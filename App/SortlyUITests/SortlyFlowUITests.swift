@@ -112,16 +112,24 @@ final class SortlyFlowUITests: XCTestCase {
     }
 
     private func audit(_ screen: String) {
-        do {
-            try app.performAccessibilityAudit { issue in
-                let element = issue.element
-                let frame = element.map { f in "\(Int(f.frame.minX)),\(Int(f.frame.minY)) \(Int(f.frame.width))x\(Int(f.frame.height))" } ?? "-"
-                print("A11Y_ISSUE \(screen) | type \(issue.auditType.rawValue) | \(issue.compactDescription) | label '\(element?.label ?? "-")' | \(element?.elementType.rawValue ?? 0) | id '\(element?.identifier ?? "-")' | \(frame)")
-                return true // collect everything, the report decides
+        // An element that changes while the audit reads the screen (a progress bar finishing)
+        // makes XCTest record "Failed to get matching snapshot". That says nothing about the app,
+        // so only that internal error is expected; every other failure still counts.
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = false
+        options.issueMatcher = { $0.compactDescription.contains("Failed to get matching snapshot") }
+        XCTExpectFailure("The screen changed during the accessibility audit", options: options) {
+            do {
+                try app.performAccessibilityAudit { issue in
+                    let element = issue.element
+                    let frame = element.map { f in "\(Int(f.frame.minX)),\(Int(f.frame.minY)) \(Int(f.frame.width))x\(Int(f.frame.height))" } ?? "-"
+                    print("A11Y_ISSUE \(screen) | type \(issue.auditType.rawValue) | \(issue.compactDescription) | label '\(element?.label ?? "-")' | \(element?.elementType.rawValue ?? 0) | id '\(element?.identifier ?? "-")' | \(frame)")
+                    return true // collect everything, the report decides
+                }
+                print("A11Y_AUDIT_DONE \(screen)")
+            } catch {
+                print("A11Y_AUDIT_ERROR \(screen) \(error)")
             }
-            print("A11Y_AUDIT_DONE \(screen)")
-        } catch {
-            print("A11Y_AUDIT_ERROR \(screen) \(error)")
         }
     }
 

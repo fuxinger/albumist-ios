@@ -252,7 +252,9 @@ struct TripWorkshopView: View {
                 perform(.merged) { await model.mergeTrips(first, second) }
             }
         } message: {
-            Text("„\(title(other))“ und „\(title(proposal))“ werden eine Reise mit \(other.assetIDs.count + proposal.assetIDs.count) Fotos.")
+            // The earlier trip first, as in the trip list read from the past.
+            let (first, second) = side == .before ? (other, proposal) : (proposal, other)
+            Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(other.assetIDs.count + proposal.assetIDs.count) Fotos.")
         }
     }
 

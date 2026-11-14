@@ -3311,6 +3311,16 @@
         }
       }
     },
+    "So sah es beim Umsetzen aus. Was davon zurückgenommen wurde, steht oben unter „Rückgängig gemacht“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This is how it looked when applied. What was taken back is listed above under “Undone”."
+          }
+        }
+      }
+    },
     "Neu aufbauen" : {
       "localizations" : {
         "en" : {
@@ -3933,6 +3943,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Undo"
+          }
+        }
+      }
+    },
+    "Schließen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close"
           }
         }
       }

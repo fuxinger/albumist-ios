@@ -389,7 +389,7 @@ final class SortlyFlowUITests: XCTestCase {
                 if tap(button("Zu Album hinzufügen"), "add to album") {
                     sleep(2)
                     shot("17-add-to-album"); audit("add to album")
-                    tap(button("Abbrechen"), "cancel add")
+                    tap(button("Schließen"), "close add")
                 }
                 tap(button("Fertig"), "end selection")
             }

@@ -411,7 +411,10 @@ struct AddToAlbumSheet: View {
             .navigationTitle(Text("\(assets.count) Fotos hinzufügen"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
+                // A round close button: the wider "Abbrechen" pushed the title off centre.
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
+                }
             }
             .navigationDestination(isPresented: $showPlan) {
                 PlanReviewView(prebuilt: plan)

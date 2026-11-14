@@ -22,11 +22,13 @@ struct PlanReceiptView: View {
         List {
             if let receipt {
                 header(receipt)
+                // Taken back: said right at the top, or the "Neu" albums below read as still there.
+                if undo != nil { undoSection(receipt) }
                 changes(receipt)
                 originals(receipt)
                 if !receipt.isComplete { problems(receipt) }
                 if !receipt.albums.isEmpty { albums(receipt) }
-                undoSection(receipt)
+                if undo == nil { undoSection(receipt) }
             }
         }
         .navigationTitle("Änderungsbeleg")
@@ -193,7 +195,11 @@ struct PlanReceiptView: View {
         } header: {
             Text("Alben")
         } footer: {
-            Text("Namen wie beim Umsetzen. Was du danach in Fotos geändert hast, respektiert Albumist.")
+            if undo != nil {
+                Text("So sah es beim Umsetzen aus. Was davon zurückgenommen wurde, steht oben unter „Rückgängig gemacht“.")
+            } else {
+                Text("Namen wie beim Umsetzen. Was du danach in Fotos geändert hast, respektiert Albumist.")
+            }
         }
     }
 

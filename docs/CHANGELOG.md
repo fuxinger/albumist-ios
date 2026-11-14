@@ -66,5 +66,9 @@
 - Datumswerte verlieren beim Speichern keine Millisekunden mehr.
 - Bilderkennungs-Begriffe an die tatsächliche Vision-Liste angepasst.
 - Namenskonflikt `Observation` mit Apples Observation-Framework behoben.
+- Feinschliff nach Erstnutzer-Durchgang: Ein rückgängig gemachter Änderungsbeleg sagt das
+  jetzt oben statt erst am Ende; in der Reise-Werkstatt steht „Beginn der Reise“ unter dem
+  Datum (der Tag brach sonst um); die Blätter „Reise anpassen“ und „Fotos hinzufügen“
+  schließen mit dem runden X, der Titel steht wieder mittig.
 ### Migrationen
 - v2: Spalte `asset_places.precision_m`.

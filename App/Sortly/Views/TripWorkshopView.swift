@@ -49,9 +49,10 @@ struct TripWorkshopView: View {
         .navigationTitle("Reise anpassen")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // A round close button: the wider "Abbrechen" pushed the title off centre.
             ToolbarItem(placement: .cancellationAction) {
                 if done == nil && working == nil {
-                    Button("Abbrechen") { dismiss() }
+                    Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
                 }
             }
         }
@@ -336,20 +337,26 @@ private struct DayRow: View {
             AssetThumbnail(id: day.assetIDs[0], side: 88)
                 .frame(width: 44, height: 44)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            // The note sits under the date: on the right it pushed "Dienstag, 1. August" onto two lines.
             VStack(alignment: .leading, spacing: 2) {
                 Text(day.start.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                Text("\(day.count) Fotos").font(.subheadline).foregroundStyle(.secondary)
+                let count = Text("\(day.count) Fotos")
+                Group {
+                    if let note {
+                        Text("\(count) · \(note)")
+                    } else {
+                        count
+                    }
+                }
+                .font(selected ? .subheadline.weight(.semibold) : .subheadline)
+                .foregroundStyle(selected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
             }
             Spacer(minLength: Theme.Spacing.s)
-            if let note {
-                if selected {
-                    Label(note, systemImage: "scissors")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Theme.accent)
-                        .labelStyle(.titleAndIcon)
-                } else {
-                    Text(note).font(.subheadline).foregroundStyle(.secondary)
-                }
+            if selected {
+                Image(systemName: "scissors")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
             }
         }
         .frame(minHeight: 44)

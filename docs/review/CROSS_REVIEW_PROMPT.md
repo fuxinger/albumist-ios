@@ -103,9 +103,9 @@ auf dem Gerät.
   Fachlogik liegt in einem Swift-Paket, das auch unter Linux baut und getestet wird. iPhone und
   iPad. Sprachen Deutsch und Englisch (`Localizable.xcstrings`). Projekt per XcodeGen
   (`App/project.yml`).
-- **Tests:** über 200 automatische Tests (Swift Testing), ein Stresstest mit zufälligen
-  Mediatheken (Analyse, Plan, Ausführung, Rückgängig), App-Tests und ein UI-Test, der die ganze
-  App im Simulator durchgeht. Nicht auf echten Geräten getestet (siehe `KNOWN_LIMITATIONS.md`).
+- **Tests:** über 260 automatische Tests (Swift Testing), ein Stresstest mit zufälligen
+  Mediatheken (Analyse, Plan, Ausführung, Rückgängig), App-Tests und fünf UI-Tests, die die ganze
+  App im Simulator durchgehen (inklusive Unterbrechung, Wiederherstellung und Reise-Werkstatt). Nicht auf echten Geräten getestet (siehe `KNOWN_LIMITATIONS.md`).
 
 ## 4. Zusagen an die Nutzer (Invarianten)
 
@@ -127,16 +127,16 @@ Diese Zusagen darf **kein** Weg im Code brechen. Ein Bruch ist immer „kritisch
 | Bereich | Dateien |
 |---|---|
 | Domäne | `Sources/SortlyCore/Domain/*` (Assets, Sammlungen, IDs, Bereiche) |
-| Reisen | `Sources/SortlyCore/Trips/TripDetector.swift`, `Geo/GeoClusterer.swift`, `Geo/GeoMath.swift` |
+| Reisen | `Sources/SortlyCore/Trips/TripDetector.swift`, `TripIdentity.swift`, `TripWorkshop.swift`, `Geo/GeoClusterer.swift`, `Geo/GeoMath.swift` |
 | Orte und Atlas | `Sources/SortlyCore/Places/*` (Offline-Karte, Ortsauflösung, häufige Orte, Atlas) |
 | Analyse | `Sources/SortlyCore/Analysis/*`, `Sources/SortlyEngine/AnalysisPipeline.swift` (actor, fortsetzbar), `FactsAssembler.swift`, `LibraryStatus.swift` |
 | Vorschläge | `Sources/SortlyCore/Proposals/ProposalEngine.swift`, `AlbumProposal.swift`, `OrganizationSettings.swift`, `ProposalOrder.swift`, `PreviewPicker.swift` |
 | Abgleich mit vorhandenen Alben | `Sources/SortlyCore/Matching/AlbumMatcher.swift` (+ `docs/ALBUM_MATCHING.md`) |
-| Plan | `Sources/SortlyCore/Planning/OrganizationPlanner.swift`, `ChangePlan.swift`, `PlanPreview.swift` |
-| Ausführung, Rückgängig | `Sources/SortlyCore/Execution/ChangeExecutor.swift` (inkl. `UndoPlanner`, `deleteBatch`) |
+| Plan | `Sources/SortlyCore/Planning/OrganizationPlanner.swift`, `ChangePlan.swift`, `PlanPreview.swift`, `PlanReceipt.swift`, `RetryPlanner.swift` |
+| Ausführung, Rückgängig | `Sources/SortlyCore/Execution/ChangeExecutor.swift` (inkl. `UndoPlanner`, `deleteBatch`), `PlanDiagnostics.swift` |
 | Status, Fortschritt | `Sources/SortlyCore/Status/ManagedAlbumTracker.swift`, `OrganizationStatusResolver.swift` |
 | Regeln, Suche, Namen, Zeit | `Rules/RuleEngine.swift`, `Search/Search.swift`, `Naming/*`, `Time/Chronology.swift`, `Similarity/Similarity.swift` |
-| Speicher | `Sources/SortlyStore/SQLiteDatabase.swift`, `SortlyStore.swift`, `Migrations.swift` |
+| Speicher | `Sources/SortlyStore/SQLiteDatabase.swift`, `SortlyStore.swift`, `Migrations.swift`, `SafetyBackup.swift` |
 | App-Zustand | `App/Sortly/Model/AppModel.swift` (@MainActor, @Observable) |
 | Plattform | `App/Sortly/Platform/PhotoKitLibrary.swift`, `VisionAnalyzer.swift`, `BackgroundWork.swift`, `ContinuedAnalysis.swift`, `LibraryChangeWatcher.swift`, `Purchases.swift`, `SystemServices.swift`, `SmartAssistant.swift`, `DemoLibrary.swift`, `UITestSupport.swift` |
 | Einstieg, Siri, Spotlight | `App/Sortly/App/*` |
@@ -147,25 +147,41 @@ Diese Zusagen darf **kein** Weg im Code brechen. Ein Bruch ist immer „kritisch
 
 ## 6. Zuletzt geändert (bitte besonders genau prüfen)
 
-- **Rückgängig in einem Schritt:** Alle Alben und Ordner eines Plans werden in einer
-  PhotoKit-Anfrage gelöscht; ein Ordner nur, wenn alles darin mitgeht
-  (`ChangeExecutor.deleteBatch`, `PhotoKitLibrary.deleteCollections`, `UndoPlanner`).
-- **Städte optional:** Standard sind Länder und Reisen; Städte per Schalter beim Einrichten und in
-  den Einstellungen (`PlaceSettings.includesCities`).
-- **Abgleich bei Ländern:** Ein Land wird nie mit einem kleineren, anders benannten Album
-  („Rom · 2024“ in Italien) oder mit dem Album eines anderen aktuellen Vorschlags abgeglichen
-  (`AlbumMatcher.isPart`, `claimedByOthers`). Passen mehrere Alben, wählt der Nutzer.
-- **Keine heimliche Auswahl:** „Dein Startpaket“ und „Album anlegen“ wählen Vorschläge nur für die
-  Vorschau aus. Wer zurückgeht, hat nichts ausgewählt (`selectForPreview` / `endPreview`).
-- **Vorschau-Liste:** `ChangePlan.albumPreview` listet jedes Album mit Ordnerpfad und Anzahl, in
-  derselben Reihenfolge wie die Vorschlagsliste (`inDisplayOrder`).
-- **Änderungen in Fotos:** `LibraryChangeWatcher` startet nach Änderungen außerhalb der App eine
-  Analyse (3 Sekunden Entprellung), dazu eine beim Start. Bitte auf Endlosschleifen (eigene
-  Änderungen lösen neue Analyse aus), doppelte Läufe und Last bei großen Mediatheken prüfen.
-- **Eingeschränkter Fotozugriff:** Hinweise in Übersicht und Tab „Alben“, „Auswahl ändern“ über
-  `presentLimitedLibraryPicker`.
-- **Fortschritt:** Fotos, für die kein Hauptbereich gilt, zählen weder als sortiert noch in der
-  Gesamtzahl (`OrganizationStatusResolver.progress`).
+Dies ist die **zweite Prüfung**. Die erste (43 Befunde) ist eingearbeitet; was mit jedem Befund
+passiert ist, steht in `docs/review/AUDIT_2026-11-14.md`. Melde einen alten Befund nur erneut,
+wenn die Behebung nicht trägt, und sag dann genau, warum. Neu seit der ersten Prüfung:
+
+- **Behebungen der ersten Prüfung** (`AuditRegressionTests`, `AuditAnalysisTests`,
+  `AuditAnalysisCoreTests`): Ausführung und Rückgängig (leere gleichnamige Alben werden
+  übernommen statt angelegt, nie gelöscht), Speicher-Invalidierung, Reise-Identität über Läufe
+  (`Trips/TripIdentity.swift`), Paging, Fehlversuche bei Bilderkennung und Texterkennung.
+  Bitte prüfen, ob die Behebungen selbst neue Fehler einbauen.
+- **Sicherung der Entscheidungen** (`Sources/SortlyStore/SafetyBackup.swift`,
+  `AppModel.saveSafetyBackup` / `writeSafetyBackupNow` / `restoreFromBackupIfNeeded`):
+  Entscheidungen, Regeln, eigene Namen, Reise-Korrekturen, die Alben von Albumist und der Verlauf
+  liegen als kleine Kopie im Geräte-Backup. Beim Neuaufbau der Datenbank kommen die
+  Entscheidungen sofort zurück; Albumists Alben und Verlauf nur, wenn mindestens die Hälfte dieser
+  Alben in der Mediathek noch existiert. Bitte prüfen: Kann eine alte oder fremde Kopie dazu
+  führen, dass Rückgängig ein Album löscht, das nicht von Albumist ist (Z2, Z4)? Wird die Kopie
+  während des Wartens überschrieben? Datenschutz der Kopie (Z6).
+- **Änderungsbeleg** (`Planning/PlanReceipt.swift`, `App/Sortly/Views/PlanReceiptView.swift`):
+  zählt nur, was nach dem Umsetzen in der Mediathek nachgeprüft wurde. Rückgängig sitzt jetzt im
+  Beleg. Bitte prüfen: Stimmen die Zahlen mit dem Journal überein, auch bei Teilerfolg,
+  Unterbrechung und nach Rückgängig?
+- **Geführte Reparatur** (`Planning/RetryPlanner.swift`, `Execution/PlanDiagnostics.swift`,
+  `AppModel.keepInterruptedPlanAsIs` / `retryPlan`): Nach einer Unterbrechung kann der Nutzer
+  fortsetzen, alles zurücknehmen oder „So lassen“; später „Fehlendes erneut versuchen“ (nur
+  Fehlendes, nichts doppelt). Bitte prüfen: doppelte Alben, Gratis-Alben-Zählung
+  (`ChangePlan.freeAlbumUse`), Rückgängig eines Plans, der selbst eine Reparatur war (Z4).
+- **Reise-Werkstatt** (`Trips/TripWorkshop.swift`, `TripDetector` mit `TripCorrections`,
+  `AppModel.splitTrip` / `mergeTrips` / `undoTripChange` / `resetTripCorrections`,
+  `App/Sortly/Views/TripWorkshopView.swift`): Eine Reise an einem Tag teilen, zwei benachbarte
+  zusammenlegen, Änderungen einzeln oder alle aufheben. Nur solange Albumist für die Reise noch
+  kein Album angelegt hat (`canReshape`). Teilen schlägt Zusammenlegen. Bitte prüfen:
+  Zeitzonen und Tagesgrenzen, Reisen über Mitternacht, Zusammenlegen mit einem Aufenthalt zu
+  Hause dazwischen, was mit Entscheidungen zu alten Reise-IDs passiert.
+- **Feinschliff der Oberfläche:** 44-Punkt-Trefferflächen, Hinweise in einfacher Sprache,
+  runde Schließen-Knöpfe in Blättern. Bitte auf VoiceOver-Beschriftungen und Dynamic Type achten.
 
 ## 7. Prüfauftrag in neun Teilen
 

@@ -22,13 +22,12 @@ struct PlanReceiptView: View {
         List {
             if let receipt {
                 header(receipt)
-                // Taken back: said right at the top, or the "Neu" albums below read as still there.
-                if undo != nil { undoSection(receipt) }
                 changes(receipt)
                 originals(receipt)
                 if !receipt.isComplete { problems(receipt) }
                 if !receipt.albums.isEmpty { albums(receipt) }
-                if undo == nil { undoSection(receipt) }
+                // Stays at the end, where "Rückgängig machen" was tapped; the header says it too.
+                undoSection(receipt)
             }
         }
         .navigationTitle("Änderungsbeleg")
@@ -84,6 +83,16 @@ struct PlanReceiptView: View {
                 .foregroundStyle(receipt.isComplete ? Theme.accent : Theme.tint(for: .documents))
                 Text(receipt.startedAt.formatted(date: .long, time: .shortened))
                     .font(.subheadline).foregroundStyle(.secondary)
+                // Taken back: said at the top too, or the "Neu" albums below read as still there.
+                if let undo {
+                    Label {
+                        Text("Am \(undo.startedAt.formatted(date: .long, time: .shortened)) rückgängig gemacht")
+                    } icon: {
+                        Image(systemName: "arrow.uturn.backward.circle.fill")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                }
                 Text("Gezählt wird nur, was Albumist danach in deiner Mediathek nachgeprüft hat.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -196,7 +205,7 @@ struct PlanReceiptView: View {
             Text("Alben")
         } footer: {
             if undo != nil {
-                Text("So sah es beim Umsetzen aus. Was davon zurückgenommen wurde, steht oben unter „Rückgängig gemacht“.")
+                Text("So sah es beim Umsetzen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“.")
             } else {
                 Text("Namen wie beim Umsetzen. Was du danach in Fotos geändert hast, respektiert Albumist.")
             }

@@ -3311,12 +3311,22 @@
         }
       }
     },
-    "So sah es beim Umsetzen aus. Was davon zurückgenommen wurde, steht oben unter „Rückgängig gemacht“." : {
+    "So sah es beim Umsetzen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This is how it looked when applied. What was taken back is listed above under “Undone”."
+            "value" : "This is how it looked when applied. What was taken back is listed below under “Undone”."
+          }
+        }
+      }
+    },
+    "Am %@ rückgängig gemacht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undone on %@"
           }
         }
       }

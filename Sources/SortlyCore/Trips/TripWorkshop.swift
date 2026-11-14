@@ -26,9 +26,43 @@ extension TripCorrections {
         return copy
     }
 
+    /// The user's splits and merges at a trip: a split at its start or shortly after its end
+    /// (the other side of a split it came from), a merge over it. Oldest first.
+    public func changes(around trip: DateInterval, margin: TimeInterval = 7 * 86_400) -> [TripChange] {
+        let window = DateInterval(start: trip.start.addingTimeInterval(-margin), end: trip.end.addingTimeInterval(margin))
+        let splits = forcedBreaks.filter { window.contains($0) }.map(TripChange.split)
+        let merges = forcedJoins.filter { $0.intersects(trip) }.map(TripChange.merge)
+        return (splits + merges).sorted { $0.date < $1.date }
+    }
+
+    /// "Aufheben": one split or merge is forgotten, the trips around it are detected again.
+    public func removing(_ change: TripChange) -> TripCorrections {
+        var copy = self
+        switch change {
+        case .split(let date): copy.forcedBreaks.removeAll { $0 == date }
+        case .merge(let interval): copy.forcedJoins.removeAll { $0 == interval }
+        }
+        return copy
+    }
+
     /// Back to automatic detection; photos the user took out of trips stay out.
     public func withoutSplitsAndMerges() -> TripCorrections {
         TripCorrections(excludedAssets: excludedAssets)
+    }
+}
+
+/// One change the user made to the trips.
+public enum TripChange: Hashable, Sendable {
+    /// A new trip starts at this instant.
+    case split(Date)
+    /// Everything in this span is one trip.
+    case merge(DateInterval)
+
+    public var date: Date {
+        switch self {
+        case .split(let date): date
+        case .merge(let interval): interval.start
+        }
     }
 }
 

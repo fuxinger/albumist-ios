@@ -42,8 +42,8 @@
   Zustände, Zahlen und Fehlercodes, keine Fotos, Namen oder Orte.
 - Reise-Werkstatt (I07): Im Reise-Vorschlag „Reise teilen oder zusammenlegen“. Teilen an einem Tag
   mit Vorschau der zwei Reisen, Zusammenlegen mit der Reise davor oder danach (bis 14 Tage
-  Abstand). Albumist hält sich daran bei jeder späteren Analyse; „Reisen wieder automatisch
-  erkennen“ in den Einstellungen nimmt es zurück. Nur solange das Reise-Album noch nicht angelegt ist.
+  Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
+  eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
 - Übersicht sagte „Neue Fotos werden beim nächsten Start erkannt“, obwohl Albumist Änderungen in
   Fotos schon während der Nutzung bemerkt. Jetzt: „Neue Fotos erkennt Albumist von selbst.“

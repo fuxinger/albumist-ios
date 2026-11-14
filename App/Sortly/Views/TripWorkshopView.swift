@@ -3,7 +3,7 @@ import SortlyCore
 
 /// "Reise anpassen" (I07): a trip Albumist cut wrongly is split at a day or merged with the
 /// trip right before or after it. The change is kept in time, so every later analysis holds
-/// to it; the settings can take all of them back.
+/// to it; it can be undone here, at the trip, or all at once in the settings.
 struct TripWorkshopView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -11,7 +11,7 @@ struct TripWorkshopView: View {
     /// Called after a change: the suggestion this sheet came from no longer exists.
     var onChanged: () -> Void
 
-    private enum Outcome { case split, merged }
+    private enum Outcome { case split, merged, undone }
     private enum Side { case before, after }
 
     @State private var splitIndex: Int?
@@ -20,8 +20,12 @@ struct TripWorkshopView: View {
     @State private var merging: Side?
     @State private var failed = false
 
+    private var days: [TripWorkshop.Day] {
+        TripWorkshop.days(of: proposal.assetIDs, dates: model.creationDates, calendar: .current)
+    }
+
     var body: some View {
-        let days = TripWorkshop.days(of: proposal.assetIDs, dates: model.creationDates, calendar: .current)
+        let days = self.days
         List {
             if let done {
                 finished(done)
@@ -29,17 +33,15 @@ struct TripWorkshopView: View {
                 Section {
                     HStack(spacing: Theme.Spacing.s) {
                         ProgressView()
-                        Text(working == .split ? "Albumist teilt die Reise und plant die Vorschläge neu …" : "Albumist legt die Reisen zusammen und plant die Vorschläge neu …")
+                        Text(working == .split ? "Albumist teilt die Reise und plant die Vorschläge neu …" : "Albumist plant deine Reisen und Vorschläge neu …")
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, Theme.Spacing.xs)
                 }
             } else {
                 header(days)
+                changesSection
                 splitSection(days)
-                if let index = splitIndex, let preview = TripWorkshop.split(days, before: index, dates: model.creationDates) {
-                    previewSection(preview)
-                }
                 mergeSection
             }
         }
@@ -50,6 +52,14 @@ struct TripWorkshopView: View {
                 if done == nil && working == nil {
                     Button("Abbrechen") { dismiss() }
                 }
+            }
+        }
+        // The chosen split and its button stay in reach while the days scroll.
+        .safeAreaInset(edge: .bottom) {
+            if done == nil, working == nil, let index = splitIndex,
+               let preview = TripWorkshop.split(days, before: index, dates: model.creationDates) {
+                splitBar(preview, day: days[index])
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .interactiveDismissDisabled(working != nil)
@@ -68,6 +78,18 @@ struct TripWorkshopView: View {
         }
     }
 
+    private var busy: Bool { model.analysis.isRunning || model.execution.isRunning }
+
+    private func perform(_ outcome: Outcome, _ change: @escaping @MainActor () async -> Bool) {
+        Task {
+            if await change() {
+                withAnimation(.smooth) { working = outcome }
+            } else {
+                failed = true
+            }
+        }
+    }
+
     // MARK: Sections
 
     private func header(_ days: [TripWorkshop.Day]) -> some View {
@@ -83,6 +105,41 @@ struct TripWorkshopView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, Theme.Spacing.xs)
+        }
+    }
+
+    /// What the user changed at this trip before, each with "Aufheben".
+    @ViewBuilder
+    private var changesSection: some View {
+        let changes = model.tripChanges(around: proposal)
+        if !changes.isEmpty {
+            Section {
+                ForEach(changes, id: \.self) { change in
+                    HStack(spacing: Theme.Spacing.s) {
+                        Image(systemName: change.isSplit ? "scissors" : "arrow.triangle.merge")
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 28)
+                            .accessibilityHidden(true)
+                        Text(describe(change))
+                        Spacer(minLength: Theme.Spacing.s)
+                        Button {
+                            perform(.undone) { await model.undoTripChange(change) }
+                        } label: {
+                            Text("Aufheben")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(minWidth: 44, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(busy)
+                        .accessibilityIdentifier("workshop.undoChange")
+                    }
+                }
+            } header: {
+                Text("Deine Änderungen")
+            } footer: {
+                Text("Aufheben lässt Albumist diese Reisen wieder selbst erkennen.")
+            }
         }
     }
 
@@ -114,32 +171,33 @@ struct TripWorkshopView: View {
         }
     }
 
-    private func previewSection(_ preview: TripWorkshop.Split) -> some View {
+    /// The two trips the chosen split makes, and the button, above the home indicator.
+    private func splitBar(_ preview: TripWorkshop.Split, day: TripWorkshop.Day) -> some View {
         let minimum = model.settings.trips.minPhotos
-        return Section {
-            PartRow(number: 1, part: preview.first)
-            PartRow(number: 2, part: preview.second)
+        return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Daraus werden zwei Reisen").font(.subheadline.weight(.semibold))
+            HStack(alignment: .top, spacing: Theme.Spacing.m) {
+                PartRow(number: 1, part: preview.first)
+                PartRow(number: 2, part: preview.second)
+            }
             if preview.first.count < minimum || preview.second.count < minimum {
-                Label("Ein Teil hat weniger als \(minimum) Fotos mit Ort. Er wird kein eigener Reise-Vorschlag; seine Fotos bleiben in den Länder- und Orte-Alben.", systemImage: "info.circle")
+                Text("Ein Teil hat weniger als \(minimum) Fotos mit Ort. Er wird kein eigener Reise-Vorschlag; seine Fotos bleiben in den Länder- und Orte-Alben.")
                     .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Button {
-                guard let index = splitIndex else { return }
-                let day = TripWorkshop.days(of: proposal.assetIDs, dates: model.creationDates, calendar: .current)[index]
-                Task {
-                    if await model.splitTrip(at: day) { working = .split } else { failed = true }
-                }
+                perform(.split) { await model.splitTrip(at: day) }
             } label: {
                 Label("Reise teilen", systemImage: "scissors")
             }
             .buttonStyle(PrimaryButtonStyle())
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
-            .disabled(model.analysis.isRunning || model.execution.isRunning)
+            .disabled(busy)
             .accessibilityIdentifier("workshop.split")
-        } header: {
-            Text("Daraus werden zwei Reisen")
         }
+        .padding(Theme.Spacing.m)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .padding(.horizontal, Theme.Spacing.m)
+        .padding(.bottom, Theme.Spacing.s)
     }
 
     @ViewBuilder
@@ -184,15 +242,13 @@ struct TripWorkshopView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(model.analysis.isRunning || model.execution.isRunning)
+        .disabled(busy)
         .accessibilityIdentifier(side == .before ? "workshop.merge.before" : "workshop.merge.after")
         .confirmationDialog("Zu einer Reise zusammenlegen?", isPresented: Binding(get: { merging == side }, set: { if !$0 { merging = nil } }),
                             titleVisibility: .visible) {
             Button("Zusammenlegen") {
-                Task {
-                    let (first, second) = side == .before ? (other, proposal) : (proposal, other)
-                    if await model.mergeTrips(first, second) { working = .merged } else { failed = true }
-                }
+                let (first, second) = side == .before ? (other, proposal) : (proposal, other)
+                perform(.merged) { await model.mergeTrips(first, second) }
             }
         } message: {
             Text("„\(title(other))“ und „\(title(proposal))“ werden eine Reise mit \(other.assetIDs.count + proposal.assetIDs.count) Fotos.")
@@ -207,13 +263,25 @@ struct TripWorkshopView: View {
                     .foregroundStyle(Theme.accent)
                     .symbolEffect(.bounce, value: done != nil)
                     .accessibilityHidden(true)
-                Text(outcome == .split ? "Aus einer Reise sind zwei geworden." : "Die zwei Reisen sind jetzt eine.")
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Zurücknehmen kannst du es in den Einstellungen.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+                Group {
+                    switch outcome {
+                    case .split: Text("Aus einer Reise sind zwei geworden.")
+                    case .merged: Text("Die zwei Reisen sind jetzt eine.")
+                    case .undone: Text("Deine Änderung ist aufgehoben.")
+                    }
+                }
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                Group {
+                    if outcome == .undone {
+                        Text("Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst.")
+                    } else {
+                        Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen.")
+                    }
+                }
+                .font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.s)
@@ -230,6 +298,24 @@ struct TripWorkshopView: View {
 
     private func title(_ proposal: AlbumProposal) -> String {
         model.userTitles[proposal.id] ?? proposal.title
+    }
+
+    private func describe(_ change: TripChange) -> String {
+        switch change {
+        case .split(let date):
+            let day = date.formatted(.dateTime.weekday(.wide).day().month(.wide))
+            return String(localized: "Geteilt: neue Reise ab \(day)")
+        case .merge(let interval):
+            let span = PartRow.span(interval.start, interval.end)
+            return String(localized: "Zusammengelegt: \(span)")
+        }
+    }
+}
+
+private extension TripChange {
+    var isSplit: Bool {
+        if case .split = self { return true }
+        return false
     }
 }
 
@@ -272,25 +358,27 @@ private struct PartRow: View {
     var part: TripWorkshop.Part
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.s) {
+        HStack(alignment: .top, spacing: Theme.Spacing.xs) {
             Text(number.formatted())
-                .font(.headline)
+                .font(.subheadline.weight(.bold))
                 .foregroundStyle(Theme.onAccent)
-                .frame(width: 28, height: 28)
+                .frame(width: 24, height: 24)
                 .background(Theme.accent, in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(span)
-                Text("\(part.count) Fotos").font(.subheadline).foregroundStyle(.secondary)
+                Text(Self.span(part.start, part.end)).font(.subheadline)
+                Text("\(part.count) Fotos").font(.footnote).foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
-    private var span: String {
-        if Calendar.current.isDate(part.start, inSameDayAs: part.end) {
-            return part.start.formatted(.dateTime.day().month(.wide).year())
+    /// "12.–14. Mai 2024", or one day.
+    static func span(_ start: Date, _ end: Date) -> String {
+        if Calendar.current.isDate(start, inSameDayAs: end) || end <= start {
+            return start.formatted(.dateTime.day().month(.wide).year())
         }
-        return (part.start..<part.end).formatted(.interval.day().month(.wide).year())
+        return (start..<end).formatted(.interval.day().month(.wide).year())
     }
 }

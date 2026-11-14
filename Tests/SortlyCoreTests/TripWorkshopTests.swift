@@ -94,6 +94,25 @@ struct TripWorkshopTests {
         #expect(around.after == 2)
     }
 
+    @Test func aSplitIsListedAtBothPartsAndCanBeUndoneThere() throws {
+        let lib = library()
+        let trip = try #require(detector.detect(in: lib.assets).first)
+        let days = TripWorkshop.days(of: trip.geotaggedAssetIDs, dates: dates(lib), calendar: Fixture.calendar)
+        let corrections = TripCorrections().splitting(at: days[4].start)
+        let parts = detector.detect(in: lib.assets, corrections: corrections)
+        #expect(parts.count == 2)
+        for part in parts {
+            #expect(corrections.changes(around: DateInterval(start: part.start, end: part.end)) == [.split(days[4].start)])
+        }
+        // A split far away from the trip is not listed with it.
+        let elsewhere = corrections.splitting(at: Fixture.date("2024-09-01"))
+        #expect(elsewhere.changes(around: DateInterval(start: parts[0].start, end: parts[0].end)).count == 1)
+
+        let undone = corrections.removing(.split(days[4].start))
+        #expect(undone.changeCount == 0)
+        #expect(detector.detect(in: lib.assets, corrections: undone).count == 1)
+    }
+
     @Test func resetKeepsPhotosTakenOutOfTrips() {
         let photo = AssetID("p1")
         let corrections = TripCorrections(forcedBreaks: [Fixture.date("2026-01-01")],

@@ -1441,6 +1441,16 @@
         }
       }
     },
+    "Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist detects these trips on its own again. The suggestions are already updated."
+          }
+        }
+      }
+    },
     "Albumist hat deine Entscheidungen und Einstellungen aus der Sicherung vom %@ übernommen. Die Alben von Albumist und der Verlauf folgen, sobald Albumist alle Fotos sehen darf." : {
       "localizations" : {
         "en" : {
@@ -1491,22 +1501,22 @@
         }
       }
     },
-    "Albumist legt die Reisen zusammen und plant die Vorschläge neu …" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist is merging the trips and planning the suggestions again …"
-          }
-        }
-      }
-    },
     "Albumist ordnet Fotos nur Alben zu. Löschen, Bearbeiten oder Kopieren von Fotos gibt es in Albumist nicht. Ein Album verweist nur auf deine Fotos." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist only assigns photos to albums. Deleting, editing or copying photos does not exist in Albumist. An album only points to your photos."
+          }
+        }
+      }
+    },
+    "Albumist plant deine Reisen und Vorschläge neu …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is planning your trips and suggestions again …"
           }
         }
       }
@@ -1717,6 +1727,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Taken"
+          }
+        }
+      }
+    },
+    "Aufheben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo"
+          }
+        }
+      }
+    },
+    "Aufheben lässt Albumist diese Reisen wieder selbst erkennen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo lets Albumist detect these trips on its own again."
           }
         }
       }
@@ -2061,6 +2091,26 @@
         }
       }
     },
+    "Deine Änderung ist aufgehoben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your change is undone."
+          }
+        }
+      }
+    },
+    "Deine Änderungen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your changes"
+          }
+        }
+      }
+    },
     "Demo" : {
       "localizations" : {
         "en" : {
@@ -2191,12 +2241,12 @@
         }
       }
     },
-    "Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Zurücknehmen kannst du es in den Einstellungen." : {
+    "Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The suggestions are already updated. Albumist sticks to it in every new analysis too. You can take it back in Settings."
+            "value" : "The suggestions are already updated. Albumist sticks to it in every new analysis too. You can undo it here at the trip or in Settings."
           }
         }
       }
@@ -2777,6 +2827,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Story about"
+          }
+        }
+      }
+    },
+    "Geteilt: neue Reise ab %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Split: new trip from %@"
           }
         }
       }
@@ -4303,6 +4363,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Merge into one trip?"
+          }
+        }
+      }
+    },
+    "Zusammengelegt: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Merged: %@"
           }
         }
       }

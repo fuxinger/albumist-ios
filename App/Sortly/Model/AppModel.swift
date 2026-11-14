@@ -771,6 +771,17 @@ final class AppModel {
         return await changeTrips { $0.merging(interval) }
     }
 
+    /// The user's own splits and merges at this trip, so they can be undone where they were made.
+    func tripChanges(around proposal: AlbumProposal) -> [TripChange] {
+        guard let span = proposal.dateRange else { return [] }
+        return tripCorrections.changes(around: span)
+    }
+
+    /// "Aufheben" in the workshop: one split or merge is forgotten.
+    func undoTripChange(_ change: TripChange) async -> Bool {
+        await changeTrips { $0.removing(change) }
+    }
+
     /// "Reisen wieder automatisch erkennen" in the settings.
     func resetTripCorrections() async {
         _ = await changeTrips { $0.withoutSplitsAndMerges() }

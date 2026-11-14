@@ -41,8 +41,9 @@ struct TripWorkshopView: View {
             } else {
                 header(days)
                 changesSection
-                splitSection(days)
+                // Merging is one tap and short; the days list can be long, so it comes last.
                 mergeSection
+                splitSection(days)
             }
         }
         .navigationTitle("Reise anpassen")
@@ -255,6 +256,7 @@ struct TripWorkshopView: View {
         }
     }
 
+    @ViewBuilder
     private func finished(_ outcome: Outcome) -> some View {
         Section {
             VStack(spacing: Theme.Spacing.s) {
@@ -285,6 +287,8 @@ struct TripWorkshopView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.s)
+        }
+        Section {
             Button("Zu den Reisen") {
                 dismiss()
                 onChanged()

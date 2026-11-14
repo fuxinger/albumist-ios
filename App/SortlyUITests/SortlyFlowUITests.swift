@@ -564,7 +564,8 @@ final class SortlyFlowUITests: XCTestCase {
         shot("64-workshop-after-split")
         let merge = app.buttons["workshop.merge.after"]
         swipes = 0
-        while merge.exists && !merge.isHittable && swipes < 4 { app.swipeUp(); swipes += 1 }
+        // Rows of a List exist only once they are on screen.
+        while !(merge.exists && merge.isHittable) && swipes < 4 { app.swipeUp(); swipes += 1; sleep(1) }
         guard tap(merge, "merge with trip after", timeout: 5) else { return }
         sleep(1)
         shot("64b-merge-question")

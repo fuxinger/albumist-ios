@@ -8208,6 +8208,16 @@
           }
         }
       }
+    },
+    "Albumist konnte das unterbrochene Umsetzen gerade nicht zurücknehmen. Es steht jetzt unter Einstellungen › Verlauf. Dort kannst du es zurücknehmen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist could not take back the interrupted run just now. It is now in Settings › History, where you can take it back."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

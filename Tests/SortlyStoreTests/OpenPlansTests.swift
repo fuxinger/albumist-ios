@@ -1,0 +1,246 @@
+import Foundation
+import Testing
+@testable import SortlyStore
+import SortlyCore
+import SortlyTestSupport
+
+/// What the store tells the app about plans that are not settled (review of 6c6ef79): the plan
+/// offered to continue, take back or keep (read again after every run and every way out, K2),
+/// the plans whose results are still to be stored, and the journal "Rückgängig" on an
+/// interrupted plan leaves behind (K1).
+@Suite("Open plans: offered to continue, awaiting their results, taken back")
+struct OpenPlansTests {
+    let planner = OrganizationPlanner(rootFolderTitle: "", chunkSize: 50)
+
+    func photos(_ range: Range<Int>) -> Set<AssetID> { Set(range.map { AssetID("a-\($0)") }) }
+
+    func confirmed(_ plan: ChangePlan) -> ChangePlan {
+        var p = plan
+        p.confirmedAt = Date()
+        p.status = .confirmed
+        return p
+    }
+
+    func newAlbum(_ id: String, _ title: String, _ assets: Set<AssetID>) -> ConfirmedProposal {
+        ConfirmedProposal(proposal: AlbumProposal(id: SortlyID(id), kind: .trip, title: title, folderPath: ["Reisen"], assetIDs: assets),
+                          decision: .createNew(title: nil, folderPath: nil))
+    }
+
+    /// "Paris" and "Rom" in a new folder "Reisen" (Paris is made first).
+    func parisAndRome(_ library: InMemoryPhotoLibrary) async throws -> ChangePlan {
+        confirmed(planner.makePlan(from: [newAlbum("p", "Paris", photos(10..<20)), newAlbum("r", "Rom", photos(0..<10))],
+                                   inventory: try await library.currentInventory()))
+    }
+
+    /// The store, until one of its writes fails (as on a full disk, see `DataSafetyTests`); that
+    /// write and every one after it throw.
+    actor FailingJournal: ChangePlanStoring {
+        struct DiskFull: Error {}
+        let store: SortlyStore
+        let failsAt: @Sendable (ChangePlan) -> Bool
+        private var failing = false
+        init(_ store: SortlyStore, failsAt: @escaping @Sendable (ChangePlan) -> Bool) {
+            self.store = store
+            self.failsAt = failsAt
+        }
+        func save(_ plan: ChangePlan) async throws {
+            if !failing, failsAt(plan) { failing = true }
+            guard !failing else { throw DiskFull() }
+            try await store.save(plan)
+        }
+    }
+
+    static func madeRome(_ plan: ChangePlan) -> Bool {
+        plan.steps.contains { step in
+            if case .createAlbum(_, "Rom", _) = step.operation, case .succeeded = step.state { return true }
+            return false
+        }
+    }
+
+    /// The app's run: the plan goes on the list of plans to finalize, then it is executed.
+    func run(_ plan: ChangePlan, in store: SortlyStore, journal: (any ChangePlanStoring)? = nil, library: any PhotoLibraryWriting) async throws -> ChangePlan {
+        var pending = try await store.value([SortlyID].self, forKey: SortlyStore.pendingFinalizationKey) ?? []
+        if !pending.contains(plan.id) { pending.append(plan.id) }
+        try await store.setValue(pending, forKey: SortlyStore.pendingFinalizationKey)
+        return try await ChangeExecutor(library: library, store: journal ?? store).execute(plan)
+    }
+
+    /// What the app's finalization stores, in one transaction: the plan with its time,
+    /// Albumist's albums, and the list of plans to finalize without it.
+    func finalize(_ plan: ChangePlan, in store: SortlyStore, library: InMemoryPhotoLibrary) async throws {
+        var done = plan
+        done.finalizedAt = Date()
+        let states = ManagedAlbumTracker().record(plan, into: try await store.managedAlbums(), inventory: try await library.currentInventory())
+        let pending = (try await store.value([SortlyID].self, forKey: SortlyStore.pendingFinalizationKey) ?? []).filter { $0 != plan.id }
+        try await store.finalize(done, managedAlbums: states, values: [SortlyStore.pendingFinalizationKey: pending])
+    }
+
+    // MARK: K2 The plan offered is read again after every run
+
+    /// A plan whose journal write fails half way (a full disk) in the same session stays
+    /// unfinished. The store offers it at once, so the next "Jetzt umsetzen" of the same
+    /// suggestions waits for it instead of making a second "Paris". Before, the app read the
+    /// open plan only at launch and after "Rückgängig", and this one went unnoticed until then.
+    @Test func planFailingHalfWayIsOfferedAtOnceAndTheSamePlanWaits() async throws {
+        let store = try SortlyStore(url: nil)
+        let library = InMemoryPhotoLibrary(assets: photos(0..<50))
+        let plan = try await parisAndRome(library)
+        #expect(try await store.openInterruptedPlan() == nil)
+
+        await #expect(throws: FailingJournal.DiskFull.self) {
+            _ = try await run(plan, in: store, journal: FailingJournal(store, failsAt: Self.madeRome), library: library)
+        }
+        #expect(try await library.currentInventory().albums.contains { $0.title == "Paris" })
+        let open = try #require(try await store.openInterruptedPlan())
+        #expect(open.id == plan.id)
+        #expect(open.status == .running)
+        // Not taken for a finished plan whose results wait to be stored.
+        #expect(try await store.plansAwaitingFinalization().isEmpty)
+
+        // The review builds the same plan again: it waits for the one that failed.
+        let again = try await parisAndRome(library)
+        #expect(again.steps.contains { if case .createAlbum(_, "Paris", _) = $0.operation { true } else { false } })
+        #expect(PlanGate.refusal(for: again, interrupted: open) == .interruptedPlanOpen)
+        // Continuing it is the way out, and it does not make Paris twice.
+        #expect(PlanGate.refusal(for: open, interrupted: open) == nil)
+        let resumed = try await ChangeExecutor(library: library, store: store).execute(open)
+        #expect(resumed.status == .completed)
+        #expect(try await library.currentInventory().albums.filter { $0.title == "Paris" }.count == 1)
+        #expect(try await store.openInterruptedPlan() == nil)
+    }
+
+    /// Two plans left unfinished (by an older version, or a cut-off undo next to its plan): once
+    /// one is settled, the other is offered. Before, "So lassen" and "Fortsetzen" cleared the
+    /// offer, and the other plan was not offered until the next launch.
+    @Test func settlingOneOfTwoOpenPlansOffersTheOther() async throws {
+        let store = try SortlyStore(url: nil)
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var older = try await parisAndRome(InMemoryPhotoLibrary(assets: photos(0..<50)))
+        older.id = SortlyID("older")
+        older.createdAt = start
+        older.status = .running
+        var newer = older
+        newer.id = SortlyID("newer")
+        newer.createdAt = start.addingTimeInterval(60)
+        newer.status = .confirmed
+        try await store.save(newer)
+        try await store.save(older)
+
+        #expect(try await store.openInterruptedPlan()?.id == newer.id)
+        newer.status = .completedWithErrors
+        try await store.save(newer)
+        #expect(try await store.openInterruptedPlan()?.id == older.id)
+        older.status = .cancelled
+        try await store.save(older)
+        #expect(try await store.openInterruptedPlan() == nil)
+    }
+
+    /// Plans that finished but whose results are not stored yet: on the app's list, finished,
+    /// without a finalization time. A plan still running on the list is offered instead; one
+    /// finalized, cancelled or gone is neither.
+    @Test func plansAwaitingTheirResults() async throws {
+        let store = try SortlyStore(url: nil)
+        let library = InMemoryPhotoLibrary(assets: photos(0..<50))
+        let done = try await run(try await parisAndRome(library), in: store, library: library)
+        #expect(done.status == .completed)
+        #expect(try await store.awaitsFinalization(done.id))
+        #expect(try await store.plansAwaitingFinalization().map(\.id) == [done.id])
+
+        var open = done
+        open.id = SortlyID("open")
+        open.status = .running
+        open.finalizedAt = nil
+        try await store.save(open)
+        try await store.setValue([open.id, done.id, SortlyID("gone")], forKey: SortlyStore.pendingFinalizationKey)
+        #expect(try await store.plansAwaitingFinalization().map(\.id) == [done.id])
+        #expect(!(try await store.awaitsFinalization(open.id)))
+        #expect(!(try await store.awaitsFinalization(SortlyID("gone"))))
+
+        try await finalize(done, in: store, library: library)
+        #expect(!(try await store.awaitsFinalization(done.id)))
+        #expect(try await store.plansAwaitingFinalization().isEmpty)
+    }
+
+    // MARK: K1 "Rückgängig" on an interrupted plan, with the store
+
+    /// The plan cut off right after Photos made "Rom", from the store, with "Rückgängig" tapped.
+    func interruptedPlanToTakeBack(_ store: SortlyStore, _ library: InMemoryPhotoLibrary) async throws -> InterruptedPlanUndo {
+        _ = try? await run(try await parisAndRome(library), in: store, journal: FailingJournal(store, failsAt: Self.madeRome), library: library)
+        let interrupted = try #require(try await store.openInterruptedPlan())
+        let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
+        return InterruptedPlanUndo(settled: settled, current: try await library.currentInventory())
+    }
+
+    /// The app ends right after "Rückgängig" was stored, before the plan's results were. The
+    /// next launch finds both: the plan's results to store (and its albums left alone by the
+    /// album check until then), and the undo to continue. Once it ran, the plan counts as
+    /// taken back. Before, the plan was finalized first and the undo was written only when it
+    /// started: an app ending in between lost the tap.
+    @Test func appEndingRightAfterRueckgaengigLosesNothing() async throws {
+        let store = try SortlyStore(url: nil)
+        let library = InMemoryPhotoLibrary(assets: photos(0..<50))
+        let way = try await interruptedPlanToTakeBack(store, library)
+        let undo = try #require(way.undo)
+
+        let outcome = try await way.carryOut(journal: store, finalize: { _ in false }, run: { _ in Issue.record("the undo ran") })
+        #expect(outcome == .resultsNotStored)
+
+        // The next launch.
+        let open = try #require(try await store.openInterruptedPlan())
+        #expect(open.id == undo.id)
+        #expect(open.status == .confirmed)
+        #expect(try await store.plansAwaitingFinalization().map(\.id) == [way.kept.id])
+        let made = try await library.currentInventory().collections.values.filter { $0.title != "Sommer" }.map(\.id)
+        #expect(made.count == 3)
+        #expect(try await store.collectionsInFlight().isSuperset(of: made))
+
+        // It stores the plan's results first, then continues the undo.
+        try await finalize(way.kept, in: store, library: library)
+        #expect(Set(try await store.managedAlbums().map(\.lastKnownTitle)) == ["Paris", "Rom"])
+        #expect(PlanGate.refusal(for: open, interrupted: open) == nil)
+        let undone = try await run(open, in: store, library: library)
+        #expect(undone.status == .completed)
+        try await finalize(undone, in: store, library: library)
+        #expect(try await library.currentInventory().collections.isEmpty)
+        #expect(try await store.managedAlbums().isEmpty)
+        #expect(try await store.undoneTargets().contains(way.kept.id))
+        #expect(try await store.openInterruptedPlan() == nil)
+        #expect(try await store.plansAwaitingFinalization().isEmpty)
+    }
+
+    /// What the receipt reads after "Rückgängig" ended in part or never started (point 6 of the
+    /// review of 6c6ef79): after a declined deletion the plan has a finished undo that did not
+    /// get everything back ("Rest rückgängig machen", and the app says the rest can be taken
+    /// back); after an undo refused before its first step the plan has none ("Rückgängig
+    /// machen", and the app says so), and that undo is not offered as an interrupted plan.
+    @Test(arguments: [false, true])
+    func receiptAfterRueckgaengigEndedEarly(refusedBeforeItRan: Bool) async throws {
+        let store = try SortlyStore(url: nil)
+        let library = InMemoryPhotoLibrary(assets: photos(0..<50))
+        let way = try await interruptedPlanToTakeBack(store, library)
+        let undo = try #require(way.undo)
+        if !refusedBeforeItRan { await library.setDeletionBehavior(.declined, times: 1) }
+
+        let outcome = try await way.carryOut(journal: store, finalize: { kept in
+            do { try await finalize(kept, in: store, library: library) } catch { return false }
+            if refusedBeforeItRan { await library.setWriteAllowed(false) }
+            return true
+        }, run: { undo in
+            _ = try? await run(undo, in: store, library: library)
+        })
+
+        #expect(outcome == (refusedBeforeItRan ? .notStarted : .partlyUndone))
+        #expect(try await store.openInterruptedPlan() == nil)
+        #expect(try await store.plan(way.kept.id)?.status == .completedWithErrors)
+        #expect(try await store.planHistory().map(\.id).contains(way.kept.id))
+        #expect(!(try await store.undoneTargets().contains(way.kept.id)))
+        let undos = try await store.reverts(of: way.kept.id)
+        if refusedBeforeItRan {
+            #expect(undos.isEmpty)
+            #expect(try await store.plan(undo.id)?.status == .cancelled)
+        } else {
+            #expect(undos.map(\.id) == [undo.id])
+            #expect(undos.first?.status == .completedWithErrors)
+        }
+    }
+}

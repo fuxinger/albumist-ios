@@ -59,6 +59,13 @@ public protocol ChangePlanStoring: Sendable {
     func save(_ plan: ChangePlan) async throws
 }
 
+/// The plan journal as the ways out of an interrupted plan use it (`SortlyStore` in the app).
+public protocol PlanJournal: ChangePlanStoring {
+    /// Several plans in one transaction: all of them are stored, or none.
+    func save(_ plans: [ChangePlan]) async throws
+    func plan(_ id: SortlyID) async throws -> ChangePlan?
+}
+
 public enum ExecutionEvent: Sendable, Hashable {
     case stepStarted(index: Int, total: Int)
     case stepFinished(index: Int, state: StepState)
@@ -758,10 +765,13 @@ public struct UndoPlanner: Sendable {
 
     /// - Parameter owned: media Albumist still owns per album, from the managed-album records
     ///   after the latest reconciliation. Media the user took out and later put back by hand
-    ///   are no longer Albumist's and stay. Pass `nil` for a plan that was never recorded
-    ///   (an interrupted one). An album without a record there falls back to what the plan's
-    ///   own journal says it added (plugin review W3): a record lost to an album list that was
-    ///   incomplete for a moment must not leave the album in Photos after "Rückgängig".
+    ///   are no longer Albumist's and stay. An album without a record holds nothing of
+    ///   Albumist's any more: its record goes once Albumist took its photos out ("Album
+    ///   entfernen", an undo), and what is in it after that is the user's (review of 6c6ef79).
+    ///   A record is not lost to an album list that lacks albums for a while: the album check
+    ///   looks such an album up on its own first (plugin review W3). Pass `nil` only for a plan
+    ///   whose results were never stored (an interrupted one); the app stores a finished plan's
+    ///   results before its undo is planned.
     /// - Parameter earlierUndos: undos of the same plan that ran before and did not get
     ///   everything back (plugin review W1). An album one of them brought back is used again
     ///   and only gets the photos still missing, instead of a second album of the same name.
@@ -818,11 +828,7 @@ public struct UndoPlanner: Sendable {
             }
         }
         if let owned {
-            for (albumID, ours) in addedByUs {
-                // No record of the album: the plan's own journal is all there is to go by.
-                guard let still = owned[albumID] else { continue }
-                addedByUs[albumID] = ours.intersection(still)
-            }
+            for (albumID, ours) in addedByUs { addedByUs[albumID] = ours.intersection(owned[albumID] ?? []) }
         }
 
         // 1. Revert renames and moves if nobody changed them again.

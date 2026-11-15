@@ -196,5 +196,9 @@ jobs:
           for log in ../a11y-log.txt ../a11y-contrast-log.txt; do
             grep -aE "error:|UI_STEP|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed" "$log" | grep -v "/SourcePackages/" | head -12000
           done
+          # A pass that fails before any test runs leaves nothing for the filter above.
+          if [ $contrast -ne 0 ] && ! grep -aq "Test Case" ../a11y-contrast-log.txt; then
+            grep -av PREVIEW_JPEG ../a11y-contrast-log.txt | tail -40
+          fi
           echo "A11Y_SUMMARY fails $(cat ../a11y-log.txt ../a11y-contrast-log.txt | grep -ac 'A11Y_FAIL ') warnings $(cat ../a11y-log.txt ../a11y-contrast-log.txt | grep -ac 'A11Y_WARN ')"
           [ $status -eq 0 ] && [ $contrast -eq 0 ]

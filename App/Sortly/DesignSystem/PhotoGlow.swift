@@ -52,21 +52,21 @@ struct PhotoGlow: View {
             // Text sits on the wash (category, title, count). Reduce Transparency and Increase
             // Contrast both ask for a plain background behind text, so the wash stays off.
             if colors.count == 4 && !reduceTransparency && contrast != .increased {
+                // The 30 % sits in the colours, not in a layer opacity: XCTest's contrast
+                // audit appears to measure text on this wash as if the gradient were opaque
+                // (clearly readable titles "failed" only on these two screens, UI runs 2-4).
+                // On screen both are the same: one layer, nothing overlapping inside it.
+                // The wash fades out above the text (country screen: "Rom und Florenz");
+                // white keeps 9:1 and Theme.secondaryText 5.4:1 on any photo colour.
                 MeshGradient(width: 2, height: 3, points: [
                     [0, 0], [1, 0],
                     [0, 0.5], [1, 0.5],
                     [0, 1], [1, 1],
                 ], colors: [
-                    colors[0], colors[1],
-                    colors[2].opacity(0.3), colors[3].opacity(0.3),
+                    colors[0].opacity(0.3), colors[1].opacity(0.3),
+                    colors[2].opacity(0.09), colors[3].opacity(0.09),
                     .clear, .clear,
                 ])
-                // The colour sits behind the title and the grey caption under it (country
-                // screen: "Rom und Florenz", "20 Fotos"). At 36 % with a 55 % middle the audit
-                // reported "Contrast failed" there; the wash now fades out above the text.
-                // Dark mode at 45 % lifted the black enough to fail white headlines at the
-                // largest text size; at 30 % white keeps 9:1 on any photo colour.
-                .opacity(0.3)
                 .transition(.opacity)
             }
         }

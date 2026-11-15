@@ -75,7 +75,11 @@ jobs:
           mkdir -p "$(dirname "$KEY_PATH")"
           printf '%s\n' "$KEY_P8" > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
-      - name: Archive (signed, automatic signing in the cloud)
+      # The archive is built unsigned: automatic signing would want a development profile,
+      # and Apple only makes one when an iPhone is registered to the team. The export below
+      # signs for the App Store with Apple's cloud-managed distribution certificate (needs the
+      # Admin key), which works without any registered device.
+      - name: Archive (unsigned; signed for the App Store during export)
         run: |
           cd App
           set +e
@@ -85,12 +89,10 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$ARCHIVE" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$KEY_PATH" \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" > ../archive-log.txt 2>&1
           status=$?
           grep -E "error:|\*\* ARCHIVE" ../archive-log.txt | head -80

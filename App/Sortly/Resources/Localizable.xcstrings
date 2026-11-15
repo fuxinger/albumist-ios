@@ -7638,6 +7638,16 @@
           }
         }
       }
+    },
+    "Fortsetzen nimmt auch den Rest zurück. So lassen behält, was schon zurückgenommen ist; den Rest kannst du später im Änderungsbeleg zurücknehmen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue takes back the rest too. Leave as is keeps what has already been taken back; you can take back the rest later from the change receipt."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

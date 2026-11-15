@@ -81,7 +81,7 @@ struct PlanReviewView: View {
     @ViewBuilder
     private func planContent(_ plan: ChangePlan) -> some View {
         let summary = plan.summary
-        Text("Das ändert sich in Fotos").font(.title2.weight(.bold))
+        Text("Das ändert sich in Fotos").font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
         if plan.retries != nil {
             // "Fehlendes erneut versuchen" (I16): say that this is not the whole plan again.
             Text("Nur was beim letzten Anlegen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt.")
@@ -337,7 +337,7 @@ struct ResultCard: View {
             if !isUndo && !model.undonePlans.contains(plan.id) {
                 Button("Rückgängig machen") { confirmUndo = true }
                     .buttonStyle(SecondaryButtonStyle())
-                Text("Auch später möglich unter Einstellungen › Verlauf. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben.")
+                Text("Auch später möglich unter Einstellungen › Verlauf und Rückgängig. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
@@ -432,11 +432,16 @@ struct UnlockCard: View {
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(purchases.isPurchasing)
+            // Text buttons with a 44 pt tap area (design review W9: the bare text was ~20 pt).
             HStack {
-                Button("Kauf wiederherstellen") { Task { await purchases.restore() } }
-                    .disabled(purchases.isPurchasing)
+                Button { Task { await purchases.restore() } } label: {
+                    Text("Kauf wiederherstellen").minimumHitTarget()
+                }
+                .disabled(purchases.isPurchasing)
                 Spacer()
-                Button("Code einlösen") { redeeming = true }
+                Button { redeeming = true } label: {
+                    Text("Code einlösen").minimumHitTarget()
+                }
             }
             .font(.subheadline)
             .offerCodeRedemption(isPresented: $redeeming) { _ in
@@ -470,11 +475,15 @@ struct PlanAlbumList: View {
     var body: some View {
         let visible = showAll ? albums : Array(albums.prefix(collapsedCount))
         Card {
-            if albums.allSatisfy(\.isNew) {
-                Text("Diese Alben werden angelegt").font(.headline)
-            } else {
-                Text("Diese Alben werden angelegt oder ergänzt").font(.headline)
+            Group {
+                if albums.allSatisfy(\.isNew) {
+                    Text("Diese Alben werden angelegt")
+                } else {
+                    Text("Diese Alben werden angelegt oder ergänzt")
+                }
             }
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
             ForEach(visible) { album in
                 PlanAlbumRow(album: album)
                 if album.id != visible.last?.id { Divider() }

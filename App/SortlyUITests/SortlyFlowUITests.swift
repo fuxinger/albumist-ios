@@ -207,6 +207,17 @@ final class SortlyFlowUITests: XCTestCase {
             print(cities.waitForExistence(timeout: 3) ? "UI_STEP_OK cities switch in onboarding" : "UI_STEP_MISSING cities switch in onboarding")
             tap(button("Weiter"), "areas")
             shot("03-access")
+            // Design review W13: every step after the welcome screen has the system way back.
+            if app.navigationBars.buttons.firstMatch.waitForExistence(timeout: 5) {
+                back()
+                let areasAgain = app.staticTexts["Was soll Albumist sortieren?"].waitForExistence(timeout: 5)
+                print(areasAgain ? "UI_STEP_OK onboarding back to areas" : "UI_STEP_MISSING onboarding back to areas")
+                XCTAssertTrue(areasAgain, "Back from the access step did not return to the areas")
+                tap(button("Weiter"), "areas again")
+            } else {
+                print("UI_STEP_MISSING onboarding back button")
+                XCTFail("The access step has no back button")
+            }
             if app.buttons["access.continue"].waitForExistence(timeout: 5) {
                 app.buttons["access.continue"].tap()
                 allowPhotosIfAsked()
@@ -411,10 +422,23 @@ final class SortlyFlowUITests: XCTestCase {
                 sleep(2)
                 shot("14b-library-sorted")
             }
+            // Design review W11/W12: a tap opens the photo large, its details behind "i",
+            // and a pull down closes it, as in Photos.
             if tap(photo, "open photo") {
                 sleep(2)
-                shot("15-photo-detail"); audit("photo detail")
-                tap(button("Fertig"), "close photo")
+                shot("15-photo-viewer"); audit("photo viewer")
+                if tap(app.buttons["viewer.info"], "photo info") {
+                    sleep(1)
+                    shot("15a-photo-detail"); audit("photo detail")
+                    tap(button("Fertig"), "close photo info")
+                    sleep(1)
+                }
+                let close = app.buttons["viewer.close"]
+                app.swipeDown(velocity: .slow)
+                let closed = waitGone(close, timeout: 5)
+                print(closed ? "UI_STEP_OK pull down closes the photo" : "UI_STEP_MISSING pull down closes the photo")
+                XCTAssertTrue(closed, "Pulling the photo down did not close it")
+                if !closed { closeViewerIfOpen() }
             }
             if tap(button("Auswählen"), "select mode") {
                 let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
@@ -435,6 +459,19 @@ final class SortlyFlowUITests: XCTestCase {
         if tap(tabButton("Alben"), "albums tab") {
             sleep(2)
             shot("18-albums"); audit("albums")
+            // Design review W12: an album shows all its photos, and each opens large.
+            let album = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9] Fotos?")).firstMatch
+            if tap(album, "open an album", timeout: 5) {
+                let photo = app.buttons["album.photo"].firstMatch
+                if tap(photo, "open a photo of the album", timeout: 10) {
+                    let viewer = app.buttons["viewer.close"].waitForExistence(timeout: 5)
+                    print(viewer ? "UI_STEP_OK album photo opens large" : "UI_STEP_MISSING album photo opens large")
+                    XCTAssertTrue(viewer, "A photo of an album does not open")
+                    shot("18a-album-photo")
+                    closeViewerIfOpen()
+                }
+                back(); sleep(1)
+            }
         }
 
         // Search (the system names the search tab itself)
@@ -458,16 +495,12 @@ final class SortlyFlowUITests: XCTestCase {
             if tap(app.buttons["Einstellungen"], "settings") {
                 sleep(1)
                 shot("21-settings"); audit("settings")
-                // The history sits far down in a lazy list: its rows exist only once scrolled to.
+                // Design review W16: history and undo are the first row, on their own screen.
+                let history = tap(app.buttons["settings.history"], "open history and undo", timeout: 5)
+                if history { sleep(1); shot("21h-history"); audit("history") }
                 let row = app.buttons["history.row"].firstMatch
-                let list = app.collectionViews.firstMatch
-                var swipes = 0
-                while !(row.exists && row.isHittable) && swipes < 10 {
-                    (list.exists ? list : app).swipeUp()
-                    swipes += 1
-                }
                 // A history row opens the plan's change receipt; undo lives there.
-                let opened = tap(row, "history row opens receipt", timeout: 10)
+                let opened = history && tap(row, "history row opens receipt", timeout: 10)
                 if opened { sleep(2); shot("21a-history-receipt") }
                 let undo = app.buttons["receipt.undo"]
                 if opened && !undo.exists {
@@ -525,6 +558,7 @@ final class SortlyFlowUITests: XCTestCase {
                     XCTAssertTrue(removedRow, "Undo removed no albums or folders")
                 }
                 if opened { back(); sleep(1) }
+                if history { back(); sleep(1) }
                 tap(button("Fertig"), "close settings")
             }
         }
@@ -837,7 +871,8 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(withHistory, "Album records and history were not restored into the same library")
 
         // The history is back and the settings say when the copy was made.
-        if tap(app.buttons["Einstellungen"], "settings after restore") {
+        if tap(app.buttons["Einstellungen"], "settings after restore"),
+           tap(app.buttons["settings.history"], "history after restore", timeout: 5) {
             sleep(1)
             let list = app.collectionViews.firstMatch
             let saved = anything("Zuletzt gesichert")
@@ -851,6 +886,7 @@ final class SortlyFlowUITests: XCTestCase {
             print("UI_FACT history empty after restore \(empty)")
             XCTAssertFalse(empty, "The history is empty after the restore")
             shot("41-settings-backup")
+            back(); sleep(1)
             tap(button("Fertig"), "close settings after restore")
         }
         if tap(app.buttons["overview.restoredFromBackup.ok"], "dismiss restored card") {
@@ -905,13 +941,9 @@ final class SortlyFlowUITests: XCTestCase {
         // The kept plan is the newest history row; its receipt says what is missing.
         guard tap(app.buttons["Einstellungen"], "settings after keep") else { return }
         sleep(1)
+        guard tap(app.buttons["settings.history"], "history after keep", timeout: 5) else { return }
+        sleep(1)
         let row = app.buttons["history.row"].firstMatch
-        let list = app.collectionViews.firstMatch
-        var swipes = 0
-        while !(row.exists && row.isHittable) && swipes < 10 {
-            (list.exists ? list : app).swipeUp()
-            swipes += 1
-        }
         guard tap(row, "kept plan in history", timeout: 10) else { return }
         sleep(2)
         let partial = anything("Teilweise umgesetzt").waitForExistence(timeout: 5)

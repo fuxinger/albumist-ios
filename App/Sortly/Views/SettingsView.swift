@@ -16,6 +16,23 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var model = model
         Form {
+            // Undo first and on its own screen (design review W16: the history sat between
+            // privacy and the purchase, the seventh of twelve sections).
+            Section {
+                NavigationLink {
+                    HistoryView()
+                } label: {
+                    LabeledContent {
+                        if model.interruptedPlan != nil { Text("Unterbrochen") }
+                    } label: {
+                        Label("Verlauf und Rückgängig", systemImage: "clock.arrow.circlepath")
+                    }
+                }
+                .accessibilityIdentifier("settings.history")
+            } footer: {
+                Text("Alles, was Albumist in Fotos geändert hat, und der Weg zurück.")
+            }
+
             Section {
                 Picker("Albumist arbeitet mit", selection: scopeYear) {
                     Text("Ganze Mediathek").tag(Int?.none)
@@ -42,14 +59,15 @@ struct SettingsView: View {
                 Text("Nur eingeschaltete Bereiche bekommen Vorschläge.")
             }
 
+            // Says what the second list of areas is for (W16: it read like the first one again).
             Section {
                 ForEach(OrganizationArea.available.filter { model.settings.enabledAreas.contains($0) }) { area in
                     Toggle(isOn: areaBinding(area, \.primaryAreas)) { Text(area.title) }
                 }
             } header: {
-                Text("Hauptbereiche")
+                Text("Zählt als sortiert")
             } footer: {
-                Text("Ein Foto gilt als sortiert, wenn es in einem dieser Bereiche ein Album hat.")
+                Text("Ein Foto gilt als sortiert, wenn es in einem dieser Bereiche in einem Album liegt.")
             }
 
             Section("Alben") {
@@ -58,8 +76,8 @@ struct SettingsView: View {
                     Text("Englisch").tag(TitleLanguage.english)
                 }
                 .adaptivePickerStyle()
-                LabeledContent("Hauptordner") {
-                    TextField("Keiner", text: $model.settings.rootFolderTitle)
+                LabeledContent("Ordner für neue Alben") {
+                    TextField("Kein Ordner", text: $model.settings.rootFolderTitle)
                         .multilineTextAlignment(.trailing)
                 }
                 if model.settings.enabledAreas.contains(.places) {
@@ -151,29 +169,6 @@ struct SettingsView: View {
                     Button("Als Reisen zeigen") { Task { _ = await model.withdrawRecurringPlace(answer) } }
                 } message: { _ in
                     Text("Aufenthalte an diesem Ort werden wieder als Reisen vorgeschlagen. Schon angelegte Alben bleiben, wie sie sind.")
-                }
-            }
-
-            Section {
-                if let interrupted = model.interruptedPlan {
-                    InterruptedHistoryRow(plan: interrupted)
-                }
-                if model.history.isEmpty && model.interruptedPlan == nil {
-                    Text("Noch keine Änderungen").foregroundStyle(.secondary)
-                }
-                ForEach(model.history) { plan in
-                    HistoryRow(plan: plan)
-                }
-                if model.historyHasMore {
-                    Button("Ältere anzeigen") { Task { await model.loadMoreHistory() } }
-                }
-            } header: {
-                Text("Verlauf")
-            } footer: {
-                // The analysis can be rebuilt, the decisions cannot: they are copied into the
-                // device backup (I12), so a new iPhone or a rebuilt database gets them back.
-                if let saved = model.lastSafetyBackup {
-                    Text("Deine Entscheidungen, Alben und der Verlauf liegen als kleine Kopie im Backup deines Geräts. Zuletzt gesichert: \(saved.formatted(date: .abbreviated, time: .shortened)).")
                 }
             }
 
@@ -279,6 +274,38 @@ struct SettingsView: View {
     }
 }
 
+/// Every change Albumist made, newest first, each with its way back (design review W16).
+struct HistoryView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        List {
+            Section {
+                if let interrupted = model.interruptedPlan {
+                    InterruptedHistoryRow(plan: interrupted)
+                }
+                if model.history.isEmpty && model.interruptedPlan == nil {
+                    Text("Noch keine Änderungen").foregroundStyle(.secondary)
+                }
+                ForEach(model.history) { plan in
+                    HistoryRow(plan: plan)
+                }
+                if model.historyHasMore {
+                    Button("Ältere anzeigen") { Task { await model.loadMoreHistory() } }
+                }
+            } footer: {
+                // The analysis can be rebuilt, the decisions cannot: they are copied into the
+                // device backup (I12), so a new iPhone or a rebuilt database gets them back.
+                if let saved = model.lastSafetyBackup {
+                    Text("Deine Entscheidungen, Alben und der Verlauf liegen als kleine Kopie im Backup deines Geräts. Zuletzt gesichert: \(saved.formatted(date: .abbreviated, time: .shortened)).")
+                }
+            }
+        }
+        .navigationTitle("Verlauf und Rückgängig")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 /// One executed plan; opens its change receipt (with "Rückgängig machen" there).
 struct HistoryRow: View {
     @Environment(AppModel.self) private var model
@@ -341,15 +368,22 @@ struct InterruptedHistoryRow: View {
     @ViewBuilder
     private var buttons: some View {
         let isUndo = plan.reverts != nil
-        Button(isUndo ? LocalizedStringKey("Rest zurücknehmen") : LocalizedStringKey("Rest anlegen")) {
+        // Borderless buttons in one row: each label gets the 44 pt tap area itself (W9).
+        Button {
             Task {
                 await model.resumeInterruptedPlan()
                 await model.refreshDerived()
             }
+        } label: {
+            Text(isUndo ? LocalizedStringKey("Rest zurücknehmen") : LocalizedStringKey("Rest anlegen")).minimumHitTarget()
         }
         // An interrupted undo cannot itself be taken back; it goes on or stays as it is.
-        if !isUndo { Button("Alles zurücknehmen") { confirmUndo = true } }
-        Button(isUndo ? LocalizedStringKey("So lassen") : LocalizedStringKey("Nur Erledigtes behalten")) { Task { await model.keepInterruptedPlanAsIs() } }
+        if !isUndo {
+            Button { confirmUndo = true } label: { Text("Alles zurücknehmen").minimumHitTarget() }
+        }
+        Button { Task { await model.keepInterruptedPlanAsIs() } } label: {
+            Text(isUndo ? LocalizedStringKey("So lassen") : LocalizedStringKey("Nur Erledigtes behalten")).minimumHitTarget()
+        }
     }
 }
 

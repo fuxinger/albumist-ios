@@ -9,10 +9,10 @@ struct CountryPhotosView: View {
     var code: String
     /// The year chosen in the atlas; nil = all years.
     var year: Int?
-    @State private var detail: AssetFacts?
+    /// A tap opens the photo large, its details behind "i" (design review W12).
+    @State private var viewing: PhotoViewer.Start?
     /// The photo zooms out of its thumbnail and back into it.
     @Namespace private var zoom
-    @State private var addingToAlbum: [AssetID]?
 
     var body: some View {
         let country = model.countryPhotos(code, year: year)
@@ -40,7 +40,7 @@ struct CountryPhotosView: View {
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityAddTraits(.isHeader)
-                        grid(group.photos)
+                        grid(group.photos, all: country.years.flatMap { $0.photos.map(\.id) })
                     }
                 }
             }
@@ -63,14 +63,11 @@ struct CountryPhotosView: View {
                                        description: Text("Für dieses Land gibt es gerade keine Fotos."))
             }
         }
-        .sheet(item: $detail) { facts in
-            AssetDetailView(facts: facts) { addingToAlbum = [facts.id] }
-                .navigationTransition(.zoom(sourceID: facts.id, in: zoom))
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
+                .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
-        .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
-            AddToAlbumSheet(assets: addingToAlbum ?? []) {}
-        }
-        // "Widerrufen" after ignoring a photo from its detail (design review D4).
+        // "Widerrufen" stays in reach after the viewer closed (design review D4).
         .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }
         .animation(.snappy, value: model.lastIgnored)
     }
@@ -115,11 +112,11 @@ struct CountryPhotosView: View {
         .contentShape(Rectangle())
     }
 
-    private func grid(_ photos: [AssetFacts]) -> some View {
+    private func grid(_ photos: [AssetFacts], all: [AssetID]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
             ForEach(photos, id: \.id) { facts in
                 Button {
-                    detail = facts
+                    viewing = PhotoViewer.Start(id: facts.id, ids: all)
                 } label: {
                     AssetThumbnail(id: facts.id, side: 110)
                         .aspectRatio(1, contentMode: .fill)

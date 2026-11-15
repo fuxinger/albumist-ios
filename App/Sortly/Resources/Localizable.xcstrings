@@ -1581,16 +1581,6 @@
         }
       }
     },
-    "BEREICHE" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AREAS"
-          }
-        }
-      }
-    },
     "Bereiche" : {
       "localizations" : {
         "en" : {
@@ -2071,16 +2061,6 @@
         }
       }
     },
-    "Ein Foto gilt als sortiert, wenn es in einem dieser Bereiche ein Album hat." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A photo counts as sorted when it has an album in one of these areas."
-          }
-        }
-      }
-    },
     "Ein Ordner blieb, weil noch andere Alben darin liegen." : {
       "localizations" : {
         "en" : {
@@ -2537,26 +2517,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Did Albumist put two trips together here, or cut one trip apart? Fix it here. Albumist remembers it for every later analysis."
-          }
-        }
-      }
-    },
-    "Hauptbereiche" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Main areas"
-          }
-        }
-      }
-    },
-    "Hauptordner" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Main folder"
           }
         }
       }
@@ -3987,16 +3947,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "traveling since"
-          }
-        }
-      }
-    },
-    "Verlauf" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "History"
           }
         }
       }
@@ -6213,16 +6163,6 @@
         }
       }
     },
-    "Auch später möglich unter Einstellungen › Verlauf. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Also possible later in Settings › History. Undo only removes the new albums and assignments; your photos stay."
-          }
-        }
-      }
-    },
     "Kostenlos. Danach hast du noch %lld von %lld Gratis-Alben." : {
       "localizations" : {
         "en" : {
@@ -7233,16 +7173,6 @@
         }
       }
     },
-    "Keiner" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "None"
-          }
-        }
-      }
-    },
     "Die Analyse läuft danach noch einmal über alle Fotos, mit denen Albumist arbeitet." : {
       "localizations" : {
         "en" : {
@@ -7719,16 +7649,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Only photos that fit your main areas are counted: %@."
-          }
-        }
-      }
-    },
-    "Nicht alles ließ sich zurücknehmen. Das unterbrochene Umsetzen steht jetzt unter Einstellungen › Verlauf. Dort kannst du den Rest zurücknehmen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not everything could be taken back. The interrupted run is now in Settings › History, where you can take back the rest."
           }
         }
       }
@@ -9669,6 +9589,126 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The run was interrupted."
+          }
+        }
+      }
+    },
+    "Unterbrochen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interrupted"
+          }
+        }
+      }
+    },
+    "Verlauf und Rückgängig" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "History and Undo"
+          }
+        }
+      }
+    },
+    "Alles, was Albumist in Fotos geändert hat, und der Weg zurück." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Everything Albumist changed in Photos, and the way back."
+          }
+        }
+      }
+    },
+    "Zählt als sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Counts as Sorted"
+          }
+        }
+      }
+    },
+    "Ein Foto gilt als sortiert, wenn es in einem dieser Bereiche in einem Album liegt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A photo counts as sorted when it is in an album in one of these areas."
+          }
+        }
+      }
+    },
+    "Ordner für neue Alben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Folder for New Albums"
+          }
+        }
+      }
+    },
+    "Kein Ordner" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Folder"
+          }
+        }
+      }
+    },
+    "Auch später möglich unter Einstellungen › Verlauf und Rückgängig. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Also possible later in Settings › History and Undo. Undo only removes the new albums and assignments; your photos stay."
+          }
+        }
+      }
+    },
+    "Nicht alles ließ sich zurücknehmen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest zurücknehmen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not everything could be taken back. The interrupted run is now in Settings › History and Undo, where you can take back the rest."
+          }
+        }
+      }
+    },
+    "Info" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Info"
+          }
+        }
+      }
+    },
+    "Dieses Foto ist gerade nicht verfügbar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Photo Isn’t Available Right Now"
+          }
+        }
+      }
+    },
+    "Vielleicht liegt es nur in iCloud. In der Fotos-App lädt iOS es herunter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It may only be in iCloud. The Photos app downloads it."
           }
         }
       }

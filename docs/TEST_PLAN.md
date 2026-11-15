@@ -130,3 +130,11 @@ dem Cloud-Mac noch laufen muss; bis dahin ist die Oberfläche nur syntaktisch ge
 | W5 Mehrzahl in Zählungen (auch mehrere Zahlen über Substitutionen) | ✅ | StringCatalogTests: everySubstitutionIsDefined, countVariesByPlural (11 Texte) | Anzeige im Simulator |
 | W6 Suchbeispiele übersetzt und in beiden Sprachen verstanden | ✅ | SearchExampleTests (12 Beispiele, gleiche Treffer DE/EN, Liste = App und Katalog) | — |
 | W17 Unterbrochen: „Rest anlegen“, „Alles zurücknehmen“, „Nur Erledigtes behalten“ (Rückgängig: „Rest zurücknehmen“, „So lassen“) | 🟡 | UI test5 (`interrupted.keep`) | UI-Lauf |
+| W7/W18 Grauer Suchbegriff und „REISEN · SICHER“ auf der Fotofarbe in `Theme.secondaryText` | 🟡 | Kontrast-Audit Suche und Vorschlag (AccessibilityUITests) | UI-Lauf |
+| W8 Lange Suchbegriffe brechen bei großer Schrift im Chip um | 🟡 | Baum-Prüfung „Text läuft aus dem Bildschirm“ (AccessibilityUITests, größte Schrift) | Anfrage mit langem Zeitraum im UI-Lauf fehlt |
+| W9 Tippflächen 44 pt (Mediathek-Filter, Atlas-Jahre, Zuverlässigkeit, Kauf wiederherstellen/Code, Verlaufszeile) | 🟡 | `hitRegion`-Audit (AccessibilityUITests) | UI-Lauf |
+| W10 Überschriften für VoiceOver („Bereiche“ als Text, Kartentitel) | 🟡 | — | VoiceOver-Rotor 📱 |
+| W11 Großansicht mit System-Toolbar, nach unten wischen schließt, Datum/Ort für VoiceOver, „nicht verfügbar“ statt Endlos-Kreis | 🟡 | UI test1 „pull down closes the photo“; AccessibilityUITests „photo viewer“ | Foto nur in iCloud 📱 |
+| W12 Tippen öffnet überall die Großansicht, Infos hinter „i“; Album zeigt alle Fotos | 🟡 | UI test1 „photo info“, „album photo opens large“ | UI-Lauf |
+| W13 Einführung mit Zurück (Navigation) | 🟡 | UI test1 „onboarding back to areas“ | UI-Lauf |
+| W16 Einstellungen: „Verlauf und Rückgängig“ als erste Zeile, „Zählt als sortiert“, „Ordner für neue Alben“ | 🟡 | UI test1, test4, test5 über `settings.history`; AccessibilityUITests „history“ | UI-Lauf |

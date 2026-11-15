@@ -8,7 +8,8 @@ struct LibraryView: View {
     @State private var bucket: InboxBucket = .unorganized
     @State private var selecting = false
     @State private var selection: Set<AssetID> = []
-    @State private var detail: AssetFacts?
+    /// A tap opens the photo large, its details behind "i" (design review W12).
+    @State private var viewing: PhotoViewer.Start?
     /// The photo zooms out of its thumbnail and back into it.
     @Namespace private var zoom
     @State private var addingToAlbum: [AssetID]?
@@ -88,9 +89,9 @@ struct LibraryView: View {
         }
         .animation(.snappy, value: selection.isEmpty)
         .animation(.snappy, value: model.lastIgnored)
-        .sheet(item: $detail) { facts in
-            AssetDetailView(facts: facts) { addingToAlbum = [facts.id] }
-                .navigationTransition(.zoom(sourceID: facts.id, in: zoom))
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
+                .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {
@@ -135,7 +136,10 @@ struct LibraryView: View {
                 let id = facts.id
                 // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
                 Button {
-                    guard selecting else { detail = facts; return }
+                    guard selecting else {
+                        viewing = PhotoViewer.Start(id: id, ids: members.prefix(shown).map(\.id))
+                        return
+                    }
                     if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
                 } label: {
                     AssetThumbnail(id: id, side: 110)
@@ -184,6 +188,8 @@ struct LibraryView: View {
                                 .padding(.horizontal, 14).padding(.vertical, 8)
                                 .background(b == bucket ? Theme.accent : Theme.card, in: Capsule())
                                 .foregroundStyle(b == bucket ? Theme.onAccent : Color.primary)
+                                // The capsule stays as it is; the tap area is 44 pt (design review W9).
+                                .minimumHitTarget()
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(b == bucket ? .isSelected : [])
@@ -305,13 +311,7 @@ struct AssetDetailView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    AssetThumbnail(id: facts.id, side: 420)
-                        .aspectRatio(aspect, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                }
+                // The photo itself is behind this sheet, in the viewer (design review W12).
                 Section {
                     if let date = facts.asset.creationDate {
                         LabeledContent("Aufgenommen", value: date.formatted(date: .long, time: .shortened))
@@ -387,7 +387,7 @@ struct AssetDetailView: View {
                     }
                 }
             }
-            .navigationTitle("Foto")
+            .navigationTitle("Info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
@@ -397,11 +397,6 @@ struct AssetDetailView: View {
 
     private var isIgnored: Bool {
         model.states[facts.id].map { model.resolver.overall($0) == .ignored } ?? false
-    }
-
-    private var aspect: CGFloat {
-        let w = CGFloat(facts.asset.pixelWidth), h = CGFloat(facts.asset.pixelHeight)
-        return w > 0 && h > 0 ? w / h : 1
     }
 
     private var placeText: String? {

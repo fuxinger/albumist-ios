@@ -280,6 +280,20 @@ final class AccessibilityUITests: XCTestCase {
         if tap(tabButton(w.libraryTab), "\(tag) library tab") {
             sleep(2)
             check("\(tag) library", english: english)
+            // Design review W11/W12: the photo viewer (system toolbar) and its info sheet.
+            let photo = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*")).firstMatch
+            if !short, photo.waitForExistence(timeout: 5), tap(photo, "\(tag) open photo", timeout: 5) {
+                sleep(2)
+                check("\(tag) photo viewer", english: english)
+                if tap(app.buttons["viewer.info"], "\(tag) photo info", timeout: 5) {
+                    sleep(1)
+                    check("\(tag) photo info", english: english)
+                    tap(button(w.done), "\(tag) close photo info")
+                    sleep(1)
+                }
+                tap(app.buttons["viewer.close"], "\(tag) close photo", timeout: 5)
+                sleep(1)
+            }
         }
         if tap(tabButton(w.albumsTab), "\(tag) albums tab") {
             sleep(2)
@@ -293,6 +307,13 @@ final class AccessibilityUITests: XCTestCase {
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
                 check("\(tag) settings lower", english: english)
+                (list.exists ? list : app).swipeDown(); (list.exists ? list : app).swipeDown(); sleep(1)
+                // Design review W16: history and undo on their own screen.
+                if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
+                    sleep(1)
+                    check("\(tag) history", english: english)
+                    back(); sleep(1)
+                }
             }
             tap(button(w.done), "\(tag) close settings")
             sleep(1)

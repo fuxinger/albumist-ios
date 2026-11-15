@@ -149,22 +149,47 @@ struct FolderView: View {
     }
 }
 
+/// Every photo of an album, oldest first like an album in Photos; a tap opens it large
+/// (design review W12: only 200 photos with "+N" and taps did nothing).
 struct AlbumDetailView: View {
+    @Environment(AppModel.self) private var model
     var album: CollectionSnapshot
+    @State private var viewing: PhotoViewer.Start?
+    @Namespace private var zoom
 
     var body: some View {
+        let ids = PreviewPicker.chronological(album.assetIDs, dates: model.creationDates)
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 if !album.isEditableAlbum {
                     Label("Dieses Album kann Albumist nicht verändern.", systemImage: "lock")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                ThumbnailGrid(ids: album.assetIDs.sorted(), columns: 4, limit: 200)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
+                    ForEach(ids, id: \.self) { id in
+                        Button {
+                            viewing = PhotoViewer.Start(id: id, ids: ids)
+                        } label: {
+                            AssetThumbnail(id: id, side: 110)
+                                .aspectRatio(1, contentMode: .fill)
+                                .matchedTransitionSource(id: id, in: zoom)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text(model.creationDates[id]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+                        .accessibilityIdentifier("album.photo")
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
             }
             .padding(Theme.Spacing.l)
         }
         .background(Theme.background)
         .navigationTitle(album.title)
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
+                .navigationTransition(.zoom(sourceID: start.id, in: zoom))
+        }
     }
 }

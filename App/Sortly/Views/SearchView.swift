@@ -16,7 +16,8 @@ struct SearchView: View {
     @State private var suggestions: [SearchSuggestion] = []
     /// Starting points for the empty field, from the user's own library.
     @State private var featured: [SearchSuggestion] = []
-    @State private var detail: AssetFacts?
+    /// A tap opens the photo large, its details behind "i" (design review W12).
+    @State private var viewing: PhotoViewer.Start?
     /// The tapped thumbnail (a photo can be in the best hits and in the grid).
     @State private var zoomSource = ""
     @State private var addingToAlbum: [AssetID]?
@@ -69,8 +70,8 @@ struct SearchView: View {
         }
         .background(Theme.background)
         .navigationTitle("Suchen")
-        .sheet(item: $detail) { facts in
-            AssetDetailView(facts: facts) { addingToAlbum = [facts.id] }
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: zoomSource, in: zoom))
         }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
@@ -248,7 +249,7 @@ struct SearchView: View {
         let key = source + ":" + id.rawValue
         return Button {
             zoomSource = key
-            detail = hit
+            viewing = PhotoViewer.Start(id: id, ids: Array(result.ids.prefix(shown)))
         } label: {
             AssetThumbnail(id: id, side: 110)
                 .aspectRatio(1, contentMode: .fill)
@@ -303,7 +304,9 @@ struct SearchTokenChip: View {
 
     var body: some View {
         let muted = ignored || dropped
-        let tint: Color = muted ? .secondary : Theme.accent
+        // Not the system grey: on its own 12 % capsule in caption size that was about 3.3:1
+        // (design review W7); this grey keeps 4.5:1 and more.
+        let tint: Color = muted ? Theme.secondaryText : Theme.accent
         HStack(spacing: 4) {
             Image(systemName: token.negated ? "minus.circle" : SearchView.symbol(token.kind))
                 .imageScale(.small)
@@ -330,7 +333,9 @@ struct SearchTokenChip: View {
     }
 }
 
-/// Simple wrapping layout for chips.
+/// Simple wrapping layout for chips. A chip wider than the line (a long date range at the
+/// accessibility text sizes) is measured at the line width, so it wraps inside its capsule
+/// instead of running off the screen (design review W8).
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
@@ -345,11 +350,19 @@ struct FlowLayout: Layout {
         for row in arrange(width: bounds.width, subviews: subviews) {
             var x = bounds.minX
             for index in row.indices {
-                let size = subviews[index].sizeThatFits(.unspecified)
+                let size = measure(subviews[index], width: bounds.width)
                 subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y), proposal: ProposedViewSize(size))
                 x += size.width + spacing
             }
         }
+    }
+
+    /// Ideal size, or the size at the full line width when the ideal one does not fit.
+    private func measure(_ subview: LayoutSubview, width: CGFloat) -> CGSize {
+        let ideal = subview.sizeThatFits(.unspecified)
+        guard width.isFinite, ideal.width > width else { return ideal }
+        let wrapped = subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        return CGSize(width: min(wrapped.width, width), height: wrapped.height)
     }
 
     private struct Row { var indices: [Int] = []; var y: CGFloat = 0; var width: CGFloat = 0; var height: CGFloat = 0 }
@@ -357,7 +370,7 @@ struct FlowLayout: Layout {
     private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
         var rows: [Row] = [Row()]
         for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
+            let size = measure(subviews[index], width: width)
             var row = rows[rows.count - 1]
             let needed = row.indices.isEmpty ? size.width : row.width + spacing + size.width
             if needed > width && !row.indices.isEmpty {

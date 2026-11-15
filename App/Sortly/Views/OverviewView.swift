@@ -323,7 +323,11 @@ struct OverviewView: View {
     private var areasSection: some View {
         let byArea = Dictionary(grouping: model.proposals, by: \.kind.area)
         return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("BEREICHE")
+            // Caps by style, not in the text (EN reads "Areas"), and a heading for VoiceOver
+            // (design review W10).
+            Text("Bereiche")
+                .textCase(.uppercase)
+                .accessibilityAddTraits(.isHeader)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.top, Theme.Spacing.s)
@@ -533,7 +537,7 @@ struct StarterSetCard: View {
         let set = model.starterSet(limit: limit)
         if set.count >= 3 {
             Card {
-                Text("Dein Startpaket").font(.headline)
+                Text("Dein Startpaket").font(.headline).accessibilityAddTraits(.isHeader)
                 Text("Die \(set.count) besten Alben aus deiner Mediathek, fertig zum Anlegen. Du siehst vorher genau, was passiert.")
                     .font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: -14) {
@@ -574,7 +578,7 @@ struct LimitedAccessCard: View {
 
     var body: some View {
         Card {
-            Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline)
+            Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline).accessibilityAddTraits(.isHeader)
             Text("Albumist sieht nur die \(model.progress.allPhotos) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
                 .font(.subheadline).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -215,14 +215,17 @@ struct ProposalDetailView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     // Tapping the label explains what "Sicher" or "Wahrscheinlich" means.
                     Button { explainReliability = true } label: {
+                        // On the photo wash only the measured grey is sure to keep 4.5:1; the
+                        // symbol alone carries the accent (design review W18). 44 pt to tap (W9).
                         HStack(spacing: 4) {
                             Text("\(Text(proposal.kind.area.title)) · \(Text(proposal.reliability.label))")
                                 .textCase(.uppercase)
+                                .foregroundStyle(Theme.secondaryText)
                             Image(systemName: "info.circle")
+                                .foregroundStyle(Theme.accent)
                         }
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.accent)
-                        .frame(minHeight: 32, alignment: .leading)
+                        .frame(minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -680,7 +683,7 @@ struct ProposalPhotosView: View {
             Text("Sie kommen nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleiben sie.")
         }
         .fullScreenCover(item: $viewing) { start in
-            PhotoViewer(ids: members, current: start.id)
+            PhotoViewer(ids: members, current: start.id, showsInfo: true)
         }
     }
 

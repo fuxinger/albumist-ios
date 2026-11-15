@@ -1615,7 +1615,7 @@ final class AppModel {
                         try await store.save(original)
                     }
                 } else {
-                    message = .failure([String(localized: "Nicht alles ließ sich zurücknehmen. Das unterbrochene Umsetzen steht jetzt unter Einstellungen › Verlauf. Dort kannst du den Rest zurücknehmen."),
+                    message = .failure([String(localized: "Nicht alles ließ sich zurücknehmen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest zurücknehmen."),
                                         execution.failure].compactMap { $0 }.joined(separator: "\n\n"))
                 }
             }

@@ -7918,6 +7918,36 @@
           }
         }
       }
+    },
+    "Wird neu gezählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recounting"
+          }
+        }
+      }
+    },
+    "Zuletzt %@ von %@ sortiert. Die neue Zahl kommt mit den ersten Vorschlägen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last count: %1$@ of %2$@ sorted. The new number arrives with the first suggestions."
+          }
+        }
+      }
+    },
+    "Wird neu berechnet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Being recalculated"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

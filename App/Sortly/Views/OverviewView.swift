@@ -90,21 +90,37 @@ struct OverviewView: View {
             : AnyLayout(HStackLayout(spacing: Theme.Spacing.l))
         return Card {
             layout {
-                ProgressRing(fraction: model.progress.fullyShare)
-                    .frame(width: min(ringSide, 150), height: min(ringSide, 150))
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("\(model.progress.fully.formatted()) von \(model.progress.total.formatted()) sortiert")
-                        .font(.headline)
-                        .monospacedDigit()
-                    Text(primaryAreasText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if model.interruptedPlan != nil {
-                        // The unfinished run counts only once the user has decided above
-                        // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
-                        Text("Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.")
+                if let recount = model.recount {
+                    // Rebuilding: no false 0 %, the last count marked as being recounted.
+                    ProgressView()
+                        .controlSize(.large)
+                        .frame(width: min(ringSide, 150), height: min(ringSide, 150))
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("Wird neu gezählt")
+                            .font(.headline)
+                        Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt mit den ersten Vorschlägen.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
+                } else {
+                    ProgressRing(fraction: model.progress.fullyShare)
+                        .frame(width: min(ringSide, 150), height: min(ringSide, 150))
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("\(model.progress.fully.formatted()) von \(model.progress.total.formatted()) sortiert")
+                            .font(.headline)
+                            .monospacedDigit()
+                        Text(primaryAreasText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if model.interruptedPlan != nil {
+                            // The unfinished run counts only once the user has decided above
+                            // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
+                            Text("Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -330,7 +346,9 @@ struct OverviewView: View {
         let text = VStack(alignment: .leading, spacing: 2) {
             Text(area.title).font(.body.weight(.medium))
             Group {
-                if proposals.isEmpty {
+                if proposals.isEmpty, model.recount != nil {
+                    Text("Wird neu berechnet")
+                } else if proposals.isEmpty {
                     Text("Noch keine Vorschläge")
                 } else {
                     Text(summary)

@@ -187,6 +187,13 @@ final class AppModel {
             .max { $0.1 < $1.1 }?.0
     }
     var progress = OrganizationStatusResolver.Progress()
+    /// "Analyse neu aufbauen" removes the proposals, and photos in the user's own matching
+    /// albums count as sorted only through them: the ring fell to 0 % until new proposals came
+    /// (device test 15.11., "Und oben null"). The last count stays on screen, marked as being
+    /// recounted, until the first new proposals exist or the analysis ends.
+    var recount: RecountState? = RecountState.load() {
+        didSet { RecountState.save(recount) }
+    }
     var inventory = CollectionInventory() { didSet { resetSearchIndex() } }
     var mergeSuggestions: [AlbumOverlapAnalyzer.MergeSuggestion] = []
     /// Executed plans, newest first. Undo runs are not listed on their own; they mark the
@@ -824,6 +831,9 @@ final class AppModel {
             let inScope = scope == .all ? facts : facts.filter { scope.includes($0, calendar: calendar) }
             let scopedIDs = Set(inScope.map(\.id))
             progress = resolver.progress(scope == .all ? Array(computed.values) : computed.filter { scopedIDs.contains($0.key) }.map(\.value))
+            if recount != nil, !proposals.isEmpty || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
+                recount = nil
+            }
             analysisCounts = AnalysisCounts(
                 photos: inScope.count,
                 analyzed: scope == .all ? analyzed.count : analyzed.intersection(scopedIDs).count,
@@ -1758,6 +1768,9 @@ final class AppModel {
         // ended, not for a fixed time (audit 2, 4.1).
         await analysisTask?.value
         AnalysisMarker.reset()
+        if progress.total > 0, recount == nil {
+            recount = RecountState(fully: progress.fully, total: progress.total)
+        }
         do {
             try await store?.resetAnalysis(includingDecisions: false)
         } catch {
@@ -1766,5 +1779,26 @@ final class AppModel {
         snapshot = nil
         SpotlightIndex.clear()
         await refreshDerived()
+    }
+}
+
+/// The ring's last count while "Analyse neu aufbauen" builds the proposals again.
+struct RecountState: Codable, Equatable {
+    var fully: Int
+    var total: Int
+
+    private static let key = "overview.recount"
+
+    static func load() -> RecountState? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(RecountState.self, from: data)
+    }
+
+    static func save(_ state: RecountState?) {
+        if let state, let data = try? JSONEncoder().encode(state) {
+            UserDefaults.standard.set(data, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
     }
 }

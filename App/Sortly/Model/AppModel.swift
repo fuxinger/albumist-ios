@@ -211,6 +211,10 @@ final class AppModel {
     @ObservationIgnored var catchUpAfterRun = false
     /// The user's own trip splits and merges (I07), for the settings.
     private(set) var tripCorrections = TripCorrections()
+    /// The user's answers to "Bist du hier öfter?", for the settings.
+    private(set) var recurringPlaces = RecurringPlaceAnswers()
+    /// What the latest analysis asks about recurring places, and where each trip mostly was.
+    private(set) var recurringPlaceReport: RecurringPlaceReport?
     var execution = ExecutionState()
     var message: String?
     /// Where Siri, Shortcuts or a Spotlight result wants to go; the overview opens it.
@@ -301,6 +305,7 @@ final class AppModel {
                 contentLanes: UITestSupport.slowsAnalysis ? 1 : 4
             )
             tripCorrections = (try? await pipeline?.tripCorrections()) ?? TripCorrections()
+            recurringPlaces = (try? await pipeline?.recurringPlaceAnswers()) ?? RecurringPlaceAnswers()
             analysisScope = (try? await pipeline?.storedScope()) ?? .all
             await refreshDerived()
             // A plan that finished right before the app was closed stores its results now.
@@ -762,6 +767,7 @@ final class AppModel {
         await reconcileManagedAlbums(quiet: true)
         do {
             snapshot = try await pipeline.latestProposals()
+            recurringPlaceReport = try await pipeline.recurringPlaceReport()
             facts = try await pipeline.currentFacts()
             inventory = try await store.loadInventory()
             let inventory = inventory
@@ -1009,6 +1015,89 @@ final class AppModel {
             tripCorrections = updated
             saveSafetyBackup()
             startAnalysis()
+            return true
+        } catch {
+            message = error.localizedDescription
+            return false
+        }
+    }
+
+    // MARK: Places the user is often at
+
+    /// A trip, or the album that gathers several trips to one place ("Reisen › Garmisch"):
+    /// the suggestions where "Keine Reise, hier bin ich öfter" makes sense. Like the trip
+    /// workshop, only while Albumist has not made the album yet: an album that exists would
+    /// lose the trips it stands for.
+    private func isTripLike(_ proposal: AlbumProposal) -> Bool {
+        let tripFolder = Labels(settings.titleLanguage).folder(for: .trips)
+        switch proposal.kind {
+        case .trip: break
+        case .placeCollection where proposal.folderPath.first == tripFolder: break
+        default: return false
+        }
+        return !managedAlbums.contains { $0.allSourceIDs.contains(proposal.id) }
+    }
+
+    /// The open question "Bist du hier öfter?" on this suggestion: asked once per place, on
+    /// any of its trips, until the user answers it there or on another trip.
+    func recurringPlaceQuestion(for proposal: AlbumProposal) -> RecurringPlaceCandidate? {
+        guard isTripLike(proposal), let report = recurringPlaceReport else { return nil }
+        let facts = factsByID
+        guard let question = report.question(for: proposal, tripOf: { facts[$0]?.tripID }) else { return nil }
+        // Answered since the last analysis ("Nein" starts none): not asked again.
+        return recurringPlaces.answer(near: question.center) == nil ? question : nil
+    }
+
+    /// Whether "Keine Reise, hier bin ich öfter" can be offered: the place of the trip is known.
+    func canMarkRecurringPlace(_ proposal: AlbumProposal) -> Bool {
+        guard isTripLike(proposal), let report = recurringPlaceReport else { return false }
+        let facts = factsByID
+        return report.place(for: proposal, tripOf: { facts[$0]?.tripID }) != nil
+    }
+
+    /// "Ja, hier bin ich öfter" and "Keine Reise, hier bin ich öfter" (`oftenHere`), or "Nein,
+    /// das sind Reisen", for the place of this suggestion. The answer is kept by position,
+    /// stored next to the trip corrections and part of the decisions copy in the backup. A
+    /// "Ja" changes the trips, so the analysis runs again; a "Nein" changes nothing but the
+    /// question.
+    func answerRecurringPlace(_ oftenHere: Bool, for proposal: AlbumProposal) async -> Bool {
+        guard let report = recurringPlaceReport else { return false }
+        let facts = factsByID
+        let tripOf: (AssetID) -> SortlyID? = { facts[$0]?.tripID }
+        guard let center = report.question(for: proposal, tripOf: tripOf)?.center ?? report.place(for: proposal, tripOf: tripOf) else { return false }
+        // The place's name as the suggestion shows it, for the settings only; never what the
+        // place is to the user.
+        let name: String? = proposal.reasons.lazy.compactMap { reason -> String? in
+            switch reason {
+            case .photosInPlaceDuringPeriod(_, let place, _, _), .photosInPlace(_, let place): place
+            default: nil
+            }
+        }.first ?? (proposal.kind == .trip ? nil : proposal.title)
+        return await changeRecurringPlaces(rerun: oftenHere) { $0.answering(oftenHere, at: center, name: name, date: .now) }
+    }
+
+    /// The album suggestion of a place the user is often at, for its name in the settings.
+    func recurringPlaceProposal(for answer: PlaceAnswer) -> AlbumProposal? {
+        let id = RecurringPlaces.proposalID(for: answer.id)
+        return proposals.first { $0.id == id }
+    }
+
+    /// "Wieder als Reisen zeigen" in the settings: the stays there are trips again. Remembered
+    /// as "Nein", so the question does not come right back.
+    func withdrawRecurringPlace(_ answer: PlaceAnswer) async -> Bool {
+        await changeRecurringPlaces(rerun: true) { $0.withdrawing(answer.id, date: .now) }
+    }
+
+    /// Like `changeTrips`: an answer that changes the trips is not stored while an analysis
+    /// already read the old answers.
+    private func changeRecurringPlaces(rerun: Bool, _ change: (RecurringPlaceAnswers) -> RecurringPlaceAnswers) async -> Bool {
+        guard let pipeline, !rerun || (!analysis.isRunning && !execution.isRunning) else { return false }
+        do {
+            let updated = change(try await pipeline.recurringPlaceAnswers())
+            try await pipeline.setRecurringPlaceAnswers(updated)
+            recurringPlaces = updated
+            saveSafetyBackup()
+            if rerun { startAnalysis() }
             return true
         } catch {
             message = error.localizedDescription

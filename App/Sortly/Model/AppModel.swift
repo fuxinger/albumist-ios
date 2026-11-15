@@ -88,7 +88,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { bucketCache = [:]; atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil } }
+    var facts: [AssetFacts] = [] { didSet { bucketCache = [:]; atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { bucketCache = [:] } }
     /// Filtered and sorted library buckets; rebuilt only when facts or states change, not on
     /// every redraw of the library (a selection tap redraws it).
@@ -184,7 +184,7 @@ final class AppModel {
             .max { $0.1 < $1.1 }?.0
     }
     var progress = OrganizationStatusResolver.Progress()
-    var inventory = CollectionInventory()
+    var inventory = CollectionInventory() { didSet { resetSearchIndex() } }
     var mergeSuggestions: [AlbumOverlapAnalyzer.MergeSuggestion] = []
     /// Executed plans, newest first. Undo runs are not listed on their own; they mark the
     /// plan they took back (see `undonePlans`).
@@ -1477,37 +1477,71 @@ final class AppModel {
         }
     }
 
-    var searchParser: QueryParser {
-        QueryParser(vocabulary: SearchVocabulary.build(facts: facts, inventory: inventory, groups: []))
+    /// Search index over the current facts and album names, built once per change and off
+    /// the main thread (a large library takes a moment); every search then only combines
+    /// prepared sets.
+    @ObservationIgnored private var searchIndexCache: SearchIndex?
+    @ObservationIgnored private var searchIndexTask: Task<SearchIndex, Never>?
+    @ObservationIgnored private var searchIndexGeneration = 0
+
+    private func resetSearchIndex() {
+        searchIndexCache = nil
+        searchIndexTask = nil
+        searchIndexGeneration += 1
+    }
+
+    func searchIndex() async -> SearchIndex {
+        if let searchIndexCache { return searchIndexCache }
+        if let searchIndexTask { return await searchIndexTask.value }
+        let facts = facts, inventory = inventory, generation = searchIndexGeneration
+        let task = Task.detached(priority: .userInitiated) { SearchIndex(facts: facts, inventory: inventory) }
+        searchIndexTask = task
+        let index = await task.value
+        // Facts that changed meanwhile start a new index on the next search.
+        if generation == searchIndexGeneration {
+            searchIndexCache = index
+            searchIndexTask = nil
+        }
+        return index
     }
 
     /// Keywords Apple Intelligence derived from the last sentence-style query (shown in the UI).
     var lastSearchRewrite: String?
 
-    func search(_ query: String) async -> (tokens: [SearchToken], results: [AssetID]) {
+    func search(_ query: String) async -> SearchResult {
         lastSearchRewrite = nil
         let direct = await plainSearch(query)
         let wordCount = query.split(whereSeparator: \.isWhitespace).count
-        // Sentences ("Fotos vom Grillen letzten Sommer") get help from the on-device model.
-        guard wordCount >= 3, direct.results.isEmpty || direct.tokens.count < 2, SmartAssistant.isAvailable,
+        // Sentences ("Fotos vom Grillen bei Oma letzten Sommer") get help from the on-device
+        // model when the rule-based reading left words out or found nothing for all of them.
+        let incomplete = direct.ids.isEmpty || direct.isRelaxed || direct.tokens.contains { $0.kind == .ignored }
+        guard wordCount >= 3, incomplete, SmartAssistant.isAvailable,
               let keywords = await SmartAssistant.searchKeywords(for: query) else { return direct }
         let assisted = await plainSearch(keywords)
-        guard !assisted.results.isEmpty else { return direct }
+        guard !assisted.ids.isEmpty, !assisted.isRelaxed || direct.ids.isEmpty else { return direct }
         lastSearchRewrite = keywords
         return assisted
     }
 
-    private func plainSearch(_ query: String) async -> (tokens: [SearchToken], results: [AssetID]) {
-        let parsed = searchParser.parse(query)
-        guard !parsed.filter.isEmpty else { return (parsed.tokens, []) }
-        var textHits: Set<AssetID>?
-        if !parsed.filter.freeText.isEmpty, let store {
-            // Every text hit counts: the number shown and an album made from the search include all.
-            textHits = Set((try? await store.searchText(parsed.filter.freeText.joined(separator: " "), limit: 1_000_000)) ?? [])
-        }
-        let overall = states.mapValues { resolver.overall($0) }
-        let results = SearchEngine().search(parsed.filter, in: facts, statuses: overall, textHits: textHits)
-        return (parsed.tokens, results)
+    private func plainSearch(_ query: String) async -> SearchResult {
+        let index = await searchIndex()
+        let parsed = index.parse(query)
+        // The organization state of every photo only when the query asks for it ("nicht sortiert").
+        let statuses = parsed.usesStatus ? states.mapValues { resolver.overall($0) } : [:]
+        return await Task.detached(priority: .userInitiated) { SearchEngine().run(parsed, in: index, statuses: statuses) }.value
+    }
+
+    /// Completions for the word being typed, from the user's own places, topics and albums.
+    func searchSuggestions(for query: String) async -> [SearchSuggestion] {
+        let index = await searchIndex()
+        return index.suggestions(for: query)
+    }
+
+    /// Starting points for the empty search field, from the user's own library.
+    func featuredSearches() async -> [SearchSuggestion] {
+        let index = await searchIndex()
+        let english = !(Bundle.main.preferredLocalizations.first?.hasPrefix("de") ?? true)
+        return index.featuredSuggestions(english: english)
     }
 
     // MARK: Reset

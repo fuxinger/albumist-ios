@@ -118,8 +118,27 @@ final class Purchases {
 
     @ObservationIgnored private var updates: Task<Void, Never>?
 
+    /// The one call that shows Apple's purchase sheet. The unit tests put the StoreKit test
+    /// session in its place: in the test host the sheet never appears and `Product.purchase()`
+    /// never returns (CI runs 43763150106 and 43764929910, also with the window scene named),
+    /// so they buy through the session and everything around this call stays the app's code.
+    @ObservationIgnored var confirmPurchase: @MainActor (Product) async throws -> Product.PurchaseResult = { product in
+        try await product.purchase()
+    }
+
+    /// Debug builds hosting the unit tests: the app's own instance stays away from the App
+    /// Store, so the StoreKit tests (PurchaseStoreKitTests) talk to their test session only
+    /// and nothing the host asked the real App Store at launch gets in between.
+    static var hostsUnitTests: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        #else
+        false
+        #endif
+    }
+
     func start() {
-        guard updates == nil else { return }
+        guard updates == nil, !(Self.hostsUnitTests && self === Purchases.shared) else { return }
         updates = Task { [weak self] in
             // A purchase approved later (Ask to Buy), made on another device, refunded or no
             // longer shared by the family arrives here: the entitlements are read again.
@@ -180,7 +199,7 @@ final class Purchases {
             return
         }
         do {
-            await handle(try await product.purchase())
+            await handle(try await confirmPurchase(product))
         } catch {
             handle(error)
         }

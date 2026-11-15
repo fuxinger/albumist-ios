@@ -77,10 +77,33 @@ targets:
       - target: Sortly
       - package: SortlyKit
         product: SortlyTestSupport
+    postBuildScripts:
+      # StoreKit testing (SKTestSession) recognizes the test host by its code signing
+      # identifier. Built with CODE_SIGNING_ALLOWED=NO (CI), the app only carries the
+      # linker's signature with the identifier "Sortly", so StoreKit treats it as an
+      # unknown app and asks the real App Store: no product, no transactions. Signing the
+      # simulator test host ad hoc gives it its bundle id. Never runs for devices or archives.
+      - name: Sign test host for StoreKit testing
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$PLATFORM_NAME" = "iphonesimulator" ] && [ "$CODE_SIGNING_ALLOWED" != "YES" ] && [ -n "$TEST_HOST" ]; then
+            APP="${TEST_HOST%/*}"
+            ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+            LOG=$(mktemp)
+            # The whole bundle; if a nested part refuses, at least the executable gets the id.
+            if codesign --force --deep --sign - --timestamp=none "$APP" 2> "$LOG" \
+              || codesign --force --sign - --timestamp=none --identifier "$ID" "$TEST_HOST" 2>> "$LOG"; then
+              echo "note: test host signed ad hoc for StoreKit testing: $(codesign -dv "$TEST_HOST" 2>&1 | grep '^Identifier=')"
+            else
+              echo "warning: SortlyTests could not sign the test host for StoreKit testing: $(tr '\n' ' ' < "$LOG")"
+            fi
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.albumist.ios.tests
         GENERATE_INFOPLIST_FILE: YES
+        # The script above writes into the test host's bundle.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
   SortlyUITests:
     type: bundle.ui-testing
     platform: iOS

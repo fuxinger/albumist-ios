@@ -142,16 +142,14 @@ final class Purchases {
         updates = Task { [weak self] in
             // A purchase approved later (Ask to Buy), made on another device, refunded or no
             // longer shared by the family arrives here: the entitlements are read again.
+            // The unlock follows first, the transaction is finished afterwards (see `finishLater`).
             for await result in Transaction.updates {
-                switch result {
-                case .verified(let transaction):
-                    await transaction.finish()
-                    guard let self else { return }
+                guard let self else { return }
+                if case .verified = result {
                     await self.refreshEntitlements()
                     if self.isUnlocked { self.lastError = nil }
-                case .unverified(let transaction, _):
-                    await transaction.finish()
                 }
+                Self.finishLater(result.unsafePayloadValue)
             }
         }
         Task {
@@ -211,13 +209,13 @@ final class Purchases {
         case .success(let verification):
             switch verification {
             case .verified(let transaction):
-                await transaction.finish()
                 if transaction.productID == productID && transaction.revocationDate == nil { isUnlocked = true }
                 lastError = nil
+                Self.finishLater(transaction)
             case .unverified(let transaction, _):
                 // Never unlock on an unverified receipt, but close the transaction so
                 // it does not come back on every launch.
-                await transaction.finish()
+                Self.finishLater(transaction)
                 lastError = String(localized: "Der Kauf konnte nicht bestätigt werden. Tippe auf „Kauf wiederherstellen“ oder versuche es später noch einmal.")
             }
         case .pending:
@@ -228,6 +226,15 @@ final class Purchases {
         @unknown default:
             break
         }
+    }
+
+    /// Apple's order: deliver what was bought, then finish the transaction. The finish runs on
+    /// its own so it never holds up the unlock or the purchase call: StoreKit may take long
+    /// or fail with it (the Xcode test environment logged "Error finishing transaction ...
+    /// StoreKitInternalError.unknown", CI run 43770704675). An unfinished transaction only
+    /// comes back through `Transaction.updates` at the next start and is finished then.
+    private static func finishLater(_ transaction: Transaction) {
+        Task.detached { await transaction.finish() }
     }
 
     /// A purchase or restore that threw.

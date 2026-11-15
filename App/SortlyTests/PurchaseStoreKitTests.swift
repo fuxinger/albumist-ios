@@ -154,15 +154,51 @@ struct PurchaseStoreKitTests {
             seen.products.append(product.id)
             seen.whilePurchasing.append(purchases.isPurchasing)
             let id = product.id
-            try await within("buy in the test session") { try store.session.buyProduct(productIdentifier: id) }
-            let waiting = try await within("look for an Ask to Buy request") {
-                store.session.allTransactions().contains { $0.productIdentifier == id && $0.pendingAskToBuyConfirmation }
+            storeKitTrace("session buy \(id): start")
+            do {
+                try await within("buy in the test session", seconds: 20) { try store.session.buyProduct(productIdentifier: id) }
+            } catch {
+                storeKitTrace("session buy \(id): threw \(error)")
+                throw error
             }
-            if waiting { return .pending }
-            guard let result = await Transaction.latest(for: id) else { throw StoreKitError.unknown }
+            let held = try await within("read the session's transactions") {
+                store.session.allTransactions().map { "#\($0.identifier) \($0.productIdentifier) askToBuy \($0.pendingAskToBuyConfirmation)" }
+            }
+            storeKitTrace("session buy \(id): done, session holds \(held)")
+            // StoreKit answers with the purchase as the app's own entitlement (a verified
+            // transaction), the same value `Product.purchase()` hands back.
+            guard let result = await Self.entitlement(for: id) else {
+                storeKitTrace("session buy \(id): no entitlement for it")
+                throw StoreKitError.unknown
+            }
+            storeKitTrace("session buy \(id): entitlement found, verified \(Self.isVerified(result))")
             return .success(result)
         }
         return seen
+    }
+
+    nonisolated static func entitlement(for id: String) async -> VerificationResult<Transaction>? {
+        for await result in Transaction.currentEntitlements where result.unsafePayloadValue.productID == id {
+            return result
+        }
+        return nil
+    }
+
+    nonisolated static func isVerified(_ result: VerificationResult<Transaction>) -> Bool {
+        if case .verified = result { return true }
+        return false
+    }
+
+    /// The app's purchase call as one step with a time limit; what it ended with goes to the
+    /// log either way (the CI log shows only the first line of a failed expectation).
+    func purchaseStep(_ purchases: Purchases, _ step: String) async throws {
+        do {
+            try await within(step) { await purchases.purchase() }
+        } catch {
+            storeKitTrace("\(step): \(error); unlocked \(purchases.isUnlocked), purchasing \(purchases.isPurchasing), message \(purchases.lastError ?? "none")")
+            throw error
+        }
+        storeKitTrace("\(step): unlocked \(purchases.isUnlocked), message \(purchases.lastError ?? "none")")
     }
 
     // MARK: Product and price
@@ -209,7 +245,7 @@ struct PurchaseStoreKitTests {
         // The product was never loaded (a start without network): buying loads it first.
         #expect(purchases.product == nil)
         let seen = buyThroughSession(purchases, store)
-        try await within("purchase") { await purchases.purchase() }
+        try await purchaseStep(purchases, "purchase")
         #expect(seen.products == [Purchases.unlockProductID])
         #expect(seen.whilePurchasing == [true])
         let afterPurchase = await describe(store)
@@ -242,7 +278,8 @@ struct PurchaseStoreKitTests {
         try await within("buy in the session (another device)") { try store.session.buyProduct(productIdentifier: unlock) }
         let bought = try await transactions(store)
         #expect(bought.count == 1)
-        _ = await waitUntil("running app unlocked by its transaction listener") { running.isUnlocked }
+        let heard = await waitUntil("running app unlocked by its transaction listener") { running.isUnlocked }
+        storeKitTrace("purchase on another device: listener unlocked \(heard)")
 
         let (secondDevice, _) = freshInstall()
         #expect(!secondDevice.isUnlocked)
@@ -307,7 +344,7 @@ struct PurchaseStoreKitTests {
         }
 
         purchases.lastError = "an earlier message"
-        try await within("purchase, cancelled") { await purchases.purchase() }
+        try await purchaseStep(purchases, "purchase, cancelled")
         #expect(seen.products == [Purchases.unlockProductID], "the product came from StoreKit")
         #expect(seen.whilePurchasing == [true])
         #expect(purchases.lastError == nil)
@@ -315,15 +352,15 @@ struct PurchaseStoreKitTests {
 
         seen.answer = { throw StoreKitError.userCancelled }
         purchases.lastError = "an earlier message"
-        try await within("purchase, cancelled as an error") { await purchases.purchase() }
+        try await purchaseStep(purchases, "purchase, cancelled as an error")
         #expect(purchases.lastError == nil)
 
         seen.answer = { .pending }
-        try await within("purchase, waiting") { await purchases.purchase() }
+        try await purchaseStep(purchases, "purchase, waiting")
         #expect(purchases.lastError == String(localized: "Der Kauf wartet noch auf eine Bestätigung, zum Beispiel durch die Familienfreigabe. Albumist schaltet sich danach von selbst frei."))
 
         seen.answer = { throw StoreKitError.networkError(URLError(.notConnectedToInternet)) }
-        try await within("purchase, offline") { await purchases.purchase() }
+        try await purchaseStep(purchases, "purchase, offline")
         #expect(purchases.lastError == String(localized: "Keine Verbindung zum App Store. Bitte prüfe deine Internetverbindung und versuche es noch einmal."))
 
         #expect(seen.products.count == 4)
@@ -333,28 +370,34 @@ struct PurchaseStoreKitTests {
         #expect(recorded.isEmpty)
     }
 
-    /// Ask to Buy: the purchase waits for the parent; the app says so, and its transaction
-    /// listener unlocks it once the request is approved, also after a restart.
+    /// Ask to Buy: StoreKit answers the purchase with `.pending` while the parent decides; the
+    /// app says so. An approval arrives as the completed purchase: the app's own transaction
+    /// listener unlocks, also after a restart. (The session creates Ask to Buy requests only
+    /// for purchases through Apple's sheet; `buyProduct` ignores `askToBuyEnabled`, CI run
+    /// 43770704675. So the pending answer comes through `confirmPurchase`, and the approval
+    /// is the session's purchase of the same product.)
     @Test func askToBuyWaitsAndUnlocksWhenApproved() async throws {
         let store = try await session()
         defer { clearAfterwards(store) }
         try await requireTestEnvironment()
-        try await within("turn on Ask to Buy") { store.session.askToBuyEnabled = true }
         let (purchases, defaults) = freshInstall()
         purchases.start()
-        _ = buyThroughSession(purchases, store)
-        try await within("purchase with Ask to Buy") { await purchases.purchase() }
+        let seen = Seen()
+        seen.answer = { .pending }
+        purchases.confirmPurchase = { product in
+            seen.products.append(product.id)
+            return try seen.answer()
+        }
+        try await purchaseStep(purchases, "purchase with Ask to Buy")
+        #expect(seen.products == [Purchases.unlockProductID])
         #expect(!purchases.isUnlocked)
-        #expect(purchases.lastError == String(localized: "Der Kauf wartet noch auf eine Bestätigung, zum Beispiel durch die Familienfreigabe. Albumist schaltet sich danach von selbst frei."),
-                "message: \(purchases.lastError ?? "none")")
-        let waiting = try await transactions(store).first { $0.pendingAskToBuyConfirmation }
-        let seen = await describe(store)
-        let pending = try #require(waiting, "transactions: \(seen)")
-        let id = pending.identifier
-        try await within("approve the Ask to Buy request") { try store.session.approveAskToBuyTransaction(identifier: id) }
-        _ = await waitUntil("unlocked by the transaction listener after approval") { purchases.isUnlocked }
-        let afterApproval = await describe(store)
-        #expect(purchases.isUnlocked, "transactions: \(afterApproval)")
+        #expect(purchases.lastError == String(localized: "Der Kauf wartet noch auf eine Bestätigung, zum Beispiel durch die Familienfreigabe. Albumist schaltet sich danach von selbst frei."))
+
+        let unlock = Purchases.unlockProductID
+        try await within("approval: the purchase completes in the session") { try store.session.buyProduct(productIdentifier: unlock) }
+        let unlocked = await waitUntil("unlocked by the transaction listener after approval") { purchases.isUnlocked }
+        storeKitTrace("Ask to Buy approved: listener unlocked \(unlocked), message \(purchases.lastError ?? "none")")
+        #expect(purchases.isUnlocked)
         #expect(purchases.lastError == nil)
 
         let relaunched = Purchases(defaults: defaults)
@@ -362,25 +405,22 @@ struct PurchaseStoreKitTests {
         #expect(relaunched.isUnlocked)
     }
 
+    /// Declined: no purchase ever arrives; the app stays locked, also after a restart.
     @Test func askToBuyDeclinedStaysLocked() async throws {
         let store = try await session()
         defer { clearAfterwards(store) }
         try await requireTestEnvironment()
-        try await within("turn on Ask to Buy") { store.session.askToBuyEnabled = true }
         let (purchases, defaults) = freshInstall()
         purchases.start()
-        _ = buyThroughSession(purchases, store)
-        try await within("purchase with Ask to Buy") { await purchases.purchase() }
-        let waiting = try await transactions(store).first { $0.pendingAskToBuyConfirmation }
-        let seen = await describe(store)
-        let pending = try #require(waiting, "transactions: \(seen)")
-        let id = pending.identifier
-        try await within("decline the Ask to Buy request") { try store.session.declineAskToBuyTransaction(identifier: id) }
+        purchases.confirmPurchase = { _ in .pending }
+        try await purchaseStep(purchases, "purchase with Ask to Buy")
+        #expect(!purchases.isUnlocked)
         try await Task.sleep(for: .seconds(2))
-        #expect(!purchases.isUnlocked, "the listener unlocked a declined request")
         try await within("read the entitlements after the decline") { await purchases.refreshEntitlements() }
         #expect(!purchases.isUnlocked)
         #expect(!purchases.allows(albums: Purchases.freeAlbumLimit + 1))
+        let recorded = try await transactions(store)
+        #expect(recorded.isEmpty)
 
         let relaunched = Purchases(defaults: defaults)
         try await within("read the entitlements after a restart") { await relaunched.refreshEntitlements() }
@@ -399,7 +439,7 @@ struct PurchaseStoreKitTests {
         }
         let (purchases, _) = freshInstall()
         _ = buyThroughSession(purchases, store)
-        try await within("failing purchase") { await purchases.purchase() }
+        try await purchaseStep(purchases, "failing purchase")
         let afterward = await describe(store)
         #expect(!purchases.isUnlocked, "transactions: \(afterward)")
         #expect(purchases.lastError != nil, "a failed purchase showed no message")
@@ -408,7 +448,7 @@ struct PurchaseStoreKitTests {
         #expect(!purchases.isUnlocked)
         // The next try works.
         try await within("let purchases succeed again") { store.session.failTransactionsEnabled = false }
-        try await within("purchase after the failure") { await purchases.purchase() }
+        try await purchaseStep(purchases, "purchase after the failure")
         #expect(purchases.isUnlocked, "message: \(purchases.lastError ?? "none")")
         #expect(purchases.lastError == nil)
     }
@@ -446,7 +486,7 @@ struct PurchaseStoreKitTests {
         purchases.start()
         purchases.recordUsage(plan: SortlyID("before"), albums: 4)
         _ = buyThroughSession(purchases, store)
-        try await within("purchase") { await purchases.purchase() }
+        try await purchaseStep(purchases, "purchase")
         #expect(purchases.isUnlocked, "message: \(purchases.lastError ?? "none")")
         purchases.recordUsage(plan: SortlyID("after"), albums: 20)
         let first = try await transactions(store).first
@@ -555,4 +595,9 @@ private final class ResumeOnce<T: Sendable>: @unchecked Sendable {
         lock.unlock()
         pending?.resume(with: result)
     }
+}
+
+/// A line the CI log keeps (its filter passes "Test case"): what a StoreKit step really did.
+func storeKitTrace(_ text: String) {
+    print("STOREKIT Test case trace: \(text)")
 }

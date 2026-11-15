@@ -102,6 +102,8 @@ struct AnalysisProgressCard: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("analysis.details")
         }
+        // B1: the card is a container; inside it one element for the progress and own buttons.
+        .accessibilityElement(children: .contain)
     }
 
     /// Heading and Pause (or Fortsetzen); the button moves under the heading when the text is

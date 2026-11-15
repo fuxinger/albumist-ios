@@ -116,6 +116,8 @@ enum ContinuedAnalysis {
         guard !isActive, UIApplication.shared.applicationState == .active else { return }
         if let lastRequest, Date().timeIntervalSince(lastRequest) < 60 { return }
         lastRequest = Date()
+        // A new request: what iOS said to an earlier one no longer holds for the chip.
+        if status == .refused { status = .idle }
         let identifier = makeIdentifier()
         BackgroundRunLog.update { $0.requested += 1 }
         guard registerHandler(for: identifier) else {

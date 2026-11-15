@@ -20,6 +20,11 @@ public actor SortlyStore: ChangePlanStoring {
         encoder.dateEncodingStrategy = .deferredToDate
         decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .deferredToDate
+        // A damaged database fails here, at the start, where the app offers "Neu aufbauen"
+        // (the file is set aside, the decisions come back from the backup copy), instead of
+        // in the middle of an analysis or a plan. Checked before migrating: a migration must
+        // never build on a damaged file.
+        if url != nil { try db.verifyIntegrity() }
         try Migrations.migrate(db)
         hasFullTextSearch = (try? db.query("SELECT 1 FROM sqlite_master WHERE name = 'text_fts'").isEmpty == false) ?? false
     }

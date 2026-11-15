@@ -90,6 +90,21 @@ public struct SafetyBackup: Codable, Sendable, Equatable {
         return found * 2 >= states.count
     }
 
+    /// Whether the album records and history of this copy may come back, for the photo
+    /// access Albumist has and the albums it can see (`visibleAlbums`, nil when they could not
+    /// be read). true: restore them; false: the copy comes from another library (a new iPhone
+    /// with new album identifiers), only the decisions come back; nil: cannot be told yet,
+    /// they wait (and the copy is not overwritten meanwhile).
+    /// - No photo access: wait.
+    /// - Limited access: the albums may be hidden, so only a match counts; otherwise wait.
+    /// - Full access: a match restores, anything else is another library.
+    public func belongsToLibrary(access: LibraryAccess, visibleAlbums: Set<CollectionID>?) -> Bool? {
+        guard !managedAlbums.isEmpty else { return true }
+        guard access.canRead, let visibleAlbums else { return nil }
+        if matchesLibrary(albums: visibleAlbums) { return true }
+        return access == .full ? false : nil
+    }
+
     // MARK: File
 
     public func write(to url: URL) throws {

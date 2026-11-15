@@ -7728,6 +7728,156 @@
           }
         }
       }
+    },
+    "Keine Reise, hier bin ich öfter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not a trip, I'm here often"
+          }
+        }
+      }
+    },
+    "Keine Reise?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not a trip?"
+          }
+        }
+      }
+    },
+    "Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stays at this place will no longer be trips, in every new analysis too. Instead Albumist suggests one album for the place. You can take this back in Settings."
+          }
+        }
+      }
+    },
+    "Bist du hier öfter, etwa Zweitwohnsitz, Arbeit oder Familie?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Are you here often, like a second home, work or family?"
+          }
+        }
+      }
+    },
+    "Du warst %lld-mal hier, zuletzt %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You've been here %lld times, most recently %@."
+          }
+        }
+      }
+    },
+    "Ja, hier bin ich öfter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yes, I'm here often"
+          }
+        }
+      }
+    },
+    "Nein, das sind Reisen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No, these are trips"
+          }
+        }
+      }
+    },
+    "Antworten kannst du, sobald die Analyse fertig ist." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can answer once the analysis is done."
+          }
+        }
+      }
+    },
+    "Unbenannter Ort" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unnamed place"
+          }
+        }
+      }
+    },
+    "Wieder als Reisen zeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show as trips again"
+          }
+        }
+      }
+    },
+    "Hier bist du öfter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Places you're often at"
+          }
+        }
+      }
+    },
+    "Aufenthalte an diesen Orten zählt Albumist nicht als Reisen. Jeder Ort bekommt stattdessen ein eigenes Album." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist doesn't count stays at these places as trips. Each place gets its own album instead."
+          }
+        }
+      }
+    },
+    "Wieder als Reisen zeigen?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show as trips again?"
+          }
+        }
+      }
+    },
+    "Als Reisen zeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show as trips"
+          }
+        }
+      }
+    },
+    "Aufenthalte an diesem Ort werden wieder als Reisen vorgeschlagen. Schon angelegte Alben bleiben, wie sie sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stays at this place will be suggested as trips again. Albums already created stay as they are."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

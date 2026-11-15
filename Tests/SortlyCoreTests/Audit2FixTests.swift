@@ -197,4 +197,41 @@ struct Audit2FixTests {
         _ = try await executor.execute(confirmed(undo))
         #expect(try await lib.currentInventory().albums.isEmpty)
     }
+
+    // MARK: 1.6 a partial undo can be finished
+
+    /// Two albums were extended; the undo takes the photo out of the first, then fails on the
+    /// second. Undoing again plans only what is still Albumist's: the second album.
+    @Test func partialUndoOffersTheRemainingRepair() async throws {
+        let lib = InMemoryPhotoLibrary(assets: ["x", "y"], collections: [
+            CollectionSnapshot(id: "a", title: "Sommer"), CollectionSnapshot(id: "b", title: "Winter"),
+        ])
+        let store = InMemoryPlanStore()
+        let executor = ChangeExecutor(library: lib, store: store)
+        let plan = confirmed(OrganizationPlanner().makePlan(from: [
+            ConfirmedProposal(proposal: AlbumProposal(id: SortlyID("s"), kind: .trip, title: "Sommer", folderPath: [], assetIDs: ["x"]), decision: .extendExisting("a")),
+            ConfirmedProposal(proposal: AlbumProposal(id: SortlyID("w"), kind: .trip, title: "Winter", folderPath: [], assetIDs: ["y"]), decision: .extendExisting("b")),
+        ], inventory: try await lib.currentInventory()))
+        let applied = try await executor.execute(plan)
+        let tracker = ManagedAlbumTracker()
+        var states = tracker.record(applied, into: [], inventory: try await lib.currentInventory())
+        func owned() -> [CollectionID: Set<AssetID>] {
+            Dictionary(states.map { ($0.albumID, $0.addedBySortly) }, uniquingKeysWith: { $0.union($1) })
+        }
+
+        let undo = confirmed(UndoPlanner().undoPlan(for: applied, current: try await lib.currentInventory(), owned: owned()))
+        #expect(undo.steps.count == 2)
+        await lib.setFailAfterWrites(1) // the second removal fails
+        let partial = try await executor.execute(undo)
+        await lib.setFailAfterWrites(nil)
+        #expect(partial.status == .completedWithErrors)
+        #expect(!PlanReceipt(plan: partial, inventory: try await lib.currentInventory()).isComplete)
+        states = tracker.record(partial, into: states, inventory: try await lib.currentInventory())
+
+        let rest = confirmed(UndoPlanner().undoPlan(for: applied, current: try await lib.currentInventory(), owned: owned()))
+        #expect(rest.steps.map(\.operation) == [.removeAssets(album: "b", assets: ["y"])])
+        _ = try await executor.execute(rest)
+        #expect(try await lib.currentInventory()["a"]?.assetIDs.isEmpty == true)
+        #expect(try await lib.currentInventory()["b"]?.assetIDs.isEmpty == true)
+    }
 }

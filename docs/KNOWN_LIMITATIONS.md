@@ -30,6 +30,11 @@ mit eingeschränkten Rechten: nur lesend.
 - PhotoKit kennt kein bedingtes Löschen: Zwischen dem letzten Lesen und dem Löschen eines
   leeren Albums kann noch ein Foto hineinkommen (Millisekunden). Albumist liest direkt davor.
 - Ein beim Wiederanlauf übernommenes leeres Album bleibt nach Rückgängig stehen (gewollt).
+- Wird ein Hinzufügen in ein Album des Nutzers unterbrochen und ist der Ausgang unklar, nimmt
+  Rückgängig ein dort doch angekommenes Foto nicht heraus (gewollt, zweite Gegenprüfung 1.1).
+  Der Änderungsbeleg zeigt den Schritt als nicht bestätigt.
+- Benennt der Nutzer ein Album zwischen Ausführen und Abschluss um, zeigt der Beleg den Namen
+  zum Zeitpunkt der Ausführung.
 - Die Sicherung der Entscheidungen (I12) erkennt eine andere Mediathek an den Album-Kennungen.
   Mit iCloud-Fotos auf einem neuen iPhone können die Kennungen abweichen; dann kommen nur die
   Entscheidungen zurück, nicht Alben und Verlauf. Mit eingeschränktem Fotozugriff wartet die

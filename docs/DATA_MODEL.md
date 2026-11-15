@@ -16,7 +16,9 @@ SQLite, Version über `PRAGMA user_version`, Migrationen in `Sources/SortlyStore
 | `overrides` | `id` | Nutzerentscheidungen (ignorieren, ablehnen, entfernte Fotos) |
 | `rules` | (`id`, `version`) | Regeln mit Versionsverlauf |
 | `managed_albums` | `album_id` | von Albumist angelegte/ergänzte Alben |
-| `plans` | `id` | Änderungspläne mit Schrittstatus (Verlauf, Wiederanlauf) |
+| `plans` | `id` | Kopf der Änderungspläne: Status, Zeiten, Bezug auf rückgängig gemachten Plan (ab v4 ohne Schritte und Journal) |
+| `plan_steps` | (`plan_id`, `idx`) | Schritte eines Plans mit Zustand (v4) |
+| `plan_media` | (`plan_id`, `step_id`) | Ausführungsjournal je Schritt: wirklich geänderte Fotos (v4) |
 | `settings` | `key` | Einstellungen, Entscheidungen, Vorschlags-Schnappschuss |
 
 ## Beziehungen und Indizes
@@ -34,4 +36,8 @@ Idempotenzschlüssel (Plan-ID + Index + Inhalts-Hash).
 ## Migrationen
 - v1: Grundschema.
 - v2: `asset_places.precision_m` für den nächtlichen Verfeinerungslauf.
+- v3: `text_plain` mit Zeilen-ID, der Volltextindex folgt automatisch.
+- v4: `plan_steps` und `plan_media`. Gespeichert wird nur, was sich seit dem letzten Speichern
+  geändert hat; gelesen wird der Plan wieder ganz. Ältere Pläne liegen noch als Ganzes in
+  `plans` und werden beim nächsten Speichern aufgeteilt.
 Migrationen laufen nur vorwärts, jede in einer Transaktion.

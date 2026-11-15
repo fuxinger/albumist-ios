@@ -5,7 +5,7 @@ andere KIs) kommen neue Punkte dazu. Status: ✅ erledigt · 🔜 als Nächstes 
 Aufwand: S klein, M mittel, L groß.
 
 Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) · **U** Nutzer
-(Fuchs) · **T** Testläufe · **B** Bedienungstest 14.11.2026 (5 unabhängige Testpersonen: Gelegenheitsnutzerin, Vielreisender, Senior mit großer Schrift, Fotografin, Vater mit Kinderfotos) · **G** Gegenprüfung durch ChatGPT/Gemini 14.11.2026 (43 Befunde, alle bewertet in `docs/review/AUDIT_2026-11-14.md`; 16 Produktideen, unten eingeordnet).
+(Fuchs) · **T** Testläufe · **B** Bedienungstest 14.11.2026 (5 unabhängige Testpersonen: Gelegenheitsnutzerin, Vielreisender, Senior mit großer Schrift, Fotografin, Vater mit Kinderfotos) · **G** Gegenprüfung durch ChatGPT/Gemini 14.11.2026 (43 Befunde, alle bewertet in `docs/review/AUDIT_2026-11-14.md`; 16 Produktideen, unten eingeordnet) · **H** zweite Gegenprüfung durch ChatGPT 15.11.2026 (22 Befunde, alle bewertet in `docs/review/AUDIT2_2026-11-15.md`; 9 Produktideen, unten eingeordnet).
 
 ## Datensicherheit und Zuverlässigkeit
 
@@ -157,6 +157,24 @@ Funktionsliste; nichts, was Fotos löscht oder ohne Bestätigung ändert.
 | 💡 | **I10 Beleg-Assistent:** Felder aus Rechnungen (Händler, Betrag, Datum) prüfbar anzeigen und suchen. | L | G I10 |
 | 💡 | **I14 Personen und Haustiere:** nur bestätigte Gruppen, Opt-in; schon für 1.1 geplant. | XL | G I14 |
 | 💡 | **I15 Widget und Kurzbefehle:** Widget „offene Vorschläge“, Kurzbefehl „neue Fotos sortieren“; Widget ist für 1.1 geplant. | M | G I15 |
+
+## Aus der zweiten Gegenprüfung (H): Produktideen
+
+Einordnung der 9 Vorschläge aus `PRODUKT_ROADMAP_AUDIT2.md`. Vier davon decken sich mit
+G-Ideen und stehen dort. Leitplanken der Prüfung, die wir teilen: nichts löschen, keine
+Cloud-KI, keine unbestätigte Änderung, „unbekannt ist nicht erfolgreich“.
+
+| Status | Punkt | Aufwand | Quelle |
+|---|---|---|---|
+| ✅ | **H1 Unklare Änderungen sichtbar machen (Konflikt-Inbox):** Ein Schritt mit unklarem Ausgang nach einer Unterbrechung steht im Änderungsbeleg mit Grund in Klartext; nichts wird von selbst wiederholt, „Fehlendes erneut versuchen“ zeigt erst eine Vorschau. Noch offen (💡): eine Sammelstelle für unklare Schritte aus mehreren Plänen. | M | H |
+| ✅ | **H2 Änderungsbeleg als Kette:** Teil-Rückgängig wird erkannt („teilweise rückgängig gemacht“) und mit „Rest rückgängig machen“ abgeschlossen; Namen und Ordner der Alben zum Zeitpunkt der Ausführung; nur bestätigte Änderungen zählen. | M | H, I01 |
+| 💡 | **H3 Wiederherstellen mit Vorschau:** vor dem Zurückholen einer Sicherung zeigen, was zurückkommt (Entscheidungen, Alben, Verlauf, offene Abschlüsse) und warum etwas fehlt (andere Mediathek). Heute gibt es dazu einen Hinweis danach. | M | H, I12 |
+| ✅ | **H4 Verbindliche Teilung in der Reise-Werkstatt:** Teile mit einem Foto bleiben, Fotos ohne GPS an der Grenze landen in genau einem Teil; Vorschau und Analyse rechnen gleich. | S | H, I07 |
+| 💡 | **H5 Datenschutz-Übersicht:** auf einer Seite zeigen, was Albumist lokal gespeichert hat (Texte, Orte), ob gerade etwas aus dem Netz geladen wird, und alles mit einem Schalter löschen. Die Einwilligungen selbst wirken schon vor jedem einzelnen Netzaufruf. | M | H |
+| 💡 | **H6 Persönliche Regelvorschläge („Meine Ordnung“):** siehe I03 Lernschleife und I05 Regelstudio. | L | H |
+| 💡 | **H7 Lebende Alben als freiwillige Inbox:** siehe I04. | L | H |
+| 💡 | **H8 Reise-Atlas mit Jahreskarten:** siehe I11; Export ohne GPS-Daten, nur bestätigte Reisen. | M | H |
+| 💡 | **H9 Ähnliche Fotos auf dem Gerät:** siehe I09; erst nach Messung auf einem Gerät mit 100.000 Fotos. | L | H |
 
 ## Wow-Ideen
 

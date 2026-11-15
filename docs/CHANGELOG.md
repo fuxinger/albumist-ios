@@ -55,6 +55,15 @@
   Orte und Texte nach Änderungen verworfen, iCloud-Fotos später erneut gelesen, WLAN je Foto
   geprüft, schnellerer Abgleich und Ortsgruppen, Mediathek und Suche ohne Obergrenze,
   Lasttest mit 100 000 Fotos.
+- Zweite Gegenprüfung 15.11.2026 (22 Befunde, `docs/review/AUDIT2_2026-11-15.md`): unklare
+  Ausgänge nach einer Unterbrechung werden nie geraten (kein Nachholen, kein Beanspruchen von
+  Nutzerfotos), vom Nutzer gelöschte Alben auch beim Fortsetzen nicht neu angelegt, leere eigene
+  Alben bleiben in der Verwaltung, Planung nur mit frisch gelesenem Albenstand, halbes
+  Rückgängig lässt sich abschließen, Teilungen in der Reise-Werkstatt verbindlich, Sicherung mit
+  offenem Abschluss und Folgenummer, Reset wartet auf das Ende der Analyse, Einwilligungen wirken
+  vor jedem Netzaufruf, Karten- und Kontonummern über Zeilenumbrüche maskiert (auch Altbestand),
+  Gratis-Alben bei Rückgängig sicher zurück, Beleg mit damaligen Namen und ehrlich bei
+  ausgelassenen Fotos, Speichern großer Pläne 160 s → 1,7 s.
 - Reise-Erkennung: Wer zu Hause wenig fotografiert, bekam nur eine Reise; das Zuhause
   braucht jetzt Fotos über mindestens drei Wochen verteilt.
 - Umgesetzte Vorschläge kamen als „mehrere passende Alben“ zurück, wenn zwei Alben dieselben
@@ -72,3 +81,5 @@
   schließen mit dem runden X, der Titel steht wieder mittig.
 ### Migrationen
 - v2: Spalte `asset_places.precision_m`.
+- v3: `text_plain` mit Zeilen-ID, damit der Volltextindex automatisch folgt.
+- v4: Planjournal Schritt für Schritt: Tabellen `plan_steps` und `plan_media`.

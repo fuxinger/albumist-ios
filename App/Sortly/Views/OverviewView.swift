@@ -153,6 +153,20 @@ struct OverviewView: View {
         return analysis.stage?.label ?? "Analyse läuft"
     }
 
+    /// Pause, or right after the tap what happens now: the photos in work are finished first.
+    @ViewBuilder
+    private var pauseControl: some View {
+        if model.analysis.pausing {
+            HStack(spacing: Theme.Spacing.xs) {
+                ProgressView().controlSize(.small)
+                Text("Wird angehalten …").font(.subheadline).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
+        }
+    }
+
     @ViewBuilder
     private var runningAnalysis: some View {
         let analysis = model.analysis
@@ -161,11 +175,11 @@ struct OverviewView: View {
                 Text(runningTitle).font(.headline)
                 if isQuickCheck { ProgressView().controlSize(.small) }
                 Spacer()
-                Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
+                pauseControl
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(runningTitle).font(.headline)
-                Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
+                pauseControl
             }
         }
         // Every full analysis (the first one, after "Analyse neu aufbauen" or another part of

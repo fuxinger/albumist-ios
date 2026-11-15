@@ -88,6 +88,8 @@ public actor AnalysisPipeline {
         public var contentAnalyzed = 0
         public var textRecognized = 0
         public var textWaitingForOriginal = 0
+        /// How long reading the texts took in this run (diagnostic report: photos per minute).
+        public var textSeconds: Double = 0
         public var proposals = 0
         /// Vision failed for several photos in a row (not the photos' fault, e.g. no graphics
         /// hardware in the background): the run stopped without counting those against them.
@@ -401,9 +403,10 @@ public actor AnalysisPipeline {
         // (first device test 15.11.: "1.450 von 14.332", then "2.700 von 12.708").
         let inRange = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
         let contentBefore = max(0, inRange - contentTotal)
-        if contentTotal > 0 {
-            onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal))
-        }
+        // Said also when nothing is left to look at: every stage says when it begins, or the
+        // card kept showing the stage before ("Orte werden bestimmt · 1.600 von 1.600") while
+        // the run went on (device test 15.11.: "jetzt hängt es hier").
+        onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal))
         // First results early: trips, countries and places need no image analysis. On a first
         // run (no suggestions yet) they are offered right away instead of after the image
         // analysis, which takes hours on a large library. The full set replaces them later;
@@ -535,7 +538,9 @@ public actor AnalysisPipeline {
         report.completedStages.append(.content)
 
         // 5. Text
+        let textStart = now()
         let textOutcome = try await recognizeText(scoped, onProgress: onProgress)
+        report.textSeconds = now().timeIntervalSince(textStart)
         report.textRecognized = textOutcome.recognized
         report.textWaitingForOriginal = textOutcome.waiting
         report.analyzerUnavailable = report.analyzerUnavailable || textOutcome.analyzerUnavailable
@@ -543,10 +548,14 @@ public actor AnalysisPipeline {
         report.completedStages.append(.text)
 
         // 6. Groups
+        if let reason = await shouldStop() { report.pausedBecause = reason; return report }
+        onProgress(Progress(stage: .groups, completed: 0, total: 0))
         let groups = try await groupObservations()
         report.completedStages.append(.groups)
 
         // 7. Proposals
+        if let reason = await shouldStop() { report.pausedBecause = reason; return report }
+        onProgress(Progress(stage: .proposals, completed: 0, total: 0))
         let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope)
         report.proposals = snapshot.proposals.count
         report.completedStages.append(.proposals)
@@ -622,6 +631,7 @@ public actor AnalysisPipeline {
         guard settings.enabledAreas.contains(.screenshots) || settings.enabledAreas.contains(.documents) || settings.enabledAreas.contains(.messenger) else {
             return outcome
         }
+        onProgress(Progress(stage: .text, completed: 0, total: 0))
         // Masked first: a read that fails below writes the earlier result back, which must be
         // the masked one.
         try await remaskStoredTexts()
@@ -657,9 +667,14 @@ public actor AnalysisPipeline {
         // Analyzer errors in a row, not counted against the photos yet (see the content stage).
         var suspects: [AssetID] = []
         var processed = 0
+        var lastShown = now()
+        // The count moves with every photo that takes time (device test 15.11.: shown only
+        // every 20 photos, the stage looked stuck), and in steps of 20 when they go fast.
         func counted() {
             processed += 1
-            if processed % 20 == 0 || processed == candidates.count {
+            let time = now()
+            if processed % 20 == 0 || processed == candidates.count || time.timeIntervalSince(lastShown) >= 1 {
+                lastShown = time
                 onProgress(Progress(stage: .text, completed: textBefore + processed, total: needing.count))
             }
         }

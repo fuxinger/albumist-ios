@@ -33,6 +33,8 @@ final class AppModel {
         /// The device asked for a break (very warm, battery nearly empty); the run goes on by
         /// itself (first device test 15.11.: a warm iPhone ended the analysis for good).
         var waiting: PauseReason?
+        /// Pause was tapped and the run is finishing the photos in work.
+        var pausing = false
         /// Where an unfinished earlier run got to. A run that goes on shows this instead of
         /// "Schritt 1" again until it is back there (first device test 15.11.).
         var resumeFrom: AnalysisMarker.Point?
@@ -589,6 +591,7 @@ final class AppModel {
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
         analysis.isRunning = true
         analysis.needsResume = false
+        analysis.pausing = false
         analysis.stage = nil
         analysis.completed = 0
         analysis.total = 0
@@ -633,6 +636,7 @@ final class AppModel {
                                       analyzerFailing: finished?.analyzerUnavailable == true,
                                       stage: analysis.stage?.number)
             analysis.isRunning = false
+            analysis.pausing = false
             analysis.stage = nil
             analysis.waiting = nil
             if finished?.isComplete == true {
@@ -740,6 +744,9 @@ final class AppModel {
 
     func pauseAnalysis() {
         analysis.needsResume = false
+        // Shown at once: the photos in work are finished first, which can take a moment
+        // (device test 15.11.: "Pause reagiert nicht").
+        if analysis.isRunning { analysis.pausing = true }
         analysisControl?.pause()
     }
 
@@ -754,7 +761,10 @@ final class AppModel {
         }
         guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return false }
         analysis.isRunning = true
-        defer { analysis.isRunning = false }
+        defer {
+            analysis.isRunning = false
+            analysis.pausing = false
+        }
         // Late progress of the run before must not show up during this one.
         analysisGeneration += 1
         let control = AnalysisRunControl()
@@ -1580,7 +1590,7 @@ final class AppModel {
         lines.append("photos \(progress.total), fully sorted \(progress.fully), partly \(progress.partially), unsorted \(progress.unorganized), pending \(progress.pending)")
         if let report = analysis.lastReport {
             let last = analysis.lastRun.map { iso.string(from: $0) } ?? "?"
-            lines.append("analysis last \(last), complete \(report.isComplete), paused \(report.pausedBecause?.rawValue ?? "no"), stages \(report.completedStages.count), content \(report.contentAnalyzed), text \(report.textRecognized), text waiting \(report.textWaitingForOriginal), places pending online \(report.placesPendingOnline), places throttled \(report.placesThrottled), analyzer failing \(report.analyzerUnavailable)")
+            lines.append("analysis last \(last), complete \(report.isComplete), paused \(report.pausedBecause?.rawValue ?? "no"), stages \(report.completedStages.count), content \(report.contentAnalyzed), text \(report.textRecognized), text waiting \(report.textWaitingForOriginal), text seconds \(Int(report.textSeconds)), places pending online \(report.placesPendingOnline), places throttled \(report.placesThrottled), analyzer failing \(report.analyzerUnavailable)")
         } else {
             lines.append("analysis not run in this session")
         }

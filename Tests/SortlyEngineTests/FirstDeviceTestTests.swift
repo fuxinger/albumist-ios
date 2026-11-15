@@ -183,4 +183,27 @@ struct FirstDeviceTestTests {
         #expect(zip(values, values.dropFirst()).allSatisfy { $0 <= $1 })
         #expect(values.last == requests.count)
     }
+
+    // MARK: Every stage is shown, Pause holds before the last steps (device test 15.11.)
+
+    /// "Jetzt hängt es hier": the card showed "Orte werden bestimmt · 1.600 von 1.600" while
+    /// the run went on through stages that said nothing, and Pause was only seen at the end.
+    @Test func everyStageSaysWhenItBeginsAndPauseHoldsBeforeTheLastSteps() async throws {
+        let s = try setup()
+        let seen = Mutex<[AnalysisPipeline.Stage]>([])
+        let full = try await s.pipeline.run(onProgress: { progress in
+            seen.withLock { if $0.last != progress.stage { $0.append(progress.stage) } }
+        })
+        #expect(full.isComplete)
+        #expect(seen.withLock { $0 } == AnalysisPipeline.Stage.allCases)
+
+        // Pause while the texts are read: the run ends before groups and suggestions.
+        let control = AnalysisRunControl()
+        let paused = try await s.pipeline.run(control: control, onProgress: { progress in
+            if progress.stage == .text { control.pause() }
+        })
+        #expect(paused.pausedBecause == .userPaused)
+        #expect(!paused.completedStages.contains(.groups))
+        #expect(!paused.completedStages.contains(.proposals))
+    }
 }

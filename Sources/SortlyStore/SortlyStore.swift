@@ -582,6 +582,25 @@ public actor SortlyStore: ChangePlanStoring {
             .compactMap { try loadPlan($0["payload"]) }
     }
 
+    /// Albums and folders that Albumist's own plans may still be changing (plugin review W2):
+    /// those of every plan that is unfinished (cut off, offered to continue or take back), and
+    /// of every plan that finished but whose results are not stored yet (on the app's list of
+    /// plans to finalize). A difference there may be Albumist's own doing, not the user's: the
+    /// album check leaves these albums alone until the plan is settled (see
+    /// `ManagedAlbumTracker.reconcile`), so an undo cut off during its finalization never turns
+    /// into "deleted by you".
+    public func collectionsInFlight() throws -> Set<CollectionID> {
+        var result = Set<CollectionID>()
+        for plan in try unfinishedPlans() { result.formUnion(plan.touchedCollections) }
+        let pending = try value([SortlyID].self, forKey: Self.pendingFinalizationKey) ?? []
+        for id in pending {
+            guard let plan = try plan(id), plan.finalizedAt == nil,
+                  plan.status == .completed || plan.status == .completedWithErrors else { continue }
+            result.formUnion(plan.touchedCollections)
+        }
+        return result
+    }
+
     /// One page of finished plans, newest first.
     public func planHistory(limit: Int = 50, offset: Int = 0) throws -> [ChangePlan] {
         try db.query("SELECT payload FROM plans WHERE status IN ('completed', 'completedWithErrors') ORDER BY created_at DESC LIMIT ? OFFSET ?",

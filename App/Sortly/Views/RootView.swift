@@ -28,8 +28,43 @@ struct RootView: View {
             }
         case .onboarding:
             OnboardingView()
+        case .noAccess:
+            NoPhotoAccessView()
         case .ready:
             MainTabs()
+        }
+    }
+}
+
+/// Photo access taken away after the introduction (plugin review W4). The introduction used
+/// to start again and ended with "Analyse starten" for the whole library, which replaced a
+/// part chosen before. This screen leads to Settings (or to the iOS question when iOS forgot
+/// the answer); once access is back, Albumist goes on where it was.
+struct NoPhotoAccessView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("Kein Zugriff auf deine Fotos", systemImage: "photo.on.rectangle.angled")
+        } description: {
+            Text("Albumist darf deine Fotos gerade nicht lesen. Sobald du den Zugriff wieder erlaubst, geht es dort weiter, wo du warst. Deine Auswahl und deine Alben bleiben, wie sie sind.")
+        } actions: {
+            if model.access == .notDetermined {
+                // "Weiter", not "Zugriff erlauben": the iOS question comes next (plugin review K5).
+                Button("Weiter") { Task { await model.requestAccess() } }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("access.continue")
+            } else {
+                // iOS does not ask a second time: the way back is the Settings app.
+                Button("Einstellungen öffnen") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("access.settings")
+                Text("Einstellungen › Apps › Albumist › Fotos › Voller Zugriff")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
     }
 }

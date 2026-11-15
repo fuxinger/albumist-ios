@@ -8138,6 +8138,66 @@
           }
         }
       }
+    },
+    "Erst das unterbrochene Umsetzen abschließen: in der Übersicht mit Fortsetzen, Rückgängig machen oder So lassen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "First finish the interrupted run: on the overview, with Resume, Undo or Leave as Is."
+          }
+        }
+      }
+    },
+    "Nicht alles ließ sich zurücknehmen. Das unterbrochene Umsetzen steht jetzt unter Einstellungen › Verlauf. Dort kannst du den Rest zurücknehmen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not everything could be taken back. The interrupted run is now in Settings › History, where you can take back the rest."
+          }
+        }
+      }
+    },
+    "Erst das unterbrochene Umsetzen abschließen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish the interrupted run first"
+          }
+        }
+      }
+    },
+    "Ein früheres Umsetzen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht: Fortsetzen, Rückgängig machen oder So lassen. Danach kannst du diese Änderungen umsetzen, und nichts wird doppelt angelegt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An earlier run was interrupted. Decide on the overview how to go on: Resume, Undo or Leave as Is. Then you can apply these changes, and nothing is created twice."
+          }
+        }
+      }
+    },
+    "Kein Zugriff auf deine Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No access to your photos"
+          }
+        }
+      }
+    },
+    "Albumist darf deine Fotos gerade nicht lesen. Sobald du den Zugriff wieder erlaubst, geht es dort weiter, wo du warst. Deine Auswahl und deine Alben bleiben, wie sie sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist can’t read your photos right now. As soon as you allow access again, it continues where you left off. Your choices and your albums stay as they are."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

@@ -14,6 +14,9 @@ final class AppModel {
     enum Phase: Equatable {
         case loading
         case onboarding
+        /// The introduction was done, but the photo access was taken away later (plugin
+        /// review W4): a screen of its own leads to Settings instead of the introduction.
+        case noAccess
         case ready
         case failed(String)
     }
@@ -325,13 +328,22 @@ final class AppModel {
             tripCorrections = (try? await pipeline?.tripCorrections()) ?? TripCorrections()
             recurringPlaces = (try? await pipeline?.recurringPlaceAnswers()) ?? RecurringPlaceAnswers()
             analysisScope = (try? await pipeline?.storedScope()) ?? .all
-            await refreshDerived()
-            // A plan that finished right before the app was closed stores its results now.
+            // A plan that finished right before the app was closed stores its results now,
+            // before the album check in `refreshDerived` compares: what the plan changed is not
+            // the user's doing (plugin review W2).
             await finishPendingFinalizations()
+            await refreshDerived()
             // A plan that stopped half way (app closed during "Jetzt umsetzen") is offered
             // on the overview: continue or take back.
             interruptedPlan = try? await store.unfinishedPlans().last
-            phase = onboardingDone && access.canRead ? .ready : .onboarding
+            // Photo access taken away after the introduction: a screen of its own, not the
+            // introduction again, whose "Analyse starten" would replace the part of the library
+            // chosen before (plugin review W4).
+            switch StartScreen.after(onboardingDone: onboardingDone, access: access) {
+            case .introduction: phase = .onboarding
+            case .noPhotoAccess: phase = .noAccess
+            case .main: phase = .ready
+            }
         } catch {
             phase = .failed(error.localizedDescription)
         }
@@ -505,9 +517,10 @@ final class AppModel {
         decisions = (try? await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions)) ?? decisions
         userTitles = (try? await store.value([SortlyID: String].self, forKey: Key.titles)) ?? userTitles
         await pipeline?.update(settings: settings)
-        await refreshDerived()
-        // Plans of the copy that ran but were not finished then are finished now (audit 2, 3.1).
+        // Plans of the copy that ran but were not finished then are finished now (audit 2, 3.1),
+        // before the album check in `refreshDerived` compares (plugin review W2).
         await finishPendingFinalizations()
+        await refreshDerived()
         interruptedPlan = try? await store.unfinishedPlans().last
         saveSafetyBackup()
     }
@@ -539,12 +552,23 @@ final class AppModel {
     func requestAccess() async {
         access = await library.requestAccess()
         await restoreWaitingLibraryState()
+        followAccess()
     }
 
     /// Reads the access again, e.g. after the user came back from the Settings app.
     func refreshAccess() async {
         access = await library.access()
         await restoreWaitingLibraryState()
+        followAccess()
+    }
+
+    /// The access is back on the "Kein Zugriff" screen (plugin review W4): Albumist goes on
+    /// where it was, with the part of the library chosen before. The scope is not touched.
+    private func followAccess() {
+        guard phase == .noAccess, access.canRead else { return }
+        phase = .ready
+        LibraryChangeWatcher.shared.start()
+        if !UITestSupport.isRunning { startAnalysis() }
     }
 
     func finishOnboarding(scope: OrganizationScope) {
@@ -747,6 +771,11 @@ final class AppModel {
     /// The app is on screen again: a run that iOS ended goes on by itself, and a run still
     /// busy asks for background time again (the last request may have run out).
     func sceneBecameActive() {
+        // Back from the Settings app on the "Kein Zugriff" screen: the access may be back (W4).
+        if phase == .noAccess {
+            Task { await refreshAccess() }
+            return
+        }
         if analysis.isRunning {
             keepRunningInBackgroundIfLong()
             return
@@ -1273,6 +1302,12 @@ final class AppModel {
     /// was confirmed before (its free albums were checked then).
     private func run(_ plan: ChangePlan, resume: Bool = false) async {
         guard let store else { return }
+        // One plan at a time, also when one was cut off: that one is settled first (plugin
+        // review K2). Its continuation and its undo are the ways out and always run.
+        if PlanGate.refusal(for: plan, interrupted: interruptedPlan) != nil {
+            execution = ExecutionState(planID: plan.id, failure: interruptedPlanFirst)
+            return
+        }
         // The free albums are checked here too, not only on the review screen.
         let wanted = plan.freeAlbumUse(applied: false)
         if plan.reverts == nil, !resume, !Purchases.shared.allows(albums: wanted) {
@@ -1326,12 +1361,20 @@ final class AppModel {
         return error.localizedDescription
     }
 
+    /// Why nothing new runs while a plan that was cut off is open (plugin review K2).
+    private var interruptedPlanFirst: String {
+        String(localized: "Erst das unterbrochene Umsetzen abschließen: in der Übersicht mit Fortsetzen, Rückgängig machen oder So lassen.")
+    }
+
     /// Everything that follows a finished plan, stored in one transaction: Albumist's albums,
     /// applied suggestions leaving the open list, and the plan marked as finalized. The free
-    /// albums are counted once per plan, from what really changed.
-    private func finalize(_ result: ChangePlan) async {
-        guard let store else { return }
+    /// albums are counted once per plan, from what really changed. Returns whether the
+    /// results were stored.
+    @discardableResult
+    private func finalize(_ result: ChangePlan) async -> Bool {
+        guard let store else { return false }
         var undone: SortlyID?
+        var stored = false
         do {
             let after = try await library.currentInventory()
             try await store.saveInventory(after)
@@ -1369,6 +1412,7 @@ final class AppModel {
                 Key.decisions: storedDecisions(newDecisions),
                 Key.pendingFinalization: pending,
             ])
+            stored = true
             decisions = newDecisions
             managedAlbums = states
             if let undone { undonePlans.insert(undone) }
@@ -1379,6 +1423,7 @@ final class AppModel {
         } catch {
             message = error.localizedDescription
         }
+        return stored
     }
 
     private func setPendingFinalization(adding id: SortlyID? = nil, removing gone: Set<SortlyID> = []) async throws {
@@ -1466,21 +1511,21 @@ final class AppModel {
                 managedAlbums = stored
                 return current
             }
-            let tracker = ManagedAlbumTracker()
-            // Albums an interrupted plan (or undo) is still changing are compared once it is
-            // settled: what its own steps did is not the user's decision. The plan offered to
-            // continue or take back, read from the store (at launch this runs before
-            // `interruptedPlan` is loaded).
-            let changing = try await store.unfinishedPlans().last?.touchedCollections ?? []
-            var result = tracker.reconcile(stored, with: current, changing: changing)
-            // An empty album list is a valid answer (the user deleted the last album). Only when
-            // every remembered album seems gone at once, a second read has to confirm it, and
-            // that read is then the one everything works with.
-            if result.updatedStates.isEmpty {
-                try? await Task.sleep(for: .milliseconds(300))
-                current = try await library.currentInventory()
-                result = tracker.reconcile(stored, with: current, changing: changing)
-            }
+            // Albums Albumist's own plans may still be changing are compared once those plans
+            // are settled: what their own steps did is not the user's decision. That is a plan
+            // that was cut off (offered to continue or take back) and a plan that finished but
+            // whose results are not stored yet (plugin review W2), read from the store (at
+            // launch this runs before `interruptedPlan` is loaded).
+            let changing = try await store.collectionsInFlight()
+            // An album missing from the list counts as deleted only once Photos confirms it when
+            // asked for that album on its own (plugin review W3: the list can lack albums for a
+            // while, e.g. iCloud still syncing after a restore). An empty album list is a valid
+            // answer (the user deleted the last album); only when every remembered album seems
+            // gone at once, a second read has to confirm it. The list that comes back (with the
+            // albums found on their own) is the one everything works with.
+            let checked = try await ManagedAlbumTracker().reconcile(stored, listed: current, in: library, changing: changing)
+            let result = checked.reconciliation
+            current = checked.inventory
             if !result.changes.isEmpty {
                 // Overrides and the new last-known state in one transaction: a manual change
                 // is never marked as seen without its override.
@@ -1529,6 +1574,12 @@ final class AppModel {
     /// Takes back what an interrupted plan already did, and drops the rest. Steps the
     /// interruption left open are first checked against the library (an album created or
     /// photos added right before the app was closed are taken back too).
+    ///
+    /// What the plan did is first kept and recorded like "So lassen" (history, receipt, free
+    /// albums) and then taken back by an ordinary undo of it. Only a completed undo cancels the
+    /// plan; when the undo does not get everything back ("Nicht erlauben" in the iOS question),
+    /// the plan stays in the history and the rest can be taken back there (plugin review K1).
+    /// Before, it was cancelled first and its albums stayed in Photos without a trace.
     func undoInterruptedPlan() async {
         // An interrupted undo cannot itself be taken back: Photos cannot bring deleted albums
         // back, and undo plans put no photos back. What it already did is kept and recorded
@@ -1541,23 +1592,39 @@ final class AppModel {
         }
         guard let store, let interrupted = interruptedPlan, claimExecution() else { return }
         defer { releaseExecution() }
+        // Without write access nothing could be taken back: nothing changes, the card stays.
+        guard await library.canWrite() else {
+            execution = ExecutionState(planID: interrupted.id, failure: ConflictText.text(.writeAccessMissing, inventory: inventory))
+            return
+        }
         do {
             let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
-            let current = try await library.currentInventory()
-            var undoPlan = UndoPlanner().undoPlan(for: settled, current: current)
-            undoPlan.status = .confirmed
-            undoPlan.confirmedAt = Date()
-            var cancelled = settled
-            cancelled.status = .cancelled
-            // Both in one transaction: the undo is journaled before the plan stops being offered.
-            try await store.save([cancelled] + (undoPlan.steps.isEmpty ? [] : [undoPlan]))
-            try? await setPendingFinalization(removing: [interrupted.id])
-            if !undoPlan.steps.isEmpty { await run(undoPlan) }
-            interruptedPlan = nil
-            await refreshDerived()
+            let way = InterruptedPlanUndo(settled: settled, current: try await library.currentInventory())
+            // Each step leaves a consistent store: kept (finalized at the next launch if the app
+            // ends now), recorded, then taken back.
+            try await store.save(way.kept)
+            if way.kept.status == .cancelled {
+                // Nothing to take back: the plan simply goes away.
+                try? await setPendingFinalization(removing: [interrupted.id])
+            } else if await finalize(way.kept), let undoPlan = way.undo {
+                await run(undoPlan)
+                if way.cancelsPlan(after: execution.finished) {
+                    // Everything taken back: the plan leaves the history, as before.
+                    if var original = try await store.plan(interrupted.id) {
+                        original.status = .cancelled
+                        try await store.save(original)
+                    }
+                } else {
+                    message = [String(localized: "Nicht alles ließ sich zurücknehmen. Das unterbrochene Umsetzen steht jetzt unter Einstellungen › Verlauf. Dort kannst du den Rest zurücknehmen."),
+                               execution.failure].compactMap { $0 }.joined(separator: "\n\n")
+                }
+            }
         } catch {
             message = error.localizedDescription
         }
+        // What is still open, from the store: nothing, or an undo that was cut off itself.
+        interruptedPlan = try? await store.unfinishedPlans().last
+        await refreshDerived()
     }
 
     // MARK: Guided repair (I16)
@@ -1570,19 +1637,14 @@ final class AppModel {
         defer { releaseExecution() }
         do {
             // Steps the interruption left open are checked against the library first.
-            var settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
-            for index in settled.steps.indices where !settled.steps[index].state.isFinished {
-                settled.steps[index].state = .skipped(reason: StepState.leftByUserReason)
-            }
-            let succeeded = settled.steps.filter { if case .succeeded = $0.state { true } else { false } }.count
-            if succeeded > 0 {
-                settled.status = succeeded == settled.steps.count ? .completed : .completedWithErrors
-                try await store.save(settled)
-                await finalize(settled)
-            } else {
-                settled.status = .cancelled
-                try await store.save(settled)
+            let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
+            // Also an album Photos made before its check failed is recorded (plugin review K1).
+            let kept = settled.keptAsIs(current: try await library.currentInventory())
+            try await store.save(kept)
+            if kept.status == .cancelled {
                 try? await setPendingFinalization(removing: [interrupted.id])
+            } else {
+                await finalize(kept)
             }
             interruptedPlan = nil
             await refreshDerived()
@@ -1658,14 +1720,23 @@ final class AppModel {
         // added in the meantime), so a plan is undone once.
         // A partial undo (completedWithErrors) does not count as undone: running it again takes
         // back only what is still Albumist's (audit 2, 1.6).
-        guard !undonePlans.contains(executed.id), executed.reverts == nil, claimExecution() else { return }
+        guard !undonePlans.contains(executed.id), executed.reverts == nil, let store, claimExecution() else { return }
         defer { releaseExecution() }
         // What the user changed by hand since counts first: a photo they took out and put back
         // is theirs now and stays.
         guard let current = await reconcileManagedAlbums() else { return }
         var owned: [CollectionID: Set<AssetID>] = [:]
         for state in managedAlbums { owned[state.albumID, default: []].formUnion(state.addedBySortly) }
-        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned)
+        // Undos of this plan that did not get everything back (plugin review W1): an album one
+        // of them brought back gets the photos still missing, never a second album.
+        let earlier: [ChangePlan]
+        do { earlier = try await store.reverts(of: executed.id) } catch { message = error.localizedDescription; return }
+        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, earlierUndos: earlier)
+        // A plan that was cut off is settled first (plugin review K2).
+        if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
+            message = interruptedPlanFirst
+            return
+        }
         // Free albums and suggestions come back in `finalize`, with the undo itself.
         await run(undoPlan)
     }

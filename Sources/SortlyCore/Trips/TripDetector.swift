@@ -72,19 +72,36 @@ public struct TripDetector: Sendable {
     /// - Parameters:
     ///   - assets: all assets (with and without GPS).
     ///   - corrections: persisted user corrections.
+    ///   - places: the user's answers to "Bist du hier öfter?".
     ///   - excludeFromInference: returns true for assets that must never be added to a trip
     ///     purely by time (screenshots, messenger media, downloads – prompt §4.2).
     public func detect(
         in assets: [AssetSnapshot],
         corrections: TripCorrections = .init(),
+        places: RecurringPlaceAnswers = .init(),
         excludeFromInference: (AssetSnapshot) -> Bool = { _ in false }
     ) -> [Trip] {
+        analyse(in: assets, corrections: corrections, places: places, excludeFromInference: excludeFromInference).trips
+    }
+
+    /// The trips, every stay away (also those too small for a trip, to notice places the user
+    /// goes to again and again), and the photos at the places the user said they are often at.
+    public func analyse(
+        in assets: [AssetSnapshot],
+        corrections: TripCorrections = .init(),
+        places: RecurringPlaceAnswers = .init(),
+        excludeFromInference: (AssetSnapshot) -> Bool = { _ in false }
+    ) -> TripAnalysis {
         let geotagged = assets
             .filter { $0.usableLocation != nil && $0.creationDate != nil && !$0.isScreenshotLike && !corrections.excludedAssets.contains($0.id) }
             .sorted { ($0.creationDate!, $0.id) < ($1.creationDate!, $1.id) }
-        guard !geotagged.isEmpty else { return [] }
+        guard !geotagged.isEmpty else { return TripAnalysis(trips: [], stays: [], places: []) }
 
-        let home = HabitualArea(assets: geotagged, calendar: calendar, windowDays: configuration.homeWindowDays)
+        // A place the user is often at counts like the habitual area, at every time: its stays
+        // are not trips, and an excursion from there starts there.
+        let oftenHere = places.oftenHere
+        let home = HabitualArea(assets: geotagged, calendar: calendar, windowDays: configuration.homeWindowDays,
+                                homeRadius: configuration.homeRadiusMeters, extraHomes: oftenHere.map(\.center))
 
         struct Segment {
             var members: [AssetSnapshot] = []
@@ -105,6 +122,11 @@ public struct TripDetector: Sendable {
         func forcedBreakBetween(_ a: Date, _ b: Date) -> Bool {
             corrections.forcedBreaks.contains { $0 > a && $0 <= b }
         }
+        /// The user moved on from one place they stayed at for weeks to the next one (digital
+        /// nomad): a new trip starts, as if they had been back home in between.
+        func movedOnBetween(_ a: Date, _ b: Date) -> Bool {
+            home.movedOn.contains { $0 > a && $0 <= b }
+        }
 
         for asset in geotagged {
             let date = asset.creationDate!
@@ -120,9 +142,10 @@ public struct TripDetector: Sendable {
                         && GeoMath.distance(coordinate, seg.lastCoordinate) < configuration.farAwayMeters / 2
                     let allowedGap = bothFar ? configuration.maxGapFarAway : configuration.maxGap
                     let cameHome = seg.firstHomeAfterLastAway.map { date.timeIntervalSince($0) > configuration.homeInterludeTolerance } ?? false
+                        || wentHomeUnseen(from: seg.lastCoordinate, at: seg.lastAway, to: coordinate, at: date, home: home)
                     let protected = joinProtects(seg.lastAway, date)
                     let mustBreak = forcedBreakBetween(seg.lastAway, date)
-                    let naturalBreak = !protected && (gap > allowedGap || cameHome)
+                    let naturalBreak = !protected && (gap > allowedGap || cameHome || movedOnBetween(seg.lastAway, date))
                     if mustBreak || naturalBreak {
                         segments.append(seg.members)
                         splitBefore.append(currentSplit)
@@ -166,15 +189,84 @@ public struct TripDetector: Sendable {
             }
             groupStart = index + 1
         }
-        let candidates = segments.indices.filter { keep[$0] }.map { segments[$0] }
         let nonGeo = assets
             .filter { $0.usableLocation == nil && $0.creationDate != nil && !$0.isScreenshotLike && ($0.kind == .image || $0.kind == .video) }
             .filter { !corrections.excludedAssets.contains($0.id) && !excludeFromInference($0) }
             .sorted { ($0.creationDate!, $0.id) < ($1.creationDate!, $1.id) }
         let breaks = corrections.forcedBreaks.sorted()
 
-        return candidates.map { members in
-            makeTrip(members, home: home, nonGeo: nonGeo, breaks: breaks)
+        var trips: [Trip] = []
+        var stays: [AwayStay] = []
+        for (index, members) in segments.enumerated() {
+            let photos = members.map { (date: $0.creationDate!, coordinate: $0.usableLocation!) }
+            var stay = AwayStay(start: photos.first!.date, end: photos.last!.date,
+                                mainPlace: RecurringPlaces.mainPlace(of: photos, calendar: calendar) ?? photos[0].coordinate,
+                                photoCount: members.count, tripIndex: nil)
+            if keep[index] {
+                stay.tripIndex = trips.count
+                trips.append(makeTrip(members, home: home, nonGeo: nonGeo, breaks: breaks))
+            }
+            stays.append(stay)
+        }
+        return TripAnalysis(trips: trips, stays: stays, places: placesOftenVisited(oftenHere, photos: geotagged, home: home))
+    }
+
+    /// Within a day trip of the habitual area: a place the user can go to and come back from
+    /// on one day.
+    static let dayTripReachMeters: Double = 150_000
+    /// A whole day without a single photo.
+    static let silentDay: TimeInterval = 24 * 3_600
+
+    /// Most people take no photo at home on the evening they come back. Two stays at different
+    /// places with no photo in between are still two outings when the user most likely slept
+    /// at home in between (simulated library: the parents' town on Saturday and the lake on
+    /// Sunday became one weekend trip, a day in Innsbruck two days after Sardinia part of it):
+    /// - a night lay between them and the way from one to the other passes the habitual area
+    ///   anyway (at most `2 × homeRadius` longer than the direct way), or
+    /// - a whole day passed without a photo and one of them is within a day trip of the
+    ///   habitual area.
+    /// Stops of one journey far from home (a road trip, a semester's weekends) are never split
+    /// this way: home is not on their way and they are out of day-trip reach.
+    private func wentHomeUnseen(from a: GeoCoordinate, at aDate: Date, to b: GeoCoordinate, at bDate: Date, home: HabitualArea) -> Bool {
+        let apart = GeoMath.distance(a, b)
+        guard apart > configuration.homeRadiusMeters else { return false }
+        let gap = bDate.timeIntervalSince(aDate)
+        if gap > configuration.homeInterludeTolerance,
+           home.wayViaHome(a, b, at: bDate) <= apart + 2 * configuration.homeRadiusMeters { return true }
+        if gap >= Self.silentDay,
+           min(home.distanceToHome(a, at: aDate), home.distanceToHome(b, at: bDate)) <= Self.dayTripReachMeters { return true }
+        return false
+    }
+
+    /// The photos of each place the user is often at: the stays there that would otherwise be
+    /// trips. Within the habitual radius of the place, closer to it than to the habitual area of
+    /// that time (a place near the usual one does not take everyday photos away from it), and
+    /// not from a time the place was part of the habitual area itself (the town the user
+    /// lived in before moving away and now visits).
+    private func placesOftenVisited(_ answers: [PlaceAnswer], photos: [AssetSnapshot], home: HabitualArea) -> [RecurringPlace] {
+        guard !answers.isEmpty else { return [] }
+        var members = [[AssetSnapshot]](repeating: [], count: answers.count)
+        for asset in photos {
+            let coordinate = asset.usableLocation!, date = asset.creationDate!
+            let distances = answers.map { GeoMath.distance($0.center, coordinate) }
+            guard let nearest = distances.indices.min(by: { distances[$0] < distances[$1] }),
+                  distances[nearest] <= configuration.homeRadiusMeters,
+                  distances[nearest] < home.distanceToUsualHome(coordinate, at: date),
+                  home.distanceToUsualHome(answers[nearest].center, at: date) > configuration.homeRadiusMeters else { continue }
+            members[nearest].append(asset)
+        }
+        return answers.indices.compactMap { index in
+            let assets = members[index]
+            guard let first = assets.first?.creationDate, let last = assets.last?.creationDate else { return nil }
+            return RecurringPlace(
+                id: answers[index].id,
+                center: answers[index].center,
+                name: answers[index].name,
+                assetIDs: assets.map(\.id),
+                distinctDays: Set(assets.map { calendar.startOfDay(for: $0.creationDate!) }).count,
+                firstDate: first,
+                lastDate: last
+            )
         }
     }
 
@@ -222,6 +314,9 @@ public struct TripDetector: Sendable {
         )
     }
 
+    /// The hour a night out ends (see `classify`).
+    static let nightEndsHour = 4
+
     /// Kind of a trip from its photos (sorted by date) and the number of distinct overnight
     /// stops. Days and evening hours are counted in `calendar`, which should use the
     /// destination's time zone when it is known: an evening flight home across midnight is
@@ -229,20 +324,28 @@ public struct TripDetector: Sendable {
     public static func classify(dates: [Date], coordinates: [GeoCoordinate], calendar: Calendar) -> (kind: TripKind, stops: Int) {
         guard let start = dates.first, let end = dates.last else { return (.dayTrip, 1) }
         // Distinct stops: ~25 km cells where photos were taken in the evening/night.
-        var stopCells = Set<GeoCell>()
+        var nights: [GeoCell: Set<Date>] = [:]
         for (date, c) in zip(dates, coordinates) {
             let hour = calendar.component(.hour, from: date)
-            if hour >= 18 || hour < 6 { stopCells.insert(GeoCell(c, sizeMeters: 25_000)) }
+            if hour >= 18 || hour < 6 { nights[GeoCell(c, sizeMeters: 25_000), default: []].insert(calendar.startOfDay(for: date)) }
         }
+        let stopCells = Set(nights.keys)
         let allCells = Set(coordinates.map { GeoCell($0, sizeMeters: 25_000) })
+        // A stay at one place with a few excursions (a semester with weekend trips, a holiday
+        // flat with a night elsewhere) is not a road trip: one stop holds most evenings.
+        let eveningCount = nights.values.reduce(0) { $0 + $1.count }
+        let mainStopShare = eveningCount > 0 ? Double(nights.values.map(\.count).max() ?? 0) / Double(eveningCount) : 0
 
         let startDay = calendar.startOfDay(for: start)
-        let endDay = calendar.startOfDay(for: end)
+        // An outing that runs past midnight (a concert, New Year's Eve) still ends on the day it
+        // began: photos before 4 a.m. on the last day belong to the evening before.
+        let lateNight = calendar.component(.hour, from: end) < Self.nightEndsHour
+        let endDay = max(startDay, calendar.startOfDay(for: lateNight ? end.addingTimeInterval(-Double(Self.nightEndsHour) * 3_600) : end))
         let dayCount = (calendar.dateComponents([.day], from: startDay, to: endDay).day ?? 0) + 1
         let kind: TripKind
         if dayCount == 1 {
             kind = .dayTrip
-        } else if stopCells.count >= 3 && allCells.count >= 4 && dayCount >= 3 {
+        } else if stopCells.count >= 3 && allCells.count >= 4 && dayCount >= 3 && mainStopShare < 0.5 {
             kind = .roadTrip
         } else if dayCount <= 3 && (startDay...endDay).containsWeekend(calendar) {
             kind = .weekendTrip
@@ -293,25 +396,56 @@ private extension ClosedRange where Bound == Date {
 /// The user's habitual area ("gewöhnlicher Aufenthaltsbereich"), computed time-locally
 /// so that moving house does not turn the old or new home into a "trip".
 /// It is an internal reference only and is never shown or labelled as "home".
+///
+/// A place is habitual around a date when it holds a quarter of the photo days of the
+/// surrounding months, spread over three weeks or more. Two things refine that:
+/// - A long stay away that the user comes back from (semester, sabbatical, Work & Travel, a
+///   month on a long journey) is time away, not a new home: its days do not make its place
+///   habitual, and the place the user came from stays habitual meanwhile. Moving house is
+///   told apart by the missing return; a stay longer than a year is a move even with one.
+/// - Places the user said they are often at count at every time.
 struct HabitualArea: Sendable {
     private struct Day { let day: Date; let coordinate: GeoCoordinate; var cluster: Int }
+    /// The user lived at `cluster` from `start` to `end` (photo days) and came back to `home`.
+    struct Sojourn: Sendable, Hashable { var cluster: Int; var start: Date; var end: Date; var home: Int }
+
     private var days: [Day] = []
+    /// Per day: it counts toward its place being habitual (days of a sojourn do not).
+    private var counts: [Bool] = []
     private var clusterCentroids: [GeoCoordinate] = []
     private let windowDays: Int
     private let calendar: Calendar
+    private let homeRadius: Double
+    private let extraHomes: [GeoCoordinate]
     private var homesByDay: [Date: [Int]] = [:]
     private var globalHome: Int?
-    /// Photo days per cluster, ascending.
+    /// Counting photo days per cluster, ascending.
     private var clusterDays: [[Date]] = []
     private var requireSpread = false
+    private(set) var sojourns: [Sojourn] = []
+    /// Instants where a long time away is split: the user moved on from one place they stayed
+    /// at for weeks to the next without coming back in between (digital nomad, a long
+    /// journey with long stops). Each such stay is its own trip.
+    private(set) var movedOn: [Date] = []
+
     /// A place only counts as home when its photo days inside the window lie at least this
     /// far apart. A burst of holiday days (one trip, even a long one) never makes a place
     /// "home", which matters for people who mostly take photos while travelling.
     static let minimumHomeSpread: TimeInterval = 21 * 86_400
+    /// Photo days at one place at most this far apart belong to one stay there. Three weeks:
+    /// a Christmas visit home does not end a semester abroad, a monthly visit is a new stay.
+    static let stayGap: TimeInterval = 21 * 86_400
+    /// A stay away that ends with a return counts as time away up to this length; a longer one
+    /// is a move (two years abroad, then back).
+    static let maximumSojourn: TimeInterval = 365 * 86_400
+    /// How far before and after a stay the place the user came from and went back to is looked for.
+    static let returnHorizon: TimeInterval = 365 * 86_400
 
-    init(assets: [AssetSnapshot], calendar: Calendar, windowDays: Int) {
+    init(assets: [AssetSnapshot], calendar: Calendar, windowDays: Int, homeRadius: Double = 30_000, extraHomes: [GeoCoordinate] = []) {
         self.calendar = calendar
         self.windowDays = windowDays
+        self.homeRadius = homeRadius
+        self.extraHomes = extraHomes
         var perDay: [Date: [GeoCoordinate]] = [:]
         for asset in assets {
             guard let c = asset.usableLocation, let d = asset.creationDate else { continue }
@@ -335,34 +469,63 @@ struct HabitualArea: Sendable {
         }
         clusterCentroids = result.clusters.map(\.centroid)
         days = dayPoints.enumerated().map { Day(day: $1.0, coordinate: $1.1, cluster: labels[$0]) }
-        clusterDays = Array(repeating: [], count: result.clusters.count)
-        for d in days where d.cluster >= 0 { clusterDays[d.cluster].append(d.day) }
+        var allClusterDays = [[Date]](repeating: [], count: result.clusters.count)
+        for d in days where d.cluster >= 0 { allClusterDays[d.cluster].append(d.day) }
         // Spread is only demanded once some place shows it; a library of a few weeks keeps
         // the plain majority rule (otherwise its home would turn into one long trip).
-        requireSpread = clusterDays.contains { ($0.last ?? .distantPast).timeIntervalSince($0.first ?? .distantPast) >= Self.minimumHomeSpread }
+        requireSpread = allClusterDays.contains { ($0.last ?? .distantPast).timeIntervalSince($0.first ?? .distantPast) >= Self.minimumHomeSpread }
+
+        sojourns = findSojourns(allClusterDays)
+        counts = days.map { d in !sojourns.contains { $0.cluster == d.cluster && $0.start <= d.day && d.day <= $0.end } }
+        clusterDays = Array(repeating: [], count: result.clusters.count)
+        for (i, d) in days.enumerated() where d.cluster >= 0 && counts[i] { clusterDays[d.cluster].append(d.day) }
 
         var global: [Int: Int] = [:]
-        for d in days where d.cluster >= 0 && isSpread(d.cluster, from: .distantPast, to: .distantFuture) {
+        for (i, d) in days.enumerated() where d.cluster >= 0 && counts[i] && isSpread(d.cluster, from: .distantPast, to: .distantFuture) {
             global[d.cluster, default: 0] += 1
         }
         if let best = global.max(by: { ($0.value, -$0.key) < ($1.value, -$1.key) }), best.value >= 5 { globalHome = best.key }
 
-        // Sliding window over the sorted days: O(days) instead of O(days²).
+        // Sliding window over the sorted days: O(days) instead of O(days²). Every photo day
+        // counts in the total, only counting days count for their place.
         let window = Double(windowDays) * 86_400
         var lo = 0, hi = 0
-        var counts: [Int: Int] = [:]
+        var perCluster: [Int: Int] = [:]
         for d in days {
             while hi < days.count && days[hi].day <= d.day.addingTimeInterval(window) {
-                if days[hi].cluster >= 0 { counts[days[hi].cluster, default: 0] += 1 }
+                if days[hi].cluster >= 0 && counts[hi] { perCluster[days[hi].cluster, default: 0] += 1 }
                 hi += 1
             }
             while lo < hi && days[lo].day < d.day.addingTimeInterval(-window) {
-                if days[lo].cluster >= 0 { counts[days[lo].cluster, default: 0] -= 1 }
+                if days[lo].cluster >= 0 && counts[lo] { perCluster[days[lo].cluster, default: 0] -= 1 }
                 lo += 1
             }
             let lower = d.day.addingTimeInterval(-window), upper = d.day.addingTimeInterval(window)
-            let candidates = counts.filter { $0.value > 0 && isSpread($0.key, from: lower, to: upper) }
-            homesByDay[d.day] = Self.select(counts: candidates, total: hi - lo, fallback: globalHome)
+            let candidates = perCluster.filter { $0.value > 0 && isSpread($0.key, from: lower, to: upper) }
+            homesByDay[d.day] = Self.select(counts: candidates, total: hi - lo, returnedTo: returnHomes(at: d.day), fallback: globalHome)
+        }
+        makeLongStaysWhole(allClusterDays)
+        movedOn = findMovedOn(allClusterDays)
+    }
+
+    /// A long stay is either where the user lived or time away, never half of each. The window
+    /// is cut off at the ends of the library, so the last weeks of the nomad's last city looked
+    /// habitual while the weeks before did not. The majority of the stay's days decides.
+    private mutating func makeLongStaysWhole(_ allClusterDays: [[Date]]) {
+        for (cluster, list) in allClusterDays.enumerated() {
+            for stay in longStays(of: cluster, in: list) {
+                let stayDays = stay.days.map { days[$0].day }
+                let habitual = stayDays.filter { homesByDay[$0]?.contains(cluster) == true }.count
+                guard habitual > 0, habitual < stayDays.count else { continue }
+                let keep = habitual * 2 >= stayDays.count
+                for day in stayDays {
+                    var homes = homesByDay[day] ?? []
+                    if keep, !homes.contains(cluster) { homes.append(cluster) }
+                    if !keep { homes.removeAll { $0 == cluster } }
+                    if homes.isEmpty, let globalHome { homes = [globalHome] }
+                    homesByDay[day] = homes.sorted()
+                }
+            }
         }
     }
 
@@ -377,13 +540,19 @@ struct HabitualArea: Sendable {
         guard !days.isEmpty else { return [] }
         let lower = center.addingTimeInterval(-Double(windowDays) * 86_400)
         let upper = center.addingTimeInterval(Double(windowDays) * 86_400)
-        var counts: [Int: Int] = [:]
+        var perCluster: [Int: Int] = [:]
         var total = 0
-        for d in days where d.day >= lower && d.day <= upper {
+        for (i, d) in days.enumerated() where d.day >= lower && d.day <= upper {
             total += 1
-            if d.cluster >= 0 { counts[d.cluster, default: 0] += 1 }
+            if d.cluster >= 0 && counts[i] { perCluster[d.cluster, default: 0] += 1 }
         }
-        return Self.select(counts: counts.filter { isSpread($0.key, from: lower, to: upper) }, total: total, fallback: globalHome)
+        return Self.select(counts: perCluster.filter { isSpread($0.key, from: lower, to: upper) }, total: total,
+                           returnedTo: returnHomes(at: center), fallback: globalHome)
+    }
+
+    /// The places the user came from and went back to, during their sojourns at `day`.
+    private func returnHomes(at day: Date) -> [Int] {
+        sojourns.filter { $0.start <= day && day <= $0.end }.map(\.home)
     }
 
     /// True if the cluster's photo days between `lower` and `upper` span at least `minimumHomeSpread`.
@@ -400,16 +569,119 @@ struct HabitualArea: Sendable {
         return list[last].timeIntervalSince(list[first]) >= Self.minimumHomeSpread
     }
 
-    private static func select(counts: [Int: Int], total: Int, fallback: Int?) -> [Int] {
+    private static func select(counts: [Int: Int], total: Int, returnedTo: [Int], fallback: Int?) -> [Int] {
         let threshold = max(3, Int(Double(total) * 0.25))
-        let homes = counts.filter { $0.value >= threshold }.map(\.key).sorted()
+        let homes = Set(counts.filter { $0.value >= threshold }.map(\.key)).union(returnedTo).sorted()
         if homes.isEmpty, let fallback { return [fallback] }
         return homes
     }
 
+    /// Distance to the habitual area or to a place the user is often at, whichever is closer.
     func distanceToHome(_ coordinate: GeoCoordinate, at date: Date) -> Double {
+        let usual = distanceToUsualHome(coordinate, at: date)
+        return extraHomes.reduce(usual) { min($0, GeoMath.distance($1, coordinate)) }
+    }
+
+    /// The shortest way from `a` to `b` through the habitual area of `date` (or a place the
+    /// user is often at).
+    func wayViaHome(_ a: GeoCoordinate, _ b: GeoCoordinate, at date: Date) -> Double {
+        let points = homeClusters(at: date).map { clusterCentroids[$0] } + extraHomes
+        return points.map { GeoMath.distance(a, $0) + GeoMath.distance($0, b) }.min() ?? .infinity
+    }
+
+    /// Distance to the habitual area alone, without the places the user is often at.
+    func distanceToUsualHome(_ coordinate: GeoCoordinate, at date: Date) -> Double {
         let homes = homeClusters(at: date)
         guard !homes.isEmpty else { return .infinity }
         return homes.map { GeoMath.distance(clusterCentroids[$0], coordinate) }.min() ?? .infinity
+    }
+
+    // MARK: Long stays
+
+    /// Indices of the days from `lower` to `upper` (both included).
+    private func dayIndices(from lower: Date, to upper: Date) -> Range<Int> {
+        var lo = 0, hi = days.count
+        while lo < hi { let mid = (lo + hi) / 2; if days[mid].day < lower { lo = mid + 1 } else { hi = mid } }
+        let first = lo
+        hi = days.count
+        while lo < hi { let mid = (lo + hi) / 2; if days[mid].day <= upper { lo = mid + 1 } else { hi = mid } }
+        return first..<lo
+    }
+
+    /// The stays at one place: its photo days split where they lie more than `stayGap` apart.
+    /// Only stays of three weeks or more in which the place holds at least half the photo days
+    /// (the user lived there then, not next to another home).
+    private func longStays(of cluster: Int, in list: [Date]) -> [(start: Date, end: Date, days: Range<Int>)] {
+        var result: [(start: Date, end: Date, days: Range<Int>)] = []
+        var first = 0
+        for i in list.indices where i + 1 == list.count || list[i + 1].timeIntervalSince(list[i]) > Self.stayGap {
+            let start = list[first], end = list[i]
+            first = i + 1
+            guard end.timeIntervalSince(start) >= Self.minimumHomeSpread else { continue }
+            let inside = dayIndices(from: start, to: end)
+            let here = inside.filter { days[$0].cluster == cluster }.count
+            if here * 2 >= inside.count { result.append((start, end, inside)) }
+        }
+        return result
+    }
+
+    /// The place the user was at in the most different months between `lower` and `upper`,
+    /// apart from `excluded`. Months, not photo days: a week of holiday photos must not
+    /// outweigh a few photos every month at home (people who mostly photograph on trips).
+    private func mostPresent(from lower: Date, to upper: Date, excluding excluded: Int) -> Int? {
+        var months: [Int: Set<Int>] = [:]
+        for i in dayIndices(from: lower, to: upper) where days[i].cluster >= 0 && days[i].cluster != excluded {
+            let c = calendar.dateComponents([.year, .month], from: days[i].day)
+            months[days[i].cluster, default: []].insert((c.year ?? 0) * 12 + (c.month ?? 0))
+        }
+        return months.max { ($0.value.count, -$0.key) < ($1.value.count, -$1.key) }?.key
+    }
+
+    /// Long stays away that the user came back from: three weeks to a year at one place,
+    /// where the place they mostly were at in the year before is the same as in the year
+    /// after, they were hardly there during the stay (at most one photo day in five), and it is
+    /// their place for longer (more months with photos) than the stay's place.
+    private func findSojourns(_ allClusterDays: [[Date]]) -> [Sojourn] {
+        guard allClusterDays.count > 1 else { return [] }
+        let months = allClusterDays.map { list in
+            Set(list.map { day -> Int in
+                let c = calendar.dateComponents([.year, .month], from: day)
+                return (c.year ?? 0) * 12 + (c.month ?? 0)
+            }).count
+        }
+        var result: [Sojourn] = []
+        for (cluster, list) in allClusterDays.enumerated() {
+            for stay in longStays(of: cluster, in: list) where stay.end.timeIntervalSince(stay.start) <= Self.maximumSojourn {
+                guard let before = mostPresent(from: stay.start.addingTimeInterval(-Self.returnHorizon), to: stay.start.addingTimeInterval(-1), excluding: cluster),
+                      let after = mostPresent(from: stay.end.addingTimeInterval(1), to: stay.end.addingTimeInterval(Self.returnHorizon), excluding: cluster),
+                      before == after,
+                      GeoMath.distance(clusterCentroids[before], clusterCentroids[cluster]) > homeRadius,
+                      months[before] > months[cluster] else { continue }
+                let atHome = stay.days.filter { days[$0].cluster == before }.count
+                guard atHome * 5 <= stay.days.count else { continue }
+                result.append(Sojourn(cluster: cluster, start: stay.start, end: stay.end, home: before))
+            }
+        }
+        return result
+    }
+
+    /// The day after each long stay away that is followed by another long stay elsewhere,
+    /// with no day at the habitual area in between.
+    private func findMovedOn(_ allClusterDays: [[Date]]) -> [Date] {
+        var settled: [(cluster: Int, start: Date, end: Date)] = []
+        for (cluster, list) in allClusterDays.enumerated() {
+            for stay in longStays(of: cluster, in: list) where distanceToHome(clusterCentroids[cluster], at: stay.start) > homeRadius {
+                settled.append((cluster, stay.start, stay.end))
+            }
+        }
+        settled.sort { ($0.start, $0.cluster) < ($1.start, $1.cluster) }
+        var result: [Date] = []
+        for (a, b) in zip(settled, settled.dropFirst()) where a.end < b.start && a.cluster != b.cluster {
+            let between = dayIndices(from: a.end.addingTimeInterval(1), to: b.start.addingTimeInterval(-1))
+            guard !between.contains(where: { distanceToHome(days[$0].coordinate, at: days[$0].day) <= homeRadius }),
+                  let next = calendar.date(byAdding: .day, value: 1, to: a.end) else { continue }
+            result.append(next)
+        }
+        return result
     }
 }

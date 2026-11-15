@@ -7,12 +7,16 @@ public struct AnalysisSnapshot: Sendable {
     public var frequentPlaces: [FrequentPlace]
     /// Person/pet groups (confirmed and unconfirmed).
     public var groups: [ObservationGroup]
+    /// Places the user said they are often at (Trips/RecurringPlaces.swift).
+    public var recurringPlaces: [RecurringPlace]
 
-    public init(facts: [AssetFacts], trips: [Trip] = [], frequentPlaces: [FrequentPlace] = [], groups: [ObservationGroup] = []) {
+    public init(facts: [AssetFacts], trips: [Trip] = [], frequentPlaces: [FrequentPlace] = [], groups: [ObservationGroup] = [],
+                recurringPlaces: [RecurringPlace] = []) {
         self.facts = facts
         self.trips = trips
         self.frequentPlaces = frequentPlaces
         self.groups = groups
+        self.recurringPlaces = recurringPlaces
     }
 }
 
@@ -38,6 +42,9 @@ public struct ProposalEngine: Sendable {
         if areas.contains(.places) { result += placeProposals(usable, profile: profile) }
         if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile) }
         if areas.contains(.frequentPlaces) { result += frequentPlaceProposals(analysis.frequentPlaces, facts: analysis.facts) }
+        // A place the user is often at gets one album instead of its trips, so it comes with
+        // either area (Trips/RecurringPlaces.swift).
+        if areas.contains(.frequentPlaces) || areas.contains(.trips) { result += recurringPlaceProposals(analysis.recurringPlaces, facts: usable) }
         if areas.contains(.chronology) { result += chronologyProposals(usable) }
         if areas.contains(.mediaTypes) { result += mediaTypeProposals(usable) }
         if areas.contains(.screenshots) { result += screenshotProposals(usable, profile: profile) }

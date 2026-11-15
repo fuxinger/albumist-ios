@@ -23,10 +23,16 @@ struct FirstDeviceTestCoreTests {
         }
     }
 
+    /// Everyday photos in Austria: Germany is a country visited, not where the user lives
+    /// (that country gets no album of its own).
+    var livingInAustria: [AssetFacts] {
+        facts(250, from: 1_000, PlaceComponents(isoCountryCode: "AT", country: "Österreich", administrativeArea: "Wien", locality: "Wien"))
+    }
+
     @Test func aCountryWithAndWithoutItsCodeIsOneSuggestion() {
         let withCode = facts(40, from: 0, PlaceComponents(isoCountryCode: "DE", country: "Deutschland"))
         let withoutCode = facts(12, from: 100, PlaceComponents(country: "Deutschland"))
-        let proposals = engine { $0.enabledAreas = [.places] }.proposals(for: AnalysisSnapshot(facts: withCode + withoutCode))
+        let proposals = engine { $0.enabledAreas = [.places] }.proposals(for: AnalysisSnapshot(facts: withCode + withoutCode + livingInAustria))
         let germany = proposals.filter { $0.title == "Deutschland" }
         #expect(germany.count == 1)
         #expect(germany.first?.assetIDs.count == 52)
@@ -39,7 +45,7 @@ struct FirstDeviceTestCoreTests {
         let a = facts(20, from: 0, PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Bayern", locality: "Neustadt"))
         let b = facts(20, from: 100, PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Hessen", locality: "Neustadt"))
         let proposals = engine { $0.enabledAreas = [.places]; $0.places.levels = [.country, .locality] }
-            .proposals(for: AnalysisSnapshot(facts: a + b))
+            .proposals(for: AnalysisSnapshot(facts: a + b + livingInAustria))
         #expect(proposals.filter { $0.title == "Neustadt" }.count == 2)
     }
 

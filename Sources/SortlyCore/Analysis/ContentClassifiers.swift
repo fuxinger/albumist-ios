@@ -41,12 +41,22 @@ public struct ScreenshotClassifier: Sendable {
     /// so weak categories need two hits.
     static let minimumHits: [ScreenshotCategory: Int] = [.chat: 2, .mapNavigation: 3, .manual: 2, .technical: 2, .note: 1, .news: 2, .socialMedia: 2, .offer: 2, .realEstate: 3]
 
+    /// Short keywords count only as whole words: as parts of words they were everywhere
+    /// ("ust" in "August" and "Zustellung" made order screenshots invoices, "eta" in "Details",
+    /// "min" in "Admin", "read" in "already"). Longer ones still match inside compounds
+    /// ("rechnung" in "Rechnungsnummer").
+    static func contains(_ keyword: String, lower: String, tokens: Set<String>) -> Bool {
+        if keyword.count <= 4, keyword.allSatisfy(\.isLetter) { return tokens.contains(keyword) }
+        return lower.contains(keyword)
+    }
+
     public func classify(text: String, barcodePayloads: [String] = [], imageLabels: Set<String> = []) -> Result {
         let lower = text.lowercased()
+        let tokens = Set(lower.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty })
         var categories: [ScreenshotCategory: Reliability] = [:]
         var terms: [ScreenshotCategory: [String]] = [:]
         for (category, words) in Self.keywords {
-            let hits = words.filter { lower.contains($0) }
+            let hits = words.filter { Self.contains($0, lower: lower, tokens: tokens) }
             let needed = Self.minimumHits[category] ?? 1
             guard hits.count >= needed else { continue }
             terms[category] = hits

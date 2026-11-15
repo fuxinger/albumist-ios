@@ -129,7 +129,9 @@ struct FirstDeviceTestTests {
         #expect(snapshot.scope == .year(2026))
         let in2026 = Set(s.year2026)
         #expect(snapshot.proposals.allSatisfy { Set($0.assetIDs).isSubset(of: in2026) })
-        #expect(snapshot.proposals.contains { $0.title.contains("Garda") || $0.title.contains("Italien") })
+        // The Lake Garda trip (the fake geocoder knows the town, Malcesine); Italy was seen on
+        // that trip only, so the trip is its album.
+        #expect(snapshot.proposals.contains { $0.kind == .trip && $0.title.hasPrefix("Malcesine") })
         #expect(!snapshot.proposals.contains { $0.title.hasPrefix("Rom") })
         #expect(try await s.pipeline.storedScope() == .year(2026))
     }

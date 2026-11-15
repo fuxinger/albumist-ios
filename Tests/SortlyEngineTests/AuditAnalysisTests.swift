@@ -86,7 +86,7 @@ struct AuditAnalysisTests {
         let s = try PipelineTests().setup()
         _ = try await s.pipeline.run()
         let first = try #require(try await s.pipeline.latestProposals())
-        let trip = try #require(first.proposals.first { $0.kind == .trip && $0.title.hasPrefix("Rom ·") })
+        let trip = try #require(first.proposals.first { $0.kind == .trip && $0.title.hasPrefix("Rom,") })
         try await s.store.addOverride(UserOverride(scope: .source(trip.id), decision: .rejectProposal))
 
         // An older photo of the trip arrives (shared by a friend), and the first one is deleted.
@@ -104,7 +104,7 @@ struct AuditAnalysisTests {
         let rome = try #require(trips.first { $0.geotaggedAssetIDs.contains("imported-earlier") })
         #expect(rome.id == trip.id)
         let next = try #require(try await s.pipeline.latestProposals())
-        #expect(!next.proposals.contains { $0.kind == .trip && $0.title.hasPrefix("Rom ·") })
+        #expect(!next.proposals.contains { $0.kind == .trip && $0.title.hasPrefix("Rom,") })
     }
 
     // MARK: 2.2 / 2.3 / 2.5 store invalidation
@@ -427,7 +427,7 @@ struct AuditAnalysisTests {
         _ = try await pipeline.run()
         #expect(await reader.applied)
         let snapshot = try #require(try await pipeline.latestProposals())
-        let trip = try #require(snapshot.proposals.first { $0.title.hasPrefix("Rom ·") })
+        let trip = try #require(snapshot.proposals.first { $0.title.hasPrefix("Rom,") })
         #expect(snapshot.matches[trip.id]?.best?.albumID == "rom")
         #expect(try await store.loadInventory()["rom"] != nil)
     }

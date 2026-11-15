@@ -13,10 +13,33 @@ struct NamingTests {
         #expect(de.format(start: Fixture.date("2025-12-28"), end: Fixture.date("2026-01-04")) == "28.12.2025–04.01.2026")
     }
 
+    /// "Marokko, Mai 2025" since the first device test (15.11.); the exact days stay available.
     @Test func defaultTripTemplate() {
-        let title = NamingTemplate.tripDefault.render(
-            .init(place: "Gardasee", start: Fixture.date("2026-08-03"), end: Fixture.date("2026-08-14")), formatter: de)
-        #expect(title == "Gardasee · 03.08.–14.08.2026")
+        let values = NamingTemplate.Values(place: "Gardasee", start: Fixture.date("2026-08-03"), end: Fixture.date("2026-08-14"))
+        #expect(NamingTemplate.tripDefault.render(values, formatter: de) == "Gardasee, August 2026")
+        #expect(NamingTemplate.tripDateRange.render(values, formatter: de) == "Gardasee · 03.08.–14.08.2026")
+        var precise = values
+        precise.preciseDates = true
+        #expect(NamingTemplate.tripDefault.render(precise, formatter: de) == "Gardasee, 3.–14. August 2026")
+    }
+
+    @Test func periodsInWords() {
+        let en = DateRangeFormatter(language: .english, timeZone: Fixture.utc)
+        let day = (Fixture.date("2026-07-12 09:00"), Fixture.date("2026-07-12 18:00"))
+        #expect(de.period(start: day.0, end: day.1) == "12. Juli 2026")
+        #expect(en.period(start: day.0, end: day.1) == "12 July 2026")
+        let may = (Fixture.date("2025-05-03"), Fixture.date("2025-05-12"))
+        #expect(de.period(start: may.0, end: may.1) == "Mai 2025")
+        #expect(en.period(start: may.0, end: may.1) == "May 2025")
+        #expect(de.period(start: may.0, end: may.1, precise: true) == "3.–12. Mai 2025")
+        #expect(en.period(start: may.0, end: may.1, precise: true) == "3–12 May 2025")
+        let summer = (Fixture.date("2025-07-28"), Fixture.date("2025-08-09"))
+        #expect(de.period(start: summer.0, end: summer.1) == "Juli–August 2025")
+        #expect(de.period(start: summer.0, end: summer.1, precise: true) == "28. Juli – 9. August 2025")
+        let newYear = (Fixture.date("2024-12-29"), Fixture.date("2025-01-04"))
+        #expect(de.period(start: newYear.0, end: newYear.1) == "Dezember 2024 – Januar 2025")
+        #expect(en.period(start: newYear.0, end: newYear.1) == "December 2024 – January 2025")
+        #expect(de.period(start: newYear.0, end: newYear.1, precise: true) == "29. Dezember 2024 – 4. Januar 2025")
     }
 
     @Test func alternativeTemplates() {

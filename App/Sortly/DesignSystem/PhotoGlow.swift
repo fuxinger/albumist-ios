@@ -59,10 +59,13 @@ struct PhotoGlow: View {
                     [0, 1], [1, 1],
                 ], colors: [
                     colors[0], colors[1],
-                    colors[2].opacity(0.55), colors[3].opacity(0.55),
+                    colors[2].opacity(0.3), colors[3].opacity(0.3),
                     .clear, .clear,
                 ])
-                .opacity(scheme == .dark ? 0.5 : 0.36)
+                // The colour sits behind the title and the grey caption under it (country
+                // screen: "Rom und Florenz", "20 Fotos"). At 36 % with a 55 % middle the audit
+                // reported "Contrast failed" there; the wash now fades out above the text.
+                .opacity(scheme == .dark ? 0.45 : 0.3)
                 .transition(.opacity)
             }
         }

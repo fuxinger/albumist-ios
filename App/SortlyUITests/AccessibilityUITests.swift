@@ -61,19 +61,20 @@ final class AccessibilityUITests: XCTestCase {
         var atlas: String
         var shareAtlas: String
         var searchQuery: String
+        var country: String
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: "Vorschläge prüfen",
                                   suggestionTitle: "Vorschlag", rowMarker: "Aufnahmen",
                                   starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Umsetzen",
                                   applyNow: "Jetzt umsetzen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
-                                  shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom")
+                                  shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom", country: "Italien")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: "Review",
                                    suggestionTitle: "Suggestion", rowMarker: "item",
                                    starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Apply",
                                    applyNow: "Apply now", undo: "Undo", atlas: "Travel Atlas",
-                                   shareAtlas: "Share Travel Atlas", searchQuery: "Rome")
+                                   shareAtlas: "Share Travel Atlas", searchQuery: "Rome", country: "Italy")
     }
 
     // MARK: Tests
@@ -235,6 +236,13 @@ final class AccessibilityUITests: XCTestCase {
             if !short {
                 app.swipeUp(); app.swipeUp(); sleep(1)
                 check("\(tag) atlas lower", english: english)
+                // A country: its photo colours sit behind the title and caption.
+                let country = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", w.country)).firstMatch
+                if tap(country, "\(tag) open country", timeout: 10) {
+                    sleep(2)
+                    check("\(tag) country", english: english)
+                    back(); sleep(1)
+                }
                 app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
                     sleep(3)

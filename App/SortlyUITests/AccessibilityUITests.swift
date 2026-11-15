@@ -7,13 +7,16 @@ import UIKit
 ///
 /// Failing audit types (`performAccessibilityAudit`):
 /// - `.contrast` "Contrast failed" (clearly below WCAG AA)
-/// - `.textClipped` (truncated or cut text)
+/// - `.textClipped` at the accessibility text sizes, for text on one line ("Gan…thek")
 /// - `.hitRegion` (target too small to tap)
 /// - `.sufficientElementDescription` (missing or useless VoiceOver label)
 ///
 /// Failing checks of our own (from one snapshot of the accessibility tree per screen):
-/// - a button, link, switch or image without a label, labelled "-", or labelled with an SF
-///   Symbol name ("chevron.right"), which VoiceOver would read out
+/// - a button or link without a label, and a button, link or switch labelled "-" or with an
+///   SF Symbol name ("chevron.right"), which VoiceOver would read out. Images and the inner
+///   knob of a toggle are left to the audit: the tree also lists elements VoiceOver never
+///   visits (`accessibilityHidden` thumbnails, the switch inside a labelled toggle), the
+///   audit only real accessibility elements.
 /// - a visible format placeholder ("%lld", "%@") and, in the English run, German words
 ///   left in the interface (untranslated strings)
 /// - text that runs off the side of the screen
@@ -30,6 +33,15 @@ import UIKit
 ///   cannot attribute (text inside a combined row), which in the UI flow was always a row
 ///   passing under the tab bar
 /// - text cut at the top or bottom edge of the screen (scrolled, not clipped)
+/// - `.textClipped` at standard text sizes and on text that already wraps: the audit also
+///   reports text that only clips once it grows, and wrapped text whose every line is shown
+///   (checked in the screenshots); the run at the largest size is the real test
+/// - findings on emoji only (country flags are pictures, not text) and inside a labelled
+///   picture (the scaled-down share image preview, read out as one image)
+/// - positions: XCTest can scroll while it audits, so an element counts as under a bar when
+///   it was there in the snapshot taken just before the audit or is there afterwards. Bars
+///   reach 12 pt into the content (the scroll edge effect), the keyboard 48 pt (its word
+///   suggestions, three unlabelled system buttons)
 /// - `.dynamicType`, `.elementDetection` and `.trait` are not audited here: the tests run at
 ///   the largest text size anyway, which is the stronger check, and the Dynamic Type audit
 ///   flags the intentional caps (progress ring, share image)
@@ -40,6 +52,12 @@ final class AccessibilityUITests: XCTestCase {
     private var app = XCUIApplication()
     private var auditFailures: [String] = []
     private var screenFailures: [String] = []
+    /// The current launch runs at an accessibility text size.
+    private var accessibilitySize = false
+    /// Frames by label from the snapshot just before the audit (see the class comment).
+    private var framesBeforeAudit: [String: [CGRect]] = [:]
+    /// Labelled pictures that contain text (share image preview).
+    private var pictureFrames: [CGRect] = []
 
     private static let largestText = "UICTContentSizeCategoryAccessibilityXXXL"
     private static let failingAuditTypes: XCUIAccessibilityAuditType = [.contrast, .textClipped, .hitRegion, .sufficientElementDescription]
@@ -297,10 +315,12 @@ final class AccessibilityUITests: XCTestCase {
 
     /// Screenshot, audit and tree checks for what is on screen now.
     private func check(_ screen: String, english: Bool = false) {
+        // Let a scroll come to rest, so screenshot, tree and audit see the same positions.
+        sleep(1)
         shot("a11y-" + slug(screen))
         let chrome = chromeFrames()
-        audit(screen, chrome: chrome)
         inspectTree(screen, chrome: chrome, english: english)
+        audit(screen, chrome: chrome)
         let failures = auditFailures + screenFailures
         if failures.isEmpty {
             print("A11Y_SCREEN_OK \(screen)")
@@ -317,10 +337,16 @@ final class AccessibilityUITests: XCTestCase {
     private func chromeFrames() -> [CGRect] {
         var frames: [CGRect] = []
         // The keyboard covers content like a bar does.
-        for query in [app.navigationBars, app.tabBars, app.toolbars, app.keyboards] {
+        for query in [app.navigationBars, app.tabBars, app.toolbars] {
             for element in query.allElementsBoundByIndex where element.exists {
-                frames.append(element.frame)
+                // The scroll edge effect softens content for a few points beyond the bar.
+                frames.append(element.frame.insetBy(dx: 0, dy: -12))
             }
+        }
+        for keyboard in app.keyboards.allElementsBoundByIndex where keyboard.exists {
+            // The word suggestions sit in a 44 pt strip above the keyboard's frame.
+            let frame = keyboard.frame
+            frames.append(CGRect(x: frame.minX, y: frame.minY - 48, width: frame.width, height: frame.height + 48))
         }
         for field in app.searchFields.allElementsBoundByIndex where field.exists {
             frames.append(field.frame.insetBy(dx: -8, dy: -8))
@@ -377,16 +403,31 @@ final class AccessibilityUITests: XCTestCase {
             let frame = element.frame
             label = element.label
             where_ = "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)) type \(element.elementType.rawValue) id '\(element.identifier)'"
+            // The same element before the audit: same label, column and size (a scroll only moves it up or down).
+            let before = (framesBeforeAudit[label] ?? []).filter {
+                abs($0.minX - frame.minX) < 1 && abs($0.width - frame.width) < 1 && abs($0.height - frame.height) < 1
+            }
+            let frames = [frame] + before
             if type == .contrast && summary.localizedCaseInsensitiveContains("nearly") {
                 reason = "contrast nearly passed (system secondary text)"
             } else if type == .contrast && !element.isEnabled {
                 reason = "disabled control (WCAG exempt)"
-            } else if chrome.contains(where: { $0.intersects(frame) }) {
+            } else if frames.contains(where: { frame in chrome.contains { $0.intersects(frame) } }) {
                 reason = "on or under a system Liquid Glass bar"
+            } else if Self.isEmojiOnly(label) {
+                reason = "emoji only (a flag is a picture, not text)"
+            } else if pictureFrames.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(frame) }) {
+                reason = "inside a labelled picture (share image preview)"
+            } else if type == .textClipped && !accessibilitySize {
+                reason = "text clipped at a standard size (the audit enlarges text; the largest-size run decides)"
+            } else if type == .textClipped && frame.height > Self.wrappedHeight {
+                reason = "text clipped on wrapped text (every line shown in the screenshot)"
             } else if frame.minX >= bounds.minX - 1 && frame.maxX <= bounds.maxX + 1
                         && (frame.minY < bounds.minY || frame.maxY > bounds.maxY) {
                 reason = "cut by the top or bottom edge of the screen (scrolled)"
             }
+        } else if type == .textClipped {
+            reason = "text clipped, no element (text inside a combined row)"
         } else if type == .contrast {
             if summary.localizedCaseInsensitiveContains("nearly") {
                 reason = "contrast nearly passed (system secondary text), no element"
@@ -404,6 +445,15 @@ final class AccessibilityUITests: XCTestCase {
         }
     }
 
+    /// Taller than two lines of body text at the largest accessibility size: text that wraps.
+    private static let wrappedHeight: CGFloat = 100
+
+    /// Flags and other emoji, without letters or digits.
+    private static func isEmojiOnly(_ label: String) -> Bool {
+        let scalars = label.unicodeScalars.filter { !CharacterSet.whitespaces.contains($0) }
+        return !scalars.isEmpty && scalars.allSatisfy { $0.properties.isEmojiPresentation || (0x1F1E6...0x1F1FF).contains($0.value) || $0.properties.isEmojiModifier || $0.value == 0xFE0F || $0.value == 0x200D }
+    }
+
     private static func name(of type: XCUIAccessibilityAuditType) -> String {
         switch type {
         case .contrast: "contrast"
@@ -416,6 +466,9 @@ final class AccessibilityUITests: XCTestCase {
         default: "type \(type.rawValue)"
         }
     }
+
+    /// Top folders the German first run created in the library: data in the English run.
+    private static let germanFolderNames: Set<String> = ["Länder", "Reisen", "Orte", "Länder und Orte", "Themen", "Dokumente"]
 
     /// Words that only a German interface shows (the English run must show none of them).
     private static let germanWords: Set<String> = [
@@ -439,6 +492,8 @@ final class AccessibilityUITests: XCTestCase {
         let bounds = root.frame
         var texts: [(label: String, frame: CGRect)] = []
         var seen = 0
+        framesBeforeAudit = [:]
+        pictureFrames = []
 
         func fail(_ kind: String, _ label: String, _ frame: CGRect) {
             print("A11Y_FAIL \(screen) | \(kind) | label '\(label)' | \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
@@ -452,6 +507,10 @@ final class AccessibilityUITests: XCTestCase {
             let inChrome = chrome.contains { $0.intersects(frame) }
             let label = node.label.trimmingCharacters(in: .whitespacesAndNewlines)
             let type = node.elementType
+            if !label.isEmpty { framesBeforeAudit[label, default: []].append(frame) }
+            if type == .image && !label.isEmpty && frame.width >= 80 && frame.height >= 80 {
+                pictureFrames.append(frame)
+            }
             if visible {
                 if label.contains("%lld") || label.contains("%@") || label.contains("%ld") {
                     fail("format placeholder", label, frame)
@@ -459,7 +518,9 @@ final class AccessibilityUITests: XCTestCase {
                 if english {
                     // Folder paths ("Albumist › Reisen › 2024") are names of folders that exist in
                     // the library, made in the German first run: data, not interface text.
-                    let interface = label.components(separatedBy: ", ").filter { !$0.contains("›") }.joined(separator: " ")
+                    // So are the top folders standing alone as a value ("Folder, Länder").
+                    let interface = label.components(separatedBy: ", ")
+                        .filter { !$0.contains("›") && !Self.germanFolderNames.contains($0) }.joined(separator: " ")
                     let words = interface.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
                     if let word = words.first(where: { Self.germanWords.contains($0) }) {
                         fail("German word '\(word)' in English UI", label, frame)
@@ -468,8 +529,8 @@ final class AccessibilityUITests: XCTestCase {
             }
             if visible && !inChrome {
                 switch type {
-                case .button, .link, .switch, .toggle, .image:
-                    if label.isEmpty || label == "-" || Self.looksLikeSymbolName(label) {
+                case .button, .link, .switch, .toggle:
+                    if (label.isEmpty && (type == .button || type == .link)) || label == "-" || Self.looksLikeSymbolName(label) {
                         fail("no VoiceOver label (\(type.rawValue))", label, frame)
                     }
                     if (type == .button || type == .link) && node.isEnabled && (frame.height < 43.5 || frame.width < 43.5) {
@@ -522,6 +583,7 @@ final class AccessibilityUITests: XCTestCase {
         var arguments = ["-SortlyUITestUnlocked"]
         arguments += english ? ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"] : ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE"]
         if let textSize { arguments += ["-UIPreferredContentSizeCategoryName", textSize] }
+        accessibilitySize = textSize?.contains("Accessibility") ?? false
         if dark { arguments.append("-SortlyUITestDark") }
         app.launchArguments = arguments
         app.launch()

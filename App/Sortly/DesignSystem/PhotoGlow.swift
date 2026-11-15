@@ -44,7 +44,6 @@ enum PhotoPalette {
 struct PhotoGlow: View {
     var id: AssetID?
     @State private var colors: [Color] = []
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -65,7 +64,9 @@ struct PhotoGlow: View {
                 // The colour sits behind the title and the grey caption under it (country
                 // screen: "Rom und Florenz", "20 Fotos"). At 36 % with a 55 % middle the audit
                 // reported "Contrast failed" there; the wash now fades out above the text.
-                .opacity(scheme == .dark ? 0.45 : 0.3)
+                // Dark mode at 45 % lifted the black enough to fail white headlines at the
+                // largest text size; at 30 % white keeps 9:1 on any photo colour.
+                .opacity(0.3)
                 .transition(.opacity)
             }
         }

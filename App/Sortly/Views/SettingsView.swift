@@ -22,6 +22,7 @@ struct SettingsView: View {
                         Text("Nur \(String(year))").tag(Int?.some(year))
                     }
                 }
+                .adaptivePickerStyle()
             } header: {
                 Text("Mediathek")
             } footer: {
@@ -55,6 +56,7 @@ struct SettingsView: View {
                     Text("Deutsch").tag(TitleLanguage.german)
                     Text("Englisch").tag(TitleLanguage.english)
                 }
+                .adaptivePickerStyle()
                 LabeledContent("Hauptordner") {
                     TextField("Keiner", text: $model.settings.rootFolderTitle)
                         .multilineTextAlignment(.trailing)

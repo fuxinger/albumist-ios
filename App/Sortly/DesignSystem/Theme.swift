@@ -37,7 +37,19 @@ enum Theme {
     static var buttonShape: RoundedRectangle { RoundedRectangle(cornerRadius: 25, style: .continuous) }
     static let background = Color(uiColor: .systemGroupedBackground)
     static let card = Color(uiColor: .secondarySystemGroupedBackground)
-    static let secondaryText = Color.secondary
+    /// Secondary text that has to hold 4.5:1 where the system grey does not: on the photo
+    /// colour wash (suggestion and country headers). The system `secondaryLabel` is 3.4:1 on
+    /// white and drops below 3:1 on a tinted wash ("Contrast failed" in the audit). This grey:
+    /// light 9.5:1 on white, 8.5:1 on the grouped background, 4.7:1 on the strongest wash;
+    /// dark 12.5:1 on black, 10.1:1 on cards, 5.4:1 on the strongest wash; Increase Contrast
+    /// (no wash) 11.6:1 and 14.5:1. Still a grey, so the hierarchy stays calm.
+    static let secondaryText = Color(uiColor: UIColor { traits in
+        let high = traits.accessibilityContrast == .high
+        if traits.userInterfaceStyle == .dark {
+            return UIColor(red: high ? 0.84 : 0.78, green: high ? 0.84 : 0.78, blue: high ? 0.86 : 0.81, alpha: 1)
+        }
+        return UIColor(red: high ? 0.22 : 0.27, green: high ? 0.22 : 0.27, blue: high ? 0.24 : 0.30, alpha: 1)
+    })
 
     /// Area colors: distinct in lightness, not only hue (accessibility). Dark mode uses
     /// lighter variants so text in these colors keeps at least 4.5:1 contrast there too
@@ -246,6 +258,29 @@ extension View {
     /// At least 44 × 44 pt to tap (HIG), without changing how the control looks.
     func minimumHitTarget() -> some View {
         frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+    }
+}
+
+/// A menu picker squeezes its value into one line next to or under the label; at the
+/// accessibility text sizes the value ends in "…" ("Gan…thek", audit: "Text clipped").
+/// There the picker becomes a navigation row whose choices are full-width, wrapping rows.
+struct AdaptivePickerStyle: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if typeSize.isAccessibilitySize {
+            content.pickerStyle(.navigationLink)
+        } else {
+            content.pickerStyle(.menu)
+        }
+    }
+}
+
+extension View {
+    /// Menu picker, or a navigation row at the accessibility text sizes (needs a NavigationStack).
+    func adaptivePickerStyle() -> some View {
+        modifier(AdaptivePickerStyle())
     }
 }
 

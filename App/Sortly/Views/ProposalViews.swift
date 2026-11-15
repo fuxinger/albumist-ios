@@ -254,7 +254,7 @@ struct ProposalDetailView: View {
                         }
                     }
                     ForEach(Array(proposal.reasons.enumerated()), id: \.offset) { _, reason in
-                        Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(.secondary)
+                        Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(Theme.secondaryText) // sits on the photo wash
                     }
                 }
 

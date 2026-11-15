@@ -1314,10 +1314,12 @@ final class AppModel {
             execution = ExecutionState(planID: plan.id, failure: String(localized: "Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen."))
             return
         }
-        // An undo runs only once the results of finished plans are stored (after a full disk
-        // they may still wait): the albums of the plan it takes back are then Albumist's
-        // records, and nothing it does is later taken for the user's doing (review of 6c6ef79).
-        if plan.reverts != nil, !(await storeWaitingResults()) { return }
+        // Every plan runs only once the results of finished plans are stored (after a full disk
+        // they may still wait), so album records are written in run order: for an undo, the
+        // albums of the plan it takes back are Albumist's records (review of 6c6ef79); for any
+        // other plan, results stored late would rebuild a shared album's record without this
+        // plan's photos, and undoing both would leave the album behind (review of 6b34b20).
+        if !(await storeWaitingResults()) { return }
         var confirmed = plan
         if confirmed.status == .draft { confirmed.status = .confirmed }
         if confirmed.confirmedAt == nil { confirmed.confirmedAt = Date() }
@@ -1645,8 +1647,11 @@ final class AppModel {
                            execution.failure].compactMap { $0 }.joined(separator: "\n\n")
             case .notStarted:
                 // Nothing was taken back: the receipt offers "Rückgängig machen" (review of 6c6ef79).
-                message = [String(localized: "Albumist konnte das unterbrochene Umsetzen gerade nicht zurücknehmen. Es steht jetzt unter Einstellungen › Verlauf. Dort kannst du es zurücknehmen."),
-                           execution.failure].compactMap { $0 }.joined(separator: "\n\n")
+                // Keeps the reason storing earlier results failed (e.g. a full disk), which
+                // finalize put into `message` (review of 6b34b20).
+                let reasons = [execution.failure, message].compactMap { $0 }
+                message = ([String(localized: "Albumist konnte das unterbrochene Umsetzen gerade nicht zurücknehmen. Es steht jetzt unter Einstellungen › Verlauf. Dort kannst du es zurücknehmen.")]
+                           + reasons.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }).joined(separator: "\n\n")
             case .undoInterrupted, .resultsNotStored:
                 // Offered on the overview again: the undo that was cut off, or the one that
                 // runs once the plan's results are stored. Run and finalization said why.

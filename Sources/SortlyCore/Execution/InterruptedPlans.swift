@@ -38,7 +38,11 @@ extension ChangePlan {
         for step in steps {
             guard let source = step.sourceID else { continue }
             switch step.operation {
-            case .createAlbum(let key, _, _), .createFolder(let key, _, _):
+            case .createFolder:
+                // A folder carries the id of the first suggestion that needed it, but making
+                // only the folder carries out no suggestion (review of 6b34b20).
+                continue
+            case .createAlbum(let key, _, _):
                 if case .succeeded = step.state { result.insert(source) } else if resolvedKeys[key] != nil { result.insert(source) }
             default:
                 if case .succeeded = step.state { result.insert(source) }

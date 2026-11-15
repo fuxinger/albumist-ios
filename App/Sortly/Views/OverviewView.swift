@@ -267,6 +267,8 @@ struct OverviewView: View {
                     }
                 }
                 .font(.headline)
+                // UI runs read how the image requests ended (all demo photos were unreadable there).
+                .accessibilityValue(UITestSupport.isRunning ? "image loads: \(ImageLoadStats.summary)" : "")
                 if let date = model.analysis.lastRun {
                     Text("Zuletzt geprüft \(date.formatted(.relative(presentation: .named)))").font(.subheadline).foregroundStyle(.secondary)
                 } else {

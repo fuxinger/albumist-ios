@@ -1698,6 +1698,7 @@ final class AppModel {
         case .album: scopeText = "album"
         }
         lines.append("analysis scope \(scopeText), photos \(analysisCounts.photos), analysed \(analysisCounts.analyzed), unreadable \(analysisCounts.unreadable), running \(analysis.isRunning), waiting \(analysis.waiting?.rawValue ?? "no"), needs resume \(analysis.needsResume), background task \(ContinuedAnalysis.isActive)")
+        lines.append("image loads \(ImageLoadStats.summary)")
         lines.append("decisions copy \(lastSafetyBackup.map { iso.string(from: $0) } ?? "none"), albums waiting for access \(pendingLibraryRestore != nil)")
         if let store {
             let overrides = (try? await store.overrides().count) ?? -1

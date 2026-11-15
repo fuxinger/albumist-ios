@@ -12,12 +12,19 @@ enum DeletionLog {
         var missing = 0
         var notDeletable = 0
         var attempts = 0
+        /// How long each request took in Photos. Well under a second means iOS showed no
+        /// question (nobody reads and answers it that fast).
+        var seconds: [Double] = []
+        /// Requests sent although Albumist was not on screen (waited for it in vain).
+        var notOnScreen = 0
         var stillThere = 0
         var outcome = "?"
 
         var line: String {
-            "requested \(requested), albums \(albums), folders \(folders) (kept \(foldersKept)), missing \(missing), "
-                + "not deletable \(notDeletable), attempts \(attempts), still there \(stillThere), \(outcome)"
+            let took = seconds.map { String(format: "%.2f s", $0) }.joined(separator: ", ")
+            return "requested \(requested), albums \(albums), folders \(folders) (kept \(foldersKept)), missing \(missing), "
+                + "not deletable \(notDeletable), attempts \(attempts) (\(took)), not on screen \(notOnScreen), "
+                + "still there \(stillThere), \(outcome)"
         }
     }
 

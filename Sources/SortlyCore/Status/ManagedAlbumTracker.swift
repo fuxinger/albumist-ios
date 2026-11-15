@@ -78,12 +78,21 @@ public struct ManagedAlbumTracker: Sendable {
         public var newOverrides: [UserOverride]
     }
 
-    public func reconcile(_ states: [ManagedAlbumState], with inventory: CollectionInventory, now: Date = Date()) -> Reconciliation {
+    /// - Parameter changing: albums an unfinished plan of Albumist is still changing (an
+    ///   interrupted run or undo). What is missing there may be Albumist's own doing, not the
+    ///   user's: such an album is compared again once that plan is settled, so an interrupted
+    ///   undo never turns into "deleted by the user" decisions the user did not make.
+    public func reconcile(_ states: [ManagedAlbumState], with inventory: CollectionInventory, changing: Set<CollectionID> = [],
+                          now: Date = Date()) -> Reconciliation {
         var changes: [ExternalAlbumChange] = []
         var updated: [ManagedAlbumState] = []
         var overrides: [UserOverride] = []
 
         for var state in states {
+            if changing.contains(state.albumID) {
+                updated.append(state)
+                continue
+            }
             guard let album = inventory[state.albumID] else {
                 // Deleted on purpose by the user: never silently re-create it (for any of the
                 // suggestions it stood for).

@@ -24,13 +24,14 @@ struct PipelineTests {
     /// Munich everyday life, a Rome trip with a dog, and screenshots (one only in iCloud).
     func setup(settings configure: (inout OrganizationSettings) -> Void = { _ in }, cloudOnly: Bool = true, pauseAfter: Int? = nil, batchSize: Int = 10) throws -> Setup {
         var lib = LibraryBuilder()
-        lib.daily(from: "2026-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-05-12", "2026-05-19")])
+        let home = lib.daily(from: "2026-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-05-12", "2026-05-19")])
         let rome = lib.daily(from: "2026-05-12", to: "2026-05-19", at: Fixture.Places.rome, perDay: 4, hour: 10)
         var screenshots: [AssetID] = []
         for day in 1...5 {
             screenshots.append(lib.photo(at: Fixture.date("2026-06-0\(day) 20:00"), nil, subtypes: .screenshot))
         }
-        let dogs = Array(rome.prefix(20))
+        // A dog in Rome and at home: a theme seen on one trip only would be that trip's album.
+        let dogs = Array(rome.prefix(10)) + Array(home.suffix(10))
         let dogSet = Set(dogs)
         let shots = Set(screenshots)
         let analyzer = FakeContentAnalyzer(
@@ -62,8 +63,9 @@ struct PipelineTests {
         #expect(report.textWaitingForOriginal == 1) // iCloud-only, network not allowed
         let snapshot = try #require(try await s.pipeline.latestProposals())
         let titles = Set(snapshot.proposals.map(\.title))
-        #expect(titles.contains("Rom · 12.05.–19.05.2026"))
-        #expect(titles.contains("Italien"))
+        #expect(titles.contains("Rom, Mai 2026"))
+        // Italy was seen on this one trip only: the trip is its album.
+        #expect(!titles.contains("Italien"))
         #expect(titles.contains("Hunde"))
         #expect(titles.contains("Bestellungen"))
         #expect(snapshot.matches.count == snapshot.proposals.count)
@@ -99,7 +101,7 @@ struct PipelineTests {
         )
         _ = try await pipeline.run()
         let snapshot = try #require(try await pipeline.latestProposals())
-        let trip = try #require(snapshot.proposals.first { $0.title.hasPrefix("Rom ·") })
+        let trip = try #require(snapshot.proposals.first { $0.title.hasPrefix("Rom,") })
         #expect(snapshot.matches[trip.id]?.best?.albumID == "rom")
         #expect(try await s.store.loadInventory()["rom"] != nil)
     }
@@ -135,7 +137,7 @@ struct PipelineTests {
         #expect(first.pausedBecause != nil)
         #expect(first.earlyProposals)
         let early = try #require(try await s.pipeline.latestProposals())
-        #expect(early.proposals.contains { $0.title == "Rom · 12.05.–19.05.2026" })
+        #expect(early.proposals.contains { $0.title == "Rom, Mai 2026" })
         #expect(!early.proposals.contains { $0.title == "Hunde" }) // needs the image analysis
         s.conditions.set(pauseAfterChecks: nil)
         let second = try await s.pipeline.run()
@@ -143,7 +145,7 @@ struct PipelineTests {
         let full = try #require(try await s.pipeline.latestProposals())
         #expect(full.proposals.contains { $0.title == "Hunde" })
         // Same id before and after, so a decision made early still applies.
-        let earlyTrip = early.proposals.first { $0.title.hasPrefix("Rom ·") }?.id
+        let earlyTrip = early.proposals.first { $0.title.hasPrefix("Rom,") }?.id
         #expect(earlyTrip != nil && full.proposals.contains { $0.id == earlyTrip })
     }
 

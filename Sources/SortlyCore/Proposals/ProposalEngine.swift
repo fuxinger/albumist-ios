@@ -166,8 +166,12 @@ public struct ProposalEngine: Sendable {
             if regular.outings.contains(trip.id) { continue }
             let places = trip.geotaggedAssetIDs.compactMap { byID[$0]?.gpsPlace }
             let (name, key, country) = Self.primaryPlaceName(places, kind: trip.kind, labels: labels, profile: profile)
-            let timeZone = places.compactMap(\.timeZoneIdentifier).first.flatMap(TimeZone.init(identifier:)) ?? calendar.timeZone
-            let formatter = DateRangeFormatter(language: settings.titleLanguage, timeZone: timeZone)
+            // The first day where the first photo was taken, the last day where the last one was
+            // (the photos are in time order): Munich – New York – Tokyo ends on Tokyo's date.
+            let zones = places.compactMap(\.timeZoneIdentifier)
+            let timeZone = zones.first.flatMap(TimeZone.init(identifier:)) ?? calendar.timeZone
+            let formatter = DateRangeFormatter(language: settings.titleLanguage, timeZone: timeZone,
+                                               endTimeZone: zones.last.flatMap(TimeZone.init(identifier:)))
             var path = [labels.folder(for: .trips)]
             if settings.trips.folderPerYear {
                 var cal = calendar
@@ -270,7 +274,7 @@ public struct ProposalEngine: Sendable {
     /// by name: a town name alone would join two different lakes of one district.
     struct RegularDestinations {
         struct Destination {
-            /// Photos of every trip day spent there.
+            /// Every photo taken there from the first visit to the last.
             var members: [AssetID]
             /// Fallback identity when the place has no name yet.
             var anchor: String
@@ -310,16 +314,27 @@ public struct ProposalEngine: Sendable {
         let clusters = GeoClusterer(epsilonMeters: Self.destinationRadius, minPoints: 1).cluster(points.map(\.point)).clusters
         var result = RegularDestinations()
         var routineMembers: [Int: Int] = [:]
-        let located = facts.values.compactMap { f in f.asset.usableLocation.map { (f.id, $0) } }
+        let located = facts.values.compactMap { f -> (id: AssetID, at: GeoCoordinate, date: Date)? in
+            guard let c = f.asset.usableLocation, let date = f.asset.creationDate else { return nil }
+            return (f.id, c, date)
+        }
         for cluster in clusters {
             let shortTrips = Set(cluster.memberIndices.filter { points[$0].short }.map { points[$0].trip })
             guard shortTrips.count >= Self.regularVisits else { continue }
-            // Every photo taken there, also on visits too short to count as a trip: the album of
-            // the parents' town holds every visit, the same set as that town's place album.
+            // Every photo taken there from the first visit to the last, also on visits too short
+            // to count as a trip: the album of the parents' town holds every visit. Nothing from
+            // before or after: somebody who lived in Hamburg until last year and now visits it
+            // gets the visits, not the years of everyday life there.
+            let visits = Set(cluster.memberIndices.map { points[$0].trip }).map { trips[$0] }
+            guard let first = visits.map(\.start).min(), let last = visits.map(\.end).max() else { continue }
+            let from = calendar.startOfDay(for: first)
+            let until = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: last)) ?? last
             let spots = GeoSpatialIndex(cellSize: Self.destinationRadius, points: cluster.memberIndices.map { (points[$0].point, $0) })
             let reach = (cluster.memberIndices.map { GeoMath.distance(points[$0].point, cluster.centroid) }.max() ?? 0) + Self.destinationRadius
-            let members = located.filter { GeoMath.distance($0.1, cluster.centroid) <= reach && !spots.query(near: $0.1, radius: Self.destinationRadius).isEmpty }
-                .map(\.0).sorted()
+            let members = located.filter { photo in
+                photo.date >= from && photo.date < until && GeoMath.distance(photo.at, cluster.centroid) <= reach
+                    && !spots.query(near: photo.at, radius: Self.destinationRadius).isEmpty
+            }.map(\.id).sorted()
             let anchor = String(format: "%.2f,%.2f", cluster.centroid.latitude, cluster.centroid.longitude)
             result.destinations.append(.init(members: members, anchor: anchor))
             for i in cluster.memberIndices where points[i].short { routineMembers[points[i].trip, default: 0] += points[i].members.count }

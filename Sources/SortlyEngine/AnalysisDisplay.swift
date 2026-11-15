@@ -248,6 +248,7 @@ public struct ProgressEstimator: Sendable {
         /// Everything measured in this step, for its average speed once it is done.
         var measuredItems = 0
         var measuredActive: Duration = .zero
+        var waitingForApple = false
     }
 
     public let rules: Rules
@@ -263,8 +264,13 @@ public struct ProgressEstimator: Sendable {
 
     public mutating func setWorkload(_ workload: AnalysisWorkload) { self.workload = workload }
 
-    /// A progress report of the run.
-    public mutating func record(step: AnalysisStep, completed: Int, total: Int, at now: Instant) {
+    /// A progress report of the run. `appleWait`: the report says the run waits for Apple's
+    /// geocoder (`Progress.waitLeft`). That time says nothing about the speed per item (the
+    /// limit is Apple's, and after its online budget the step resolves the rest offline in
+    /// seconds): it is not measured, and the speed settles again afterwards, but a time already
+    /// shown stays. Measured in the simulated run with a refusing geocoder: counted, the waits
+    /// put the finish time more than 5 min too late.
+    public mutating func record(step: AnalysisStep, completed: Int, total: Int, at now: Instant, appleWait: Bool = false) {
         guard var r = running, r.step == step else {
             if let r = running { keepMeasured(r) }
             running = Running(step: step, completed: completed, total: total, lastAt: now,
@@ -276,6 +282,17 @@ public struct ProgressEstimator: Sendable {
         let previous = r.completed
         r.completed = max(r.completed, completed)
         r.total = total
+        if appleWait {
+            r.waitingForApple = true
+            return
+        }
+        if r.waitingForApple {
+            r.waitingForApple = false
+            r.lastAt = now
+            r.samples = [Sample(active: r.active, completed: r.completed)]
+            r.settledFrom = Sample(active: r.active, completed: r.completed)
+            return
+        }
         guard let last = r.lastAt else {
             settle(&r, at: now)
             return
@@ -326,7 +343,7 @@ public struct ProgressEstimator: Sendable {
 
     /// Items per second of the running step, once trustworthy.
     public var rate: Double? {
-        guard let r = running, r.lastAt != nil, r.total > 1 else { return nil }
+        guard let r = running, r.lastAt != nil, !r.waitingForApple, r.total > 1 else { return nil }
         guard r.active - r.settledFrom.active >= rules.minActive,
               r.completed - r.settledFrom.completed >= rules.minItems,
               let first = r.samples.first, let last = r.samples.last else { return nil }

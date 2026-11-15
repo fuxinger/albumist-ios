@@ -145,6 +145,86 @@ struct FullRunDisplayTests {
         sim.finish()
     }
 
+    // MARK: The new card (progress display v3)
+
+    /// (g) P2: iOS holds the app for 10 minutes in the middle of the image analysis (no
+    /// continued task). The time in between is not counted: no finish time for 30 s after it
+    /// comes back (invariant 9), then a right one again.
+    @Test func backgroundGapResettles() async throws {
+        let sim = try Sim()
+        let suspended = Mutex(false)
+        sim.onProgress = { [weak sim] progress, _ in
+            guard progress.stage == .content, progress.total > 0,
+                  Double(progress.completed) >= 0.3 * Double(progress.total),
+                  suspended.withLock({ let was = $0; $0 = true; return !was }) else { return }
+            sim?.suspend(.seconds(600))
+        }
+        let run = await sim.run("g background")
+        sim.expectComplete(run)
+        #expect(suspended.withLock { $0 })
+        let late = sim.finishTimes.filter { entry in
+            guard case .at(let date) = entry.shown, entry.end - entry.t < .seconds(400) else { return false }
+            return abs(date.timeIntervalSince(SimClock.base.addingTimeInterval(entry.end.seconds))) > 120
+        }
+        #expect(late.isEmpty, "\(late.count) finish times more than 2 min off after the gap")
+        sim.finish()
+    }
+
+    /// (h) P8: an empty library finishes without a finish time and without a count standing.
+    @Test func emptyLibraryShowsNoTime() async throws {
+        let sim = try Sim(scale: 0.05, empty: true)
+        let run = await sim.run("h empty")
+        sim.expectComplete(run)
+        #expect(sim.finishTimes.isEmpty)
+        #expect(run.progress.compactMap(\.workload).first?.photos == 0)
+        sim.finish()
+    }
+
+    /// The workload is said exactly once per run, with the library's amounts; the bar's widths
+    /// come from it. "Gerade angesehen" never shows a screenshot (B4).
+    @Test func workloadIsSaidOnceWithTheLibrarysAmounts() async throws {
+        let sim = try Sim(scale: 0.2)
+        let run = await sim.run("workload")
+        sim.expectComplete(run)
+        let workloads = run.progress.compactMap(\.workload)
+        #expect(workloads.count == 1)
+        let w = try #require(workloads.first)
+        #expect(w.photos == sim.library.total)
+        #expect(w.located == sim.library.located)
+        #expect(w.screenshots == sim.library.screenshots)
+        #expect(w.contentLeft == sim.library.total)
+        #expect(w.textLeft == sim.library.screenshots)
+        let screenshots = Set(sim.library.assets.filter(\.isScreenshotLike).map(\.id))
+        let recent = run.progress.flatMap(\.recent)
+        #expect(!recent.isEmpty)
+        #expect(recent.allSatisfy { !screenshots.contains($0) })
+        #expect(run.progress.allSatisfy { $0.recent.count <= 3 })
+        // The second run has nothing left to look at.
+        let again = await sim.run("workload again")
+        let second = try #require(again.progress.compactMap(\.workload).first)
+        #expect(second.contentLeft == 0 && second.textLeft == 0)
+        sim.finish()
+    }
+
+    /// P16, point 3: the suggestions offered before the image analysis ("Schon fertig: …",
+    /// "Ansehen") keep their ids in the final set, so a decision made on them stays.
+    @Test func earlyProposalsKeepTheirIDs() async throws {
+        let sim = try Sim(scale: 0.2)
+        let paused = await sim.run("early", pause: .when(stage: .content, atLeast: 0.2))
+        #expect(paused.report?.earlyProposals == true)
+        let early = try #require(try await sim.pipeline.latestProposals())
+        let earlyIDs = Set(early.proposals.filter { [.trips, .places, .frequentPlaces].contains($0.kind.area) }.map(\.id))
+        #expect(!earlyIDs.isEmpty)
+        let done = AlreadyDone.counts(proposals: early.proposals, step: .content)
+        #expect(done.trips > 0 && done.places > 0, "\(done)")
+        let rest = await sim.run("final")
+        sim.expectComplete(rest)
+        let final = try #require(try await sim.pipeline.latestProposals())
+        let missing = earlyIDs.subtracting(final.proposals.map(\.id))
+        #expect(missing.isEmpty, "\(missing.count) of \(earlyIDs.count) early suggestions are not in the final set")
+        sim.finish()
+    }
+
     // MARK: Focused checks of the engine fixes
 
     /// A wait for Apple's geocoder (its limit of about 40 lookups a minute, or a refusal) is
@@ -264,7 +344,18 @@ final class SimClock: @unchecked Sendable {
 
     func onTick(_ hook: @escaping @Sendable (Duration) -> Void) { hooks.withLock { $0.append(hook) } }
 
+    /// iOS holds the app: time passes without any work and without the hooks.
+    func jump(_ d: Duration) { state.withLock { $0 += d } }
+
     var source: TimeSource { TimeSource(elapsed: { self.now }, sleep: { self.advance($0) }) }
+}
+
+extension Sim {
+    /// Logs a suspension in the run in progress and lets the time pass.
+    func suspend(_ d: Duration) {
+        currentLog?.add(.suspended(d), at: clock.now)
+        clock.jump(d)
+    }
 }
 
 /// The device's pace: `steps` (time after `anchor`, pace from then on); normal before.
@@ -426,6 +517,9 @@ struct SimEvent: Sendable {
         case waiting(PauseReason?)
         case pauseRequested
         case work(Stage)
+        /// iOS held the app (background without the continued task): the clock jumps, nothing
+        /// is reported meanwhile.
+        case suspended(Duration)
     }
     var t: Duration
     var wall: ContinuousClock.Instant
@@ -530,9 +624,18 @@ final class Sim: @unchecked Sendable {
     private var display = DisplayModel()
     /// The bar's value last shown in this analysis (pause and resume included).
     private var lastShown: Double = 0
+    /// The card's bar as the app draws it: six steps with widths fixed for the whole analysis
+    /// (from the first workload said, kept over Pause and a restart: S6), gliding between reports.
+    private var widths: StepWidths?
+    private var lastShownBar: Double = 0
+    /// The highest real value of this analysis (the app's `shownOverall` with `resumeFrom`).
+    private var lastRealBar: Double = 0
+    /// Every finish time the card showed: (simulated time, what it said, the run's real end).
+    var finishTimes: [(run: String, t: Duration, shown: FinishEstimate, end: Duration, complete: Bool)] = []
     var violations: [String] = []
     var onProgress: (@Sendable (PipelineProgress, Duration) -> Void)?
     private let current = Mutex<RunLog?>(nil)
+    var currentLog: RunLog? { current.withLock { $0 } }
     /// The Pause (or the end of the app) planned for the run in progress. Data, not closures:
     /// a closure kept in a Mutex and called on every tick slowed the simulation down many times.
     private struct Armed: @unchecked Sendable {
@@ -544,10 +647,10 @@ final class Sim: @unchecked Sendable {
     private let armed = Mutex<Armed?>(nil)
     private let wallStart = ContinuousClock.now
 
-    init(scale: Double = FullRunDisplayTests.scale) throws {
+    init(scale: Double = FullRunDisplayTests.scale, empty: Bool = false) throws {
         library = SimLibrary(scale: scale)
         store = try SortlyStore(url: nil)
-        reader = InMemoryLibraryReader(assets: library.assets)
+        reader = InMemoryLibraryReader(assets: empty ? [] : library.assets)
         analyzer = SimAnalyzer(clock: clock)
         geocoder = SimGeocoder(clock: clock, map: FullRunDisplayTests.map)
         conditions = SimConditions(clock: clock)
@@ -577,6 +680,9 @@ final class Sim: @unchecked Sendable {
         previous = []
         display = DisplayModel()
         lastShown = 0
+        widths = nil
+        lastShownBar = 0
+        lastRealBar = 0
     }
 
     private func fire(_ t: Duration, _ progress: PipelineProgress?) {
@@ -633,10 +739,16 @@ final class Sim: @unchecked Sendable {
         armed.withLock { $0 = nil }
         current.withLock { $0 = nil }
         check(log)
+        checkCard(log)
         runs.append(log)
         previous.append(log)
         display.end(complete: log.report?.isComplete == true)
-        if log.report?.isComplete == true { lastShown = 0 }
+        if log.report?.isComplete == true {
+            lastShown = 0
+            widths = nil
+            lastShownBar = 0
+            lastRealBar = 0
+        }
         return log
     }
 
@@ -665,6 +777,18 @@ final class Sim: @unchecked Sendable {
             }
         }.max { $0.0 < $1.0 }
         if let longestCPU { print("SIM longest stretch without simulated time (CPU on Linux): \(String(format: "%.3f", longestCPU.0)) s, \(longestCPU.1)") }
+        // How far the finish times were off, for complete runs (minutes, by time left).
+        for run in runs where run.report?.isComplete == true {
+            let mine = finishTimes.filter { $0.run == run.label }
+            let errors = mine.compactMap { entry -> (left: Double, off: Double)? in
+                guard case .at(let date) = entry.shown else { return nil }
+                let realEnd = SimClock.base.addingTimeInterval(entry.end.seconds)
+                return ((entry.end - entry.t).seconds, date.timeIntervalSince(realEnd))
+            }
+            if let worst = errors.max(by: { abs($0.off) < abs($1.off) }) {
+                print("SIM \(run.label) finish times: \(errors.count) shown, worst \(Int(worst.off)) s off with \(Int(worst.left)) s left, first with \(Int(errors.first!.left)) s left")
+            }
+        }
         #expect(violations.isEmpty, Comment(rawValue: "\(violations.count) display violations:\n" + violations.prefix(40).joined(separator: "\n")), sourceLocation: sourceLocation)
     }
 
@@ -674,6 +798,7 @@ final class Sim: @unchecked Sendable {
         case .waiting(let w): "waiting \(w.map(\.rawValue) ?? "over")"
         case .pauseRequested: "Pause"
         case .work(let s): "work \(s)"
+        case .suspended(let d): "suspended \(Int(d.seconds)) s"
         }
     }
 
@@ -771,7 +896,8 @@ final class Sim: @unchecked Sendable {
             if index > 0 {
                 let before = points[index - 1]
                 let afterPause = pause.map { before.t >= $0 } ?? false
-                if point.t - before.t > maxGap, !waiting, !afterPause {
+                let suspended = if case .suspended? = before.kind { true } else { false }
+                if point.t - before.t > maxGap, !waiting, !afterPause, !suspended {
                     fail(run, 4, "\(String(format: "%.1f", (point.t - before.t).seconds)) s without a progress event, card shows \(shown.map { "\($0.stage) \($0.completed)/\($0.total)" } ?? "nothing")", at: before.t)
                 }
             }
@@ -808,4 +934,89 @@ final class Sim: @unchecked Sendable {
     }
 
     private func pct(_ x: Double) -> String { String(format: "%.2f %%", x * 100) }
+
+    /// The card as the app computes it on its 250 ms tick (AppModel.tick): the six-step bar with
+    /// the widths of this analysis, the gliding bar, the finish time (`ProgressEstimator`).
+    /// 3b. The drawn bar never goes back, also over Pause and restarts; never more than 1 % of a
+    ///     step ahead of the real value.
+    /// 8.  While the run works, something on the card changes at least every 10 s: the count,
+    ///     Apple's wait, or the gliding bar (limit set by the product owner, 15.11.).
+    /// 9.  No finish time while the run waits or after Pause; "Gleich fertig" only in the last
+    ///     3 minutes (checked against the real end in `finish`).
+    private func checkCard(_ run: RunLog) {
+        let base = ContinuousClock.now
+        func instant(_ t: Duration) -> ContinuousClock.Instant { base.advanced(by: t) }
+        func wall(_ t: Duration) -> Date { SimClock.base.addingTimeInterval(t.seconds) }
+        var estimator = ProgressEstimator()
+        var glide = BarGlide()
+        var step: AnalysisStep?
+        var waiting = false
+        var paused = false
+        var lastChange: Duration = run.start
+        var lastSeen: (step: AnalysisStep, completed: Int, wait: Int?)?
+        var lastBar = 0.0
+        var shown: [(Duration, FinishEstimate)] = []
+        var suspendedUntil: Duration?
+        for event in run.timeline {
+            switch event.kind {
+            case .progress(let p):
+                let s = AnalysisStep(p.stage)
+                if let workload = p.workload {
+                    estimator.setWorkload(workload)
+                    if widths == nil { widths = StepWidths(workload: workload) }
+                }
+                let w = widths ?? .standard
+                if let step, s < step { continue }
+                step = s
+                if !paused { estimator.record(step: s, completed: p.completed, total: p.total, at: instant(event.t), appleWait: p.waitLeft != nil) }
+                // As AppModel: the real value is never below where the analysis got to.
+                let real = max(w.overall(step: s, completed: p.completed, total: p.total), lastRealBar)
+                lastRealBar = real
+                glide.update(real: real, at: instant(event.t), step: s, widths: w, itemsPerSecond: estimator.rate, total: p.total)
+                let bar = glide.value(at: instant(event.t), gliding: !waiting && !paused)
+                if bar + 1e-9 < lastShownBar {
+                    fail(run, 3, "drawn bar went back from \(pct(lastShownBar)) to \(pct(bar)) at \(p.stage) \(p.completed)/\(p.total)", at: event.t)
+                }
+                if bar > glide.real + BarGlide.maxLead * w.width(of: s) + 1e-9 {
+                    fail(run, 3, "drawn bar \(pct(bar)) more than 1 % of the step ahead of \(pct(glide.real))", at: event.t)
+                }
+                lastShownBar = max(lastShownBar, bar)
+                let seen = (s, p.completed, p.waitLeft.map { Int($0.seconds) })
+                let moved = lastSeen.map { $0.step != seen.0 || $0.completed != seen.1 || $0.wait != seen.2 } ?? true
+                if moved || bar > lastBar + 1e-6 || waiting || paused {
+                    if !waiting, !paused, event.t - lastChange > .seconds(10) {
+                        fail(run, 8, "card stood still for \(String(format: "%.1f", (event.t - lastChange).seconds)) s while the run worked (\(p.stage) \(p.completed)/\(p.total))", at: lastChange)
+                    }
+                    lastChange = event.t
+                }
+                lastSeen = seen
+                lastBar = bar
+                if let finish = estimator.finish(at: instant(event.t), wall: wall(event.t)) {
+                    if waiting || paused { fail(run, 9, "finish time shown while \(waiting ? "waiting" : "paused")", at: event.t) }
+                    if let until = suspendedUntil, event.t - until < .seconds(30) {
+                        fail(run, 9, "finish time shown \(Int((event.t - until).seconds)) s after the app came back from the background (settles 30 s first)", at: event.t)
+                    }
+                    shown.append((event.t, finish))
+                }
+            case .waiting(let reason):
+                waiting = reason != nil
+                if waiting { estimator.idle() }
+                lastChange = event.t
+            case .pauseRequested:
+                paused = true
+                estimator.idle()
+            case .suspended(let d):
+                // Nothing on screen meanwhile; the estimator sees only the gap (S4).
+                lastChange = event.t + d
+                suspendedUntil = event.t + d
+            case .work:
+                break
+            }
+        }
+        finishTimes += shown.map { (run.label, $0.0, $0.1, run.end, run.report?.isComplete == true) }
+        guard run.report?.isComplete == true else { return }
+        for (t, finish) in shown where finish == .soon && run.end - t > .seconds(180) {
+            fail(run, 9, "\"Gleich fertig\" \(Int((run.end - t).seconds)) s before the end", at: t)
+        }
+    }
 }

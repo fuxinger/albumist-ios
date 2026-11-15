@@ -188,6 +188,25 @@ struct AnalysisDisplayTests {
         #expect(e.finish(at: Self.at(150), wall: Self.wall(150)) == .at(later))
     }
 
+    /// Waits for Apple's geocoder are not measured: the speed after them is the speed of the
+    /// lookups, and a time shown before stays during the wait.
+    @Test func appleWaitIsNotMeasured() {
+        var e = ProgressEstimator()
+        e.setWorkload(Self.owner)
+        let done = Self.feed(&e, .places, total: 1_600, perSecond: 5, from: 0, to: 40)
+        let shown = e.finish(at: Self.at(40), wall: Self.wall(40))
+        #expect(shown != nil)
+        let rate = e.rate
+        // 30 s of waiting for Apple, reported every 2 s with the same count.
+        for t in stride(from: 42.0, through: 72, by: 2) {
+            e.record(step: .places, completed: done, total: 1_600, at: Self.at(t), appleWait: true)
+        }
+        #expect(e.rate == nil)
+        #expect(e.finish(at: Self.at(72), wall: Self.wall(72)) == shown)
+        Self.feed(&e, .places, total: 1_600, startAt: done, perSecond: 5, from: 72.5, to: 110)
+        #expect(abs((e.rate ?? 0) - (rate ?? -1)) < 0.5, "the wait did not lower the speed: \(String(describing: e.rate))")
+    }
+
     @Test func roundingAndSoon() {
         let rules = ProgressEstimator.Rules()
         let wall = Date(timeIntervalSinceReferenceDate: 3_600 * 1_000) // whole hour

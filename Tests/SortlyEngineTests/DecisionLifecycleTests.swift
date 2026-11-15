@@ -102,7 +102,9 @@ struct DecisionLifecycleTests {
         _ = try await w.pipeline.run()
         let first = try #require(try await w.pipeline.latestProposals())
         let items = acceptSafe(first)
-        #expect(items.count >= 3)
+        // The two trips. Their countries were seen on one trip each (the trip is their album),
+        // and the order screenshots are with the documents, which are never taken in one go.
+        #expect(items.count >= 2)
         // The existing album is extended, not duplicated.
         let romeTrip = try #require(items.first { $0.proposal.kind == .trip && Set($0.proposal.assetIDs) == Set(w.rome) })
         #expect(romeTrip.decision == .extendExisting("sommer-rom"))
@@ -154,7 +156,7 @@ struct DecisionLifecycleTests {
 
         // In Photos, the user removes two Paris photos from the trip album Albumist created.
         let parisAlbum = try #require(states.first { state in
-            state.createdBySortly && state.addedBySortly == Set(w.paris) && state.lastKnownTitle.contains("·")
+            state.createdBySortly && state.addedBySortly == Set(w.paris) && state.lastKnownTitle.contains(",")
         })
         let removed = Array(w.paris.prefix(2))
         await w.library.userEdit { inv in

@@ -34,6 +34,17 @@ struct ProposalEngineTests {
         return AnalysisSnapshot(facts: FixtureGeocoder.facts(for: lib.assets), trips: trips)
     }
 
+    /// Rome twice and Florence once: Italy is more than one trip, Rome more than one visit.
+    func italyAnalysis() -> AnalysisSnapshot {
+        var lib = LibraryBuilder()
+        lib.daily(from: "2024-01-01", to: "2026-12-31", at: Fixture.Places.munichHome, perDay: 1, everyNthDay: 2)
+        lib.daily(from: "2024-05-12", to: "2024-05-19", at: Fixture.Places.rome, perDay: 6, hour: 10)
+        lib.daily(from: "2025-09-03", to: "2025-09-08", at: Fixture.Places.rome, perDay: 6, hour: 10)
+        lib.daily(from: "2026-04-02", to: "2026-04-06", at: Fixture.Places.florence, perDay: 6, hour: 10)
+        let trips = TripDetector(calendar: Fixture.calendar).detect(in: lib.assets)
+        return AnalysisSnapshot(facts: FixtureGeocoder.facts(for: lib.assets), trips: trips)
+    }
+
     func engine(_ configure: (inout OrganizationSettings) -> Void = { _ in }) -> ProposalEngine {
         var s = OrganizationSettings()
         s.titleLanguage = .german
@@ -41,24 +52,39 @@ struct ProposalEngineTests {
         return ProposalEngine(settings: s, calendar: Fixture.calendar)
     }
 
+    /// Place and month, in words (first device test 15.11.: "Rom · 12.05.–19.05.2024" read like
+    /// a form and was cut off in the album grid of Photos). The days are in the reason.
     @Test func tripsAreNamedAfterDominantCityAndFiledByYear() {
         let proposals = engine().proposals(for: romeAnalysis()).filter { $0.kind == .trip }
         #expect(proposals.count == 2)
-        #expect(proposals.first?.title == "Rom · 12.05.–19.05.2024")
+        #expect(proposals.first?.title == "Rom, Mai 2024")
         #expect(proposals.first?.folderPath == ["Reisen", "2024"])
         #expect(proposals.allSatisfy { $0.reliability == .likely })
+        guard case .photosInPlaceDuringPeriod(let count, let place, let start, _)? = proposals.first?.reasons.first else {
+            Issue.record("trip without its period")
+            return
+        }
+        #expect(count == 48 && place == "Rom" && start == Fixture.date("2024-05-12 10:00"))
     }
 
+    /// Scenario B: a place album next to repeated trips, when it is more than the country
+    /// album. With only Rome in Italy, "Rom" and "Italien" would be the same photos twice.
     @Test func repeatedTripsGetPermanentPlaceCollection() {
-        let analysis = romeAnalysis()
+        let analysis = italyAnalysis()
         let all = engine().proposals(for: analysis)
         let collection = all.first { if case .placeCollection = $0.kind, $0.folderPath == ["Reisen"] { return true } else { return false } }
         #expect(collection?.title == "Rom")
-        let tripAssets = all.filter { $0.kind == .trip }.reduce(into: Set<AssetID>()) { $0.formUnion($1.assetIDs) }
-        #expect(collection?.assetIDs == tripAssets)
+        let romeTrips = all.filter { $0.kind == .trip && $0.title.hasPrefix("Rom") }.reduce(into: Set<AssetID>()) { $0.formUnion($1.assetIDs) }
+        #expect(collection?.assetIDs == romeTrips)
+        #expect(all.contains { $0.title == "Italien" && $0.folderPath == ["Länder"] })
 
         let without = engine { $0.trips.placeCollectionForRepeatedTrips = false }.proposals(for: analysis)
         #expect(!without.contains { $0.folderPath == ["Reisen"] })
+
+        // Only Rome: the country album already is that collection.
+        let onlyRome = engine().proposals(for: romeAnalysis())
+        #expect(onlyRome.contains { $0.title == "Italien" })
+        #expect(!onlyRome.contains { $0.folderPath == ["Reisen"] })
     }
 
     /// Default: countries only, so a trip does not turn into four albums (usability test 14.11.2026).
@@ -69,13 +95,18 @@ struct ProposalEngineTests {
         #expect(!places.contains { $0.folderPath == ["Länder", "Italien"] })
     }
 
+    /// Towns go into a folder of their country. The home town is no album (it is most of the
+    /// library), and Florence, seen on one trip, is that trip's album.
     @Test func placeCollectionsAreHierarchical() {
         let places = engine { $0.places.levels = PlaceSettings.Preset.countriesAndCities.levels }
-            .proposals(for: romeAnalysis()).filter { $0.kind.area == .places }
-        let rome = places.first { $0.title == "Rom" }
+            .proposals(for: italyAnalysis()).filter { $0.kind.area == .places }
+        let rome = places.first { $0.title == "Rom" && $0.folderPath != ["Reisen"] }
         #expect(rome?.folderPath == ["Länder", "Italien"])
         #expect(places.contains { $0.title == "Italien" && $0.folderPath == ["Länder"] })
-        #expect(places.contains { $0.title == "München" })
+        #expect(!places.contains { $0.title == "München" || $0.title == "Deutschland" })
+        #expect(!places.contains { $0.title == "Florenz" })
+        // The town album and the album of repeated Rome trips are the same photos: one stays.
+        #expect(places.filter { $0.title == "Rom" }.count == 1)
     }
 
     @Test func idsAreStableAcrossRuns() {

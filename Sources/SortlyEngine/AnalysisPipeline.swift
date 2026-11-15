@@ -93,6 +93,8 @@ public actor AnalysisPipeline {
         /// Trip identities across runs (kept by "Analyse neu aufbauen", like other user data).
         static let tripIdentities = "user.tripIdentities"
         static let groupingFeedback = "user.groupingFeedback"
+        /// Version of the masks the stored texts went through (see `TextMinimizer.maskVersion`).
+        static let textMaskVersion = "analysis.textMaskVersion"
         static let proposals = "analysis.proposals"
     }
 
@@ -341,7 +343,8 @@ public actor AnalysisPipeline {
         let counter = ProgressCounter()
         let budget = refining ? nil : foregroundOnlineBudget
         return try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
-                                         shouldStop: { [weak self] in await self?.stopRequested() ?? true }) { batch in
+                                         shouldStop: { [weak self] in await self?.stopRequested() ?? true },
+                                         onlineAllowed: { [weak self] in await self?.settings.privacy.allowOnlineGeocoding ?? false }) { batch in
             try await store.setPlaces(batch)
             let done = await counter.add(batch.count)
             onProgress(Progress(stage: .places, completed: min(done, total), total: total))
@@ -358,12 +361,7 @@ public actor AnalysisPipeline {
         }
         let contents = try await store.results(ContentAnalysis.self, kind: "content")
         let done = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
-        // iCloud rule: originals only with consent, on Wi-Fi unless cellular is allowed.
-        // Checked again before every photo: leaving Wi-Fi stops downloads at once.
-        let networkAllowedNow: () async -> Bool = { [settings, conditions] in
-            guard settings.privacy.allowNetworkForAnalysis else { return false }
-            return settings.privacy.allowCellularDownloads ? true : await conditions.isOnWiFi()
-        }
+        try await remaskStoredTexts()
         let networkAllowed = await networkAllowedNow()
         let started = now()
         let candidates = all.filter { asset in
@@ -433,6 +431,40 @@ public actor AnalysisPipeline {
             }
         }
         return (recognized, waiting, nil)
+    }
+
+    /// iCloud rule: originals only with consent, on Wi-Fi unless cellular is allowed. Read from
+    /// the current settings before every photo, so switching the consent off or leaving Wi-Fi
+    /// stops the next download at once, not only the next run (audit 2, 5.1).
+    private func networkAllowedNow() async -> Bool {
+        guard settings.privacy.allowNetworkForAnalysis else { return false }
+        if settings.privacy.allowCellularDownloads { return true }
+        let onWiFi = await conditions.isOnWiFi()
+        // The settings may have changed while waiting for the network state.
+        return onWiFi && settings.privacy.allowNetworkForAnalysis
+    }
+
+    /// Texts stored before the masks got stricter are masked again once (no new reading of
+    /// the photos): the stored copy only ever loses detail.
+    private func remaskStoredTexts() async throws {
+        let done = try await store.value(Int.self, forKey: Key.textMaskVersion) ?? 1
+        guard done < TextMinimizer.maskVersion else { return }
+        let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
+        for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
+            guard let text = result.text?.text, !text.isEmpty else { continue }
+            let masked = TextMinimizer.storable(text)
+            guard masked != text else { continue }
+            result.text?.text = masked
+            // An outdated result keeps its old version, so it is still read again later.
+            let version = current[asset] != nil ? Self.textVersion : 0
+            try await store.saveResult(result, kind: "text", asset: asset, version: version)
+            if masked.isEmpty {
+                try await store.removeText(for: asset)
+            } else {
+                try await store.indexText(masked, for: asset)
+            }
+        }
+        try await store.setValue(TextMinimizer.maskVersion, forKey: Key.textMaskVersion)
     }
 
     private func groupObservations() async throws -> [ObservationGroup] {

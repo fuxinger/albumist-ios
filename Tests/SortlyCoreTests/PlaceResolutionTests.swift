@@ -108,6 +108,17 @@ struct PlaceResolutionTests {
         #expect(outcome.pendingOnline.count == 5)
     }
 
+    /// Audit 2, 5.2: consent is read again before every online lookup.
+    @Test func consentIsCheckedBeforeEveryLookup() async throws {
+        let geocoder = FakeGeocoder()
+        let places = [Fixture.Places.munichHome, Fixture.Places.rome, Fixture.Places.florence, Fixture.Places.naples, Fixture.Places.gardaLake]
+        let reqs = places.enumerated().map { PlaceResolutionService.Request(assetID: AssetID("p\($0.offset)"), coordinate: $0.element) }
+        let outcome = try await service(level: .locality, geocoder: geocoder)
+            .resolve(reqs, onlineAllowed: { geocoder.calls.count < 2 }) { _ in }
+        #expect(geocoder.calls.count == 2)
+        #expect(outcome.pendingOnline.count == 3)
+    }
+
     @Test func throttleSpacesRequests() async throws {
         let time = ManualTime()
         let geocoder = FakeGeocoder()

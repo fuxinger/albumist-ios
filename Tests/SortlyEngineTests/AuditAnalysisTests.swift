@@ -276,6 +276,86 @@ struct AuditAnalysisTests {
         #expect(calls.last?.1 == false)
     }
 
+    // MARK: Audit 2, 5.1 / 5.2 consent switched off during a run
+
+    /// Switching off "use the network for analysis" while screenshots are read: the next photo
+    /// is read without the network, not only the next run.
+    @Test func ocrStopsNetworkRequestsAfterConsentIsRevoked() async throws {
+        let (assets, ids) = screenshots(3)
+        let analyzer = ScriptedAnalyzer()
+        analyzer.state.withLock {
+            $0.cloudOnly = Set(ids)
+            $0.original = Dictionary(uniqueKeysWithValues: ids.map { ($0, "Rechnung") })
+        }
+        let store = try SortlyStore(url: nil)
+        let p = pipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: analyzer,
+                         conditions: FakeConditions(wifi: true), network: true)
+        var revoked = OrganizationSettings()
+        revoked.titleLanguage = .german
+        revoked.privacy.allowNetworkForAnalysis = false
+        let off = revoked
+        analyzer.onText.withLock { $0 = { await p.update(settings: off) } }
+        _ = try await p.run()
+        let calls = analyzer.state.withLock { $0.textCalls }
+        #expect(calls.count == 3)
+        #expect(calls.filter { $0.1 }.count == 1)
+    }
+
+    /// Audit 2, 6.1: texts stored before the stricter masks are masked again once, without
+    /// reading the photos again.
+    @Test func textsStoredByOlderMasksAreMaskedAgain() async throws {
+        let (assets, ids) = screenshots(1)
+        let store = try SortlyStore(url: nil)
+        _ = try await store.upsertAssets(assets)
+        let old = "Karte 4111 1111\n1111 1111 Danke"
+        try await store.saveResult(TextResult(text: TextAnalysis(text: old, source: .original)), kind: "text",
+                                   asset: ids[0], version: AnalysisPipeline.textVersion)
+        try await store.indexText(old, for: ids[0])
+        let analyzer = ScriptedAnalyzer()
+        _ = try await pipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: analyzer).run()
+        let stored = try await store.result(TextResult.self, kind: "text", asset: ids[0])?.text?.text
+        #expect(stored?.contains("1111") == false)
+        #expect(stored?.contains("Danke") == true)
+        #expect(try await store.searchText("4111").isEmpty)
+        #expect(try await store.searchText("Danke") == [ids[0]])
+        #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
+    }
+
+    /// Geocoder that runs a hook before it answers (the user changes a setting meanwhile).
+    final class HookedGeocoder: ReverseGeocoding, @unchecked Sendable {
+        let inner = FakeGeocoder()
+        let onCall = Mutex<(@Sendable () async -> Void)?>(nil)
+        func reverseGeocode(_ coordinate: GeoCoordinate) async throws -> PlaceComponents? {
+            if let hook = onCall.withLock({ $0 }) { await hook() }
+            return try await inner.reverseGeocode(coordinate)
+        }
+    }
+
+    /// Switching off "look up places online" during the place stage: no further request
+    /// leaves the device; the rest waits as offline-only places.
+    @Test func geocodingStopsAfterConsentIsRevoked() async throws {
+        var lib = LibraryBuilder()
+        for (i, place) in [Fixture.Places.munichHome, Fixture.Places.rome, Fixture.Places.florence,
+                           Fixture.Places.naples, Fixture.Places.gardaLake].enumerated() {
+            _ = lib.daily(from: String(format: "2026-0%d-01", i + 1), to: String(format: "2026-0%d-05", i + 1), at: place, perDay: 2)
+        }
+        var settings = OrganizationSettings()
+        settings.titleLanguage = .german
+        settings.places.levels = [.country, .locality]
+        let geocoder = HookedGeocoder()
+        let p = AnalysisPipeline(
+            store: try SortlyStore(url: nil), reader: InMemoryLibraryReader(assets: lib.assets), analyzer: ScriptedAnalyzer(),
+            geocoder: geocoder, map: Self.map, conditions: FakeConditions(), settings: settings,
+            calendar: Fixture.calendar, time: ManualTime().source
+        )
+        var revoked = settings
+        revoked.privacy.allowOnlineGeocoding = false
+        let off = revoked
+        geocoder.onCall.withLock { $0 = { await p.update(settings: off) } }
+        _ = try await p.run()
+        #expect(geocoder.inner.calls.count == 1)
+    }
+
     // MARK: 5.6 stop within one photo
 
     @Test func contentStopsWithinOneAssetWhenThermalStateChanges() async throws {

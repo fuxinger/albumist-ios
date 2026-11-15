@@ -128,6 +128,7 @@ public actor PlaceResolutionService {
         refining: Bool = false,
         maxOnlineRequests: Int? = nil,
         shouldStop: (@Sendable () async -> Bool)? = nil,
+        onlineAllowed: (@Sendable () async -> Bool)? = nil,
         sink: Sink
     ) async throws -> Outcome {
         var outcome = Outcome()
@@ -169,6 +170,9 @@ public actor PlaceResolutionService {
             if Task.isCancelled { outcome.pendingOnline.formUnion(members.map(\.assetID)); continue }
             // Pause, heat or low battery: no more online lookups; cached cells still count.
             if !onlineDisabled, let shouldStop, await shouldStop() { onlineDisabled = true }
+            // The user's consent is read again before every online lookup: switching it off in
+            // the settings stops the next request, not only the next run (audit 2, 5.2).
+            if !onlineDisabled, let onlineAllowed, !(await onlineAllowed()) { onlineDisabled = true }
             var online = try await cache.cachedPlace(cell: cell)
             if online != nil {
                 outcome.cacheHits += 1

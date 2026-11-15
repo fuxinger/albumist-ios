@@ -80,8 +80,8 @@ extension UITestSupport {
     /// once the app goes to the background (the user cleared space in Settings).
     static let diskFullDuring = value("-SortlyUITestDiskFull")
 
-    /// `-SortlyUITestSlowPlan`: every change in Photos takes 3 s longer, so closing the app
-    /// during "Jetzt umsetzen" always lands in the middle of the plan.
+    /// `-SortlyUITestSlowPlan`: after the first change in Photos every change takes 30 s
+    /// longer, so closing the app during "Jetzt umsetzen" always lands in the middle of the plan.
     static let slowsPlan = flag("-SortlyUITestSlowPlan")
 
     // MARK: Services (AppModel builds its services through these)

@@ -34,6 +34,7 @@ final class UITestCounter: @unchecked Sendable {
 struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     private let base = PhotoKitLibrary()
     private static let deletions = UITestCounter()
+    private static let changes = UITestCounter()
 
     init() {}
 
@@ -132,8 +133,13 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         Self.afterChange()
     }
 
+    /// The first change of a launch goes through at once and every later one waits 30 s:
+    /// a test that closes the app a few seconds after "Jetzt umsetzen" then always finds one
+    /// step done and the rest open, however slow the simulator is (a fixed 3 s per change
+    /// let a short plan finish before the app was closed in UI run 43763236960).
     private static func beforeChange() async throws {
-        if UITestSupport.slowsPlan { try await Task.sleep(for: .seconds(3)) }
+        guard UITestSupport.slowsPlan, changes.next() > 1 else { return }
+        try await Task.sleep(for: .seconds(30))
     }
 
     private static func afterChange() {

@@ -245,33 +245,65 @@ final class DeviceConditionUITests: XCTestCase {
         return true
     }
 
-    /// The system's photo question; the alert is in the simulator's own language.
-    @discardableResult
-    private func answerPhotoQuestion(_ choice: PhotoChoice, timeout: TimeInterval = 25) -> Bool {
-        let predicate: NSPredicate
+    /// The button that gives `choice` in the system's photo question (in the simulator's own
+    /// language).
+    private func photoAnswer(_ choice: PhotoChoice) -> NSPredicate {
         switch choice {
         case .full:
-            predicate = NSPredicate(format: "label CONTAINS[c] 'full access' OR label CONTAINS[c] 'all photos' OR label CONTAINS[c] 'alle Fotos' OR label CONTAINS[c] 'vollen Zugriff' OR label CONTAINS[c] 'Vollzugriff'")
+            return NSPredicate(format: "label CONTAINS[c] 'full access' OR label CONTAINS[c] 'all photos' OR label CONTAINS[c] 'alle Fotos' OR label CONTAINS[c] 'vollen Zugriff' OR label CONTAINS[c] 'Vollzugriff'")
         case .limited:
-            predicate = NSPredicate(format: "label CONTAINS[c] 'limit' OR label CONTAINS[c] 'beschränken' OR label CONTAINS[c] 'select photos' OR label CONTAINS[c] 'Fotos auswählen'")
+            return NSPredicate(format: "label CONTAINS[c] 'limit' OR label CONTAINS[c] 'beschränken' OR label CONTAINS[c] 'select photos' OR label CONTAINS[c] 'Fotos auswählen'")
         case .deny:
-            predicate = NSPredicate(format: "label IN %@", ["Don’t Allow", "Don't Allow", "Nicht erlauben"])
+            return NSPredicate(format: "label IN %@", ["Don’t Allow", "Don't Allow", "Nicht erlauben"])
         }
+    }
+
+    private var photoQuestionAnswered = false
+
+    /// Called by the interruption monitor with the alert iOS shows.
+    private func answer(_ alert: XCUIElement, _ choice: PhotoChoice) -> Bool {
+        print("UI_FACT photo question: \(allLabels(alert))")
+        let answer = alert.buttons.matching(photoAnswer(choice)).firstMatch
+        guard answer.exists else { return false }
+        answer.tap()
+        photoQuestionAnswered = true
+        return true
+    }
+
+    /// The system's photo question.
+    @discardableResult
+    private func answerPhotoQuestion(_ choice: PhotoChoice, timeout: TimeInterval = 25) -> Bool {
+        let predicate = photoAnswer(choice)
+        // In UI run 43763236960 the question was not found among Springboard's buttons, and
+        // XCTest's own handler then answered it with "Don't Allow" at the next wait. A monitor
+        // sees the alert wherever iOS shows it; a tap on the status bar (scrolls to the top,
+        // nothing else) is the interaction that lets XCTest call it.
+        photoQuestionAnswered = false
+        let monitor = addUIInterruptionMonitor(withDescription: "photo question") { alert in
+            MainActor.assumeIsolated { self.answer(alert, choice) }
+        }
+        defer { removeUIInterruptionMonitor(monitor) }
         let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            for answer in [springboard.buttons.matching(predicate).firstMatch, app.alerts.buttons.matching(predicate).firstMatch] where answer.exists {
+        while Date() < deadline && !photoQuestionAnswered {
+            if let answer = [springboard.buttons.matching(predicate).firstMatch, app.alerts.buttons.matching(predicate).firstMatch].first(where: { $0.exists }) {
                 shot("photo-question-\(choice)")
                 answer.tap()
-                print("UI_STEP_OK photo question answered (\(choice))")
-                if choice == .limited { finishLimitedPicker() }
-                return true
+                photoQuestionAnswered = true
+                break
             }
             if choice == .full && button("Analyse starten").exists { return false } // granted before
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap()
             usleep(500_000)
         }
-        print("UI_STEP_MISSING photo question (\(choice))")
-        shot("x-no-photo-question")
-        return false
+        guard photoQuestionAnswered else {
+            print("UI_STEP_MISSING photo question (\(choice))")
+            print("UI_FACT springboard shows: \(allLabels(springboard).prefix(400))")
+            shot("x-no-photo-question")
+            return false
+        }
+        print("UI_STEP_OK photo question answered (\(choice))")
+        if choice == .limited { finishLimitedPicker() }
+        return true
     }
 
     /// After "Limit Access" iOS shows its picker; it is closed as it is (limited to what was
@@ -428,8 +460,9 @@ final class DeviceConditionUITests: XCTestCase {
     private func interruptManualPlan(_ title: String) -> Bool {
         start(["-SortlyUITestSlowPlan"])
         guard openManualPlan(title), tap(button("Jetzt umsetzen"), "start \(title)", timeout: 30) else { return false }
-        // Every change takes 3 s more: after 4.5 s the first change is done, the next is not.
-        usleep(4_500_000)
+        // The first change goes through at once, every later one waits 30 s: after 5 s one
+        // step is done and the next is not.
+        sleep(5)
         print("UI_FACT \(title) running when the app was closed: \(anything("Alben werden angelegt").exists)")
         app.terminate()
         sleep(2)

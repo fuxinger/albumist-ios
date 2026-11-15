@@ -903,10 +903,11 @@ final class SortlyFlowUITests: XCTestCase {
     func test5_InterruptedPlanCanBeLeftAndRetried() {
         continueAfterFailure = true
         prepare()
-        // Every change in Photos takes 3 s longer, so the app is always closed half way.
+        // The first change in Photos goes through at once, every later one waits 30 s, so the
+        // app is always closed half way.
         launch(["-SortlyUITestSlowPlan"])
         guard openRecommendedPlan("interruption"), tap(button("Jetzt umsetzen"), "start plan for interruption", timeout: 30) else { return }
-        usleep(4_500_000)
+        sleep(5)
         print("UI_FACT plan running when the app was closed: \(anything("Alben werden angelegt").exists)")
         app.terminate()
         sleep(2)

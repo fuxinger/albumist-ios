@@ -1501,7 +1501,7 @@ final class AppModel {
     /// changed between two reads slips through (audit 2, 1.5). Nil if the albums could not be
     /// read or what was found could not be stored; planning then waits.
     @discardableResult
-    private func reconcileManagedAlbums(quiet: Bool = false) async -> CollectionInventory? {
+    private func reconcileManagedAlbums(quiet: Bool = false, attempt: Int = 0) async -> CollectionInventory? {
         guard let store else { return nil }
         do {
             let stored = try await store.managedAlbums()
@@ -1526,13 +1526,35 @@ final class AppModel {
             let checked = try await ManagedAlbumTracker().reconcile(stored, listed: current, in: library, changing: changing)
             let result = checked.reconciliation
             current = checked.inventory
+            // The comparison can take a while (albums looked up one by one, a second read). A
+            // plan that started or finished meanwhile wrote its own records, and the list this
+            // comparison started from is old (plugin review N7): it is never written over them.
+            // The store refuses it when its records changed since; then everything is compared
+            // once more from the fresh state, and planning waits if that is refused as well.
+            if execution.isRunning {
+                managedAlbums = try await store.managedAlbums()
+                return current
+            }
             if !result.changes.isEmpty {
                 // Overrides and the new last-known state in one transaction: a manual change
                 // is never marked as seen without its override.
-                try await store.applyReconciliation(overrides: result.newOverrides, managedAlbums: result.updatedStates)
+                let applied = try await store.applyReconciliation(overrides: result.newOverrides, managedAlbums: result.updatedStates, expected: stored)
+                guard applied else {
+                    if attempt == 0 { return await reconcileManagedAlbums(quiet: quiet, attempt: 1) }
+                    managedAlbums = try await store.managedAlbums()
+                    if !quiet { message = String(localized: "Albumist konnte deine Alben gerade nicht lesen. Versuche es gleich noch einmal.") }
+                    return nil
+                }
                 saveSafetyBackup()
             }
-            managedAlbums = result.updatedStates
+            // What is stored, not what this comparison saw: a plan finished meanwhile keeps its albums.
+            let now = try await store.managedAlbums()
+            if result.changes.isEmpty, now != stored, attempt == 0 {
+                // Nothing to write, but a plan changed the albums meanwhile: the album list
+                // returned for planning would be from before it.
+                return await reconcileManagedAlbums(quiet: quiet, attempt: 1)
+            }
+            managedAlbums = now
             return current
         } catch {
             // Fails closed (audit 2, 1.5): without knowing what the user changed in Photos,
@@ -1731,7 +1753,9 @@ final class AppModel {
         // of them brought back gets the photos still missing, never a second album.
         let earlier: [ChangePlan]
         do { earlier = try await store.reverts(of: executed.id) } catch { message = error.localizedDescription; return }
-        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, earlierUndos: earlier)
+        // An album another plan made, left with only this plan's photos, goes too (plugin review N5).
+        let created = Set(managedAlbums.filter(\.createdBySortly).map(\.albumID))
+        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, createdByAlbumist: created, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
             message = interruptedPlanFirst

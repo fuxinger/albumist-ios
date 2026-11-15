@@ -294,6 +294,10 @@ struct PurchaseStoreKitTests {
         running.start()
         try await within("read the entitlements at the start") { await running.refreshEntitlements() }
         #expect(!running.isUnlocked)
+        // A running app has listened since its launch. A purchase made right after `start()`
+        // never reached the listener (CI run 43773400300), while updates a moment later did
+        // (Ask to Buy approval, refund), so the app runs for a few seconds first.
+        try await Task.sleep(for: .seconds(5))
         let unlock = Purchases.unlockProductID
         try await within("buy in the session (another device)") { try store.session.buyProduct(productIdentifier: unlock) }
         let bought = try await transactions(store)

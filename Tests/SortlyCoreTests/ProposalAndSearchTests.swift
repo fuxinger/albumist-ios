@@ -34,6 +34,17 @@ struct ProposalEngineTests {
         return AnalysisSnapshot(facts: FixtureGeocoder.facts(for: lib.assets), trips: trips)
     }
 
+    /// Rome twice and Florence once: Italy is more than one trip, Rome more than one visit.
+    func italyAnalysis() -> AnalysisSnapshot {
+        var lib = LibraryBuilder()
+        lib.daily(from: "2024-01-01", to: "2026-12-31", at: Fixture.Places.munichHome, perDay: 1, everyNthDay: 2)
+        lib.daily(from: "2024-05-12", to: "2024-05-19", at: Fixture.Places.rome, perDay: 6, hour: 10)
+        lib.daily(from: "2025-09-03", to: "2025-09-08", at: Fixture.Places.rome, perDay: 6, hour: 10)
+        lib.daily(from: "2026-04-02", to: "2026-04-06", at: Fixture.Places.florence, perDay: 6, hour: 10)
+        let trips = TripDetector(calendar: Fixture.calendar).detect(in: lib.assets)
+        return AnalysisSnapshot(facts: FixtureGeocoder.facts(for: lib.assets), trips: trips)
+    }
+
     func engine(_ configure: (inout OrganizationSettings) -> Void = { _ in }) -> ProposalEngine {
         var s = OrganizationSettings()
         s.titleLanguage = .german
@@ -41,24 +52,39 @@ struct ProposalEngineTests {
         return ProposalEngine(settings: s, calendar: Fixture.calendar)
     }
 
+    /// Place and month, in words (first device test 15.11.: "Rom · 12.05.–19.05.2024" read like
+    /// a form and was cut off in the album grid of Photos). The days are in the reason.
     @Test func tripsAreNamedAfterDominantCityAndFiledByYear() {
         let proposals = engine().proposals(for: romeAnalysis()).filter { $0.kind == .trip }
         #expect(proposals.count == 2)
-        #expect(proposals.first?.title == "Rom · 12.05.–19.05.2024")
+        #expect(proposals.first?.title == "Rom, Mai 2024")
         #expect(proposals.first?.folderPath == ["Reisen", "2024"])
         #expect(proposals.allSatisfy { $0.reliability == .likely })
+        guard case .photosInPlaceDuringPeriod(let count, let place, let start, _)? = proposals.first?.reasons.first else {
+            Issue.record("trip without its period")
+            return
+        }
+        #expect(count == 48 && place == "Rom" && start == Fixture.date("2024-05-12 10:00"))
     }
 
+    /// Scenario B: a place album next to repeated trips, when it is more than the country
+    /// album. With only Rome in Italy, "Rom" and "Italien" would be the same photos twice.
     @Test func repeatedTripsGetPermanentPlaceCollection() {
-        let analysis = romeAnalysis()
+        let analysis = italyAnalysis()
         let all = engine().proposals(for: analysis)
         let collection = all.first { if case .placeCollection = $0.kind, $0.folderPath == ["Reisen"] { return true } else { return false } }
         #expect(collection?.title == "Rom")
-        let tripAssets = all.filter { $0.kind == .trip }.reduce(into: Set<AssetID>()) { $0.formUnion($1.assetIDs) }
-        #expect(collection?.assetIDs == tripAssets)
+        let romeTrips = all.filter { $0.kind == .trip && $0.title.hasPrefix("Rom") }.reduce(into: Set<AssetID>()) { $0.formUnion($1.assetIDs) }
+        #expect(collection?.assetIDs == romeTrips)
+        #expect(all.contains { $0.title == "Italien" && $0.folderPath == ["Länder"] })
 
         let without = engine { $0.trips.placeCollectionForRepeatedTrips = false }.proposals(for: analysis)
         #expect(!without.contains { $0.folderPath == ["Reisen"] })
+
+        // Only Rome: the country album already is that collection.
+        let onlyRome = engine().proposals(for: romeAnalysis())
+        #expect(onlyRome.contains { $0.title == "Italien" })
+        #expect(!onlyRome.contains { $0.folderPath == ["Reisen"] })
     }
 
     /// Default: countries only, so a trip does not turn into four albums (usability test 14.11.2026).
@@ -69,13 +95,18 @@ struct ProposalEngineTests {
         #expect(!places.contains { $0.folderPath == ["Länder", "Italien"] })
     }
 
+    /// Towns go into a folder of their country. The home town is no album (it is most of the
+    /// library), and Florence, seen on one trip, is that trip's album.
     @Test func placeCollectionsAreHierarchical() {
         let places = engine { $0.places.levels = PlaceSettings.Preset.countriesAndCities.levels }
-            .proposals(for: romeAnalysis()).filter { $0.kind.area == .places }
-        let rome = places.first { $0.title == "Rom" }
+            .proposals(for: italyAnalysis()).filter { $0.kind.area == .places }
+        let rome = places.first { $0.title == "Rom" && $0.folderPath != ["Reisen"] }
         #expect(rome?.folderPath == ["Länder", "Italien"])
         #expect(places.contains { $0.title == "Italien" && $0.folderPath == ["Länder"] })
-        #expect(places.contains { $0.title == "München" })
+        #expect(!places.contains { $0.title == "München" || $0.title == "Deutschland" })
+        #expect(!places.contains { $0.title == "Florenz" })
+        // The town album and the album of repeated Rome trips are the same photos: one stays.
+        #expect(places.filter { $0.title == "Rom" }.count == 1)
     }
 
     @Test func idsAreStableAcrossRuns() {
@@ -129,7 +160,7 @@ struct ProposalEngineTests {
 
 @Suite("Search")
 struct SearchTests {
-    func library() -> (facts: [AssetFacts], parser: QueryParser, dog: SortlyID) {
+    func library() -> (facts: [AssetFacts], index: SearchIndex, dog: SortlyID) {
         var lib = LibraryBuilder()
         lib.daily(from: "2025-12-01", to: "2025-12-03", at: Fixture.Places.munichHome, perDay: 2)
         lib.daily(from: "2026-05-12", to: "2026-05-14", at: Fixture.Places.rome, perDay: 3)
@@ -144,70 +175,63 @@ struct SearchTests {
         facts[12].document = DocumentInfo(type: .invoice, typeReliability: .likely, documentDate: nil, merchant: "Amazon", orderNumber: "302-1234567", invoiceNumber: nil, totalAmount: nil, subject: nil, keywords: [], sensitivity: .normal)
         facts[12].recognizedText = "Rechnung Amazon Bestellnummer 302-1234567"
         let groups = [ObservationGroup(id: dogID, kind: .dog, observationIDs: ["o1", "o2", "o3"], assetIDs: [facts[6].id], confirmedName: "Bello", isConfirmed: true)]
-        let vocabulary = SearchVocabulary.build(facts: facts, inventory: CollectionInventory([]), groups: groups)
-        return (facts, QueryParser(vocabulary: vocabulary), dogID)
+        return (facts, SearchIndex(facts: facts, groups: groups, calendar: Fixture.calendar), dogID)
     }
 
-    let engine = SearchEngine(calendar: Fixture.calendar)
+    let now = Fixture.date("2026-11-15 12:00")
 
     @Test func countryAndYear() {
-        let (facts, parser, _) = library()
-        let (filter, tokens) = parser.parse("Alle Fotos aus Italien 2026")
-        #expect(filter.countryCodes == ["IT"])
-        #expect(filter.years == [2026])
-        #expect(tokens.map(\.kind) == [.country, .year])
-        let hits = engine.search(filter, in: facts)
-        #expect(hits.count == 10) // 9 Rome photos + Garda video
+        let (_, index, _) = library()
+        let query = index.parse("Alle Fotos aus Italien 2026", now: now)
+        #expect(query.clauses.map(\.criterion) == [.country("IT"), .year(2026)])
+        #expect(query.tokens.map(\.kind) == [.country, .year])
+        #expect(index.search("Alle Fotos aus Italien 2026", now: now).ids.count == 10) // 9 Rome photos + Garda video
     }
 
     @Test func cityMonthAndMediaType() {
-        let (facts, parser, _) = library()
-        #expect(engine.search(parser.parse("Rom Mai").filter, in: facts).count == 9)
-        #expect(engine.search(parser.parse("Videos vom Gardasee").filter, in: facts).count == 1)
-        #expect(engine.search(parser.parse("Screenshots").filter, in: facts).count == 1)
+        let (_, index, _) = library()
+        #expect(index.search("Rom Mai", now: now).ids.count == 9)
+        #expect(index.search("Videos vom Gardasee", now: now).ids.count == 1)
+        #expect(index.search("Screenshots", now: now).ids.count == 1)
     }
 
     @Test func namedGroupAndCategory() {
-        let (facts, parser, dog) = library()
-        let named = parser.parse("Fotos von Bello")
-        #expect(named.filter.groupIDs == [dog])
-        #expect(engine.search(named.filter, in: facts).count == 1)
-        let category = parser.parse("Hunde in Rom")
-        #expect(category.filter.categories == ["animal.dog"])
-        #expect(engine.search(category.filter, in: facts).count == 2)
-        let mine = parser.parse("Fotos meines Hundes")
-        #expect(mine.filter.groupIDs == [dog])
+        let (_, index, dog) = library()
+        let named = index.parse("Fotos von Bello", now: now)
+        #expect(named.clauses.map(\.criterion) == [.group(dog)])
+        #expect(index.search("Fotos von Bello", now: now).ids.count == 1)
+        #expect(index.search("Hunde in Rom", now: now).ids.count == 2)
+        #expect(index.parse("Hunde in Rom", now: now).tokens.first?.kind == .category)
     }
 
     @Test func documentsMerchantsAndFields() {
-        let (facts, parser, _) = library()
-        let q = parser.parse("Amazon Rechnungen mit Bestellnummer")
-        #expect(q.filter.merchants == ["amazon"])
-        #expect(q.filter.documentTypes == [.invoice])
-        #expect(q.filter.requiresOrderNumber)
-        #expect(engine.search(q.filter, in: facts).count == 1)
+        let (facts, index, _) = library()
+        let result = index.search("Amazon Rechnungen mit Bestellnummer", now: now)
+        #expect(result.tokens.map(\.kind) == [.merchant, .document, .field])
+        #expect(result.ids == [facts[12].id])
     }
 
     @Test func freeTextAndLocationAndStatus() {
-        let (facts, parser, _) = library()
-        let text = parser.parse("302-1234567")
-        #expect(engine.search(text.filter, in: facts).count == 1)
-        let noLocation = parser.parse("Fotos ohne Standort")
-        #expect(noLocation.filter.hasLocation == false)
-        #expect(engine.search(noLocation.filter, in: facts).count == 1)
-        let unorganized = parser.parse("nicht organisiert")
+        let (facts, index, _) = library()
+        #expect(index.search("302-1234567", now: now).ids == [facts[12].id])
+        let noLocation = index.parse("Fotos ohne Standort", now: now)
+        #expect(noLocation.clauses.map(\.criterion) == [.hasLocation(false)])
+        #expect(index.search("Fotos ohne Standort", now: now).ids.count == 1)
+        let unorganized = index.parse("nicht organisiert", now: now)
+        #expect(unorganized.usesStatus)
         let statuses = Dictionary(uniqueKeysWithValues: facts.map { ($0.id, OverallStatus.fullyOrganized) })
             .merging([facts[0].id: OverallStatus.unorganized]) { $1 }
-        #expect(engine.search(unorganized.filter, in: facts, statuses: statuses) == [facts[0].id])
+        #expect(index.search("nicht organisiert", now: now, statuses: statuses).ids == [facts[0].id])
     }
 
     @Test func unknownValuesNeverMatch() {
         var facts = library().facts
         facts[0].asset.creationDate = nil
-        var filter = SearchFilter()
-        filter.years = [2025]
-        #expect(!engine.search(filter, in: facts).contains(facts[0].id))
-        #expect(SearchFilter().isEmpty)
+        let index = SearchIndex(facts: facts, calendar: Fixture.calendar)
+        #expect(!index.search("2025", now: now).ids.contains(facts[0].id))
+        #expect(!index.search("Dezember", now: now).ids.contains(facts[0].id))
+        #expect(index.search("", now: now).ids.isEmpty)
+        #expect(index.parse("Fotos", now: now).isEmpty)
     }
 }
 

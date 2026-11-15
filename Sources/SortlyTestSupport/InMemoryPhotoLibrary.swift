@@ -62,8 +62,22 @@ public actor InMemoryPhotoLibrary: PhotoLibraryWriting {
     public private(set) var inventoryReads = 0
     public func currentInventory() async throws -> CollectionInventory {
         inventoryReads += 1
+        if blankReadsToSkip > 0 {
+            blankReadsToSkip -= 1
+        } else if blankReads > 0 {
+            blankReads -= 1
+            return CollectionInventory()
+        }
         return inventory
     }
+    /// Simulates Photos handing out an empty album list for a moment: after `skipping` normal
+    /// reads, the next `n` reads of the whole list come back empty.
+    public func setBlankInventoryReads(_ n: Int, skipping: Int = 0) {
+        blankReads = n
+        blankReadsToSkip = skipping
+    }
+    private var blankReads = 0
+    private var blankReadsToSkip = 0
     /// Simulates reads of single albums that fail (a Photos hiccup right after a change).
     public private(set) var failingCollectionReads = 0
     public func setFailingCollectionReads(_ n: Int) { failingCollectionReads = n }
@@ -122,6 +136,8 @@ public actor InMemoryPhotoLibrary: PhotoLibraryWriting {
     public func moveCollection(_ id: CollectionID, from oldParent: CollectionID?, to newParent: CollectionID?) async throws {
         try countWrite()
         guard var c = inventory[id] else { throw CocoaLikeError.missing }
+        // Like the PhotoKit adapter: a target folder that is gone changes nothing.
+        if let newParent, inventory[newParent]?.kind != .folder { throw CocoaLikeError.missing }
         if let old = c.parentID, var p = inventory[old] { p.childIDs.removeAll { $0 == id }; inventory.upsert(p) }
         c.parentID = newParent
         inventory.upsert(c)

@@ -167,6 +167,10 @@ struct UITestAnalyzer: ContentAnalyzing {
         if UITestSupport.documentsOnlyInICloud, !allowNetwork { throw AnalysisError.originalNotAvailable }
         return try await base.recognizeText(asset, allowNetwork: allowNetwork)
     }
+
+    func willAnalyze(_ upcoming: [AssetSnapshot]) async {
+        await base.willAnalyze(upcoming)
+    }
 }
 
 /// The first `UITestSupport.unreadablePhotos` photos the analysis asks for stay unreadable for

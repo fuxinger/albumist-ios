@@ -123,7 +123,7 @@ public struct ScreenshotSettings: Hashable, Sendable, Codable {
 public struct ImageCategorySettings: Hashable, Sendable, Codable {
     public var minPhotos = 15
     public var minimumReliability: Reliability = .likely
-    /// Only leaf categories become albums by default (Autos, Hunde, ...), parents become folders.
+    /// Only leaf categories become albums by default (Autos, Hunde, ...), all in one folder.
     public var leafCategoriesOnly = true
     public var disabledCategories: Set<String> = []
     public init() {}

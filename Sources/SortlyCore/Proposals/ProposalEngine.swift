@@ -28,28 +28,32 @@ public struct ProposalEngine: Sendable {
         self.calendar = calendar
     }
 
-    private var labels: Labels { Labels(settings.titleLanguage) }
+    var labels: Labels { Labels(settings.titleLanguage) }
 
     public func proposals(for analysis: AnalysisSnapshot, overrides: OverrideSet = OverrideSet()) -> [AlbumProposal] {
         let usable = analysis.facts.filter { !overrides.isExcluded($0.id) && !overrides.isIgnored($0.id) }
+        let profile = LibraryProfile(facts: usable, trips: analysis.trips)
         var result: [AlbumProposal] = []
         let areas = settings.enabledAreas
-        if areas.contains(.places) { result += placeProposals(usable) }
-        if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable) }
+        if areas.contains(.places) { result += placeProposals(usable, profile: profile) }
+        if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile) }
         if areas.contains(.frequentPlaces) { result += frequentPlaceProposals(analysis.frequentPlaces, facts: analysis.facts) }
         if areas.contains(.chronology) { result += chronologyProposals(usable) }
         if areas.contains(.mediaTypes) { result += mediaTypeProposals(usable) }
-        if areas.contains(.screenshots) { result += screenshotProposals(usable) }
-        if areas.contains(.imageCategories) { result += imageCategoryProposals(usable) }
-        if areas.contains(.documents) { result += documentProposals(usable) }
+        if areas.contains(.screenshots) { result += screenshotProposals(usable, profile: profile) }
+        if areas.contains(.imageCategories) { result += imageCategoryProposals(usable, profile: profile) }
+        if areas.contains(.documents) { result += documentProposals(usable, profile: profile) }
         if areas.contains(.messenger) { result += messengerProposals(usable) }
         if areas.contains(.peopleAndPets) { result += groupProposals(analysis.groups) }
-        return result.filter { !overrides.isRejected($0.id) && !overrides.mustNotRecreate($0.id) }
+        // Curated before rejections are taken out: a trip the user said no to still stands for
+        // its country, which would otherwise come back as the same photos under another name.
+        return curated(result, profile: profile)
+            .filter { !overrides.isRejected($0.id) && !overrides.mustNotRecreate($0.id) }
     }
 
     // MARK: Places (4.1)
 
-    func placeProposals(_ facts: [AssetFacts]) -> [AlbumProposal] {
+    func placeProposals(_ facts: [AssetFacts], profile: LibraryProfile = LibraryProfile()) -> [AlbumProposal] {
         let levels = settings.places.levels.sorted()
         guard !levels.isEmpty else { return [] }
         var groups: [PlaceKey: (components: PlaceComponents, assets: Set<AssetID>)] = [:]
@@ -96,7 +100,7 @@ public struct ProposalEngine: Sendable {
         }
         let base = labels.folder(for: .places)
         return groups.compactMap { key, value -> AlbumProposal? in
-            guard value.assets.count >= settings.places.minPhotos, let name = displayName(value.components, level: key.level) else { return nil }
+            guard profile.shots(in: value.assets) >= settings.places.minPhotos, let name = displayName(value.components, level: key.level) else { return nil }
             var path = [base]
             if settings.places.hierarchical {
                 for parent in levels where parent < key.level {
@@ -126,67 +130,218 @@ public struct ProposalEngine: Sendable {
 
     // MARK: Trips (4.2)
 
-    func tripProposals(_ trips: [Trip], facts: [AssetFacts]) -> [AlbumProposal] {
-        let byID = Dictionary(uniqueKeysWithValues: facts.map { ($0.id, $0) })
-        var result: [AlbumProposal] = []
-        var tripsPerPlace: [PlaceKey: [Trip]] = [:]
+    /// The template trips are named with. The stored default up to 15.11.2026 follows the new
+    /// default: no screen ever let anyone choose a template, so it was nobody's choice.
+    var tripTemplate: NamingTemplate {
+        settings.trips.template == .tripDateRange ? .tripDefault : settings.trips.template
+    }
 
-        for trip in trips where trip.geotaggedAssetIDs.count >= settings.trips.minPhotos {
+    func tripProposals(_ trips: [Trip], facts: [AssetFacts], profile: LibraryProfile = LibraryProfile()) -> [AlbumProposal] {
+        let byID = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let collections = settings.trips.placeCollectionForRepeatedTrips
+        let regular = collections ? regularDestinations(trips, facts: byID) : RegularDestinations()
+
+        struct Draft {
+            var trip: Trip
+            var name: String
+            var key: PlaceKey?
+            var country: String?
+            var places: [PlaceComponents]
+            var formatter: DateRangeFormatter
+            var path: [String]
+            var title: String
+        }
+        var drafts: [Draft] = []
+        for trip in trips where profile.shots(in: trip.geotaggedAssetIDs) >= settings.trips.minPhotos {
             if trip.kind == .dayTrip && !settings.trips.includeDayTrips { continue }
+            // A routine visit (the parents' town, the lake every summer Sunday) is not a trip of
+            // its own: its photos go to the one album of that destination below.
+            if regular.outings.contains(trip.id) { continue }
             let places = trip.geotaggedAssetIDs.compactMap { byID[$0]?.gpsPlace }
-            let (name, key, country) = Self.primaryPlaceName(places, kind: trip.kind, labels: labels)
+            let (name, key, country) = Self.primaryPlaceName(places, kind: trip.kind, labels: labels, profile: profile)
             let timeZone = places.compactMap(\.timeZoneIdentifier).first.flatMap(TimeZone.init(identifier:)) ?? calendar.timeZone
             let formatter = DateRangeFormatter(language: settings.titleLanguage, timeZone: timeZone)
-            let placeLabel = name ?? labels.unknownPlace
-            let title = settings.trips.template.render(
-                .init(place: placeLabel, country: country, region: places.first?.administrativeArea, city: places.first?.locality, start: trip.start, end: trip.end),
-                formatter: formatter
-            )
             var path = [labels.folder(for: .trips)]
             if settings.trips.folderPerYear {
                 var cal = calendar
                 cal.timeZone = timeZone
                 path.append(String(cal.component(.year, from: trip.start)))
             }
-            result.append(AlbumProposal(
-                id: trip.id,
-                kind: .trip,
-                title: title,
-                folderPath: path,
-                assetIDs: Set(trip.geotaggedAssetIDs),
-                optionalAssetIDs: Set(trip.inferredAssetIDs),
-                reliability: name == nil ? .plausible : .likely,
-                reasons: [.photosInPlaceDuringPeriod(count: trip.geotaggedAssetIDs.count, place: placeLabel, start: trip.start, end: trip.end)]
-                    + (trip.inferredAssetIDs.isEmpty ? [] : [.inferredWithoutLocation(count: trip.inferredAssetIDs.count)]),
-                dateRange: DateInterval(start: trip.start, end: trip.end),
-                placeKeys: key.map { [$0] } ?? []
-            ))
-            if let key { tripsPerPlace[key, default: []].append(trip) }
+            let placeLabel = name ?? labels.unknownPlace
+            drafts.append(Draft(trip: trip, name: placeLabel, key: key, country: country, places: places, formatter: formatter, path: path,
+                                title: renderTripTitle(placeLabel, country: country, places: places, trip: trip, formatter: formatter, precise: false)))
         }
-
-        // Scenario B: one permanent place album next to repeated visits.
-        if settings.trips.placeCollectionForRepeatedTrips {
-            for (key, repeated) in tripsPerPlace where repeated.count >= 2 {
-                let assets = Set(repeated.flatMap(\.geotaggedAssetIDs))
-                let name = repeated.lazy.flatMap(\.geotaggedAssetIDs).compactMap { byID[$0]?.gpsPlace?.name(at: key.level) }.first ?? labels.unknownPlace
-                result.append(AlbumProposal(
-                    id: .stable("trip-place", key.description),
-                    kind: .placeCollection(key.level),
-                    title: name,
-                    folderPath: [labels.folder(for: .trips)],
-                    assetIDs: assets,
-                    reliability: .likely,
-                    reasons: [.photosInPlace(count: assets.count, place: name)],
-                    placeKeys: [key]
-                ))
+        // Two trips with the same title in the same folder ("Tegernsee, Juli 2025" twice) name
+        // their days; the planner would refuse two new albums of the same name anyway.
+        let clashes = Dictionary(grouping: drafts.indices) { drafts[$0].path + [drafts[$0].title] }.values.filter { $0.count > 1 }
+        for group in clashes {
+            for i in group {
+                let d = drafts[i]
+                drafts[i].title = renderTripTitle(d.name, country: d.country, places: d.places, trip: d.trip, formatter: d.formatter, precise: true)
             }
         }
-        return result.sorted { ($0.dateRange?.start ?? .distantPast, $0.id.rawValue) < ($1.dateRange?.start ?? .distantPast, $1.id.rawValue) }
+
+        var result: [AlbumProposal] = drafts.map { d in
+            let visited = Self.visitedTowns(d.places, labels: labels) ?? d.name
+            return AlbumProposal(
+                id: d.trip.id,
+                kind: .trip,
+                title: d.title,
+                folderPath: d.path,
+                assetIDs: Set(d.trip.geotaggedAssetIDs),
+                optionalAssetIDs: Set(d.trip.inferredAssetIDs),
+                reliability: d.name == labels.unknownPlace ? .plausible : .likely,
+                reasons: [.photosInPlaceDuringPeriod(count: d.trip.geotaggedAssetIDs.count, place: visited, start: d.trip.start, end: d.trip.end)]
+                    + (d.trip.inferredAssetIDs.isEmpty ? [] : [.inferredWithoutLocation(count: d.trip.inferredAssetIDs.count)]),
+                dateRange: DateInterval(start: d.trip.start, end: d.trip.end),
+                placeKeys: d.key.map { [$0] } ?? []
+            )
+        }
+        guard collections else { return result.sorted(by: Self.byStart) }
+
+        // One album per place the user goes to again and again (Scenario B): every routine
+        // visit there, and the longer trips there too.
+        var made = Set<SortlyID>()
+        for destination in regular.destinations {
+            let places = destination.members.compactMap { byID[$0]?.gpsPlace }
+            let (name, key, _) = Self.primaryPlaceName(places, kind: .shortTrip, labels: labels, profile: profile)
+            guard profile.shots(in: destination.members) >= settings.trips.minPhotos, let name else { continue }
+            let id = SortlyID.stable("trip-place", key?.description ?? destination.anchor)
+            guard made.insert(id).inserted else { continue }
+            result.append(collection(id: id, name: name, key: key, members: destination.members, facts: byID))
+        }
+        // Repeated trips to the same place get that place's album next to the trips. Day trips
+        // do not count: two afternoons in Innsbruck made three albums of the same 40 photos.
+        var tripsPerPlace: [PlaceKey: [Draft]] = [:]
+        for d in drafts where d.trip.kind != .dayTrip { if let key = d.key { tripsPerPlace[key, default: []].append(d) } }
+        for (key, repeated) in tripsPerPlace where repeated.count >= 2 {
+            let id = SortlyID.stable("trip-place", key.description)
+            guard made.insert(id).inserted else { continue }
+            let members = repeated.flatMap(\.trip.geotaggedAssetIDs)
+            result.append(collection(id: id, name: repeated[0].name, key: key, members: members, facts: byID))
+        }
+        return result.sorted(by: Self.byStart)
     }
 
-    /// Most fitting name for a set of places: city if ≥ 60 % share one, else region, else
-    /// country, else "Country-Roadtrip" / several countries joined.
-    static func primaryPlaceName(_ places: [PlaceComponents], kind: TripKind, labels: Labels) -> (String?, PlaceKey?, String?) {
+    private static func byStart(_ a: AlbumProposal, _ b: AlbumProposal) -> Bool {
+        (a.dateRange?.start ?? .distantPast, a.id.rawValue) < (b.dateRange?.start ?? .distantPast, b.id.rawValue)
+    }
+
+    private func renderTripTitle(_ place: String, country: String?, places: [PlaceComponents], trip: Trip, formatter: DateRangeFormatter, precise: Bool) -> String {
+        tripTemplate.render(
+            .init(place: place, country: country, region: places.first?.administrativeArea, city: places.first?.locality,
+                  start: trip.start, end: trip.end, preciseDates: precise),
+            formatter: formatter
+        )
+    }
+
+    /// The album of a place visited on several trips: "Tegernsee", with when and how often.
+    private func collection(id: SortlyID, name: String, key: PlaceKey?, members: [AssetID], facts: [AssetID: AssetFacts]) -> AlbumProposal {
+        let assets = Set(members)
+        let dates = members.compactMap { facts[$0]?.asset.creationDate }
+        let days = Set(dates.map { calendar.startOfDay(for: $0) }).count
+        var reasons: [ProposalReason] = []
+        if let first = dates.min(), let last = dates.max() {
+            reasons.append(.photosInPlaceDuringPeriod(count: assets.count, place: name, start: first, end: last))
+        } else {
+            reasons.append(.photosInPlace(count: assets.count, place: name))
+        }
+        if days > 1 { reasons.append(.recurringPlace(count: assets.count, days: days)) }
+        return AlbumProposal(
+            id: id,
+            kind: .placeCollection(key?.level ?? .locality),
+            title: name,
+            folderPath: [labels.folder(for: .trips)],
+            assetIDs: assets,
+            reliability: .likely,
+            reasons: reasons,
+            placeKeys: key.map { [$0] } ?? []
+        )
+    }
+
+    /// Short trips to places the user goes to again and again, found by where they went, not
+    /// by name: a town name alone would join two different lakes of one district.
+    struct RegularDestinations {
+        struct Destination {
+            /// Photos of every trip day spent there.
+            var members: [AssetID]
+            /// Fallback identity when the place has no name yet.
+            var anchor: String
+        }
+        var destinations: [Destination] = []
+        /// Short trips spent mostly at such places.
+        var outings: Set<SortlyID> = []
+    }
+
+    /// Short trips (one to three days) to the same spot at least this often make it a regular
+    /// destination: once is a trip, twice may be a coincidence, three times is a habit.
+    static let regularVisits = 3
+    /// Days whose photos lie within this distance of each other count as the same spot.
+    static let destinationRadius: Double = 5_000
+    /// A short trip is a routine visit when this share of its photos is at regular destinations.
+    static let routineShare = 0.6
+
+    func regularDestinations(_ trips: [Trip], facts: [AssetID: AssetFacts]) -> RegularDestinations {
+        struct DayPoint { var trip: Int; var short: Bool; var members: [AssetID]; var point: GeoCoordinate }
+        var points: [DayPoint] = []
+        for (index, trip) in trips.enumerated() {
+            let short = trip.kind == .dayTrip || trip.kind == .weekendTrip || trip.kind == .shortTrip
+            var byDay: [Date: [(AssetID, GeoCoordinate)]] = [:]
+            for id in trip.geotaggedAssetIDs {
+                guard let asset = facts[id]?.asset, let c = asset.usableLocation, let date = asset.creationDate else { continue }
+                byDay[calendar.startOfDay(for: date), default: []].append((id, c))
+            }
+            for day in byDay.keys.sorted() {
+                let items = byDay[day] ?? []
+                // The median, not the mean: the drive there does not move the spot.
+                let lat = items.map(\.1.latitude).sorted()[items.count / 2]
+                let lon = items.map(\.1.longitude).sorted()[items.count / 2]
+                points.append(DayPoint(trip: index, short: short, members: items.map(\.0), point: GeoCoordinate(latitude: lat, longitude: lon)))
+            }
+        }
+        guard !points.isEmpty else { return RegularDestinations() }
+        let clusters = GeoClusterer(epsilonMeters: Self.destinationRadius, minPoints: 1).cluster(points.map(\.point)).clusters
+        var result = RegularDestinations()
+        var routineMembers: [Int: Int] = [:]
+        let located = facts.values.compactMap { f in f.asset.usableLocation.map { (f.id, $0) } }
+        for cluster in clusters {
+            let shortTrips = Set(cluster.memberIndices.filter { points[$0].short }.map { points[$0].trip })
+            guard shortTrips.count >= Self.regularVisits else { continue }
+            // Every photo taken there, also on visits too short to count as a trip: the album of
+            // the parents' town holds every visit, the same set as that town's place album.
+            let spots = GeoSpatialIndex(cellSize: Self.destinationRadius, points: cluster.memberIndices.map { (points[$0].point, $0) })
+            let reach = (cluster.memberIndices.map { GeoMath.distance(points[$0].point, cluster.centroid) }.max() ?? 0) + Self.destinationRadius
+            let members = located.filter { GeoMath.distance($0.1, cluster.centroid) <= reach && !spots.query(near: $0.1, radius: Self.destinationRadius).isEmpty }
+                .map(\.0).sorted()
+            let anchor = String(format: "%.2f,%.2f", cluster.centroid.latitude, cluster.centroid.longitude)
+            result.destinations.append(.init(members: members, anchor: anchor))
+            for i in cluster.memberIndices where points[i].short { routineMembers[points[i].trip, default: 0] += points[i].members.count }
+        }
+        for (index, count) in routineMembers {
+            let trip = trips[index]
+            let located = trip.geotaggedAssetIDs.filter { facts[$0]?.asset.usableLocation != nil }.count
+            if located > 0, Double(count) >= Double(located) * Self.routineShare { result.outings.insert(trip.id) }
+        }
+        return result
+    }
+
+    /// A trip with this share of its photos in one country is a trip to that country; a day
+    /// across the border does not change its name.
+    static let oneCountryShare = 0.8
+
+    /// Most fitting name for a set of places (prompt §4.2), in this order:
+    /// 1. a lake holding 60 % of the photos ("Gardasee"),
+    /// 2. a town holding 60 % of the photos ("Rom"),
+    /// 3. a region – at home always, abroad only a plain one ("Sardinien", "Toskana"): composite
+    ///    administrative names like "Marrakesch-Safi" or "Split-Dalmatien" read like a form, the
+    ///    country is what people call such a trip; never the home region ("Bayern" for a
+    ///    weekend near Munich says nothing),
+    /// 4. the country, unless it is the home country ("Kroatien"; road trips "Kroatien-Roadtrip"),
+    /// 5. the two or three towns that hold most photos ("Salzburg & Berchtesgaden"),
+    /// 6. the countries in the order they were visited ("Portugal & Spanien").
+    /// Regions and countries (3, 4) only name a trip that stayed (almost) in one country.
+    static func primaryPlaceName(_ places: [PlaceComponents], kind: TripKind, labels: Labels,
+                                 profile: LibraryProfile = LibraryProfile()) -> (String?, PlaceKey?, String?) {
         guard !places.isEmpty else { return (nil, nil, nil) }
         func dominant(_ level: PlaceLevel) -> (String, PlaceKey)? {
             var counts: [PlaceKey: (String, Int)] = [:]
@@ -198,17 +353,63 @@ public struct ProposalEngine: Sendable {
             return Double(best.value.1) / Double(places.count) >= 0.6 ? (best.value.0, best.key) : nil
         }
         let country = dominant(.country)
-        if kind != .roadTrip, let city = dominant(.locality) { return (city.0, city.1, country?.0) }
+        let atHome = country.map { profile.isEveryday($0.1) } ?? false
+        // Photos on the lake itself name the trip after the lake: "Gardasee", not "Malcesine".
         if let area = places.compactMap(\.inlandWater).first, kind != .roadTrip,
            Double(places.filter { $0.inlandWater == area }.count) / Double(places.count) >= 0.6 {
-            return (area, places.first { $0.inlandWater == area }?.key(at: .pointOfInterest), country?.0) // e.g. "Gardasee"
+            return (area, places.first { $0.inlandWater == area }?.key(at: .pointOfInterest), country?.0)
         }
-        if kind != .roadTrip, let region = dominant(.administrativeArea) { return (region.0, region.1, country?.0) }
-        if let country {
+        if kind != .roadTrip, let city = dominant(.locality) { return (city.0, city.1, country?.0) }
+        // A region or a country names a trip that stayed there: a tour from Lisbon to Granada is
+        // neither an "Andalusien-Roadtrip" nor a "Spanien-Roadtrip" because most photos were
+        // taken in Spain.
+        let oneCountry = country.map { c in
+            Double(places.filter { $0.key(at: .country) == c.1 }.count) >= Double(places.count) * Self.oneCountryShare
+        } ?? true
+        if oneCountry, let region = dominant(.administrativeArea), !profile.isEveryday(region.1),
+           country == nil || atHome || !region.0.contains("-") {
+            return (kind == .roadTrip ? "\(region.0)-\(labels.roadTripSuffix)" : region.0, region.1, country?.0)
+        }
+        if let country, oneCountry, !atHome {
             return (kind == .roadTrip ? "\(country.0)-\(labels.roadTripSuffix)" : country.0, country.1, country.0)
         }
-        let names = Array(Set(places.compactMap(\.country))).sorted().prefix(3)
+        // Two or three towns that hold most of the photos.
+        let towns = rankedTowns(places)
+        let top = towns.prefix(3)
+        if !top.isEmpty, Double(top.reduce(0) { $0 + $1.count }) >= Double(places.count) * 0.8 {
+            let names = top.map(\.name)
+            let title = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " & " + names[names.count - 1]
+            return (title, top.count == 1 ? top.first?.key : nil, country?.0)
+        }
+        if let country, oneCountry {
+            // A long trip through the home country.
+            return (kind == .roadTrip ? "\(country.0)-\(labels.roadTripSuffix)" : country.0, country.1, country.0)
+        }
+        var seen = Set<String>()
+        let names = places.compactMap(\.country).filter { seen.insert($0).inserted }.prefix(3)
         return (names.isEmpty ? nil : names.joined(separator: " & "), nil, nil)
+    }
+
+    /// Towns by number of photos (ties: first visited first).
+    private static func rankedTowns(_ places: [PlaceComponents]) -> [(name: String, key: PlaceKey, count: Int, first: Int)] {
+        var towns: [PlaceKey: (name: String, count: Int, first: Int)] = [:]
+        for (i, p) in places.enumerated() {
+            guard let key = p.key(at: .locality), let name = p.locality else { continue }
+            towns[key, default: (name, 0, i)].count += 1
+        }
+        return towns.map { (name: $0.value.name, key: $0.key, count: $0.value.count, first: $0.value.first) }
+            .sorted { ($0.count, -$0.first) > ($1.count, -$1.first) }
+    }
+
+    /// The towns a trip went to, for its reason: "Split, Hvar und Dubrovnik". Up to four, in the
+    /// order they were visited; nil when the towns are not known yet.
+    static func visitedTowns(_ places: [PlaceComponents], labels: Labels) -> String? {
+        let towns = rankedTowns(places)
+        guard !towns.isEmpty else { return nil }
+        // Towns with only a photo or two (a stop on the motorway) are left out.
+        let minimum = max(1, places.count / 20)
+        let shown = towns.filter { $0.count >= minimum }.prefix(4).sorted { $0.first < $1.first }.map(\.name)
+        return shown.isEmpty ? nil : labels.list(shown)
     }
 
     // MARK: Frequent places (4.3)
@@ -321,15 +522,25 @@ public struct ProposalEngine: Sendable {
 
     // MARK: Screenshots (4.6)
 
-    func screenshotProposals(_ facts: [AssetFacts]) -> [AlbumProposal] {
+    /// Screenshot kinds that are real things to keep or find again (chats, recipes, orders,
+    /// tickets, wish lists). Settings pages, error messages, sales, news, notes, how-tos and
+    /// route screenshots are only useful in the moment: as albums they buried the useful ones
+    /// (first device test 15.11.: 19 screenshot albums). Search still finds all of them.
+    static let lastingScreenshotCategories: Set<ScreenshotCategory> = [
+        .chat, .order, .invoice, .ticket, .flight, .hotel, .recipe, .product, .coupon, .socialMedia, .realEstate, .job, .qrCode,
+    ]
+
+    func screenshotProposals(_ facts: [AssetFacts], profile: LibraryProfile = LibraryProfile()) -> [AlbumProposal] {
         var groups: [ScreenshotCategory: Set<AssetID>] = [:]
         for f in facts where f.asset.subtypes.contains(.screenshot) {
             for raw in f.textCategories {
-                if let c = ScreenshotCategory(rawValue: raw) { groups[c, default: []].insert(f.id) }
+                if let c = ScreenshotCategory(rawValue: raw), Self.lastingScreenshotCategories.contains(c) { groups[c, default: []].insert(f.id) }
             }
         }
+        // Five at least, and 1 % of the screenshots: three chats among 900 screenshots are noise.
+        let minimum = LibraryProfile.scaled(max(settings.screenshots.minItems, 5), perMille: 10, of: profile.screenshotCount)
         return groups.compactMap { category, assets in
-            guard assets.count >= settings.screenshots.minItems else { return nil }
+            guard assets.count >= minimum else { return nil }
             return AlbumProposal(
                 id: .stable("screenshot", category.rawValue), kind: .screenshotCategory(category.rawValue), title: labels.name(category),
                 folderPath: [labels.folder(for: .screenshots)], assetIDs: assets, reliability: .likely,
@@ -341,23 +552,52 @@ public struct ProposalEngine: Sendable {
 
     // MARK: Image categories (4.7)
 
-    func imageCategoryProposals(_ facts: [AssetFacts]) -> [AlbumProposal] {
+    /// Categories the classifier finds in the background of ordinary photos rather than as
+    /// their subject: every photo of people shows clothing, every room furniture, every street
+    /// a building ("Immobilien"), every table a drink or a phone. As albums they were the
+    /// biggest themes and the least useful ones (first device test 15.11.). Search still finds
+    /// them ("Möbel"), and a search result can become an album.
+    static let incidentalThemes: Set<String> = [
+        "misc.clothing", "home.furniture", "home.interior", "home.realEstate", "home.garden", "misc.technology",
+        "misc.shopping", "misc.collection", "work.tools", "work.documentation", "nature.landscape", "food.drink",
+    ]
+    /// A theme is something that comes back: photos of it on at least this many days. One
+    /// afternoon at a horse farm is an event, not "Pferde".
+    static let minimumThemeDays = 5
+    /// At most this many themes, the biggest. Themes come after trips and places in the list,
+    /// and a dozen of them pushed everything else out of sight; any other theme is one search
+    /// away ("Kunst"), and a search result can be saved as an album.
+    static let maximumThemes = 8
+
+    func imageCategoryProposals(_ facts: [AssetFacts], profile: LibraryProfile = LibraryProfile()) -> [AlbumProposal] {
         var groups: [String: Set<AssetID>] = [:]
+        var days: [String: Set<Date>] = [:]
         for f in facts where !f.asset.isScreenshotLike {
             for (id, reliability) in f.categories where reliability >= settings.imageCategories.minimumReliability {
                 groups[id, default: []].insert(f.id)
+                if let date = f.asset.creationDate { days[id, default: []].insert(calendar.startOfDay(for: date)) }
             }
         }
-        return groups.compactMap { id, assets -> AlbumProposal? in
+        // 15 photos at least, and 2.5 per thousand photos: 125 in a library of 50,000.
+        let minimum = LibraryProfile.scaled(settings.imageCategories.minPhotos, perMille: 2.5, of: profile.photoCount)
+        let themes = groups.compactMap { id, assets -> (category: ImageCategory, assets: Set<AssetID>)? in
             guard let category = ImageTaxonomy.byID[id], !settings.imageCategories.disabledCategories.contains(id),
-                  assets.count >= settings.imageCategories.minPhotos else { return nil }
+                  !Self.incidentalThemes.contains(id), profile.shots(in: assets) >= minimum,
+                  (days[id]?.count ?? 0) >= Self.minimumThemeDays else { return nil }
             if settings.imageCategories.leafCategoriesOnly && category.parentID == nil { return nil }
-            let parentName = category.parentID.flatMap { ImageTaxonomy.byID[$0] }.map(labels.name)
+            return (category, assets)
+        }
+        .sorted { ($0.assets.count, $1.category.id) > ($1.assets.count, $0.category.id) }
+        .prefix(Self.maximumThemes)
+        // All in one folder "Themen": with a handful of themes, parent folders ("Natur",
+        // "Weitere Bereiche") only put each album one tap further away.
+        return themes.map { theme in
+            let category = theme.category
             return AlbumProposal(
-                id: .stable("category", id), kind: .imageCategory(id), title: labels.name(category),
-                folderPath: [labels.folder(for: .imageCategories)] + (parentName.map { [$0] } ?? []),
-                assetIDs: assets, reliability: settings.imageCategories.minimumReliability,
-                reasons: [.recognizedContent(count: assets.count, label: labels.name(category))]
+                id: .stable("category", category.id), kind: .imageCategory(category.id), title: labels.name(category),
+                folderPath: [labels.folder(for: .imageCategories)],
+                assetIDs: theme.assets, reliability: settings.imageCategories.minimumReliability,
+                reasons: [.recognizedContent(count: theme.assets.count, label: labels.name(category))]
             )
         }
         .sorted { $0.id.rawValue < $1.id.rawValue }
@@ -365,7 +605,7 @@ public struct ProposalEngine: Sendable {
 
     // MARK: Documents (4.8)
 
-    func documentProposals(_ facts: [AssetFacts]) -> [AlbumProposal] {
+    func documentProposals(_ facts: [AssetFacts], profile: LibraryProfile = LibraryProfile()) -> [AlbumProposal] {
         var groups: [DocumentType: (assets: Set<AssetID>, sensitive: Bool)] = [:]
         for f in facts {
             guard let doc = f.document, doc.typeReliability >= .plausible else { continue }
@@ -374,8 +614,11 @@ public struct ProposalEngine: Sendable {
             groups[doc.type, default: ([], false)].assets.insert(f.id)
             if sensitive { groups[doc.type]?.sensitive = true }
         }
+        // One receipt is not an album: four at least (a few warranty cards are worth keeping
+        // together), more in big libraries. "Sonstige Dokumente" says nothing about its content.
+        let minimum = LibraryProfile.scaled(max(settings.documents.minItems, 4), perMille: 0.5, of: profile.photoCount + profile.screenshotCount)
         return groups.compactMap { type, value in
-            guard value.assets.count >= settings.documents.minItems else { return nil }
+            guard value.assets.count >= minimum, type != .other else { return nil }
             return AlbumProposal(
                 id: .stable("document", type.rawValue), kind: .documentCategory(type.rawValue), title: labels.name(type),
                 folderPath: [labels.folder(for: .documents)], assetIDs: value.assets, reliability: .plausible,

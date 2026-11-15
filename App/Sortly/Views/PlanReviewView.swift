@@ -404,6 +404,7 @@ struct UnlockCard: View {
             .disabled(purchases.isPurchasing)
             HStack {
                 Button("Kauf wiederherstellen") { Task { await purchases.restore() } }
+                    .disabled(purchases.isPurchasing)
                 Spacer()
                 Button("Code einlösen") { redeeming = true }
             }
@@ -424,6 +425,8 @@ struct UnlockCard: View {
                 Text(error).font(.footnote).foregroundStyle(.red)
             }
         }
+        // The price comes from StoreKit; a start without network is made up for here.
+        .task { await purchases.loadProductIfNeeded() }
     }
 }
 

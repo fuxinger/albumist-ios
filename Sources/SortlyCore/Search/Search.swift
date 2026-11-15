@@ -1,276 +1,240 @@
 import Foundation
 
-/// Structured search filter. Natural-language queries are translated into this filter
-/// and the interpretation is shown to the user (prompt §10: verifiable interpretation).
-public struct SearchFilter: Hashable, Sendable {
-    public var countryCodes: Set<String> = []
-    public var placeNames: Set<String> = []          // normalized city/region/water names
-    public var years: Set<Int> = []
-    public var months: Set<Int> = []
-    public var dateRange: DateInterval?
-    public var mediaKinds: Set<MediaKind> = []
-    public var requiredSubtypes: MediaSubtypes = []
-    public var categories: Set<String> = []
-    public var documentTypes: Set<DocumentType> = []
-    public var merchants: Set<String> = []           // normalized
-    public var requiresOrderNumber = false
-    public var requiresInvoiceNumber = false
-    public var groupIDs: Set<SortlyID> = []
-    public var albumIDs: Set<CollectionID> = []
-    public var hasLocation: Bool?
-    public var statuses: Set<OverallStatus> = []
-    public var freeText: [String] = []
+// Search over the analysed library (prompt §14), fully on the device.
+//
+// A query is read into clauses ("Hund am Strand 2023" → dog AND beach AND 2023). Each clause
+// has one or more alternatives (OR): a word can mean a place and a topic at once ("Essen"),
+// and values of one kind are alternatives of each other ("Rom Florenz" = Rome or Florence,
+// since a photo has only one city). Every clause is shown to the user as a chip, so the
+// interpretation can always be checked (prompt §10). Unknown values never match: an undated
+// photo never matches a year, a photo without GPS never matches a place.
 
-    public init() {}
+/// One condition on an asset.
+public indirect enum SearchCriterion: Hashable, Sendable {
+    case country(String)                     // ISO code
+    case countries(Set<String>)              // a continent or region
+    case outsideHome                         // "Ausland": not in the country with the most photos
+    case place(String)                       // normalized name of a city, region, island, lake …
+    case year(Int)
+    case month(Int)
+    case monthDay(month: Int, day: Int)
+    case weekday(Int)                        // Calendar weekday, 1 = Sunday
+    case dateRange(DateInterval)
+    case holiday(Holiday, years: Set<Int>)   // empty years: every year
+    case mediaKind(MediaKind)
+    case subtype(MediaSubtypes)
+    case favorite
+    case category(String)                    // ImageTaxonomy id, at least "plausible"
+    case label(String)                       // Vision identifier, confidence ≥ 0.5
+    case documentType(DocumentType)
+    case anyDocument
+    case screenshotCategory(String)
+    case merchant(String)                    // normalized
+    case orderNumber
+    case invoiceNumber
+    case messenger(MessengerApp)
+    case trip
+    case frequentPlace(SortlyID)
+    case group(SortlyID)
+    case album(CollectionID)
+    case hasLocation(Bool)
+    case status(Set<OverallStatus>)
+    case text(String)                        // folded word in the recognized text
+    case any([SearchCriterion])
+    case all([SearchCriterion])
 
-    public var isEmpty: Bool { self == SearchFilter() }
+    /// Needs the organization status of every photo (computed only then).
+    var usesStatus: Bool {
+        switch self {
+        case .status: true
+        case .any(let list), .all(let list): list.contains { $0.usesStatus }
+        default: false
+        }
+    }
 }
 
 /// One recognized piece of the query, for display ("Land: Italien", "Jahr: 2026").
 public struct SearchToken: Hashable, Sendable {
-    public enum Kind: String, Sendable { case country, place, year, month, mediaType, category, document, merchant, field, group, album, location, status, text }
+    public enum Kind: String, Sendable {
+        case country, place, year, month, date, mediaType, category, document, merchant, field, group, album, location, status, text, trip, favorite
+        /// A word that was not understood and is left out of the search.
+        case ignored
+    }
     public var kind: Kind
     public var label: String
+    /// The concrete period behind a relative date ("letzte Woche" → "2.–8. Nov. 2026").
+    public var detail: String?
+    /// What the user typed when it was read as something else ("Itallien" → Italien).
+    public var typed: String?
+    /// The term excludes photos ("ohne Hund").
+    public var negated = false
+    /// Photos in the library that match this term alone; `nil` before the search ran.
+    public var count: Int?
+
+    public init(kind: Kind, label: String, detail: String? = nil, typed: String? = nil, negated: Bool = false, count: Int? = nil) {
+        self.kind = kind
+        self.label = label
+        self.detail = detail
+        self.typed = typed
+        self.negated = negated
+        self.count = count
+    }
 }
 
-/// Names the parser can recognize, built from the user's own analysed library.
-public struct SearchVocabulary: Sendable {
-    public var countries: [String: String] = [:]        // normalized name → ISO code
-    public var places: Set<String> = []                 // normalized city/region/water names
-    public var albums: [String: CollectionID] = [:]     // normalized title → id
-    public var groups: [String: SortlyID] = [:]         // normalized confirmed name → id
-    public var groupKinds: [SortlyID: GroupKind] = [:]
-    public var merchants: Set<String> = []              // normalized
+/// A term of the query: alternatives that are OR-ed; clauses are AND-ed.
+public struct SearchClause: Hashable, Sendable {
+    public var alternatives: [SearchCriterion]
+    public var token: SearchToken
+    /// Clauses of the same dimension are alternatives of each other ("2023 2024").
+    var dimension: String?
+    /// How much the user's intent depends on this term. When nothing matches all terms, the
+    /// least important ones are left out first (a place outweighs a year, a year a topic).
+    var importance: Int
+    var negated = false
+    /// Position in the query, for showing the chips in the order they were typed.
+    var position: Int
 
+    var criterion: SearchCriterion { alternatives.count == 1 ? alternatives[0] : .any(alternatives) }
+}
+
+/// A parsed query.
+public struct SearchQuery: Hashable, Sendable {
+    public var clauses: [SearchClause] = []
+    /// Words that were not understood; shown, never silently dropped.
+    public var ignored: [String] = []
+
+    public var isEmpty: Bool { clauses.isEmpty }
+    public var usesStatus: Bool { clauses.contains { $0.criterion.usesStatus } }
+
+    /// Chips in query order; words that were not understood come last.
+    public var tokens: [SearchToken] {
+        clauses.sorted { $0.position < $1.position }.map(\.token) + ignored.map { SearchToken(kind: .ignored, label: $0) }
+    }
+}
+
+/// What the search found.
+public struct SearchResult: Hashable, Sendable {
+    /// Every hit, newest first. "Als Album anlegen" and the count use all of them.
+    public var ids: [AssetID] = []
+    /// The best few hits when the result is large and the match quality differs (a dog the
+    /// classifier is sure about, a favourite), shown above the full grid.
+    public var top: [AssetID] = []
+    /// Understood terms with their photo counts, then words that were not understood.
+    public var tokens: [SearchToken] = []
+    /// Terms left out because no photo matched all terms together.
+    public var dropped: [SearchToken] = []
+
+    public var isRelaxed: Bool { !dropped.isEmpty }
+    public init() {}
+}
+
+/// An autocomplete entry built from the user's own library.
+public struct SearchSuggestion: Hashable, Sendable, Identifiable {
+    /// The whole search text after choosing this suggestion.
+    public var completion: String
+    public var label: String
+    public var kind: SearchToken.Kind
+    public var count: Int
+    public var id: String { completion }
+}
+
+/// Evaluates parsed queries against a `SearchIndex`.
+public struct SearchEngine: Sendable {
     public init() {}
 
-    public static func build(facts: [AssetFacts], inventory: CollectionInventory, groups: [ObservationGroup]) -> SearchVocabulary {
-        var v = SearchVocabulary()
-        for f in facts {
-            guard let p = f.gpsPlace else { continue }
-            if let c = p.country, let code = p.isoCountryCode { v.countries[PlaceKey.normalize(c)] = code }
-            for name in [p.locality, p.administrativeArea, p.subAdministrativeArea, p.subLocality, p.inlandWater, p.areaOfInterest].compactMap({ $0 }) {
-                v.places.insert(PlaceKey.normalize(name))
+    /// Number of hits above which the best ones are shown separately.
+    static let topThreshold = 12
+    static let topCount = 6
+
+    public func run(_ query: SearchQuery, in index: SearchIndex, statuses: [AssetID: OverallStatus] = [:]) -> SearchResult {
+        var result = SearchResult()
+        guard !query.isEmpty else {
+            result.tokens = query.tokens
+            return result
+        }
+        let evaluator = SearchIndex.Evaluator(index: index, statuses: statuses)
+        let ordered = query.clauses.sorted { $0.position < $1.position }
+        // Each clause once: (all hits, hits the analysis is sure about).
+        let sets = ordered.map { clause -> (all: Bitset, strong: Bitset) in
+            var value = evaluator.clause(clause)
+            if clause.negated { value = (value.all.inverted(), value.all.inverted()) }
+            return value
+        }
+        var tokens = zip(ordered, sets).map { clause, set -> SearchToken in
+            var token = clause.token
+            token.negated = clause.negated
+            token.count = set.all.cardinality
+            return token
+        }
+
+        var chosen = Array(ordered.indices)
+        var hits = Self.intersection(sets.map(\.all), of: chosen, count: index.count)
+        if hits.isEmpty, ordered.count > 1 {
+            // Nothing matches all terms: keep the most important terms that still find
+            // photos and say which ones were left out (never an unexplained empty page).
+            if let best = Self.bestSubset(ordered, sets: sets.map(\.all), count: index.count) {
+                chosen = best
+                hits = Self.intersection(sets.map(\.all), of: chosen, count: index.count)
+                result.dropped = ordered.indices.filter { !chosen.contains($0) }.map { tokens[$0] }
             }
-            if let m = f.document?.merchant { v.merchants.insert(PlaceKey.normalize(m)) }
         }
-        for album in inventory.albums { v.albums[AlbumTitle.normalized(album.title)] = album.id }
-        for g in groups where g.isConfirmed {
-            if let name = g.confirmedName { v.groups[PlaceKey.normalize(name)] = g.id }
-            v.groupKinds[g.id] = g.kind
+        result.ids = hits.positions.map { index.ids[$0] }
+
+        // Top hits: score by how sure each chosen term is, plus favourites; newest first on ties.
+        // Only when the analysis is surer about some hits than others (topics, text): for a
+        // place or a date every hit fits equally well and the grid by date says it best.
+        let graded = chosen.contains { !ordered[$0].negated && sets[$0].strong != sets[$0].all }
+        if result.ids.count > Self.topThreshold, graded {
+            let positions = hits.positions
+            var scores = [Int](repeating: 0, count: positions.count)
+            for c in chosen where !ordered[c].negated {
+                let strong = sets[c].strong
+                for (i, p) in positions.enumerated() where strong.contains(p) { scores[i] += 2 }
+            }
+            for (i, p) in positions.enumerated() where index.favorites.contains(p) { scores[i] += 1 }
+            let best = scores.max() ?? 0, worst = scores.min() ?? 0
+            if best > worst {
+                let ranked = positions.indices.sorted { scores[$0] != scores[$1] ? scores[$0] > scores[$1] : positions[$0] < positions[$1] }
+                result.top = ranked.prefix(Self.topCount).map { index.ids[positions[$0]] }
+            }
         }
-        // Common country names in German and English even if not in the library, so
-        // "Italien 2026" is understood (and simply returns nothing if there are no photos).
-        for (name, code) in Self.commonCountries where v.countries[name] == nil { v.countries[name] = code }
-        return v
+        tokens.append(contentsOf: query.ignored.map { SearchToken(kind: .ignored, label: $0) })
+        result.tokens = tokens
+        return result
     }
 
-    static let commonCountries: [String: String] = [
-        "deutschland": "DE", "germany": "DE", "osterreich": "AT", "austria": "AT", "schweiz": "CH", "switzerland": "CH",
-        "italien": "IT", "italy": "IT", "frankreich": "FR", "france": "FR", "spanien": "ES", "spain": "ES", "portugal": "PT",
-        "griechenland": "GR", "greece": "GR", "kroatien": "HR", "croatia": "HR", "niederlande": "NL", "netherlands": "NL",
-        "england": "GB", "grossbritannien": "GB", "united-kingdom": "GB", "turkei": "TR", "turkey": "TR", "usa": "US",
-        "vereinigte-staaten": "US", "united-states": "US", "danemark": "DK", "denmark": "DK", "schweden": "SE", "sweden": "SE",
-        "norwegen": "NO", "norway": "NO", "polen": "PL", "poland": "PL", "tschechien": "CZ", "czechia": "CZ", "ungarn": "HU",
-        "hungary": "HU", "agypten": "EG", "egypt": "EG", "thailand": "TH", "japan": "JP", "kanada": "CA", "canada": "CA",
-    ]
-}
-
-/// Rule-based natural-language query parser (German and English). Deterministic, so the
-/// displayed interpretation always matches what is searched.
-public struct QueryParser: Sendable {
-    public var vocabulary: SearchVocabulary
-
-    public init(vocabulary: SearchVocabulary) {
-        self.vocabulary = vocabulary
+    static func intersection(_ sets: [Bitset], of chosen: [Int], count: Int) -> Bitset {
+        var hits = Bitset(count: count, filled: true)
+        for c in chosen { hits.formIntersection(sets[c]) }
+        return hits
     }
 
-    static let stopwords: Set<String> = [
-        "alle", "aller", "alles", "fotos", "foto", "bilder", "bild", "aus", "im", "in", "am", "an", "der", "die", "das", "dem", "den",
-        "des", "von", "vom", "mit", "einer", "einem", "eine", "ein", "meines", "meinem", "meinen", "meine", "mein", "unser", "unsere",
-        "jahr", "jahre", "zeig", "zeige", "mir", "und", "oder", "all", "photos", "photo", "pictures", "from", "the", "of", "my", "with",
-        "a", "an", "at", "year", "show", "me", "and", "ohne", "without", "bei", "zu", "zum", "zur", "auf",
-    ]
-
-    static let months: [String: Int] = [
-        "januar": 1, "january": 1, "jan": 1, "februar": 2, "february": 2, "feb": 2, "marz": 3, "maerz": 3, "march": 3, "april": 4, "apr": 4,
-        "mai": 5, "may": 5, "juni": 6, "june": 6, "juli": 7, "july": 7, "august": 8, "aug": 8, "september": 9, "sept": 9, "oktober": 10,
-        "october": 10, "okt": 10, "november": 11, "nov": 11, "dezember": 12, "december": 12, "dez": 12,
-    ]
-
-    static let documentWords: [String: DocumentType] = [
-        "rechnung": .invoice, "rechnungen": .invoice, "invoice": .invoice, "invoices": .invoice,
-        "kassenbon": .receipt, "kassenbons": .receipt, "quittung": .receipt, "quittungen": .receipt, "receipt": .receipt, "receipts": .receipt,
-        "vertrag": .contract, "vertrage": .contract, "contract": .contract, "contracts": .contract,
-        "garantie": .warranty, "garantien": .warranty, "warranty": .warranty,
-        "ticket": .ticket, "tickets": .ticket, "brief": .letter, "briefe": .letter, "letter": .letter, "letters": .letter,
-        "bedienungsanleitung": .manual, "bedienungsanleitungen": .manual, "manual": .manual, "manuals": .manual,
-        "angebot": .offer, "angebote": .offer, "buchung": .booking, "buchungen": .booking, "booking": .booking, "bookings": .booking,
-    ]
-
-    public func parse(_ query: String) -> (filter: SearchFilter, tokens: [SearchToken]) {
-        var filter = SearchFilter()
-        var tokens: [SearchToken] = []
-        var words = query.lowercased()
-            .replacingOccurrences(of: "nicht organisiert", with: " __unorganized__ ")
-            .replacingOccurrences(of: "not organized", with: " __unorganized__ ")
-            .replacingOccurrences(of: "unorganisiert", with: " __unorganized__ ")
-            .replacingOccurrences(of: "ohne standort", with: " __nolocation__ ")
-            .replacingOccurrences(of: "ohne ort", with: " __nolocation__ ")
-            .replacingOccurrences(of: "without location", with: " __nolocation__ ")
-            .replacingOccurrences(of: "live photos", with: " __live__ ")
-            .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_")).inverted)
-            .filter { !$0.isEmpty }
-            .map { PlaceKey.normalize($0).isEmpty ? $0 : ($0.hasPrefix("__") ? $0 : PlaceKey.normalize($0)) }
-
-        var consumed = Set<Int>()
-
-        // Multi-word names first (longest match): places, countries, albums, groups.
-        for length in stride(from: 4, through: 1, by: -1) where words.count >= length {
-            for start in 0...(words.count - length) {
-                let range = start..<(start + length)
-                guard consumed.isDisjoint(with: range) else { continue }
-                let phrase = words[range].joined(separator: "-")
-                if let code = vocabulary.countries[phrase] {
-                    filter.countryCodes.insert(code); tokens.append(.init(kind: .country, label: words[range].joined(separator: " ").capitalized))
-                } else if vocabulary.places.contains(phrase) {
-                    filter.placeNames.insert(phrase); tokens.append(.init(kind: .place, label: words[range].joined(separator: " ").capitalized))
-                } else if let g = vocabulary.groups[phrase] {
-                    filter.groupIDs.insert(g); tokens.append(.init(kind: .group, label: words[range].joined(separator: " ").capitalized))
-                } else if let a = vocabulary.albums[phrase] {
-                    filter.albumIDs.insert(a); tokens.append(.init(kind: .album, label: words[range].joined(separator: " ")))
-                } else if length == 1, vocabulary.merchants.contains(phrase) {
-                    filter.merchants.insert(phrase); tokens.append(.init(kind: .merchant, label: phrase.capitalized))
-                } else {
-                    continue
+    /// The largest set of terms that still finds photos, preferring important terms.
+    static func bestSubset(_ clauses: [SearchClause], sets: [Bitset], count: Int) -> [Int]? {
+        let n = clauses.count
+        // Beyond 8 terms the search over subsets would grow too large; drop one at a time.
+        guard n <= 8 else {
+            var kept = Array(0..<n)
+            while kept.count > 1 {
+                let weakest = kept.min { clauses[$0].importance < clauses[$1].importance }!
+                kept.removeAll { $0 == weakest }
+                if !intersection(sets, of: kept, count: count).isEmpty { return kept }
+            }
+            return nil
+        }
+        for size in stride(from: n - 1, through: 1, by: -1) {
+            var best: (subset: [Int], weight: Int, hits: Int)?
+            for mask in 1..<(1 << n) where mask.nonzeroBitCount == size {
+                let subset = (0..<n).filter { mask & (1 << $0) != 0 }
+                let hits = intersection(sets, of: subset, count: count).cardinality
+                guard hits > 0 else { continue }
+                let weight = subset.reduce(0) { $0 + clauses[$1].importance }
+                if best == nil || weight > best!.weight || (weight == best!.weight && hits > best!.hits) {
+                    best = (subset, weight, hits)
                 }
-                consumed.formUnion(range)
             }
-        }
-
-        for (i, word) in words.enumerated() where !consumed.contains(i) {
-            var handled = true
-            if word == "__unorganized__" {
-                filter.statuses.formUnion([.unorganized, .partiallyOrganized]); tokens.append(.init(kind: .status, label: "nicht organisiert"))
-            } else if word == "__nolocation__" {
-                filter.hasLocation = false; tokens.append(.init(kind: .location, label: "ohne Standort"))
-            } else if word == "__live__" {
-                filter.requiredSubtypes.insert(.livePhoto); tokens.append(.init(kind: .mediaType, label: "Live Photos"))
-            } else if let y = Int(word), (1900...2100).contains(y), word.count == 4 {
-                filter.years.insert(y); tokens.append(.init(kind: .year, label: word))
-            } else if let m = Self.months[word] {
-                filter.months.insert(m); tokens.append(.init(kind: .month, label: word.capitalized))
-            } else if ["video", "videos"].contains(word) {
-                filter.mediaKinds.insert(.video); tokens.append(.init(kind: .mediaType, label: "Videos"))
-            } else if ["screenshot", "screenshots", "bildschirmfoto", "bildschirmfotos"].contains(word) {
-                filter.requiredSubtypes.insert(.screenshot); tokens.append(.init(kind: .mediaType, label: "Screenshots"))
-            } else if ["panorama", "panoramen", "panoramas"].contains(word) {
-                filter.requiredSubtypes.insert(.panorama); tokens.append(.init(kind: .mediaType, label: "Panoramen"))
-            } else if let d = Self.documentWords[word] {
-                filter.documentTypes.insert(d); tokens.append(.init(kind: .document, label: word.capitalized))
-            } else if ["bestellnummer", "bestellnummern", "ordernumber"].contains(word) || (word == "order" && words.dropFirst(i + 1).first == "number") {
-                filter.requiresOrderNumber = true; tokens.append(.init(kind: .field, label: "mit Bestellnummer"))
-            } else if ["rechnungsnummer", "invoicenumber"].contains(word) {
-                filter.requiresInvoiceNumber = true; tokens.append(.init(kind: .field, label: "mit Rechnungsnummer"))
-            } else if let category = Self.category(for: word) {
-                // "Hund" with exactly one confirmed dog group → that group ("meines Hundes").
-                let kind: GroupKind? = category == "animal.dog" ? .dog : (category == "animal.cat" ? .cat : nil)
-                let confirmed = vocabulary.groupKinds.filter { $0.value == kind }.map(\.key)
-                if let kind, confirmed.count == 1, (words.contains("meines") || words.contains("meinem") || words.contains("my") || words.contains("unserem")) {
-                    filter.groupIDs.insert(confirmed[0]); tokens.append(.init(kind: .group, label: Labels(.german).groupPlaceholder(kind, number: 1)))
-                } else {
-                    filter.categories.insert(category)
-                    tokens.append(.init(kind: .category, label: ImageTaxonomy.byID[category]?.german ?? category))
-                }
-            } else {
-                handled = false
-            }
-            if handled { consumed.insert(i) }
-        }
-
-        let leftovers = words.enumerated().filter { !consumed.contains($0.offset) && !Self.stopwords.contains($0.element) && $0.element.count >= 3 && !$0.element.hasPrefix("__") }
-        for (_, word) in leftovers {
-            filter.freeText.append(word)
-            tokens.append(.init(kind: .text, label: "„\(word)“"))
-        }
-        words.removeAll()
-        return (filter, tokens)
-    }
-
-    /// Matches category names in German/English, singular or plural.
-    static func category(for word: String) -> String? {
-        for c in ImageTaxonomy.all {
-            let names = [c.german, c.english].map(PlaceKey.normalize)
-            for n in names {
-                if n == word || singular(n) == word || singular(word) == n || singular(word) == singular(n) { return c.id }
-            }
-            if c.visionIdentifiers.contains(word) || c.visionIdentifiers.contains(singular(word)) { return c.id }
+            if let best { return best.subset }
         }
         return nil
-    }
-
-    static func singular(_ w: String) -> String {
-        for suffix in ["es", "en", "s", "e", "n"] where w.count > suffix.count + 2 && w.hasSuffix(suffix) {
-            return String(w.dropLast(suffix.count))
-        }
-        return w
-    }
-}
-
-/// Evaluates filters against analysis facts. Never invents results: unknown values do not
-/// match (an undated photo never matches a year filter).
-public struct SearchEngine: Sendable {
-    public var calendar: Calendar
-    public init(calendar: Calendar = .sortlyDefault) { self.calendar = calendar }
-
-    public func matches(_ f: SearchFilter, _ facts: AssetFacts, status: OverallStatus? = nil, textHits: Set<AssetID>? = nil) -> Bool {
-        let a = facts.asset
-        if !f.countryCodes.isEmpty {
-            guard let code = facts.gpsPlace?.isoCountryCode, f.countryCodes.contains(code) else { return false }
-        }
-        if !f.placeNames.isEmpty {
-            guard let p = facts.gpsPlace else { return false }
-            let names = Set([p.locality, p.administrativeArea, p.subAdministrativeArea, p.subLocality, p.inlandWater, p.areaOfInterest].compactMap { $0 }.map(PlaceKey.normalize))
-            guard !names.isDisjoint(with: f.placeNames) else { return false }
-        }
-        if !f.years.isEmpty || !f.months.isEmpty || f.dateRange != nil {
-            guard let d = a.creationDate else { return false }
-            if !f.years.isEmpty && !f.years.contains(calendar.component(.year, from: d)) { return false }
-            if !f.months.isEmpty && !f.months.contains(calendar.component(.month, from: d)) { return false }
-            if let r = f.dateRange, !r.contains(d) { return false }
-        }
-        if !f.mediaKinds.isEmpty && !f.mediaKinds.contains(a.kind) { return false }
-        if !f.requiredSubtypes.isEmpty && !a.subtypes.contains(f.requiredSubtypes) { return false }
-        for c in f.categories where !facts.hasCategory(c, minimum: .plausible) { return false }
-        if !f.documentTypes.isEmpty {
-            guard let t = facts.document?.type, f.documentTypes.contains(t) else { return false }
-        }
-        if !f.merchants.isEmpty {
-            guard let m = facts.document?.merchant.map(PlaceKey.normalize), f.merchants.contains(m) else { return false }
-        }
-        if f.requiresOrderNumber && facts.document?.orderNumber == nil { return false }
-        if f.requiresInvoiceNumber && facts.document?.invoiceNumber == nil { return false }
-        if !f.groupIDs.isEmpty && facts.groupIDs.isDisjoint(with: f.groupIDs) { return false }
-        if !f.albumIDs.isEmpty && facts.albumIDs.isDisjoint(with: f.albumIDs) { return false }
-        if let hasLocation = f.hasLocation, (a.usableLocation != nil) != hasLocation { return false }
-        if !f.statuses.isEmpty {
-            guard let status, f.statuses.contains(status) else { return false }
-        }
-        if !f.freeText.isEmpty {
-            if let textHits {
-                if !textHits.contains(a.id) { return false }
-            } else {
-                let text = (facts.recognizedText ?? "").lowercased()
-                for word in f.freeText where !text.contains(word) { return false }
-            }
-        }
-        return true
-    }
-
-    public func search(_ f: SearchFilter, in facts: [AssetFacts], statuses: [AssetID: OverallStatus] = [:], textHits: Set<AssetID>? = nil) -> [AssetID] {
-        facts
-            .filter { matches(f, $0, status: statuses[$0.id], textHits: textHits) }
-            .sorted { ($0.asset.creationDate ?? .distantPast, $0.id) > ($1.asset.creationDate ?? .distantPast, $1.id) }
-            .map(\.id)
     }
 }

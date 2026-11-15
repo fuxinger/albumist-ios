@@ -6,7 +6,9 @@ import Foundation
 /// - a plan is counted once, from what it really changed;
 /// - a completed undo gives that plan's albums back once (audit 2, 6.3);
 /// - at launch, plans the store shows as taken back are settled again.
-public struct FreeAlbumLedger: Hashable, Sendable {
+/// The app stores it as one value (Codable), so an app ended between two writes can never
+/// keep half of a change (a plan neither counted nor marked as given back).
+public struct FreeAlbumLedger: Hashable, Sendable, Codable {
     /// Albums counted as one total by versions before the per-plan count.
     public var legacyUsed: Int
     /// Plan id → albums that plan created or extended.
@@ -21,6 +23,24 @@ public struct FreeAlbumLedger: Hashable, Sendable {
     }
 
     public var used: Int { legacyUsed + byPlan.values.reduce(0, +) }
+
+    /// Free albums left of `limit`. `reserved`: plans that started but are not counted yet
+    /// (an interrupted plan can be continued without a new check, so its albums are held
+    /// back; otherwise a second plan could use them first and the total would pass the
+    /// limit). A reservation of a plan that is already counted or given back holds nothing.
+    public func remaining(limit: Int, reserved: [SortlyID: Int] = [:]) -> Int {
+        let held = reserved.reduce(0) { sum, entry in
+            byPlan[entry.key.rawValue] != nil || returned.contains(entry.key.rawValue) ? sum : sum + max(0, entry.value)
+        }
+        return max(0, limit - used - held)
+    }
+
+    /// Whether a plan that uses `albums` free albums may run: always once unlocked; without
+    /// the unlock only while it fits into what is left, exactly at the limit included. A plan
+    /// that creates or extends no album (removing, taking back) always may.
+    public func allows(albums: Int, limit: Int, unlocked: Bool, reserved: [SortlyID: Int] = [:]) -> Bool {
+        unlocked || albums <= 0 || albums <= remaining(limit: limit, reserved: reserved)
+    }
 
     /// Returns whether anything changed.
     @discardableResult

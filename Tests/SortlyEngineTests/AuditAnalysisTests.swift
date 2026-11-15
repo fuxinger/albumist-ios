@@ -86,7 +86,7 @@ struct AuditAnalysisTests {
         let s = try PipelineTests().setup()
         _ = try await s.pipeline.run()
         let first = try #require(try await s.pipeline.latestProposals())
-        let trip = try #require(first.proposals.first { $0.kind == .trip && $0.title.hasPrefix("Rom ·") })
+        let trip = try #require(first.proposals.first { $0.kind == .trip && $0.title.hasPrefix("Rom,") })
         try await s.store.addOverride(UserOverride(scope: .source(trip.id), decision: .rejectProposal))
 
         // An older photo of the trip arrives (shared by a friend), and the first one is deleted.
@@ -104,7 +104,7 @@ struct AuditAnalysisTests {
         let rome = try #require(trips.first { $0.geotaggedAssetIDs.contains("imported-earlier") })
         #expect(rome.id == trip.id)
         let next = try #require(try await s.pipeline.latestProposals())
-        #expect(!next.proposals.contains { $0.kind == .trip && $0.title.hasPrefix("Rom ·") })
+        #expect(!next.proposals.contains { $0.kind == .trip && $0.title.hasPrefix("Rom,") })
     }
 
     // MARK: 2.2 / 2.3 / 2.5 store invalidation
@@ -227,12 +227,16 @@ struct AuditAnalysisTests {
         analyzer.state.withLock { $0.contentFailures = [ids[1]: 1] }
         let reader = InMemoryLibraryReader(assets: assets)
         let store = try SortlyStore(url: nil)
-        let p = pipeline(store: store, reader: reader, analyzer: analyzer)
+        let clock = Clock()
+        let p = pipeline(store: store, reader: reader, analyzer: analyzer, clock: clock)
         let first = try await p.run()
         #expect(first.contentAnalyzed == 2)
         #expect(try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 1)
         #expect(try await store.result(ContentAnalysis.self, kind: "content", asset: ids[1])?.failedAttempts == 1)
 
+        // Retried in a later run, spaced out (first device test 15.11.: catch-up runs follow
+        // each other within seconds).
+        clock.advance(ContentAnalysis.retrySpacing)
         let second = try await p.run()
         #expect(second.contentAnalyzed == 1)
         let result = try #require(try await store.result(ContentAnalysis.self, kind: "content", asset: ids[1]))
@@ -246,8 +250,12 @@ struct AuditAnalysisTests {
         analyzer.state.withLock { $0.contentFailures = [ids[0]: 10] }
         let reader = InMemoryLibraryReader(assets: assets)
         let store = try SortlyStore(url: nil)
-        let p = pipeline(store: store, reader: reader, analyzer: analyzer)
-        for _ in 0..<3 { _ = try await p.run() }
+        let clock = Clock()
+        let p = pipeline(store: store, reader: reader, analyzer: analyzer, clock: clock)
+        for _ in 0..<3 {
+            _ = try await p.run()
+            clock.advance(ContentAnalysis.retrySpacing)
+        }
         #expect(try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 0)
         #expect(try await store.result(ContentAnalysis.self, kind: "content", asset: ids[0])?.failedAttempts == 3)
         let reads = analyzer.state.withLock { $0.contentCalls }
@@ -427,7 +435,7 @@ struct AuditAnalysisTests {
         _ = try await pipeline.run()
         #expect(await reader.applied)
         let snapshot = try #require(try await pipeline.latestProposals())
-        let trip = try #require(snapshot.proposals.first { $0.title.hasPrefix("Rom ·") })
+        let trip = try #require(snapshot.proposals.first { $0.title.hasPrefix("Rom,") })
         #expect(snapshot.matches[trip.id]?.best?.albumID == "rom")
         #expect(try await store.loadInventory()["rom"] != nil)
     }

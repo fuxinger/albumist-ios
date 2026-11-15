@@ -169,12 +169,15 @@ struct SettingsView: View {
                     }
                     .disabled(purchases.isPurchasing)
                     Button("Kauf wiederherstellen") { Task { await purchases.restore() } }
+                        .disabled(purchases.isPurchasing)
                     Button("Code einlösen") { redeeming = true }
                     if let error = purchases.lastError {
                         Text(error).font(.footnote).foregroundStyle(.red)
                     }
                 }
             }
+            // The price comes from StoreKit; a start without network is made up for here.
+            .task { await purchases.loadProductIfNeeded() }
             .offerCodeRedemption(isPresented: $redeeming) { _ in
                 Task { await purchases.refreshEntitlements() }
             }
@@ -308,7 +311,8 @@ struct InterruptedHistoryRow: View {
                 await model.refreshDerived()
             }
         }
-        Button("Rückgängig") { confirmUndo = true }
+        // An interrupted undo cannot itself be taken back; it goes on or stays as it is.
+        if plan.reverts == nil { Button("Rückgängig") { confirmUndo = true } }
         Button("So lassen") { Task { await model.keepInterruptedPlanAsIs() } }
     }
 }

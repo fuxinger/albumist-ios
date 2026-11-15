@@ -141,14 +141,11 @@ final class Purchases {
         guard updates == nil, !(Self.hostsUnitTests && self === Purchases.shared) else { return }
         updates = Task { [weak self] in
             // A purchase approved later (Ask to Buy), made on another device, refunded or no
-            // longer shared by the family arrives here: the entitlements are read again.
-            // The unlock follows first, the transaction is finished afterwards (see `finishLater`).
+            // longer shared by the family arrives here and is applied (see `apply(update:)`);
+            // the transaction is finished afterwards (see `finishLater`).
             for await result in Transaction.updates {
                 guard let self else { return }
-                if case .verified = result {
-                    await self.refreshEntitlements()
-                    if self.isUnlocked { self.lastError = nil }
-                }
+                if case .verified(let transaction) = result { await self.apply(update: transaction) }
                 Self.finishLater(result.unsafePayloadValue)
             }
         }
@@ -172,9 +169,26 @@ final class Purchases {
         if product == nil { await loadProduct() }
     }
 
-    func refreshEntitlements() async {
+    /// A transaction that changed (approved, bought elsewhere, refunded, sharing ended). The
+    /// update itself decides: right after it StoreKit may not list the change in
+    /// `currentEntitlements` yet (in the Xcode test environment a purchase was missing there
+    /// right after it was made, CI run 43772050228), so reading the list alone could miss an
+    /// approval or keep a refunded purchase unlocked.
+    func apply(update transaction: Transaction) async {
+        guard transaction.productID == productID else { return }
+        if transaction.revocationDate == nil {
+            isUnlocked = true
+            lastError = nil
+        } else {
+            // Revoked: another entitlement (bought by the user and shared) may still unlock.
+            await refreshEntitlements(ignoring: transaction.id)
+        }
+    }
+
+    /// `ignoring`: a transaction known to be revoked that StoreKit may still list for a moment.
+    func refreshEntitlements(ignoring revoked: UInt64? = nil) async {
         var entitlements: [PurchaseRules.Entitlement] = []
-        for await result in Transaction.currentEntitlements {
+        for await result in Transaction.currentEntitlements where result.unsafePayloadValue.id != revoked {
             switch result {
             case .verified(let transaction):
                 entitlements.append(PurchaseRules.Entitlement(

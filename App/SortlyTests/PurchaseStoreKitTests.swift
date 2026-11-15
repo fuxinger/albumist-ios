@@ -177,9 +177,14 @@ struct PurchaseStoreKitTests {
         return seen
     }
 
+    /// Right after a session purchase StoreKit may not list it yet (CI run 43772050228: missing
+    /// once, present once), so the list is read again for up to 10 s.
     nonisolated static func entitlement(for id: String) async -> VerificationResult<Transaction>? {
-        for await result in Transaction.currentEntitlements where result.unsafePayloadValue.productID == id {
-            return result
+        for _ in 0..<50 {
+            for await result in Transaction.currentEntitlements where result.unsafePayloadValue.productID == id {
+                return result
+            }
+            try? await Task.sleep(for: .milliseconds(200))
         }
         return nil
     }
@@ -187,6 +192,21 @@ struct PurchaseStoreKitTests {
     nonisolated static func isVerified(_ result: VerificationResult<Transaction>) -> Bool {
         if case .verified = result { return true }
         return false
+    }
+
+    /// A start reads StoreKit's list of entitlements. Right after a purchase or refund made in
+    /// the session the list may still show the state before (CI run 43772050228), so it is read
+    /// again for up to 10 s until it shows `until`; the expectation after it decides.
+    func readEntitlements(_ purchases: Purchases, until unlocked: Bool, _ step: String) async throws {
+        for attempt in 1...20 {
+            try await within(step) { await purchases.refreshEntitlements() }
+            if purchases.isUnlocked == unlocked {
+                if attempt > 1 { storeKitTrace("\(step): as expected after \(attempt) reads") }
+                return
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        storeKitTrace("\(step): still unlocked \(purchases.isUnlocked) after 20 reads")
     }
 
     /// The app's purchase call as one step with a time limit; what it ended with goes to the
@@ -283,7 +303,7 @@ struct PurchaseStoreKitTests {
 
         let (secondDevice, _) = freshInstall()
         #expect(!secondDevice.isUnlocked)
-        try await within("read the entitlements on the second device") { await secondDevice.refreshEntitlements() }
+        try await readEntitlements(secondDevice, until: true, "read the entitlements on the second device")
         #expect(secondDevice.isUnlocked)
 
         let (reinstalled, _) = freshInstall()
@@ -372,10 +392,10 @@ struct PurchaseStoreKitTests {
 
     /// Ask to Buy: StoreKit answers the purchase with `.pending` while the parent decides; the
     /// app says so. An approval arrives as the completed purchase: the app's own transaction
-    /// listener unlocks, also after a restart. (The session creates Ask to Buy requests only
-    /// for purchases through Apple's sheet; `buyProduct` ignores `askToBuyEnabled`, CI run
-    /// 43770704675. So the pending answer comes through `confirmPurchase`, and the approval
-    /// is the session's purchase of the same product.)
+    /// listener unlocks, also after a restart. (The session's `buyProduct` ignores
+    /// `askToBuyEnabled`, no request was pending in CI run 43770704675, and Apple's sheet cannot
+    /// run in the test host. So the pending answer comes through `confirmPurchase`, and the
+    /// approval is the session's purchase of the same product.)
     @Test func askToBuyWaitsAndUnlocksWhenApproved() async throws {
         let store = try await session()
         defer { clearAfterwards(store) }
@@ -427,27 +447,33 @@ struct PurchaseStoreKitTests {
         #expect(!relaunched.isUnlocked)
     }
 
-    /// The session fails the purchase with an error: the app shows a message, stays locked,
-    /// and the next try works.
+    /// A purchase that fails: StoreKit throws, the app shows the error and stays locked, and
+    /// the next try (a real session purchase) works. The failure is StoreKit's error thrown
+    /// through `confirmPurchase`: the session's `buyProduct` does not apply
+    /// `failTransactionsEnabled` and `failureError`; it completed the purchase with both set
+    /// (CI run 43772050228), and Apple's sheet, where they apply, cannot run in the test host.
     @Test func failedPurchaseShowsAnErrorAndStaysLocked() async throws {
         let store = try await session()
         defer { clearAfterwards(store) }
         try await requireTestEnvironment()
-        try await within("make purchases fail") {
-            store.session.failTransactionsEnabled = true
-            store.session.failureError = .unknown
-        }
         let (purchases, _) = freshInstall()
-        _ = buyThroughSession(purchases, store)
+        let seen = Seen()
+        seen.answer = { throw Product.PurchaseError.purchaseNotAllowed }
+        purchases.confirmPurchase = { product in
+            seen.products.append(product.id)
+            return try seen.answer()
+        }
         try await purchaseStep(purchases, "failing purchase")
-        let afterward = await describe(store)
-        #expect(!purchases.isUnlocked, "transactions: \(afterward)")
-        #expect(purchases.lastError != nil, "a failed purchase showed no message")
+        #expect(seen.products == [Purchases.unlockProductID])
+        #expect(!purchases.isUnlocked)
+        #expect(purchases.lastError == Product.PurchaseError.purchaseNotAllowed.localizedDescription, "message: \(purchases.lastError ?? "none")")
         #expect(!purchases.isPurchasing)
         try await within("read the entitlements after the failure") { await purchases.refreshEntitlements() }
         #expect(!purchases.isUnlocked)
+        let recorded = try await transactions(store)
+        #expect(recorded.isEmpty)
         // The next try works.
-        try await within("let purchases succeed again") { store.session.failTransactionsEnabled = false }
+        _ = buyThroughSession(purchases, store)
         try await purchaseStep(purchases, "purchase after the failure")
         #expect(purchases.isUnlocked, "message: \(purchases.lastError ?? "none")")
         #expect(purchases.lastError == nil)
@@ -500,7 +526,7 @@ struct PurchaseStoreKitTests {
         #expect(purchases.remainingFreeAlbums == 0)
         #expect(!purchases.allows(albums: 1))
         let relaunched = Purchases(defaults: defaults)
-        try await within("read the entitlements after a restart") { await relaunched.refreshEntitlements() }
+        try await readEntitlements(relaunched, until: false, "read the entitlements after a restart")
         #expect(!relaunched.isUnlocked)
     }
 

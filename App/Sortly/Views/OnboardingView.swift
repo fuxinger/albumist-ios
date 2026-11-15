@@ -90,12 +90,21 @@ struct OnboardingView: View {
                 }
             }
         } footer: {
-            Button("Weiter") {
-                model.saveSettings()
-                step = 2
+            VStack(spacing: Theme.Spacing.s) {
+                Button("Weiter") {
+                    model.saveSettings()
+                    step = 2
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(model.settings.enabledAreas.isEmpty)
+                // Why the button is grey (design review N6).
+                if model.settings.enabledAreas.isEmpty {
+                    Text("Wähle mindestens einen Bereich.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("onboarding.areasHint")
+                }
             }
-            .buttonStyle(PrimaryButtonStyle())
-            .disabled(model.settings.enabledAreas.isEmpty)
         }
     }
 
@@ -154,8 +163,9 @@ struct OnboardingView: View {
             switch model.access {
             case .denied, .restricted:
                 Card {
-                    Label("Der Zugriff wurde abgelehnt.", systemImage: "exclamationmark.triangle").font(.headline)
-                    Text("Du kannst ihn in den Einstellungen unter Datenschutz › Fotos erlauben.")
+                    // The path of iOS 18 and later, like the other access screens (design review W14).
+                    Label("Kein Zugriff auf deine Fotos", systemImage: "exclamationmark.triangle").font(.headline)
+                    Text("Erlaube ihn unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff.")
                 }
             case .limited:
                 Card {

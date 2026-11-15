@@ -1363,7 +1363,7 @@ final class AppModel {
 
     /// Why nothing new runs while a plan that was cut off is open (plugin review K2).
     private var interruptedPlanFirst: String {
-        String(localized: "Erst das unterbrochene Umsetzen abschließen: in der Übersicht mit Fortsetzen, Rückgängig machen oder So lassen.")
+        String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
     }
 
     /// Everything that follows a finished plan, stored in one transaction: Albumist's albums,
@@ -1734,7 +1734,7 @@ final class AppModel {
         let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
-            message = AppMessage(title: String(localized: "Erst das unterbrochene Umsetzen abschließen"), text: interruptedPlanFirst)
+            message = AppMessage(title: String(localized: "Erst das unterbrochene Anlegen abschließen"), text: interruptedPlanFirst)
             return
         }
         // Free albums and suggestions come back in `finalize`, with the undo itself.

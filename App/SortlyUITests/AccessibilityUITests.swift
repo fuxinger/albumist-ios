@@ -87,15 +87,15 @@ final class AccessibilityUITests: XCTestCase {
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: "Vorschläge prüfen",
-                                  suggestionTitle: "Vorschlag", rowMarker: "Aufnahmen",
-                                  starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Umsetzen",
-                                  applyNow: "Jetzt umsetzen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
+                                  suggestionTitle: "Vorschlag", rowMarker: "Fotos",
+                                  starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
+                                  applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
                                   shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom", country: "Italien")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: "Review",
-                                   suggestionTitle: "Suggestion", rowMarker: "item",
-                                   starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Apply",
-                                   applyNow: "Apply now", undo: "Undo", atlas: "Travel Atlas",
+                                   suggestionTitle: "Suggestion", rowMarker: "photo",
+                                   starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
+                                   applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
                                    shareAtlas: "Share Travel Atlas", searchQuery: "Rome", country: "Italy")
     }
 

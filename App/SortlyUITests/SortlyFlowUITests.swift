@@ -18,9 +18,9 @@ final class SortlyFlowUITests: XCTestCase {
         app.launch()
     }
 
-    /// The first suggestion row of a list ("57 Aufnahmen" is in every row, never in a button).
+    /// The first suggestion row of a list ("57 Fotos" is in every row, never in a button).
     private func suggestionRow() -> XCUIElement {
-        app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "Aufnahmen")).element(boundBy: 0)
+        app.collectionViews.cells.containing(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Fotos?")).element(boundBy: 0)
     }
 
     private func button(_ text: String) -> XCUIElement {
@@ -257,7 +257,7 @@ final class SortlyFlowUITests: XCTestCase {
         let starter = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ Alben (kostenlos )?anlegen")).firstMatch
         if starter.waitForExistence(timeout: 5) {
             tap(starter, "open starter set")
-            let preview = app.navigationBars["Umsetzen"].waitForExistence(timeout: 20)
+            let preview = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
             print(preview ? "UI_STEP_OK starter preview opened" : "UI_STEP_MISSING starter preview opened")
             sleep(2); shot("06c-starter-plan")
             back(); sleep(2)
@@ -302,7 +302,7 @@ final class SortlyFlowUITests: XCTestCase {
                 let create = app.buttons["Album anlegen"]
                 if create.exists {
                     create.tap()
-                    if app.navigationBars["Umsetzen"].waitForExistence(timeout: 20) { sleep(1); back(); sleep(1) }
+                    if app.navigationBars["Vorschau"].waitForExistence(timeout: 20) { sleep(1); back(); sleep(1) }
                 }
                 back(); sleep(1)
                 let selected = suggestionRow().label.contains("Ausgewählt")
@@ -348,7 +348,7 @@ final class SortlyFlowUITests: XCTestCase {
                 shot("10a-plan-albums")
                 app.swipeDown(); sleep(1)
             }
-            if tap(button("Jetzt umsetzen"), "apply plan", timeout: 30) {
+            if tap(app.buttons["plan.apply"], "apply plan", timeout: 30) {
                 let applied = Date()
                 // Mid-show frames of "photos fly into albums".
                 usleep(1_100_000); shot("10b-show")
@@ -362,7 +362,7 @@ final class SortlyFlowUITests: XCTestCase {
                 if !receipt.isHittable { app.swipeUp(); sleep(1) }
                 if tap(receipt, "open change receipt", timeout: 10) {
                     sleep(2)
-                    let checked = anything("0 Originale gelöscht").waitForExistence(timeout: 5)
+                    let checked = anything("Kein Original gelöscht").waitForExistence(timeout: 5)
                     print(checked ? "UI_STEP_OK receipt shows originals untouched" : "UI_STEP_MISSING receipt shows originals untouched")
                     shot("11a-receipt"); audit("receipt")
                     app.swipeUp(); sleep(1)
@@ -722,7 +722,8 @@ final class SortlyFlowUITests: XCTestCase {
     // MARK: Tap-through sweep
 
     /// Labels the sweep never taps: anything that changes the library or the analysis.
-    private let sweepSkip = ["Pause", "Neu prüfen", "Jetzt umsetzen", "Rückgängig", "Fotos-App öffnen", "Alle Jahre", "Ganze Mediathek dazunehmen", "arbeitet mit", "Nur 20", "Löschen", "Entfernen", "Anlegen",
+    private let sweepSkip = ["Pause", "Neu prüfen", "jetzt anlegen", "jetzt einsortieren", "jetzt ausführen", "zurücknehmen", "Rest anlegen",
+                             "Erledigtes behalten", "ignorieren", "Widerrufen", "Rückgängig", "Fotos-App öffnen", "Alle Jahre", "Ganze Mediathek dazunehmen", "arbeitet mit", "Nur 20", "Löschen", "Entfernen", "Anlegen",
                              "Übernehmen", "Nicht jetzt", "ergänzen", "so lassen", "Fortsetzen", "Beispiel", "Ignorieren", "Auswählen",
                              "aufheben"]
 
@@ -861,7 +862,7 @@ final class SortlyFlowUITests: XCTestCase {
     }
 
     /// Fifth run: the app is closed while a plan runs. The next start offers to continue,
-    /// undo or leave it; "So lassen" keeps what was done, the change receipt says so and
+    /// undo or leave it; "Nur Erledigtes behalten" keeps what was done, the change list says so and
     /// "Fehlendes erneut versuchen" makes a plan with only the missing steps.
     func test5_InterruptedPlanCanBeLeftAndRetried() {
         continueAfterFailure = true
@@ -877,13 +878,13 @@ final class SortlyFlowUITests: XCTestCase {
         }
         guard tap(apply, "open plan for interruption", timeout: 20) else { return }
         sleep(3)
-        guard tap(button("Jetzt umsetzen"), "start plan for interruption", timeout: 30) else { return }
+        guard tap(app.buttons["plan.apply"], "start plan for interruption", timeout: 30) else { return }
         // The run takes about 16 s; closing the app after 3 s leaves it half done.
         sleep(3)
         app.terminate()
         sleep(2)
         launch()
-        let card = anything("Umsetzen wurde unterbrochen")
+        let card = anything("Anlegen wurde unterbrochen")
         guard card.waitForExistence(timeout: 30) else {
             // The plan finished before the app was closed: nothing to repair in this run.
             print("UI_FACT no interruption card (plan finished before the app was closed)")
@@ -897,7 +898,7 @@ final class SortlyFlowUITests: XCTestCase {
         guard tap(keep, "leave interrupted plan as it is") else { return }
         let gone = waitGone(card, timeout: 30)
         print(gone ? "UI_STEP_OK interruption card gone after keep" : "UI_STEP_MISSING interruption card gone after keep")
-        XCTAssertTrue(gone, "The interruption card stayed after \"So lassen\"")
+        XCTAssertTrue(gone, "The interruption card stayed after \"Nur Erledigtes behalten\"")
         sleep(2)
         shot("50b-after-keep")
 
@@ -923,12 +924,12 @@ final class SortlyFlowUITests: XCTestCase {
         sleep(1)
         shot("52-receipt-repair")
         guard tap(retry, "retry missing steps", timeout: 10) else { return }
-        let plan = app.navigationBars["Umsetzen"].waitForExistence(timeout: 20)
+        let plan = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
         print(plan ? "UI_STEP_OK retry plan opened" : "UI_STEP_MISSING retry plan opened")
         XCTAssertTrue(plan, "\"Fehlendes erneut versuchen\" did not open a plan")
         sleep(2)
         shot("53-retry-plan"); audit("retry plan")
-        if tap(button("Jetzt umsetzen"), "apply retry plan", timeout: 30) {
+        if tap(app.buttons["plan.apply"], "apply retry plan", timeout: 30) {
             let done = button("Rückgängig machen").waitForExistence(timeout: 300)
             print(done ? "UI_STEP_OK retry plan finished" : "UI_STEP_MISSING retry plan finished")
             XCTAssertTrue(done, "The retry plan did not finish")

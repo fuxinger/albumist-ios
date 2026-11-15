@@ -27,10 +27,11 @@ struct LibraryView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 bucketPicker
                 if bucket == .suggestions {
-                    Text("\(model.openProposals.count) Vorschläge für \(members.count.formatted()) Fotos und Videos")
+                    // Numbers as plural strings (design review W5: "1 Fotos und Videos").
+                    Text("\(model.openProposals.count) Vorschläge für \(members.count) Fotos und Videos")
                         .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                 } else {
-                    Text("\(members.count.formatted()) Fotos und Videos")
+                    Text("\(members.count) Fotos und Videos")
                         .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                 }
 

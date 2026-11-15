@@ -78,7 +78,7 @@ struct SettingsView: View {
                 NavigationLink {
                     ManagedAlbumsView()
                 } label: {
-                    LabeledContent("Von Albumist angelegt", value: model.managedAlbums.count.formatted())
+                    LabeledContent("Alben von Albumist", value: model.managedAlbums.count.formatted())
                 }
             }
 
@@ -328,8 +328,8 @@ struct InterruptedHistoryRow: View {
             .font(.subheadline)
             .disabled(model.execution.isRunning)
         }
-        .confirmationDialog("Bisherige Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
-            Button("Rückgängig machen", role: .destructive) {
+        .confirmationDialog("Alles zurücknehmen?", isPresented: $confirmUndo, titleVisibility: .visible) {
+            Button("Alles zurücknehmen", role: .destructive) {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
@@ -337,17 +337,19 @@ struct InterruptedHistoryRow: View {
         }
     }
 
+    /// The same words as on the overview card (design review W17).
     @ViewBuilder
     private var buttons: some View {
-        Button("Fortsetzen") {
+        let isUndo = plan.reverts != nil
+        Button(isUndo ? LocalizedStringKey("Rest zurücknehmen") : LocalizedStringKey("Rest anlegen")) {
             Task {
                 await model.resumeInterruptedPlan()
                 await model.refreshDerived()
             }
         }
         // An interrupted undo cannot itself be taken back; it goes on or stays as it is.
-        if plan.reverts == nil { Button("Rückgängig") { confirmUndo = true } }
-        Button("So lassen") { Task { await model.keepInterruptedPlanAsIs() } }
+        if !isUndo { Button("Alles zurücknehmen") { confirmUndo = true } }
+        Button(isUndo ? LocalizedStringKey("So lassen") : LocalizedStringKey("Nur Erledigtes behalten")) { Task { await model.keepInterruptedPlanAsIs() } }
     }
 }
 

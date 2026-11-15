@@ -1,16 +1,6 @@
 {
   "sourceLanguage" : "de",
   "strings" : {
-    "%@ Fotos und Videos" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ photos and videos"
-          }
-        }
-      }
-    },
     "%@ Treffer" : {
       "localizations" : {
         "en" : {
@@ -37,16 +27,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Showing %1$@ of %2$@"
-          }
-        }
-      }
-    },
-    "%@ von %@ Schritten" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ of %2$@ steps"
           }
         }
       }
@@ -127,46 +107,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "%lld Aufnahmen an %lld verschiedenen Tagen am selben Ort." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld items on %2$lld different days at the same place."
-          }
-        }
-      }
-    },
-    "%lld Aufnahmen in %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld items in %2$@."
-          }
-        }
-      }
-    },
-    "%lld Aufnahmen zwischen %@ und %@ in %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld items between %2$@ and %3$@ in %4$@."
-          }
-        }
-      }
-    },
-    "%lld Aufnahmen zwischen %@ und %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld items between %2$@ and %3$@."
           }
         }
       }
@@ -461,46 +401,6 @@
         }
       }
     },
-    "%lld Bilder enthalten Text zu „%@“." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld images contain text about “%2$@”."
-          }
-        }
-      }
-    },
-    "%lld Bilder passen zur Regel „%@“." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld images match the rule “%2$@”."
-          }
-        }
-      }
-    },
-    "%lld Bilder von %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld images from %2$@."
-          }
-        }
-      }
-    },
-    "%lld Bilder zeigen „%@“." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld images show “%2$@”."
-          }
-        }
-      }
-    },
     "%lld Dokumente liegen nur in iCloud und werden später gelesen." : {
       "localizations" : {
         "en" : {
@@ -781,46 +681,6 @@
         }
       }
     },
-    "%lld gemeinsame Aufnahmen" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld shared item"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld shared items"
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld gemeinsame Aufnahme"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld gemeinsame Aufnahmen"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "%lld ignorieren" : {
       "localizations" : {
         "en" : {
@@ -867,46 +727,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "%lld Länder · %lld Städte · %lld Reisen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld countries · %2$lld cities · %3$lld trips"
-          }
-        }
-      }
-    },
-    "%lld Medien: %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld items: %2$@."
-          }
-        }
-      }
-    },
-    "%lld neu, %lld ergänzt, %lld Fotos" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld new, %2$lld extended, %3$lld photos"
-          }
-        }
-      }
-    },
-    "%lld neue Alben, %lld ergänzt, %lld Fotos einsortiert." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld new albums, %2$lld extended, %3$lld photos sorted."
           }
         }
       }
@@ -994,46 +814,6 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "%lld Orte werden später genauer bestimmt."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "%lld passende Aufnahmen fehlen noch und werden ergänzt." : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld matching item is still missing and will be added."
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld matching items are still missing and will be added."
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld passende Aufnahme fehlt noch und wird ergänzt."
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld passende Aufnahmen fehlen noch und werden ergänzt."
                 }
               }
             }
@@ -1131,16 +911,6 @@
         }
       }
     },
-    "%lld von %lld Schritten sind erledigt. Du entscheidest, wie es weitergeht. Nichts wird doppelt angelegt, deine Fotos bleiben in jedem Fall unverändert." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld of %2$lld steps are done. You decide how to go on. Nothing is created twice, and your photos stay unchanged either way."
-          }
-        }
-      }
-    },
     "%lld von 7 Kontinenten" : {
       "localizations" : {
         "en" : {
@@ -1227,16 +997,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "%lld Vorschläge · %lld Alben gefunden" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld suggestions · %2$lld albums found"
           }
         }
       }
@@ -1541,16 +1301,6 @@
         }
       }
     },
-    "Albumist – Änderungsbeleg" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist – Change Receipt"
-          }
-        }
-      }
-    },
     "Albumist-Diagnose" : {
       "localizations" : {
         "en" : {
@@ -1607,16 +1357,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "All sorted"
-          }
-        }
-      }
-    },
-    "Als neues Album anlegen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Create as new album"
           }
         }
       }
@@ -1851,16 +1591,6 @@
         }
       }
     },
-    "Beleg teilen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Share Receipt"
-          }
-        }
-      }
-    },
     "Bereiche" : {
       "localizations" : {
         "en" : {
@@ -1877,16 +1607,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Affected photos and videos"
-          }
-        }
-      }
-    },
-    "Bilder aus WhatsApp, Signal und Co., nur mit klaren Hinweisen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Images from WhatsApp, Signal and others, only with clear signs."
           }
         }
       }
@@ -1971,16 +1691,6 @@
         }
       }
     },
-    "Das Umsetzen wurde unterbrochen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Applying was interrupted."
-          }
-        }
-      }
-    },
     "Das hat Albumist geändert" : {
       "localizations" : {
         "en" : {
@@ -1991,32 +1701,12 @@
         }
       }
     },
-    "Das passiert jetzt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "What happens now"
-          }
-        }
-      }
-    },
     "Datenschutz" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Privacy"
-          }
-        }
-      }
-    },
-    "Dein Album „%@“ enthält schon %lld von %lld Aufnahmen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your album “%1$@” already contains %2$lld of %3$lld items."
           }
         }
       }
@@ -2137,16 +1827,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The target folder has been deleted since."
-          }
-        }
-      }
-    },
-    "Der Zugriff wurde abgelehnt." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Access was denied."
           }
         }
       }
@@ -2311,16 +1991,6 @@
         }
       }
     },
-    "Dieser Plan ordnet %lld Alben. Kostenlos sind noch %lld. Mit einem einmaligen Kauf kannst du unbegrenzt sortieren, ohne Abo." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This plan sorts %1$lld albums. %2$lld are still free. With a one-time purchase you can sort without limits, no subscription."
-          }
-        }
-      }
-    },
     "Dieses Album kann Albumist nicht verändern." : {
       "localizations" : {
         "en" : {
@@ -2377,16 +2047,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "You can keep the app open. If something is interrupted, Albumist safely continues on the next launch."
-          }
-        }
-      }
-    },
-    "Du kannst ihn in den Einstellungen unter Datenschutz › Fotos erlauben." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "You can allow it in Settings under Privacy & Security › Photos."
           }
         }
       }
@@ -2611,16 +2271,6 @@
         }
       }
     },
-    "Es gibt schon ein Album „%@“, aber mit anderem Inhalt (%lld gemeinsame Aufnahmen)." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "There is already an album “%1$@”, but with different content (%2$lld shared items)."
-          }
-        }
-      }
-    },
     "Es gibt schon ein anderes Album „%@“. Das neue bekommt einen Zusatz." : {
       "localizations" : {
         "en" : {
@@ -2677,16 +2327,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Resume"
-          }
-        }
-      }
-    },
-    "Fortsetzen legt den Rest an. Rückgängig nimmt das Erledigte zurück. So lassen behält das Erledigte und lässt den Rest weg; es steht dann im Verlauf und lässt sich später noch zurücknehmen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Continue creates the rest. Undo takes back what was done. Leave as Is keeps what was done and drops the rest; it then appears in the history and can still be undone later."
           }
         }
       }
@@ -2987,16 +2627,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Years and months"
-          }
-        }
-      }
-    },
-    "Jetzt umsetzen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apply now"
           }
         }
       }
@@ -3621,32 +3251,6 @@
         }
       }
     },
-    "Nur vorgeschlagen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Suggested only"
-          }
-        }
-      }
-    },
-    "Nur was beim letzten Umsetzen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt." : {
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nur was beim letzten Umsetzen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Only what was missing last time. What is already done stays as it is and is not created twice."
-          }
-        }
-      }
-    },
     "OK" : {
       "localizations" : {
         "en" : {
@@ -3903,16 +3507,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Set up Albumist in the app first."
-          }
-        }
-      }
-    },
-    "Rückgängig" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Undo"
           }
         }
       }
@@ -4307,16 +3901,6 @@
         }
       }
     },
-    "Umsetzen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apply"
-          }
-        }
-      }
-    },
     "Unsicher" : {
       "localizations" : {
         "en" : {
@@ -4707,26 +4291,6 @@
         }
       }
     },
-    "Änderungsbeleg" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Change Receipt"
-          }
-        }
-      }
-    },
-    "Änderungsbeleg ansehen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "View Change Receipt"
-          }
-        }
-      }
-    },
     "Öffnet Albumist und sucht nach neuen Fotos, für die es Vorschläge gibt." : {
       "localizations" : {
         "en" : {
@@ -4763,26 +4327,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Overview"
-          }
-        }
-      }
-    },
-    "„%@“ enthält %lld weitere Aufnahmen, die nicht dazugehören. Sie bleiben unverändert." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“%1$@” contains %2$lld other items that don’t belong. They stay unchanged."
-          }
-        }
-      }
-    },
-    "„%@“ hat nur %lld gemeinsame Aufnahmen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“%1$@” has only %2$lld shared items."
           }
         }
       }
@@ -5037,16 +4581,6 @@
         }
       }
     },
-    "Von Albumist angelegt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Created by Albumist"
-          }
-        }
-      }
-    },
     "Änderungen von Albumist zurücknehmen" : {
       "localizations" : {
         "en" : {
@@ -5123,16 +4657,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suggestions for This Photo"
-          }
-        }
-      }
-    },
-    "%lld Vorschläge für %@ Fotos und Videos" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld suggestions for %2$@ photos and videos"
           }
         }
       }
@@ -5483,46 +5007,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld new"
-          }
-        }
-      }
-    },
-    "Vorschlag mit %lld Aufnahmen" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Suggestion with %lld item"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Suggestion with %lld items"
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Vorschlag mit %lld Aufnahme"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Vorschlag mit %lld Aufnahmen"
-                }
-              }
-            }
           }
         }
       }
@@ -6199,26 +5683,6 @@
         }
       }
     },
-    "Umsetzen wurde unterbrochen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Applying Was Interrupted"
-          }
-        }
-      }
-    },
-    "Bisherige Änderungen rückgängig machen?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Undo the Changes So Far?"
-          }
-        }
-      }
-    },
     "Albumist entfernt die schon angelegten Alben und Zuordnungen. Deine Fotos bleiben unverändert." : {
       "localizations" : {
         "en" : {
@@ -6501,10 +5965,60 @@
     },
     "Unterbrochen: %lld von %lld Schritten erledigt" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unterbrochen: %1$lld von %#@steps@ erledigt"
+          },
+          "substitutions" : {
+            "steps" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Schritt"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Schritten"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Interrupted: %lld of %lld steps done"
+            "value" : "Interrupted: %1$lld of %#@steps@ done"
+          },
+          "substitutions" : {
+            "steps" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg step"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg steps"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -6561,20 +6075,140 @@
     },
     "von %lld Alben fertig" : {
       "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "von %lld Album fertig"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "von %lld Alben fertig"
+                }
+              }
+            }
+          }
+        },
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "of %lld albums done"
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "of %lld album done"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "of %lld albums done"
+                }
+              }
+            }
           }
         }
       }
     },
     "%lld von %lld Alben fertig, %lld Fotos einsortiert" : {
       "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld von %#@albums@ fertig, %#@photos@ einsortiert"
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Album"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Alben"
+                    }
+                  }
+                }
+              }
+            },
+            "photos" : {
+              "argNum" : 3,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$lld of %2$lld albums done, %3$lld photos sorted"
+            "value" : "%1$lld of %#@albums@ done, %#@photos@ sorted"
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg album"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg albums"
+                    }
+                  }
+                }
+              }
+            },
+            "photos" : {
+              "argNum" : 3,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -6975,16 +6609,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Select and Create Later"
-          }
-        }
-      }
-    },
-    "Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du auf „Alben anlegen“ tippst. Vorher siehst du jedes Album noch einmal." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recommended means certain and likely suggestions without personal topics. Nothing is created until you tap “Create albums”, and you see every album once more first."
           }
         }
       }
@@ -7679,16 +7303,6 @@
         }
       }
     },
-    "Fortsetzen nimmt auch den Rest zurück. So lassen behält, was schon zurückgenommen ist; den Rest kannst du später im Änderungsbeleg zurücknehmen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Continue takes back the rest too. Leave as is keeps what has already been taken back; you can take back the rest later from the change receipt."
-          }
-        }
-      }
-    },
     "Keine Verbindung zum App Store. Bitte prüfe deine Internetverbindung und versuche es noch einmal." : {
       "localizations" : {
         "en" : {
@@ -7715,16 +7329,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No photo matches every term. Searched without %@."
-          }
-        }
-      }
-    },
-    "Nicht verstanden" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not understood"
           }
         }
       }
@@ -8119,42 +7723,12 @@
         }
       }
     },
-    "Erst das unterbrochene Umsetzen abschließen: in der Übersicht mit Fortsetzen, Rückgängig machen oder So lassen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "First finish the interrupted run: on the overview, with Resume, Undo or Leave as Is."
-          }
-        }
-      }
-    },
     "Nicht alles ließ sich zurücknehmen. Das unterbrochene Umsetzen steht jetzt unter Einstellungen › Verlauf. Dort kannst du den Rest zurücknehmen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Not everything could be taken back. The interrupted run is now in Settings › History, where you can take back the rest."
-          }
-        }
-      }
-    },
-    "Erst das unterbrochene Umsetzen abschließen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Finish the interrupted run first"
-          }
-        }
-      }
-    },
-    "Ein früheres Umsetzen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht: Fortsetzen, Rückgängig machen oder So lassen. Danach kannst du diese Änderungen umsetzen, und nichts wird doppelt angelegt." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "An earlier run was interrupted. Decide on the overview how to go on: Resume, Undo or Leave as Is. Then you can apply these changes, and nothing is created twice."
           }
         }
       }
@@ -8285,6 +7859,1816 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "That Didn’t Work"
+          }
+        }
+      }
+    },
+    "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating albums was interrupted earlier. Decide on the overview how to go on; then you can continue here."
+          }
+        }
+      }
+    },
+    "Wähle mindestens einen Bereich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose at least one area."
+          }
+        }
+      }
+    },
+    "Erlaube ihn unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow it in Settings › Apps › Albumist › Photos › Full Access."
+          }
+        }
+      }
+    },
+    "Rückgängig wurde unterbrochen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo Was Interrupted"
+          }
+        }
+      }
+    },
+    "Anlegen wurde unterbrochen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating Albums Was Interrupted"
+          }
+        }
+      }
+    },
+    "Deine Fotos bleiben in jedem Fall unverändert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your photos stay unchanged either way."
+          }
+        }
+      }
+    },
+    "Änderungen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changes"
+          }
+        }
+      }
+    },
+    "Liste teilen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share List"
+          }
+        }
+      }
+    },
+    "Kein Original gelöscht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No originals deleted"
+          }
+        }
+      }
+    },
+    "Kein Original bearbeitet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No originals edited"
+          }
+        }
+      }
+    },
+    "Keine Kopie angelegt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No copies made"
+          }
+        }
+      }
+    },
+    "Albumist – Änderungen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist – Changes"
+          }
+        }
+      }
+    },
+    "Vorschau" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preview"
+          }
+        }
+      }
+    },
+    "Das ändert sich in Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What changes in Photos"
+          }
+        }
+      }
+    },
+    "Nur was beim letzten Anlegen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only what was missing last time. What is already done stays as it is and is not created twice."
+          }
+        }
+      }
+    },
+    "Kein Original wird gelöscht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No originals are deleted"
+          }
+        }
+      }
+    },
+    "Es werden keine Kopien angelegt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No copies are made"
+          }
+        }
+      }
+    },
+    "Erst das unterbrochene Anlegen abschließen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish the Interrupted Run First"
+          }
+        }
+      }
+    },
+    "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating albums was interrupted earlier. Decide on the overview how to go on. Then you can continue here, and nothing is created twice."
+          }
+        }
+      }
+    },
+    "Alben jetzt anlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create Albums Now"
+          }
+        }
+      }
+    },
+    "Fotos jetzt einsortieren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sort Photos Now"
+          }
+        }
+      }
+    },
+    "Änderungen jetzt ausführen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Make Changes Now"
+          }
+        }
+      }
+    },
+    "Alle Änderungen ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View All Changes"
+          }
+        }
+      }
+    },
+    "Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du auf „Alben jetzt anlegen“ tippst. Vorher siehst du jedes Album noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recommended are certain and likely suggestions without personal topics. Nothing is created until you tap “Create Albums Now”. You see every album before that."
+          }
+        }
+      }
+    },
+    "Vielleicht passend" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "May fit"
+          }
+        }
+      }
+    },
+    "Neues Album wählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose New Album"
+          }
+        }
+      }
+    },
+    "Angelegt wird erst, wenn du auf „Alben jetzt anlegen“ tippst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing is created until you tap “Create Albums Now”."
+          }
+        }
+      }
+    },
+    "Suchbegriff nicht erkannt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search Term Not Recognized"
+          }
+        }
+      }
+    },
+    "Versuch es mit einem Ort, einem Jahr, einem Thema oder Text auf einem Screenshot." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try a place, a year, a topic or text on a screenshot."
+          }
+        }
+      }
+    },
+    "nicht erkannt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "not recognized"
+          }
+        }
+      }
+    },
+    "Alben von Albumist" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albums by Albumist"
+          }
+        }
+      }
+    },
+    "Alles zurücknehmen?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take Everything Back?"
+          }
+        }
+      }
+    },
+    "Alles zurücknehmen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take Everything Back"
+          }
+        }
+      }
+    },
+    "Rest zurücknehmen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take Back the Rest"
+          }
+        }
+      }
+    },
+    "Rest anlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create the Rest"
+          }
+        }
+      }
+    },
+    "Nur Erledigtes behalten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep Only What’s Done"
+          }
+        }
+      }
+    },
+    "Fotos aus WhatsApp, Signal und Co., nur mit klaren Hinweisen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos from WhatsApp, Signal and others, only with clear signs."
+          }
+        }
+      }
+    },
+    "Strand 2024" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beach 2024"
+          }
+        }
+      }
+    },
+    "Italien" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Italy"
+          }
+        }
+      }
+    },
+    "Rechnungen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invoices"
+          }
+        }
+      }
+    },
+    "Videos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Videos"
+          }
+        }
+      }
+    },
+    "Screenshots Bestellung" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Screenshots order"
+          }
+        }
+      }
+    },
+    "%lld Originale werden gelöscht" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Original wird gelöscht"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Originale werden gelöscht"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld original is deleted"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld originals are deleted"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Kopien werden angelegt" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Kopie wird angelegt"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Kopien werden angelegt"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld copy is made"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld copies are made"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Vorschlag mit %lld Fotos" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Vorschlag mit %lld Foto"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Vorschlag mit %lld Fotos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Suggestion with %lld photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Suggestion with %lld photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld gemeinsame Fotos" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld gemeinsames Foto"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld gemeinsame Fotos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld shared photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld shared photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos und Videos" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto oder Video"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos und Videos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo or video"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos and videos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld passende Fotos fehlen noch und werden ergänzt." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld passendes Foto fehlt noch und wird ergänzt."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld passende Fotos fehlen noch und werden ergänzt."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld matching photo is still missing and will be added."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld matching photos are still missing and will be added."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Vorschläge für %lld Fotos und Videos" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@sugg@ für %#@media@"
+          },
+          "substitutions" : {
+            "sugg" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Vorschlag"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Vorschläge"
+                    }
+                  }
+                }
+              }
+            },
+            "media" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto oder Video"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos und Videos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@sugg@ for %#@media@"
+          },
+          "substitutions" : {
+            "sugg" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg suggestion"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg suggestions"
+                    }
+                  }
+                }
+              }
+            },
+            "media" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo or video"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos and videos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Erledigt: %lld von %lld Schritten" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erledigt: %1$lld von %#@steps@"
+          },
+          "substitutions" : {
+            "steps" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Schritt"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Schritten"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done: %1$lld of %#@steps@"
+          },
+          "substitutions" : {
+            "steps" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg step"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg steps"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Für diese Auswahl brauchst du %lld Alben. Kostenlos sind noch %lld. Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Für diese Auswahl brauchst du %#@albums@. Kostenlos %#@free@. Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo."
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Album"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Alben"
+                    }
+                  }
+                }
+              }
+            },
+            "free" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "ist noch %arg"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "sind noch %arg"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This selection needs %#@albums@. You have %#@free@ left. A one-time purchase lets you sort without limits, no subscription."
+          },
+          "substitutions" : {
+            "albums" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg album"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg albums"
+                    }
+                  }
+                }
+              }
+            },
+            "free" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg free album"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg free albums"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos zwischen %@ und %@ in %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ zwischen %2$@ und %3$@ in %4$@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ between %2$@ and %3$@ in %4$@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos in %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ in %2$@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ in %2$@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos zwischen %@ und %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ zwischen %2$@ und %3$@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ between %2$@ and %3$@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos an %lld verschiedenen Tagen am selben Ort." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ an %#@days@ am selben Ort."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos"
+                    }
+                  }
+                }
+              }
+            },
+            "days" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Tag"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg verschiedenen Tagen"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ on %#@days@ at the same place."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos"
+                    }
+                  }
+                }
+              }
+            },
+            "days" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg day"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg different days"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos zeigen „%@“." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ „%2$@“."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto zeigt"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos zeigen"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ “%2$@”."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo shows"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos show"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos enthalten Text zu „%@“." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ Text zu „%2$@“."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto enthält"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos enthalten"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ text about “%2$@”."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo contains"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos contain"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos und Videos: %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@media@: %2$@."
+          },
+          "substitutions" : {
+            "media" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto oder Video"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos und Videos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@media@: %2$@."
+          },
+          "substitutions" : {
+            "media" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo or video"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos and videos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos von %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ von %2$@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ of %2$@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos passen zur Regel „%@“." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ zur Regel „%2$@“."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto passt"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos passen"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ the rule “%2$@”."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo matches"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos match"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Dein Album „%@“ enthält schon %lld von %lld Fotos." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dein Album „%1$@“ enthält schon %2$lld von %#@photos@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 3,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your album “%1$@” already contains %2$lld of %#@photos@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 3,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "„%@“ enthält %lld weitere Fotos, die nicht dazugehören. Sie bleiben unverändert." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%1$@“ enthält %#@photos@, die nicht dazugehören. Sie bleiben unverändert."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg weiteres Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg weitere Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%1$@” contains %#@photos@ that don’t belong. They stay unchanged."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg other photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg other photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Es gibt schon ein Album „%@“, aber mit anderem Inhalt (%lld gemeinsame Fotos)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Es gibt schon ein Album „%1$@“, aber mit anderem Inhalt (%#@photos@)."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg gemeinsames Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg gemeinsame Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "There is already an album “%1$@”, but with different content (%#@photos@)."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg shared photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg shared photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "„%@“ hat nur %lld gemeinsame Fotos." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%1$@“ hat nur %#@photos@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg gemeinsames Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg gemeinsame Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%1$@” has only %#@photos@."
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg shared photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg shared photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld von %lld Schritten" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld von %#@steps@"
+          },
+          "substitutions" : {
+            "steps" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Schritt"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg Schritten"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld of %#@steps@"
+          },
+          "substitutions" : {
+            "steps" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg step"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg steps"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Der Vorgang wurde unterbrochen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The run was interrupted."
           }
         }
       }

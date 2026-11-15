@@ -124,3 +124,9 @@ dem Cloud-Mac noch laufen muss; bis dahin ist die Oberfläche nur syntaktisch ge
 | D2 Fehlertext in Primärfarbe mit rotem Symbol (`ErrorNote`) | 🟡 | — | UI-Schalter für einen Kauffehler fehlt |
 | D3 Fotos eines Vorschlags sind benannte Knöpfe, „Ausgewählt“ für VoiceOver | 🟡 | UI test1: „suggestion photos are named buttons“, `isSelected` | UI-Lauf |
 | D4 Ignorieren zurücknehmen: „Widerrufen“ direkt danach, „Nicht mehr ignorieren“ in „Ignoriert“ und im Foto | 🟡 | IgnoreUndoTests (5: nur Neues wird zurückgenommen, keine Doppelten, andere Entscheidungen bleiben, Status kehrt zurück); UI test1 `ignoreAndUndo` | UI-Lauf |
+| W1 Originale: „Kein Original gelöscht“ statt „0 Originale gelöscht“ (Vorschau, Änderungen, geteilte Liste) | 🟡 | UI test1 sucht „Kein Original gelöscht“ | UI-Lauf |
+| W2 Ein Name für den Vorgang: „Vorschau“, „Das ändert sich in Fotos“, „Alben jetzt anlegen“ (`plan.apply`), „Anlegen wurde unterbrochen“, „Änderungen“ | 🟡 | UI test1, test5, Locked, Accessibility (neue Titel und `plan.apply`) | UI-Lauf |
+| W4 „Fotos“ statt „Aufnahmen/Bilder/Medien“ | ✅ | StringCatalogTests.photosAreCalledFotos (nur ScanShow ausgenommen, wird auf `claude/pro-progress` neu gebaut) | — |
+| W5 Mehrzahl in Zählungen (auch mehrere Zahlen über Substitutionen) | ✅ | StringCatalogTests: everySubstitutionIsDefined, countVariesByPlural (11 Texte) | Anzeige im Simulator |
+| W6 Suchbeispiele übersetzt und in beiden Sprachen verstanden | ✅ | SearchExampleTests (12 Beispiele, gleiche Treffer DE/EN, Liste = App und Katalog) | — |
+| W17 Unterbrochen: „Rest anlegen“, „Alles zurücknehmen“, „Nur Erledigtes behalten“ (Rückgängig: „Rest zurücknehmen“, „So lassen“) | 🟡 | UI test5 (`interrupted.keep`) | UI-Lauf |

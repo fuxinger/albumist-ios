@@ -28,7 +28,9 @@ struct SearchView: View {
     @Namespace private var zoom
 
     /// Shown only before the library is analysed (afterwards the library's own starting points).
-    private let examples: [String] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Nicht sortiert", "Screenshots Bestellung"]
+    /// Translated (design review W6: English devices saw "Strand 2024"); the search understands
+    /// both languages, see `SearchExampleTests`.
+    private let examples: [LocalizedStringResource] = ["Strand 2024", "Italien", "Rechnungen", "Videos", "Nicht sortiert", "Screenshots Bestellung"]
 
     private var isEmptyQuery: Bool { query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -110,7 +112,7 @@ struct SearchView: View {
                 .foregroundStyle(.secondary)
             FlowLayout(spacing: Theme.Spacing.s) {
                 if featured.isEmpty {
-                    ForEach(examples, id: \.self) { example in
+                    ForEach(examples.map { String(localized: $0) }, id: \.self) { example in
                         Button(example) { query = example }
                             .buttonStyle(.bordered)
                             .buttonBorderShape(.capsule)
@@ -181,8 +183,9 @@ struct SearchView: View {
         let understood = result.tokens.filter { $0.kind != .ignored }
         return Group {
             if understood.isEmpty {
-                ContentUnavailableView("Nicht verstanden", systemImage: "questionmark.circle",
-                                       description: Text("Suche nach Orten, Jahren, Themen oder Text auf Screenshots."))
+                // Says what to try instead (design review N14).
+                ContentUnavailableView("Suchbegriff nicht erkannt", systemImage: "questionmark.circle",
+                                       description: Text("Versuch es mit einem Ort, einem Jahr, einem Thema oder Text auf einem Screenshot."))
             } else if let missing = understood.first(where: { $0.count == 0 }) {
                 ContentUnavailableView("Keine Fotos", systemImage: "magnifyingglass",
                                        description: Text("Zu „\(missing.label)“ gibt es keine Fotos in deiner Mediathek."))
@@ -293,7 +296,7 @@ struct SearchTokenChip: View {
         var parts = [token.label]
         if let detail = token.detail { parts.append(detail) }
         if let typed = token.typed { parts.append(String(localized: "korrigiert aus \(typed)")) }
-        if ignored { parts.append(String(localized: "Nicht verstanden")) }
+        if ignored { parts.append(String(localized: "nicht erkannt")) }
         if dropped { parts.append(String(localized: "nicht berücksichtigt")) }
         return parts.joined(separator: ", ")
     }

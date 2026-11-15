@@ -63,7 +63,7 @@ struct ProposalListView: View {
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 } footer: {
-                    Text("Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du auf „Alben anlegen“ tippst. Vorher siehst du jedes Album noch einmal.")
+                    Text("Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du auf „Alben jetzt anlegen“ tippst. Vorher siehst du jedes Album noch einmal.")
                 }
             }
             if area == nil {
@@ -115,7 +115,8 @@ struct ProposalRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.userTitles[proposal.id] ?? proposal.title).font(.body.weight(.medium)).lineLimit(typeSize.isAccessibilitySize ? 5 : 2)
-                Text("\(proposal.assetIDs.count - (model.removedFromProposals[proposal.id]?.count ?? 0)) Aufnahmen").font(.footnote).foregroundStyle(.secondary)
+                // "Fotos" everywhere, not "Aufnahmen", "Bilder" or "Medien" (design review W4).
+                Text("\(proposal.assetIDs.count - (model.removedFromProposals[proposal.id]?.count ?? 0)) Fotos").font(.footnote).foregroundStyle(.secondary)
                 if proposal.requiresUserName && model.userTitles[proposal.id] == nil {
                     // A place only the user can name: says what is missing instead of
                     // "Neues Album" (first device test 15.11.: 44 "Häufiger Ort N").
@@ -274,7 +275,8 @@ struct ProposalDetailView: View {
                     LabeledContent("Ordner", value: ([model.settings.rootFolderTitle] + proposal.folderPath)
                         .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " › "))
                     if !proposal.optionalAssetIDs.isEmpty {
-                        LabeledContent("Nur vorgeschlagen", value: "\(proposal.optionalAssetIDs.count)")
+                        // Says what the number is (design review N5: "Nur vorgeschlagen: 12").
+                        LabeledContent("Vielleicht passend") { Text("\(proposal.optionalAssetIDs.count) Fotos") }
                     }
                     if proposal.isSensitive {
                         Label("Persönlicher Inhalt: wird nie automatisch ausgewählt.", systemImage: "lock")
@@ -537,15 +539,20 @@ struct AdjustProposalView: View {
 
     var body: some View {
         Form {
-            Section("Neues Album") {
+            // Choosing only selects; nothing is created here (design review W3).
+            Section {
                 TextField("Titel", text: $title)
-                Button("Als neues Album anlegen") {
+                Button("Neues Album wählen") {
                     let trimmed = title.trimmingCharacters(in: .whitespaces)
                     if !trimmed.isEmpty { model.setUserTitle(trimmed, for: proposal) }
                     model.setDecision(.createNew(title: trimmed.isEmpty ? nil : trimmed, folderPath: nil), for: proposal)
                     dismiss()
                 }
                 .disabled(proposal.requiresUserName && title.trimmingCharacters(in: .whitespaces).isEmpty)
+            } header: {
+                Text("Neues Album")
+            } footer: {
+                Text("Angelegt wird erst, wenn du auf „Alben jetzt anlegen“ tippst.")
             }
             Section {
                 ForEach(candidates, id: \.albumID) { candidate in
@@ -555,7 +562,7 @@ struct AdjustProposalView: View {
                     } label: {
                         VStack(alignment: .leading) {
                             Text(candidate.albumTitle)
-                            Text("\(candidate.metrics.intersection) gemeinsame Aufnahmen").font(.footnote).foregroundStyle(.secondary)
+                            Text("\(candidate.metrics.intersection) gemeinsame Fotos").font(.footnote).foregroundStyle(.secondary)
                         }
                     }
                     .foregroundStyle(.primary)

@@ -34,13 +34,13 @@ struct PlanReceiptView: View {
                 undoSection(receipt)
             }
         }
-        .navigationTitle("Änderungsbeleg")
+        .navigationTitle("Änderungen")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let receipt {
                 ToolbarItem(placement: .primaryAction) {
                     ShareLink(item: ReceiptText.text(receipt, undo: undo, inventory: model.inventory)) {
-                        Label("Beleg teilen", systemImage: "square.and.arrow.up")
+                        Label("Liste teilen", systemImage: "square.and.arrow.up")
                     }
                 }
             }
@@ -133,9 +133,22 @@ struct PlanReceiptView: View {
 
     private func originals(_ receipt: PlanReceipt) -> some View {
         Section {
-            guarantee(Text("\(receipt.originalsDeleted) Originale gelöscht"))
-            guarantee(Text("\(receipt.originalsEdited) Originale bearbeitet"))
-            guarantee(Text("\(receipt.originalCopiesCreated) Kopien angelegt"))
+            // What did not happen, in words (design review W1); a number only if it ever did.
+            if receipt.originalsDeleted == 0 {
+                guarantee(Text("Kein Original gelöscht"))
+            } else {
+                Text("\(receipt.originalsDeleted) Originale gelöscht")
+            }
+            if receipt.originalsEdited == 0 {
+                guarantee(Text("Kein Original bearbeitet"))
+            } else {
+                Text("\(receipt.originalsEdited) Originale bearbeitet")
+            }
+            if receipt.originalCopiesCreated == 0 {
+                guarantee(Text("Keine Kopie angelegt"))
+            } else {
+                Text("\(receipt.originalCopiesCreated) Kopien angelegt")
+            }
         } header: {
             Text("Deine Originale")
         } footer: {
@@ -370,7 +383,7 @@ private struct ReceiptAlbumRow: View {
 enum ReceiptText {
     static func text(_ receipt: PlanReceipt, undo: PlanReceipt?, inventory: CollectionInventory) -> String {
         var lines: [String] = []
-        lines.append(String(localized: "Albumist – Änderungsbeleg"))
+        lines.append(String(localized: "Albumist – Änderungen"))
         lines.append(receipt.startedAt.formatted(date: .long, time: .shortened))
         lines.append(receipt.isComplete ? String(localized: "Vollständig umgesetzt") : String(localized: "Teilweise umgesetzt"))
         lines.append("")
@@ -384,9 +397,13 @@ enum ReceiptText {
         add("Nicht mehr in der Mediathek", receipt.unavailablePhotos)
         add("Aus Alben genommen", receipt.membershipsRemoved)
         add("Entfernte Alben und Ordner", receipt.containersDeleted)
-        add("Originale gelöscht", receipt.originalsDeleted, always: true)
-        add("Originale bearbeitet", receipt.originalsEdited, always: true)
-        add("Kopien angelegt", receipt.originalCopiesCreated, always: true)
+        // As on screen: what did not happen in words, a number only if it did (W1).
+        lines.append(receipt.originalsDeleted == 0 ? String(localized: "Kein Original gelöscht")
+                     : "\(String(localized: "Originale gelöscht")): \(receipt.originalsDeleted.formatted())")
+        lines.append(receipt.originalsEdited == 0 ? String(localized: "Kein Original bearbeitet")
+                     : "\(String(localized: "Originale bearbeitet")): \(receipt.originalsEdited.formatted())")
+        lines.append(receipt.originalCopiesCreated == 0 ? String(localized: "Keine Kopie angelegt")
+                     : "\(String(localized: "Kopien angelegt")): \(receipt.originalCopiesCreated.formatted())")
         if !receipt.albums.isEmpty {
             lines.append("")
             lines.append(String(localized: "Alben"))

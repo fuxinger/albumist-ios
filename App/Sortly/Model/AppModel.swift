@@ -84,7 +84,8 @@ final class AppModel {
     var phase: Phase = .loading
     var access: LibraryAccess = .notDetermined
     var settings = OrganizationSettings() { didSet { bucketCache = [:] } }
-    var analysis = AnalysisState()
+    /// Every change also reaches the background task's progress (read off the main thread).
+    var analysis = AnalysisState() { didSet { ContinuedAnalysis.publish(analysis) } }
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
@@ -289,7 +290,15 @@ final class AppModel {
             // A rebuilt (or newly restored) database gets the user's decisions back first.
             await restoreFromBackupIfNeeded(store)
             lastSafetyBackup = Self.safetyBackupDate()
-            settings = try await store.value(OrganizationSettings.self, forKey: Key.settings) ?? OrganizationSettings()
+            do {
+                // Fields added by an update come from the defaults (plugin review 15.11., K3).
+                settings = try await store.value(OrganizationSettings.self, forKey: Key.settings, defaults: OrganizationSettings()) ?? OrganizationSettings()
+            } catch {
+                // Not readable even then: the app starts with the standard settings and says
+                // so, instead of not starting at all.
+                settings = OrganizationSettings()
+                message = String(localized: "Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. Bitte prüfe sie in den Einstellungen.")
+            }
             await dropOldRootFolderDefault(store)
             decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
             userTitles = try await store.value([SortlyID: String].self, forKey: Key.titles) ?? [:]
@@ -483,7 +492,7 @@ final class AppModel {
             // Another library: the card already says so; the copy was renewed.
             return
         }
-        settings = (try? await store.value(OrganizationSettings.self, forKey: Key.settings)) ?? settings
+        settings = (try? await store.value(OrganizationSettings.self, forKey: Key.settings, defaults: OrganizationSettings())) ?? settings
         decisions = (try? await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions)) ?? decisions
         userTitles = (try? await store.value([SortlyID: String].self, forKey: Key.titles)) ?? userTitles
         await pipeline?.update(settings: settings)
@@ -619,6 +628,10 @@ final class AppModel {
                 message = error.localizedDescription
             }
             if analysisControl === control { analysisControl = nil }
+            BackgroundRunLog.runEnded(paused: finished?.pausedBecause?.rawValue,
+                                      complete: finished?.isComplete == true,
+                                      analyzerFailing: finished?.analyzerUnavailable == true,
+                                      stage: analysis.stage?.number)
             analysis.isRunning = false
             analysis.stage = nil
             analysis.waiting = nil
@@ -1591,6 +1604,7 @@ final class AppModel {
         }
         if let failure = execution.failure { lines.append("last execution failure: \(PlanDiagnostics.reasonCode(failure))") }
         if let deletion = DeletionLog.last { lines.append("last deletion \(deletion)") }
+        lines += BackgroundRunLog.summary
         return lines.joined(separator: "\n")
     }
 

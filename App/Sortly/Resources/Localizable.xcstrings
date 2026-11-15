@@ -7878,6 +7878,36 @@
           }
         }
       }
+    },
+    "Analyse macht Pause" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis paused"
+          }
+        }
+      }
+    },
+    "Öffne Albumist, dann geht sie genau dort weiter, wo sie war." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist and it continues exactly where it left off."
+          }
+        }
+      }
+    },
+    "Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. Bitte prüfe sie in den Einstellungen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your settings could not be read and are back to their defaults. Please check them in Settings."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

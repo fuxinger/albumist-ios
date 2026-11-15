@@ -614,6 +614,13 @@ public actor SortlyStore: ChangePlanStoring {
         try decode(T.self, db.query("SELECT payload FROM settings WHERE key = ?", [.text(key)]).first?["payload"])
     }
 
+    /// A value an earlier version may have stored without the fields added since: those come
+    /// from `defaults` (see `StoredDefaults`). For the user's settings and decisions.
+    public func value<T: Codable>(_ type: T.Type, forKey key: String, defaults: T) throws -> T? {
+        guard let data = try db.query("SELECT payload FROM settings WHERE key = ?", [.text(key)]).first?["payload"]?.data else { return nil }
+        return try StoredDefaults.decode(T.self, from: data, defaults: defaults, encoder: encoder, decoder: decoder)
+    }
+
     // MARK: - Reset
 
     /// Deletes all local analysis data. Never touches the photo library (prompt §11).

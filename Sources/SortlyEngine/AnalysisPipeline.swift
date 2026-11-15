@@ -337,7 +337,7 @@ public actor AnalysisPipeline {
 
         // 2. Patterns (pure computation over metadata, seconds even for large libraries)
         let all = try await store.allAssets()
-        let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections) ?? TripCorrections()
+        let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
         let answers = try await recurringPlaceAnswers()
         let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar).analyse(in: all, corrections: corrections, places: answers)
         let detected = tripAnalysis.trips
@@ -827,7 +827,7 @@ public actor AnalysisPipeline {
             return []
         }
         let contents = try await store.results(ContentAnalysis.self, kind: "content")
-        let feedback = try await store.value(GroupingFeedback.self, forKey: Key.groupingFeedback) ?? GroupingFeedback()
+        let feedback = try await store.value(GroupingFeedback.self, forKey: Key.groupingFeedback, defaults: GroupingFeedback()) ?? GroupingFeedback()
         let grouper = ObservationGrouper(distanceThreshold: settings.people.advanced.distanceThreshold, minGroupSize: settings.people.advanced.minGroupSize)
         var groups: [ObservationGroup] = []
         if settings.people.faceGroupingEnabled {
@@ -888,7 +888,7 @@ public actor AnalysisPipeline {
     /// The trips the user split or merged (I07). Kept in time, so they hold for every
     /// later analysis; the next run applies them.
     public func tripCorrections() async throws -> TripCorrections {
-        try await store.value(TripCorrections.self, forKey: Key.tripCorrections) ?? TripCorrections()
+        try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
     }
 
     public func setTripCorrections(_ corrections: TripCorrections) async throws {
@@ -898,7 +898,7 @@ public actor AnalysisPipeline {
     /// The user's answers to "Bist du hier öfter?". Kept by position, so they hold for every
     /// later analysis; the next run applies them.
     public func recurringPlaceAnswers() async throws -> RecurringPlaceAnswers {
-        try await store.value(RecurringPlaceAnswers.self, forKey: Key.recurringPlaces) ?? RecurringPlaceAnswers()
+        try await store.value(RecurringPlaceAnswers.self, forKey: Key.recurringPlaces, defaults: RecurringPlaceAnswers()) ?? RecurringPlaceAnswers()
     }
 
     public func setRecurringPlaceAnswers(_ answers: RecurringPlaceAnswers) async throws {

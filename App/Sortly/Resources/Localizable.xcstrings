@@ -8128,6 +8128,16 @@
           }
         }
       }
+    },
+    "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only photos that fit your main areas are counted: %@."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

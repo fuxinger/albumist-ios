@@ -132,7 +132,9 @@ struct OverviewView: View {
         let open = Locale.current.quotationBeginDelimiter ?? "\"", close = Locale.current.quotationEndDelimiter ?? "\""
         let names = OrganizationArea.available.filter { model.settings.primaryAreas.contains($0) }
             .map { open + String(localized: $0.titleResource) + close }
-        return String(localized: "Gezählt werden deine Hauptbereiche: \(names.formatted(.list(type: .and))).")
+        // Only photos the main areas apply to count, so the total is smaller than the library
+        // (device test 15.11.: "141 von 5.737 sortiert" next to "14.351 von 14.352 Fotos analysiert").
+        return String(localized: "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: \(names.formatted(.list(type: .and))).")
     }
 
     @ViewBuilder

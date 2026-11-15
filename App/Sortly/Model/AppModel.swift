@@ -607,7 +607,13 @@ final class AppModel {
         HeatLog.reset()
         analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
         if userInitiated {
-            ContinuedAnalysis.begin()
+            // A quick check for new photos ("Neu prüfen") needs no background time: asking for
+            // it put "Albumist analysiert deine Fotos · Schritt 1 von 7" on the Lock Screen for
+            // a few seconds after every check (device test 15.11. 23:16).
+            if analysis.kind != .check {
+                ContinuedAnalysis.requestNotificationPermission()
+                ContinuedAnalysis.begin()
+            }
             unattendedRetries = 0
         }
         analysisGeneration += 1
@@ -729,8 +735,12 @@ final class AppModel {
 
     /// A run with real work left asks iOS to go on after the user leaves the app.
     func keepRunningInBackgroundIfLong() {
+        // Only real image or text work counts. The places step reports every town still
+        // missing as "remaining" although a run in the app looks up at most a few, so every
+        // quick check asked iOS for background time (device test 15.11. 23:16: the Lock Screen
+        // and the Dynamic Island showed the analysis every few seconds).
         guard analysis.isRunning, let stage = analysis.stage,
-              [.places, .content, .text].contains(stage), analysis.remaining >= 100 else { return }
+              [.content, .text].contains(stage), analysis.remaining >= 100 else { return }
         ContinuedAnalysis.begin()
     }
 
@@ -1603,6 +1613,16 @@ final class AppModel {
         lines.append("app \(AppInfo.version), \(system), \(device), language \(Locale.current.language.languageCode?.identifier ?? "?")")
         lines.append("photo access \(access.rawValue), onboarding done \(onboardingDone)")
         lines.append("photos \(progress.total), fully sorted \(progress.fully), partly \(progress.partially), unsorted \(progress.unorganized), pending \(progress.pending)")
+        // Where the sorted count comes from, per main area (device test 15.11.: 811 sorted before
+        // "Analyse neu aufbauen", 141 after it).
+        var areaLines: [String] = []
+        for area in OrganizationArea.allCases where settings.primaryAreas.contains(area) {
+            var counts: [AreaStatus: Int] = [:]
+            for state in states.values { if let status = state.areas[area] { counts[status, default: 0] += 1 } }
+            let parts = AreaStatus.allCases.compactMap { status in counts[status].map { "\(status.rawValue) \($0)" } }
+            areaLines.append("\(area.rawValue): " + parts.joined(separator: ", "))
+        }
+        lines.append("main areas " + areaLines.joined(separator: "; ") + "; outside main areas \(progress.outsideMainAreas)")
         if let report = analysis.lastReport {
             let last = analysis.lastRun.map { iso.string(from: $0) } ?? "?"
             lines.append("analysis last \(last), complete \(report.isComplete), paused \(report.pausedBecause?.rawValue ?? "no"), stages \(report.completedStages.count), content \(report.contentAnalyzed), text \(report.textRecognized), text waiting \(report.textWaitingForOriginal), text seconds \(Int(report.textSeconds)), places pending online \(report.placesPendingOnline), places throttled \(report.placesThrottled), analyzer failing \(report.analyzerUnavailable)")

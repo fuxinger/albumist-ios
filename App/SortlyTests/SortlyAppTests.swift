@@ -6,6 +6,7 @@ import Vision
 import SwiftUI
 import UIKit
 import SortlyCore
+import SortlyEngine
 @testable import Sortly
 
 @Suite("Platform mapping")
@@ -263,5 +264,48 @@ struct ContinuedAnalysisIdentifierTests {
             // Under the bundle identifier, as iOS requires for continued processing tasks.
             #expect(id.hasPrefix(try #require(Bundle.main.bundleIdentifier) + "."))
         }
+    }
+}
+
+/// Device test 15.11. 22:57: the analysis had stopped, and the Lock Screen still said
+/// "Albumist analysiert deine Fotos". Every way a run ends gets its own text there.
+@MainActor
+@Suite("Lock Screen text when a run ends")
+struct ContinuedAnalysisEndingTests {
+    private func state(complete: Bool = false, paused: PauseReason? = nil, needsResume: Bool) -> AppModel.AnalysisState {
+        var report = AnalysisPipeline.Report()
+        if complete { report.completedStages = AnalysisPipeline.Stage.allCases }
+        report.pausedBecause = paused
+        var state = AppModel.AnalysisState()
+        state.lastReport = report
+        state.needsResume = needsResume
+        return state
+    }
+
+    @Test func finishedSaysSoAndFillsTheCircle() {
+        let ending = ContinuedAnalysis.ending(state(complete: true, needsResume: false))
+        #expect(ending.title == String(localized: "Analyse fertig"))
+        #expect(ending.complete)
+    }
+
+    @Test func pausedByTheUserSaysPaused() {
+        let ending = ContinuedAnalysis.ending(state(paused: .userPaused, needsResume: false))
+        #expect(ending.title == String(localized: "Analyse pausiert"))
+        #expect(!ending.complete)
+    }
+
+    @Test func stoppedByTheDeviceOrIOSWaitsForTheUser() {
+        for reason in [PauseReason.thermal, .batteryLow, .lowPower, .timeBudget, .accessRevoked] {
+            let ending = ContinuedAnalysis.ending(state(paused: reason, needsResume: true))
+            #expect(ending.title == String(localized: "Analyse wartet auf dich"), "\(reason)")
+            #expect(!ending.complete)
+        }
+    }
+
+    /// An error leaves the report of the run before: a finished one must not read as "fertig".
+    @Test func anErrorAfterAFinishedRunIsNotFinished() {
+        let ending = ContinuedAnalysis.ending(state(complete: true, needsResume: true))
+        #expect(ending.title == String(localized: "Analyse wartet auf dich"))
+        #expect(!ending.complete)
     }
 }

@@ -8058,6 +8058,76 @@
           }
         }
       }
+    },
+    "Öffne Albumist, um die Vorschläge zu prüfen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist to review the suggestions."
+          }
+        }
+      }
+    },
+    "Analyse pausiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis paused"
+          }
+        }
+      }
+    },
+    "Öffne Albumist, um sie fortzusetzen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist to continue it."
+          }
+        }
+      }
+    },
+    "Analyse wartet auf dich" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis is waiting for you"
+          }
+        }
+      }
+    },
+    "Öffne Albumist, dann geht es genau dort weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist and it goes on right where it stopped."
+          }
+        }
+      }
+    },
+    "Wartet aufs Laden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for charging"
+          }
+        }
+      }
+    },
+    "Wartet, bis dein iPhone abkühlt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for your iPhone to cool down"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

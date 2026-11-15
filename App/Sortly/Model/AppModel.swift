@@ -646,6 +646,12 @@ final class AppModel {
                                       complete: finished?.isComplete == true,
                                       analyzerFailing: finished?.analyzerUnavailable == true,
                                       stage: analysis.stage?.number)
+            // Ended early without the user's Pause (an error, the app's time ran out, the photo
+            // access was changed in Settings): the next time the app is opened it goes on by
+            // itself; with the access back, from where it was. Set before isRunning, so the Lock
+            // Screen reads how this run ended, not the run before (ContinuedAnalysis.ending).
+            let reason = finished?.pausedBecause
+            analysis.needsResume = finished == nil || (reason != nil && reason != .userPaused)
             analysis.isRunning = false
             analysis.pausing = false
             analysis.stage = nil
@@ -654,11 +660,6 @@ final class AppModel {
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
             }
-            // Ended early without the user's Pause (an error, the app's time ran out, the photo
-            // access was changed in Settings): the next time the app is opened it goes on by
-            // itself; with the access back, from where it was.
-            let reason = finished?.pausedBecause
-            analysis.needsResume = finished == nil || (reason != nil && reason != .userPaused)
             if reason == .accessRevoked {
                 // Shown as it is now (limited or none), so the overview offers the way back.
                 access = await library.access()

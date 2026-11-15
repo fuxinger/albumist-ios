@@ -27,6 +27,12 @@ private struct ContinuedTaskShared: Sendable {
     var running = false
     var fraction = 0.0
     var subtitle = ""
+    /// What the Lock Screen says once the run has ended: iOS keeps showing the task's last
+    /// title after it is completed, and "analysiert deine Fotos" stayed there although the
+    /// analysis had stopped (device test 15.11. 22:57).
+    var endTitle = ""
+    var endSubtitle = ""
+    var endedComplete = false
     /// Albumist is on screen (set with every scene change, read when iOS ends the time).
     var onScreen = true
 }
@@ -69,11 +75,18 @@ enum ContinuedAnalysis {
     static func publish(_ analysis: AppModel.AnalysisState) {
         // The text only while a task shows it (the state changes several times a second).
         let running = analysis.isRunning, fraction = analysis.shownOverall
-        let text = isActive ? subtitle(analysis) : ""
+        let text = isActive && running ? subtitle(analysis) : ""
+        let ending = running ? nil : ending(analysis)
         shared.withLock {
             $0.running = running
-            $0.fraction = fraction
-            $0.subtitle = text
+            // The bar keeps where the run got to (a run that ended has no stage, so 0).
+            if running { $0.fraction = fraction }
+            if !text.isEmpty { $0.subtitle = text }
+            if let ending {
+                $0.endTitle = ending.title
+                $0.endSubtitle = ending.subtitle
+                $0.endedComplete = ending.complete
+            }
         }
     }
 
@@ -168,8 +181,14 @@ enum ContinuedAnalysis {
                         box.task.updateTitle(title, subtitle: state.subtitle)
                     }
                 case .finish:
-                    // Finished, paused by the user, or stopped: done, no failure.
-                    box.task.progress.completedUnitCount = ContinuedTaskHeartbeat.units
+                    // Finished, paused by the user, or stopped: done, no failure. The text says
+                    // which, and only a finished analysis shows a full circle.
+                    if !state.endTitle.isEmpty {
+                        box.task.updateTitle(state.endTitle, subtitle: state.endSubtitle)
+                    }
+                    if state.endedComplete {
+                        box.task.progress.completedUnitCount = ContinuedTaskHeartbeat.units
+                    }
                     if box.complete(success: true) {
                         let fraction = state.fraction
                         await MainActor.run { ended("finished", fraction: fraction) }
@@ -195,11 +214,23 @@ enum ContinuedAnalysis {
         }
     }
 
+    /// The Lock Screen text once a run has ended, by how it ended.
+    static func ending(_ analysis: AppModel.AnalysisState) -> (title: String, subtitle: String, complete: Bool) {
+        let report = analysis.lastReport
+        if !analysis.needsResume, report?.isComplete == true {
+            return (String(localized: "Analyse fertig"), String(localized: "Öffne Albumist, um die Vorschläge zu prüfen."), true)
+        }
+        if !analysis.needsResume, report?.pausedBecause == .userPaused {
+            return (String(localized: "Analyse pausiert"), String(localized: "Öffne Albumist, um sie fortzusetzen."), false)
+        }
+        return (String(localized: "Analyse wartet auf dich"), String(localized: "Öffne Albumist, dann geht es genau dort weiter."), false)
+    }
+
     private static func subtitle(_ analysis: AppModel.AnalysisState) -> String {
         if let waiting = analysis.waiting {
             return waiting == .batteryLow
-                ? String(localized: "Wartet, bis der Akku lädt")
-                : String(localized: "Kurze Pause, das iPhone kühlt ab")
+                ? String(localized: "Wartet aufs Laden")
+                : String(localized: "Wartet, bis dein iPhone abkühlt")
         }
         let steps = AnalysisPipeline.Stage.allCases.count
         // Still reading the library (no step reported yet): only a run that goes on from an
@@ -227,8 +258,8 @@ enum ContinuedAnalysis {
     /// screen: says that nothing is lost and how it goes on.
     nonisolated private static func postPausedNotification() {
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Analyse macht Pause")
-        content.body = String(localized: "Öffne Albumist, dann geht sie genau dort weiter, wo sie war.")
+        content.title = String(localized: "Analyse wartet auf dich")
+        content.body = String(localized: "Öffne Albumist, dann geht es genau dort weiter.")
         let request = UNNotificationRequest(identifier: "analysis.paused", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }

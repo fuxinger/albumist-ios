@@ -98,6 +98,8 @@ public actor AnalysisPipeline {
         public var placesThrottled = false
 
         public var isComplete: Bool { pausedBecause == nil && completedStages.count == Stage.allCases.count }
+
+        public init() {}
     }
 
     public static let contentVersion = 1

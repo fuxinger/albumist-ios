@@ -20,6 +20,10 @@ public actor SortlyStore: ChangePlanStoring {
         encoder.dateEncodingStrategy = .deferredToDate
         decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .deferredToDate
+        // A stray infinity or NaN (a distance without a home, a score from Vision) must never
+        // make a save throw: that ended the whole analysis run, every time.
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "+inf", negativeInfinity: "-inf", nan: "nan")
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "+inf", negativeInfinity: "-inf", nan: "nan")
         try Migrations.migrate(db)
         hasFullTextSearch = (try? db.query("SELECT 1 FROM sqlite_master WHERE name = 'text_fts'").isEmpty == false) ?? false
     }
@@ -171,6 +175,23 @@ public actor SortlyStore: ChangePlanStoring {
         }
         return try db.query("SELECT COUNT(*) AS n FROM assets WHERE analysis_version < ? AND creation_date >= ? AND creation_date < ?",
                             [.integer(Int64(version)), .real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]).first?["n"]?.int ?? 0
+    }
+
+    /// The results of one batch and the photos it is done with, in one transaction: one write
+    /// per batch instead of one per photo, and a batch is either stored with its marks or not
+    /// at all (a run ended in between does it again).
+    public func saveResults<T: Encodable>(_ results: [(AssetID, T)], kind: String, version: Int, markingAnalyzed done: [AssetID]) throws {
+        guard !results.isEmpty || !done.isEmpty else { return }
+        try db.transaction {
+            for (asset, value) in results {
+                try db.execute("INSERT OR REPLACE INTO analysis_results (asset_id, kind, version, payload) VALUES (?, ?, ?, ?)", [
+                    .text(asset.rawValue), .text(kind), .integer(Int64(version)), try json(value),
+                ])
+            }
+            for id in done {
+                try db.execute("UPDATE assets SET analysis_version = ? WHERE id = ?", [.integer(Int64(version)), .text(id.rawValue)])
+            }
+        }
     }
 
     public func markAnalyzed(_ ids: [AssetID], version: Int) throws {

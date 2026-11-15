@@ -28,10 +28,20 @@ public protocol PhotoLibraryReading: Sendable {
 public struct LabelScore: Hashable, Sendable, Codable {
     public var identifier: String
     public var confidence: Double
-    public init(_ identifier: String, _ confidence: Double) {
+    /// Vision's own calibration for this label says it is right at high precision (90 %),
+    /// whatever the raw confidence: confidences are not comparable between labels (0.4 can be
+    /// sure for one and a guess for another). `nil` in results stored before it was asked.
+    /// Nothing relies on it yet; the confidence thresholds work as before.
+    public var isPrecise: Bool?
+
+    public init(_ identifier: String, _ confidence: Double, isPrecise: Bool? = nil) {
         self.identifier = identifier
         self.confidence = confidence
+        self.isPrecise = isPrecise
     }
+
+    /// Calibrated precision Vision is asked for (`hasMinimumRecall(0.01, forPrecision:)`).
+    public static let preciseAt: Float = 0.9
 }
 
 public enum AnalysisImageSource: String, Hashable, Sendable, Codable {
@@ -67,6 +77,12 @@ public struct ContentAnalysis: Hashable, Sendable, Codable {
     public var failedAttempts: Int?
     /// When the image could last not be read (`nil` in records of older versions).
     public var lastAttempt: Date?
+    /// Vision's aesthetics score (-1…1, higher = better composed, sharper, better lit), for
+    /// picking covers. `nil` in results stored before it was computed (they stay valid).
+    public var aestheticsScore: Double?
+    /// Vision says this is a utility image (screenshot, receipt, document, whiteboard, QR
+    /// code) rather than a memorable photo. `nil` = not known.
+    public var isUtility: Bool?
 
     /// Runs that may fail to read an image before it is given up and counted as analyzed.
     public static let maxFailedAttempts = 3
@@ -88,8 +104,12 @@ public struct ContentAnalysis: Hashable, Sendable, Codable {
         featurePrint: Embedding? = nil,
         looksLikeDocument: Bool = false,
         containsText: Bool = false,
-        source: AnalysisImageSource = .localPreview
+        source: AnalysisImageSource = .localPreview,
+        aestheticsScore: Double? = nil,
+        isUtility: Bool? = nil
     ) {
+        self.aestheticsScore = aestheticsScore
+        self.isUtility = isUtility
         self.labels = labels
         self.faces = faces
         self.animals = animals
@@ -107,6 +127,9 @@ public struct ContentAnalysis: Hashable, Sendable, Codable {
         if asset.kind == .video { return false }
         if asset.isScreenshotLike { return true }
         if looksLikeDocument { return true }
+        // A photographed letter, receipt or whiteboard the labels missed: Vision's utility
+        // flag finds documents the label list alone does not.
+        if isUtility == true { return true }
         return labels.contains { Self.documentLabels.contains($0.identifier) && $0.confidence >= 0.5 }
     }
 }
@@ -152,6 +175,13 @@ public protocol ContentAnalyzing: Sendable {
     /// Reads text from the best available image. Throws `AnalysisError.originalNotAvailable`
     /// when the original would have to be downloaded and `allowNetwork` is false.
     func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis
+    /// The next few photos the content stage will look at, so their previews can be loaded
+    /// ahead while the current ones are analysed. A hint; nothing depends on it.
+    func willAnalyze(_ upcoming: [AssetSnapshot]) async
+}
+
+extension ContentAnalyzing {
+    public func willAnalyze(_ upcoming: [AssetSnapshot]) async {}
 }
 
 public enum PauseReason: String, Sendable, Codable {
@@ -169,6 +199,60 @@ public enum AnalysisPace: Sendable, Equatable {
     case wait(PauseReason)
     /// The run ends here; a later run goes on from the same place.
     case stop(PauseReason)
+}
+
+/// What the device reports (ProcessInfo, UIDevice), and the rules that turn it into a pause
+/// or a pace. Kept apart from UIKit so every combination is tested.
+public struct DeviceState: Sendable, Equatable {
+    /// `ProcessInfo.ThermalState`, in the same order.
+    public enum Thermal: Int, Sendable, Comparable {
+        case nominal, fair, serious, critical
+        public static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    public var thermal: Thermal
+    /// 0…1; `nil` when unknown (UIDevice says -1, e.g. in the simulator).
+    public var batteryLevel: Double?
+    /// Charging or full: on power.
+    public var isCharging: Bool
+    public var isLowPowerMode: Bool
+
+    public init(thermal: Thermal = .nominal, batteryLevel: Double? = nil, isCharging: Bool = false, isLowPowerMode: Bool = false) {
+        self.thermal = thermal
+        self.batteryLevel = batteryLevel
+        self.isCharging = isCharging
+        self.isLowPowerMode = isLowPowerMode
+    }
+
+    /// Below this level, without power, the overnight refinement does not run.
+    public static let refinementBatteryFloor = 0.2
+    /// Below this level, without power, a run in the app waits until the phone is charged.
+    public static let appBatteryFloor = 0.1
+
+    private func isBelow(_ floor: Double) -> Bool {
+        guard !isCharging, let batteryLevel else { return false }
+        return batteryLevel < floor
+    }
+
+    /// The overnight refinement (nobody waits for it): any of these ends it until the next
+    /// charging window.
+    public var refinementPauseReason: PauseReason? {
+        if thermal >= .serious { return .thermal }
+        if isLowPowerMode && !isCharging { return .lowPower }
+        if isBelow(Self.refinementBatteryFloor) { return .batteryLow }
+        return nil
+    }
+
+    /// A run in the app (the user started it or waits for it): very warm only slows it down,
+    /// too hot or a nearly empty battery make it wait, and it goes on by itself. Low Power
+    /// Mode does not stop it; iOS already runs the phone slower then. First device test 15.11.:
+    /// a warm iPhone ended the analysis for good and nothing started it again.
+    public var appPace: AnalysisPace {
+        if thermal == .critical { return .wait(.thermal) }
+        if isBelow(Self.appBatteryFloor) { return .wait(.batteryLow) }
+        if thermal == .serious { return .gentle }
+        return .normal
+    }
 }
 
 /// Device conditions (thermal state, power, network). Implemented with ProcessInfo,

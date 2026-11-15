@@ -174,7 +174,8 @@ struct AnalysisReliabilityTests {
         #expect(report.pausedBecause == .timeBudget)
         #expect(report.analyzerUnavailable)
         #expect(!report.isComplete)
-        #expect(s.analyzer.contentCalls.withLock { $0 }.count == AnalysisPipeline.analyzerFailureLimit)
+        // Photos already in other lanes finish, nothing more starts.
+        #expect(s.analyzer.contentCalls.withLock { $0 }.count < AnalysisPipeline.analyzerFailureLimit + 4)
         // Nothing was counted against the photos.
         #expect(try await s.store.results(ContentAnalysis.self, kind: "content").isEmpty)
         #expect(try await s.store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == s.photos.count)
@@ -234,7 +235,7 @@ struct AnalysisReliabilityTests {
         let report = try await s.pipeline.run()
         #expect(report.analyzerUnavailable)
         #expect(report.pausedBecause == .timeBudget)
-        #expect(s.analyzer.textCalls.withLock { $0 }.count == AnalysisPipeline.analyzerFailureLimit)
+        #expect(s.analyzer.textCalls.withLock { $0 }.count < AnalysisPipeline.analyzerFailureLimit + 2)
         // No try was used up: the texts are read at the next run, not an hour later.
         #expect(try await s.store.results(TextResult.self, kind: "text").isEmpty)
         s.analyzer.textAnswer.withLock { answer in answer = { _ in .labels } }

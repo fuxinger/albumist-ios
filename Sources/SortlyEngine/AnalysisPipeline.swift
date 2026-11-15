@@ -149,9 +149,18 @@ public actor AnalysisPipeline {
     private var queuedRuns: [CheckedContinuation<Void, Never>] = []
     /// The mode of the run in progress (online place lookups ask it between requests).
     private var runMode: Mode = .incremental
+    /// Told when the run in progress waits for the device, and when it goes on.
+    private var runOnWaiting: @Sendable (PauseReason?) -> Void = { _ in }
+    /// The photo access the run in progress started with.
+    private var runAccess: LibraryAccess = .notDetermined
     /// A warm device: break after every photo. Waiting: how often the device is asked again.
     static let gentleBreak: Duration = .milliseconds(250)
     static let waitCheck: Duration = .seconds(2)
+    /// Photos looked at side by side at full speed (image loading, which waits for the disk,
+    /// overlaps with Vision); half of them when the device is warm, none while it waits.
+    private let contentLanes: Int
+    /// Text recognition reads larger images and is heavier: fewer side by side.
+    private let textLanes: Int
 
     public init(
         store: SortlyStore,
@@ -165,9 +174,13 @@ public actor AnalysisPipeline {
         time: TimeSource = .live(),
         batchSize: Int = 50,
         foregroundOnlineBudget: Int? = nil,
+        contentLanes: Int = 4,
+        textLanes: Int = 2,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.now = now
+        self.contentLanes = max(1, contentLanes)
+        self.textLanes = max(1, textLanes)
         self.store = store
         self.reader = reader
         self.analyzer = analyzer
@@ -231,6 +244,49 @@ public actor AnalysisPipeline {
         }
     }
 
+    /// Asked before every photo: whether the run stops, and how many photos may be in work
+    /// at once. A run in the app never ends because of the device: it slows down when warm
+    /// and waits when hot, then goes on by itself. Only Pause, the end of the app's time and
+    /// the overnight refinement's rules end a run.
+    private func admission(lanes: Int) async -> (stop: PauseReason?, width: Int) {
+        guard let control = activeControl else { return (.timeBudget, 0) }
+        if control.isPaused { return (.userPaused, 0) }
+        if Task.isCancelled { return (.timeBudget, 0) }
+        if runMode == .refinement {
+            if let reason = await conditions.pauseReason() { return (reason, 0) }
+            return (nil, lanes)
+        }
+        let onWaiting = runOnWaiting
+        var waitingFor: PauseReason?
+        defer { if waitingFor != nil { onWaiting(nil) } }
+        while true {
+            switch await conditions.pace() {
+            case .normal:
+                return (nil, lanes)
+            case .gentle:
+                do { try await time.sleep(Self.gentleBreak) } catch { return (.timeBudget, 0) }
+                return control.isPaused ? (.userPaused, 0) : (nil, max(1, lanes / 2))
+            case .stop(let reason):
+                return (reason, 0)
+            case .wait(let reason):
+                if waitingFor != reason {
+                    waitingFor = reason
+                    onWaiting(reason)
+                }
+                do { try await time.sleep(Self.waitCheck) } catch { return (.timeBudget, 0) }
+                if control.isPaused { return (.userPaused, 0) }
+                if Task.isCancelled { return (.timeBudget, 0) }
+            }
+        }
+    }
+
+    /// Access taken away or changed in Settings while the run is busy: photos cannot be read
+    /// (or other ones can), and must not be marked unreadable for that. The run ends; the
+    /// next one reads the library as it is then.
+    private func accessChanged() async -> Bool {
+        await reader.access() != runAccess
+    }
+
     /// `onWaiting`: the run waits for the device (hot, battery nearly empty) and goes on by
     /// itself; called with `nil` when it goes on.
     /// `control`: the app's handle to pause exactly this run. A run that is called while
@@ -254,38 +310,12 @@ public actor AnalysisPipeline {
         let scope: OrganizationScope
         if let requested { scope = requested } else { scope = try await storedScope() }
 
-        /// Asked before every photo. A run in the app never ends because of the device: it
-        /// slows down when warm and waits when hot, then goes on by itself. Only Pause, the
-        /// end of the app's time and the overnight refinement's rules end a run.
-        func shouldStop() async -> PauseReason? {
-            if control.isPaused { return .userPaused }
-            if Task.isCancelled { return .timeBudget }
-            if mode == .refinement { return await conditions.pauseReason() }
-            var waitingFor: PauseReason?
-            defer { if waitingFor != nil { onWaiting(nil) } }
-            while true {
-                switch await conditions.pace() {
-                case .normal:
-                    return nil
-                case .gentle:
-                    do { try await time.sleep(Self.gentleBreak) } catch { return .timeBudget }
-                    return control.isPaused ? .userPaused : nil
-                case .stop(let reason):
-                    return reason
-                case .wait(let reason):
-                    if waitingFor != reason {
-                        waitingFor = reason
-                        onWaiting(reason)
-                    }
-                    do { try await time.sleep(Self.waitCheck) } catch { return .timeBudget }
-                    if control.isPaused { return .userPaused }
-                    if Task.isCancelled { return .timeBudget }
-                }
-            }
-        }
+        runOnWaiting = onWaiting
+        func shouldStop() async -> PauseReason? { await admission(lanes: 1).stop }
 
         // 1. Inventory
-        guard await reader.access().canRead else {
+        runAccess = await reader.access()
+        guard runAccess.canRead else {
             report.pausedBecause = .accessRevoked
             return report
         }
@@ -388,8 +418,10 @@ public actor AnalysisPipeline {
         // Analyzer errors in a row, not counted against the photos yet: only when a later photo
         // works was it the photo. When every photo fails, the analyzer is the problem.
         var suspects: [AssetID] = []
+        let analyzer = self.analyzer
         while true {
             if let reason = await shouldStop() { report.pausedBecause = reason; return report }
+            if await accessChanged() { report.pausedBecause = .accessRevoked; return report }
             // Deferred photos can come back only without a cursor (behind it they are past).
             let limit = batchSize + (cursor == nil ? deferred.count : 0)
             var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: limit, olderThan: cursor, within: range)
@@ -398,60 +430,93 @@ public actor AnalysisPipeline {
                 cursor = nil
                 raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: batchSize + deferred.count, within: range)
             }
-            let batch = raw.filter { !deferred.contains($0.id) }
+            var batch = raw.filter { !deferred.contains($0.id) }
             if batch.isEmpty { break }
             if let last = raw.last, last.creationDate != nil { cursor = last }
             var finished: [AssetID] = []
+            // Saved with the batch's marks in one transaction.
+            var results: [(AssetID, ContentAnalysis)] = []
             var analyzed = 0
             var stopped: PauseReason?
-            for asset in batch {
-                if let previous = stored[asset.id] {
-                    if previous.failedAttempts == nil {
-                        finished.append(asset.id)
-                        continue
-                    }
-                    // Could not be read a short while ago: not again in this run.
-                    if !previous.isDueForRetry(now: now()) {
-                        deferred.insert(asset.id)
-                        continue
-                    }
-                }
-                // Checked per photo: heat, low battery or Pause stop within one image.
-                if let reason = await shouldStop() { stopped = reason; break }
-                do {
-                    let result = try await analyzer.analyzeContent(asset, request: peopleRequest)
-                    try await store.saveResult(result, kind: "content", asset: asset.id, version: Self.contentVersion)
+            var cancelled = false
+            // Decided without looking at the image: labels stored already, or a photo that
+            // could not be read a short while ago (not again in this run).
+            batch = batch.filter { asset in
+                guard let previous = stored[asset.id] else { return true }
+                if previous.failedAttempts == nil {
                     finished.append(asset.id)
-                    analyzed += 1
-                    // The analyzer works: the photos it failed on just before were the problem.
-                    for id in suspects {
-                        if try await recordContentFailure(id) { finished.append(id) }
-                    }
-                    suspects = []
-                } catch {
-                    if error is CancellationError || Task.isCancelled {
-                        // Stopped, not unreadable: what is done stays done, the rest waits.
-                        try await store.markAnalyzed(finished, version: Self.contentVersion)
-                        throw CancellationError()
-                    }
+                } else if !previous.isDueForRetry(now: now()) {
                     deferred.insert(asset.id)
-                    guard error is AnalysisError else {
-                        suspects.append(asset.id)
-                        if suspects.count >= Self.analyzerFailureLimit {
-                            // Vision itself fails: going through every photo would mark all of
-                            // them as unreadable. The run ends; the photos wait untouched.
-                            report.analyzerUnavailable = true
-                            stopped = .timeBudget
-                            break
+                } else {
+                    return true
+                }
+                return false
+            }
+            await analyzer.willAnalyze(Array(batch.prefix(2 * contentLanes)))
+            try await withThrowingTaskGroup(of: (AssetSnapshot, Result<ContentAnalysis, any Error>).self) { group in
+                var next = 0
+                var inFlight = 0
+                var width = contentLanes
+                while true {
+                    // Fill the lanes. Heat, low battery or Pause are checked before every
+                    // photo, so a stop takes effect within one photo per lane.
+                    while stopped == nil, !cancelled, next < batch.count, inFlight < width {
+                        let (reason, lanes) = await admission(lanes: contentLanes)
+                        if let reason { stopped = reason; break }
+                        width = lanes
+                        guard inFlight < width else { break }
+                        let asset = batch[next]
+                        if next + 2 * contentLanes < batch.count {
+                            await analyzer.willAnalyze([batch[next + 2 * contentLanes]])
                         }
-                        continue
+                        next += 1
+                        inFlight += 1
+                        group.addTask {
+                            do {
+                                return (asset, .success(try await analyzer.analyzeContent(asset, request: peopleRequest)))
+                            } catch {
+                                return (asset, .failure(error))
+                            }
+                        }
                     }
-                    // Not readable right now (no local preview yet, still syncing): tried again
-                    // in later runs, and given up only after a few of them.
-                    if try await recordContentFailure(asset.id) { finished.append(asset.id) }
+                    guard let (asset, outcome) = try await group.next() else { break }
+                    inFlight -= 1
+                    switch outcome {
+                    case .success(let result):
+                        results.append((asset.id, result))
+                        finished.append(asset.id)
+                        analyzed += 1
+                        // The analyzer works: the photos it failed on just before were the problem.
+                        for id in suspects {
+                            if try await recordContentFailure(id) { finished.append(id) }
+                        }
+                        suspects = []
+                    case .failure(let error):
+                        deferred.insert(asset.id)
+                        if error is CancellationError || Task.isCancelled {
+                            // Stopped, not unreadable: what is done stays done, the rest waits.
+                            cancelled = true
+                        } else if !(error is AnalysisError) {
+                            suspects.append(asset.id)
+                            if suspects.count >= Self.analyzerFailureLimit, stopped == nil {
+                                // Vision itself fails: going through every photo would mark all
+                                // of them as unreadable. The run ends; the photos wait untouched.
+                                report.analyzerUnavailable = true
+                                stopped = .timeBudget
+                            }
+                        } else if await accessChanged() {
+                            // Not the photo: the access was taken away. Nothing is counted.
+                            stopped = .accessRevoked
+                        } else if try await recordContentFailure(asset.id) {
+                            // Not readable right now (no local preview yet, still syncing): tried
+                            // again in later runs, and given up only after a few of them.
+                            finished.append(asset.id)
+                        }
+                    }
                 }
             }
-            try await store.markAnalyzed(finished, version: Self.contentVersion)
+            try await store.saveResults(results, kind: "content", version: Self.contentVersion, markingAnalyzed: finished)
+            if cancelled { throw CancellationError() }
             contentDone += finished.count
             report.contentAnalyzed += analyzed
             onProgress(Progress(stage: .content, completed: contentBefore + contentDone,
@@ -461,7 +526,7 @@ public actor AnalysisPipeline {
         report.completedStages.append(.content)
 
         // 5. Text
-        let textOutcome = try await recognizeText(scoped, shouldStop: shouldStop, onProgress: onProgress)
+        let textOutcome = try await recognizeText(scoped, onProgress: onProgress)
         report.textRecognized = textOutcome.recognized
         report.textWaitingForOriginal = textOutcome.waiting
         report.analyzerUnavailable = report.analyzerUnavailable || textOutcome.analyzerUnavailable
@@ -542,15 +607,16 @@ public actor AnalysisPipeline {
 
     private func recognizeText(
         _ all: [AssetSnapshot],
-        shouldStop: () async -> PauseReason?,
         onProgress: @escaping @Sendable (Progress) -> Void
     ) async throws -> TextOutcome {
         var outcome = TextOutcome()
         guard settings.enabledAreas.contains(.screenshots) || settings.enabledAreas.contains(.documents) || settings.enabledAreas.contains(.messenger) else {
             return outcome
         }
-        let done = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
+        // Masked first: a read that fails below writes the earlier result back, which must be
+        // the masked one.
         try await remaskStoredTexts()
+        let done = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
         let networkAllowed = await networkAllowedNow()
         let started = now()
         let needing: [AssetSnapshot]
@@ -578,80 +644,126 @@ public actor AnalysisPipeline {
         }
         let documents = DocumentAnalyzer()
         let screenshots = ScreenshotClassifier()
+        let analyzer = self.analyzer
         // Analyzer errors in a row, not counted against the photos yet (see the content stage).
         var suspects: [AssetID] = []
-        for (index, asset) in candidates.enumerated() {
-            if let reason = await shouldStop() { outcome.paused = reason; return outcome }
-            defer {
-                if index % 20 == 19 || index == candidates.count - 1 {
-                    onProgress(Progress(stage: .text, completed: textBefore + index + 1, total: needing.count))
-                }
+        var processed = 0
+        func counted() {
+            processed += 1
+            if processed % 20 == 0 || processed == candidates.count {
+                onProgress(Progress(stage: .text, completed: textBefore + processed, total: needing.count))
             }
-            let previous = done[asset.id]
-            let allowNetwork = networkAllowed ? await networkAllowedNow() : false
-            // Needed the network and it is gone now: stays as it is for a later run.
-            if let previous, previous.waitingForOriginal || previous.text?.source == .localPreview, !allowNetwork { continue }
-            var result = TextResult()
-            do {
-                let text = try await analyzer.recognizeText(asset, allowNetwork: allowNetwork)
-                result.document = documents.analyze(text: text.text)
-                if asset.isScreenshotLike {
-                    let labels = screenshotLabels[asset.id] ?? []
-                    let classified = screenshots.classify(text: text.text, barcodePayloads: text.barcodePayloads, imageLabels: labels)
-                    result.screenshotCategories = classified.categories.filter { $0.value >= .plausible }.map(\.key.rawValue).sorted()
+        }
+        try await withThrowingTaskGroup(of: (AssetSnapshot, Bool, Result<TextAnalysis, any Error>).self) { group in
+            var next = 0
+            var inFlight = 0
+            var width = textLanes
+            var cancelled = false
+            // A read that may download an original is in work: it goes alone, so leaving
+            // Wi-Fi or switching off the consent applies to the very next photo (audit 2, 5.1).
+            var downloading = false
+            while true {
+                while outcome.paused == nil, !cancelled, !downloading, next < candidates.count, inFlight < width {
+                    let asset = candidates[next]
+                    let previous = done[asset.id]
+                    let allowNetwork = networkAllowed ? await networkAllowedNow() : false
+                    // Needed the network and it is gone now: stays as it is for a later run.
+                    if let previous, previous.waitingForOriginal || previous.text?.source == .localPreview, !allowNetwork {
+                        next += 1
+                        counted()
+                        continue
+                    }
+                    if allowNetwork && inFlight > 0 { break }
+                    let (reason, lanes) = await admission(lanes: textLanes)
+                    if let reason { outcome.paused = reason; break }
+                    width = lanes
+                    guard inFlight < width else { break }
+                    next += 1
+                    downloading = allowNetwork
+                    inFlight += 1
+                    group.addTask {
+                        do {
+                            return (asset, allowNetwork, .success(try await analyzer.recognizeText(asset, allowNetwork: allowNetwork)))
+                        } catch {
+                            return (asset, allowNetwork, .failure(error))
+                        }
+                    }
                 }
-                // Analysis used the full text; only a minimized copy is kept on disk.
-                var stored = text
-                stored.text = TextMinimizer.storable(text.text)
-                // Barcode contents (boarding passes, payment codes with IBAN, tickets with names)
-                // only serve the classification above and are never kept.
-                stored.barcodePayloads = []
-                result.text = stored
-                // The search index follows the new text; empty or withheld text removes the old one.
-                if stored.text.isEmpty {
-                    try await store.removeText(for: asset.id)
-                } else {
-                    try await store.indexText(stored.text, for: asset.id)
-                }
-                if text.source == .localPreview {
-                    // Only the small preview was readable: read again from the original later.
-                    result.retries = (previous?.retries ?? 0) + 1
-                    result.lastAttempt = now()
-                }
-                outcome.recognized += 1
-                // The analyzer works: the photos it failed on just before were the problem.
-                for id in suspects { try await recordTextFailure(id, previous: done[id]) }
-                suspects = []
-            } catch AnalysisError.originalNotAvailable {
-                result = previous ?? TextResult()
-                if allowNetwork {
-                    // Even the download failed: a few more tries, spaced out, then it stays.
+                guard let (asset, allowNetwork, read) = try await group.next() else { break }
+                inFlight -= 1
+                if allowNetwork { downloading = false }
+                let previous = done[asset.id]
+                var result = TextResult()
+                switch read {
+                case .success(let text):
+                    result.document = documents.analyze(text: text.text)
+                    if asset.isScreenshotLike {
+                        let labels = screenshotLabels[asset.id] ?? []
+                        let classified = screenshots.classify(text: text.text, barcodePayloads: text.barcodePayloads, imageLabels: labels)
+                        result.screenshotCategories = classified.categories.filter { $0.value >= .plausible }.map(\.key.rawValue).sorted()
+                    }
+                    // Analysis used the full text; only a minimized copy is kept on disk.
+                    var stored = text
+                    stored.text = TextMinimizer.storable(text.text)
+                    // Barcode contents (boarding passes, payment codes with IBAN, tickets with
+                    // names) only serve the classification above and are never kept.
+                    stored.barcodePayloads = []
+                    result.text = stored
+                    // The search index follows the new text; empty or withheld text removes the old one.
+                    if stored.text.isEmpty {
+                        try await store.removeText(for: asset.id)
+                    } else {
+                        try await store.indexText(stored.text, for: asset.id)
+                    }
+                    if text.source == .localPreview {
+                        // Only the small preview was readable: read again from the original later.
+                        result.retries = (previous?.retries ?? 0) + 1
+                        result.lastAttempt = now()
+                    }
+                    outcome.recognized += 1
+                    // The analyzer works: the photos it failed on just before were the problem.
+                    for id in suspects { try await recordTextFailure(id, previous: done[id]) }
+                    suspects = []
+                case .failure(AnalysisError.originalNotAvailable):
+                    result = previous ?? TextResult()
+                    if allowNetwork {
+                        // Even the download failed: a few more tries, spaced out, then it stays.
+                        result.waitingForOriginal = false
+                        result.retries = (previous?.retries ?? 0) + 1
+                        result.lastAttempt = now()
+                    } else {
+                        result.waitingForOriginal = true
+                        outcome.waiting += 1
+                    }
+                case .failure(let error):
+                    if error is CancellationError || Task.isCancelled {
+                        cancelled = true
+                        continue
+                    }
+                    if !(error is AnalysisError) {
+                        // Vision failed, maybe not because of this photo: nothing is counted yet.
+                        suspects.append(asset.id)
+                        counted()
+                        if suspects.count >= Self.analyzerFailureLimit, outcome.paused == nil {
+                            outcome.analyzerUnavailable = true
+                            outcome.paused = .timeBudget
+                        }
+                        continue
+                    }
+                    if await accessChanged() {
+                        if outcome.paused == nil { outcome.paused = .accessRevoked }
+                        continue
+                    }
+                    // Unreadable now: what was read before stays; a few more tries in later runs.
+                    result = previous ?? TextResult()
                     result.waitingForOriginal = false
                     result.retries = (previous?.retries ?? 0) + 1
                     result.lastAttempt = now()
-                } else {
-                    result.waitingForOriginal = true
-                    outcome.waiting += 1
                 }
-            } catch {
-                if error is CancellationError || Task.isCancelled { throw CancellationError() }
-                guard error is AnalysisError else {
-                    // Vision failed, maybe not because of this photo: nothing is counted yet.
-                    suspects.append(asset.id)
-                    if suspects.count >= Self.analyzerFailureLimit {
-                        outcome.analyzerUnavailable = true
-                        outcome.paused = .timeBudget
-                        return outcome
-                    }
-                    continue
-                }
-                // Unreadable now: what was read before stays; a few more tries in later runs.
-                result = previous ?? TextResult()
-                result.waitingForOriginal = false
-                result.retries = (previous?.retries ?? 0) + 1
-                result.lastAttempt = now()
+                try await store.saveResult(result, kind: "text", asset: asset.id, version: Self.textVersion)
+                counted()
             }
-            try await store.saveResult(result, kind: "text", asset: asset.id, version: Self.textVersion)
+            if cancelled { throw CancellationError() }
         }
         return outcome
     }

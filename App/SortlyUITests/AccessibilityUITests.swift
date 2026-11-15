@@ -38,6 +38,8 @@ import UIKit
 ///   (checked in the screenshots); the run at the largest size is the real test
 /// - findings on emoji only (country flags are pictures, not text) and inside a labelled
 ///   picture (the scaled-down share image preview, read out as one image)
+/// - "Contrast failed" that does not repeat in a second contrast audit two seconds later
+///   (measured while the screen moved; see `confirmContrast`)
 /// - positions: XCTest can scroll while it audits, so an element counts as under a bar when
 ///   it was there in the snapshot taken just before the audit or is there afterwards. Bars
 ///   reach 12 pt into the content (the scroll edge effect), the keyboard 48 pt (its word
@@ -58,6 +60,8 @@ final class AccessibilityUITests: XCTestCase {
     private var framesBeforeAudit: [String: [CGRect]] = [:]
     /// Labelled pictures that contain text (share image preview).
     private var pictureFrames: [CGRect] = []
+    /// "Contrast failed" findings waiting for the second contrast audit.
+    private var pendingContrast: [(label: String, line: String, detail: String)] = []
 
     private static let largestText = "UICTContentSizeCategoryAccessibilityXXXL"
     private static let failingAuditTypes: XCUIAccessibilityAuditType = [.contrast, .textClipped, .hitRegion, .sufficientElementDescription]
@@ -343,6 +347,9 @@ final class AccessibilityUITests: XCTestCase {
                 frames.append(element.frame.insetBy(dx: 0, dy: -12))
             }
         }
+        // The status bar: content scrolling under it (onboarding) shares its pixels with the clock.
+        let top = app.frame
+        frames.append(CGRect(x: top.minX, y: top.minY, width: top.width, height: top.height > 800 ? 54 : 20))
         for keyboard in app.keyboards.allElementsBoundByIndex where keyboard.exists {
             // The word suggestions sit in a 44 pt strip above the keyboard's frame.
             let frame = keyboard.frame
@@ -385,12 +392,49 @@ final class AccessibilityUITests: XCTestCase {
                     print("A11Y_AUDIT_ERROR \(screen) attempt \(attempt) \(error.localizedDescription)")
                 }
             }
-            if finished { return }
+            if finished {
+                confirmContrast(screen)
+                return
+            }
             auditFailures = []
+            pendingContrast = []
             sleep(2)
         }
         // "Audit failed to complete in time" twice: say so loudly, the tree checks still ran.
         print("A11Y_WARN \(screen) | audit | did not complete, screen not audited")
+    }
+
+    /// "Contrast failed" must repeat in a second contrast audit two seconds later to count.
+    /// In UI run 2 and 3 the first audit reported black titles and buttons on white (over
+    /// 15:1) on screens that had just scrolled: it measured them mid-movement. Text that
+    /// really lacks contrast fails both times.
+    private func confirmContrast(_ screen: String) {
+        guard !pendingContrast.isEmpty else { return }
+        let pending = pendingContrast
+        pendingContrast = []
+        sleep(2)
+        var again = Set<String>()
+        do {
+            try app.performAccessibilityAudit(for: .contrast) { issue in
+                if !issue.compactDescription.localizedCaseInsensitiveContains("nearly") {
+                    again.insert(issue.element?.label ?? "-")
+                }
+                return true
+            }
+        } catch {
+            // Without a second measurement the first one stands.
+            print("A11Y_AUDIT_ERROR \(screen) contrast confirmation \(error.localizedDescription)")
+            again = Set(pending.map { $0.label })
+        }
+        for finding in pending {
+            if again.contains(finding.label) {
+                print("A11Y_FAIL \(finding.line)")
+                print("A11Y_DETAIL \(screen) | \(finding.detail)")
+                auditFailures.append("contrast '\(finding.label.prefix(40))'")
+            } else {
+                print("A11Y_WARN \(finding.line) | did not repeat in a second contrast audit (measured mid-movement)")
+            }
+        }
     }
 
     private func record(_ issue: XCUIAccessibilityAuditIssue, screen: String, chrome: [CGRect], bounds: CGRect, barOverContent: Bool) {
@@ -438,6 +482,8 @@ final class AccessibilityUITests: XCTestCase {
         let line = "\(screen) | audit \(Self.name(of: type)) | \(summary) | label '\(label)' | \(where_)"
         if let reason {
             print("A11Y_WARN \(line) | \(reason)")
+        } else if type == .contrast {
+            pendingContrast.append((label, line, String(issue.detailedDescription.prefix(400))))
         } else {
             print("A11Y_FAIL \(line)")
             print("A11Y_DETAIL \(screen) | \(String(issue.detailedDescription.prefix(400)))")

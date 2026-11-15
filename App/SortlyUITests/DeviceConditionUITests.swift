@@ -113,8 +113,10 @@ final class DeviceConditionUITests: XCTestCase {
     }
 
     /// The overview says the analysis is done and nothing runs (no "Pause").
+    /// (Static texts only: a query over every element timed out while the app was busy.)
     private var analysisIdle: Bool {
-        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists) && !app.buttons["Pause"].exists
+        let headline = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ OR label == %@", "Fotos analysiert", "Analyse aktuell")).firstMatch
+        return headline.exists && !app.buttons["Pause"].exists
     }
 
     private var analysisRunning: Bool { app.buttons["Pause"].exists }

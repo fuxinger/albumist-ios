@@ -103,7 +103,11 @@ enum ImageLoader {
                 request.cancel()
             }
         }
-        if let image = try await load(with: manager) { return image }
+        do {
+            if let image = try await load(with: manager) { return image }
+        } catch AnalysisError.originalNotAvailable where quality == .localPreview {
+            // Asked once more below, like an empty answer.
+        }
         // Since the prefetch every photo of the demo library counted as unreadable on the
         // simulator (UI runs 43749182330 and 43753915509: "246 Fotos konnten noch nicht
         // gelesen werden"): the caching manager can hand back no preview. The plain manager,

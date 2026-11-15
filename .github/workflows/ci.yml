@@ -7,6 +7,13 @@ on:
   pull_request:
     paths-ignore: ['**.md']
   workflow_dispatch:
+    inputs:
+      appetize:
+        # The free Appetize minutes are used up, so the browser-test upload no longer runs on
+        # every push (it held a macOS runner for ~4 min each time). Kept for a manual run.
+        description: Also build the simulator app and upload it to Appetize
+        type: boolean
+        default: false
 
 # Read-only token: no job writes to the repository.
 permissions:
@@ -17,6 +24,7 @@ env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
 
+# A new push to the same branch or PR cancels the run of the previous one.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -28,7 +36,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Navigation rule
         # Navigation uses destination-based links only. A value-based link inside a screen that
         # was itself pushed by a destination-based link leads nowhere (dead row, warning triangle).
@@ -39,21 +47,63 @@ jobs:
           fi
       - name: Every UI string has English
         run: python3 .github/scripts/check_strings.py .
+      - name: Test-plan map names real tests
+        # Warnings only: a stale name in docs/TEST_COVERAGE_MAP.txt makes a case look untested
+        # in the job summary, it does not make the app worse.
+        run: python3 .github/scripts/test_summary.py map-check
+
+  changes:
+    # Decides whether the macOS job has to run: it is skipped when only *.md / docs/ changed
+    # since the last commit whose iOS tests passed (pull_request path filters cannot do this,
+    # they look at the whole PR diff).
+    name: Changes
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      actions: read
 
   core-linux:
     name: Core tests (Linux)
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
     timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install SQLite headers
-        run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev
-      - name: Build and test
-        run: swift test --parallel
-      - name: Load test (20,000 and 100,000 photos, time and memory limits)
-        run: SORTLY_LOAD_TEST=1 swift test --skip-build --filter LoadTests 2>&1 | grep -E "LOAD_|passed|failed|error"; exit ${PIPESTATUS[0]}
+    defaults:
+      run:
         shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install SQLite headers
+        run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev python3 > /dev/null
+      - name: Content-based file times (lets the build cache work, see the script)
+        run: python3 .github/scripts/stable_mtimes.py .
+      - name: Toolchain
+        id: toolchain
+        run: echo "id=$(swift --version 2>&1 | head -1 | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      # SwiftPM's .build from an earlier run. The key only picks the starting point: the
+      # compiler still checks every source (content-based times), so a stale entry costs time,
+      # never correctness. The nightly run builds without any cache.
+      - name: Build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: spm-linux-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
+          restore-keys: spm-linux-${{ steps.toolchain.outputs.id }}-
+      - name: Build and test
+        run: |
+          set -o pipefail
+          swift test --parallel 2>&1 | tee core-linux.log
+      - name: Load test (20,000 and 100,000 photos, time and memory limits)
+        run: |
+          set +e
+          SORTLY_LOAD_TEST=1 swift test --skip-build --filter LoadTests > load.log 2>&1
+          status=$?
+          grep -E "LOAD_|passed|failed|error" load.log
+          exit $status
+      - name: Job summary
+        if: always()
+        run: |
+          python3 .github/scripts/test_summary.py summary --title "Core tests (Linux)" \
+            --swift-log core-linux.log --swift-log load.log --load-log load.log >> "$GITHUB_STEP_SUMMARY" || true
 
   names:
     # App name candidates against the App Store (the API is only reachable from CI).
@@ -61,16 +111,20 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 .github/scripts/name_check.py docs/launch/name-candidates.txt
 
   ios:
     name: iOS build and tests (macOS)
+    needs: changes
+    # Runs unless the changes job positively found a docs-only change (also when it failed).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select newest Xcode
+        id: xcode
         run: |
           ls -d /Applications/Xcode*.app
           XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
@@ -78,19 +132,43 @@ jobs:
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
           xcrun simctl list runtimes
-      - name: Core tests (macOS)
-        run: swift test --parallel
+          # The exact Xcode build is part of the cache key: products of another compiler are never reused.
+          echo "id=$(xcodebuild -version | tr -c 'A-Za-z0-9.\n' '-' | paste -sd- -)" >> "$GITHUB_OUTPUT"
+          # Files restored from the cache have new inode numbers; without this Xcode's build
+          # system would treat all of them as changed and rebuild everything.
+          defaults write com.apple.dt.XCBuild IgnoreFileSystemDeviceInodeChanges -bool YES
       - name: Generate Xcode project
         if: hashFiles('App/project.yml') != ''
         run: |
           brew install xcodegen
           cd App && xcodegen generate
-      - name: Pick simulator
+      - name: Content-based file times (lets the build cache work, see the script)
+        run: python3 .github/scripts/stable_mtimes.py .
+      # DerivedData (app, package and SDK modules) and SwiftPM's .build from an earlier run.
+      # The key only picks the starting point; the build system still checks every input, and
+      # source files carry content-based times, so a changed file is always recompiled. The
+      # nightly run builds without any cache to catch an incremental-build problem within a day.
+      - name: Build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            .build
+          key: ios-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**', 'App/**') }}
+          restore-keys: ios-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-
+      - name: Pick simulator and boot it during the build
         if: hashFiles('App/project.yml') != ''
         id: sim
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          # Booting now overlaps with the builds below; xcodebuild would boot it only afterwards.
+          xcrun simctl boot "$UDID" || true
+      - name: Core tests (macOS)
+        run: |
+          set -o pipefail
+          mkdir -p build
+          swift test --parallel 2>&1 | tee build/core-macos.log
       - name: Build and test app
         if: hashFiles('App/project.yml') != ''
         run: |
@@ -101,6 +179,7 @@ jobs:
             -scheme Sortly \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath ../build/TestResults.xcresult \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1
           status=$?
           grep -E "error:|warning: .*Sortly|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
@@ -109,32 +188,43 @@ jobs:
         if: success() && hashFiles('App/project.yml') != ''
         run: |
           cd App
-          xcodebuild -exportLocalizations -project Sortly.xcodeproj -localizationPath ../build/loc -exportLanguage en CODE_SIGNING_ALLOWED=NO | tail -3
+          xcodebuild -exportLocalizations -project Sortly.xcodeproj -localizationPath ../build/loc -exportLanguage en CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO | tail -3
           find ../build/loc -name "*.xliff" -exec sh -c 'base64 -i "$1" | tr -d "\n" | fold -w 4000 | sed "s/^/XLIFF /"' _ {} \;
       - name: Upload strings
         if: success() && hashFiles('build/loc/**') != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: localizations
           path: build/loc
           retention-days: 7
+      - name: Job summary
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results tests --path build/TestResults.xcresult > build/app-tests.json 2>/dev/null || true
+          python3 .github/scripts/test_summary.py summary --title "iOS build and tests (macOS)" \
+            --swift-log build/core-macos.log --xcresult-json build/app-tests.json >> "$GITHUB_STEP_SUMMARY" || true
       - name: Upload logs
         if: always() && hashFiles('build-log.txt') != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-build-log
           path: |
             build-log.txt
             build/TestResults.xcresult
           retention-days: 7
+      - name: Keep the build cache small
+        # Logs and the index are not needed for the next build (indexing is off anyway).
+        run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
 
   simulator:
-    # Runs in parallel with the tests so the browser-test link is ready sooner.
+    # Manual only (workflow_dispatch input "appetize"): builds the simulator app and uploads it
+    # to Appetize for browser testing.
     name: Simulator app for browser testing
+    if: github.event_name == 'workflow_dispatch' && inputs.appetize
     runs-on: xcode-27
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select newest Xcode
         run: |
           XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
@@ -164,7 +254,7 @@ jobs:
           ls -la ../../../../Sortly-simulator.zip
       - name: Upload simulator app
         if: success() && hashFiles('build/Sortly-simulator.zip') != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Sortly-simulator-app
           path: build/Sortly-simulator.zip

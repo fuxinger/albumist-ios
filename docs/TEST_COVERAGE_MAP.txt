@@ -1,0 +1,62 @@
+# Test-plan case -> tests that exercise it (docs/TEST_PLAN.md, table "Abdeckung aller Fälle").
+# One line per case: the case id, then test function names (Swift Testing functions without
+# parentheses, XCTest and UI test methods). A name ending in * matches every test starting
+# with it. New cases: `python3 .github/scripts/test_summary.py map-generate` adds them from the
+# "Test heute" column; then check the names by hand. CI warns about names that match no test
+# (map-check) and shows per run which cases ran (job summary).
+A1     hotDeviceWaitsAndGoesOnByItself warmDeviceTakesBreaksButFinishes
+A2     pauseWhileWaitingEndsTheRun
+A3     test6_AnalysisKeepsGoingThroughBackgroundAndTabs
+A4     secondRunCountsOnFromWhatIsDone pauseAndResumeLosesNothing
+A5     test5_InterruptedPlanCanBeLeftAndRetried scenarioJ
+A6
+A7
+A8
+A9     offlineStopsOnlineButKeepsCountries townsUseOneRequestPerCellAndOfflineNames
+A10
+A11
+A12    test2_LargeTextDarkMode
+A13    test2_LargeTextDarkMode
+A14    test1_FullFlow test2_LargeTextDarkMode test3_TapThroughSweep test4_DecisionsComeBackAfterRebuild test5_InterruptedPlanCanBeLeftAndRetried test6_AnalysisKeepsGoingThroughBackgroundAndTabs
+A15
+A16    appShipsEnglish
+A17    dayTripUsesDestinationCalendarAcrossMidnight
+B1     test1_FullFlow
+B2     authorizationMapping
+B3     deniedAccessStopsImmediately
+B4
+B5
+B6
+B7     hundredThousandPhotosMostlyInICloud twentyThousandPhotos
+B8     modifiedScreenshotInvalidatesOCRAndSearchIndex
+B9     nonGeotaggedPhotosAreOnlyInferredAndScreenshotsNever missingGPSAloneIsNoEvidence photoWithoutGPSAtTheSplitIsInOnePartOnly changedOrRemovedGPSInvalidatesStoredPlace
+B10
+B11    refinementReadsICloudOriginalsOnWiFiWithConsent
+B12
+B13
+B14    mediaTypeCategories
+B15    removedAssetsDisappear
+B16    scenarioE scenarioF appliedSuggestionsAreCompleteAfterTheNextAnalysisAndNothingIsPlannedTwice readOnlyAlbumsAreNeverTouched undoBringsTheLibraryBack photosTheUserTookOutOfAnAlbumStayOut aDeletedAlbumIsNotCreatedAgain aRejectedSuggestionStaysRejected anAlbumMarkedAsNotFittingIsReplacedByANewAlbum invariantsHoldForRandomDecisions
+B17    sameNameDifferentContentIsNameConflict
+B18    existingFoldersAreReusedAndExtensionAddsOnlyMissing undoKeepsFoldersThatStillHoldOtherAlbums
+C1     test1_FullFlow scenarioI
+C2     hundredThousandPhotosIntoTwoHundredAlbums
+C3     scenarioJ appliedAssetsComeFromTheRecord historicalUndoPreservesManuallyReaddedMembership keptAlbumOnlyLosesAlbumistsPhotos lowercaseIBANIsMasked mergePreservesExistingUserTitleExactly removalKeepsAlbumTheUserFilledAfterThePreview removingManagedAlbumCanBeUndone resumeAsksBeforeAddingWhenTheOutcomeIsUnclear resumeDoesNotChooseBetweenTwoSameNamedAlbums resumeDoesNotReaddPhotoRemovedAfterInterruptedCommit resumeDoesNotTakeOverAFilledAlbumWithTheSameTitle resumeMustNotAdoptUserCreatedAlbumWithSameTitle resumeRespectsNewerOverrides unavailableAssetIsNotRecordedAsAdded undoDeletionPreservesAlbumFilledByUserAfterPlanning undoDoesNotRemoveMembershipAddedByUserDuringExecution undoInterruptedPlanFindsAnAlbumCreatedRightBeforeTheCrash undoInterruptedPlanReconcilesCommittedRunningSteps verificationFailureAfterCommitStillRecordsTheChange
+C4     undoThatPhotosDidNotCarryOutSaysWhyAndCanBeRepeated
+C5     undoThatPhotosDidNotCarryOutSaysWhyAndCanBeRepeated
+C6     undoRevertsOnlyOwnChanges
+C7     partialUndoOffersTheRemainingRepair
+C8     managedAlbumRecordsFromOlderVersionsStillLoad
+C9     managedAlbumsAreRecordedAndCanBeRemovedAgain
+D1     undoGivesFreeAlbumsBackOnceEvenWhenFinalizedAgain
+D2–D5
+E1     test4_DecisionsComeBackAfterRebuild
+E2     version2DatabaseKeepsItsSearchableText
+E3     test4_DecisionsComeBackAfterRebuild backupFromANewerAppIsLeftAlone backupFromAnotherLibraryRestoresOnlyDecisions backupKeepsPayloadsAsTextAndReadsOldBase64Rows backupKeepsPlansThatStillHaveToBeFinished backupRestoresDecisionsIntoARebuiltDatabase olderBackupCannotReplaceNewerSnapshot
+E4     resetKeepsDecisionsByDefault
+F1     test1_FullFlow
+F2     test3_TapThroughSweep
+F3     countryAndYear
+F4     test6_AnalysisKeepsGoingThroughBackgroundAndTabs trialYearIsKeptForLaterRuns
+F5     test1_FullFlow
+G1

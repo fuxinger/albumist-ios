@@ -1,0 +1,131 @@
+"""Waits until the tests of one commit are finished and says whether they are green.
+
+Used before a TestFlight upload and before a release tag. Green means:
+  1. The newest CI run (ci.yml) for exactly this commit succeeded, and the job
+     "iOS build and tests (macOS)" really ran and succeeded in it or in an earlier run of the
+     same commit. When it was skipped everywhere (only documentation changed since the last
+     tested commit), there is nothing new to ship.
+  2. If a UI flow run (ui.yml) exists for this commit (it runs for pull requests), its newest
+     run succeeded too. Pushes to main have no UI flow run; there CI alone decides.
+
+Writes `ok=true|false` and `reason=...` to $GITHUB_OUTPUT and a line to the job summary.
+Never fails itself (exit 0) unless --fail is given, so a red test run shows up as a skipped
+upload with the reason, not as a second red workflow.
+
+Environment: GH_TOKEN, GITHUB_REPOSITORY, SHA (commit to check), WAIT_MINUTES (default 90),
+NO_RUN_MINUTES (give up when no CI run has appeared after this long, default 15).
+"""
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+REPO = os.environ["GITHUB_REPOSITORY"]
+SHA = os.environ["SHA"]
+WAIT = float(os.environ.get("WAIT_MINUTES", "90")) * 60
+NO_RUN = float(os.environ.get("NO_RUN_MINUTES", "15")) * 60
+POLL = 60
+CI, CI_JOB = "ci.yml", "iOS build and tests"
+UI = "ui.yml"
+
+
+def api(path, **params):
+    url = f"{API}/repos/{REPO}/{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
+    request = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    })
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.load(response)
+        except (urllib.error.URLError, TimeoutError) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code == 404:
+                return {}
+            time.sleep(10 * (attempt + 1))
+    raise RuntimeError(f"GitHub API not reachable: {path}")
+
+
+def runs(workflow):
+    return api(f"actions/workflows/{workflow}/runs", head_sha=SHA, per_page=30).get("workflow_runs", [])
+
+
+def newest_run(workflow):
+    return max(runs(workflow), key=lambda r: r["run_number"], default=None)
+
+
+def describe(run):
+    return f"{run['name']} #{run['run_number']} ({run['event']}, {run['html_url']})"
+
+
+def check():
+    """(done, ok, reason) for the current state of the runs."""
+    ci = newest_run(CI)
+    if ci is None:
+        return False, False, f"no CI run for {SHA[:7]} yet"
+    if ci["status"] != "completed":
+        return False, False, f"waiting for {describe(ci)}"
+    if ci["conclusion"] != "success":
+        return True, False, f"{describe(ci)} ended with '{ci['conclusion']}'"
+    # The iOS job must have passed in this run, or in an earlier run of the same commit (then
+    # this run skipped it because that exact code was tested already).
+    ios, state = False, []
+    for run in sorted(runs(CI), key=lambda r: -r["run_number"]):
+        if run["status"] != "completed":
+            continue
+        jobs = [j for j in api(f"actions/runs/{run['id']}/jobs", per_page=100).get("jobs", [])
+                if j["name"].startswith(CI_JOB)]
+        state += [f"#{run['run_number']} {j['name']}: {j.get('conclusion')}" for j in jobs]
+        if jobs and all(j.get("conclusion") == "success" for j in jobs):
+            ios = True
+            break
+    if not ios:
+        state = ", ".join(state[:4]) or "job missing"
+        return True, False, (f"the iOS tests did not run for this commit ({state}); only documentation "
+                             "changed since the last tested commit, so there is nothing new to ship (to test this exact "
+                             "commit anyway, start CI by hand on it)")
+    ui = newest_run(UI)
+    if ui is None:
+        return True, True, f"{describe(ci)} passed (no UI flow run for this commit)"
+    if ui["status"] != "completed":
+        return False, False, f"CI passed; waiting for {describe(ui)}"
+    if ui["conclusion"] != "success":
+        return True, False, f"CI passed, but {describe(ui)} ended with '{ui['conclusion']}'"
+    return True, True, f"{describe(ci)} and {describe(ui)} passed"
+
+
+def main():
+    started = time.monotonic()
+    while True:
+        try:
+            done, ok, reason = check()
+        except RuntimeError as error:
+            done, ok, reason = False, False, str(error)
+        waited = time.monotonic() - started
+        print(f"GATE {int(waited // 60):>3} min: {reason}", flush=True)
+        if done:
+            break
+        if reason.startswith("no CI run") and waited >= NO_RUN:
+            reason = (f"no CI run appeared for {SHA[:7]} within {int(NO_RUN // 60)} min (CI runs for pull "
+                      "requests and pushes to main; start it by hand, or use force)")
+            break
+        if waited >= WAIT:
+            reason = f"tests not finished after {int(WAIT // 60)} min ({reason})"
+            break
+        time.sleep(POLL)
+    level = "notice" if ok else "warning"
+    print(f"::{level} title=Test gate::{'Green' if ok else 'Not green'}: {reason}")
+    with open(os.environ.get("GITHUB_OUTPUT", os.devnull), "a", encoding="utf-8") as out:
+        out.write(f"ok={'true' if ok else 'false'}\nreason={reason}\n")
+    with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:
+        out.write(f"### Test gate for {SHA[:7]}: {'✅ green' if ok else '⛔ not green'}\n\n{reason}\n")
+    return 1 if ("--fail" in sys.argv and not ok) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

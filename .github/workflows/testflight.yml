@@ -3,18 +3,30 @@ name: TestFlight
 # Builds a signed App Store build and uploads it to TestFlight, so Albumist can be installed on
 # a real iPhone. Runs only when the four App Store Connect secrets exist (docs/TESTFLIGHT.md);
 # until then it stops after one quick check on Linux and costs no macOS minutes.
+#
+# Only a commit whose tests are green goes to TestFlight. The job "Wait for green tests"
+# (.github/scripts/ci_gate.py) waits on a free Linux runner for the CI run of exactly this
+# commit and, where one exists, its UI flow run (pull requests); the upload starts only when
+# both passed and CI's iOS job really ran. A docs-only commit (iOS job skipped) is not uploaded.
+# A manual run with "force" skips the wait for emergencies.
+#
+# Why not `workflow_run`: that trigger only works from the workflow file on the default branch
+# (main), which lags behind the release branch, and it would run fork-PR code with these
+# secrets unless guarded. Waiting from the push itself works on every release branch as is.
 on:
   push:
+    # No paths filter on purpose: the gate decides. If a code push's tests were cancelled by a
+    # following docs-only push, CI tests the code again on that push and it must be uploaded.
     branches: [claude/sortly-app, main]
-    paths-ignore: ['**.md']
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Emergency: upload without waiting for green tests'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-
-concurrency:
-  group: testflight
-  cancel-in-progress: true
 
 env:
   HOMEBREW_NO_AUTO_UPDATE: 1
@@ -23,7 +35,11 @@ env:
 jobs:
   check:
     name: TestFlight secrets
+    # The App Store Connect secrets are only ever read on the release branches (push or manual
+    # run by someone with write access); this workflow has no pull_request trigger.
+    if: github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       ready: ${{ steps.secrets.outputs.ready }}
     steps:
@@ -41,24 +57,69 @@ jobs:
             echo "::notice::TestFlight skipped: the App Store Connect secrets are not set yet (docs/TESTFLIGHT.md)."
           fi
 
-  upload:
-    name: Build and upload to TestFlight
+  gate:
+    name: Wait for green tests
     needs: check
     if: needs.check.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    # CI takes ~10 min, the UI flow ~30 min plus queueing; the script gives up after 90 min.
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      actions: read
+    # A newer push to the same branch replaces a run that is still waiting (newest commit wins).
+    concurrency:
+      group: testflight-gate-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      ok: ${{ steps.force.outputs.ok || steps.gate.outputs.ok }}
+    steps:
+      - name: Forced upload
+        id: force
+        if: inputs.force
+        run: |
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+          echo "::warning title=Forced::Uploading without waiting for green tests (manual run with force)."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ !inputs.force }}
+        with:
+          sparse-checkout: .github/scripts
+      - name: Wait for CI and UI flow of this commit
+        id: gate
+        if: ${{ !inputs.force }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          WAIT_MINUTES: 90
+        run: python3 .github/scripts/ci_gate.py
+
+  upload:
+    name: Build and upload to TestFlight
+    needs: [check, gate]
+    if: needs.gate.outputs.ok == 'true' && (github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main')
     runs-on: xcode-27
     timeout-minutes: 60
+    # Uploads run one after another and are never cancelled half way; a newer one waits.
+    concurrency:
+      group: testflight-upload
+      cancel-in-progress: false
     env:
       KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select newest Xcode
+        id: xcode
         run: |
           XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
           [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
+          echo "id=$(xcodebuild -version | tr -c 'A-Za-z0-9.\n' '-' | paste -sd- -)" >> "$GITHUB_OUTPUT"
+          # Files restored from the cache have new inode numbers; without this Xcode's build
+          # system would treat all of them as changed.
+          defaults write com.apple.dt.XCBuild IgnoreFileSystemDeviceInodeChanges -bool YES
       - name: Paths
         run: |
           echo "KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
@@ -68,6 +129,17 @@ jobs:
         run: |
           brew install xcodegen
           cd App && xcodegen generate
+      - name: Content-based file times (lets the build cache work, see the script)
+        run: python3 .github/scripts/stable_mtimes.py .
+      # DerivedData of the previous archive (Release, device): package and SDK modules that did
+      # not change are reused. The key only picks the starting point; every input is still
+      # checked and changed files always recompile. Signing happens in the export, not here.
+      - name: Build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: archive-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'App/**') }}
+          restore-keys: archive-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-
       - name: App Store Connect key
         env:
           KEY_P8: ${{ secrets.ASC_KEY_P8 }}
@@ -79,6 +151,7 @@ jobs:
       # and Apple only makes one when an iPhone is registered to the team. The export below
       # signs for the App Store with Apple's cloud-managed distribution certificate (needs the
       # Admin key), which works without any registered device.
+      # The build number is this workflow's run number: it only grows (build 27 was run 27).
       - name: Archive (unsigned; signed for the App Store during export)
         run: |
           cd App
@@ -117,7 +190,38 @@ jobs:
           status=$?
           grep -E "error:|Upload|EXPORT|\*\* " upload-log.txt | head -80
           [ $status -eq 0 ] && echo "TESTFLIGHT_BUILD ${{ github.run_number }} uploaded; it appears in TestFlight after Apple's processing (usually 5 to 30 minutes)."
+          [ $status -eq 0 ] && echo "### TestFlight build ${{ github.run_number }} uploaded (${GITHUB_SHA:0:7})" >> "$GITHUB_STEP_SUMMARY"
           exit $status
       - name: Remove key
         if: always()
         run: rm -rf "$(dirname "$KEY_PATH")"
+      - name: Keep the build cache small
+        run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
+
+  notes:
+    # Sets the German "Was testen" text from docs/TESTFLIGHT_NOTES.md once App Store Connect
+    # knows the build (bounded wait on a Linux runner, so no macOS runner is held). A failure
+    # here never touches the upload, which is done already.
+    name: What to Test
+    needs: upload
+    if: github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set "Was testen" for this build
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          export KEY_PATH="$RUNNER_TEMP/asc/AuthKey.p8"
+          mkdir -p "$(dirname "$KEY_PATH")"
+          printf '%s\n' "$KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          python3 .github/scripts/testflight_notes.py upload --notes docs/TESTFLIGHT_NOTES.md \
+            --build "${{ github.run_number }}" --sha "$GITHUB_SHA" --bundle-id app.albumist.ios --wait-minutes 40
+      - name: Remove key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"

@@ -254,7 +254,9 @@ final class SortlyFlowUITests: XCTestCase {
     /// album of two photos when nothing is recommended.
     private func openRecommendedPlan(_ what: String) -> Bool {
         var apply = button("ausgewählte Alben anlegen")
-        if !apply.waitForExistence(timeout: 5), tap(button("Vorschläge prüfen"), "open suggestions for \(what)", timeout: 20) {
+        // "16 Vorschläge prüfen", or "1 Vorschlag prüfen" when one is left.
+        let open = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Vorschl(ag|äge) prüfen")).firstMatch
+        if !apply.waitForExistence(timeout: 5), open.waitForExistence(timeout: 10), tap(open, "open suggestions for \(what)") {
             sleep(1)
             if button("empfohlene auswählen").waitForExistence(timeout: 5) { button("empfohlene auswählen").tap(); sleep(1) }
             back(); sleep(1)
@@ -654,11 +656,14 @@ final class SortlyFlowUITests: XCTestCase {
 
     /// Reise-Werkstatt (I07), from the trip list. The demo library's Iceland trip is
     /// Reykjavík (1.–4. August) and Vík (5.–7. August) in one: split it at 5 August, then
-    /// merge the two parts again, so the rest of the run sees the trips as before.
+    /// merge the two parts again, so the rest of the run sees the trips as before. Trip rows
+    /// are named by place and month ("Island, August 2023"), so the parts are found by month.
     private func tripWorkshop() {
-        func tripRow(_ text: String) -> XCUIElement {
-            app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", text)).element(boundBy: 0)
+        let iceland = "August 2023"
+        func tripRows(_ text: String) -> XCUIElementQuery {
+            app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", text))
         }
+        func tripRow(_ text: String) -> XCUIElement { tripRows(text).element(boundBy: 0) }
         func openWorkshop(_ row: XCUIElement, _ step: String) -> Bool {
             var swipes = 0
             while !(row.exists && row.isHittable) && swipes < 4 { app.swipeUp(); swipes += 1; sleep(1) }
@@ -677,7 +682,7 @@ final class SortlyFlowUITests: XCTestCase {
             if finished { done.tap(); sleep(3) }
         }
 
-        guard openWorkshop(tripRow("01.08."), "split") else { return }
+        guard openWorkshop(tripRow(iceland), "split") else { return }
         sleep(2)
         shot("60-trip-workshop"); audit("trip workshop")
         let day = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "workshop.day", "5. August")).firstMatch
@@ -694,22 +699,24 @@ final class SortlyFlowUITests: XCTestCase {
         finish("split", shotName: "62-split-done")
         let list = app.navigationBars["Reisen"].waitForExistence(timeout: 5)
         print(list ? "UI_STEP_OK back to trips after split" : "UI_STEP_MISSING back to trips after split")
-        let parts = tripRow("05.08.").waitForExistence(timeout: 10)
+        let parts = waitStable("two trips in August 2023", timeout: 20, stableChecks: 1) { tripRows(iceland).count == 2 }
         print(parts ? "UI_STEP_OK second part is its own trip" : "UI_STEP_MISSING second part is its own trip")
-        XCTAssertTrue(parts, "After the split there is no trip starting on 5 August")
+        print("UI_FACT trips after split: \(tripRows(iceland).allElementsBoundByIndex.map(\.label))")
+        XCTAssertTrue(parts, "After the split there are not two trips in August 2023")
         shot("63-trips-after-split")
 
-        // The first part lists the split and offers to merge with the part after it.
-        guard openWorkshop(tripRow("01.08."), "merge") else { return }
+        // The first part (listed below the newer one) lists the split and offers to merge with
+        // the part after it; the other part offers the one before.
+        guard openWorkshop(tripRows(iceland).element(boundBy: tripRows(iceland).count > 1 ? 1 : 0), "merge") else { return }
         sleep(2)
         let listed = app.buttons["workshop.undoChange"].exists
         print(listed ? "UI_STEP_OK workshop lists the split" : "UI_STEP_MISSING workshop lists the split")
         shot("64-workshop-after-split")
-        let merge = app.buttons["workshop.merge.after"]
+        let after = app.buttons["workshop.merge.after"], before = app.buttons["workshop.merge.before"]
         swipes = 0
         // Rows of a List exist only once they are on screen.
-        while !(merge.exists && merge.isHittable) && swipes < 4 { app.swipeUp(); swipes += 1; sleep(1) }
-        guard tap(merge, "merge with trip after", timeout: 5) else { return }
+        while !((after.exists && after.isHittable) || (before.exists && before.isHittable)) && swipes < 4 { app.swipeUp(); swipes += 1; sleep(1) }
+        guard tap(after.exists ? after : before, "merge with the other part", timeout: 5) else { return }
         sleep(1)
         shot("64b-merge-question")
         let confirm = app.buttons.matching(identifier: "Zusammenlegen").allElementsBoundByIndex.first(where: \.isHittable)
@@ -720,8 +727,9 @@ final class SortlyFlowUITests: XCTestCase {
         }
         confirm.tap()
         finish("merge", shotName: "65-merge-done")
-        let whole = tripRow("07.08.").waitForExistence(timeout: 10) && !tripRow("05.08.").exists
+        let whole = waitStable("one trip in August 2023 again", timeout: 20, stableChecks: 1) { tripRows(iceland).count == 1 }
         print(whole ? "UI_STEP_OK trip whole again" : "UI_STEP_MISSING trip whole again")
+        XCTAssertTrue(whole, "After the merge the trip is not one again")
     }
 
     /// Same app state, but with the largest accessibility text size in dark mode.
@@ -1046,6 +1054,7 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(done, "The analysis did not finish after background and tabs")
         let all = anything("Alle ").exists && anything("Fotos analysiert").exists
         print(all ? "UI_STEP_OK every photo analysed" : "UI_STEP_MISSING every photo analysed")
+        XCTAssertTrue(all, "Not every photo was analysed after background and tabs")
         print("UI_FACT analysis card \(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "analysiert")).firstMatch.label)")
         shot("63-analysis-done"); audit("analysis done")
 

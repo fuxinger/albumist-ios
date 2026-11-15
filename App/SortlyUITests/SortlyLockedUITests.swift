@@ -71,7 +71,9 @@ final class SortlyLockedUITests: XCTestCase {
 
         // Something to apply: a selection left by the earlier runs, else the recommended ones.
         var apply = button("ausgewählte Alben anlegen")
-        if !apply.waitForExistence(timeout: 5), tap(button("Vorschläge prüfen"), "open suggestions (locked)", timeout: 20) {
+        // "16 Vorschläge prüfen", or "1 Vorschlag prüfen" when one is left.
+        let suggestions = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Vorschl(ag|äge) prüfen")).firstMatch
+        if !apply.waitForExistence(timeout: 5), tap(suggestions, "open suggestions (locked)", timeout: 20) {
             sleep(1)
             if button("empfohlene auswählen").waitForExistence(timeout: 5) { button("empfohlene auswählen").tap(); sleep(1) }
             back(); sleep(1)

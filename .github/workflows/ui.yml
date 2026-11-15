@@ -82,11 +82,11 @@ jobs:
           # within a shard, tests in alphabetical order within a class.
           - shard: flow-a
             video: true
-            tests: SortlyFlowUITests/test1_FullFlow SortlyFlowUITests/test2_LargeTextDarkMode SortlyFlowUITests/test3_TapThroughSweep SortlyFlowUITests/test4_DecisionsComeBackAfterRebuild SortlyLockedUITests
+            tests: SortlyFlowUITests/test1_FullFlow SortlyFlowUITests/test2_LargeTextDarkMode SortlyFlowUITests/test3_TapThroughSweep SortlyFlowUITests/test4_DecisionsComeBackAfterRebuild
           - shard: flow-b
             tests: DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo SortlyFlowUITests/test1b_AtlasLibrarySearch SortlyFlowUITests/test1c_UndoFromHistory SortlyFlowUITests/test5_InterruptedPlanCanBeLeftAndRetried SortlySearchUITests
           - shard: flow-c
-            tests: DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo SortlyFlowUITests/test1d_TripWorkshop SortlyFlowUITests/test6_AnalysisKeepsGoingThroughBackgroundAndTabs
+            tests: DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo SortlyFlowUITests/test1d_TripWorkshop SortlyFlowUITests/test6_AnalysisKeepsGoingThroughBackgroundAndTabs SortlyLockedUITests
           - shard: device-a
             tests: DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
           - shard: device-b

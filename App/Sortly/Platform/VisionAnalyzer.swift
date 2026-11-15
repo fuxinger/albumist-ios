@@ -77,30 +77,39 @@ enum ImageLoader {
         // One request resumes the caller exactly once: with the final image, with an error, or
         // with CancellationError when the analysis stops (the PhotoKit request, maybe an
         // iCloud download, is cancelled with it instead of running on).
-        let request = ImageRequest(manager: manager)
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LoadedImage?, Error>) in
-                guard request.start(continuation) else { return }
-                let id = manager.requestImage(for: asset, targetSize: target, contentMode: .aspectFit, options: options) { image, info in
-                    if (info?[PHImageCancelledKey] as? Bool) == true {
-                        request.finish(.failure(CancellationError()))
-                        return
+        func load(with manager: PHImageManager) async throws -> LoadedImage? {
+            let request = ImageRequest(manager: manager)
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LoadedImage?, Error>) in
+                    guard request.start(continuation) else { return }
+                    let id = manager.requestImage(for: asset, targetSize: target, contentMode: .aspectFit, options: options) { image, info in
+                        if (info?[PHImageCancelledKey] as? Bool) == true {
+                            request.finish(.failure(CancellationError()))
+                            return
+                        }
+                        let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                        if isDegraded && quality == .original { return } // wait for the final image
+                        if let image, let cg = image.cgImage {
+                            request.finish(.success(LoadedImage(cgImage: cg, orientation: CGImagePropertyOrientation(image.imageOrientation))))
+                        } else if (info?[PHImageResultIsInCloudKey] as? Bool) == true {
+                            request.finish(.failure(AnalysisError.originalNotAvailable))
+                        } else {
+                            request.finish(.success(nil))
+                        }
                     }
-                    let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                    if isDegraded && quality == .original { return } // wait for the final image
-                    if let image, let cg = image.cgImage {
-                        request.finish(.success(LoadedImage(cgImage: cg, orientation: CGImagePropertyOrientation(image.imageOrientation))))
-                    } else if (info?[PHImageResultIsInCloudKey] as? Bool) == true {
-                        request.finish(.failure(AnalysisError.originalNotAvailable))
-                    } else {
-                        request.finish(.success(nil))
-                    }
+                    request.attach(id)
                 }
-                request.attach(id)
+            } onCancel: {
+                request.cancel()
             }
-        } onCancel: {
-            request.cancel()
         }
+        if let image = try await load(with: manager) { return image }
+        // Since the prefetch every photo of the demo library counted as unreadable on the
+        // simulator (UI runs 43749182330 and 43753915509: "246 Fotos konnten noch nicht
+        // gelesen werden"): the caching manager can hand back no preview. The plain manager,
+        // as before the prefetch, is asked once more before a photo counts as unreadable.
+        guard quality == .localPreview else { return nil }
+        return try await load(with: PHImageManager.default())
     }
 }
 

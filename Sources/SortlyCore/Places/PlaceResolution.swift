@@ -88,6 +88,8 @@ public actor PlaceResolutionService {
         public var onlineRequests = 0
         public var cacheHits = 0
         public var stoppedBecauseOffline = false
+        /// Apple's geocoder kept refusing (rate limit): the remaining cells wait for a later run.
+        public var stoppedBecauseThrottled = false
         public init() {}
     }
 
@@ -101,6 +103,11 @@ public actor PlaceResolutionService {
     private let time: TimeSource
     private let now: @Sendable () -> Date
     private var requestTimes: [Duration] = []
+    /// Time spent in this `resolve` waiting for the geocoder after it refused.
+    private var rateLimitWaited: Duration = .zero
+    /// Longest single sleep between two checks of `shouldStop`: Pause, heat or the end of the
+    /// app's time interrupt a wait for the geocoder within seconds, not after minutes.
+    static let waitSlice: Duration = .seconds(2)
 
     public init(
         map: OfflineWorldMap?,
@@ -123,16 +130,22 @@ public actor PlaceResolutionService {
     /// Resolves all requests. Results are handed to `sink` in batches as they arrive, so a
     /// paused or killed run keeps everything finished so far. Cancellation stops early and
     /// reports the rest as pending.
+    ///
+    /// `maxRateLimitWait`: how long this call may wait in total after the geocoder refused
+    /// (rate limit). Once that is used up, or the geocoder still refuses after its retries, no
+    /// more online lookups are made in this call and the rest is reported as pending.
     public func resolve(
         _ requests: [Request],
         refining: Bool = false,
         maxOnlineRequests: Int? = nil,
+        maxRateLimitWait: Duration? = nil,
         shouldStop: (@Sendable () async -> Bool)? = nil,
         onlineAllowed: (@Sendable () async -> Bool)? = nil,
         progress: (@Sendable (Int) async -> Void)? = nil,
         sink: Sink
     ) async throws -> Outcome {
         var outcome = Outcome()
+        rateLimitWaited = .zero
         // How many requests are final (resolved, pending for later, or not resolvable). A
         // country known early from the map does not count yet when the town still needs the
         // online lookup, so the count rises with the real work (first device test 15.11.:
@@ -187,19 +200,26 @@ public actor PlaceResolutionService {
                 outcome.cacheHits += 1
             } else if !onlineDisabled, maxOnlineRequests.map({ outcome.onlineRequests < $0 }) ?? true, let geocoder {
                 let representative = Self.representative(of: members.map(\.coordinate))
-                switch await request(geocoder, representative) {
-                case .success(let components):
+                switch await request(geocoder, representative, patience: maxRateLimitWait, shouldStop: shouldStop) {
+                case .found(let components):
                     outcome.onlineRequests += 1
                     // "Nothing here" (open sea, a lake, wilderness) is remembered as an empty
                     // answer, so the cell is not asked again every night.
                     let answer = components ?? PlaceComponents()
                     online = answer
                     try await cache.cachePlace(answer, cell: cell, resolvedAt: now())
-                case .failure(.offline):
+                case .offline:
                     outcome.onlineRequests += 1
                     onlineDisabled = true
                     outcome.stoppedBecauseOffline = true
-                case .failure:
+                case .throttled:
+                    // Asking the next cell would only be refused as well (and wait again).
+                    outcome.onlineRequests += 1
+                    onlineDisabled = true
+                    outcome.stoppedBecauseThrottled = true
+                case .stopped:
+                    onlineDisabled = true
+                case .failed:
                     outcome.onlineRequests += 1
                 }
             }
@@ -283,37 +303,70 @@ public actor PlaceResolutionService {
 
     // MARK: Throttled requests
 
-    private func request(_ geocoder: any ReverseGeocoding, _ coordinate: GeoCoordinate) async -> Result<PlaceComponents?, GeocodingError> {
+    enum Lookup: Equatable {
+        case found(PlaceComponents?)
+        case offline
+        /// Still refused after the retries, or the patience for this call is used up.
+        case throttled
+        /// Pause, heat or the end of the app's time while waiting.
+        case stopped
+        case failed
+    }
+
+    private func request(
+        _ geocoder: any ReverseGeocoding, _ coordinate: GeoCoordinate,
+        patience: Duration?, shouldStop: (@Sendable () async -> Bool)?
+    ) async -> Lookup {
         var backoff: Duration = .seconds(30)
-        for _ in 0..<4 {
+        let attempts = 4
+        for attempt in 1...attempts {
+            guard await waitForSlot(shouldStop) else { return .stopped }
             do {
-                try await waitForSlot()
-                return .success(try await geocoder.reverseGeocode(coordinate))
+                return .found(try await geocoder.reverseGeocode(coordinate))
             } catch let error as GeocodingError {
                 switch error {
                 case .rateLimited(let retryAfter):
+                    if attempt == attempts { return .throttled }
                     let wait = retryAfter.map { Duration.milliseconds(Int64($0 * 1000)) } ?? backoff
                     backoff = min(backoff * 2, .seconds(600))
-                    do { try await time.sleep(wait) } catch { return .failure(.failed) }
-                case .offline, .failed:
-                    return .failure(error)
+                    if let patience, rateLimitWaited + wait > patience { return .throttled }
+                    rateLimitWaited += wait
+                    guard await pause(for: wait, shouldStop) else { return .stopped }
+                case .offline:
+                    return .offline
+                case .failed:
+                    return .failed
                 }
             } catch {
-                return .failure(.failed)
+                return .failed
             }
         }
-        return .failure(.rateLimited(retryAfter: nil))
+        return .throttled
     }
 
-    private func waitForSlot() async throws {
+    /// Sleeps in short slices and asks `shouldStop` between them. False: stopped.
+    private func pause(for duration: Duration, _ shouldStop: (@Sendable () async -> Bool)?) async -> Bool {
+        var left = duration
+        while left > .zero {
+            if Task.isCancelled { return false }
+            if let shouldStop, await shouldStop() { return false }
+            let slice = min(left, Self.waitSlice)
+            do { try await time.sleep(slice) } catch { return false }
+            left -= slice
+        }
+        return !Task.isCancelled
+    }
+
+    private func waitForSlot(_ shouldStop: (@Sendable () async -> Bool)?) async -> Bool {
         var current = time.elapsed()
         requestTimes.removeAll { current - $0 >= throttle.window }
         if requestTimes.count >= throttle.maxRequests, let oldest = requestTimes.first {
-            try await time.sleep(throttle.window - (current - oldest))
+            guard await pause(for: throttle.window - (current - oldest), shouldStop) else { return false }
             current = time.elapsed()
             requestTimes.removeAll { current - $0 >= throttle.window }
         }
         requestTimes.append(current)
+        return true
     }
 }
 

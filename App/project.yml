@@ -74,6 +74,10 @@ targets:
     platform: iOS
     sources:
       - path: SortlyTests
+      # The app's product for StoreKit testing (SKTestSession in PurchaseStoreKitTests).
+      # Price and product id mirror App Store Connect; the app itself reads the price from StoreKit.
+      - path: StoreKit/Albumist.storekit
+        buildPhase: resources
     dependencies:
       - target: Sortly
       - package: SortlyKit

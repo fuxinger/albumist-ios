@@ -119,10 +119,15 @@ enum ContinuedAnalysis {
                 ? String(localized: "Wartet, bis der Akku lädt")
                 : String(localized: "Kurze Pause, das iPhone kühlt ab")
         }
-        guard let stage = analysis.stage, !analysis.isCatchingUp else {
-            return String(localized: "Macht da weiter, wo sie aufgehört hat")
-        }
         let steps = AnalysisPipeline.Stage.allCases.count
+        // Still reading the library (no step reported yet): only a run that goes on from an
+        // earlier one says so; a first run is at step 1.
+        guard let stage = analysis.stage else {
+            return analysis.resumeFrom != nil
+                ? String(localized: "Macht da weiter, wo sie aufgehört hat")
+                : String(localized: "Schritt \(1) von \(steps)")
+        }
+        if analysis.isCatchingUp { return String(localized: "Macht da weiter, wo sie aufgehört hat") }
         guard analysis.total > 0 else { return String(localized: "Schritt \(stage.number) von \(steps)") }
         return String(localized: "Schritt \(stage.number) von \(steps) · \(analysis.completed.formatted()) von \(analysis.total.formatted())")
     }

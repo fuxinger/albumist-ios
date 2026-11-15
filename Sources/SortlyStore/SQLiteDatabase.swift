@@ -175,6 +175,16 @@ final class SQLiteDatabase {
         }
     }
 
+    /// Throws when the file is damaged (`PRAGMA quick_check`: every page and index is read
+    /// once, about 40 ms for 33 MB). A garbage, foreign or truncated file already fails to
+    /// open; this finds a damaged page inside an otherwise valid file, which would otherwise
+    /// only surface later, or not at all for an index that silently returns wrong rows.
+    func verifyIntegrity() throws {
+        let rows = try query("PRAGMA quick_check(1)")
+        let result = rows.first?.values.first?.string
+        guard result == "ok" else { throw SQLiteError(code: SQLITE_CORRUPT, message: result ?? "quick_check returned nothing") }
+    }
+
     var userVersion: Int {
         get { (try? query("PRAGMA user_version").first?["user_version"]?.int) ?? 0 }
     }

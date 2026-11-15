@@ -19,27 +19,39 @@ public enum TitleLanguage: String, Sendable, Codable, CaseIterable {
 /// The range describes the span of the photos, not a proven arrival/departure.
 public struct DateRangeFormatter: Sendable {
     public var language: TitleLanguage
+    /// Where the period starts: its first day is that place's date.
     public var timeZone: TimeZone
+    /// Where the period ends, when that is another time zone (nil: `timeZone`). A trip from
+    /// New York to Tokyo ends on Tokyo's date: its last photo, at 8 in the morning in Tokyo,
+    /// was still the day before in New York.
+    public var endTimeZone: TimeZone?
 
-    public init(language: TitleLanguage = .german, timeZone: TimeZone = .current) {
+    public init(language: TitleLanguage = .german, timeZone: TimeZone = .current, endTimeZone: TimeZone? = nil) {
         self.language = language
         self.timeZone = timeZone
+        self.endTimeZone = endTimeZone
     }
 
-    private var calendar: Calendar {
-        var c = Calendar(identifier: .gregorian)
-        c.timeZone = timeZone
-        return c
-    }
+    private typealias Day = (y: Int, m: Int, d: Int)
 
-    private func parts(_ date: Date) -> (y: Int, m: Int, d: Int) {
+    private func parts(_ date: Date, in zone: TimeZone? = nil) -> Day {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone ?? timeZone
         let c = calendar.dateComponents([.year, .month, .day], from: date)
         return (c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
-    public func format(start: Date, end: Date) -> String {
+    /// The first day where the period started, the last day where it ended.
+    private func days(_ start: Date, _ end: Date) -> (first: Day, last: Day) {
         let a = parts(min(start, end))
-        let b = parts(max(start, end))
+        let b = parts(max(start, end), in: endTimeZone)
+        // Flying from Asia to America across the date line can end a short period on an
+        // earlier date than it began; it is then one day.
+        return (a, (b.y, b.m, b.d) < (a.y, a.m, a.d) ? a : b)
+    }
+
+    public func format(start: Date, end: Date) -> String {
+        let (a, b) = days(start, end)
         switch language {
         case .german:
             func dm(_ p: (y: Int, m: Int, d: Int)) -> String { String(format: "%02d.%02d.", p.d, p.m) }
@@ -53,6 +65,29 @@ public struct DateRangeFormatter: Sendable {
             if a.y == b.y && a.m == b.m { return iso(a) + "–" + String(format: "%02d", b.d) }
             return "\(iso(a))–\(iso(b))"
         }
+    }
+
+    /// A trip's time in the words people use for it (first device test 15.11.: "05.08.–18.08.2023"
+    /// read like a form, and the Photos album grid cut it off):
+    /// - one day:            `12. Juli 2026` / `12 July 2026`
+    /// - one month:          `Mai 2025` / `May 2025`
+    /// - several months:     `Juli–August 2025` / `July–August 2025`
+    /// - across the new year: `Dezember 2024 – Januar 2025` / `December 2024 – January 2025`
+    /// `precise` names the days too (`3.–5. Mai 2025`, `30. Juni – 2. Juli 2026`), for two
+    /// trips that would otherwise get the same title.
+    public func period(start: Date, end: Date, precise: Bool = false) -> String {
+        let (a, b) = days(start, end)
+        let german = language == .german
+        func day(_ p: (y: Int, m: Int, d: Int)) -> String { german ? "\(p.d). \(monthName(p.m))" : "\(p.d) \(monthName(p.m))" }
+        if a == b { return "\(day(a)) \(a.y)" }
+        if precise {
+            if a.y == b.y && a.m == b.m { return german ? "\(a.d).–\(b.d). \(monthName(a.m)) \(a.y)" : "\(a.d)–\(b.d) \(monthName(a.m)) \(a.y)" }
+            if a.y == b.y { return "\(day(a)) – \(day(b)) \(a.y)" }
+            return "\(day(a)) \(a.y) – \(day(b)) \(b.y)"
+        }
+        if a.y == b.y && a.m == b.m { return "\(monthName(a.m)) \(a.y)" }
+        if a.y == b.y { return "\(monthName(a.m))–\(monthName(b.m)) \(a.y)" }
+        return "\(monthName(a.m)) \(a.y) – \(monthName(b.m)) \(b.y)"
     }
 
     public func monthName(_ month: Int) -> String {
@@ -120,14 +155,18 @@ public struct DateRangeFormatter: Sendable {
 /// Configurable album naming template (prompt §4.2).
 ///
 /// Variables: `{place}` `{country}` `{region}` `{city}` `{year}` `{month}` `{start}`
-/// `{end}` `{range}`. Unknown or empty variables are removed together with dangling
-/// separators, so a template never produces "Rom ·" or "– 2026".
+/// `{end}` `{range}` `{period}`. Unknown or empty variables are removed together with
+/// dangling separators, so a template never produces "Rom ·" or "– 2026".
 public struct NamingTemplate: Hashable, Sendable, Codable {
     public var pattern: String
 
     public init(_ pattern: String) { self.pattern = pattern }
 
-    public static let tripDefault = NamingTemplate("{place} · {range}")
+    /// "Marokko, Mai 2025": the place and the time in words. The exact days stay in the
+    /// suggestion's reason and in the album's photos.
+    public static let tripDefault = NamingTemplate("{place}, {period}")
+    /// The default up to 15.11.2026 ("Rom · 12.05.–19.05.2024").
+    public static let tripDateRange = NamingTemplate("{place} · {range}")
     public static let tripWithCountry = NamingTemplate("{country} – {place} · {range}")
     public static let tripMonth = NamingTemplate("{place} – {month} {year}")
     public static let tripYearFirst = NamingTemplate("{year} – {place}")
@@ -140,14 +179,18 @@ public struct NamingTemplate: Hashable, Sendable, Codable {
         public var city: String?
         public var start: Date?
         public var end: Date?
+        /// `{period}` names the days as well (two trips that would share a title).
+        public var preciseDates: Bool
 
-        public init(place: String? = nil, country: String? = nil, region: String? = nil, city: String? = nil, start: Date? = nil, end: Date? = nil) {
+        public init(place: String? = nil, country: String? = nil, region: String? = nil, city: String? = nil, start: Date? = nil, end: Date? = nil,
+                    preciseDates: Bool = false) {
             self.place = place
             self.country = country
             self.region = region
             self.city = city
             self.start = start
             self.end = end
+            self.preciseDates = preciseDates
         }
     }
 
@@ -155,9 +198,13 @@ public struct NamingTemplate: Hashable, Sendable, Codable {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = formatter.timeZone
         let startParts = values.start.map { calendar.dateComponents([.year, .month, .day], from: $0) }
-        func dayString(_ d: Date?) -> String? {
+        func dayString(_ d: Date?, isEnd: Bool = false) -> String? {
             guard let d else { return nil }
-            return formatter.format(start: d, end: d)
+            // One day, in the time zone of where it was.
+            var single = formatter
+            if isEnd, let zone = formatter.endTimeZone { single.timeZone = zone }
+            single.endTimeZone = nil
+            return single.format(start: d, end: d)
         }
         let replacements: [String: String?] = [
             "place": values.place,
@@ -167,10 +214,14 @@ public struct NamingTemplate: Hashable, Sendable, Codable {
             "year": startParts?.year.map(String.init),
             "month": startParts?.month.map(formatter.monthName),
             "start": dayString(values.start),
-            "end": dayString(values.end),
+            "end": dayString(values.end, isEnd: true),
             "range": {
                 guard let s = values.start else { return nil }
                 return formatter.format(start: s, end: values.end ?? s)
+            }(),
+            "period": {
+                guard let s = values.start else { return nil }
+                return formatter.period(start: s, end: values.end ?? s, precise: values.preciseDates)
             }(),
         ]
 

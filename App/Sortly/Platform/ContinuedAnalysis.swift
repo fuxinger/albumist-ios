@@ -57,8 +57,17 @@ private final class ContinuedTaskBox: @unchecked Sendable {
 
 @MainActor
 enum ContinuedAnalysis {
+    /// Whether iOS lets the analysis go on in the background, for the card's chip (S8):
+    /// "Läuft auch im Hintergrund" only while the task really runs (a successful `submit` is
+    /// not enough: with `strategy = .fail` iOS can still refuse it), "Läuft, solange Albumist
+    /// offen ist" after iOS refused.
+    enum Status: Equatable { case idle, running, refused }
+
+    /// Mirrored into `AppModel.analysisBackground` by the card's tick (this is not observable).
+    private(set) static var status: Status = .idle
+
     /// The system runs one of our tasks right now (progress is on the Lock Screen).
-    private(set) static var isActive = false
+    static var isActive: Bool { status == .running }
     /// The last request, so a refused or pending one is not repeated with every progress step.
     private static var lastRequest: Date?
 
@@ -71,11 +80,11 @@ enum ContinuedAnalysis {
 
     nonisolated private static let shared = OSAllocatedUnfairLock(initialState: ContinuedTaskShared())
 
-    /// Called whenever the analysis state changes (`AppModel.analysis`).
-    static func publish(_ analysis: AppModel.AnalysisState) {
+    /// Called whenever the analysis state or its finish time changes (`AppModel`).
+    static func publish(_ analysis: AppModel.AnalysisState, finish: FinishEstimate?) {
         // The text only while a task shows it (the state changes several times a second).
         let running = analysis.isRunning, fraction = analysis.shownOverall
-        let text = isActive && running ? subtitle(analysis) : ""
+        let text = isActive && running ? subtitle(analysis, finish: finish) : ""
         let ending = running ? nil : ending(analysis)
         shared.withLock {
             $0.running = running
@@ -106,6 +115,7 @@ enum ContinuedAnalysis {
         BackgroundRunLog.update { $0.requested += 1 }
         guard registerHandler(for: identifier) else {
             BackgroundRunLog.update { $0.refused += 1; $0.lastRefusal = "not registered" }
+            status = .refused
             return
         }
         let request = BGContinuedProcessingTaskRequest(
@@ -121,6 +131,7 @@ enum ContinuedAnalysis {
             // held while the app is in the background and goes on when it is opened.
             let code = (error as NSError).code
             BackgroundRunLog.update { $0.refused += 1; $0.lastRefusal = "submit error \(code)" }
+            status = .refused
         }
     }
 
@@ -135,7 +146,7 @@ enum ContinuedAnalysis {
     }
 
     private static func started() {
-        isActive = true
+        status = .running
         lastRequest = nil
         let analysis = AppModel.shared.analysis
         BackgroundRunLog.update {
@@ -143,12 +154,12 @@ enum ContinuedAnalysis {
             $0.lastStart = Date()
             $0.lastStartProgress = analysis.shownOverall
         }
-        publish(analysis)
+        publish(analysis, finish: AppModel.shared.analysisFinish)
     }
 
     /// `fraction`: the real progress of the analysis at that moment (not the bar's heartbeat).
     private static func ended(_ how: String, fraction: Double) {
-        isActive = false
+        status = .idle
         lastRequest = nil
         let state = BackgroundRunLog.deviceState()
         BackgroundRunLog.update {
@@ -217,8 +228,12 @@ enum ContinuedAnalysis {
     /// The Lock Screen text once a run has ended, by how it ended.
     static func ending(_ analysis: AppModel.AnalysisState) -> (title: String, subtitle: String, complete: Bool) {
         let report = analysis.lastReport
-        if !analysis.needsResume, report?.isComplete == true {
-            return (String(localized: "Analyse fertig"), String(localized: "Öffne Albumist, um die Vorschläge zu prüfen."), true)
+        if !analysis.needsResume, let report, report.isComplete {
+            // Point 5: "Analyse fertig" / "216 Vorschläge" (the suggestions of this run).
+            let subtitle = report.proposals > 0
+                ? String(localized: "\(report.proposals) Vorschläge")
+                : String(localized: "Öffne Albumist, um die Vorschläge zu prüfen.")
+            return (String(localized: "Analyse fertig"), subtitle, true)
         }
         if !analysis.needsResume, report?.pausedBecause == .userPaused {
             return (String(localized: "Analyse pausiert"), String(localized: "Öffne Albumist, um sie fortzusetzen."), false)
@@ -226,23 +241,25 @@ enum ContinuedAnalysis {
         return (String(localized: "Analyse wartet auf dich"), String(localized: "Öffne Albumist, dann geht es genau dort weiter."), false)
     }
 
-    private static func subtitle(_ analysis: AppModel.AnalysisState) -> String {
+    /// Point 5: "2.431 von 5.683 Fotos · fertig gegen 23:40", number first (iOS cuts long
+    /// subtitles at the end); without a time to trust only the count.
+    static func subtitle(_ analysis: AppModel.AnalysisState, finish: FinishEstimate?) -> String {
         if let waiting = analysis.waiting {
             return waiting == .batteryLow
                 ? String(localized: "Wartet aufs Laden")
                 : String(localized: "Wartet, bis dein iPhone abkühlt")
         }
-        let steps = AnalysisPipeline.Stage.allCases.count
+        let steps = AnalysisStep.count
         // Still reading the library (no step reported yet): only a run that goes on from an
         // earlier one says so; a first run is at step 1.
-        guard let stage = analysis.stage else {
+        guard let position = analysis.position else {
             return analysis.resumeFrom != nil
                 ? String(localized: "Macht da weiter, wo sie aufgehört hat")
                 : String(localized: "Schritt \(1) von \(steps)")
         }
         if analysis.isCatchingUp { return String(localized: "Macht da weiter, wo sie aufgehört hat") }
-        guard analysis.total > 0 else { return String(localized: "Schritt \(stage.number) von \(steps)") }
-        return String(localized: "Schritt \(stage.number) von \(steps) · \(analysis.completed.formatted()) von \(analysis.total.formatted())")
+        guard position.hasCount else { return String(localized: "Schritt \(position.step.number) von \(steps)") }
+        return AnalysisText.lockScreen(position, finish: analysis.waiting == nil ? finish : nil)
     }
 
     // MARK: Notification
@@ -265,6 +282,8 @@ enum ContinuedAnalysis {
     }
 
     /// Only when the app is not on screen; inside the app the overview shows the result.
+    /// With suggestions it carries the button "Vorschläge prüfen" (point 4), which opens them
+    /// directly, like a tap on the notification itself (`NotificationRouter`).
     static func notifyFinished(openSuggestions: Int) {
         guard UIApplication.shared.applicationState != .active else { return }
         let content = UNMutableNotificationContent()
@@ -273,7 +292,41 @@ enum ContinuedAnalysis {
             ? String(localized: "\(openSuggestions) Vorschläge warten auf dich.")
             : String(localized: "Deine Fotos sind analysiert.")
         content.sound = .default
-        let request = UNNotificationRequest(identifier: "analysis.finished", content: content, trigger: nil)
+        if openSuggestions > 0 { content.categoryIdentifier = NotificationRouter.finishedCategory }
+        let request = UNNotificationRequest(identifier: NotificationRouter.finishedIdentifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+}
+
+/// Answers taps on Albumist's notifications. Set as the notification center's delegate at
+/// launch (`SortlyApp.init`), before iOS hands over the tap that opened the app.
+final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate, Sendable {
+    static let shared = NotificationRouter()
+    static let finishedIdentifier = "analysis.finished"
+    static let finishedCategory = "analysis.finished"
+    static let reviewAction = "analysis.review"
+
+    /// The category with "Vorschläge prüfen"; opens the app (foreground).
+    static func register() {
+        let center = UNUserNotificationCenter.current()
+        let review = UNNotificationAction(identifier: reviewAction, title: String(localized: "Vorschläge prüfen"), options: [.foreground])
+        let finished = UNNotificationCategory(identifier: finishedCategory, actions: [review], intentIdentifiers: [], options: [])
+        center.setNotificationCategories([finished])
+        center.delegate = shared
+    }
+
+    /// The button and a tap on the notification itself both open the suggestions.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let category = response.notification.request.content.categoryIdentifier
+        let action = response.actionIdentifier
+        guard category == Self.finishedCategory,
+              action == Self.reviewAction || action == UNNotificationDefaultActionIdentifier else { return }
+        await MainActor.run { AppModel.shared.route = .proposals }
+    }
+
+    /// While Albumist is open nothing is shown (the card says it); `notifyFinished` posts only
+    /// outside the app anyway.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        []
     }
 }

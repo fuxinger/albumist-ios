@@ -8,6 +8,8 @@ struct SortlyApp: App {
 
     init() {
         BackgroundWork.register()
+        // Before launch ends, so the tap on "Analyse fertig" that opened the app arrives.
+        NotificationRouter.register()
     }
 
     var body: some Scene {
@@ -28,6 +30,7 @@ struct SortlyApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     ContinuedAnalysis.sceneChanged(onScreen: phase == .active)
+                    model.sceneChanged(onScreen: phase == .active)
                     // Back on screen: an analysis that iOS ended goes on by itself, a running
                     // one asks for background time again.
                     if phase == .active { model.sceneBecameActive() }

@@ -122,6 +122,8 @@ struct RouteDestination: View {
         switch route {
         case .country(let code):
             CountryPhotosView(code: code, year: nil)
+        case .proposals:
+            ProposalListView(area: nil)
         case .suggestion(let id):
             if let proposal = model.proposals.first(where: { $0.id == id }) {
                 ProposalDetailView(proposal: proposal)

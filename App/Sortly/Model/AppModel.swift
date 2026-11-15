@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 import SortlyCore
 import SortlyEngine
 import SortlyStore
@@ -44,11 +45,23 @@ final class AppModel {
         /// The last run ended before it was done without the user pausing it: opening the
         /// app again goes on by itself.
         var needsResume = false
+        /// The bar's six segments, fixed for the whole analysis (from the first run's workload,
+        /// kept with the marker over Pause and restarts: progress display S6).
+        var widths: StepWidths = .standard
+        /// Where the last run stood when it ended (the paused card: "Bei 2.433 von 5.683 Fotos").
+        var stoppedAt: AnalysisCardState.Position?
+        /// Apple's geocoder makes the places step wait ("Apple antwortet gleich").
+        var appleWait = false
 
         var fraction: Double { total == 0 ? 0 : min(1, Double(completed) / Double(total)) }
-        /// Progress over all stages: one bar that fills once instead of restarting per stage.
+        /// The step the card shows (six steps; the pipeline's groups belong to the last one).
+        var step: AnalysisStep? { stage.map(AnalysisStep.init) }
+        /// Progress over all steps: one bar that fills once instead of restarting per step.
         var overall: Double {
-            stage.map { AnalysisPipeline.Progress.overall(stage: $0, completed: completed, total: total) } ?? 0
+            step.map { widths.overall(step: $0, completed: completed, total: total) } ?? 0
+        }
+        var position: AnalysisCardState.Position? {
+            step.map { AnalysisCardState.Position(step: $0, completed: completed, total: total) }
         }
         /// Still on the quick first steps of a run that goes on from further ahead.
         var isCatchingUp: Bool {
@@ -90,7 +103,57 @@ final class AppModel {
     var access: LibraryAccess = .notDetermined
     var settings = OrganizationSettings() { didSet { bucketCache = [:] } }
     /// Every change also reaches the background task's progress (read off the main thread).
-    var analysis = AnalysisState() { didSet { ContinuedAnalysis.publish(analysis) } }
+    var analysis = AnalysisState() { didSet { ContinuedAnalysis.publish(analysis, finish: analysisFinish) } }
+
+    // MARK: Analysis card (progress display v3)
+    // Written by one tick every 250 ms while a run is busy (S2), never per progress report.
+    // Kept as separate properties, so the gliding bar (4 changes a second) redraws only the bar.
+
+    /// The card's state; the view only renders it.
+    var analysisCard: AnalysisCardState?
+    /// The bar as drawn: the real value plus the glide (point 2).
+    var analysisBar: Double = 0
+    /// "Fertig gegen 23:40" for the whole analysis (point 1); also on the Lock Screen.
+    var analysisFinish: FinishEstimate? { didSet { if analysisFinish != oldValue { ContinuedAnalysis.publish(analysis, finish: analysisFinish) } } }
+    /// Details: time left in the running step ("noch etwa 12 Min."), checked every 5 s.
+    var analysisStepRemaining: Duration?
+    /// Details: when this run started ("bisher 18 Min.").
+    var analysisStartedAt: Date?
+    /// "Gerade angesehen": the last photos of the image step, at most one change a second.
+    var analysisRecent: [AssetID] = []
+    /// The Lock Screen task really runs (chip "Läuft auch im Hintergrund"), or iOS refused it.
+    var analysisBackground: ContinuedAnalysis.Status = .idle
+    /// Albumist is on screen (scene active): no gliding, no thumbnails, no announcements otherwise.
+    var isOnScreen = true
+    /// A long run finished while the app was open: the card says so until the next run or until
+    /// the suggestions are opened from it (point 4).
+    var analysisFinished: AnalysisFinished?
+    struct AnalysisFinished: Equatable {
+        var photos: Int
+        var proposals: Int
+    }
+    /// The check mark and haptic of the finished card play once, not on every return.
+    @ObservationIgnored private var finishMomentPlayed = false
+
+    /// True the first time the finished card appears for this run.
+    func claimFinishMoment() -> Bool {
+        guard analysisFinished != nil, !finishMomentPlayed else { return false }
+        finishMomentPlayed = true
+        return true
+    }
+
+    @ObservationIgnored private var progressMailbox = ProgressMailbox()
+    @ObservationIgnored private var estimator = ProgressEstimator()
+    @ObservationIgnored private var glide = BarGlide()
+    @ObservationIgnored private var tickTask: Task<Void, Never>?
+    @ObservationIgnored private var runClockStart = ContinuousClock.now
+    @ObservationIgnored private var pausingSince: ContinuousClock.Instant?
+    @ObservationIgnored private var lastRecentChange: ContinuousClock.Instant?
+    @ObservationIgnored private var lastStepRemainingCheck: ContinuousClock.Instant?
+    /// The widths came from a workload (this analysis), not the standard ones.
+    @ObservationIgnored private var widthsFixed = false
+    /// The card showed this run as a full analysis at least once (not only the quick check).
+    @ObservationIgnored private var runShowedBar = false
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
@@ -236,6 +299,8 @@ final class AppModel {
     enum Route: Hashable {
         case suggestion(SortlyID)
         case country(String)
+        /// All open suggestions: "Vorschläge prüfen" on the finished notification (point 4).
+        case proposals
     }
 
     let library = PhotoKitLibrary()
@@ -627,9 +692,19 @@ final class AppModel {
         analysis.completed = 0
         analysis.total = 0
         analysis.waiting = nil
+        analysis.appleWait = false
+        analysis.stoppedAt = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
         HeatLog.reset()
         analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
+        // The widths of the analysis this run goes on with; a new analysis gets them from its
+        // workload (said at the end of the trips step).
+        let storedWidths = analysis.resumeFrom?.widths
+        analysis.widths = storedWidths ?? .standard
+        widthsFixed = storedWidths != nil
+        analysisFinished = nil
+        finishMomentPlayed = false
+        beginCard()
         if userInitiated {
             // A quick check for new photos ("Neu prüfen") needs no background time: asking for
             // it put "Albumist analysiert deine Fotos · Schritt 1 von 7" on the Lock Screen for
@@ -644,6 +719,7 @@ final class AppModel {
         let generation = analysisGeneration
         let control = AnalysisRunControl()
         analysisControl = control
+        startTicks(run: generation)
         analysisTask = Task {
             if let scope {
                 try? await pipeline.setScope(scope)
@@ -653,8 +729,11 @@ final class AppModel {
             // one before (audit 2, 4.2).
             var finished: AnalysisPipeline.Report?
             do {
+                // Kept in the mailbox; the card's tick takes the newest every 250 ms (S2: no task
+                // per report on the main actor).
+                let mailbox = progressMailbox
                 let report = try await pipeline.run(mode: mode, control: control, onProgress: { progress in
-                    Task { @MainActor in AppModel.shared.receive(progress, run: generation) }
+                    mailbox.post(progress)
                 }, onWaiting: { reason in
                     Task { @MainActor in
                         let model = AppModel.shared
@@ -681,11 +760,19 @@ final class AppModel {
             // itself; with the access back, from where it was. Set before isRunning, so the Lock
             // Screen reads how this run ended, not the run before (ContinuedAnalysis.ending).
             let reason = finished?.pausedBecause
+            // The last reports of this run, before it is shown as ended.
+            tick(run: generation)
+            let celebrate = AnalysisCardState.celebratesFinish(isComplete: finished?.isComplete == true,
+                                                               wasQuickCheck: !runShowedBar,
+                                                               ranFor: ContinuousClock.now - runClockStart)
+            analysis.stoppedAt = analysis.position
             analysis.needsResume = finished == nil || (reason != nil && reason != .userPaused)
             analysis.isRunning = false
             analysis.pausing = false
             analysis.stage = nil
             analysis.waiting = nil
+            analysis.appleWait = false
+            endCard()
             if finished?.isComplete == true {
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
@@ -697,9 +784,15 @@ final class AppModel {
             await refreshDerived()
             // Trip identities (names and corrections stay with their trip) are kept in the copy.
             saveSafetyBackup()
-            // "Analyse fertig" only when it really finished (not paused, stopped or failed).
-            if finished?.isComplete == true, !Task.isCancelled {
-                ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
+            // "Analyse fertig" only when it really finished (not paused, stopped or failed), and
+            // not for a quick check (point 4): in the app the card, outside it the notification.
+            if celebrate, !Task.isCancelled {
+                if UIApplication.shared.applicationState == .active {
+                    analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
+                    updateCard()
+                } else {
+                    ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
+                }
             }
             BackgroundWork.scheduleRefinement()
             if finished?.isComplete == true { unattendedRetries = 0 }
@@ -728,18 +821,19 @@ final class AppModel {
         }
     }
 
-    /// Progress of the running analysis. Late updates of an earlier run are dropped (a run
-    /// that starts right after another one would otherwise show the old run's stage), and a
-    /// count never goes back within a stage (the updates hop here one by one and can overtake
-    /// each other).
-    private func receive(_ progress: AnalysisPipeline.Progress, run: Int) {
-        guard run == analysisGeneration, analysis.isRunning else { return }
+    /// Progress of the running analysis, taken from the mailbox by the tick. A count never goes
+    /// back within a stage, and a stage never goes back (late reports of the same run).
+    private func receive(_ progress: AnalysisPipeline.Progress, at now: ContinuousClock.Instant) {
+        guard analysis.isRunning else { return }
         if let stage = analysis.stage {
             if progress.stage.number < stage.number { return }
             if progress.stage == stage, progress.completed < analysis.completed { return }
         }
-        // Trips and places are ready before the image analysis: show them now.
-        if progress.stage == .content, analysis.stage != .content, snapshot == nil {
+        // Trips and places are ready before the image analysis: show them now ("Schon fertig").
+        // (Compared by number: with the tick, the report that starts the image step may be
+        // replaced by a later one before it is taken.)
+        if progress.stage.number >= AnalysisPipeline.Stage.content.number,
+           (analysis.stage?.number ?? 0) < AnalysisPipeline.Stage.content.number, snapshot == nil {
             Task { await refreshDerived() }
         }
         // First scan: the photos are known after reading the library (for the scan show).
@@ -750,11 +844,150 @@ final class AppModel {
         analysis.completed = progress.completed
         analysis.total = progress.total
         analysis.waiting = nil
+        analysis.appleWait = progress.waitLeft != nil
         // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`).
         if !analysis.isCatchingUp {
-            AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.overall)
+            AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.overall,
+                                              widths: widthsFixed ? analysis.widths : nil)
         }
+        let step = AnalysisStep(progress.stage)
+        if !analysis.pausing {
+            estimator.record(step: step, completed: progress.completed, total: progress.total, at: now,
+                             appleWait: progress.waitLeft != nil)
+        }
+        glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
+                     itemsPerSecond: estimator.rate, total: progress.total)
         keepRunningInBackgroundIfLong()
+    }
+
+    // MARK: Analysis card tick
+
+    /// A run starts: everything the card measured for the run before is forgotten.
+    private func beginCard() {
+        tickTask?.cancel()
+        progressMailbox = ProgressMailbox()
+        estimator.reset()
+        glide.reset()
+        runClockStart = .now
+        pausingSince = nil
+        lastRecentChange = nil
+        lastStepRemainingCheck = nil
+        runShowedBar = false
+        analysisBar = analysis.shownOverall
+        analysisFinish = nil
+        analysisStepRemaining = nil
+        analysisStartedAt = Date()
+        analysisRecent = []
+        updateCard()
+    }
+
+    /// One tick every 250 ms for the run `run` (its generation), until the run ends.
+    private func startTicks(run: Int) {
+        tickTask?.cancel()
+        tickTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.tick(run: run)
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+    }
+
+    /// The run ended: the tick stops; the card shows how it ended.
+    private func endCard() {
+        tickTask?.cancel()
+        tickTask = nil
+        pausingSince = nil
+        analysisFinish = nil
+        analysisStepRemaining = nil
+        analysisRecent = []
+        analysisBackground = .idle
+        updateCard()
+    }
+
+    /// One tick (every 250 ms while a run is busy, S2): takes the newest progress, measures the
+    /// speed, moves the bar, and decides what the card says. Nothing here runs per report.
+    private func tick(run: Int) {
+        guard run == analysisGeneration, analysis.isRunning else { return }
+        let now = ContinuousClock.now
+        let taken = progressMailbox.take()
+        if let workload = taken.workload {
+            estimator.setWorkload(workload)
+            if !widthsFixed {
+                // Before this the first two steps used the standard widths; the drawn bar never
+                // goes back meanwhile (the glide holds it until the real value passes).
+                analysis.widths = StepWidths(workload: workload)
+                widthsFixed = true
+            }
+        }
+        if let progress = taken.progress { receive(progress, at: now) }
+        // Thumbnails at most once a second, and only while someone can see them (S9).
+        if isOnScreen, !taken.recent.isEmpty, analysis.stage == .content,
+           lastRecentChange.map({ now - $0 >= .seconds(1) }) ?? true, taken.recent != analysisRecent {
+            analysisRecent = taken.recent
+            lastRecentChange = now
+        }
+        if analysis.stage != .content, !analysisRecent.isEmpty { analysisRecent = [] }
+        // No time while it waits, is paused, or is held in the background (S4).
+        let background = ContinuedAnalysis.status
+        if analysis.waiting != nil || analysis.pausing || (!isOnScreen && background != .running) {
+            estimator.idle()
+        }
+        let finish = estimator.finish(at: now, wall: Date())
+        if finish != analysisFinish { analysisFinish = finish }
+        if lastStepRemainingCheck.map({ now - $0 >= .seconds(5) }) ?? true {
+            lastStepRemainingCheck = now
+            let left = estimator.stepRemaining
+            if left != analysisStepRemaining { analysisStepRemaining = left }
+        }
+        // The bar glides only while really working, on screen, without Reduce Motion (point 2).
+        let gliding = analysis.waiting == nil && !analysis.pausing && isOnScreen && !UIAccessibility.isReduceMotionEnabled
+        let bar = glide.value(at: now, gliding: gliding)
+        if abs(bar - analysisBar) > 0.000_05 { analysisBar = bar }
+        if background != analysisBackground { analysisBackground = background }
+        updateCard(now: now)
+    }
+
+    /// Decides the card's state from the model (pure rules in `AnalysisCardState`).
+    func updateCard(now: ContinuousClock.Instant = .now) {
+        var i = AnalysisCardState.Inputs()
+        i.isRunning = analysis.isRunning
+        i.isQuickCheck = isQuickCheck
+        i.runningFor = now - runClockStart
+        i.position = analysis.position
+        if analysis.isCatchingUp, let resume = analysis.resumeFrom {
+            i.catchingUpTo = AnalysisPipeline.Stage.allCases.indices.contains(resume.stage - 1)
+                ? AnalysisStep(AnalysisPipeline.Stage.allCases[resume.stage - 1]).number : nil
+        }
+        i.waiting = analysis.waiting
+        i.slower = analysis.isRunning ? DeviceState(
+            thermal: DeviceState.Thermal(rawValue: ProcessInfo.processInfo.thermalState.rawValue) ?? .critical,
+            isLowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
+        ).slowerReason : nil
+        i.appleWait = analysis.appleWait
+        i.pausingFor = analysis.pausing ? pausingSince.map { now - $0 } ?? .zero : nil
+        i.pausedByUser = !analysis.isRunning && !analysis.needsResume && analysis.lastReport?.pausedBecause == .userPaused
+        i.pausedAt = analysis.stoppedAt
+        i.finished = analysisFinished.map { (photos: $0.photos, proposals: $0.proposals) }
+        let state = AnalysisCardState.resolve(i)
+        if analysis.isRunning, let state, state != .quickCheck(showsPause: true), state != .quickCheck(showsPause: false) {
+            runShowedBar = true
+        }
+        if state != analysisCard { analysisCard = state }
+    }
+
+    /// A check for new photos after everything was analysed once: no step numbers and no bar
+    /// that starts at zero again, only "Sucht neue Fotos", unless there is real work to show.
+    var isQuickCheck: Bool {
+        guard analysis.kind == .check else { return false }
+        if let stage = analysis.stage, [.content, .text].contains(stage), analysis.remaining >= 50 { return false }
+        return true
+    }
+
+    /// Scene changes (`SortlyApp`): gliding, thumbnails and announcements only on screen.
+    func sceneChanged(onScreen: Bool) {
+        guard onScreen != isOnScreen else { return }
+        isOnScreen = onScreen
+        if !onScreen { analysisRecent = [] }
     }
 
     /// A run with real work left asks iOS to go on after the user leaves the app.
@@ -796,8 +1029,14 @@ final class AppModel {
     func pauseAnalysis() {
         analysis.needsResume = false
         // Shown at once: the photos in work are finished first, which can take a moment
-        // (device test 15.11.: "Pause reagiert nicht").
-        if analysis.isRunning { analysis.pausing = true }
+        // (device test 15.11.: "Pause reagiert nicht"). The card changes in this same call, not
+        // with the next tick (limit: a visible reaction in under 1 s).
+        if analysis.isRunning, !analysis.pausing {
+            analysis.pausing = true
+            pausingSince = .now
+            estimator.idle()
+            updateCard()
+        }
         analysisControl?.pause()
     }
 
@@ -812,9 +1051,11 @@ final class AppModel {
         }
         guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return false }
         analysis.isRunning = true
+        updateCard()
         defer {
             analysis.isRunning = false
             analysis.pausing = false
+            updateCard()
         }
         // Late progress of the run before must not show up during this one.
         analysisGeneration += 1

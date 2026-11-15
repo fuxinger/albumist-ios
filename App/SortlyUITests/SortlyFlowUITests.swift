@@ -175,19 +175,22 @@ final class SortlyFlowUITests: XCTestCase {
         return false
     }
 
-    /// The overview says the analysis is done ("Alle 412 Fotos analysiert") and nothing runs
-    /// (no "Pause").
+    /// The overview says the analysis is done ("Alle 412 Fotos analysiert", or "Analyse fertig"
+    /// right after a long run) and nothing runs (no "Pause").
     private var analysisIdle: Bool {
-        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists) && !app.buttons["Pause"].exists
+        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
+            && !app.buttons["Pause"].exists
     }
 
-    /// "Schritt 4 von 7 · 120 von 412" on the overview, as (step, done, total).
+    /// The card's progress element (one element, B1): value "120 von 412 Fotos, fertig gegen
+    /// 23:40, Schritt 4 von 6, …", as (step, done, total).
     private func analysisCount() -> (step: Int, done: Int, total: Int)? {
         let element = app.descendants(matching: .any)["analysis.progress"]
         guard element.exists else { return nil }
-        let digits = element.label.replacingOccurrences(of: ".", with: "")
-        guard let m = digits.firstMatch(of: #/Schritt (\d+) von \d+ · (\d+) von (\d+)/#),
-              let step = Int(m.1), let done = Int(m.2), let total = Int(m.3) else { return nil }
+        let text = ((element.value as? String) ?? "") + " " + element.label
+        let digits = text.replacingOccurrences(of: ".", with: "")
+        guard let s = digits.firstMatch(of: #/Schritt (\d+) von \d+/#), let step = Int(s.1),
+              let m = digits.firstMatch(of: #/(\d+) von (\d+) /#), let done = Int(m.1), let total = Int(m.2) else { return nil }
         return (step, done, total)
     }
 
@@ -898,7 +901,7 @@ final class SortlyFlowUITests: XCTestCase {
         let running = app.buttons["Pause"].exists || analysisIdle
         print(running ? "UI_STEP_OK analysis still there after background" : "UI_STEP_MISSING analysis still there after background")
         XCTAssertTrue(running, "After coming back the analysis neither runs nor is done")
-        XCTAssertFalse(app.buttons["Fortsetzen"].exists, "Coming back from the background paused the analysis")
+        XCTAssertFalse(app.buttons["analysis.resume"].exists, "Coming back from the background paused the analysis")
         record("after background")
         shot("61-after-background")
 

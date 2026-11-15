@@ -198,8 +198,11 @@ final class AppModel {
     /// Albums Albumist created or extended, with exactly the media it added.
     var managedAlbums: [ManagedAlbumState] = []
     var plan: ChangePlan?
-    /// A plan that stopped half way because the app was closed while it ran.
-    var interruptedPlan: ChangePlan?
+    /// A plan that stopped half way because the app was closed while it ran. Its free albums
+    /// are held back until it is continued, kept or taken back (it continues without a new check).
+    var interruptedPlan: ChangePlan? {
+        didSet { Purchases.shared.reserve(for: interruptedPlan) }
+    }
     var analysisCounts = AnalysisCounts()
     /// The part of the library Albumist works on: everything, or the trial year chosen at
     /// the start (kept for every later run).
@@ -273,8 +276,10 @@ final class AppModel {
     private func load() async {
         guard phase == .loading else { return }
         do {
-            if UITestSupport.rebuildsDatabase, let url = try? Self.databaseURL() { Self.quarantineDatabase(at: url) }
-            let store = try SortlyStore(url: try Self.databaseURL())
+            if UITestSupport.rebuildsDatabase, let url = try? Self.databaseURL() { SortlyStore.quarantineDatabase(at: url) }
+            // Opened off the main thread: the integrity check and migrations read the file.
+            let url = try Self.databaseURL()
+            let store = try await Task.detached(priority: .userInitiated) { try SortlyStore(url: url) }.value
             self.store = store
             access = await library.access()
             // A rebuilt (or newly restored) database gets the user's decisions back first.
@@ -326,7 +331,7 @@ final class AppModel {
     func rebuildAfterFailure() async {
         guard case .failed = phase else { return }
         if let url = try? Self.databaseURL() {
-            Self.quarantineDatabase(at: url)
+            SortlyStore.quarantineDatabase(at: url)
         }
         bootstrapTask = nil
         phase = .loading
@@ -336,28 +341,6 @@ final class AppModel {
             LibraryChangeWatcher.shared.start()
             startAnalysis()
         }
-    }
-
-    /// Moves the database together with its write-ahead log and shared memory file into a
-    /// dated quarantine folder (the log can hold the last saved changes, so it is never just
-    /// deleted). The two newest quarantines are kept for support.
-    private static func quarantineDatabase(at url: URL) {
-        let fm = FileManager.default
-        let folder = url.deletingLastPathComponent().appendingPathComponent("Quarantine", isDirectory: true)
-        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let target = folder.appendingPathComponent(stamp, isDirectory: true)
-        do {
-            try fm.createDirectory(at: target, withIntermediateDirectories: true)
-            for suffix in ["", "-wal", "-shm"] where fm.fileExists(atPath: url.path + suffix) {
-                try fm.moveItem(atPath: url.path + suffix, toPath: target.appendingPathComponent(url.lastPathComponent + suffix).path)
-            }
-        } catch {
-            // Could not move: the start fails again and shows the error instead of losing data.
-            return
-        }
-        let old = ((try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }
-        for stale in old.dropFirst(2) { try? fm.removeItem(at: stale) }
     }
 
     // MARK: Safety backup
@@ -479,10 +462,12 @@ final class AppModel {
     /// Nil while that cannot be told yet: no photo access, or limited access that may hide
     /// the albums.
     private func belongsToThisLibrary(_ backup: SafetyBackup) async -> Bool? {
-        guard !backup.managedAlbums.isEmpty else { return true }
-        guard access.canRead, let inventory = try? await library.currentInventory() else { return nil }
-        if backup.matchesLibrary(albums: Set(inventory.albums.map(\.id))) { return true }
-        return access == .full ? false : nil
+        // The rule for full, limited and no access is `SafetyBackup.belongsToLibrary` (tested).
+        var visible: Set<CollectionID>?
+        if !backup.managedAlbums.isEmpty && access.canRead, let inventory = try? await library.currentInventory() {
+            visible = Set(inventory.albums.map(\.id))
+        }
+        return backup.belongsToLibrary(access: access, visibleAlbums: visible)
     }
 
     /// After the photo access was granted or widened: album records waiting in the copy

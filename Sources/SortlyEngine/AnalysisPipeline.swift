@@ -162,6 +162,12 @@ public actor AnalysisPipeline {
     /// still missing come with the overnight refinement or a run after the hour.
     private var lastForegroundOnlineLookup: Date?
     static let foregroundOnlineCooldown: TimeInterval = 60 * 60
+
+    /// "Analyse neu aufbauen" cleared the place cache: the next run asks Apple again at once,
+    /// or the rebuilt trips would get no town names for an hour.
+    public func forgetRecentOnlineLookups() {
+        lastForegroundOnlineLookup = nil
+    }
     public private(set) var settings: OrganizationSettings
     /// The run in progress: `pause()` reaches it through its control.
     private var activeControl: AnalysisRunControl?

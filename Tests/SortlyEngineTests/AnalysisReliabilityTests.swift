@@ -341,6 +341,18 @@ struct AnalysisReliabilityTests {
         #expect(third.onlineRequests > 0)
     }
 
+    /// "Analyse neu aufbauen" within the hour: the place cache is gone, so the rebuild asks again.
+    @Test func aRebuildAsksForTownNamesAgainAtOnce() async throws {
+        let geocoder = RefusingGeocoder()
+        let s = try setup(photos: 12, geocoder: geocoder, foregroundOnlineBudget: 60)
+        _ = try await s.pipeline.run()
+        try await s.store.resetAnalysis(includingDecisions: false)
+        await s.pipeline.forgetRecentOnlineLookups()
+        s.clock.value.withLock { $0 = $0.addingTimeInterval(5 * 60) }
+        let rebuilt = try await s.pipeline.run()
+        #expect(rebuilt.onlineRequests > 0)
+    }
+
     func newPhoto(id: String) -> AssetSnapshot {
         AssetSnapshot(id: AssetID(id), kind: .image, creationDate: Fixture.date("2026-08-01 10:00"),
                       location: Fixture.Places.munichHome, pixelWidth: 4032, pixelHeight: 3024)

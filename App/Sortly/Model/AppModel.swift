@@ -1778,6 +1778,7 @@ final class AppModel {
         }
         do {
             try await store?.resetAnalysis(includingDecisions: false)
+            await pipeline?.forgetRecentOnlineLookups()
         } catch {
             message = error.localizedDescription
         }

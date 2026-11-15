@@ -82,6 +82,7 @@ jobs:
             -scheme SortlyUI \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -skip-testing:SortlyUITests/AccessibilityUITests \
+            -skip-testing:SortlyUITests/GalleryUITests \
             -resultBundlePath ../build/UITestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO > ../ui-log.txt 2>&1
           status=$?

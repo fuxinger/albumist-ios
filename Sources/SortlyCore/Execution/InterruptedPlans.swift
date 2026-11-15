@@ -1,8 +1,8 @@
 import Foundation
 
 // The ways out of a plan that was cut off (the app ended while it ran, I16): "Fortsetzen",
-// "So lassen" and "Rückgängig". The app runs them; what they decide lives here, so it is
-// tested without PhotoKit (plugin review 15.11., K1 and K2).
+// "So lassen" and "Rückgängig". The app runs them; what they decide, and in which order, lives
+// here, so it is tested without PhotoKit (plugin review 15.11., K1 and K2, and its review).
 
 extension ChangePlan {
     /// "So lassen" for an interrupted plan, once `ChangeExecutor.reconcileInterrupted` has
@@ -26,6 +26,29 @@ extension ChangePlan {
             kept.status = .cancelled
         }
         return kept
+    }
+
+    /// Suggestions this plan carried out at least in part: a step of theirs succeeded, or Photos
+    /// made their album (its id was written down) whatever the step says since: its check failed
+    /// (audit 2, 1.7), or the user deleted it meanwhile. Only these leave the selection when the
+    /// plan is finalized. A suggestion whose steps never ran (an interrupted plan kept or taken
+    /// back) or all failed stays selected (review of 6c6ef79): nothing of it is done.
+    public var appliedSources: Set<SortlyID> {
+        var result = Set<SortlyID>()
+        for step in steps {
+            guard let source = step.sourceID else { continue }
+            switch step.operation {
+            case .createFolder:
+                // A folder carries the id of the first suggestion that needed it, but making
+                // only the folder carries out no suggestion (review of 6b34b20).
+                continue
+            case .createAlbum(let key, _, _):
+                if case .succeeded = step.state { result.insert(source) } else if resolvedKeys[key] != nil { result.insert(source) }
+            default:
+                if case .succeeded = step.state { result.insert(source) }
+            }
+        }
+        return result
     }
 }
 
@@ -69,6 +92,79 @@ public struct InterruptedPlanUndo: Sendable {
     public func cancelsPlan(after result: ChangePlan?) -> Bool {
         guard let undo else { return true }
         return result?.id == undo.id && result?.status == .completed
+    }
+
+    /// How "Rückgängig" ended, for what the app says and what the receipt then offers.
+    public enum Outcome: Hashable, Sendable {
+        /// Nothing had changed in Photos: the plan is gone.
+        case nothingToTakeBack
+        /// Everything is taken back: the plan is cancelled and leaves the history, as before.
+        case undone
+        /// The undo ran but did not get everything back ("Nicht erlauben" in the iOS question):
+        /// the plan stays in the history, its receipt offers "Rest rückgängig machen".
+        case partlyUndone
+        /// The undo was refused before its first step (the write access is gone, Photos or the
+        /// store could not be read): it is dropped, so it is not offered as an interrupted plan,
+        /// and the plan stays in the history, where its receipt offers "Rückgängig machen".
+        case notStarted
+        /// The undo was cut off: it is offered to continue or keep, like any interrupted plan.
+        case undoInterrupted
+        /// The plan's results could not be stored: nothing is taken back yet. The undo is offered
+        /// to continue and runs once they are stored (at the latest after the next launch).
+        case resultsNotStored
+    }
+
+    /// "Rückgängig" for the interrupted plan, in an order where every step leaves a journal the
+    /// next launch can go on from (plugin review K1, review of 6c6ef79):
+    /// 1. The plan as kept and its confirmed undo are stored in one transaction. From here on the
+    ///    tap is not lost: if the app ends now, the next launch stores the plan's results first
+    ///    (the app keeps the plan on its list of plans to finalize) and offers the undo to
+    ///    continue. Before, the undo was written only when it started, after the results.
+    /// 2. The plan's results are stored (`finalize`, the app's): its albums are Albumist's
+    ///    records before the undo changes them, so nothing the undo does can later be taken for
+    ///    the user's doing.
+    /// 3. The undo runs (`run`, the app's).
+    /// 4. Only an undo that completed cancels the plan; one that never started is dropped.
+    public func carryOut(journal: any PlanJournal, finalize: @Sendable (ChangePlan) async -> Bool,
+                         run: @Sendable (ChangePlan) async -> Void) async throws -> Outcome {
+        guard let undo else {
+            try await journal.save(kept)
+            return .nothingToTakeBack
+        }
+        try await journal.save([kept, undo])
+        guard await finalize(kept) else { return .resultsNotStored }
+        await run(undo)
+        let ended = try await journal.plan(undo.id)
+        if cancelsPlan(after: ended) {
+            if var plan = try await journal.plan(kept.id) {
+                plan.status = .cancelled
+                try await journal.save(plan)
+            }
+            return .undone
+        }
+        switch ended?.status {
+        case .completedWithErrors?:
+            return .partlyUndone
+        case .running?:
+            return .undoInterrupted
+        default:
+            // Refused before its first step: a plan in the history without an undo offers
+            // "Rückgängig machen" again, and the message says so.
+            if var dropped = ended, dropped.status == .confirmed || dropped.status == .draft {
+                dropped.status = .cancelled
+                try await journal.save(dropped)
+            }
+            return .notStarted
+        }
+    }
+
+    /// The suggestions to select again once "Rückgängig" ended with `outcome` (they left the
+    /// selection when the plan's results were stored): everything is taken back, so the
+    /// selection is as it was before "Jetzt umsetzen" (as before K1). After any other ending,
+    /// what the plan did stays in Photos, and its suggestions stay out of the selection like
+    /// those of any plan that ran.
+    public func selectionToRestore(after outcome: Outcome) -> Set<SortlyID> {
+        outcome == .undone ? kept.appliedSources : []
     }
 }
 

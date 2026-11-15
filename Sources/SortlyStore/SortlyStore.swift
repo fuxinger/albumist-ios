@@ -304,6 +304,27 @@ public actor SortlyStore: ChangePlanStoring {
         return out
     }
 
+    /// Results of `kind` (of at least `version`) for assets whose analysis is older than
+    /// `version`: labels a run saved before it could mark the photo (the app was ended in
+    /// between, or only the place or date of the photo changed since), and photos that could
+    /// not be read yet. Usually a handful, where `results(_:kind:)` reads every photo's result.
+    public func pendingResults<T: Decodable>(_ type: T.Type, kind: String, version: Int, within range: Range<Date>? = nil) throws -> [AssetID: T] {
+        var sql = """
+            SELECT r.asset_id, r.payload FROM analysis_results r JOIN assets a ON a.id = r.asset_id
+            WHERE r.kind = ? AND r.version >= ? AND a.analysis_version < ?
+            """
+        var values: [SQLValue] = [.text(kind), .integer(Int64(version)), .integer(Int64(version))]
+        if let range {
+            sql += " AND a.creation_date >= ? AND a.creation_date < ?"
+            values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
+        }
+        var out: [AssetID: T] = [:]
+        for r in try db.query(sql, values) {
+            if let id = r["asset_id"]?.string, let v = try decode(T.self, r["payload"]) { out[AssetID(id)] = v }
+        }
+        return out
+    }
+
     public func result<T: Decodable>(_ type: T.Type, kind: String, asset: AssetID) throws -> T? {
         try decode(T.self, db.query("SELECT payload FROM analysis_results WHERE kind = ? AND asset_id = ?", [.text(kind), .text(asset.rawValue)]).first?["payload"])
     }

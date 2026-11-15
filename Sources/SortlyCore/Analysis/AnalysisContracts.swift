@@ -65,9 +65,21 @@ public struct ContentAnalysis: Hashable, Sendable, Codable {
     /// Runs in which the image could not be read (no local preview yet, still syncing).
     /// Such a photo is tried again in later runs and does not count as analyzed. `nil` = read.
     public var failedAttempts: Int?
+    /// When the image could last not be read (`nil` in records of older versions).
+    public var lastAttempt: Date?
 
     /// Runs that may fail to read an image before it is given up and counted as analyzed.
     public static let maxFailedAttempts = 3
+    /// Time between two reads of a photo that could not be read. Catch-up runs follow each
+    /// other within seconds while iCloud syncs (every change in Photos starts one); without a
+    /// gap, three of them gave a photo up for good before its preview had even arrived.
+    public static let retrySpacing: TimeInterval = 3600
+
+    /// Whether a photo that could not be read is due for another try.
+    public func isDueForRetry(now: Date) -> Bool {
+        guard failedAttempts != nil, let lastAttempt else { return true }
+        return now.timeIntervalSince(lastAttempt) >= Self.retrySpacing
+    }
 
     public init(
         labels: [LabelScore] = [],
@@ -124,6 +136,10 @@ public struct TextAnalysis: Hashable, Sendable, Codable {
     }
 }
 
+/// What an analyzer throws when the photo itself is the problem. Any other error (Vision or
+/// the system failing, e.g. no access to the graphics hardware in the background) says
+/// nothing about the photo: the pipeline does not count it against the photo while every
+/// photo fails the same way.
 public enum AnalysisError: Error, Equatable, Sendable {
     /// The original is only in iCloud and downloading is not allowed right now.
     case originalNotAvailable

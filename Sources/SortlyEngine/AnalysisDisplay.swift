@@ -525,6 +525,16 @@ public enum AnalysisCardState: Sendable, Equatable {
         return nil
     }
 
+    /// The finish moment (point 4: check mark, light haptic, "Analyse fertig" card, or the
+    /// notification when the app is not open): only for a run that really finished (not paused,
+    /// stopped, failed or cut off by Vision errors), was not a quick check, and ran long enough
+    /// that someone waited for it.
+    public static let finishMomentAfter: Duration = .seconds(30)
+
+    public static func celebratesFinish(isComplete: Bool, wasQuickCheck: Bool, ranFor: Duration) -> Bool {
+        isComplete && !wasQuickCheck && ranFor >= finishMomentAfter
+    }
+
     /// Fill in accent, or grey only while paused (M5).
     public var isGrey: Bool { if case .paused = self { true } else { false } }
     /// Motion (the light sweep, the gliding bar) only while really working (rule 4).

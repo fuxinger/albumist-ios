@@ -104,6 +104,14 @@ enum Migrations {
         ALTER TABLE text_plain_v3 RENAME TO text_plain;
         DROP TABLE IF EXISTS text_fts;
         """),
+        // v4: the execution journal is stored step by step (audit 2, 5.3). `plans.payload`
+        // keeps the plan without its steps and media; each step and each step's media is a
+        // row of its own, so saving after a step writes that step, not the whole plan.
+        // Plans saved before keep their full payload and no rows here.
+        (4, """
+        CREATE TABLE plan_steps (plan_id TEXT NOT NULL, idx INTEGER NOT NULL, payload BLOB NOT NULL, PRIMARY KEY (plan_id, idx)) WITHOUT ROWID;
+        CREATE TABLE plan_media (plan_id TEXT NOT NULL, step_id TEXT NOT NULL, payload BLOB NOT NULL, PRIMARY KEY (plan_id, step_id)) WITHOUT ROWID;
+        """),
     ]
 
     /// Optional full-text index over `text_plain` (external content), kept in sync by

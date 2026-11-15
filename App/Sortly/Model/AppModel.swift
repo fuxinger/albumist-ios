@@ -184,6 +184,8 @@ final class AppModel {
     private(set) var worldMap: OfflineWorldMap?
     private var pipeline: AnalysisPipeline?
     private var analysisTask: Task<Void, Never>?
+    /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile.
+    @ObservationIgnored private var analysisResetting = false
     /// One plan at a time (apply, resume, undo, take back): claimed before the first await of
     /// every entry point, released when it ends.
     @ObservationIgnored private var executionClaimed = false
@@ -197,7 +199,7 @@ final class AppModel {
         static let titles = "user.titles"
         static let onboardingDone = "onboarding.done"
         /// Plans that started and whose results are not stored yet (finished at the next launch).
-        static let pendingFinalization = "execution.pendingFinalization"
+        static let pendingFinalization = SortlyStore.pendingFinalizationKey
     }
 
     var onboardingDone: Bool {
@@ -353,21 +355,20 @@ final class AppModel {
     private func writeSafetyBackup() async {
         // While album records of the copy still wait for photo access, the copy stays as it is.
         guard let store, UITestSupport.allowsSafetyBackup, pendingLibraryRestore == nil,
-              let backup = try? await store.safetyBackup(), let url = try? Self.safetyBackupURL() else { return }
+              let snapshot = try? await store.safetyBackupSnapshot(), let url = try? Self.safetyBackupURL() else { return }
         // Nothing decided yet and no earlier copy: nothing to keep.
-        if backup.isEmpty && !FileManager.default.fileExists(atPath: url.path) { return }
-        let written: Bool = await Task.detached(priority: .utility) {
-            do {
-                try backup.write(to: url)
+        if snapshot.backup.isEmpty && !FileManager.default.fileExists(atPath: url.path) { return }
+        if safetyBackupWriter == nil {
+            safetyBackupWriter = SafetyBackupWriter(url: url) { url in
                 try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                                                        ofItemAtPath: url.path)
-                return true
-            } catch {
-                return false
             }
-        }.value
-        if written { lastSafetyBackup = backup.createdAt }
+        }
+        // One write at a time, and an older snapshot never replaces a newer one (audit 2, 3.2).
+        let written = (try? await safetyBackupWriter?.write(snapshot.backup, sequence: snapshot.sequence)) ?? false
+        if written { lastSafetyBackup = snapshot.backup.createdAt }
     }
+    @ObservationIgnored private var safetyBackupWriter: SafetyBackupWriter?
 
     /// Album records and history from the copy that still wait for photo access (to check
     /// that the copy belongs to this library). While they wait, the copy is not overwritten.
@@ -432,6 +433,8 @@ final class AppModel {
         userTitles = (try? await store.value([SortlyID: String].self, forKey: Key.titles)) ?? userTitles
         await pipeline?.update(settings: settings)
         await refreshDerived()
+        // Plans of the copy that ran but were not finished then are finished now (audit 2, 3.1).
+        await finishPendingFinalizations()
         interruptedPlan = try? await store.unfinishedPlans().last
         saveSafetyBackup()
     }
@@ -496,12 +499,15 @@ final class AppModel {
     /// `userInitiated`: started by a tap, so it may continue in the background with progress
     /// on the Lock Screen (iOS 26 continued processing).
     func startAnalysis(scope: OrganizationScope = .all, mode: AnalysisPipeline.Mode = .incremental, userInitiated: Bool = false) {
-        guard !analysis.isRunning, let pipeline else { return }
+        guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
         if userInitiated { ContinuedAnalysis.begin() }
         analysis.isRunning = true
         analysis.completed = 0
         analysis.total = 0
         analysisTask = Task {
+            // The report of this run only: a run that fails never reuses the success of the
+            // one before (audit 2, 4.2).
+            var finished: AnalysisPipeline.Report?
             do {
                 let report = try await pipeline.run(mode: mode, scope: scope) { progress in
                     Task { @MainActor in
@@ -521,6 +527,7 @@ final class AppModel {
                 }
                 analysis.lastReport = report
                 analysis.lastRun = Date()
+                finished = report
             } catch {
                 message = error.localizedDescription
             }
@@ -530,7 +537,7 @@ final class AppModel {
             // Trip identities (names and corrections stay with their trip) are kept in the copy.
             saveSafetyBackup()
             // "Analyse fertig" only when it really finished (not paused, stopped or failed).
-            if analysis.lastReport?.isComplete == true, !Task.isCancelled {
+            if finished?.isComplete == true, !Task.isCancelled {
                 ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
             }
             BackgroundWork.scheduleRefinement()
@@ -544,11 +551,15 @@ final class AppModel {
     /// Called by the background task while charging.
     func runBackgroundRefinement() async -> Bool {
         if phase == .loading { await bootstrap() }
-        guard let pipeline, !analysis.isRunning, access.canRead else { return false }
+        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead else { return false }
         analysis.isRunning = true
         defer { analysis.isRunning = false }
+        // Held like a foreground run, so "Analyse neu aufbauen" can wait until this run has
+        // really ended before it clears the tables (audit 2, 4.1).
+        let run = Task { try await pipeline.run(mode: .refinement) }
+        analysisTask = Task { await withTaskCancellationHandler { _ = try? await run.value } onCancel: { run.cancel() } }
         do {
-            let report = try await pipeline.run(mode: .refinement)
+            let report = try await withTaskCancellationHandler { try await run.value } onCancel: { run.cancel() }
             analysis.lastReport = report
             await refreshDerived()
             saveSafetyBackup(immediately: true)
@@ -1351,17 +1362,16 @@ final class AppModel {
     /// "Analyse neu aufbauen": a running analysis stops first and is waited for, so it cannot
     /// write old results into the fresh tables; Spotlight forgets the old results too.
     func resetAnalysis() async {
+        // No new run starts while the tables are cleared.
+        analysisResetting = true
+        defer { analysisResetting = false }
         if analysis.isRunning {
             await pipeline?.pause()
             analysisTask?.cancel()
-            await analysisTask?.value
-            // A background refinement has no task to wait for: give it until its next check.
-            var waited = 0
-            while analysis.isRunning && waited < 150 {
-                try? await Task.sleep(for: .milliseconds(100))
-                waited += 1
-            }
         }
+        // Foreground and background runs both have a task: waited for until they really
+        // ended, not for a fixed time (audit 2, 4.1).
+        await analysisTask?.value
         do {
             try await store?.resetAnalysis(includingDecisions: false)
         } catch {

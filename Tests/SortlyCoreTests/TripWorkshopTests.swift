@@ -123,4 +123,40 @@ struct TripWorkshopTests {
         #expect(reset.changeCount == 0)
         #expect(reset.excludedAssets == [photo])
     }
+
+    // MARK: Audit 2 (2.1, 2.2)
+
+    /// A split right after the first photo: the one-photo part is kept, as the workshop promised.
+    @Test func forcedSplitKeepsAOnePhotoPart() throws {
+        var lib = LibraryBuilder()
+        lib.daily(from: "2024-01-01", to: "2024-12-31", at: Fixture.Places.munichHome, perDay: 1, everyNthDay: 2)
+        let first = lib.photo(at: Fixture.date("2024-05-13 20:00"), Fixture.Places.rome)
+        lib.daily(from: "2024-05-14", to: "2024-05-17", at: Fixture.Places.rome, perDay: 6, hour: 10)
+        let trip = try #require(detector.detect(in: lib.assets).first)
+        #expect(trip.geotaggedAssetIDs.first == first)
+        let days = TripWorkshop.days(of: trip.geotaggedAssetIDs, dates: dates(lib), calendar: Fixture.calendar)
+        let preview = try #require(TripWorkshop.split(days, before: 1, dates: dates(lib)))
+        #expect(preview.first.count == 1)
+        let parts = detector.detect(in: lib.assets, corrections: TripCorrections().splitting(at: TripWorkshop.splitInstant(before: days[1])))
+        #expect(parts.map(\.geotaggedAssetIDs.count) == [1, 24])
+    }
+
+    /// A photo without GPS right at the split (both parts are closer than twice the time
+    /// tolerance there) belongs to one part only.
+    @Test func photoWithoutGPSAtTheSplitIsInOnePartOnly() throws {
+        var lib = LibraryBuilder()
+        lib.daily(from: "2024-01-01", to: "2024-12-31", at: Fixture.Places.munichHome, perDay: 1, everyNthDay: 2)
+        lib.daily(from: "2024-05-12", to: "2024-05-14", at: Fixture.Places.rome, perDay: 6, hour: 10)
+        _ = lib.photo(at: Fixture.date("2024-05-14 23:30"), Fixture.Places.rome)
+        let between = lib.photo(at: Fixture.date("2024-05-15 00:30"), nil)
+        _ = lib.photo(at: Fixture.date("2024-05-15 01:00"), Fixture.Places.rome)
+        lib.daily(from: "2024-05-15", to: "2024-05-17", at: Fixture.Places.rome, perDay: 6, hour: 10)
+        let trip = try #require(detector.detect(in: lib.assets).first)
+        #expect(trip.inferredAssetIDs.contains(between))
+        let days = TripWorkshop.days(of: trip.geotaggedAssetIDs, dates: dates(lib), calendar: Fixture.calendar)
+        let parts = detector.detect(in: lib.assets, corrections: TripCorrections().splitting(at: TripWorkshop.splitInstant(before: days[3])))
+        #expect(parts.count == 2)
+        #expect(parts.filter { $0.inferredAssetIDs.contains(between) }.count == 1)
+        #expect(parts.last?.inferredAssetIDs.contains(between) == true)
+    }
 }

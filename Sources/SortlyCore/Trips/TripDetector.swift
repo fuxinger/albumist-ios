@@ -94,7 +94,10 @@ public struct TripDetector: Sendable {
         }
 
         var segments: [[AssetSnapshot]] = []
+        /// Per segment: it starts where the user split a trip (Reise-Werkstatt).
+        var splitBefore: [Bool] = []
         var current: Segment?
+        var currentSplit = false
 
         func joinProtects(_ a: Date, _ b: Date) -> Bool {
             corrections.forcedJoins.contains { $0.contains(a) && $0.contains(b) }
@@ -119,9 +122,13 @@ public struct TripDetector: Sendable {
                     let cameHome = seg.firstHomeAfterLastAway.map { date.timeIntervalSince($0) > configuration.homeInterludeTolerance } ?? false
                     let protected = joinProtects(seg.lastAway, date)
                     let mustBreak = forcedBreakBetween(seg.lastAway, date)
-                    if mustBreak || (!protected && (gap > allowedGap || cameHome)) {
+                    let naturalBreak = !protected && (gap > allowedGap || cameHome)
+                    if mustBreak || naturalBreak {
                         segments.append(seg.members)
+                        splitBefore.append(currentSplit)
                         current = Segment(members: [asset], lastAway: date, lastCoordinate: coordinate)
+                        // Only the user's split made two parts here.
+                        currentSplit = mustBreak && !naturalBreak
                     } else {
                         seg.members.append(asset)
                         seg.lastAway = date
@@ -131,6 +138,7 @@ public struct TripDetector: Sendable {
                     }
                 } else {
                     current = Segment(members: [asset], lastAway: date, lastCoordinate: coordinate)
+                    currentSplit = false
                 }
             } else if var seg = current {
                 if seg.firstHomeAfterLastAway == nil {
@@ -139,29 +147,54 @@ public struct TripDetector: Sendable {
                 }
             }
         }
-        if let seg = current { segments.append(seg.members) }
+        if let seg = current {
+            segments.append(seg.members)
+            splitBefore.append(currentSplit)
+        }
 
-        let candidates = segments.filter { $0.count >= configuration.minPhotos }
+        // A trip the user split stays split into all its parts, however small a part is, as
+        // long as the whole trip was big enough to be found (audit 2, 2.1): the workshop
+        // promised exactly these parts.
+        var keep = segments.map { $0.count >= configuration.minPhotos }
+        var groupStart = 0
+        for index in segments.indices {
+            let endsGroup = index + 1 == segments.count || !splitBefore[index + 1]
+            guard endsGroup else { continue }
+            let group = groupStart...index
+            if group.count > 1, group.reduce(0, { $0 + segments[$1].count }) >= configuration.minPhotos {
+                for member in group { keep[member] = true }
+            }
+            groupStart = index + 1
+        }
+        let candidates = segments.indices.filter { keep[$0] }.map { segments[$0] }
         let nonGeo = assets
             .filter { $0.usableLocation == nil && $0.creationDate != nil && !$0.isScreenshotLike && ($0.kind == .image || $0.kind == .video) }
             .filter { !corrections.excludedAssets.contains($0.id) && !excludeFromInference($0) }
             .sorted { ($0.creationDate!, $0.id) < ($1.creationDate!, $1.id) }
+        let breaks = corrections.forcedBreaks.sorted()
 
         return candidates.map { members in
-            makeTrip(members, home: home, nonGeo: nonGeo)
+            makeTrip(members, home: home, nonGeo: nonGeo, breaks: breaks)
         }
     }
 
-    private func makeTrip(_ members: [AssetSnapshot], home: HabitualArea, nonGeo: [AssetSnapshot]) -> Trip {
+    private func makeTrip(_ members: [AssetSnapshot], home: HabitualArea, nonGeo: [AssetSnapshot], breaks: [Date]) -> Trip {
         let start = members.first!.creationDate!
         let end = members.last!.creationDate!
         let coordinates = members.map { $0.usableLocation! }
         let centroid = GeoMath.centroid(coordinates) ?? coordinates[0]
         let maxDistance = zip(members, coordinates).map { home.distanceToHome($1, at: $0.creationDate!) }.max() ?? 0
 
-        // Inferred members: binary search the time window.
-        let lower = start.addingTimeInterval(-configuration.inferenceTolerance)
-        let upper = end.addingTimeInterval(configuration.inferenceTolerance)
+        // Inferred members: binary search the time window. A split by the user is a hard
+        // edge: a photo without GPS belongs to the part on its side only (audit 2, 2.2).
+        var lower = start.addingTimeInterval(-configuration.inferenceTolerance)
+        var upper = end.addingTimeInterval(configuration.inferenceTolerance)
+        var upperIsOpen = false
+        if let edge = breaks.last(where: { $0 <= start }), edge > lower { lower = edge }
+        if let edge = breaks.first(where: { $0 > end }), edge <= upper {
+            upper = edge
+            upperIsOpen = true
+        }
         var lo = 0, hi = nonGeo.count
         while lo < hi {
             let mid = (lo + hi) / 2
@@ -169,7 +202,7 @@ public struct TripDetector: Sendable {
         }
         var inferred: [AssetID] = []
         var i = lo
-        while i < nonGeo.count, nonGeo[i].creationDate! <= upper {
+        while i < nonGeo.count, upperIsOpen ? nonGeo[i].creationDate! < upper : nonGeo[i].creationDate! <= upper {
             inferred.append(nonGeo[i].id)
             i += 1
         }

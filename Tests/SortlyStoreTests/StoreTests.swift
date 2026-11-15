@@ -10,7 +10,7 @@ struct StoreTests {
 
     @Test func migrationsRun() async throws {
         let s = try store()
-        #expect(await s.schemaVersion == 3)
+        #expect(await s.schemaVersion == 4)
     }
 
     @Test func fileBackedStoreSurvivesReopen() async throws {
@@ -22,7 +22,7 @@ struct StoreTests {
         }
         let reopened = try SortlyStore(url: url)
         #expect(try await reopened.assetCount() == 1)
-        #expect(await reopened.schemaVersion == 3)
+        #expect(await reopened.schemaVersion == 4)
     }
 
     @Test func upsertReportsOnlyChangedAssetsAndRoundTrips() async throws {
@@ -126,10 +126,59 @@ struct StoreTests {
             try old.execute("INSERT INTO text_fts (asset_id, content) VALUES ('gone', 'Kontoauszug alt')")
         }
         let s = try SortlyStore(url: URL(fileURLWithPath: path))
-        #expect(await s.schemaVersion == 3)
+        #expect(await s.schemaVersion == 4)
         #expect(await s.hasFullTextSearch)
         #expect(try await s.searchText("Hotel") == ["a"])
         #expect(try await s.searchText("Kontoauszug").isEmpty) // orphan from the old index is gone
+    }
+
+    // MARK: Audit 2, 5.3: the journal step by step
+
+    /// A plan saved step by step reads back exactly, also from a reopened database, and a
+    /// plan saved whole by version 3 is still read and continues step by step.
+    @Test func journalIsWrittenStepByStepAndReadsBackWhole() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sortly-journal-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("db.sqlite")
+        let lib = InMemoryPhotoLibrary(assets: ["a", "b", "c"])
+        let proposals = ["a", "b", "c"].map { asset in
+            ConfirmedProposal(proposal: AlbumProposal(id: SortlyID("p-\(asset)"), kind: .trip, title: "Album \(asset)", folderPath: [], assetIDs: [AssetID(asset)]),
+                              decision: .createNew(title: nil, folderPath: nil))
+        }
+        var plan = OrganizationPlanner().makePlan(from: proposals, inventory: try await lib.currentInventory())
+        plan.confirmedAt = Date()
+        plan.status = .confirmed
+        let result: ChangePlan
+        do {
+            let s = try SortlyStore(url: url)
+            result = try await ChangeExecutor(library: lib, store: s).execute(plan)
+            #expect(try await s.plan(plan.id) == result)
+        }
+        let reopened = try SortlyStore(url: url)
+        #expect(try await reopened.plan(plan.id) == result)
+        #expect(try await reopened.planHistory().first == result)
+
+        // A whole payload as version 3 wrote it.
+        var legacy = result
+        legacy.id = SortlyID("legacy")
+        let old = try SQLiteDatabase(path: url.path)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try old.execute("INSERT INTO plans (id, status, created_at, payload) VALUES (?, ?, ?, ?)",
+                        [.text("legacy"), .text("completed"), .real(legacy.createdAt.timeIntervalSinceReferenceDate), .blob(try encoder.encode(legacy))])
+        #expect(try await reopened.plan(legacy.id) == legacy)
+        var finalized = legacy
+        finalized.finalizedAt = Date(timeIntervalSinceReferenceDate: 100)
+        try await reopened.save(finalized)
+        #expect(try await reopened.plan(legacy.id) == finalized)
+        // The copy for the device backup still has one whole plan per row.
+        let backup = try await reopened.safetyBackup()
+        #expect(backup.plans.count == 2)
+        let fresh = try SortlyStore(url: nil)
+        #expect(try await fresh.restore(backup, includingLibraryState: true))
+        #expect(try await fresh.plan(legacy.id) == finalized)
+        #expect(try await fresh.plan(plan.id) == result)
     }
 
     @Test func searchIndexFollowsTextChangesAndDeletedPhotos() async throws {
@@ -322,11 +371,49 @@ struct StoreTests {
         #expect(try await rebuilt.managedAlbums() == original.managedAlbums())
         #expect(try await rebuilt.planHistory().map(\.id) == [plan.id])
         #expect(try await rebuilt.value([String: String].self, forKey: "user.titles") == ["p": "Sommer in Rom"])
-        // Analysis results are recomputed, in-flight markers belong to the old database.
+        // Analysis results are recomputed; the marker of plans to finish only names plans of
+        // this copy ("x" is not one).
         #expect(try await rebuilt.value([Int].self, forKey: "analysis.trips") == nil)
         #expect(try await rebuilt.value([String].self, forKey: "execution.pendingFinalization") == nil)
-        // The copy of the restored database is the same copy.
-        #expect(try await rebuilt.safetyBackup(now: Date(timeIntervalSince1970: 7)) == backup)
+        // The copy of the restored database is the same copy (without the unknown "x").
+        var same = backup
+        same.pendingFinalization = nil
+        #expect(try await rebuilt.safetyBackup(now: Date(timeIntervalSince1970: 7)) == same)
+    }
+
+    /// Audit 2, 3.1: a plan that ran but was not finalized when the copy was made is finished
+    /// after the restore, also when the album records follow later.
+    @Test func backupKeepsPlansThatStillHaveToBeFinished() async throws {
+        let (original, plan) = try await storeWithDecisions()
+        try await original.setValue([plan.id.rawValue, "x"], forKey: "execution.pendingFinalization")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("albumist-backup-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try await original.safetyBackup().write(to: file)
+        let backup = try #require(try SafetyBackup.read(from: file))
+        #expect(backup.pendingFinalization == [plan.id.rawValue, "x"])
+
+        let fresh = try store()
+        #expect(try await fresh.restore(backup, includingLibraryState: false))
+        #expect(try await fresh.value([SortlyID].self, forKey: "execution.pendingFinalization") == nil)
+        #expect(try await fresh.restoreLibraryState(backup))
+        #expect(try await fresh.value([SortlyID].self, forKey: "execution.pendingFinalization") == [plan.id])
+        #expect(try await fresh.plan(plan.id)?.finalizedAt == nil)
+    }
+
+    /// Audit 2, 3.2: two copies taken one after the other, written in the opposite order:
+    /// the file keeps the later one.
+    @Test func olderBackupCannotReplaceNewerSnapshot() async throws {
+        let (s, _) = try await storeWithDecisions()
+        let older = try await s.safetyBackupSnapshot(now: Date(timeIntervalSince1970: 1))
+        try await s.setValue(["p": "Rom im Mai"], forKey: "user.titles")
+        let newer = try await s.safetyBackupSnapshot(now: Date(timeIntervalSince1970: 2))
+        #expect(newer.sequence > older.sequence)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("albumist-backup-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let writer = SafetyBackupWriter(url: file)
+        #expect(try await writer.write(newer.backup, sequence: newer.sequence))
+        #expect(try await !writer.write(older.backup, sequence: older.sequence))
+        #expect(try SafetyBackup.read(from: file) == newer.backup)
     }
 
     @Test func restoreNeverOverwritesExistingDecisions() async throws {

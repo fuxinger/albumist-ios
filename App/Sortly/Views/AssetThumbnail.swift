@@ -69,7 +69,14 @@ enum ThumbnailRequest {
                 return true
             }
         }
-        func started(_ id: PHImageRequestID) { lock.withLock { requestID = id } }
+        /// Returns false if the task was cancelled while the request was being started: the
+        /// caller cancels this late id itself (audit 2, 4.3).
+        func started(_ id: PHImageRequestID) -> Bool {
+            lock.withLock {
+                requestID = id
+                return !cancelled
+            }
+        }
         /// A small preview Photos delivers first; used only if the real thumbnail never comes.
         func keep(_ image: UIImage) { lock.withLock { lowResolution = image } }
         var kept: UIImage? { lock.withLock { lowResolution } }
@@ -112,7 +119,7 @@ enum ThumbnailRequest {
                     }
                     state.finish(image ?? state.kept)
                 }
-                state.started(id)
+                if !state.started(id) { manager.value.cancelImageRequest(id) }
             }
         } onCancel: {
             if let id = state.cancel() { manager.value.cancelImageRequest(id) }

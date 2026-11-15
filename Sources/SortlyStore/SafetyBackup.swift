@@ -65,6 +65,10 @@ public struct SafetyBackup: Codable, Sendable, Equatable {
     /// Settings rows except computed analysis results (`analysis.*`) and in-flight execution
     /// markers (`execution.*`).
     public var values: [Row]
+    /// Plans that ran but whose results (Albumist's albums, free albums) were not stored yet
+    /// when the copy was made. Part of the journal: restored together with the plans, so the
+    /// next launch still finishes them (audit 2, 3.1). Missing in copies of older versions.
+    public var pendingFinalization: [String]? = nil
 
     public var isEmpty: Bool { overrides.isEmpty && rules.isEmpty && managedAlbums.isEmpty && plans.isEmpty && values.isEmpty }
 
@@ -121,7 +125,38 @@ public struct SafetyBackup: Codable, Sendable, Equatable {
     }
 }
 
+/// Writes the copy one at a time and never puts an older snapshot over a newer one: two
+/// saves close together may finish in either order, the file keeps the later state of the
+/// database (audit 2, 3.2).
+public actor SafetyBackupWriter {
+    private let url: URL
+    private let protect: @Sendable (URL) -> Void
+    private var newestWritten: Int?
+
+    public init(url: URL, protect: @escaping @Sendable (URL) -> Void = { _ in }) {
+        self.url = url
+        self.protect = protect
+    }
+
+    /// Writes `backup`, taken as snapshot number `sequence` (`SortlyStore.safetyBackupSnapshot`).
+    /// Returns false, without writing, when a later snapshot is already on disk.
+    public func write(_ backup: SafetyBackup, sequence: Int) throws -> Bool {
+        if let newest = newestWritten, newest > sequence { return false }
+        try backup.write(to: url)
+        protect(url)
+        newestWritten = sequence
+        return true
+    }
+}
+
 extension SortlyStore {
+    /// A copy together with its place in the order of copies taken from this database.
+    public func safetyBackupSnapshot(now: Date = Date()) throws -> (backup: SafetyBackup, sequence: Int) {
+        let backup = try safetyBackup(now: now)
+        backupSequence += 1
+        return (backup, backupSequence)
+    }
+
     /// Whether the database holds anything a backup would restore (then it is never
     /// overwritten from a copy).
     public func hasSafetyData() throws -> Bool {
@@ -141,6 +176,8 @@ extension SortlyStore {
     }
 
     private static let keptValues = "key NOT LIKE 'analysis.%' AND key NOT LIKE 'execution.%'"
+    /// Plans that finished but are not finalized yet (written by the app).
+    public static let pendingFinalizationKey = "execution.pendingFinalization"
 
     /// A copy of everything that cannot be recomputed.
     public func safetyBackup(now: Date = Date()) throws -> SafetyBackup {
@@ -159,8 +196,14 @@ extension SortlyStore {
                 rules: try rows("SELECT id, CAST(version AS REAL) AS version, payload, updated_at FROM rules ORDER BY id, version",
                                 key: "id", number: "version"),
                 managedAlbums: try rows("SELECT album_id, source_id, payload FROM managed_albums ORDER BY album_id", key: "album_id", secondary: "source_id"),
-                plans: try rows("SELECT id, status, created_at, payload FROM plans ORDER BY id", key: "id", secondary: "status", number: "created_at"),
-                values: try rows("SELECT key, payload FROM settings WHERE \(Self.keptValues) ORDER BY key", key: "key")
+                // Whole plans (steps and media put back), so the copy keeps one row per plan.
+                plans: try db.query("SELECT id, status, created_at, payload FROM plans ORDER BY id").compactMap { r in
+                    guard let k = r["id"]?.string, let plan = try loadPlan(r["payload"]), case .blob(let payload) = try json(plan) else { return nil }
+                    return SafetyBackup.Row(key: k, secondary: r["status"]?.string, number: r["created_at"]?.double, payload: payload)
+                },
+                values: try rows("SELECT key, payload FROM settings WHERE \(Self.keptValues) ORDER BY key", key: "key"),
+                pendingFinalization: try db.query("SELECT payload FROM settings WHERE key = ?", [.text(Self.pendingFinalizationKey)])
+                    .first.flatMap { try decode([String].self, $0["payload"]) }
             )
         }
     }
@@ -209,8 +252,19 @@ extension SortlyStore {
                            [.text(r.key), .text(r.secondary ?? ""), .blob(r.payload)])
         }
         for r in backup.plans {
+            // Whole plans as in older versions: they are read as such until saved again.
             try db.execute("INSERT OR REPLACE INTO plans (id, status, created_at, payload) VALUES (?, ?, ?, ?)",
                            [.text(r.key), .text(r.secondary ?? "completed"), r.number.map { .real($0) } ?? .null, .blob(r.payload)])
+            try db.execute("DELETE FROM plan_steps WHERE plan_id = ?", [.text(r.key)])
+            try db.execute("DELETE FROM plan_media WHERE plan_id = ?", [.text(r.key)])
+            journalCache[SortlyID(r.key)] = nil
+        }
+        // Only plans that are part of this copy.
+        let planIDs = Set(backup.plans.map(\.key))
+        let pending = (backup.pendingFinalization ?? []).filter(planIDs.contains)
+        if !pending.isEmpty {
+            try db.execute("INSERT OR REPLACE INTO settings (key, payload) VALUES (?, ?)",
+                           [.text(Self.pendingFinalizationKey), try json(pending)])
         }
     }
 }

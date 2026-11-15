@@ -28,8 +28,13 @@ public actor SortlyStore: ChangePlanStoring {
 
     // MARK: - Helpers
 
-    private func json<T: Encodable>(_ value: T) throws -> SQLValue { .blob(try encoder.encode(value)) }
-    private func decode<T: Decodable>(_ type: T.Type, _ value: SQLValue?) throws -> T? {
+    /// Copies of the safety data taken so far (orders them for `SafetyBackupWriter`).
+    var backupSequence = 0
+    /// What the database holds of each plan saved by this store: the next save of that plan
+    /// writes only what differs (see `insertPlan`).
+    var journalCache: [SortlyID: (steps: [PlanStep], media: [String: [AssetID]])] = [:]
+    func json<T: Encodable>(_ value: T) throws -> SQLValue { .blob(try encoder.encode(value)) }
+    func decode<T: Decodable>(_ type: T.Type, _ value: SQLValue?) throws -> T? {
         guard let data = value?.data else { return nil }
         return try decoder.decode(type, from: data)
     }
@@ -373,12 +378,14 @@ public actor SortlyStore: ChangePlanStoring {
     /// finalization time), Albumist's albums and further values (decisions, the list of plans
     /// still to finalize). A crash leaves either all of it or none.
     public func finalize(_ plan: ChangePlan, managedAlbums: [ManagedAlbumState], values: [String: any Encodable & Sendable]) throws {
-        try db.durably {
-            try db.transaction {
-                try insertPlan(plan)
-                try replaceManagedAlbums(managedAlbums)
-                for (key, value) in values.sorted(by: { $0.key < $1.key }) {
-                    try db.execute("INSERT OR REPLACE INTO settings (key, payload) VALUES (?, ?)", [.text(key), try json(value)])
+        try journaling([plan.id]) {
+            try db.durably {
+                try db.transaction {
+                    try insertPlan(plan)
+                    try replaceManagedAlbums(managedAlbums)
+                    for (key, value) in values.sorted(by: { $0.key < $1.key }) {
+                        try db.execute("INSERT OR REPLACE INTO settings (key, payload) VALUES (?, ?)", [.text(key), try json(value)])
+                    }
                 }
             }
         }
@@ -428,35 +435,100 @@ public actor SortlyStore: ChangePlanStoring {
 
     /// The execution journal: on disk before the library is touched (synchronous = FULL).
     public func save(_ plan: ChangePlan) throws {
-        try db.durably { try insertPlan(plan) }
+        try journaling([plan.id]) { try db.durably { try db.transaction { try insertPlan(plan) } } }
     }
 
     /// Several plans in one transaction (an interrupted plan and the undo that replaces it).
     public func save(_ plans: [ChangePlan]) throws {
-        try db.durably { try db.transaction { for plan in plans { try insertPlan(plan) } } }
+        try journaling(plans.map(\.id)) { try db.durably { try db.transaction { for plan in plans { try insertPlan(plan) } } } }
     }
 
-    private func insertPlan(_ plan: ChangePlan) throws {
+    /// If a write fails (and its transaction is rolled back), what is known to be on disk for
+    /// these plans is forgotten: the next save writes them in full again.
+    func journaling(_ ids: [SortlyID], _ write: () throws -> Void) throws {
+        do {
+            try write()
+        } catch {
+            for id in ids { journalCache[id] = nil }
+            throw error
+        }
+    }
+
+    /// The plan without its steps and media, its steps one row each, and the media of each
+    /// step one row each (audit 2, 5.3). Only what changed since the last save of this plan
+    /// is written: after a step that is the plan header, that step and its media.
+    func insertPlan(_ plan: ChangePlan) throws {
+        var header = plan
+        header.steps = []
+        header.record?.media = [:]
         try db.execute("INSERT OR REPLACE INTO plans (id, status, created_at, payload) VALUES (?, ?, ?, ?)", [
-            .text(plan.id.rawValue), .text(plan.status.rawValue), Self.date(plan.createdAt), try json(plan),
+            .text(plan.id.rawValue), .text(plan.status.rawValue), Self.date(plan.createdAt), try json(header),
         ])
+        let id = SQLValue.text(plan.id.rawValue)
+        let known = journalCache[plan.id]
+        if let known, known.steps.count == plan.steps.count {
+            for (index, step) in plan.steps.enumerated() where step != known.steps[index] {
+                try db.execute("INSERT OR REPLACE INTO plan_steps (plan_id, idx, payload) VALUES (?, ?, ?)", [id, .integer(Int64(index)), try json(step)])
+            }
+        } else {
+            try db.execute("DELETE FROM plan_steps WHERE plan_id = ?", [id])
+            for (index, step) in plan.steps.enumerated() {
+                try db.execute("INSERT INTO plan_steps (plan_id, idx, payload) VALUES (?, ?, ?)", [id, .integer(Int64(index)), try json(step)])
+            }
+        }
+        let media = plan.record?.media ?? [:]
+        if let known {
+            for (step, assets) in media where known.media[step] != assets {
+                try db.execute("INSERT OR REPLACE INTO plan_media (plan_id, step_id, payload) VALUES (?, ?, ?)", [id, .text(step), try json(assets)])
+            }
+            for step in known.media.keys where media[step] == nil {
+                try db.execute("DELETE FROM plan_media WHERE plan_id = ? AND step_id = ?", [id, .text(step)])
+            }
+        } else {
+            try db.execute("DELETE FROM plan_media WHERE plan_id = ?", [id])
+            for (step, assets) in media.sorted(by: { $0.key < $1.key }) {
+                try db.execute("INSERT INTO plan_media (plan_id, step_id, payload) VALUES (?, ?, ?)", [id, .text(step), try json(assets)])
+            }
+        }
+        journalCache[plan.id] = (plan.steps, media)
+    }
+
+    /// A plan from its row: the header with its steps and media put back. Plans saved by
+    /// versions before the step-by-step journal carry everything in the payload.
+    func loadPlan(_ payload: SQLValue?) throws -> ChangePlan? {
+        guard var plan = try decode(ChangePlan.self, payload) else { return nil }
+        let id = SQLValue.text(plan.id.rawValue)
+        let steps = try db.query("SELECT payload FROM plan_steps WHERE plan_id = ? ORDER BY idx", [id])
+        if !steps.isEmpty {
+            plan.steps = try steps.compactMap { try decode(PlanStep.self, $0["payload"]) }
+        }
+        let media = try db.query("SELECT step_id, payload FROM plan_media WHERE plan_id = ?", [id])
+        if !media.isEmpty {
+            if plan.record == nil { plan.record = ExecutionRecord() }
+            for row in media {
+                if let step = row["step_id"]?.string, let assets = try decode([AssetID].self, row["payload"]) {
+                    plan.record?.media[step] = assets
+                }
+            }
+        }
+        return plan
     }
 
     public func plan(_ id: SortlyID) throws -> ChangePlan? {
-        try decode(ChangePlan.self, db.query("SELECT payload FROM plans WHERE id = ?", [.text(id.rawValue)]).first?["payload"])
+        try loadPlan(db.query("SELECT payload FROM plans WHERE id = ?", [.text(id.rawValue)]).first?["payload"])
     }
 
     /// Plans that were interrupted and must be resumed (Scenario J).
     public func unfinishedPlans() throws -> [ChangePlan] {
         try db.query("SELECT payload FROM plans WHERE status IN ('confirmed', 'running') ORDER BY created_at")
-            .compactMap { try decode(ChangePlan.self, $0["payload"]) }
+            .compactMap { try loadPlan($0["payload"]) }
     }
 
     /// One page of finished plans, newest first.
     public func planHistory(limit: Int = 50, offset: Int = 0) throws -> [ChangePlan] {
         try db.query("SELECT payload FROM plans WHERE status IN ('completed', 'completedWithErrors') ORDER BY created_at DESC LIMIT ? OFFSET ?",
                      [.integer(Int64(limit)), .integer(Int64(offset))])
-            .compactMap { try decode(ChangePlan.self, $0["payload"]) }
+            .compactMap { try loadPlan($0["payload"]) }
     }
 
     /// The finished undo plans that took back `id`, newest first (for the change receipt).
@@ -465,7 +537,7 @@ public actor SortlyStore: ChangePlanStoring {
         return try db.query("SELECT payload FROM plans WHERE status IN ('completed', 'completedWithErrors') ORDER BY created_at DESC")
             .compactMap { row -> ChangePlan? in
                 guard try decode(Header.self, row["payload"])?.reverts == id else { return nil }
-                return try decode(ChangePlan.self, row["payload"])
+                return try loadPlan(row["payload"])
             }
     }
 
@@ -499,7 +571,10 @@ public actor SortlyStore: ChangePlanStoring {
             // otherwise the app would keep showing them until the next run finished.
             try db.execute("DELETE FROM settings WHERE key LIKE 'analysis.%'")
             if includingDecisions {
-                for table in ["overrides", "rules", "managed_albums", "plans", "settings"] { try db.execute("DELETE FROM \(table)") }
+                for table in ["overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media", "settings"] {
+                    try db.execute("DELETE FROM \(table)")
+                }
+                journalCache = [:]
             }
         }
     }

@@ -282,6 +282,7 @@ struct PlanReceiptView: View {
                 .foregroundStyle(Theme.accent)
                 .frame(width: iconWidth)
                 .accessibilityHidden(true)
+                .hiddenAtAccessibilitySizes()
             Text(title)
             Spacer(minLength: Theme.Spacing.s)
             Text(value.formatted()).monospacedDigit().font(.body.weight(.semibold))

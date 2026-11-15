@@ -32,6 +32,9 @@ enum Theme {
         guard traits.userInterfaceStyle == .dark else { return .white }
         return traits.accessibilityContrast == .high ? .black : UIColor(white: 0.07, alpha: 1)
     })
+    /// One-line buttons are capsules (radius = half of 50 pt); a label that wraps at the
+    /// largest text sizes keeps rounded corners instead of turning into an oval.
+    static var buttonShape: RoundedRectangle { RoundedRectangle(cornerRadius: 25, style: .continuous) }
     static let background = Color(uiColor: .systemGroupedBackground)
     static let card = Color(uiColor: .secondarySystemGroupedBackground)
     static let secondaryText = Color.secondary
@@ -111,7 +114,7 @@ struct ProgressRing: View {
     }
 }
 
-/// Full-width primary action: a solid accent capsule, Apple's filled button shape.
+/// Full-width primary action: a solid accent capsule (`Theme.buttonShape`), Apple's filled button.
 ///
 /// Deliberately not Liquid Glass (`glassProminent`, used until 15.11.): glass belongs to the
 /// navigation layer that floats above content (HIG), these buttons sit in the content. And
@@ -140,8 +143,8 @@ private struct PrimaryButtonBody: View {
             .padding(.horizontal, Theme.Spacing.xl)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, minHeight: 50)
-            .background(isEnabled ? Theme.accent : Color(uiColor: .tertiarySystemFill), in: Capsule())
-            .contentShape(Capsule())
+            .background(isEnabled ? Theme.accent : Color(uiColor: .tertiarySystemFill), in: Theme.buttonShape)
+            .contentShape(Theme.buttonShape)
             .opacity(configuration.isPressed ? 0.78 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
             .hoverEffect(.highlight)
@@ -171,13 +174,13 @@ private struct SecondaryButtonBody: View {
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.vertical, 13)
             .frame(maxWidth: .infinity, minHeight: 48)
-            .background(Color(uiColor: .secondarySystemFill), in: Capsule())
+            .background(Color(uiColor: .secondarySystemFill), in: Theme.buttonShape)
             .overlay {
                 if contrast == .increased {
-                    Capsule().strokeBorder(Color(uiColor: .separator), lineWidth: 1)
+                    Theme.buttonShape.strokeBorder(Color(uiColor: .separator), lineWidth: 1)
                 }
             }
-            .contentShape(Capsule())
+            .contentShape(Theme.buttonShape)
             .opacity(configuration.isPressed ? 0.7 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
             .hoverEffect(.highlight)
@@ -243,6 +246,23 @@ extension View {
     /// At least 44 × 44 pt to tap (HIG), without changing how the control looks.
     func minimumHitTarget() -> some View {
         frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+    }
+}
+
+/// Leaves a decorative view out at the accessibility text sizes, where a leading icon would
+/// squeeze the text next to it into a column so narrow that words break mid-word.
+struct HiddenAtAccessibilitySizes: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if !typeSize.isAccessibilitySize { content }
+    }
+}
+
+extension View {
+    func hiddenAtAccessibilitySizes() -> some View {
+        modifier(HiddenAtAccessibilitySizes())
     }
 }
 

@@ -60,19 +60,20 @@ final class AccessibilityUITests: XCTestCase {
         var undo: String
         var atlas: String
         var shareAtlas: String
+        var searchQuery: String
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: "Vorschläge prüfen",
                                   suggestionTitle: "Vorschlag", rowMarker: "Aufnahmen",
                                   starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Umsetzen",
                                   applyNow: "Jetzt umsetzen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
-                                  shareAtlas: "Reise-Atlas teilen")
+                                  shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: "Review",
                                    suggestionTitle: "Suggestion", rowMarker: "item",
                                    starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Apply",
                                    applyNow: "Apply now", undo: "Undo", atlas: "Travel Atlas",
-                                   shareAtlas: "Share Travel Atlas")
+                                   shareAtlas: "Share Travel Atlas", searchQuery: "Rome")
     }
 
     // MARK: Tests
@@ -175,7 +176,12 @@ final class AccessibilityUITests: XCTestCase {
         if tap(button(w.reviewSuggestions), "\(tag) open suggestions", timeout: 20) {
             sleep(1)
             check("\(tag) suggestions", english: english)
-            if tap(suggestionRow(w.rowMarker), "\(tag) open suggestion", timeout: 10) {
+            // A List only creates the rows on screen; at the largest text size the first row
+            // starts below the fold.
+            let row = suggestionRow(w.rowMarker)
+            var swipes = 0
+            while !row.exists && swipes < 6 { app.swipeUp(); swipes += 1; sleep(1) }
+            if tap(row, "\(tag) open suggestion", timeout: 10) {
                 _ = app.navigationBars[w.suggestionTitle].waitForExistence(timeout: 5)
                 sleep(1)
                 check("\(tag) suggestion detail", english: english)
@@ -249,11 +255,6 @@ final class AccessibilityUITests: XCTestCase {
             sleep(2)
             check("\(tag) albums", english: english)
         }
-        if !short, tap(searchTabButton(), "\(tag) search tab") {
-            sleep(2)
-            check("\(tag) search", english: english)
-        }
-
         // Settings
         if tap(tabButton(w.overviewTab), "\(tag) back to overview"), tap(app.buttons[w.settings], "\(tag) settings") {
             sleep(2)
@@ -265,6 +266,22 @@ final class AccessibilityUITests: XCTestCase {
             }
             tap(button(w.done), "\(tag) close settings")
             sleep(1)
+        }
+
+        // Search last: the search tab focuses its field, and the keyboard covers the tab bar.
+        if !short, tap(searchTabButton(), "\(tag) search tab") {
+            sleep(2)
+            check("\(tag) search", english: english)
+            let field = app.searchFields.firstMatch
+            if field.waitForExistence(timeout: 5) {
+                field.tap()
+                field.typeText(w.searchQuery)
+                sleep(3)
+                // The keyboard covers the lower half; the results and chips above it count.
+                check("\(tag) search results", english: english)
+                field.typeText("\n")
+                sleep(1)
+            }
         }
     }
 
@@ -291,7 +308,8 @@ final class AccessibilityUITests: XCTestCase {
     /// search fields (in iOS 26 a sheet's search field floats at the bottom like a toolbar).
     private func chromeFrames() -> [CGRect] {
         var frames: [CGRect] = []
-        for query in [app.navigationBars, app.tabBars, app.toolbars] {
+        // The keyboard covers content like a bar does.
+        for query in [app.navigationBars, app.tabBars, app.toolbars, app.keyboards] {
             for element in query.allElementsBoundByIndex where element.exists {
                 frames.append(element.frame)
             }
@@ -299,7 +317,16 @@ final class AccessibilityUITests: XCTestCase {
         for field in app.searchFields.allElementsBoundByIndex where field.exists {
             frames.append(field.frame.insetBy(dx: -8, dy: -8))
         }
-        return frames.filter { !$0.isEmpty }
+        // Only real bars count: at the top or bottom edge and not taller than the keyboard
+        // (45 % of the screen). Anything else would exempt the middle of the screen.
+        let screen = app.frame
+        let bars = frames.filter { frame in
+            !frame.isEmpty && frame.height < screen.height * 0.45
+                && (frame.minY <= screen.minY + screen.height * 0.3 || frame.maxY >= screen.maxY - screen.height * 0.3)
+        }
+        let described = frames.map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))x\(Int($0.height))" }.joined(separator: "; ")
+        print("A11Y_CHROME \(frames.count) frames, \(bars.count) used: \(described)")
+        return bars
     }
 
     private func audit(_ screen: String, chrome: [CGRect]) {
@@ -422,7 +449,10 @@ final class AccessibilityUITests: XCTestCase {
                     fail("format placeholder", label, frame)
                 }
                 if english {
-                    let words = label.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+                    // Folder paths ("Albumist › Reisen › 2024") are names of folders that exist in
+                    // the library, made in the German first run: data, not interface text.
+                    let interface = label.components(separatedBy: ", ").filter { !$0.contains("›") }.joined(separator: " ")
+                    let words = interface.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
                     if let word = words.first(where: { Self.germanWords.contains($0) }) {
                         fail("German word '\(word)' in English UI", label, frame)
                     }

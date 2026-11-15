@@ -313,7 +313,7 @@ struct SearchTokenChip: View {
             }
         }
         .font(.caption.weight(.semibold))
-        .lineLimit(1)
+        .compactLineLimit(1)
         .padding(.horizontal, 8).padding(.vertical, 4)
         .foregroundStyle(tint)
         .background(tint.opacity(0.12), in: Capsule())

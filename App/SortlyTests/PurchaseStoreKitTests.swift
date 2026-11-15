@@ -407,10 +407,7 @@ struct PurchaseStoreKitTests {
         try await within("read the entitlements after the failure") { await purchases.refreshEntitlements() }
         #expect(!purchases.isUnlocked)
         // The next try works.
-        try await within("let purchases succeed again") {
-            store.session.failTransactionsEnabled = false
-            store.session.failureError = nil
-        }
+        try await within("let purchases succeed again") { store.session.failTransactionsEnabled = false }
         try await within("purchase after the failure") { await purchases.purchase() }
         #expect(purchases.isUnlocked, "message: \(purchases.lastError ?? "none")")
         #expect(purchases.lastError == nil)

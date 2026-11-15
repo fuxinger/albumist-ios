@@ -105,8 +105,8 @@ enum HeatLog {
     }
 
     static var hottest: String {
-        switch level.value {
-        case nil: "-"
+        guard let value = level.value else { return "-" }
+        return switch value {
         case .nominal: "nominal"
         case .fair: "fair"
         case .serious: "serious"

@@ -9,6 +9,9 @@ struct AlbumsView: View {
     @Environment(\.openURL) private var openURL
     @State private var mergePlan: ChangePlan?
     @State private var showMerge = false
+    /// The suggestion whose merge plan is being prepared: its row shows a spinner and the
+    /// rows do not take a second tap meanwhile (design review N13).
+    @State private var preparing: [CollectionID]?
 
     private var topLevel: [CollectionSnapshot] {
         model.inventory.collections.values
@@ -29,18 +32,29 @@ struct AlbumsView: View {
                 Section {
                     ForEach(suggestions, id: \.albumIDs) { suggestion in
                         Button {
+                            preparing = suggestion.albumIDs
                             Task {
                                 mergePlan = await model.mergePlan(suggestion)
+                                preparing = nil
                                 showMerge = mergePlan != nil
                             }
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(suggestion.albumIDs.compactMap { model.inventory[$0]?.title }.formatted(.list(type: .and)))
-                                    .font(.body.weight(.medium)).foregroundStyle(.primary)
-                                Text("\(suggestion.albumIDs.count) Alben mit vielen gleichen Fotos · \(suggestion.distinctAssetCount) Fotos insgesamt")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(suggestion.albumIDs.compactMap { model.inventory[$0]?.title }.formatted(.list(type: .and)))
+                                        .font(.body.weight(.medium)).foregroundStyle(.primary)
+                                    Text("\(suggestion.albumIDs.count) Alben mit vielen gleichen Fotos · \(suggestion.distinctAssetCount) Fotos insgesamt")
+                                        .font(.footnote).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                if preparing == suggestion.albumIDs {
+                                    ProgressView()
+                                        .accessibilityLabel(Text("Vorschau wird vorbereitet"))
+                                        .accessibilityIdentifier("merge.preparing")
+                                }
                             }
                         }
+                        .disabled(preparing != nil)
                     }
                 } header: {
                     Text("Ähnliche Alben")
@@ -123,7 +137,8 @@ struct CollectionRow: View {
             if collection.kind == .folder {
                 IconTile(systemName: symbol, tint: Theme.tint(for: .neutral))
             } else {
-                AssetThumbnail(id: collection.assetIDs.min() ?? AssetID(""), side: 44)
+                // The newest photo, as Photos shows albums (design review N4).
+                AssetThumbnail(id: PreviewPicker.newest(collection.assetIDs, dates: model.creationDates) ?? AssetID(""), side: 44)
                     .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
             }

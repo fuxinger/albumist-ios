@@ -297,7 +297,8 @@ struct AtlasContent: View {
                             .contentTransition(.numericText())
                         Text(shown.count == 1 ? "Land" : "Länder").font(.title2.weight(.semibold))
                     }
-                    Text("\(Int(atlas.worldShare * 100)) % der Welt · \(atlas.continents.count) von 7 Kontinenten")
+                    // Locale percent with two significant digits: one country is not "0 %" (N11).
+                    Text("\(atlas.worldShare.formatted(TravelAtlas.worldShareStyle)) der Welt · \(atlas.continents.count) von 7 Kontinenten")
                         .font(.subheadline).foregroundStyle(.secondary)
                     if atlas.year != nil && !atlas.newCountryCodes.isEmpty {
                         Label {
@@ -471,7 +472,7 @@ struct ShareCard: View {
                             Text("davon \(atlas.newCountryCodes.count) zum ersten Mal · \(atlas.continents.count) von 7 Kontinenten")
                                 .font(.system(size: 24, weight: .medium)).foregroundStyle(.secondary)
                         } else {
-                            Text("\(Int(atlas.worldShare * 100)) % der Welt · \(atlas.continents.count) von 7 Kontinenten")
+                            Text("\(atlas.worldShare.formatted(TravelAtlas.worldShareStyle)) der Welt · \(atlas.continents.count) von 7 Kontinenten")
                                 .font(.system(size: 24, weight: .medium)).foregroundStyle(.secondary)
                         }
                     }

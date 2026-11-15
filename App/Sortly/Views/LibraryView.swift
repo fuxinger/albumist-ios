@@ -45,15 +45,16 @@ struct LibraryView: View {
                 } else {
                     grid(members)
                     if members.count > shown {
-                        VStack(spacing: Theme.Spacing.s) {
-                            Text("\(shown.formatted()) von \(members.count.formatted()) angezeigt")
-                                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-                            Button("Weitere Fotos anzeigen") { shown += Self.page }
-                                .buttonStyle(.bordered)
-                                .accessibilityIdentifier("library.showMore")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, Theme.Spacing.s)
+                        // The next photos load by themselves when the end of the grid comes
+                        // into view (design review N10: a button every 3,000 photos).
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, Theme.Spacing.m)
+                            .onScrollVisibilityChange(threshold: 0.1) { visible in
+                                if visible { shown += Self.page }
+                            }
+                            .accessibilityLabel(Text("Weitere Fotos werden geladen"))
+                            .accessibilityIdentifier("library.loadingMore")
                     }
                 }
             }
@@ -454,7 +455,10 @@ struct AddToAlbumSheet: View {
                     Text("Neues Album")
                 }
                 Section {
-                    if albums.isEmpty {
+                    // The system's empty search state (design review N12).
+                    if albums.isEmpty && !query.isEmpty {
+                        ContentUnavailableView.search(text: query)
+                    } else if albums.isEmpty {
                         Text("Noch keine Alben").foregroundStyle(.secondary)
                     }
                     ForEach(albums) { album in

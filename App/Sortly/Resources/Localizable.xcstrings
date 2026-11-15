@@ -21,42 +21,12 @@
         }
       }
     },
-    "%@ von %@ angezeigt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Showing %1$@ of %2$@"
-          }
-        }
-      }
-    },
     "%@ · %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ · %2$@"
-          }
-        }
-      }
-    },
-    "%lld %% der Welt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld %% of the world"
-          }
-        }
-      }
-    },
-    "%lld %% der Welt · %lld von 7 Kontinenten" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld %% of the world · %2$lld of 7 continents"
           }
         }
       }
@@ -5061,16 +5031,6 @@
         }
       }
     },
-    "Kein Album gefunden" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No album found"
-          }
-        }
-      }
-    },
     "Album wählen" : {
       "localizations" : {
         "en" : {
@@ -6683,26 +6643,6 @@
         }
       }
     },
-    "Weitere Fotos anzeigen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show more photos"
-          }
-        }
-      }
-    },
-    "Weitere Treffer anzeigen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show more results"
-          }
-        }
-      }
-    },
     "−%lld Fotos" : {
       "localizations" : {
         "en" : {
@@ -7369,16 +7309,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No, these are trips"
-          }
-        }
-      }
-    },
-    "Antworten kannst du, sobald die Analyse fertig ist." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "You can answer once the analysis is done."
           }
         }
       }
@@ -9709,6 +9639,76 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "It may only be in iCloud. The Photos app downloads it."
+          }
+        }
+      }
+    },
+    "Albumist wird geladen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading Albumist"
+          }
+        }
+      }
+    },
+    "„Ja“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Yes” is available once the analysis is finished, because Albumist then plans your trips again."
+          }
+        }
+      }
+    },
+    "Weitere Fotos werden geladen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading more photos"
+          }
+        }
+      }
+    },
+    "Weitere Treffer werden geladen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading more results"
+          }
+        }
+      }
+    },
+    "Vorschau wird vorbereitet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing preview"
+          }
+        }
+      }
+    },
+    "%@ der Welt · %lld von 7 Kontinenten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ of the world · %2$lld of 7 continents"
+          }
+        }
+      }
+    },
+    "„Ja“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Yes” is available once creating is finished, because Albumist then plans your trips again."
           }
         }
       }

@@ -7,7 +7,9 @@ struct RootView: View {
     var body: some View {
         switch model.phase {
         case .loading:
+            // Says what is loading, not only "In Bearbeitung" (design review N2).
             ProgressView().controlSize(.large)
+                .accessibilityLabel(Text("Albumist wird geladen"))
         case .failed(let message):
             ContentUnavailableView {
                 Label("Albumist konnte nicht starten", systemImage: "exclamationmark.triangle")
@@ -86,7 +88,8 @@ struct MainTabs: View {
             Tab("Mediathek", systemImage: "photo.on.rectangle", value: MainTab.library) {
                 NavigationStack { LibraryView() }
             }
-            Tab("Alben", systemImage: "folder", value: MainTab.albums) {
+            // The symbol Photos uses for albums (design review N1).
+            Tab("Alben", systemImage: "rectangle.stack", value: MainTab.albums) {
                 NavigationStack { AlbumsView() }
             }
             Tab(value: MainTab.search, role: .search) {

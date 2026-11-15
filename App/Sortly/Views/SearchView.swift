@@ -232,15 +232,15 @@ struct SearchView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
         if result.ids.count > shown {
-            VStack(spacing: Theme.Spacing.s) {
-                Text("\(shown.formatted()) von \(result.ids.count.formatted()) angezeigt")
-                    .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-                Button("Weitere Treffer anzeigen") { shown += Self.page }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("search.showMore")
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, Theme.Spacing.s)
+            // The next hits load by themselves at the end of the grid (design review N10).
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Spacing.m)
+                .onScrollVisibilityChange(threshold: 0.1) { visible in
+                    if visible { shown += Self.page }
+                }
+                .accessibilityLabel(Text("Weitere Treffer werden geladen"))
+                .accessibilityIdentifier("search.loadingMore")
         }
     }
 

@@ -374,8 +374,14 @@ struct ProposalDetailView: View {
             Button("Nein, das sind Reisen") { answerOftenHere(false) }
                 .buttonStyle(SecondaryButtonStyle())
                 .accessibilityIdentifier("proposal.oftenHere.no")
-            if model.analysis.isRunning {
-                Text("Antworten kannst du, sobald die Analyse fertig ist.").font(.footnote).foregroundStyle(.secondary)
+            // Only "Ja" waits: it plans the trips anew, "Nein" changes nothing (design review
+            // N8 found the two buttons behaving differently without a word why).
+            if model.analysis.isRunning || model.execution.isRunning {
+                Text(model.execution.isRunning
+                     ? LocalizedStringKey("„Ja“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
+                     : LocalizedStringKey("„Ja“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu."))
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -604,8 +610,11 @@ struct AlbumPickerView: View {
 
     var body: some View {
         List {
-            if albums.isEmpty {
-                Text(query.isEmpty ? LocalizedStringKey("Noch keine Alben") : LocalizedStringKey("Kein Album gefunden")).foregroundStyle(.secondary)
+            // The system's empty search state (design review N12).
+            if albums.isEmpty && !query.isEmpty {
+                ContentUnavailableView.search(text: query)
+            } else if albums.isEmpty {
+                Text("Noch keine Alben").foregroundStyle(.secondary)
             }
             ForEach(albums) { album in
                 Button {

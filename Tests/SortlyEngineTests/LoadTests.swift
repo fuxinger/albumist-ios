@@ -150,8 +150,7 @@ struct LoadTests {
         let atlasTime = clock.measure { atlas = TravelAtlas.compute(facts: facts) }
         let overlapTime = clock.measure { _ = AlbumOverlapAnalyzer().suggestions(in: CollectionInventory(albums)) }
         let searchTime = clock.measure {
-            let parser = QueryParser(vocabulary: SearchVocabulary.build(facts: facts, inventory: CollectionInventory(albums), groups: []))
-            _ = SearchEngine().search(parser.parse("Rom 2023").filter, in: facts, statuses: [:], textHits: nil)
+            _ = SearchIndex(facts: facts, inventory: CollectionInventory(albums)).search("Rom 2023")
         }
 
         func ms(_ d: Duration) -> Int { Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000) }

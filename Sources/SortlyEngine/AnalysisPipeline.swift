@@ -66,6 +66,11 @@ public actor AnalysisPipeline {
         public var stage: Stage
         public var completed: Int
         public var total: Int
+        /// Set while the stage waits for Apple's geocoder (its limit of about 40 lookups a
+        /// minute, or after it refused): about how long the wait still takes. Said every 2 s,
+        /// so the card can show the wait instead of a count that stands for up to a minute;
+        /// `nil` again when the lookups go on.
+        public var waitLeft: Duration? = nil
 
         /// One value for the whole run (0…1), so a bar never jumps back when the next stage starts.
         public static func overall(stage: Stage, completed: Int, total: Int) -> Double {
@@ -88,6 +93,8 @@ public actor AnalysisPipeline {
         public var contentAnalyzed = 0
         public var textRecognized = 0
         public var textWaitingForOriginal = 0
+        /// How long reading the texts took in this run (diagnostic report: photos per minute).
+        public var textSeconds: Double = 0
         public var proposals = 0
         /// Vision failed for several photos in a row (not the photos' fault, e.g. no graphics
         /// hardware in the background): the run stopped without counting those against them.
@@ -96,6 +103,8 @@ public actor AnalysisPipeline {
         public var placesThrottled = false
 
         public var isComplete: Bool { pausedBecause == nil && completedStages.count == Stage.allCases.count }
+
+        public init() {}
     }
 
     public static let contentVersion = 1
@@ -115,6 +124,10 @@ public actor AnalysisPipeline {
         static let frequentPlaces = "analysis.frequentPlaces"
         static let groups = "analysis.groups"
         static let tripCorrections = "user.tripCorrections"
+        /// The user's answers to "Bist du hier öfter?" (part of the decisions copy in the backup).
+        static let recurringPlaces = "user.recurringPlaces"
+        /// Places to ask about, where each trip was, the photos of the places the user is often at.
+        static let recurringPlaceReport = "analysis.recurringPlaces"
         /// Trip identities across runs (kept by "Analyse neu aufbauen", like other user data).
         static let tripIdentities = "user.tripIdentities"
         static let groupingFeedback = "user.groupingFeedback"
@@ -142,6 +155,19 @@ public actor AnalysisPipeline {
     /// Keeps the first analysis from spending up to an hour on town names before photos are
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
     private let foregroundOnlineBudget: Int?
+    /// When a run in the app last asked Apple for town names. A run within the hour after it
+    /// (Fortsetzen after a Pause, a restart) does not ask again: the lookups and Apple's waits
+    /// held "Orte werden bestimmt" for a minute or more before the run got back to where it was
+    /// (device test 15.11.: "es dauert lange, bis die App nach Pause weiterläuft"). The towns
+    /// still missing come with the overnight refinement or a run after the hour.
+    private var lastForegroundOnlineLookup: Date?
+    static let foregroundOnlineCooldown: TimeInterval = 60 * 60
+
+    /// "Analyse neu aufbauen" cleared the place cache: the next run asks Apple again at once,
+    /// or the rebuilt trips would get no town names for an hour.
+    public func forgetRecentOnlineLookups() {
+        lastForegroundOnlineLookup = nil
+    }
     public private(set) var settings: OrganizationSettings
     /// The run in progress: `pause()` reaches it through its control.
     private var activeControl: AnalysisRunControl?
@@ -332,9 +358,14 @@ public actor AnalysisPipeline {
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
 
         // 2. Patterns (pure computation over metadata, seconds even for large libraries)
+        // Said before the trips are computed, or the card stands at "Mediathek wird gelesen ·
+        // N von N" meanwhile (simulated full run: step 2 was first shown when it was done).
+        onProgress(Progress(stage: .patterns, completed: 0, total: 1))
         let all = try await store.allAssets()
-        let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections) ?? TripCorrections()
-        let detected = TripDetector(configuration: settings.trips.advanced, calendar: calendar).detect(in: all, corrections: corrections)
+        let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
+        let answers = try await recurringPlaceAnswers()
+        let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar).analyse(in: all, corrections: corrections, places: answers)
+        let detected = tripAnalysis.trips
         // Trips keep their identity when their photos change a little (an older photo
         // imported, the first one deleted): decisions and deleted albums stay attached.
         var known = try await store.value([TripIdentity].self, forKey: Key.tripIdentities) ?? []
@@ -344,6 +375,7 @@ public actor AnalysisPipeline {
         }
         var trips = TripIdentity.carryOver(detected, from: known)
         try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
+        try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
         var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar).detect(in: all)
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
         try await store.setValue(trips, forKey: Key.trips)
@@ -394,9 +426,10 @@ public actor AnalysisPipeline {
         // (first device test 15.11.: "1.450 von 14.332", then "2.700 von 12.708").
         let inRange = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
         let contentBefore = max(0, inRange - contentTotal)
-        if contentTotal > 0 {
-            onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal))
-        }
+        // Said also when nothing is left to look at: every stage says when it begins, or the
+        // card kept showing the stage before ("Orte werden bestimmt · 1.600 von 1.600") while
+        // the run went on (device test 15.11.: "jetzt hängt es hier").
+        onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal))
         // First results early: trips, countries and places need no image analysis. On a first
         // run (no suggestions yet) they are offered right away instead of after the image
         // analysis, which takes hours on a large library. The full set replaces them later;
@@ -441,6 +474,12 @@ public actor AnalysisPipeline {
             var analyzed = 0
             var stopped: PauseReason?
             var cancelled = false
+            // Saved and shown at least once a second: a batch of 50 photos took 5 s, on a warm
+            // device 18 s, and the count stood still meanwhile (simulated full run). The photos
+            // after the cut stay for the next batch.
+            let batchStart = now()
+            var cut = false
+            var next = 0
             // Decided without looking at the image: labels stored already, or a photo that
             // could not be read a short while ago (not again in this run).
             batch = batch.filter { asset in
@@ -456,13 +495,13 @@ public actor AnalysisPipeline {
             }
             await analyzer.willAnalyze(Array(batch.prefix(2 * contentLanes)))
             try await withThrowingTaskGroup(of: (AssetSnapshot, Result<ContentAnalysis, any Error>).self) { group in
-                var next = 0
                 var inFlight = 0
                 var width = contentLanes
                 while true {
                     // Fill the lanes. Heat, low battery or Pause are checked before every
                     // photo, so a stop takes effect within one photo per lane.
                     while stopped == nil, !cancelled, next < batch.count, inFlight < width {
+                        if next > 0, now().timeIntervalSince(batchStart) >= 1 { cut = true; break }
                         let (reason, lanes) = await admission(lanes: contentLanes)
                         if let reason { stopped = reason; break }
                         width = lanes
@@ -519,6 +558,12 @@ public actor AnalysisPipeline {
             }
             try await store.saveResults(results, kind: "content", version: Self.contentVersion, markingAnalyzed: finished)
             if cancelled { throw CancellationError() }
+            if cut {
+                // Goes on behind the last photo looked at (same order as the store's query);
+                // without a date, from the start of the photos still to analyse.
+                let last = batch[next - 1]
+                cursor = last.creationDate != nil ? last : nil
+            }
             contentDone += finished.count
             report.contentAnalyzed += analyzed
             onProgress(Progress(stage: .content, completed: contentBefore + contentDone,
@@ -528,7 +573,9 @@ public actor AnalysisPipeline {
         report.completedStages.append(.content)
 
         // 5. Text
+        let textStart = now()
         let textOutcome = try await recognizeText(scoped, onProgress: onProgress)
+        report.textSeconds = now().timeIntervalSince(textStart)
         report.textRecognized = textOutcome.recognized
         report.textWaitingForOriginal = textOutcome.waiting
         report.analyzerUnavailable = report.analyzerUnavailable || textOutcome.analyzerUnavailable
@@ -536,10 +583,14 @@ public actor AnalysisPipeline {
         report.completedStages.append(.text)
 
         // 6. Groups
+        if let reason = await shouldStop() { report.pausedBecause = reason; return report }
+        onProgress(Progress(stage: .groups, completed: 0, total: 0))
         let groups = try await groupObservations()
         report.completedStages.append(.groups)
 
         // 7. Proposals
+        if let reason = await shouldStop() { report.pausedBecause = reason; return report }
+        onProgress(Progress(stage: .proposals, completed: 0, total: 0))
         let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope)
         report.proposals = snapshot.proposals.count
         report.completedStages.append(.proposals)
@@ -587,17 +638,27 @@ public actor AnalysisPipeline {
         // starts again after a pause goes on from the real state instead of from zero.
         let total = all.filter { $0.usableLocation != nil }.count
         let before = max(0, total - requests.count)
-        let budget = refining ? nil : foregroundOnlineBudget
+        let askedRecently = lastForegroundOnlineLookup.map { now().timeIntervalSince($0) < Self.foregroundOnlineCooldown } ?? false
+        let budget = refining ? nil : (askedRecently ? 0 : foregroundOnlineBudget)
         onProgress(Progress(stage: .places, completed: before, total: total))
-        return try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
+        // The count last shown, repeated with the time left while the run waits for the geocoder.
+        let shown = Mutex(before)
+        let outcome = try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
                                          maxRateLimitWait: refining ? nil : Self.foregroundRateLimitWait,
                                          shouldStop: { [weak self] in await self?.stopRequested() ?? true },
                                          onlineAllowed: { [weak self] in await self?.settings.privacy.allowOnlineGeocoding ?? false },
                                          progress: { processed in
-                                             onProgress(Progress(stage: .places, completed: min(before + processed, total), total: total))
+                                             let completed = min(before + processed, total)
+                                             shown.withLock { $0 = completed }
+                                             onProgress(Progress(stage: .places, completed: completed, total: total))
+                                         },
+                                         waiting: { left in
+                                             onProgress(Progress(stage: .places, completed: shown.withLock { $0 }, total: total, waitLeft: left))
                                          }) { batch in
             try await store.setPlaces(batch)
         }
+        if !refining, outcome.onlineRequests > 0 { lastForegroundOnlineLookup = now() }
+        return outcome
     }
 
     struct TextOutcome {
@@ -641,18 +702,24 @@ public actor AnalysisPipeline {
         }
         // Counted over all screenshots and documents, so a later run goes on from the real state.
         let textBefore = needing.count - candidates.count
-        if !candidates.isEmpty {
-            onProgress(Progress(stage: .text, completed: textBefore, total: needing.count))
-        }
+        // Said as soon as the count is known, also when nothing is left to read. A "0" said
+        // before the count put the bar of a run that goes on in this step below where the
+        // paused run had got to (simulated full run: 86 % back to 80 %).
+        onProgress(Progress(stage: .text, completed: textBefore, total: needing.count))
         let documents = DocumentAnalyzer()
         let screenshots = ScreenshotClassifier()
         let analyzer = self.analyzer
         // Analyzer errors in a row, not counted against the photos yet (see the content stage).
         var suspects: [AssetID] = []
         var processed = 0
+        var lastShown = now()
+        // The count moves with every photo that takes time (device test 15.11.: shown only
+        // every 20 photos, the stage looked stuck), and in steps of 20 when they go fast.
         func counted() {
             processed += 1
-            if processed % 20 == 0 || processed == candidates.count {
+            let time = now()
+            if processed % 20 == 0 || processed == candidates.count || time.timeIntervalSince(lastShown) >= 1 {
+                lastShown = time
                 onProgress(Progress(stage: .text, completed: textBefore + processed, total: needing.count))
             }
         }
@@ -820,7 +887,7 @@ public actor AnalysisPipeline {
             return []
         }
         let contents = try await store.results(ContentAnalysis.self, kind: "content")
-        let feedback = try await store.value(GroupingFeedback.self, forKey: Key.groupingFeedback) ?? GroupingFeedback()
+        let feedback = try await store.value(GroupingFeedback.self, forKey: Key.groupingFeedback, defaults: GroupingFeedback()) ?? GroupingFeedback()
         let grouper = ObservationGrouper(distanceThreshold: settings.people.advanced.distanceThreshold, minGroupSize: settings.people.advanced.minGroupSize)
         var groups: [ObservationGroup] = []
         if settings.people.faceGroupingEnabled {
@@ -854,11 +921,14 @@ public actor AnalysisPipeline {
             .filter { scope.includes($0, calendar: calendar) }
         let overrides = OverrideSet(try await store.overrides())
         let scopedIDs = Set(facts.map(\.id))
+        let oftenHere = try await recurringPlaceReport()?.places ?? []
         let analysis = AnalysisSnapshot(
             facts: facts,
             trips: scope == .all ? trips : trips.filter { !scopedIDs.isDisjoint(with: $0.geotaggedAssetIDs) },
             frequentPlaces: scope == .all ? frequent : [],
-            groups: groups
+            groups: groups,
+            // Like trips: a place with photos in the trial year comes with all its photos.
+            recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) }
         )
         let proposals = ProposalEngine(settings: settings, calendar: calendar).proposals(for: analysis, overrides: overrides)
         var matches = AlbumMatcher().match(proposals, against: inventory, overrides: overrides,
@@ -878,11 +948,26 @@ public actor AnalysisPipeline {
     /// The trips the user split or merged (I07). Kept in time, so they hold for every
     /// later analysis; the next run applies them.
     public func tripCorrections() async throws -> TripCorrections {
-        try await store.value(TripCorrections.self, forKey: Key.tripCorrections) ?? TripCorrections()
+        try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
     }
 
     public func setTripCorrections(_ corrections: TripCorrections) async throws {
         try await store.setValue(corrections, forKey: Key.tripCorrections)
+    }
+
+    /// The user's answers to "Bist du hier öfter?". Kept by position, so they hold for every
+    /// later analysis; the next run applies them.
+    public func recurringPlaceAnswers() async throws -> RecurringPlaceAnswers {
+        try await store.value(RecurringPlaceAnswers.self, forKey: Key.recurringPlaces, defaults: RecurringPlaceAnswers()) ?? RecurringPlaceAnswers()
+    }
+
+    public func setRecurringPlaceAnswers(_ answers: RecurringPlaceAnswers) async throws {
+        try await store.setValue(answers, forKey: Key.recurringPlaces)
+    }
+
+    /// What the last analysis found about places visited again and again.
+    public func recurringPlaceReport() async throws -> RecurringPlaceReport? {
+        try await store.value(RecurringPlaceReport.self, forKey: Key.recurringPlaceReport)
     }
 
     public func currentFacts() async throws -> [AssetFacts] {

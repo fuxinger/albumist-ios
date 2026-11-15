@@ -3,6 +3,8 @@
 The UI run is split over parallel runners; each shard lists its tests as `Class` or
 `Class/test` in a `tests:` line of the matrix. A test missing there would never run, a test
 listed twice would run twice, and a name that no longer exists would run nothing.
+AccessibilityUITests run in their own job (small iPhone, accessibility settings) and are
+left out here.
 Usage: python3 .github/scripts/check_ui_shards.py
 """
 import pathlib
@@ -21,6 +23,9 @@ for path in sorted((root / "App" / "SortlyUITests").glob("*.swift")):
         test = re.match(r"\s*func\s+(test\w*)\s*\(\s*\)", line)
         if test and current:
             tests[current].append(test.group(1))
+
+# Run by the workflow's accessibility job on a simulator of their own.
+tests.pop("AccessibilityUITests", None)
 
 workflow = (root / ".github" / "workflows" / "ui.yml").read_text(encoding="utf-8")
 listed = [entry for line in re.findall(r"^\s*tests:\s*(.+)$", workflow, re.M) for entry in line.split()]

@@ -6,6 +6,7 @@ import Vision
 import SwiftUI
 import UIKit
 import SortlyCore
+import SortlyEngine
 @testable import Sortly
 
 @Suite("Platform mapping")
@@ -244,5 +245,67 @@ struct DemoLibraryTests {
         print("DEMO_SCREENSHOT_EXIF \(String(describing: exif?[kCGImagePropertyExifUserComment]))")
         #expect(DemoLibrary.documentPhoto(["Rechnung"]).size == CGSize(width: 1500, height: 2000))
         #expect(DemoLibrary.shared.expectedCount > 200)
+    }
+}
+
+/// Device test 15.11.: the Lock Screen bar came only for the first analysis of an app session,
+/// because every request used the same identifier and iOS runs an identifier only once.
+@Suite("Continued analysis identifiers")
+struct ContinuedAnalysisIdentifierTests {
+    @Test func everyRequestHasItsOwnIdentifierThatInfoPlistPermits() throws {
+        let ids = (0..<50).map { _ in ContinuedAnalysis.makeIdentifier() }
+        #expect(Set(ids).count == ids.count)
+        let permitted = try #require(Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String])
+        let wildcard = try #require(permitted.first { $0.hasSuffix(".*") })
+        let prefix = String(wildcard.dropLast(1))
+        for id in ids {
+            #expect(id.hasPrefix(prefix))
+            #expect(id.count > prefix.count)
+            // Under the bundle identifier, as iOS requires for continued processing tasks.
+            #expect(id.hasPrefix(try #require(Bundle.main.bundleIdentifier) + "."))
+        }
+    }
+}
+
+/// Device test 15.11. 22:57: the analysis had stopped, and the Lock Screen still said
+/// "Albumist analysiert deine Fotos". Every way a run ends gets its own text there.
+@MainActor
+@Suite("Lock Screen text when a run ends")
+struct ContinuedAnalysisEndingTests {
+    private func state(complete: Bool = false, paused: PauseReason? = nil, needsResume: Bool) -> AppModel.AnalysisState {
+        var report = AnalysisPipeline.Report()
+        if complete { report.completedStages = AnalysisPipeline.Stage.allCases }
+        report.pausedBecause = paused
+        var state = AppModel.AnalysisState()
+        state.lastReport = report
+        state.needsResume = needsResume
+        return state
+    }
+
+    @Test func finishedSaysSoAndFillsTheCircle() {
+        let ending = ContinuedAnalysis.ending(state(complete: true, needsResume: false))
+        #expect(ending.title == String(localized: "Analyse fertig"))
+        #expect(ending.complete)
+    }
+
+    @Test func pausedByTheUserSaysPaused() {
+        let ending = ContinuedAnalysis.ending(state(paused: .userPaused, needsResume: false))
+        #expect(ending.title == String(localized: "Analyse pausiert"))
+        #expect(!ending.complete)
+    }
+
+    @Test func stoppedByTheDeviceOrIOSWaitsForTheUser() {
+        for reason in [PauseReason.thermal, .batteryLow, .lowPower, .timeBudget, .accessRevoked] {
+            let ending = ContinuedAnalysis.ending(state(paused: reason, needsResume: true))
+            #expect(ending.title == String(localized: "Analyse wartet auf dich"), "\(reason)")
+            #expect(!ending.complete)
+        }
+    }
+
+    /// An error leaves the report of the run before: a finished one must not read as "fertig".
+    @Test func anErrorAfterAFinishedRunIsNotFinished() {
+        let ending = ContinuedAnalysis.ending(state(complete: true, needsResume: true))
+        #expect(ending.title == String(localized: "Analyse wartet auf dich"))
+        #expect(!ending.complete)
     }
 }

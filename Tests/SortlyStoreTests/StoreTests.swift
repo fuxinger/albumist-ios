@@ -477,4 +477,16 @@ struct StoreTests {
         #expect(try SafetyBackup.read(from: file) == nil)
         #expect(try SafetyBackup.read(from: file.appendingPathExtension("missing")) == nil)
     }
+
+    /// Settings stored by an earlier version, read after an update added a field (plugin
+    /// review 15.11., K3): the stored choices stay, the new field gets its default.
+    @Test func settingsOfAnEarlierVersionStayReadable() async throws {
+        struct Earlier: Codable { var minPhotos = 25 }
+        struct Later: Codable, Equatable { var minPhotos = 10; var folderPerYear = true }
+        let s = try store()
+        try await s.setValue(Earlier(), forKey: "settings")
+        await #expect(throws: (any Error).self) { try await s.value(Later.self, forKey: "settings") }
+        #expect(try await s.value(Later.self, forKey: "settings", defaults: Later()) == Later(minPhotos: 25, folderPerYear: true))
+        #expect(try await s.value(Later.self, forKey: "missing", defaults: Later()) == nil)
+    }
 }

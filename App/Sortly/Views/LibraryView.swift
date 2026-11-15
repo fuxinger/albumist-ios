@@ -79,7 +79,7 @@ struct LibraryView: View {
                     selection = []
                     selecting = false
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.snappy, value: selection.isEmpty)
@@ -230,7 +230,7 @@ struct SelectionBar: View {
         }
         .controlSize(.large)
         .padding(Theme.Spacing.m)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .floatingPanel()
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.bottom, Theme.Spacing.s)
         .overlay(alignment: .topTrailing) {

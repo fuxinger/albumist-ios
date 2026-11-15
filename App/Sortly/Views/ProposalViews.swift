@@ -169,6 +169,7 @@ struct ProposalDetailView: View {
     @State private var showWorkshop = false
     /// Set when the trip was split or merged: this suggestion is gone, back to the list.
     @State private var reshaped = false
+    @State private var confirmOftenHere = false
 
     /// Only trips get a creative name; places and dates keep their exact titles.
     private var canSuggestTitle: Bool {
@@ -254,8 +255,14 @@ struct ProposalDetailView: View {
                         }
                     }
                     ForEach(Array(proposal.reasons.enumerated()), id: \.offset) { _, reason in
-                        Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(.secondary)
+                        Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(Theme.secondaryText) // sits on the photo wash
                     }
+                }
+
+                // Asked once per place, before the user decides on the album: the answer may
+                // turn the trips there into one album of the place.
+                if let question = model.recurringPlaceQuestion(for: proposal) {
+                    recurringPlaceCard(question)
                 }
 
                 // Album status and destination folder in one card.
@@ -284,6 +291,24 @@ struct ProposalDetailView: View {
                             .contentShape(Rectangle())
                     }
                     .accessibilityIdentifier("proposal.reshapeTrip")
+                }
+
+                // The same answer without being asked: for a place visited too rarely for the
+                // question (a semester abroad, a new second home).
+                if model.recurringPlaceQuestion(for: proposal) == nil && model.canMarkRecurringPlace(proposal) {
+                    Button { confirmOftenHere = true } label: {
+                        Label("Keine Reise, hier bin ich öfter", systemImage: "mappin.and.ellipse")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .disabled(model.analysis.isRunning || model.execution.isRunning)
+                    .accessibilityIdentifier("proposal.oftenHere")
+                    .confirmationDialog("Keine Reise?", isPresented: $confirmOftenHere, titleVisibility: .visible) {
+                        Button("Keine Reise, hier bin ich öfter") { answerOftenHere(true) }
+                    } message: {
+                        Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen.")
+                    }
                 }
             }
             .padding(Theme.Spacing.l)
@@ -323,6 +348,35 @@ struct ProposalDetailView: View {
                 model.endPreview(selection)
             }
             previewSelection = nil
+        }
+    }
+
+    /// "Bist du hier öfter?": the user's answer is the only thing that says what a place is
+    /// to them, and it is never shown as a title.
+    private func recurringPlaceCard(_ question: RecurringPlaceCandidate) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text("Bist du hier öfter, etwa Zweitwohnsitz, Arbeit oder Familie?").font(.headline)
+                Text("Du warst \(question.stayCount)-mal hier, zuletzt \(question.lastVisit.formatted(.dateTime.month(.wide).year())).")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Button("Ja, hier bin ich öfter") { answerOftenHere(true) }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(model.analysis.isRunning || model.execution.isRunning)
+                .accessibilityIdentifier("proposal.oftenHere.yes")
+            Button("Nein, das sind Reisen") { answerOftenHere(false) }
+                .buttonStyle(SecondaryButtonStyle())
+                .accessibilityIdentifier("proposal.oftenHere.no")
+            if model.analysis.isRunning {
+                Text("Antworten kannst du, sobald die Analyse fertig ist.").font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// A "Ja" makes this suggestion go away with the analysis it starts: back to the list.
+    private func answerOftenHere(_ oftenHere: Bool) {
+        Task {
+            if await model.answerRecurringPlace(oftenHere, for: proposal), oftenHere { dismiss() }
         }
     }
 

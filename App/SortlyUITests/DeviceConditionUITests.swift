@@ -207,12 +207,37 @@ final class DeviceConditionUITests: XCTestCase {
 
     private enum PhotoChoice { case full, limited, deny }
 
-    /// The onboarding, if it shows (fresh install, or photo access was taken back).
+    /// "Kein Zugriff auf deine Fotos" (plugin review W4): once the introduction is done, an app
+    /// without photo access shows this screen instead of the introduction. "Weiter" when iOS
+    /// will ask, "Einstellungen öffnen" when access was denied.
+    private var askAgain: XCUIElement { app.buttons["access.continue"] }
+    private var toSettings: XCUIElement { app.buttons["access.settings"] }
+
+    /// The introduction (fresh install) or the "Kein Zugriff" screen (access taken away after
+    /// it), if one of them shows; afterwards the app has full access. A denied access cannot be
+    /// given back inside the app, so it is reset and the app asks once more.
     private func onboardIfNeeded() {
         let welcome = button("Los geht")
-        _ = waitStable("first screen", timeout: 20, stableChecks: 1) { welcome.exists || app.tabBars.firstMatch.exists }
-        guard welcome.exists else { return }
-        onboarding(.full)
+        _ = waitStable("first screen", timeout: 20, stableChecks: 1) {
+            welcome.exists || app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists
+        }
+        if welcome.exists { onboarding(.full); return }
+        if toSettings.exists {
+            print("UI_FACT photo access denied at the start: reset")
+            app.resetAuthorizationStatus(for: .photos)
+            start()
+            _ = askAgain.waitForExistence(timeout: 20)
+        }
+        // Opened once more, so the fast start runs as with access (demo library, if missing).
+        if askAgain.exists, grantOnNoAccessScreen(.full) { start() }
+    }
+
+    /// "Weiter" on the "Kein Zugriff" screen, then the iOS question answered with `choice`.
+    /// Returns false when the screen or the question did not show.
+    @discardableResult
+    private func grantOnNoAccessScreen(_ choice: PhotoChoice) -> Bool {
+        guard tap(askAgain, "no photo access: continue", timeout: 20) else { return false }
+        return answerPhotoQuestion(choice)
     }
 
     /// Walks through the onboarding and answers the system's photo question with `choice`.
@@ -223,8 +248,9 @@ final class DeviceConditionUITests: XCTestCase {
         sleep(1)
         tap(app.buttons["Weiter"], "areas")
         sleep(1)
-        if app.buttons["Zugriff erlauben"].waitForExistence(timeout: 5) {
-            app.buttons["Zugriff erlauben"].tap()
+        // "Weiter" before the iOS question (plugin review K5; it said "Zugriff erlauben" before).
+        if askAgain.waitForExistence(timeout: 5) {
+            askAgain.tap()
             answerPhotoQuestion(choice)
         }
         guard choice != .deny else { return false }
@@ -847,33 +873,38 @@ final class DeviceConditionUITests: XCTestCase {
         continueAfterFailure = true
         prepare()
 
-        // Denied
+        // Denied. After the introduction an app without access shows "Kein Zugriff auf deine
+        // Fotos" (plugin review W4), not the introduction again: "Weiter" leads to the iOS question.
         app.resetAuthorizationStatus(for: .photos)
         start()
-        if button("Los geht").waitForExistence(timeout: 20) {
-            onboarding(.deny)
-            let denied = anything("Der Zugriff wurde abgelehnt").waitForExistence(timeout: 10)
+        let screen = askAgain.waitForExistence(timeout: 20)
+        print(screen ? "UI_STEP_OK no-access screen after access reset" : "UI_STEP_MISSING no-access screen after access reset")
+        XCTAssertTrue(screen, "Resetting photo access did not bring the \"Kein Zugriff\" screen")
+        XCTAssertFalse(button("Los geht").exists, "The introduction starts again after access was taken away")
+        if screen {
             sleep(1)
-            shot("17-access-denied")
+            shot("17-no-access")
+            grantOnNoAccessScreen(.deny)
+            let denied = toSettings.waitForExistence(timeout: 10)
+            sleep(1)
+            shot("17a-access-denied")
             print(denied ? "UI_STEP_OK denied access explained" : "UI_STEP_MISSING denied access explained")
-            XCTAssertTrue(denied, "Denied photo access is not explained")
-            XCTAssertTrue(anything("Einstellungen öffnen").exists, "Denied access offers no way to the Settings app")
-            XCTAssertFalse(button("Analyse starten").exists, "The onboarding went on without photo access")
+            XCTAssertTrue(denied, "Denied photo access offers no way to the Settings app")
+            XCTAssertTrue(anything("Kein Zugriff auf deine Fotos").exists, "Denied photo access is not explained")
+            XCTAssertFalse(app.tabBars.firstMatch.exists, "The app went on without photo access")
             start()
-            sleep(3)
+            let still = toSettings.waitForExistence(timeout: 20)
             XCTAssertEqual(app.state, .runningForeground, "The app does not start with denied access")
-            print("UI_FACT relaunch with denied access: \(anything("Los geht").exists ? "onboarding" : "other screen")")
+            print(still ? "UI_STEP_OK relaunch with denied access explained" : "UI_STEP_MISSING relaunch with denied access explained")
+            XCTAssertTrue(still, "After a relaunch denied access is not explained")
             shot("17b-relaunch-denied")
-        } else {
-            print("UI_STEP_MISSING onboarding after access reset")
-            XCTFail("Resetting photo access did not bring the onboarding back")
         }
 
         // Limited (the real picker if the simulator lets the test drive it, else the switch)
         app.resetAuthorizationStatus(for: .photos)
         start()
         var limited = false
-        if button("Los geht").waitForExistence(timeout: 20), onboarding(.limited) {
+        if grantOnNoAccessScreen(.limited) {
             limited = anything("Nur ausgewählte Fotos").waitForExistence(timeout: 30)
         }
         print(limited ? "UI_STEP_OK limited access through the system question" : "UI_STEP_MISSING limited access through the system question")
@@ -898,12 +929,18 @@ final class DeviceConditionUITests: XCTestCase {
         sleep(2)
         print("UI_FACT app state after access was taken away: \(app.state.rawValue)")
         start(["-SortlyUITestSlowAnalysis", "-SortlyUITestLaunchAnalysis"])
-        let asks = button("Los geht").waitForExistence(timeout: 20) || app.buttons["Zugriff erlauben"].exists
+        let asks = askAgain.waitForExistence(timeout: 20)
         shot("19-access-revoked")
         print(asks ? "UI_STEP_OK asks for access again" : "UI_STEP_MISSING asks for access again")
         XCTAssertTrue(asks, "After access was taken away the app does not ask for it again")
         XCTAssertEqual(app.state, .runningForeground, "The app ended after access was taken away")
-        if asks { onboarding(.full) }
+        if asks { grantOnNoAccessScreen(.full) }
+        let back = app.tabBars.firstMatch.waitForExistence(timeout: 30)
+        print(back ? "UI_STEP_OK overview after access came back" : "UI_STEP_MISSING overview after access came back")
+        XCTAssertTrue(back, "The app does not go on after access came back")
+        // On a phone the analysis goes on by itself once access is back; UI runs start their
+        // analyses themselves, so the app is opened once more and starts it as at launch.
+        start(["-SortlyUITestSlowAnalysis", "-SortlyUITestLaunchAnalysis"])
         _ = waitStable("count after access came back", timeout: 120, stableChecks: 1) { analysisCount() != nil || analysisIdle }
         record("after access came back")
         let finished = waitStable("analysis finished after access came back", timeout: 900) { analysisIdle }
@@ -916,7 +953,7 @@ final class DeviceConditionUITests: XCTestCase {
     private func restoreFullAccess() {
         app.resetAuthorizationStatus(for: .photos)
         start()
-        if button("Los geht").waitForExistence(timeout: 20) { onboarding(.full) }
+        onboardIfNeeded()
         let ready = waitStable("full access again", timeout: 60, stableChecks: 1) { app.tabBars.firstMatch.exists && !anything("Nur ausgewählte Fotos").exists }
         print(ready ? "UI_STEP_OK full access again" : "UI_STEP_MISSING full access again")
     }

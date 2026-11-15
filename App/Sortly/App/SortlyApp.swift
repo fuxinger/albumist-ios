@@ -30,6 +30,7 @@ struct SortlyApp: App {
                     await UITestSupport.didLaunch(model)
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    ContinuedAnalysis.sceneChanged(onScreen: phase == .active)
                     // Back on screen: an analysis that iOS ended goes on by itself, a running
                     // one asks for background time again.
                     if phase == .active { model.sceneBecameActive() }

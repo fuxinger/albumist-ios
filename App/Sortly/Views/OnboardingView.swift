@@ -5,6 +5,7 @@ import SortlyEngine
 /// First start (prompt §7, Schritt 1–3): promise, areas, photo access, first analysis.
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
     @State private var step = 0
     @State private var trialYear: Int?
 
@@ -59,7 +60,7 @@ struct OnboardingView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, Theme.Spacing.s)
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-                promise("iphone", "Alles bleibt auf deinem Gerät. Nichts wird hochgeladen.")
+                promise("iphone", "Deine Fotos bleiben auf deinem Gerät. Nichts wird hochgeladen.")
                 promise("lock.shield", "Originale werden nie gelöscht, verändert oder kopiert.")
                 promise("checklist", "Du siehst jeden Vorschlag, bevor etwas passiert, und kannst alles rückgängig machen.")
                 promise("rectangle.stack", "Vorhandene Alben werden erkannt und ergänzt statt doppelt angelegt.")
@@ -155,9 +156,6 @@ struct OnboardingView: View {
                 Card {
                     Label("Der Zugriff wurde abgelehnt.", systemImage: "exclamationmark.triangle").font(.headline)
                     Text("Du kannst ihn in den Einstellungen unter Datenschutz › Fotos erlauben.")
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        Link("Einstellungen öffnen", destination: url).font(.headline)
-                    }
                 }
             case .limited:
                 Card {
@@ -170,14 +168,24 @@ struct OnboardingView: View {
         } footer: {
             if model.access.canRead {
                 Button("Weiter") { step = 3 }.buttonStyle(PrimaryButtonStyle())
+            } else if model.access == .denied || model.access == .restricted {
+                // iOS does not ask a second time: the way on is the Settings app.
+                Button("Einstellungen öffnen") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .accessibilityIdentifier("access.settings")
             } else {
-                Button("Zugriff erlauben") {
+                // "Weiter", not "Zugriff erlauben": a screen before the system prompt must not
+                // read like the consent itself (App Review 5.1.1, plugin review K5).
+                Button("Weiter") {
                     Task {
                         await model.requestAccess()
                         if model.access.canRead { step = 3 }
                     }
                 }
                 .buttonStyle(PrimaryButtonStyle())
+                .accessibilityIdentifier("access.continue")
             }
         }
     }

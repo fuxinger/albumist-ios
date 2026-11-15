@@ -201,8 +201,8 @@ final class SortlySearchUITests: XCTestCase {
         if button("Los geht").waitForExistence(timeout: 15) {
             tap(button("Los geht"), "welcome")
             tap(button("Weiter"), "areas")
-            if button("Zugriff erlauben").waitForExistence(timeout: 5) {
-                button("Zugriff erlauben").tap()
+            if app.buttons["access.continue"].waitForExistence(timeout: 5) {
+                app.buttons["access.continue"].tap()
                 allowPhotosIfAsked()
             }
             if button("Weiter").waitForExistence(timeout: 3) { button("Weiter").tap() }

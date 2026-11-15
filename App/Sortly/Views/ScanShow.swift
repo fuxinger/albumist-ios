@@ -3,7 +3,8 @@ import SortlyCore
 
 /// "Erster Scan als Show": during the first analysis the user's own photos form a mosaic
 /// that a soft light sweeps across, and every trip Albumist finds pops up as a card.
-/// Only on the first run (no albums made yet); later runs keep the plain progress bar.
+/// On every full analysis (the first one, a rebuilt one, another part of the library); the
+/// short check for new photos keeps the plain progress bar.
 struct ScanShow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

@@ -211,12 +211,20 @@ final class SortlyFlowUITests: XCTestCase {
     private func prepare() {
         let started = Date()
         launch(["-SortlyUITestFastStart"])
-        if button("Los geht").waitForExistence(timeout: 5) {
-            // Photo access is not granted yet (the CI grant did not hold): the real onboarding.
+        let noAccess = app.buttons["access.continue"]
+        if noAccess.waitForExistence(timeout: 5) {
+            // Photo access is not granted (the CI grant did not hold, or a test took it away):
+            // with the introduction done the app shows "Kein Zugriff auf deine Fotos" (W4).
+            noAccess.tap()
+            allowPhotosIfAsked()
+            // Opened once more, so the fast start runs as with access (demo library, if missing).
+            launch(["-SortlyUITestFastStart"])
+        } else if button("Los geht").exists {
+            // A first start without the fast start's introduction: the real onboarding.
             tap(button("Los geht"), "welcome (prepare)")
             sleep(1)
             tap(app.buttons["Weiter"], "areas (prepare)")
-            if button("Zugriff erlauben").waitForExistence(timeout: 5) { button("Zugriff erlauben").tap(); allowPhotosIfAsked() }
+            if noAccess.waitForExistence(timeout: 5) { noAccess.tap(); allowPhotosIfAsked() }
             if app.buttons["Weiter"].waitForExistence(timeout: 3) { app.buttons["Weiter"].tap() }
             tap(button("Analyse starten"), "start analysis (prepare)", timeout: 20)
             declineNotificationsIfAsked()
@@ -301,8 +309,8 @@ final class SortlyFlowUITests: XCTestCase {
             print(cities.waitForExistence(timeout: 3) ? "UI_STEP_OK cities switch in onboarding" : "UI_STEP_MISSING cities switch in onboarding")
             tap(button("Weiter"), "areas")
             shot("03-access")
-            if button("Zugriff erlauben").waitForExistence(timeout: 5) {
-                button("Zugriff erlauben").tap()
+            if app.buttons["access.continue"].waitForExistence(timeout: 5) {
+                app.buttons["access.continue"].tap()
                 allowPhotosIfAsked()
             }
             // With access granted the app moves on by itself; "Weiter" only appears when

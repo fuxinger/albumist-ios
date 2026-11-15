@@ -582,6 +582,25 @@ public actor SortlyStore: ChangePlanStoring {
             .compactMap { try loadPlan($0["payload"]) }
     }
 
+    /// Albums and folders that Albumist's own plans may still be changing (plugin review W2):
+    /// those of every plan that is unfinished (cut off, offered to continue or take back), and
+    /// of every plan that finished but whose results are not stored yet (on the app's list of
+    /// plans to finalize). A difference there may be Albumist's own doing, not the user's: the
+    /// album check leaves these albums alone until the plan is settled (see
+    /// `ManagedAlbumTracker.reconcile`), so an undo cut off during its finalization never turns
+    /// into "deleted by you".
+    public func collectionsInFlight() throws -> Set<CollectionID> {
+        var result = Set<CollectionID>()
+        for plan in try unfinishedPlans() { result.formUnion(plan.touchedCollections) }
+        let pending = try value([SortlyID].self, forKey: Self.pendingFinalizationKey) ?? []
+        for id in pending {
+            guard let plan = try plan(id), plan.finalizedAt == nil,
+                  plan.status == .completed || plan.status == .completedWithErrors else { continue }
+            result.formUnion(plan.touchedCollections)
+        }
+        return result
+    }
+
     /// One page of finished plans, newest first.
     public func planHistory(limit: Int = 50, offset: Int = 0) throws -> [ChangePlan] {
         try db.query("SELECT payload FROM plans WHERE status IN ('completed', 'completedWithErrors') ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -612,6 +631,13 @@ public actor SortlyStore: ChangePlanStoring {
 
     public func value<T: Decodable>(_ type: T.Type, forKey key: String) throws -> T? {
         try decode(T.self, db.query("SELECT payload FROM settings WHERE key = ?", [.text(key)]).first?["payload"])
+    }
+
+    /// A value an earlier version may have stored without the fields added since: those come
+    /// from `defaults` (see `StoredDefaults`). For the user's settings and decisions.
+    public func value<T: Codable>(_ type: T.Type, forKey key: String, defaults: T) throws -> T? {
+        guard let data = try db.query("SELECT payload FROM settings WHERE key = ?", [.text(key)]).first?["payload"]?.data else { return nil }
+        return try StoredDefaults.decode(T.self, from: data, defaults: defaults, encoder: encoder, decoder: decoder)
     }
 
     // MARK: - Reset

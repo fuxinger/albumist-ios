@@ -6711,10 +6711,40 @@
     },
     "%lld Alben passen ähnlich gut. Albumist ergänzt erst, wenn du eines ausgewählt hast." : {
       "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Album passt. Albumist ergänzt erst, wenn du es ausgewählt hast."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Alben passen ähnlich gut. Albumist ergänzt erst, wenn du eines ausgewählt hast."
+                }
+              }
+            }
+          }
+        },
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld albums fit about equally well. Albumist adds nothing until you choose one."
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld album fits. Albumist adds nothing until you choose it."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld albums fit about equally well. Albumist adds nothing until you choose one."
+                }
+              }
+            }
           }
         }
       }
@@ -6751,10 +6781,40 @@
     },
     "Albumist sieht nur die %lld Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff." : {
       "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist sieht nur das %lld Foto, das du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist sieht nur die %lld Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff."
+                }
+              }
+            }
+          }
+        },
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist only sees the %lld photos you shared. To make albums from your whole library, Albumist needs full access."
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist only sees the %lld photo you shared. To make albums from your whole library, Albumist needs full access."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist only sees the %lld photos you shared. To make albums from your whole library, Albumist needs full access."
+                }
+              }
+            }
           }
         }
       }
@@ -7725,6 +7785,426 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "left out"
+          }
+        }
+      }
+    },
+    "Keine Reise, hier bin ich öfter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not a trip, I'm here often"
+          }
+        }
+      }
+    },
+    "Keine Reise?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not a trip?"
+          }
+        }
+      }
+    },
+    "Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stays at this place will no longer be trips, in every new analysis too. Instead Albumist suggests one album for the place. You can take this back in Settings."
+          }
+        }
+      }
+    },
+    "Bist du hier öfter, etwa Zweitwohnsitz, Arbeit oder Familie?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Are you here often, like a second home, work or family?"
+          }
+        }
+      }
+    },
+    "Du warst %lld-mal hier, zuletzt %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You've been here %lld times, most recently %@."
+          }
+        }
+      }
+    },
+    "Ja, hier bin ich öfter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yes, I'm here often"
+          }
+        }
+      }
+    },
+    "Nein, das sind Reisen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No, these are trips"
+          }
+        }
+      }
+    },
+    "Antworten kannst du, sobald die Analyse fertig ist." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can answer once the analysis is done."
+          }
+        }
+      }
+    },
+    "Unbenannter Ort" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unnamed place"
+          }
+        }
+      }
+    },
+    "Wieder als Reisen zeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show as trips again"
+          }
+        }
+      }
+    },
+    "Hier bist du öfter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Places you're often at"
+          }
+        }
+      }
+    },
+    "Aufenthalte an diesen Orten zählt Albumist nicht als Reisen. Jeder Ort bekommt stattdessen ein eigenes Album." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist doesn't count stays at these places as trips. Each place gets its own album instead."
+          }
+        }
+      }
+    },
+    "Wieder als Reisen zeigen?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show as trips again?"
+          }
+        }
+      }
+    },
+    "Als Reisen zeigen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show as trips"
+          }
+        }
+      }
+    },
+    "Aufenthalte an diesem Ort werden wieder als Reisen vorgeschlagen. Schon angelegte Alben bleiben, wie sie sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stays at this place will be suggested as trips again. Albums already created stay as they are."
+          }
+        }
+      }
+    },
+    "Analyse macht Pause" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis paused"
+          }
+        }
+      }
+    },
+    "Öffne Albumist, dann geht sie genau dort weiter, wo sie war." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist and it continues exactly where it left off."
+          }
+        }
+      }
+    },
+    "Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. Bitte prüfe sie in den Einstellungen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your settings could not be read and are back to their defaults. Please check them in Settings."
+          }
+        }
+      }
+    },
+    "Wird angehalten …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausing …"
+          }
+        }
+      }
+    },
+    "Wird neu gezählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recounting"
+          }
+        }
+      }
+    },
+    "Zuletzt %@ von %@ sortiert. Die neue Zahl kommt mit den ersten Vorschlägen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last count: %1$@ of %2$@ sorted. The new number arrives with the first suggestions."
+          }
+        }
+      }
+    },
+    "Wird neu berechnet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Being recalculated"
+          }
+        }
+      }
+    },
+    "%lld Alben" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Album"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Alben"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld album"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld albums"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Deine Fotos bleiben auf deinem Gerät. Nichts wird hochgeladen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your photos stay on your device. Nothing is uploaded."
+          }
+        }
+      }
+    },
+    "Öffne Albumist, um die Vorschläge zu prüfen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist to review the suggestions."
+          }
+        }
+      }
+    },
+    "Analyse pausiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis paused"
+          }
+        }
+      }
+    },
+    "Öffne Albumist, um sie fortzusetzen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist to continue it."
+          }
+        }
+      }
+    },
+    "Analyse wartet auf dich" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis is waiting for you"
+          }
+        }
+      }
+    },
+    "Öffne Albumist, dann geht es genau dort weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist and it goes on right where it stopped."
+          }
+        }
+      }
+    },
+    "Wartet aufs Laden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for charging"
+          }
+        }
+      }
+    },
+    "Wartet, bis dein iPhone abkühlt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for your iPhone to cool down"
+          }
+        }
+      }
+    },
+    "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only photos that fit your main areas are counted: %@."
+          }
+        }
+      }
+    },
+    "Erst das unterbrochene Umsetzen abschließen: in der Übersicht mit Fortsetzen, Rückgängig machen oder So lassen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "First finish the interrupted run: on the overview, with Resume, Undo or Leave as Is."
+          }
+        }
+      }
+    },
+    "Nicht alles ließ sich zurücknehmen. Das unterbrochene Umsetzen steht jetzt unter Einstellungen › Verlauf. Dort kannst du den Rest zurücknehmen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not everything could be taken back. The interrupted run is now in Settings › History, where you can take back the rest."
+          }
+        }
+      }
+    },
+    "Erst das unterbrochene Umsetzen abschließen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish the interrupted run first"
+          }
+        }
+      }
+    },
+    "Ein früheres Umsetzen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht: Fortsetzen, Rückgängig machen oder So lassen. Danach kannst du diese Änderungen umsetzen, und nichts wird doppelt angelegt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An earlier run was interrupted. Decide on the overview how to go on: Resume, Undo or Leave as Is. Then you can apply these changes, and nothing is created twice."
+          }
+        }
+      }
+    },
+    "Kein Zugriff auf deine Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No access to your photos"
+          }
+        }
+      }
+    },
+    "Albumist darf deine Fotos gerade nicht lesen. Sobald du den Zugriff wieder erlaubst, geht es dort weiter, wo du warst. Deine Auswahl und deine Alben bleiben, wie sie sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist can’t read your photos right now. As soon as you allow access again, it continues where you left off. Your choices and your albums stay as they are."
+          }
+        }
+      }
+    },
+    "Dazu %lld teilweise sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plus %lld partly sorted"
           }
         }
       }

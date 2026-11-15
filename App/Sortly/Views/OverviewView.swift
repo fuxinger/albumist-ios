@@ -90,21 +90,45 @@ struct OverviewView: View {
             : AnyLayout(HStackLayout(spacing: Theme.Spacing.l))
         return Card {
             layout {
-                ProgressRing(fraction: model.progress.fullyShare)
-                    .frame(width: min(ringSide, 150), height: min(ringSide, 150))
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("\(model.progress.fully.formatted()) von \(model.progress.total.formatted()) sortiert")
-                        .font(.headline)
-                        .monospacedDigit()
-                    Text(primaryAreasText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if model.interruptedPlan != nil {
-                        // The unfinished run counts only once the user has decided above
-                        // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
-                        Text("Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.")
+                if let recount = model.recount {
+                    // Rebuilding: no false 0 %, the last count marked as being recounted.
+                    ProgressView()
+                        .controlSize(.large)
+                        .frame(width: min(ringSide, 150), height: min(ringSide, 150))
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("Wird neu gezählt")
+                            .font(.headline)
+                        Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt mit den ersten Vorschlägen.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
+                } else {
+                    ProgressRing(fraction: model.progress.fullyShare)
+                        .frame(width: min(ringSide, 150), height: min(ringSide, 150))
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("\(model.progress.fully.formatted()) von \(model.progress.total.formatted()) sortiert")
+                            .font(.headline)
+                            .monospacedDigit()
+                        if model.progress.partially > 0 {
+                            // Photos already in a matching album for one main area but not yet for the
+                            // other count as partly sorted; without this line the ring looked too low
+                            // (device test 15.11.: 157 sorted, 1,199 partly).
+                            Text("Dazu \(model.progress.partially) teilweise sortiert")
+                                .font(.subheadline)
+                                .monospacedDigit()
+                        }
+                        Text(primaryAreasText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if model.interruptedPlan != nil {
+                            // The unfinished run counts only once the user has decided above
+                            // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
+                            Text("Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -116,7 +140,9 @@ struct OverviewView: View {
         let open = Locale.current.quotationBeginDelimiter ?? "\"", close = Locale.current.quotationEndDelimiter ?? "\""
         let names = OrganizationArea.available.filter { model.settings.primaryAreas.contains($0) }
             .map { open + String(localized: $0.titleResource) + close }
-        return String(localized: "Gezählt werden deine Hauptbereiche: \(names.formatted(.list(type: .and))).")
+        // Only photos the main areas apply to count, so the total is smaller than the library
+        // (device test 15.11.: "141 von 5.737 sortiert" next to "14.351 von 14.352 Fotos analysiert").
+        return String(localized: "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: \(names.formatted(.list(type: .and))).")
     }
 
     @ViewBuilder
@@ -153,6 +179,20 @@ struct OverviewView: View {
         return analysis.stage?.label ?? "Analyse läuft"
     }
 
+    /// Pause, or right after the tap what happens now: the photos in work are finished first.
+    @ViewBuilder
+    private var pauseControl: some View {
+        if model.analysis.pausing {
+            HStack(spacing: Theme.Spacing.xs) {
+                ProgressView().controlSize(.small)
+                Text("Wird angehalten …").font(.subheadline).foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
+        }
+    }
+
     @ViewBuilder
     private var runningAnalysis: some View {
         let analysis = model.analysis
@@ -161,14 +201,17 @@ struct OverviewView: View {
                 Text(runningTitle).font(.headline)
                 if isQuickCheck { ProgressView().controlSize(.small) }
                 Spacer()
-                Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
+                pauseControl
             }
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(runningTitle).font(.headline)
-                Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
+                pauseControl
             }
         }
-        if model.history.isEmpty && model.managedAlbums.isEmpty {
+        // Every full analysis (the first one, after "Analyse neu aufbauen" or another part of
+        // the library), not the short check for new photos (Fuchs 15.11.: "wo sind die
+        // Animationen?" after a rebuild with albums already made).
+        if model.analysis.kind != .check {
             ScanShow()
         }
         if !isQuickCheck {
@@ -313,7 +356,9 @@ struct OverviewView: View {
         let text = VStack(alignment: .leading, spacing: 2) {
             Text(area.title).font(.body.weight(.medium))
             Group {
-                if proposals.isEmpty {
+                if proposals.isEmpty, model.recount != nil {
+                    Text("Wird neu berechnet")
+                } else if proposals.isEmpty {
                     Text("Noch keine Vorschläge")
                 } else {
                     Text(summary)
@@ -497,7 +542,7 @@ struct StarterSetCard: View {
                 Text(ListFormatter.localizedString(byJoining: set.prefix(3).map { model.userTitles[$0.id] ?? $0.title })
                      + (set.count > 3 ? " …" : ""))
                     .font(.footnote).foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .compactLineLimit(2)
                 Button {
                     onStart(set)
                 } label: {

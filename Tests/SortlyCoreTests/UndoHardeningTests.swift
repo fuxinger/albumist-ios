@@ -226,4 +226,400 @@ struct UndoHardeningTests {
         #expect(result.steps[0].state == .failed(reason: "parent folder no longer exists"))
         #expect(try await library.currentInventory()["garten"]?.parentID == "start")
     }
+
+    // MARK: Interruption at every write (C3)
+
+    /// Trips when the library "crashes" (the write `setFailAfterWrites` chose): from then on
+    /// the app is gone, so nothing more reaches the journal.
+    final class KillSwitch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        var tripped: Bool { lock.withLock { value } }
+        func trip() { lock.withLock { value = true } }
+    }
+
+    struct KillableLibrary: PhotoLibraryWriting {
+        let inner: InMemoryPhotoLibrary
+        let kill: KillSwitch
+        private func write<T>(_ call: () async throws -> T) async throws -> T {
+            do { return try await call() } catch let crash as InMemoryPhotoLibrary.SimulatedCrash { kill.trip(); throw crash }
+        }
+        func canWrite() async -> Bool { await inner.canWrite() }
+        func currentInventory() async throws -> CollectionInventory { try await inner.currentInventory() }
+        func availableAssets(_ ids: [AssetID]) async throws -> Set<AssetID> { try await inner.availableAssets(ids) }
+        func collection(_ id: CollectionID) async throws -> CollectionSnapshot? { try await inner.collection(id) }
+        func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID { try await write { try await inner.createFolder(title: title, parent: parent) } }
+        func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID { try await write { try await inner.createAlbum(title: title, parent: parent) } }
+        func addAssets(_ assets: [AssetID], to album: CollectionID) async throws { try await write { try await inner.addAssets(assets, to: album) } }
+        func removeAssets(_ assets: [AssetID], from album: CollectionID) async throws { try await write { try await inner.removeAssets(assets, from: album) } }
+        func renameCollection(_ id: CollectionID, to title: String) async throws { try await write { try await inner.renameCollection(id, to: title) } }
+        func moveCollection(_ id: CollectionID, from oldParent: CollectionID?, to newParent: CollectionID?) async throws {
+            try await write { try await inner.moveCollection(id, from: oldParent, to: newParent) }
+        }
+        func deleteCollection(_ id: CollectionID) async throws { try await write { try await inner.deleteCollection(id) } }
+        func deleteCollections(_ ids: [CollectionID]) async throws { try await write { try await inner.deleteCollections(ids) } }
+    }
+
+    /// The user's library before the plan: an own album with own photos and an own folder.
+    static let ownPhotos = ids("a", 250..<255)
+    func representativeLibrary() -> InMemoryPhotoLibrary {
+        InMemoryPhotoLibrary(assets: allAssets, collections: [
+            CollectionSnapshot(id: "sommer", title: "Sommer", assetIDs: Self.ownPhotos),
+            CollectionSnapshot(id: "familie", title: "Familie", kind: .folder),
+        ])
+    }
+
+    /// New albums in new and existing folders, one filled in two parts, an own album renamed
+    /// and extended.
+    func representativePlan(_ inventory: CollectionInventory) -> ChangePlan {
+        confirmed(planner.makePlan(from: [
+            newAlbum("r", "Rom", ["Reisen"], ids("a", 0..<60)),
+            newAlbum("p", "Paris", ["Reisen"], ids("a", 60..<70)),
+            ConfirmedProposal(proposal: AlbumProposal(id: SortlyID("s"), kind: .trip, title: "Sommer", folderPath: [], assetIDs: ids("a", 100..<110)),
+                              decision: .renameExisting("sommer", newTitle: "Sommer 2024", extend: true)),
+        ], inventory: inventory))
+    }
+
+    /// What may be in the library after a resumed run: never a second album or folder of the
+    /// same name in one place, no photo in an album it was not planned for, the user's own
+    /// photos untouched, media unchanged. Steps that did not finish say why; the only reason
+    /// allowed is the deliberate "not added again by itself".
+    func expectSane(_ plan: ChangePlan, _ library: InMemoryPhotoLibrary, case label: String) async throws {
+        let inv = try await library.currentInventory()
+        var seen = Set<String>()
+        for c in inv.collections.values {
+            let first = seen.insert("\(c.parentID?.rawValue ?? "-")/\(c.kind == .folder)/\(c.title)").inserted
+            #expect(first, "duplicate \(c.title) (\(label))")
+        }
+        let planned: [String: Set<AssetID>] = ["Rom": ids("a", 0..<60), "Paris": ids("a", 60..<70)]
+        for title in planned.keys {
+            #expect(inv.albums.filter { $0.title == title }.count == 1, "\(title) (\(label))")
+        }
+        for album in inv.albums where album.id != "sommer" {
+            #expect(album.assetIDs.isSubset(of: planned[album.title] ?? []), "\(album.title) (\(label))")
+        }
+        let sommer = try #require(inv["sommer"])
+        #expect(sommer.assetIDs.isSuperset(of: Self.ownPhotos), "\(label)")
+        #expect(sommer.assetIDs.isSubset(of: Self.ownPhotos.union(ids("a", 100..<110))), "\(label)")
+        #expect(inv["familie"] != nil, "\(label)")
+        #expect(await library.assets == allAssets)
+        for step in plan.steps {
+            switch step.state {
+            case .succeeded: break
+            case .failed(let reason): #expect(reason == StepState.unclearReason, "\(reason) (\(label))")
+            default: Issue.record("step left \(step.state) (\(label))")
+            }
+        }
+    }
+
+    /// After an undo: the user's album is back to its name and holds its own photos (plus,
+    /// by design, photos Albumist could not prove it added); everything else Albumist made
+    /// is gone, except albums it only found after an interruption (never deleted: it cannot
+    /// prove it made them), which are empty, and the folders holding them.
+    func expectUndone(_ executed: ChangePlan, _ undone: ChangePlan, _ library: InMemoryPhotoLibrary, case label: String) async throws {
+        #expect(undone.status == .completed, "\(label): \(undone.steps.map(\.state))")
+        let inv = try await library.currentInventory()
+        let adopted = Set((executed.record?.adoptedKeys ?? []).compactMap { executed.resolvedKeys[$0] })
+        for c in inv.collections.values where c.id != "sommer" && c.id != "familie" {
+            let holdsAdopted = inv.collections.values.contains { adopted.contains($0.id) && inv.path(of: $0.id).contains(c.title) }
+            #expect(adopted.contains(c.id) || holdsAdopted, "\(c.title) left behind (\(label))")
+            #expect(c.assetIDs.isEmpty, "\(c.title) still holds photos (\(label))")
+        }
+        let sommer = try #require(inv["sommer"])
+        #expect(sommer.title == "Sommer", "\(label)")
+        // Albumist's photos leave the user's album unless an interruption left it unprovable
+        // whether Albumist or the user put them there (audit 2, 1.1).
+        let unprovable = executed.steps.contains { step in
+            guard case .addAssets(.existing("sommer"), _) = step.operation else { return false }
+            return executed.record?.unverified.contains(step.id) == true
+        }
+        if unprovable {
+            #expect(sommer.assetIDs.isSuperset(of: Self.ownPhotos), "\(label)")
+        } else {
+            #expect(sommer.assetIDs == Self.ownPhotos, "\(label)")
+        }
+        #expect(await library.assets == allAssets)
+    }
+
+    @Test(arguments: [false, true])
+    func interruptionAtEveryWriteResumesAndUndoesCleanly(afterApplying: Bool) async throws {
+        // How many writes a clean run makes.
+        let probe = representativeLibrary()
+        _ = try await ChangeExecutor(library: probe, store: InMemoryPlanStore()).execute(representativePlan(try await probe.currentInventory()))
+        let writes = await probe.writeCount
+        #expect(writes >= 8)
+
+        for k in 0..<writes {
+            for resume in [true, false] {
+                let label = "write \(k), \(afterApplying ? "after" : "before") applying, \(resume ? "resume" : "undo")"
+                let library = representativeLibrary()
+                let kill = KillSwitch()
+                let plan = representativePlan(try await library.currentInventory())
+                await library.setFailAfterWrites(k, afterApplying: afterApplying)
+                let store = EndingPlanStore { _ in kill.tripped }
+                _ = try? await ChangeExecutor(library: KillableLibrary(inner: library, kill: kill), store: store).execute(plan)
+                #expect(kill.tripped, "\(label)")
+                let interrupted = try #require(await store.saved.last)
+                await library.setFailAfterWrites(nil)
+                let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
+
+                if resume {
+                    let resumed = try await executor.execute(interrupted)
+                    try await expectSane(resumed, library, case: label)
+                    let undo = confirmed(UndoPlanner().undoPlan(for: resumed, current: try await library.currentInventory()))
+                    try await expectUndone(resumed, try await executor.execute(undo), library, case: label)
+                } else {
+                    let settled = try await executor.reconcileInterrupted(interrupted)
+                    let undo = confirmed(UndoPlanner().undoPlan(for: settled, current: try await library.currentInventory()))
+                    try await expectUndone(settled, try await executor.execute(undo), library, case: label)
+                }
+            }
+        }
+    }
+
+    /// The undo itself is cut off at each of its writes, then resumed: the result is the same
+    /// as an undo that ran through.
+    @Test(arguments: [false, true])
+    func undoInterruptedAtEveryWriteFinishesCleanly(afterApplying: Bool) async throws {
+        let probe = representativeLibrary()
+        let probed = try await ChangeExecutor(library: probe, store: InMemoryPlanStore()).execute(representativePlan(try await probe.currentInventory()))
+        await probe.setFailAfterWrites(nil)
+        _ = try await ChangeExecutor(library: probe, store: InMemoryPlanStore())
+            .execute(confirmed(UndoPlanner().undoPlan(for: probed, current: try await probe.currentInventory())))
+        let writes = await probe.writeCount
+        #expect(writes >= 3)
+
+        for k in 0..<writes {
+            let label = "undo write \(k), \(afterApplying ? "after" : "before") applying"
+            let library = representativeLibrary()
+            let executed = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(representativePlan(try await library.currentInventory()))
+            #expect(executed.status == .completed)
+            let undo = confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory()))
+            let kill = KillSwitch()
+            await library.setFailAfterWrites(k, afterApplying: afterApplying)
+            let store = EndingPlanStore { _ in kill.tripped }
+            _ = try? await ChangeExecutor(library: KillableLibrary(inner: library, kill: kill), store: store).execute(undo)
+            #expect(kill.tripped, "\(label)")
+            let interrupted = try #require(await store.saved.last)
+            await library.setFailAfterWrites(nil)
+            let finished = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(interrupted)
+            try await expectUndone(executed, finished, library, case: label)
+            let inv = try await library.currentInventory()
+            #expect(inv["sommer"]?.assetIDs == Self.ownPhotos, "\(label)")
+            #expect(inv.collections.count == 2, "\(label)")
+        }
+    }
+
+    // MARK: Undo twice (C7)
+
+    /// Taking back a plan that is already taken back finds nothing to do and changes nothing,
+    /// also not the user's own albums.
+    @Test func undoOfAnAlreadyUndonePlanChangesNothing() async throws {
+        let library = representativeLibrary()
+        let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
+        let executed = try await executor.execute(representativePlan(try await library.currentInventory()))
+        _ = try await executor.execute(confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory())))
+        let afterFirst = try await library.currentInventory()
+        #expect(afterFirst.collections.count == 2)
+
+        let second = UndoPlanner().undoPlan(for: executed, current: afterFirst)
+        #expect(second.steps.isEmpty)
+        let ran = try await executor.execute(confirmed(second))
+        #expect(ran.status == .completed)
+        #expect(try await library.currentInventory() == afterFirst)
+        #expect(await library.deleteRequests == 1)
+    }
+
+    /// The first undo is declined in the iOS question after Albumist's photos left the user's
+    /// album; "Rest rückgängig machen" removes exactly the rest, and a third undo has nothing
+    /// left to do.
+    @Test func partialUndoThenTheRestThenNothing() async throws {
+        let library = representativeLibrary()
+        let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
+        let executed = try await executor.execute(representativePlan(try await library.currentInventory()))
+        await library.setDeletionBehavior(.declined, times: 1)
+        let first = try await executor.execute(confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory())))
+        #expect(first.status == .completedWithErrors)
+        #expect(try await library.currentInventory()["sommer"]?.assetIDs == Self.ownPhotos)
+        #expect(try await library.currentInventory()["sommer"]?.title == "Sommer")
+
+        let rest = UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory())
+        #expect(rest.steps.allSatisfy { if case .deleteCollection = $0.operation { true } else { false } })
+        let second = try await executor.execute(confirmed(rest))
+        try await expectUndone(executed, second, library, case: "rest")
+        #expect(try await library.currentInventory().collections.count == 2)
+        #expect(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory()).steps.isEmpty)
+    }
+
+    // MARK: Plans stored by older versions (C8)
+
+    /// A plan saved before the execution journal existed (no record, no delete guards, no
+    /// finalization time) and one with an early journal (media only): both load, and undo
+    /// removes exactly what Albumist made, keeping the user's own photos.
+    @Test(arguments: [["record", "deleteGuards", "finalizedAt", "retries", "albumsFromRetriedPlan"],
+                      ["record.unverified", "record.adoptedKeys", "record.deletedAlbums", "record.unavailable", "record.names", "finalizedAt"]])
+    func undoOfAPlanStoredByAnOlderVersion(dropping keys: [String]) async throws {
+        let library = representativeLibrary()
+        let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
+        var executed = try await executor.execute(representativePlan(try await library.currentInventory()))
+        executed.finalizedAt = Date()
+        // Encoded the way the store does it, then written back in the older shape.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        var json = try #require(try JSONSerialization.jsonObject(with: encoder.encode(executed)) as? [String: Any])
+        for key in keys {
+            let parts = key.split(separator: ".").map(String.init)
+            if parts.count == 2, var record = json[parts[0]] as? [String: Any] {
+                record[parts[1]] = nil
+                json[parts[0]] = record
+            } else {
+                json[key] = nil
+            }
+        }
+        let old = try JSONDecoder().decode(ChangePlan.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(old.steps == executed.steps)
+
+        // The user put an own photo into "Paris" since.
+        let paris = try #require(try await library.currentInventory().albums.first { $0.title == "Paris" }?.id)
+        await library.userEdit { inv in
+            var album = inv[paris]!
+            album.assetIDs.insert("a-299")
+            inv.upsert(album)
+        }
+        let undo = confirmed(UndoPlanner().undoPlan(for: old, current: try await library.currentInventory()))
+        let undone = try await executor.execute(undo)
+        #expect(undone.status == .completed)
+        let inv = try await library.currentInventory()
+        #expect(inv["sommer"]?.title == "Sommer")
+        #expect(inv["sommer"]?.assetIDs == Self.ownPhotos)
+        #expect(inv.albums.first { $0.title == "Rom" } == nil)
+        #expect(inv[paris]?.assetIDs == ["a-299"]) // the user's photo and its album stay
+        #expect(inv["familie"] != nil)
+        #expect(await library.assets == allAssets)
+    }
+
+    // MARK: Large plan (C2)
+
+    /// Keeps only the newest version (the app's store writes changed steps only).
+    actor LatestPlanStore: ChangePlanStoring {
+        private(set) var saves = 0
+        private(set) var latest: ChangePlan?
+        func save(_ plan: ChangePlan) async throws {
+            saves += 1
+            latest = plan
+        }
+    }
+
+    /// 300 albums in 12 folders with 20,100 photos: it runs through, verifies, and undo takes
+    /// it all back with a single question from Photos, both in reasonable time.
+    @Test func threeHundredAlbumsWithTwentyThousandPhotosRunAndUndo() async throws {
+        let assets = ids("big", 0..<20_100)
+        let library = InMemoryPhotoLibrary(assets: assets)
+        let items = (0..<300).map { n in
+            newAlbum("big\(n)", "Album \(n)", ["Reisen", "Jahr \(n % 12)"], ids("big", (n * 67)..<(n * 67 + 67)))
+        }
+        let plan = confirmed(OrganizationPlanner(rootFolderTitle: "Albumist").makePlan(from: items, inventory: try await library.currentInventory()))
+        #expect(plan.summary.newAlbums == 300)
+        #expect(plan.summary.distinctAssets == 20_100)
+        let store = LatestPlanStore()
+        let executor = ChangeExecutor(library: library, store: store)
+        let clock = ContinuousClock()
+
+        var executed: ChangePlan?
+        let runTime = try await clock.measure { executed = try await executor.execute(plan) }
+        let result = try #require(executed)
+        #expect(result.status == .completed)
+        #expect(try await library.currentInventory().albums.count == 300)
+        #expect(result.appliedSummary.distinctAssets == 20_100)
+
+        var undone: ChangePlan?
+        let undo = confirmed(UndoPlanner().undoPlan(for: result, current: try await library.currentInventory()))
+        let undoTime = try await clock.measure { undone = try await executor.execute(undo) }
+        #expect(undone?.status == .completed)
+        #expect(try await library.currentInventory().collections.isEmpty)
+        #expect(await library.deleteRequests == 1)
+        #expect(await library.assets == assets)
+        // Generous bounds for a debug build on a slow machine: they catch work that grows
+        // with the square of the plan, not ordinary speed.
+        #expect(runTime < .seconds(60), "run took \(runTime)")
+        #expect(undoTime < .seconds(60), "undo took \(undoTime)")
+    }
+
+    // MARK: Removing one of Albumist's albums, and taking that back (C9)
+
+    /// "Album entfernen" in Albumist's album list deletes an album Albumist made; taking that
+    /// removal back brings the album back (as a new album, Photos cannot restore the old one)
+    /// in its folder with the same photos. In an album the user extended, only Albumist's
+    /// photos leave, and they come back.
+    @Test func removingAManagedAlbumAndTakingItBack() async throws {
+        let library = representativeLibrary()
+        let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
+        let executed = try await executor.execute(representativePlan(try await library.currentInventory()))
+        let tracker = ManagedAlbumTracker()
+        let states = tracker.record(executed, into: [], inventory: try await library.currentInventory())
+        let rom = try #require(states.first { $0.lastKnownTitle == "Rom" })
+        let romFolder = try await library.currentInventory()[rom.albumID]?.parentID
+        let sommer = try #require(states.first { $0.albumID == "sommer" })
+
+        var removals: [ChangePlan] = []
+        for state in [rom, sommer] {
+            let removal = confirmed(tracker.removalPlan(for: state, current: try await library.currentInventory()))
+            let removed = try await executor.execute(removal)
+            #expect(removed.status == .completed)
+            removals.append(removed)
+        }
+        var inv = try await library.currentInventory()
+        #expect(inv[rom.albumID] == nil)
+        #expect(inv["sommer"]?.assetIDs == Self.ownPhotos)
+        #expect(await library.deleteRequests == 1)
+
+        // Both removals taken back, newest first.
+        for removed in removals.reversed() {
+            let undo = confirmed(UndoPlanner().undoPlan(for: removed, current: try await library.currentInventory()))
+            let undone = try await executor.execute(undo)
+            #expect(undone.status == .completed)
+        }
+        inv = try await library.currentInventory()
+        let back = try #require(inv.albums.first { $0.title == "Rom" })
+        #expect(back.id != rom.albumID)
+        #expect(back.parentID == romFolder)
+        #expect(back.assetIDs == ids("a", 0..<60))
+        #expect(inv["sommer"]?.assetIDs == Self.ownPhotos.union(ids("a", 100..<110)))
+        #expect(inv.albums.filter { $0.title == "Rom" }.count == 1)
+        #expect(await library.assets == allAssets)
+    }
+
+    // MARK: An interrupted undo is not the user's doing
+
+    /// The undo deleted an album and then the app ended. Until that undo is settled, the
+    /// album list check must not take the missing album for one the user deleted (which would
+    /// stop its suggestion from ever coming back).
+    @Test func interruptedUndoIsNotTakenForTheUsersDeletion() async throws {
+        let library = representativeLibrary()
+        let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
+        let executed = try await executor.execute(representativePlan(try await library.currentInventory()))
+        let tracker = ManagedAlbumTracker()
+        let states = tracker.record(executed, into: [], inventory: try await library.currentInventory())
+        let undo = confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory()))
+        // The app ends right after Photos deleted the albums, before the steps were marked.
+        let store = EndingPlanStore { plan in plan.steps.contains { if case .succeeded = $0.state, case .deleteCollection = $0.operation { true } else { false } } }
+        _ = try? await ChangeExecutor(library: library, store: store).execute(undo)
+        let interrupted = try #require(await store.saved.last)
+        let now = try await library.currentInventory()
+        #expect(!now.albums.contains { $0.title == "Rom" })
+
+        let naive = tracker.reconcile(states, with: now)
+        #expect(naive.newOverrides.contains { $0.decision == .doNotRecreateAlbum })
+        let careful = tracker.reconcile(states, with: now, changing: interrupted.touchedCollections)
+        #expect(careful.changes.isEmpty)
+        #expect(careful.newOverrides.isEmpty)
+        #expect(careful.updatedStates == states)
+
+        // "So lassen": what the undo did is settled and recorded; nothing is left of Rom.
+        var settled = try await executor.reconcileInterrupted(interrupted)
+        for i in settled.steps.indices where !settled.steps[i].state.isFinished { settled.steps[i].state = .skipped(reason: StepState.leftByUserReason) }
+        let recorded = tracker.record(settled, into: careful.updatedStates, inventory: now)
+        #expect(!recorded.contains { $0.lastKnownTitle == "Rom" })
+        #expect(tracker.reconcile(recorded, with: now).newOverrides.isEmpty)
+    }
 }

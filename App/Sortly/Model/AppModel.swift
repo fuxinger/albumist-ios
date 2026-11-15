@@ -1092,6 +1092,9 @@ final class AppModel {
         if confirmed.confirmedAt == nil { confirmed.confirmedAt = Date() }
         let planID = confirmed.id
         execution = ExecutionState(isRunning: true, planID: planID, completedSteps: 0, totalSteps: plan.steps.count)
+        // No auto-lock in the middle of a plan, and a little time to finish a step if the
+        // user switches away (see `ExecutionGuard`).
+        let keepAwake = ExecutionGuard()
         let executor = ChangeExecutor(library: library, store: store)
         do {
             // Remembered before anything runs: if the app is closed after the plan finished
@@ -1113,11 +1116,22 @@ final class AppModel {
                 await finalize(result)
             }
         } catch {
-            execution.failure = error.localizedDescription
+            execution.failure = failureText(error)
         }
+        keepAwake.end()
         execution.isRunning = false
         self.plan = nil
         startAnalysis()
+    }
+
+    /// What the user reads when a plan could not run: a plan stopped by a change in Photos
+    /// (an album changed since the preview, access reduced) says which, in the words of the
+    /// review screen, instead of "SortlyCore.ChangeExecutor.ExecutionError error 1".
+    private func failureText(_ error: any Error) -> String {
+        if let stopped = error as? ChangeExecutor.ExecutionError, case .blocked(let conflicts) = stopped, !conflicts.isEmpty {
+            return conflicts.prefix(3).map { ConflictText.text($0, inventory: inventory) }.joined(separator: "\n")
+        }
+        return error.localizedDescription
     }
 
     /// Everything that follows a finished plan, stored in one transaction: Albumist's albums,
@@ -1261,14 +1275,19 @@ final class AppModel {
                 return current
             }
             let tracker = ManagedAlbumTracker()
-            var result = tracker.reconcile(stored, with: current)
+            // Albums an interrupted plan (or undo) is still changing are compared once it is
+            // settled: what its own steps did is not the user's decision. The plan offered to
+            // continue or take back, read from the store (at launch this runs before
+            // `interruptedPlan` is loaded).
+            let changing = try await store.unfinishedPlans().last?.touchedCollections ?? []
+            var result = tracker.reconcile(stored, with: current, changing: changing)
             // An empty album list is a valid answer (the user deleted the last album). Only when
             // every remembered album seems gone at once, a second read has to confirm it, and
             // that read is then the one everything works with.
             if result.updatedStates.isEmpty {
                 try? await Task.sleep(for: .milliseconds(300))
                 current = try await library.currentInventory()
-                result = tracker.reconcile(stored, with: current)
+                result = tracker.reconcile(stored, with: current, changing: changing)
             }
             if !result.changes.isEmpty {
                 // Overrides and the new last-known state in one transaction: a manual change
@@ -1319,6 +1338,15 @@ final class AppModel {
     /// interruption left open are first checked against the library (an album created or
     /// photos added right before the app was closed are taken back too).
     func undoInterruptedPlan() async {
+        // An interrupted undo cannot itself be taken back: Photos cannot bring deleted albums
+        // back, and undo plans put no photos back. What it already did is kept and recorded
+        // instead (as with "So lassen"), so the receipt offers "Rest rückgängig machen".
+        // Before, it was cancelled unrecorded, and the next check took the albums it had
+        // deleted for albums the user deleted, so their suggestions never came back.
+        if interruptedPlan?.reverts != nil {
+            await keepInterruptedPlanAsIs()
+            return
+        }
         guard let store, let interrupted = interruptedPlan, claimExecution() else { return }
         defer { releaseExecution() }
         do {

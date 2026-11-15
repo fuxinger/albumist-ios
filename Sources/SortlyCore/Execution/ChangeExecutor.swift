@@ -655,6 +655,23 @@ extension ChangePlan {
         return result
     }
 
+    /// Albums and folders this plan changes or may already have changed: existing ones its
+    /// steps name and the ones it created. While the plan is unfinished, a difference in them
+    /// may be Albumist's own doing (see `ManagedAlbumTracker.reconcile`).
+    public var touchedCollections: Set<CollectionID> {
+        var result = Set(resolvedKeys.values)
+        for step in steps {
+            switch step.operation {
+            case .addAssets(.existing(let id), _), .removeAssets(let id, _), .renameCollection(let id, _, _),
+                 .moveCollection(let id, _, _), .deleteCollection(let id, _):
+                result.insert(id)
+            default:
+                break
+            }
+        }
+        return result
+    }
+
     /// Suggestions whose album a plan took photos out of or deleted (a removal from the list
     /// of Albumist's albums). Taking such a plan back lets these suggestions return.
     public var removalSources: Set<SortlyID> {

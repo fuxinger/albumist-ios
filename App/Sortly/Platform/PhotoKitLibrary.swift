@@ -1,5 +1,6 @@
 import Foundation
 import Photos
+import UIKit
 import UniformTypeIdentifiers
 import SortlyCore
 
@@ -177,14 +178,14 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         let parentID = parent?.rawValue
         try Self.requireFolder(parentID)
         try await PHPhotoLibrary.shared().performChanges {
+            // Into its folder or not at all (see `parentRequest`).
+            guard let folder = Self.parentRequest(parentID) else { return }
             let request = PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: title)
             let placeholder = request.placeholderForCreatedCollectionList
             created.value = placeholder.localIdentifier
-            if let parentID, let parentList = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [parentID], options: nil).firstObject {
-                PHCollectionListChangeRequest(for: parentList)?.addChildCollections([placeholder] as NSArray)
-            }
+            folder?.addChildCollections([placeholder] as NSArray)
         }
-        guard let id = created.value else { throw PhotoKitError.changeFailed("folder") }
+        guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("folder") }
         return CollectionID(id)
     }
 
@@ -193,15 +194,28 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         let parentID = parent?.rawValue
         try Self.requireFolder(parentID)
         try await PHPhotoLibrary.shared().performChanges {
+            // Into its folder or not at all (see `parentRequest`).
+            guard let folder = Self.parentRequest(parentID) else { return }
             let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: title)
             let placeholder = request.placeholderForCreatedAssetCollection
             created.value = placeholder.localIdentifier
-            if let parentID, let parentList = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [parentID], options: nil).firstObject {
-                PHCollectionListChangeRequest(for: parentList)?.addChildCollections([placeholder] as NSArray)
-            }
+            folder?.addChildCollections([placeholder] as NSArray)
         }
-        guard let id = created.value else { throw PhotoKitError.changeFailed("album") }
+        guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("album") }
         return CollectionID(id)
+    }
+
+    /// Inside a change block: the request that puts something into folder `id`. `.some(nil)`
+    /// for the top level; `nil` when the folder is gone or cannot take it. The folder is
+    /// checked before the change block too, but it can go in between (deleted on another
+    /// device); creating or moving anyway would put the album at the top of the library
+    /// instead of in its folder, without an error. So the caller then changes nothing and
+    /// reports the folder as missing.
+    private static func parentRequest(_ id: String?) -> PHCollectionListChangeRequest?? {
+        guard let id else { return .some(nil) }
+        guard let list = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [id], options: nil).firstObject,
+              let request = PHCollectionListChangeRequest(for: list) else { return nil }
+        return .some(request)
     }
 
     func addAssets(_ assets: [AssetID], to album: CollectionID) async throws {
@@ -239,21 +253,25 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         }
     }
 
+    /// `oldParent` is the folder the album is in now (the executor reads it right before).
     func moveCollection(_ id: CollectionID, from oldParent: CollectionID?, to newParent: CollectionID?) async throws {
         let raw = id.rawValue
         let oldRaw = oldParent?.rawValue
         let newRaw = newParent?.rawValue
+        let moved = LockedBox(false)
         try await PHPhotoLibrary.shared().performChanges {
             let collection: PHCollection? = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [raw], options: nil).firstObject
                 ?? PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject
-            guard let collection else { return }
+            // The target first: if it is gone, the album is not taken out of its folder at all
+            // (it would end up at the top of the library).
+            guard let collection, let target = Self.parentRequest(newRaw) else { return }
             if let oldRaw, let old = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [oldRaw], options: nil).firstObject {
                 PHCollectionListChangeRequest(for: old)?.removeChildCollections([collection] as NSArray)
             }
-            if let newRaw, let new = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [newRaw], options: nil).firstObject {
-                PHCollectionListChangeRequest(for: new)?.addChildCollections([collection] as NSArray)
-            }
+            target?.addChildCollections([collection] as NSArray)
+            moved.value = true
         }
+        guard moved.value else { throw PhotoKitError.collectionNotFound(newRaw ?? raw) }
     }
 
     /// One request for everything: Photos asks the user once ("Delete 37 albums?") instead of
@@ -261,30 +279,40 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// contents with it); this is checked here again, not only in the executor.
     ///
     /// First iPhone test (15.11.): undo ran, iOS never asked, nothing was deleted and Photos
-    /// reported no error. So the result is read back. What is still there is asked for once
-    /// more after a short pause (iOS then shows its question); if it still stays,
-    /// `.notApplied` is thrown instead of returning as if it had worked. "Don't Allow"
-    /// becomes `.declinedByUser`. The last outcome goes into the diagnostic report.
+    /// reported no error. So nothing here is taken on trust:
+    /// - albums and folders are found by walking the folder tree, the way `currentInventory`
+    ///   (and so the executor) sees them, not by lookups by identifier (the earlier code mixed
+    ///   album and folder identifiers in one lookup and returned silently when it found
+    ///   nothing), and the request carries those objects themselves;
+    /// - the request waits until Albumist is on screen: iOS shows its question only then;
+    /// - the result is read back the same way. What is still there is asked for once more
+    ///   only if Photos answered faster than anyone can read and answer its question (so the
+    ///   user saw none); after a real answer a second question would surprise them. Still
+    ///   there afterwards: `.notApplied`, never a silent return. "Don't Allow" becomes
+    ///   `.declinedByUser`.
+    /// The last outcome, with how long Photos took, goes into the diagnostic report.
     func deleteCollections(_ ids: [CollectionID]) async throws {
         var log = DeletionLog.Entry(requested: ids.count)
         defer { DeletionLog.record(log) }
-        var (albumRaws, listRaws) = Self.deletable(ids.map(\.rawValue), log: &log)
-        guard !albumRaws.isEmpty || !listRaws.isEmpty else {
+        var target = Self.deletable(ids.map(\.rawValue), in: CollectionTree(), log: &log)
+        guard !target.isEmpty else {
             log.outcome = "nothing deletable"
             return
         }
         for attempt in 1...2 {
             log.attempts = attempt
-            let albums = albumRaws, lists = listRaws
+            let ready = await Self.waitUntilOnScreen()
+            if !ready { log.notOnScreen += 1 }
+            let request = target
+            let started = Date()
             do {
                 try await PHPhotoLibrary.shared().performChanges {
                     // Deletes only the album/folder containers. PhotoKit keeps the media.
-                    let albumResult = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: albums, options: nil)
-                    if albumResult.count > 0 { PHAssetCollectionChangeRequest.deleteAssetCollections(albumResult) }
-                    let listResult = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: lists, options: nil)
-                    if listResult.count > 0 { PHCollectionListChangeRequest.deleteCollectionLists(listResult) }
+                    if !request.albums.isEmpty { PHAssetCollectionChangeRequest.deleteAssetCollections(request.albums as NSArray) }
+                    if !request.folders.isEmpty { PHCollectionListChangeRequest.deleteCollectionLists(request.folders as NSArray) }
                 }
             } catch {
+                log.seconds.append(Date().timeIntervalSince(started))
                 let ns = error as NSError
                 if ns.domain == PHPhotosErrorDomain, ns.code == PHPhotosError.Code.userCancelled.rawValue {
                     log.outcome = "declined"
@@ -293,19 +321,27 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                 log.outcome = "error \(ns.domain) \(ns.code)"
                 throw error
             }
-            // Photos may need a moment before the deletion shows in a new fetch.
-            for _ in 0..<8 {
-                if Self.remaining(albums: albums, lists: lists).isEmpty { break }
+            let took = Date().timeIntervalSince(started)
+            log.seconds.append(took)
+            // Photos may need a moment before the deletion shows in a new read.
+            var left = Self.stillThere(request.ids)
+            var polls = 0
+            while !left.isEmpty, polls < 8 {
                 try? await Task.sleep(for: .milliseconds(250))
+                left = Self.stillThere(request.ids)
+                polls += 1
             }
-            let left = Self.remaining(albums: albums, lists: lists)
             if left.isEmpty {
                 log.outcome = "deleted"
                 return
             }
             log.stillThere = left.count
-            albumRaws = albums.filter(left.contains)
-            listRaws = lists.filter(left.contains)
+            guard attempt == 1, took < Self.fastestAnswer else { break }
+            // Found again from the tree, with the folder check again: only what is still
+            // there, and a folder only if everything in it still goes.
+            var again = DeletionLog.Entry(requested: left.count)
+            target = Self.deletable(Array(left), in: CollectionTree(), log: &again)
+            if target.isEmpty { break }
             // A question that could not be shown (a dialog was still closing) shows now.
             try? await Task.sleep(for: .seconds(1))
         }
@@ -313,57 +349,110 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         throw LibraryWriteFailure.notApplied
     }
 
-    /// Albums, and folders whose whole content goes too. Each identifier is looked up with its
-    /// own kind: a lookup that mixes album and folder identifiers is not relied on.
-    private static func deletable(_ raws: [String], log: inout DeletionLog.Entry) -> (albums: [String], lists: [String]) {
-        var albums: [String] = []
+    /// Less time than anyone needs to read the iOS question and tap an answer: a request
+    /// that came back faster was not shown to the user.
+    private static let fastestAnswer: TimeInterval = 0.8
+
+    /// The albums and folders of one deletion request. PHObjects are immutable and may be
+    /// used on any thread (Photos documentation), so they can go into the change block.
+    private struct DeletionTarget: @unchecked Sendable {
+        var albums: [PHAssetCollection] = []
+        var folders: [PHCollectionList] = []
+        var isEmpty: Bool { albums.isEmpty && folders.isEmpty }
+        var ids: [String] { albums.map(\.localIdentifier) + folders.map(\.localIdentifier) }
+    }
+
+    /// Every user album and folder, found by walking the folder tree from the top, exactly as
+    /// `currentInventory` finds them.
+    private struct CollectionTree {
+        var byID: [String: PHCollection] = [:]
+        var children: [String: [String]] = [:]
+
+        init() {
+            walk(PHCollectionList.fetchTopLevelUserCollections(with: nil), parent: nil, depth: 0)
+        }
+
+        private mutating func walk(_ result: PHFetchResult<PHCollection>, parent: String?, depth: Int) {
+            // Photos has no folder cycles; the depth limit only keeps a broken library from
+            // looping forever.
+            guard depth < 64 else { return }
+            for index in 0..<result.count {
+                let collection = result.object(at: index)
+                let id = collection.localIdentifier
+                byID[id] = collection
+                if let parent { children[parent, default: []].append(id) }
+                if let list = collection as? PHCollectionList {
+                    children[id] = children[id] ?? []
+                    walk(PHCollection.fetchCollections(in: list, options: nil), parent: id, depth: depth + 1)
+                }
+            }
+        }
+    }
+
+    /// The albums, and the folders whose whole content goes too. Something Photos does not
+    /// let Albumist delete is left out (it would fail the whole request) and counted.
+    private static func deletable(_ raws: [String], in tree: CollectionTree, log: inout DeletionLog.Entry) -> DeletionTarget {
+        var target = DeletionTarget()
         var lists: [PHCollectionList] = []
-        for raw in raws {
-            if let album = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [raw], options: nil).firstObject {
-                albums.append(album.localIdentifier)
-                if !album.canPerform(.delete) { log.notDeletable += 1 }
-            } else if let list = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject {
-                lists.append(list)
-                if !list.canPerform(.delete) { log.notDeletable += 1 }
+        for raw in Set(raws).sorted() {
+            let found = tree.byID[raw]
+            if let album = found as? PHAssetCollection {
+                if album.canPerform(.delete) { target.albums.append(album) } else { log.notDeletable += 1 }
+            } else if let list = found as? PHCollectionList {
+                if list.canPerform(.delete) { lists.append(list) } else { log.notDeletable += 1 }
             } else {
                 log.missing += 1
             }
         }
-        var safe = Set(albums)
-        var listRaws: [String] = []
+        var going = Set(target.albums.map(\.localIdentifier))
         var changed = true
         while changed {
             changed = false
-            for list in lists where !safe.contains(list.localIdentifier) {
-                var allGoing = true
-                PHCollection.fetchCollections(in: list, options: nil).enumerateObjects { child, _, stop in
-                    if !safe.contains(child.localIdentifier) { allGoing = false; stop.pointee = true }
-                }
-                if allGoing {
-                    safe.insert(list.localIdentifier)
-                    listRaws.append(list.localIdentifier)
+            for list in lists where !going.contains(list.localIdentifier) {
+                if (tree.children[list.localIdentifier] ?? []).allSatisfy(going.contains) {
+                    going.insert(list.localIdentifier)
+                    target.folders.append(list)
                     changed = true
                 }
             }
         }
-        log.albums = albums.count
+        log.albums = target.albums.count
         log.folders = lists.count
-        log.foldersKept = lists.count - listRaws.count
-        return (albums, listRaws)
+        log.foldersKept = lists.count - target.folders.count
+        return target
     }
 
-    /// Which of these albums and folders a new fetch still finds.
-    private static func remaining(albums: [String], lists: [String]) -> Set<String> {
-        var left = Set<String>()
-        if !albums.isEmpty {
-            PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: albums, options: nil)
-                .enumerateObjects { c, _, _ in left.insert(c.localIdentifier) }
+    /// Which of these albums and folders a new walk of the tree still finds.
+    private static func stillThere(_ ids: [String]) -> Set<String> {
+        let tree = CollectionTree()
+        return Set(ids.filter { tree.byID[$0] != nil })
+    }
+
+    /// iOS asks before it deletes albums, and it can show that question only while Albumist
+    /// is on screen and no dialog of its own is still opening or closing (a deletion started
+    /// from a confirmation dialog). A request that comes up while the user switched away
+    /// waits until they are back, up to a limit; then it is sent anyway, and the read-back
+    /// says what happened. Returns whether Albumist was ready to show the question.
+    @MainActor
+    private static func waitUntilOnScreen(limit: Duration = .seconds(30)) async -> Bool {
+        func ready() -> Bool {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            guard scenes.contains(where: { $0.activationState == .foregroundActive }) else { return false }
+            return !scenes.contains { scene in
+                var controller = scene.keyWindow?.rootViewController
+                while let current = controller {
+                    if current.isBeingPresented || current.isBeingDismissed { return true }
+                    controller = current.presentedViewController
+                }
+                return false
+            }
         }
-        if !lists.isEmpty {
-            PHCollectionList.fetchCollectionLists(withLocalIdentifiers: lists, options: nil)
-                .enumerateObjects { c, _, _ in left.insert(c.localIdentifier) }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: limit)
+        while !ready(), clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(200))
         }
-        return left
+        return ready()
     }
 
     func deleteCollection(_ id: CollectionID) async throws {

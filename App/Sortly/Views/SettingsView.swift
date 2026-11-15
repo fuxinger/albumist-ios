@@ -308,7 +308,8 @@ struct InterruptedHistoryRow: View {
                 await model.refreshDerived()
             }
         }
-        Button("Rückgängig") { confirmUndo = true }
+        // An interrupted undo cannot itself be taken back; it goes on or stays as it is.
+        if plan.reverts == nil { Button("Rückgängig") { confirmUndo = true } }
         Button("So lassen") { Task { await model.keepInterruptedPlanAsIs() } }
     }
 }

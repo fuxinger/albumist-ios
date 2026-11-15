@@ -175,9 +175,20 @@ final class SortlyFlowUITests: XCTestCase {
         return false
     }
 
-    /// The overview shows "Analyse aktuell" and no running analysis (no "Pause").
+    /// The overview says the analysis is done ("Alle 412 Fotos analysiert") and nothing runs
+    /// (no "Pause").
     private var analysisIdle: Bool {
-        anything("Analyse aktuell").exists && !app.buttons["Pause"].exists
+        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists) && !app.buttons["Pause"].exists
+    }
+
+    /// "Schritt 4 von 7 · 120 von 412" on the overview, as (step, done, total).
+    private func analysisCount() -> (step: Int, done: Int, total: Int)? {
+        let element = app.descendants(matching: .any)["analysis.progress"]
+        guard element.exists else { return nil }
+        let digits = element.label.replacingOccurrences(of: ".", with: "")
+        guard let m = digits.firstMatch(of: #/Schritt (\d+) von \d+ · (\d+) von (\d+)/#),
+              let step = Int(m.1), let done = Int(m.2), let total = Int(m.3) else { return nil }
+        return (step, done, total)
     }
 
     // MARK: Tests
@@ -487,6 +498,14 @@ final class SortlyFlowUITests: XCTestCase {
                     // The receipt now ends with what the undo removed.
                     app.swipeUp(); app.swipeUp(); sleep(1)
                     shot("22-after-undo")
+                    // "Rückgängig gemacht" is also the section title of a partial undo; on the
+                    // first real iPhone nothing was taken back and the test would not have
+                    // noticed (15.11.). Everything must be gone.
+                    let partial = anything("Nicht alles ließ sich zurücknehmen").exists || anything("teilweise rückgängig").exists
+                    let removedRow = anything("Entfernte Alben und Ordner").exists
+                    print(!partial && removedRow ? "UI_STEP_OK undo took back everything" : "UI_STEP_MISSING undo took back everything (partial \(partial), removed row \(removedRow))")
+                    XCTAssertFalse(partial, "Undo was only partial")
+                    XCTAssertTrue(removedRow, "Undo removed no albums or folders")
                 }
                 if opened { back(); sleep(1) }
                 tap(button("Fertig"), "close settings")
@@ -611,7 +630,7 @@ final class SortlyFlowUITests: XCTestCase {
     // MARK: Tap-through sweep
 
     /// Labels the sweep never taps: anything that changes the library or the analysis.
-    private let sweepSkip = ["Pause", "Neu prüfen", "Jetzt umsetzen", "Rückgängig", "In Fotos ansehen", "Löschen", "Entfernen", "Anlegen",
+    private let sweepSkip = ["Pause", "Neu prüfen", "Jetzt umsetzen", "Rückgängig", "Fotos-App öffnen", "Alle Jahre", "Ganze Mediathek dazunehmen", "arbeitet mit", "Nur 20", "Löschen", "Entfernen", "Anlegen",
                              "Übernehmen", "Nicht jetzt", "ergänzen", "so lassen", "Fortsetzen", "Beispiel", "Ignorieren", "Auswählen",
                              "aufheben"]
 
@@ -823,6 +842,115 @@ final class SortlyFlowUITests: XCTestCase {
             XCTAssertTrue(done, "The retry plan did not finish")
             sleep(1)
             shot("54-retry-result")
+        }
+    }
+    // MARK: Analysis keeps going
+
+    /// Sixth run (first device test 15.11.: "bricht die Suche ab", "die Zahlen werden kleiner",
+    /// "läuft es weiter, wenn man den Tab wechselt?"): a full analysis, made slow on purpose,
+    /// survives leaving the app, coming back and switching tabs. Its count never goes down,
+    /// it never starts at step 1 again, and it ends with every photo analysed. Then the trial
+    /// year: choosing one shows it on the overview, "Alle Jahre" takes it back.
+    func test6_AnalysisKeepsGoingThroughBackgroundAndTabs() {
+        continueAfterFailure = true
+        launch(["-SortlyUITestSlowAnalysis"])
+        _ = waitStable("analysis idle before rebuild", timeout: 300) { analysisIdle }
+        // A full run from scratch: "Analyse neu aufbauen" in the settings.
+        guard tap(app.buttons["Einstellungen"], "settings for rebuild") else { return }
+        let list = app.collectionViews.firstMatch
+        let rebuild = app.buttons["Analyse neu aufbauen"]
+        var swipes = 0
+        while !(rebuild.exists && rebuild.isHittable) && swipes < 12 { (list.exists ? list : app).swipeUp(); swipes += 1 }
+        tap(rebuild, "rebuild analysis")
+        tap(app.buttons["Neu aufbauen"], "confirm rebuild")
+        sleep(1)
+        if app.buttons["Fertig"].exists { app.buttons["Fertig"].tap() }
+
+        var seen: [(step: Int, done: Int, total: Int)] = []
+        func record(_ moment: String) {
+            guard let count = analysisCount() else {
+                print("UI_FACT analysis \(moment): no count (running \(app.buttons["Pause"].exists))")
+                return
+            }
+            print("UI_FACT analysis \(moment): step \(count.step) \(count.done)/\(count.total)")
+            if let last = seen.last {
+                let back = count.step < last.step || (count.step == last.step && count.total == last.total && count.done < last.done)
+                print(back ? "UI_STEP_MISSING count never goes back (\(moment))" : "UI_STEP_OK count never goes back (\(moment))")
+                XCTAssertFalse(back, "The analysis went back at \(moment): \(last) -> \(count)")
+            }
+            seen.append(count)
+        }
+
+        // Wait for the image analysis (step 4), where most of the time goes.
+        let inContent = waitStable("analysis reached the images", timeout: 300, stableChecks: 1) { (analysisCount()?.step ?? 0) >= 4 }
+        XCTAssertTrue(inContent, "The analysis did not reach the image step")
+        record("before leaving")
+        shot("60-analysis-running"); audit("analysis running")
+
+        // Leave the app (on the simulator iOS holds it right away) and come back.
+        XCUIDevice.shared.press(.home)
+        sleep(8)
+        app.activate()
+        sleep(3)
+        let running = app.buttons["Pause"].exists || analysisIdle
+        print(running ? "UI_STEP_OK analysis still there after background" : "UI_STEP_MISSING analysis still there after background")
+        XCTAssertTrue(running, "After coming back the analysis neither runs nor is done")
+        XCTAssertFalse(app.buttons["Fortsetzen"].exists, "Coming back from the background paused the analysis")
+        record("after background")
+        shot("61-after-background")
+
+        // Switch tabs while it runs, then back to the overview.
+        for name in ["Mediathek", "Alben"] {
+            if tap(tabButton(name), "tab \(name) during analysis") { sleep(3) }
+        }
+        tap(tabButton("Übersicht"), "back to overview during analysis")
+        sleep(2)
+        record("after tabs")
+        shot("62-after-tabs")
+
+        // It goes on and ends with every photo analysed.
+        var checks = 0
+        while !analysisIdle && checks < 300 {
+            sleep(3)
+            if checks % 5 == 0 { record("while running") }
+            checks += 1
+        }
+        let done = waitStable("analysis finished after background and tabs", timeout: 60) { analysisIdle }
+        XCTAssertTrue(done, "The analysis did not finish after background and tabs")
+        let all = anything("Alle ").exists && anything("Fotos analysiert").exists
+        print(all ? "UI_STEP_OK every photo analysed" : "UI_STEP_MISSING every photo analysed")
+        print("UI_FACT analysis card \(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "analysiert")).firstMatch.label)")
+        shot("63-analysis-done"); audit("analysis done")
+
+        // "Neu prüfen" finds nothing new and says so.
+        if tap(app.buttons["Neu prüfen"], "check again") {
+            let said = waitStable("check result shown", timeout: 120) { analysisIdle && anything("keine neuen Fotos").exists }
+            print(said ? "UI_STEP_OK check says no new photos" : "UI_STEP_MISSING check says no new photos")
+            shot("64-check-again")
+        }
+
+        // Trial year: chosen in the settings, shown on the overview, taken back there.
+        let year = Calendar.current.component(.year, from: Date())
+        if tap(app.buttons["Einstellungen"], "settings for trial year") {
+            let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Albumist arbeitet mit")).firstMatch
+            if tap(picker, "trial year picker") {
+                tap(app.buttons["Nur \(year)"], "choose \(year)")
+                sleep(1)
+            }
+            shot("65-settings-trial-year")
+            if app.buttons["Fertig"].exists { app.buttons["Fertig"].tap() }
+            let note = app.descendants(matching: .any)["analysis.trial"]
+            let shown = note.waitForExistence(timeout: 20)
+            print(shown ? "UI_STEP_OK trial year on overview" : "UI_STEP_MISSING trial year on overview")
+            XCTAssertTrue(shown, "The chosen year is not shown on the overview")
+            _ = waitStable("analysis idle with trial year", timeout: 300) { analysisIdle }
+            shot("66-overview-trial-year")
+            if tap(button("Alle Jahre"), "take in all years") {
+                let gone = waitGone(note, timeout: 20)
+                print(gone ? "UI_STEP_OK trial year taken back" : "UI_STEP_MISSING trial year taken back")
+                _ = waitStable("analysis idle after all years", timeout: 300) { analysisIdle }
+                shot("67-overview-all-years")
+            }
         }
     }
 }

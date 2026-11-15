@@ -123,67 +123,158 @@ struct OverviewView: View {
     private var analysisCard: some View {
         Card {
             if model.analysis.isRunning {
-                ViewThatFits(in: .horizontal) {
-                    HStack {
-                        Text(model.analysis.stage?.label ?? "Analyse läuft").font(.headline)
-                        Spacer()
-                        Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
-                    }
-                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text(model.analysis.stage?.label ?? "Analyse läuft").font(.headline)
-                        Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
-                    }
-                }
-                if model.history.isEmpty && model.managedAlbums.isEmpty {
-                    ScanShow()
-                }
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    ProgressView(value: model.analysis.overall)
-                        .tint(Theme.accent)
-                        .animation(.smooth, value: model.analysis.overall)
-                    if let stage = model.analysis.stage {
-                        let steps = AnalysisPipeline.Stage.allCases.count
-                        Group {
-                            if model.analysis.total > 0 {
-                                Text("Schritt \(stage.number) von \(steps) · \(model.analysis.completed.formatted()) von \(model.analysis.total.formatted())")
-                            } else {
-                                Text("Schritt \(stage.number) von \(steps)")
-                            }
-                        }
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-                    }
-                }
-                .accessibilityElement(children: .combine) // one element: bar plus "150 von 240"
+                runningAnalysis
             } else if let reason = model.analysis.lastReport?.pausedBecause {
                 Text(reason.label).font(.headline)
                 Text("Die Analyse setzt genau dort fort, wo sie aufgehört hat.").font(.subheadline).foregroundStyle(.secondary)
                 Button("Fortsetzen") { model.startAnalysis(userInitiated: true) }.buttonStyle(SecondaryButtonStyle())
             } else {
-                let stack = typeSize.isAccessibilitySize
-                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Spacing.s))
-                    : AnyLayout(HStackLayout())
-                stack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Analyse aktuell").font(.headline)
-                        if let date = model.analysis.lastRun {
-                            Text("Zuletzt \(date.formatted(.relative(presentation: .named)))").font(.subheadline).foregroundStyle(.secondary)
-                        } else {
-                            Text("Neue Fotos erkennt Albumist von selbst.").font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                    if !typeSize.isAccessibilitySize { Spacer() }
-                    Button { model.startAnalysis() } label: { TapTarget("Neu prüfen") }
-                }
-                if let pending = model.analysis.lastReport?.placesPendingOnline, pending > 0 {
-                    Label("\(pending) Orte werden später genauer bestimmt.", systemImage: "moon.zzz")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                if let waiting = model.analysis.lastReport?.textWaitingForOriginal, waiting > 0 {
-                    Label("\(waiting) Dokumente liegen nur in iCloud und werden später gelesen.", systemImage: "icloud")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
+                finishedAnalysis
+            }
+            if case .year(let year) = model.analysisScope {
+                trialNote(year)
             }
         }
+    }
+
+    /// A check for new photos after everything was analysed once: no stage numbers and no bar
+    /// that starts at zero again, only a spinner, unless there is real work to show.
+    private var isQuickCheck: Bool {
+        let analysis = model.analysis
+        guard analysis.kind == .check else { return false }
+        if let stage = analysis.stage, [.content, .text].contains(stage), analysis.remaining >= 50 { return false }
+        return true
+    }
+
+    private var runningTitle: LocalizedStringKey {
+        let analysis = model.analysis
+        if analysis.isCatchingUp { return "Macht da weiter, wo sie aufgehört hat" }
+        if isQuickCheck { return "Prüft auf neue Fotos" }
+        return analysis.stage?.label ?? "Analyse läuft"
+    }
+
+    @ViewBuilder
+    private var runningAnalysis: some View {
+        let analysis = model.analysis
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                Text(runningTitle).font(.headline)
+                if isQuickCheck { ProgressView().controlSize(.small) }
+                Spacer()
+                Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
+            }
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text(runningTitle).font(.headline)
+                Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
+            }
+        }
+        if model.history.isEmpty && model.managedAlbums.isEmpty {
+            ScanShow()
+        }
+        if !isQuickCheck {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                ProgressView(value: analysis.shownOverall)
+                    .tint(Theme.accent)
+                    .animation(.smooth, value: analysis.shownOverall)
+                let steps = AnalysisPipeline.Stage.allCases.count
+                Group {
+                    if let resume = analysis.resumeFrom, analysis.isCatchingUp {
+                        Text("Gleich wieder bei Schritt \(resume.stage) von \(steps)")
+                    } else if let stage = analysis.stage {
+                        if analysis.total > 0 {
+                            Text("Schritt \(stage.number) von \(steps) · \(analysis.completed.formatted()) von \(analysis.total.formatted())")
+                        } else {
+                            Text("Schritt \(stage.number) von \(steps)")
+                        }
+                    }
+                }
+                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+            }
+            .accessibilityElement(children: .combine) // one element: bar plus "150 von 240"
+            .accessibilityIdentifier("analysis.progress")
+        }
+        if let waiting = analysis.waiting {
+            Label(waiting == .batteryLow ? "Wartet, bis der Akku lädt. Geht dann von selbst weiter." : "Kurze Pause, das iPhone ist sehr warm. Geht von selbst weiter.",
+                  systemImage: waiting == .batteryLow ? "battery.25percent" : "thermometer.medium")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if !isQuickCheck {
+            Text("Du kannst Albumist verlassen. Die Analyse geht danach genau hier weiter.")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var finishedAnalysis: some View {
+        let counts = model.analysisCounts
+        let stack = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Spacing.s))
+            : AnyLayout(HStackLayout())
+        stack {
+            VStack(alignment: .leading, spacing: 2) {
+                // Says what is done, so "aktuell" is not read as "stopped" (first device test 15.11.).
+                Group {
+                    if counts.photos == 0 {
+                        Text("Analyse aktuell")
+                    } else if counts.analyzed >= counts.photos {
+                        Text("Alle \(counts.photos.formatted()) Fotos analysiert")
+                    } else {
+                        Text("\(counts.analyzed.formatted()) von \(counts.photos.formatted()) Fotos analysiert")
+                    }
+                }
+                .font(.headline)
+                if let date = model.analysis.lastRun {
+                    Text("Zuletzt geprüft \(date.formatted(.relative(presentation: .named)))").font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Text("Neue Fotos erkennt Albumist von selbst.").font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            if !typeSize.isAccessibilitySize { Spacer() }
+            Button { model.startAnalysis() } label: { TapTarget("Neu prüfen") }
+        }
+        if let report = model.analysis.lastReport, model.analysis.lastRun != nil, model.analysis.kind == .check {
+            // What "Neu prüfen" found, so a check that ends after a few seconds is clearly done.
+            Group {
+                if report.contentAnalyzed > 0 {
+                    Text("Beim Prüfen \(report.contentAnalyzed) neue Fotos analysiert.")
+                } else if report.newOrChanged == 0 && report.removed == 0 {
+                    Text("Beim Prüfen keine neuen Fotos gefunden.")
+                }
+            }
+            .font(.footnote).foregroundStyle(.secondary)
+        }
+        if counts.unreadable > 0 {
+            Label("\(counts.unreadable) Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal.", systemImage: "exclamationmark.icloud")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let pending = model.analysis.lastReport?.placesPendingOnline, pending > 0 {
+            Label("\(pending) Orte werden später genauer bestimmt.", systemImage: "moon.zzz")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+        if let waiting = model.analysis.lastReport?.textWaitingForOriginal, waiting > 0 {
+            Label("\(waiting) Dokumente liegen nur in iCloud und werden später gelesen.", systemImage: "icloud")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The trial year chosen at the start stays until the user takes in the whole library.
+    @ViewBuilder
+    private func trialNote(_ year: Int) -> some View {
+        Divider()
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                Label("Probelauf: nur Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
+                Spacer()
+                Button { model.changeScope(.all) } label: { TapTarget("Alle Jahre") }
+            }
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Label("Probelauf: nur Fotos aus \(String(year))", systemImage: "calendar").font(.subheadline)
+                Button { model.changeScope(.all) } label: { TapTarget("Ganze Mediathek dazunehmen") }
+            }
+        }
+        .accessibilityIdentifier("analysis.trial")
     }
 
     private var areasSection: some View {

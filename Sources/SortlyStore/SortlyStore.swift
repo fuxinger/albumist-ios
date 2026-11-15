@@ -147,19 +147,30 @@ public actor SortlyStore: ChangePlanStoring {
     /// Newest first. With `olderThan` (the last asset of the previous batch) the scan continues
     /// where it stopped instead of skipping every already-analyzed photo again: without it a
     /// first run over 100,000 photos spent about 18 s in this query alone.
-    public func assetsNeedingAnalysis(version: Int, limit: Int, olderThan last: AssetSnapshot? = nil) throws -> [AssetSnapshot] {
+    /// `within`: only photos taken in this time (a trial run over one year).
+    public func assetsNeedingAnalysis(version: Int, limit: Int, olderThan last: AssetSnapshot? = nil, within range: Range<Date>? = nil) throws -> [AssetSnapshot] {
+        var filter = "analysis_version < ?"
+        var values: [SQLValue] = [.integer(Int64(version))]
+        if let range {
+            filter += " AND creation_date >= ? AND creation_date < ?"
+            values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
+        }
         if let last, let date = last.creationDate?.timeIntervalSince1970 {
             return try db.query("""
-                SELECT * FROM assets WHERE analysis_version < ?
+                SELECT * FROM assets WHERE \(filter)
                   AND (creation_date < ? OR (creation_date = ? AND id < ?))
                 ORDER BY creation_date DESC, id DESC LIMIT ?
-                """, [.integer(Int64(version)), .real(date), .real(date), .text(last.id.rawValue), .integer(Int64(limit))]).map(Self.asset)
+                """, values + [.real(date), .real(date), .text(last.id.rawValue), .integer(Int64(limit))]).map(Self.asset)
         }
-        return try db.query("SELECT * FROM assets WHERE analysis_version < ? ORDER BY creation_date DESC, id DESC LIMIT ?", [.integer(Int64(version)), .integer(Int64(limit))]).map(Self.asset)
+        return try db.query("SELECT * FROM assets WHERE \(filter) ORDER BY creation_date DESC, id DESC LIMIT ?", values + [.integer(Int64(limit))]).map(Self.asset)
     }
 
-    public func countNeedingAnalysis(version: Int) throws -> Int {
-        try db.query("SELECT COUNT(*) AS n FROM assets WHERE analysis_version < ?", [.integer(Int64(version))]).first?["n"]?.int ?? 0
+    public func countNeedingAnalysis(version: Int, within range: Range<Date>? = nil) throws -> Int {
+        guard let range else {
+            return try db.query("SELECT COUNT(*) AS n FROM assets WHERE analysis_version < ?", [.integer(Int64(version))]).first?["n"]?.int ?? 0
+        }
+        return try db.query("SELECT COUNT(*) AS n FROM assets WHERE analysis_version < ? AND creation_date >= ? AND creation_date < ?",
+                            [.integer(Int64(version)), .real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]).first?["n"]?.int ?? 0
     }
 
     public func markAnalyzed(_ ids: [AssetID], version: Int) throws {

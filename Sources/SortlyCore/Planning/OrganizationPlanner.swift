@@ -48,7 +48,7 @@ public struct OrganizationPlanner: Sendable {
     public var chunkSize: Int
 
     public init(rootFolderTitle: String = "Albumist", chunkSize: Int = 500) {
-        self.rootFolderTitle = rootFolderTitle
+        self.rootFolderTitle = rootFolderTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         self.chunkSize = max(1, chunkSize)
     }
 

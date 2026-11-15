@@ -58,7 +58,12 @@ struct AlbumsView: View {
                 } header: {
                     Text("Von Albumist angelegt oder ergänzt")
                 } footer: {
-                    Text("Neue Alben liegen in Fotos im Ordner „\(model.settings.rootFolderTitle)“.")
+                    let root = model.settings.rootFolderTitle.trimmingCharacters(in: .whitespaces)
+                    if root.isEmpty {
+                        Text("Neue Alben liegen in Fotos unter Sammlungen › Alben.")
+                    } else {
+                        Text("Neue Alben liegen in Fotos im Ordner „\(root)“.")
+                    }
                 }
             }
 

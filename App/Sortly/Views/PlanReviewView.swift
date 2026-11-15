@@ -277,8 +277,24 @@ struct ResultCard: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.s)
             if let photos = URL(string: "photos-redirect://") {
-                Button("In Fotos ansehen") { openURL(photos) }
+                // iOS lets apps open Fotos, but not a particular album (first device test 15.11.:
+                // "Ich springe nicht zu meinen Alben"). So the button says what it does, and the
+                // way to the albums is written next to it.
+                Button("Fotos-App öffnen") { openURL(photos) }
                     .buttonStyle(PrimaryButtonStyle())
+                if !isUndo {
+                    Group {
+                        let root = model.settings.rootFolderTitle.trimmingCharacters(in: .whitespaces)
+                        if root.isEmpty {
+                            Text("Deine neuen Alben findest du in Fotos unter Sammlungen › Alben.")
+                        } else {
+                            Text("Deine neuen Alben findest du in Fotos unter Sammlungen › Alben, im Ordner „\(root)“.")
+                        }
+                    }
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                }
             }
             NavigationLink {
                 PlanReceiptView(plan: plan)

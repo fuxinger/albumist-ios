@@ -118,6 +118,7 @@ public struct Labels: Sendable {
     }
 
     public func frequentPlacePlaceholder(number: Int) -> String { t("Häufiger Ort \(number)", "Frequent Place \(number)") }
+    public func frequentPlacePlaceholder(in city: String) -> String { t("Häufiger Ort in \(city)", "Frequent Place in \(city)") }
     public var roadTripSuffix: String { "Roadtrip" }
     public var unknownPlace: String { t("Unbekannter Aufnahmeort", "Unknown Location") }
 }

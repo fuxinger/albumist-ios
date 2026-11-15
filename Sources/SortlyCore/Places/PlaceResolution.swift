@@ -129,9 +129,15 @@ public actor PlaceResolutionService {
         maxOnlineRequests: Int? = nil,
         shouldStop: (@Sendable () async -> Bool)? = nil,
         onlineAllowed: (@Sendable () async -> Bool)? = nil,
+        progress: (@Sendable (Int) async -> Void)? = nil,
         sink: Sink
     ) async throws -> Outcome {
         var outcome = Outcome()
+        // How many requests are final (resolved, pending for later, or not resolvable). A
+        // country known early from the map does not count yet when the town still needs the
+        // online lookup, so the count rises with the real work (first device test 15.11.:
+        // "5.683 von 5.683" showed at once while the lookups had only begun).
+        var processed = 0
         var offlineOnly: [AssetID: ResolvedPlace] = [:]
         var needsOnline: [Request] = []
         var offlineCache: [GeoCell: OfflineWorldMap.Match] = [:]
@@ -154,6 +160,8 @@ public actor PlaceResolutionService {
             try await sink(offlineOnly)
             outcome.resolved += offlineOnly.count
         }
+        processed = requests.count - needsOnline.count
+        await progress?(processed)
 
         // One online request per raster cell, highest priority and biggest cells first.
         let cellMeters = policy.cellMeters(refining: refining)
@@ -167,6 +175,7 @@ public actor PlaceResolutionService {
 
         var onlineDisabled = !policy.onlineAllowed || geocoder == nil
         for (cell, members) in groups {
+            processed += members.count
             if Task.isCancelled { outcome.pendingOnline.formUnion(members.map(\.assetID)); continue }
             // Pause, heat or low battery: no more online lookups; cached cells still count.
             if !onlineDisabled, let shouldStop, await shouldStop() { onlineDisabled = true }
@@ -196,6 +205,7 @@ public actor PlaceResolutionService {
             }
             guard let online else {
                 outcome.pendingOnline.formUnion(members.map(\.assetID))
+                await progress?(processed)
                 continue
             }
             var batch: [AssetID: ResolvedPlace] = [:]
@@ -213,6 +223,7 @@ public actor PlaceResolutionService {
                 try await sink(batch)
                 outcome.resolved += batch.count - batch.keys.filter { offlineOnly[$0] != nil }.count
             }
+            await progress?(processed)
         }
         return outcome
     }

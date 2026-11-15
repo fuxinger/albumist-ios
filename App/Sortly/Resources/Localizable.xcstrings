@@ -7228,6 +7228,396 @@
           }
         }
       }
+    },
+    "Neue Alben liegen in Fotos unter Sammlungen › Alben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New albums are in Photos under Collections › Albums."
+          }
+        }
+      }
+    },
+    "Wartet, bis der Akku lädt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for the battery to charge"
+          }
+        }
+      }
+    },
+    "Kurze Pause, das iPhone kühlt ab" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Short break while the iPhone cools down"
+          }
+        }
+      }
+    },
+    "Macht da weiter, wo sie aufgehört hat" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Picking up where it left off"
+          }
+        }
+      }
+    },
+    "Prüft auf neue Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking for new photos"
+          }
+        }
+      }
+    },
+    "Name fehlt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name missing"
+          }
+        }
+      }
+    },
+    "Mit einem Jahr anzufangen geht schneller: Albumist analysiert dann nur diese Fotos und macht nur dafür Vorschläge. So prüfst du das Ergebnis in Ruhe. Die ganze Mediathek kannst du jederzeit dazunehmen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting with one year is faster: Albumist then analyzes only those photos and suggests albums only for them, so you can check the result calmly. You can add the whole library at any time."
+          }
+        }
+      }
+    },
+    "Anfangen mit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start with"
+          }
+        }
+      }
+    },
+    "Die erste Analyse kann bei großen Mediatheken eine Weile dauern. Du kannst die App dabei verlassen: Solange iOS es erlaubt, läuft sie weiter und zeigt den Fortschritt auf dem Sperrbildschirm, sonst geht sie beim nächsten Öffnen genau dort weiter. Wenn du magst, sagt Albumist dir Bescheid, sobald sie fertig ist." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The first analysis can take a while for large libraries. You can leave the app: as long as iOS allows, it keeps running and shows its progress on the Lock Screen; otherwise it picks up right there the next time you open the app. If you like, Albumist lets you know when it is done."
+          }
+        }
+      }
+    },
+    "Gleich wieder bei Schritt %lld von %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back at step %lld of %lld in a moment"
+          }
+        }
+      }
+    },
+    "Du kannst Albumist verlassen. Die Analyse geht danach genau hier weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can leave Albumist. The analysis continues right here afterwards."
+          }
+        }
+      }
+    },
+    "Kurze Pause, das iPhone ist sehr warm. Geht von selbst weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Short break, the iPhone is very warm. Continues by itself."
+          }
+        }
+      }
+    },
+    "Wartet, bis der Akku lädt. Geht dann von selbst weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for the battery to charge. Then continues by itself."
+          }
+        }
+      }
+    },
+    "Alle %@ Fotos analysiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All %@ photos analyzed"
+          }
+        }
+      }
+    },
+    "%@ von %@ Fotos analysiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ of %@ photos analyzed"
+          }
+        }
+      }
+    },
+    "Zuletzt geprüft %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last checked %@"
+          }
+        }
+      }
+    },
+    "Beim Prüfen %lld neue Fotos analysiert." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Analyzed %lld new photo in this check."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Analyzed %lld new photos in this check."
+                }
+              }
+            }
+          }
+        },
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Beim Prüfen %lld neues Foto analysiert."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Beim Prüfen %lld neue Fotos analysiert."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Beim Prüfen keine neuen Fotos gefunden." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No new photos found in this check."
+          }
+        }
+      }
+    },
+    "%lld Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo could not be read yet. Albumist will try again later."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos could not be read yet. Albumist will try again later."
+                }
+              }
+            }
+          }
+        },
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto konnte noch nicht gelesen werden. Albumist versucht es später noch einmal."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Probelauf: nur Fotos aus %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trial run: only photos from %@"
+          }
+        }
+      }
+    },
+    "Ganze Mediathek dazunehmen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add the whole library"
+          }
+        }
+      }
+    },
+    "Zweimal tippen zum Vergrößern" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Double-tap to zoom"
+          }
+        }
+      }
+    },
+    "Fotos-App öffnen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open the Photos app"
+          }
+        }
+      }
+    },
+    "Deine neuen Alben findest du in Fotos unter Sammlungen › Alben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your new albums are in Photos under Collections › Albums."
+          }
+        }
+      }
+    },
+    "Deine neuen Alben findest du in Fotos unter Sammlungen › Alben, im Ordner „%@“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your new albums are in Photos under Collections › Albums, in the folder “%@”."
+          }
+        }
+      }
+    },
+    "Albumist arbeitet mit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist works with"
+          }
+        }
+      }
+    },
+    "Ganze Mediathek" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Whole library"
+          }
+        }
+      }
+    },
+    "Mit einem Jahr geht es schneller: Albumist analysiert dann nur diese Fotos und macht nur dafür Vorschläge." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One year is faster: Albumist then analyzes only those photos and suggests albums only for them."
+          }
+        }
+      }
+    },
+    "Keiner" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None"
+          }
+        }
+      }
+    },
+    "Die Analyse läuft danach noch einmal über alle Fotos, mit denen Albumist arbeitet." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The analysis then runs again over all photos Albumist works with."
+          }
+        }
+      }
+    },
+    "Umgesetzt am %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applied on %@"
+          }
+        }
+      }
+    },
+    "Zurückgenommen am %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Taken back on %@"
+          }
+        }
+      }
+    },
+    "Alle Zahlen hat Albumist danach in deiner Mediathek nachgeprüft." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist checked every number in your library afterwards."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

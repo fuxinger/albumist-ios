@@ -1,4 +1,5 @@
 import Foundation
+import SortlyCore
 
 /// Debug builds started by the UI tests (`-SortlyUITestUnlocked`): no purchase sheet and no
 /// system rating prompt, which would cover the screen the test is about to tap.
@@ -24,4 +25,22 @@ enum UITestSupport {
     /// `-SortlyUITestRebuildDatabase`: the database is set aside at launch, exactly like
     /// "Neu aufbauen" after a start error, to test that the decisions come back.
     static let rebuildsDatabase: Bool = isRunning && ProcessInfo.processInfo.arguments.contains("-SortlyUITestRebuildDatabase")
+
+    /// `-SortlyUITestSlowAnalysis`: every photo takes a little longer, so a UI test can leave
+    /// the app and switch tabs while the analysis is still busy (first device test 15.11.).
+    static let slowsAnalysis: Bool = isRunning && ProcessInfo.processInfo.arguments.contains("-SortlyUITestSlowAnalysis")
+}
+
+/// The real analyzer with a pause per photo (UI tests only, see `slowsAnalysis`).
+struct SlowedAnalyzer: ContentAnalyzing {
+    var base: any ContentAnalyzing
+
+    func analyzeContent(_ asset: AssetSnapshot, request: ContentAnalysisRequest) async throws -> ContentAnalysis {
+        try await Task.sleep(for: .milliseconds(150))
+        return try await base.analyzeContent(asset, request: request)
+    }
+
+    func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {
+        try await base.recognizeText(asset, allowNetwork: allowNetwork)
+    }
 }

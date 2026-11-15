@@ -27,6 +27,9 @@ struct SortlyApp: App {
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    // Back on screen: an analysis that iOS ended goes on by itself, a running
+                    // one asks for background time again.
+                    if phase == .active { model.sceneBecameActive() }
                     // The copy of the decisions for the iPhone backup is current before iOS may
                     // end the app (a background task keeps the app awake for the short write).
                     guard phase == .background else { return }

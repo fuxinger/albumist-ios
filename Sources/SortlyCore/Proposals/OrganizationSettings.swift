@@ -29,7 +29,9 @@ public struct OrganizationSettings: Hashable, Sendable, Codable {
         // the Photos app and are opt-in (decision 2026-11-13, docs/DECISIONS.md).
         enabledAreas = [.places, .trips, .frequentPlaces, .screenshots, .imageCategories, .documents]
         primaryAreas = [.trips, .places]
-        rootFolderTitle = "Albumist"
+        // No folder above the albums: they read like the user's own, one tap less in Photos.
+        // Undo does not depend on it (decision Fuchs 15.11.).
+        rootFolderTitle = ""
         titleLanguage = .deviceDefault
         allowMultipleAssignments = true
         automation = AutomationPolicy(globalMode: .suggestOnly)

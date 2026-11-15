@@ -116,7 +116,11 @@ struct ProposalRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.userTitles[proposal.id] ?? proposal.title).font(.body.weight(.medium)).lineLimit(typeSize.isAccessibilitySize ? 5 : 2)
                 Text("\(proposal.assetIDs.count - (model.removedFromProposals[proposal.id]?.count ?? 0)) Aufnahmen").font(.footnote).foregroundStyle(.secondary)
-                if let status = model.match(for: proposal)?.status {
+                if proposal.requiresUserName && model.userTitles[proposal.id] == nil {
+                    // A place only the user can name: says what is missing instead of
+                    // "Neues Album" (first device test 15.11.: 44 "Häufiger Ort N").
+                    StatusBadge(text: "Name fehlt", tint: .orange)
+                } else if let status = model.match(for: proposal)?.status {
                     StatusBadge(text: status.label, tint: status.tint)
                 }
                 decisionLabel
@@ -258,7 +262,8 @@ struct ProposalDetailView: View {
                 Card {
                     matchContent
                     if match != nil { Divider() }
-                    LabeledContent("Ordner", value: ([model.settings.rootFolderTitle] + proposal.folderPath).joined(separator: " › "))
+                    LabeledContent("Ordner", value: ([model.settings.rootFolderTitle] + proposal.folderPath)
+                        .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " › "))
                     if !proposal.optionalAssetIDs.isEmpty {
                         LabeledContent("Nur vorgeschlagen", value: "\(proposal.optionalAssetIDs.count)")
                     }
@@ -563,6 +568,7 @@ struct ProposalPhotosView: View {
     @State private var selecting = false
     @State private var selected: Set<AssetID> = []
     @State private var confirmRemove = false
+    @State private var viewing: PhotoViewer.Start?
     private let columns = [GridItem(.adaptive(minimum: 96), spacing: 3)]
 
     var body: some View {
@@ -610,10 +616,13 @@ struct ProposalPhotosView: View {
         } message: {
             Text("Sie kommen nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleiben sie.")
         }
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: members, current: start.id)
+        }
     }
 
     private func traits(selected isSelected: Bool) -> AccessibilityTraits {
-        guard selecting else { return [] }
+        guard selecting else { return [.isButton] }
         return isSelected ? [.isButton, .isSelected] : [.isButton]
     }
 
@@ -635,7 +644,11 @@ struct ProposalPhotosView: View {
             .opacity(selecting && !isSelected ? 0.85 : 1)
             .contentShape(Rectangle())
             .onTapGesture {
-                guard selecting else { return }
+                // Outside "Auswählen" a tap opens the photo large (first device test 15.11.).
+                guard selecting else {
+                    viewing = PhotoViewer.Start(id: id)
+                    return
+                }
                 if isSelected { selected.remove(id) } else { selected.insert(id) }
             }
             .accessibilityAddTraits(traits(selected: isSelected))

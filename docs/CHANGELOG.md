@@ -45,6 +45,14 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- Erster iPhone-Test (15.11.): Analyse endet nicht mehr bei Wärme, Stromsparmodus oder
+  wenn iOS die Hintergrundzeit beendet, sondern wird langsamer, wartet oder geht beim Öffnen
+  weiter; jeder lange Lauf fragt nach Hintergrundzeit (Sperrbildschirm); Fortschritt zählt
+  über alle Fotos und springt nicht zurück; das Probejahr bleibt gespeichert und begrenzt
+  die Analyse; Analyse-Karte nennt die analysierten Fotos; höchstens 5 unbenannte häufige
+  Orte, mit Stadt; eigenes Titelbild je Vorschlag; gleichnamige Länder zusammengeführt;
+  Fotos im Vollbild; strengere Flugbuchungs-Erkennung; „Fotos-App öffnen“ mit Wegbeschreibung;
+  neue Alben ohne Ordner „Albumist“.
 - Übersicht sagte „Neue Fotos werden beim nächsten Start erkannt“, obwohl Albumist Änderungen in
   Fotos schon während der Nutzung bemerkt. Jetzt: „Neue Fotos erkennt Albumist von selbst.“
 - Textknöpfe „So lassen“, „Alle … Alben anzeigen“, „Auswählen und später anlegen“ und

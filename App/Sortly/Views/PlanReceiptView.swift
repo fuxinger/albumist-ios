@@ -74,35 +74,39 @@ struct PlanReceiptView: View {
 
     // MARK: Sections
 
+    /// The state now comes first: a plan that was taken back says so at the top instead of
+    /// "Vollständig umgesetzt" (Fuchs 15.11.: "Finde die Nachricht oben etwas komisch").
     private func header(_ receipt: PlanReceipt) -> some View {
         Section {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Group {
-                    if receipt.isComplete {
+                    if undo != nil, !receipt.isUndo {
+                        if partlyUndone {
+                            Label("Teilweise rückgängig gemacht", systemImage: "arrow.uturn.backward.circle.fill")
+                                .foregroundStyle(Theme.tint(for: .documents))
+                        } else {
+                            Label("Rückgängig gemacht", systemImage: "arrow.uturn.backward.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if receipt.isComplete {
                         Label("Vollständig umgesetzt", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(Theme.accent)
                     } else {
                         Label("Teilweise umgesetzt", systemImage: "exclamationmark.circle.fill")
+                            .foregroundStyle(Theme.tint(for: .documents))
                     }
                 }
                 .font(.headline)
-                .foregroundStyle(receipt.isComplete ? Theme.accent : Theme.tint(for: .documents))
-                Text(receipt.startedAt.formatted(date: .long, time: .shortened))
-                    .font(.subheadline).foregroundStyle(.secondary)
-                // Taken back: said at the top too, or the "Neu" albums below read as still there.
-                if let undo {
-                    Label {
-                        if partlyUndone {
-                            Text("Am \(undo.startedAt.formatted(date: .long, time: .shortened)) teilweise rückgängig gemacht")
-                        } else {
-                            Text("Am \(undo.startedAt.formatted(date: .long, time: .shortened)) rückgängig gemacht")
-                        }
-                    } icon: {
-                        Image(systemName: "arrow.uturn.backward.circle.fill")
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                if let undo, !receipt.isUndo {
+                    Text("Umgesetzt am \(receipt.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Text("Zurückgenommen am \(undo.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Text(receipt.startedAt.formatted(date: .long, time: .shortened))
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
-                Text("Gezählt wird nur, was Albumist danach in deiner Mediathek nachgeprüft hat.")
+                Text("Alle Zahlen hat Albumist danach in deiner Mediathek nachgeprüft.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

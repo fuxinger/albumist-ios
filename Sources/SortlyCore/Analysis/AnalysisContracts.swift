@@ -142,9 +142,33 @@ public enum PauseReason: String, Sendable, Codable {
     case userPaused, thermal, lowPower, batteryLow, timeBudget, accessRevoked
 }
 
+/// How a run in the app reacts to the device. First device test 15.11.: a warm iPhone ended
+/// the analysis for good and nothing started it again ("bricht die Suche ab").
+public enum AnalysisPace: Sendable, Equatable {
+    /// Full speed.
+    case normal
+    /// Warm: a short break after every photo, so the device cools down while the run goes on.
+    case gentle
+    /// Too hot or the battery nearly empty: the run waits and goes on by itself.
+    case wait(PauseReason)
+    /// The run ends here; a later run goes on from the same place.
+    case stop(PauseReason)
+}
+
 /// Device conditions (thermal state, power, network). Implemented with ProcessInfo,
 /// UIDevice and NWPathMonitor in the app.
 public protocol AnalysisConditions: Sendable {
+    /// The overnight refinement: any reason ends the run until the next charging window.
     func pauseReason() async -> PauseReason?
+    /// Runs in the app (the user waits for them): slow down or wait, but do not end.
+    func pace() async -> AnalysisPace
     func isOnWiFi() async -> Bool
+}
+
+extension AnalysisConditions {
+    /// Without a rule of its own, a reason ends a run in the app too.
+    public func pace() async -> AnalysisPace {
+        if let reason = await pauseReason() { return .stop(reason) }
+        return .normal
+    }
 }

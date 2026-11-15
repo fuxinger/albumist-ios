@@ -39,6 +39,20 @@ final class ThumbnailCache {
         }
         return image
     }
+
+    /// A large version for the full-screen viewer: not kept in the cache (a few of them would
+    /// push out hundreds of thumbnails), and only what is on the device (no download).
+    func largeImage(for id: AssetID, pixels: CGSize) async -> UIImage? {
+        let asset: PHAsset
+        if let known = assets.object(forKey: id.rawValue as NSString) {
+            asset = known
+        } else {
+            guard let fetched = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject else { return nil }
+            assets.setObject(fetched, forKey: id.rawValue as NSString)
+            asset = fetched
+        }
+        return await ThumbnailRequest.load(ThumbnailRequest.Asset(asset), size: pixels, manager: manager, contentMode: .aspectFit)
+    }
 }
 
 /// PhotoKit request outside the main actor (its callbacks must not inherit main-actor
@@ -95,7 +109,7 @@ enum ThumbnailRequest {
         }
     }
 
-    nonisolated static func load(_ asset: Asset, size: CGSize, manager: Manager) async -> UIImage? {
+    nonisolated static func load(_ asset: Asset, size: CGSize, manager: Manager, contentMode: PHImageContentMode = .aspectFill) async -> UIImage? {
         let state = State()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
@@ -107,7 +121,7 @@ enum ThumbnailRequest {
                 options.deliveryMode = .opportunistic
                 options.resizeMode = .fast
                 options.isNetworkAccessAllowed = false
-                let id = manager.value.requestImage(for: asset.value, targetSize: size, contentMode: .aspectFill, options: options) { image, info in
+                let id = manager.value.requestImage(for: asset.value, targetSize: size, contentMode: contentMode, options: options) { image, info in
                     let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
                     if degraded {
                         // A preview that is nearly sharp enough is shown at once; a tiny one would

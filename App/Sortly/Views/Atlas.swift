@@ -314,7 +314,10 @@ struct AtlasContent: View {
                 tile("building.2.fill", atlas.cityCount.formatted(), atlas.cityCount == 1 ? "Stadt" : "Städte")
                 tile("airplane", atlas.tripCount.formatted(), atlas.tripCount == 1 ? "Reise" : "Reisen")
                 if atlas.year == nil, let year = atlas.sinceYear { tile("calendar", String(year), "unterwegs seit") }
-                if let days = atlas.longestTripDays { tile("clock.fill", "\(days)", days == 1 ? "Tag längste Reise" : "Tage längste Reise") }
+                if let days = atlas.longestTripDays {
+                    tile("clock.fill", "\(days)", days == 1 ? "Tag längste Reise" : "Tage längste Reise",
+                         detail: atlas.longestTrip.flatMap { $0.days == days ? "\(TravelAtlas.flag($0.countryCode)) \(AtlasStyle.countryName($0.countryCode))" : nil })
+                }
             }
 
             if let city = atlas.favoriteTripCity {
@@ -366,11 +369,15 @@ struct AtlasContent: View {
         }
     }
 
-    private func tile(_ symbol: String, _ value: String, _ label: LocalizedStringKey) -> some View {
+    private func tile(_ symbol: String, _ value: String, _ label: LocalizedStringKey, detail: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Image(systemName: symbol).foregroundStyle(Theme.accent).font(.subheadline)
             Text(value).font(.title2.weight(.bold)).monospacedDigit()
             Text(label).font(.footnote).foregroundStyle(.secondary)
+            if let detail {
+                // Where the longest trip went: flag and country.
+                Text(verbatim: detail).font(.footnote.weight(.semibold)).lineLimit(2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Spacing.l)
@@ -472,7 +479,15 @@ struct ShareCard: View {
                     HStack(spacing: 40) {
                         stat(atlas.cityCount, atlas.cityCount == 1 ? "Stadt" : "Städte")
                         stat(atlas.tripCount, atlas.tripCount == 1 ? "Reise" : "Reisen")
-                        if let days = atlas.longestTripDays, days > 1 { stat(days, "Tage am Stück") }
+                        if let days = atlas.longestTripDays, days > 1 {
+                            VStack(alignment: .leading, spacing: 4) {
+                                stat(days, "Tage am Stück")
+                                if let trip = atlas.longestTrip, trip.days == days {
+                                    Text(verbatim: "\(TravelAtlas.flag(trip.countryCode)) \(AtlasStyle.countryName(trip.countryCode))")
+                                        .font(.system(size: 22, weight: .semibold))
+                                }
+                            }
+                        }
                     }
                     if cover == nil, let city = atlas.favoriteTripCity {
                         Label { Text("Lieblingsziel: \(city)") } icon: { Image(systemName: "heart.fill").foregroundStyle(.pink) }

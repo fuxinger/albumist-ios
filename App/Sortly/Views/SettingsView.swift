@@ -16,6 +16,19 @@ struct SettingsView: View {
         @Bindable var model = model
         Form {
             Section {
+                Picker("Albumist arbeitet mit", selection: scopeYear) {
+                    Text("Ganze Mediathek").tag(Int?.none)
+                    ForEach(scopeYears, id: \.self) { year in
+                        Text("Nur \(String(year))").tag(Int?.some(year))
+                    }
+                }
+            } header: {
+                Text("Mediathek")
+            } footer: {
+                Text("Mit einem Jahr geht es schneller: Albumist analysiert dann nur diese Fotos und macht nur dafür Vorschläge.")
+            }
+
+            Section {
                 ForEach(OrganizationArea.available) { area in
                     Toggle(isOn: areaBinding(area, \.enabledAreas)) {
                         Label { Text(area.title) } icon: { Image(systemName: area.symbol).foregroundStyle(area.tint) }
@@ -43,7 +56,7 @@ struct SettingsView: View {
                     Text("Englisch").tag(TitleLanguage.english)
                 }
                 LabeledContent("Hauptordner") {
-                    TextField("Albumist", text: $model.settings.rootFolderTitle)
+                    TextField("Keiner", text: $model.settings.rootFolderTitle)
                         .multilineTextAlignment(.trailing)
                 }
                 if model.settings.enabledAreas.contains(.places) {
@@ -199,8 +212,23 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text("Die Analyse läuft danach noch einmal über die ganze Mediathek.")
+            Text("Die Analyse läuft danach noch einmal über alle Fotos, mit denen Albumist arbeitet.")
         }
+    }
+
+    /// The trial year (kept for every run) or the whole library.
+    private var scopeYear: Binding<Int?> {
+        Binding(
+            get: { if case .year(let year) = model.analysisScope { year } else { nil } },
+            set: { model.changeScope($0.map { .year($0) } ?? .all) }
+        )
+    }
+
+    private var scopeYears: [Int] {
+        let current = Calendar.current.component(.year, from: Date())
+        var years = (0..<6).map { current - $0 }
+        if case .year(let chosen) = model.analysisScope, !years.contains(chosen) { years.append(chosen) }
+        return years
     }
 
     private func areaBinding(_ area: OrganizationArea, _ keyPath: WritableKeyPath<OrganizationSettings, Set<OrganizationArea>>) -> Binding<Bool> {

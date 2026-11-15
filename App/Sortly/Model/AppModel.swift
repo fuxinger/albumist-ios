@@ -19,18 +19,52 @@ final class AppModel {
     }
 
     struct AnalysisState: Equatable {
+        /// First run, a run that goes on after an interruption, or a check for new photos
+        /// after everything was analysed once (the card shows each one differently).
+        enum Kind: Equatable { case first, resume, check }
+
         var isRunning = false
         var stage: AnalysisPipeline.Stage?
         var completed = 0
         var total = 0
         var lastReport: AnalysisPipeline.Report?
         var lastRun: Date?
+        var kind: Kind = .first
+        /// The device asked for a break (very warm, battery nearly empty); the run goes on by
+        /// itself (first device test 15.11.: a warm iPhone ended the analysis for good).
+        var waiting: PauseReason?
+        /// Where an unfinished earlier run got to. A run that goes on shows this instead of
+        /// "Schritt 1" again until it is back there (first device test 15.11.).
+        var resumeFrom: AnalysisMarker.Point?
+        /// The last run ended before it was done without the user pausing it: opening the
+        /// app again goes on by itself.
+        var needsResume = false
 
         var fraction: Double { total == 0 ? 0 : min(1, Double(completed) / Double(total)) }
         /// Progress over all stages: one bar that fills once instead of restarting per stage.
         var overall: Double {
             stage.map { AnalysisPipeline.Progress.overall(stage: $0, completed: completed, total: total) } ?? 0
         }
+        /// Still on the quick first steps of a run that goes on from further ahead.
+        var isCatchingUp: Bool {
+            guard let resumeFrom else { return false }
+            return (stage?.number ?? 0) < resumeFrom.stage
+        }
+        /// The bar: never below where the interrupted run had got to.
+        var shownOverall: Double {
+            isCatchingUp ? max(overall, resumeFrom?.overall ?? 0) : overall
+        }
+        /// Photos still to look at in the current stage (images or texts).
+        var remaining: Int { max(0, total - completed) }
+    }
+
+    /// How many photos (in the chosen part of the library) are analysed: shown on the card,
+    /// so "Analyse aktuell" says what it means (first device test 15.11.).
+    struct AnalysisCounts: Equatable {
+        var photos = 0
+        var analyzed = 0
+        /// Not readable yet (no local preview, still syncing): tried again in later runs.
+        var unreadable = 0
     }
 
     struct ExecutionState: Equatable {
@@ -166,6 +200,12 @@ final class AppModel {
     var plan: ChangePlan?
     /// A plan that stopped half way because the app was closed while it ran.
     var interruptedPlan: ChangePlan?
+    var analysisCounts = AnalysisCounts()
+    /// The part of the library Albumist works on: everything, or the trial year chosen at
+    /// the start (kept for every later run).
+    var analysisScope: OrganizationScope = .all
+    /// Photos changed while a run was busy: one more run follows when it ends.
+    @ObservationIgnored var catchUpAfterRun = false
     /// The user's own trip splits and merges (I07), for the settings.
     private(set) var tripCorrections = TripCorrections()
     var execution = ExecutionState()
@@ -233,17 +273,20 @@ final class AppModel {
             await restoreFromBackupIfNeeded(store)
             lastSafetyBackup = Self.safetyBackupDate()
             settings = try await store.value(OrganizationSettings.self, forKey: Key.settings) ?? OrganizationSettings()
+            await dropOldRootFolderDefault(store)
             decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
             userTitles = try await store.value([SortlyID: String].self, forKey: Key.titles) ?? [:]
             let map = await Task.detached(priority: .userInitiated) { try? WorldMapResource.load() }.value
             worldMap = map
             pipeline = AnalysisPipeline(
-                store: store, reader: library, analyzer: VisionAnalyzer(),
+                store: store, reader: library,
+                analyzer: UITestSupport.slowsAnalysis ? SlowedAnalyzer(base: VisionAnalyzer()) as any ContentAnalyzing : VisionAnalyzer() as any ContentAnalyzing,
                 geocoder: SystemGeocoder(locale: Locale(identifier: settings.titleLanguage.rawValue)),
                 map: map, conditions: DeviceConditions(), settings: settings,
                 foregroundOnlineBudget: 60
             )
             tripCorrections = (try? await pipeline?.tripCorrections()) ?? TripCorrections()
+            analysisScope = (try? await pipeline?.storedScope()) ?? .all
             await refreshDerived()
             // A plan that finished right before the app was closed stores its results now.
             await finishPendingFinalizations()
@@ -254,6 +297,18 @@ final class AppModel {
         } catch {
             phase = .failed(error.localizedDescription)
         }
+    }
+
+    /// Decision 15.11. (Fuchs): no "Albumist" folder above the albums. Earlier installs that
+    /// kept the old default switch once, unless albums were already made in that folder, so
+    /// nothing ends up in two places.
+    private func dropOldRootFolderDefault(_ store: SortlyStore) async {
+        let key = "settings.rootFolderDefaultDropped"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        guard settings.rootFolderTitle == "Albumist", (try? await store.managedAlbums())?.isEmpty ?? false else { return }
+        settings.rootFolderTitle = ""
+        try? await store.setValue(settings, forKey: Key.settings)
     }
 
     /// "Neu aufbauen" on the start error screen: the damaged database is set aside (one copy
@@ -482,6 +537,21 @@ final class AppModel {
         startAnalysis(scope: scope, userInitiated: true)
     }
 
+    /// "Nur 2026" or the whole library, also later in Settings and on the overview. A run in
+    /// progress stops first; the new one goes on from what is analysed already.
+    func changeScope(_ scope: OrganizationScope) {
+        guard scope != analysisScope else { return }
+        analysisScope = scope
+        AnalysisMarker.reset()
+        Task {
+            if analysis.isRunning {
+                await pipeline?.pause()
+                await analysisTask?.value
+            }
+            startAnalysis(scope: scope, userInitiated: true)
+        }
+    }
+
     // MARK: Settings
 
     func saveSettings() {
@@ -496,35 +566,38 @@ final class AppModel {
 
     // MARK: Analysis
 
-    /// `userInitiated`: started by a tap, so it may continue in the background with progress
-    /// on the Lock Screen (iOS 26 continued processing).
-    func startAnalysis(scope: OrganizationScope = .all, mode: AnalysisPipeline.Mode = .incremental, userInitiated: Bool = false) {
+    /// `userInitiated`: started by a tap. Every long run asks iOS to go on in the background
+    /// with progress on the Lock Screen (iOS 26 continued processing), not only the first one
+    /// (first device test 15.11.: shown once, then never again).
+    /// `scope`: a new part of the library to work on; `nil` keeps the stored one.
+    func startAnalysis(scope: OrganizationScope? = nil, mode: AnalysisPipeline.Mode = .incremental, userInitiated: Bool = false) {
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
-        if userInitiated { ContinuedAnalysis.begin() }
         analysis.isRunning = true
+        analysis.needsResume = false
+        analysis.stage = nil
         analysis.completed = 0
         analysis.total = 0
+        analysis.waiting = nil
+        analysis.resumeFrom = AnalysisMarker.unfinished
+        analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
+        if userInitiated { ContinuedAnalysis.begin() }
         analysisTask = Task {
+            if let scope {
+                try? await pipeline.setScope(scope)
+                analysisScope = scope
+            }
             // The report of this run only: a run that fails never reuses the success of the
             // one before (audit 2, 4.2).
             var finished: AnalysisPipeline.Report?
             do {
-                let report = try await pipeline.run(mode: mode, scope: scope) { progress in
+                let report = try await pipeline.run(mode: mode, onProgress: { progress in
+                    Task { @MainActor in AppModel.shared.receive(progress) }
+                }, onWaiting: { reason in
                     Task { @MainActor in
-                        let model = AppModel.shared
-                        // Trips and places are ready before the image analysis: show them now.
-                        if progress.stage == .content, model.analysis.stage != .content, model.snapshot == nil {
-                            Task { await model.refreshDerived() }
-                        }
-                        // First scan: the photos are known after reading the library (for the scan show).
-                        if progress.stage == .patterns, model.analysis.stage == .inventory, model.facts.isEmpty {
-                            Task { await model.refreshDerived() }
-                        }
-                        AppModel.shared.analysis.stage = progress.stage
-                        AppModel.shared.analysis.completed = progress.completed
-                        AppModel.shared.analysis.total = progress.total
+                        guard AppModel.shared.analysis.isRunning else { return }
+                        AppModel.shared.analysis.waiting = reason
                     }
-                }
+                })
                 analysis.lastReport = report
                 analysis.lastRun = Date()
                 finished = report
@@ -533,6 +606,15 @@ final class AppModel {
             }
             analysis.isRunning = false
             analysis.stage = nil
+            analysis.waiting = nil
+            if finished?.isComplete == true {
+                AnalysisMarker.finished()
+                analysis.resumeFrom = nil
+            }
+            // Ended early without the user's Pause (an error, the app's time ran out): the
+            // next time the app is opened it goes on by itself.
+            let reason = finished?.pausedBecause
+            analysis.needsResume = finished == nil || (reason != nil && reason != .userPaused && reason != .accessRevoked)
             await refreshDerived()
             // Trip identities (names and corrections stay with their trip) are kept in the copy.
             saveSafetyBackup()
@@ -541,10 +623,61 @@ final class AppModel {
                 ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
             }
             BackgroundWork.scheduleRefinement()
+            // Photos changed in Photos while this ran (new pictures, an album): one more pass.
+            if catchUpAfterRun {
+                catchUpAfterRun = false
+                if reason != .userPaused { startAnalysis() }
+            }
         }
     }
 
+    /// Progress of the running analysis. Late updates of a finished run are dropped, and a
+    /// count never goes back within a stage (the updates hop here one by one).
+    private func receive(_ progress: AnalysisPipeline.Progress) {
+        guard analysis.isRunning else { return }
+        if let stage = analysis.stage {
+            if progress.stage.number < stage.number { return }
+            if progress.stage == stage, progress.total == analysis.total, progress.completed < analysis.completed { return }
+        }
+        // Trips and places are ready before the image analysis: show them now.
+        if progress.stage == .content, analysis.stage != .content, snapshot == nil {
+            Task { await refreshDerived() }
+        }
+        // First scan: the photos are known after reading the library (for the scan show).
+        if progress.stage == .patterns, analysis.stage == .inventory, facts.isEmpty {
+            Task { await refreshDerived() }
+        }
+        analysis.stage = progress.stage
+        analysis.completed = progress.completed
+        analysis.total = progress.total
+        analysis.waiting = nil
+        // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`).
+        if !analysis.isCatchingUp {
+            AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.overall)
+        }
+        keepRunningInBackgroundIfLong()
+    }
+
+    /// A run with real work left asks iOS to go on after the user leaves the app.
+    func keepRunningInBackgroundIfLong() {
+        guard analysis.isRunning, let stage = analysis.stage,
+              [.places, .content, .text].contains(stage), analysis.remaining >= 100 else { return }
+        ContinuedAnalysis.begin()
+    }
+
+    /// The app is on screen again: a run that iOS ended goes on by itself, and a run still
+    /// busy asks for background time again (the last request may have run out).
+    func sceneBecameActive() {
+        if analysis.isRunning {
+            keepRunningInBackgroundIfLong()
+            return
+        }
+        guard analysis.needsResume, phase == .ready, access.canRead, !execution.isRunning, !analysisResetting else { return }
+        startAnalysis()
+    }
+
     func pauseAnalysis() {
+        analysis.needsResume = false
         Task { await pipeline?.pause() }
     }
 
@@ -586,7 +719,9 @@ final class AppModel {
             undonePlans = try await store.undoneTargets()
             Purchases.shared.settleUndone(undonePlans)
             // Photos that could not be read yet (failed attempts) do not count as looked at.
-            let analyzed = Set(try await store.results(ContentAnalysis.self, kind: "content").filter { $0.value.failedAttempts == nil }.keys)
+            let contents = try await store.results(ContentAnalysis.self, kind: "content")
+            let analyzed = Set(contents.filter { $0.value.failedAttempts == nil }.keys)
+            let unreadable = Set(contents.filter { $0.value.failedAttempts != nil }.keys)
             let stored = try await store.overrides()
             let overrides = OverrideSet(stored)
             var removed: [SortlyID: Set<AssetID>] = [:]
@@ -599,7 +734,17 @@ final class AppModel {
                 LibraryStatus.compute(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides, contentAnalyzed: analyzed)
             }.value
             states = computed
-            progress = resolver.progress(computed.values)
+            // The trial year counts only its own photos (the ring said "839 von 5.683" over
+            // the whole library while the suggestions were for 2026).
+            let scope = analysisScope, calendar = Calendar.sortlyDefault
+            let inScope = scope == .all ? facts : facts.filter { scope.includes($0, calendar: calendar) }
+            let scopedIDs = Set(inScope.map(\.id))
+            progress = resolver.progress(scope == .all ? Array(computed.values) : computed.filter { scopedIDs.contains($0.key) }.map(\.value))
+            analysisCounts = AnalysisCounts(
+                photos: inScope.count,
+                analyzed: scope == .all ? analyzed.count : analyzed.intersection(scopedIDs).count,
+                unreadable: scope == .all ? unreadable.count : unreadable.intersection(scopedIDs).count
+            )
         } catch {
             message = error.localizedDescription
         }
@@ -1254,6 +1399,13 @@ final class AppModel {
         } else {
             lines.append("analysis not run in this session")
         }
+        let scopeText: String
+        switch analysisScope {
+        case .all: scopeText = "all"
+        case .year(let year): scopeText = "year \(year)"
+        case .album: scopeText = "album"
+        }
+        lines.append("analysis scope \(scopeText), photos \(analysisCounts.photos), analysed \(analysisCounts.analyzed), unreadable \(analysisCounts.unreadable), running \(analysis.isRunning), waiting \(analysis.waiting?.rawValue ?? "no"), needs resume \(analysis.needsResume), background task \(ContinuedAnalysis.isActive)")
         lines.append("decisions copy \(lastSafetyBackup.map { iso.string(from: $0) } ?? "none"), albums waiting for access \(pendingLibraryRestore != nil)")
         if let store {
             let overrides = (try? await store.overrides().count) ?? -1
@@ -1372,6 +1524,7 @@ final class AppModel {
         // Foreground and background runs both have a task: waited for until they really
         // ended, not for a fixed time (audit 2, 4.1).
         await analysisTask?.value
+        AnalysisMarker.reset()
         do {
             try await store?.resetAnalysis(includingDecisions: false)
         } catch {

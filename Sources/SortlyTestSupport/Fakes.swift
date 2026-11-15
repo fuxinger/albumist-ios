@@ -138,5 +138,22 @@ public final class FakeConditions: AnalysisConditions, @unchecked Sendable {
         }
     }
 
+    /// Scripted answers for runs in the app, one per check; the last one stays. Empty: the
+    /// thermal pause above ends the run, as before.
+    public let paces = Mutex<[AnalysisPace]>([])
+    public let paceChecks = Mutex(0)
+
+    public func pace() async -> AnalysisPace {
+        paceChecks.withLock { $0 += 1 }
+        let scripted: AnalysisPace? = paces.withLock { list in
+            guard let first = list.first else { return nil }
+            if list.count > 1 { list.removeFirst() }
+            return first
+        }
+        if let scripted { return scripted }
+        if let reason = await pauseReason() { return .stop(reason) }
+        return .normal
+    }
+
     public func isOnWiFi() async -> Bool { state.withLock { $0.wifi } }
 }

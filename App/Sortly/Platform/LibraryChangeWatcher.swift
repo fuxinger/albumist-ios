@@ -29,7 +29,14 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
         pending = Task {
             // Several changes in a row (an album and its photos) start one analysis.
             try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled, Self.mayCatchUp(model) else { return }
+            guard !Task.isCancelled else { return }
+            // A run in progress read the library at its start: one more pass follows it, so
+            // new screenshots do not wait for the next app start.
+            if model.analysis.isRunning {
+                model.catchUpAfterRun = true
+                return
+            }
+            guard Self.mayCatchUp(model) else { return }
             model.startAnalysis()
         }
     }

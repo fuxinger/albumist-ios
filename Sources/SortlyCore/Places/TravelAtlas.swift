@@ -16,6 +16,11 @@ public struct TravelAtlas: Hashable, Sendable {
     public var tripCount = 0
     public var sinceYear: Int?
     public var longestTripDays: Int?
+    /// The longest trip itself, so the atlas can say where it went (Fuchs 15.11.: "Bei der
+    /// längsten Reise wäre gerne das Land angezeigt"). The more recent one wins a tie.
+    public var longestTrip: TripSummary? {
+        trips.max { ($0.days, $0.start) < ($1.days, $1.start) }
+    }
     /// Most photographed town outside the home area (by trip photos), if any.
     public var favoriteTripCity: String?
     /// A good photo from the favorite destination for the share image: a real photo (no

@@ -85,5 +85,22 @@ final class DeviceConditions: AnalysisConditions, @unchecked Sendable {
         return nil
     }
 
+    /// A run in the app (the user started it or waits for it): very warm only slows it down,
+    /// too hot or a nearly empty battery make it wait, and it goes on by itself. Low Power
+    /// Mode does not stop it; iOS already runs the phone slower then. First device test 15.11.:
+    /// a warm iPhone ended the analysis for good and nothing started it again.
+    func pace() async -> AnalysisPace {
+        let info = ProcessInfo.processInfo
+        if info.thermalState == .critical { return .wait(.thermal) }
+        let (state, level) = await MainActor.run { () -> (UIDevice.BatteryState, Float) in
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            return (UIDevice.current.batteryState, UIDevice.current.batteryLevel)
+        }
+        let charging = state == .charging || state == .full
+        if !charging && level >= 0 && level < 0.1 { return .wait(.batteryLow) }
+        if info.thermalState == .serious { return .gentle }
+        return .normal
+    }
+
     func isOnWiFi() async -> Bool { NetworkStatus.shared.isOnWiFi }
 }

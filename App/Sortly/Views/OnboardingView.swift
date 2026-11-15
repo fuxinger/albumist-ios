@@ -187,18 +187,18 @@ struct OnboardingView: View {
         return page {
             Text("Womit soll Albumist anfangen?").font(.title.weight(.bold))
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Die Analyse läuft immer über die ganze Mediathek. Für den ersten Durchgang kann Albumist die Vorschläge aber auf ein Jahr beschränken, damit du das Ergebnis in Ruhe prüfen kannst.")
+            Text("Mit einem Jahr anzufangen geht schneller: Albumist analysiert dann nur diese Fotos und macht nur dafür Vorschläge. So prüfst du das Ergebnis in Ruhe. Die ganze Mediathek kannst du jederzeit dazunehmen.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             // A settings-style row with a menu instead of a wheel (HIG: menus for short lists).
             ViewThatFits(in: .horizontal) {
                 HStack {
-                    Text("Vorschläge für")
+                    Text("Anfangen mit")
                     Spacer(minLength: Theme.Spacing.m)
                     trialPicker(currentYear)
                 }
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("Vorschläge für")
+                    Text("Anfangen mit")
                     trialPicker(currentYear)
                 }
             }
@@ -206,7 +206,7 @@ struct OnboardingView: View {
             .padding(.vertical, Theme.Spacing.s)
             .frame(minHeight: 52)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-            Text("Die erste Analyse kann bei großen Mediatheken eine Weile dauern. Sie läuft weiter, auch wenn du die App verlässt, und zeigt den Fortschritt auf dem Sperrbildschirm. Wenn du magst, sagt Albumist dir Bescheid, sobald sie fertig ist.")
+            Text("Die erste Analyse kann bei großen Mediatheken eine Weile dauern. Du kannst die App dabei verlassen: Solange iOS es erlaubt, läuft sie weiter und zeigt den Fortschritt auf dem Sperrbildschirm, sonst geht sie beim nächsten Öffnen genau dort weiter. Wenn du magst, sagt Albumist dir Bescheid, sobald sie fertig ist.")
                 .font(.footnote).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } footer: {
@@ -220,7 +220,7 @@ struct OnboardingView: View {
 
 extension OnboardingView {
     fileprivate func trialPicker(_ currentYear: Int) -> some View {
-        Picker("Vorschläge für", selection: $trialYear) {
+        Picker("Anfangen mit", selection: $trialYear) {
             Text("Die ganze Mediathek").tag(Int?.none)
             ForEach((0..<6).map { currentYear - $0 }, id: \.self) { year in
                 Text("Nur \(String(year))").tag(Int?.some(year))

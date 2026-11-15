@@ -96,6 +96,8 @@ public actor AnalysisPipeline {
         /// Version of the masks the stored texts went through (see `TextMinimizer.maskVersion`).
         static let textMaskVersion = "analysis.textMaskVersion"
         static let proposals = "analysis.proposals"
+        /// The trial run's year chosen at the start (kept by "Analyse neu aufbauen").
+        static let scope = "user.analysisScope"
     }
 
     private let store: SortlyStore
@@ -117,6 +119,11 @@ public actor AnalysisPipeline {
     private let foregroundOnlineBudget: Int?
     public private(set) var settings: OrganizationSettings
     private var userPaused = false
+    /// The mode of the run in progress (online place lookups ask it between requests).
+    private var runMode: Mode = .incremental
+    /// A warm device: break after every photo. Waiting: how often the device is asked again.
+    static let gentleBreak: Duration = .milliseconds(250)
+    static let waitCheck: Duration = .seconds(2)
 
     public init(
         store: SortlyStore,
@@ -148,28 +155,82 @@ public actor AnalysisPipeline {
 
     public func update(settings: OrganizationSettings) { self.settings = settings }
 
+    /// What runs without an explicit scope work on. First device test 15.11.: "nur 2026" at
+    /// the start applied to the first run only; every later run suggested the whole library.
+    public func storedScope() async throws -> OrganizationScope {
+        try await store.value(OrganizationScope.self, forKey: Key.scope) ?? .all
+    }
+
+    public func setScope(_ scope: OrganizationScope) async throws {
+        try await store.setValue(scope, forKey: Key.scope)
+    }
+
+    /// A trial run over one year analyses only the photos of that year (and the trips that
+    /// touch it); the rest is looked at once the user takes in the whole library.
+    static func dateRange(of scope: OrganizationScope, calendar: Calendar) -> Range<Date>? {
+        guard case .year(let year) = scope,
+              let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
+              let end = calendar.date(byAdding: .year, value: 1, to: start) else { return nil }
+        return start..<end
+    }
+
     /// Pauses at the next batch boundary; `run` then returns with `.userPaused`.
     public func pause() { userPaused = true }
 
     /// Checked between online place lookups, so Pause, heat or low battery stop that stage
-    /// within one request instead of after all of them.
+    /// within one request instead of after all of them. The lookups left over wait for the
+    /// overnight refinement; a run in the app goes on with the photos.
     private func stopRequested() async -> Bool {
         if userPaused || Task.isCancelled { return true }
-        return await conditions.pauseReason() != nil
+        if runMode == .refinement { return await conditions.pauseReason() != nil }
+        switch await conditions.pace() {
+        case .normal, .gentle: return false
+        case .wait, .stop: return true
+        }
     }
 
+    /// `onWaiting`: the run waits for the device (hot, battery nearly empty) and goes on by
+    /// itself; called with `nil` when it goes on.
     public func run(
         mode: Mode = .incremental,
-        scope: OrganizationScope = .all,
-        onProgress: @escaping @Sendable (Progress) -> Void = { _ in }
+        scope requested: OrganizationScope? = nil,
+        onProgress: @escaping @Sendable (Progress) -> Void = { _ in },
+        onWaiting: @escaping @Sendable (PauseReason?) -> Void = { _ in }
     ) async throws -> Report {
         userPaused = false
+        runMode = mode
         var report = Report()
+        let scope: OrganizationScope
+        if let requested { scope = requested } else { scope = try await storedScope() }
 
+        /// Asked before every photo. A run in the app never ends because of the device: it
+        /// slows down when warm and waits when hot, then goes on by itself. Only Pause, the
+        /// end of the app's time and the overnight refinement's rules end a run.
         func shouldStop() async -> PauseReason? {
             if userPaused { return .userPaused }
             if Task.isCancelled { return .timeBudget }
-            return await conditions.pauseReason()
+            if mode == .refinement { return await conditions.pauseReason() }
+            var waitingFor: PauseReason?
+            defer { if waitingFor != nil { onWaiting(nil) } }
+            while true {
+                switch await conditions.pace() {
+                case .normal:
+                    return nil
+                case .gentle:
+                    do { try await time.sleep(Self.gentleBreak) } catch { return .timeBudget }
+                    return userPaused ? .userPaused : nil
+                case .stop(let reason):
+                    return reason
+                case .wait(let reason):
+                    if waitingFor != reason {
+                        waitingFor = reason
+                        onWaiting(reason)
+                    }
+                    do { try await time.sleep(Self.waitCheck) } catch { return .timeBudget }
+                    if userPaused { return .userPaused }
+                    if Task.isCancelled { return .timeBudget }
+                }
+            }
         }
 
         // 1. Inventory
@@ -207,8 +268,19 @@ public actor AnalysisPipeline {
         report.completedStages.append(.patterns)
         onProgress(Progress(stage: .patterns, completed: 1, total: 1))
 
+        // The photos this run analyses: all of them, or one year and the trips that touch it.
+        let range = Self.dateRange(of: scope, calendar: calendar)
+        let scoped: [AssetSnapshot]
+        if let range {
+            let inYear = Set(all.filter { $0.creationDate.map(range.contains) ?? false }.map(\.id))
+            let tripMembers = Set(trips.filter { !inYear.isDisjoint(with: $0.geotaggedAssetIDs) }.flatMap(\.geotaggedAssetIDs))
+            scoped = all.filter { inYear.contains($0.id) || tripMembers.contains($0.id) }
+        } else {
+            scoped = all
+        }
+
         // 3. Places
-        let placeOutcome = try await resolvePlaces(all, trips: trips, frequent: frequent, refining: mode == .refinement, onProgress: onProgress)
+        let placeOutcome = try await resolvePlaces(scoped, trips: trips, frequent: frequent, refining: mode == .refinement, onProgress: onProgress)
         report.placesResolved = placeOutcome.resolved
         report.placesPendingOnline = placeOutcome.pendingOnline.count
         report.onlineRequests = placeOutcome.onlineRequests
@@ -233,7 +305,14 @@ public actor AnalysisPipeline {
             detectAnimals: settings.people.petGroupingEnabled && settings.enabledAreas.contains(.peopleAndPets),
             featurePrint: true
         )
-        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion)
+        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, within: range)
+        // Shown over the whole library: after a pause the count goes on from what is done
+        // (first device test 15.11.: "1.450 von 14.332", then "2.700 von 12.708").
+        let inRange = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
+        let contentBefore = max(0, inRange - contentTotal)
+        if contentTotal > 0 {
+            onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal))
+        }
         // First results early: trips, countries and places need no image analysis. On a first
         // run (no suggestions yet) they are offered right away instead of after the image
         // analysis, which takes hours on a large library. The full set replaces them later;
@@ -249,11 +328,11 @@ public actor AnalysisPipeline {
         var deferred = Set<AssetID>()
         while true {
             if let reason = await shouldStop() { report.pausedBecause = reason; return report }
-            var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: batchSize + deferred.count, olderThan: cursor)
+            var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: batchSize + deferred.count, olderThan: cursor, within: range)
             if raw.isEmpty, cursor != nil {
                 // Past the oldest dated photo: one plain pass picks up photos without a date.
                 cursor = nil
-                raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: batchSize + deferred.count)
+                raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: batchSize + deferred.count, within: range)
             }
             let batch = raw.filter { !deferred.contains($0.id) }
             if batch.isEmpty { break }
@@ -292,13 +371,14 @@ public actor AnalysisPipeline {
             try await store.markAnalyzed(finished, version: Self.contentVersion)
             contentDone += finished.count
             report.contentAnalyzed += finished.count
-            onProgress(Progress(stage: .content, completed: contentDone, total: max(contentTotal, contentDone)))
+            onProgress(Progress(stage: .content, completed: contentBefore + contentDone,
+                                total: contentBefore + max(contentTotal, contentDone)))
             if let stopped { report.pausedBecause = stopped; return report }
         }
         report.completedStages.append(.content)
 
         // 5. Text
-        let textOutcome = try await recognizeText(all, shouldStop: shouldStop, onProgress: onProgress)
+        let textOutcome = try await recognizeText(scoped, shouldStop: shouldStop, onProgress: onProgress)
         report.textRecognized = textOutcome.recognized
         report.textWaitingForOriginal = textOutcome.waiting
         if let reason = textOutcome.paused { report.pausedBecause = reason; return report }
@@ -339,15 +419,19 @@ public actor AnalysisPipeline {
         guard !requests.isEmpty else { return .init() }
         let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time)
         let store = self.store
-        let total = requests.count
-        let counter = ProgressCounter()
+        // Counted over every photo with a location, not only this run's requests: a run that
+        // starts again after a pause goes on from the real state instead of from zero.
+        let total = all.filter { $0.usableLocation != nil }.count
+        let before = max(0, total - requests.count)
         let budget = refining ? nil : foregroundOnlineBudget
+        onProgress(Progress(stage: .places, completed: before, total: total))
         return try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
                                          shouldStop: { [weak self] in await self?.stopRequested() ?? true },
-                                         onlineAllowed: { [weak self] in await self?.settings.privacy.allowOnlineGeocoding ?? false }) { batch in
+                                         onlineAllowed: { [weak self] in await self?.settings.privacy.allowOnlineGeocoding ?? false },
+                                         progress: { processed in
+                                             onProgress(Progress(stage: .places, completed: min(before + processed, total), total: total))
+                                         }) { batch in
             try await store.setPlaces(batch)
-            let done = await counter.add(batch.count)
-            onProgress(Progress(stage: .places, completed: min(done, total), total: total))
         }
     }
 
@@ -364,10 +448,18 @@ public actor AnalysisPipeline {
         try await remaskStoredTexts()
         let networkAllowed = await networkAllowedNow()
         let started = now()
-        let candidates = all.filter { asset in
-            guard let content = contents[asset.id], content.needsTextRecognition(for: asset) else { return false }
+        let needing = all.filter { asset in
+            guard let content = contents[asset.id] else { return false }
+            return content.needsTextRecognition(for: asset)
+        }
+        let candidates = needing.filter { asset in
             guard let previous = done[asset.id] else { return true }
             return previous.shouldRetry(networkAllowed: networkAllowed, now: started)
+        }
+        // Counted over all screenshots and documents, so a later run goes on from the real state.
+        let textBefore = needing.count - candidates.count
+        if !candidates.isEmpty {
+            onProgress(Progress(stage: .text, completed: textBefore, total: needing.count))
         }
         var recognized = 0, waiting = 0
         let documents = DocumentAnalyzer()
@@ -427,7 +519,7 @@ public actor AnalysisPipeline {
             }
             try await store.saveResult(result, kind: "text", asset: asset.id, version: Self.textVersion)
             if index % 20 == 19 || index == candidates.count - 1 {
-                onProgress(Progress(stage: .text, completed: index + 1, total: candidates.count))
+                onProgress(Progress(stage: .text, completed: textBefore + index + 1, total: needing.count))
             }
         }
         return (recognized, waiting, nil)
@@ -593,9 +685,4 @@ public actor AnalysisPipeline {
         try await store.setValue(snapshot, forKey: Key.proposals)
         return snapshot
     }
-}
-
-private actor ProgressCounter {
-    var value = 0
-    func add(_ n: Int) -> Int { value += n; return value }
 }

@@ -36,7 +36,7 @@ public struct ProposalEngine: Sendable {
         let areas = settings.enabledAreas
         if areas.contains(.places) { result += placeProposals(usable) }
         if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable) }
-        if areas.contains(.frequentPlaces) { result += frequentPlaceProposals(analysis.frequentPlaces) }
+        if areas.contains(.frequentPlaces) { result += frequentPlaceProposals(analysis.frequentPlaces, facts: analysis.facts) }
         if areas.contains(.chronology) { result += chronologyProposals(usable) }
         if areas.contains(.mediaTypes) { result += mediaTypeProposals(usable) }
         if areas.contains(.screenshots) { result += screenshotProposals(usable) }
@@ -67,6 +67,33 @@ public struct ProposalEngine: Sendable {
                 groups[deepest, default: (place, [])].assets.insert(f.id)
             }
         }
+        // One suggestion per country or region name: photos whose country came without its
+        // code (or with another spelling of it) formed a second "Deutschland" next to the
+        // first (first device test 15.11.). The larger group keeps its id, so decisions stay.
+        // Towns are not merged: two towns of the same name are different places.
+        var keysOf: [PlaceKey: [PlaceKey]] = [:]
+        var keptByName: [String: PlaceKey] = [:]
+        let bySize = groups.keys.sorted { a, b in
+            let ca = groups[a]?.assets.count ?? 0, cb = groups[b]?.assets.count ?? 0
+            return ca != cb ? ca > cb : a < b
+        }
+        for key in bySize {
+            guard let value = groups[key] else { continue }
+            keysOf[key] = [key]
+            guard key.level <= .administrativeArea else { continue }
+            // The continent is left out: it is only known together with the country code.
+            let names = PlaceLevel.allCases.filter { $0 <= key.level && ($0 != .continent || key.level == .continent) }
+                .compactMap { displayName(value.components, level: $0) }
+            let identity = "\(key.level):" + names.map(PlaceKey.normalize).joined(separator: "/")
+            if let kept = keptByName[identity] {
+                groups[kept]?.assets.formUnion(value.assets)
+                keysOf[kept, default: [kept]].append(key)
+                groups[key] = nil
+                keysOf[key] = nil
+            } else {
+                keptByName[identity] = key
+            }
+        }
         let base = labels.folder(for: .places)
         return groups.compactMap { key, value -> AlbumProposal? in
             guard value.assets.count >= settings.places.minPhotos, let name = displayName(value.components, level: key.level) else { return nil }
@@ -84,7 +111,7 @@ public struct ProposalEngine: Sendable {
                 assetIDs: value.assets,
                 reliability: .certain,
                 reasons: [.photosInPlace(count: value.assets.count, place: name)],
-                placeKeys: [key]
+                placeKeys: keysOf[key] ?? [key]
             )
         }
         .sorted { $0.id.rawValue < $1.id.rawValue }
@@ -186,13 +213,35 @@ public struct ProposalEngine: Sendable {
 
     // MARK: Frequent places (4.3)
 
-    func frequentPlaceProposals(_ places: [FrequentPlace]) -> [AlbumProposal] {
-        places.enumerated().map { index, place in
+    /// At most this many places without a name are offered, the most visited ones. A long tail
+    /// of "Häufiger Ort 12 … 44" asks for names nobody can give (first device test 15.11.).
+    static let maxUnnamedFrequentPlaces = 5
+
+    func frequentPlaceProposals(_ places: [FrequentPlace], facts: [AssetFacts] = []) -> [AlbumProposal] {
+        let placeOf = Dictionary(facts.compactMap { f in f.place.map { (f.id, $0) } }, uniquingKeysWith: { first, _ in first })
+        var unnamed = 0
+        var perCity: [String: Int] = [:]
+        var result: [AlbumProposal] = []
+        // Most visited first (the detector's order), so the cap keeps the places that matter.
+        for place in places {
             let name = settings.frequentPlaces.names[place.id] ?? place.userName
-            return AlbumProposal(
+            var title = name ?? ""
+            if name == nil {
+                unnamed += 1
+                if unnamed > Self.maxUnnamedFrequentPlaces { continue }
+                // "Häufiger Ort in München" says which place is meant; a number alone does not.
+                if let city = Self.dominantCity(of: place.assetIDs, in: placeOf) {
+                    perCity[city, default: 0] += 1
+                    let n = perCity[city] ?? 1
+                    title = n == 1 ? labels.frequentPlacePlaceholder(in: city) : "\(labels.frequentPlacePlaceholder(in: city)) \(n)"
+                } else {
+                    title = labels.frequentPlacePlaceholder(number: unnamed)
+                }
+            }
+            result.append(AlbumProposal(
                 id: place.id,
                 kind: .frequentPlace,
-                title: name ?? labels.frequentPlacePlaceholder(number: index + 1),
+                title: title,
                 folderPath: [labels.folder(for: .frequentPlaces)],
                 assetIDs: Set(place.assetIDs),
                 reliability: .likely,
@@ -200,8 +249,19 @@ public struct ProposalEngine: Sendable {
                 dateRange: DateInterval(start: place.firstDate, end: place.lastDate),
                 isSensitive: true,
                 requiresUserName: name == nil
-            )
+            ))
         }
+        return result
+    }
+
+    /// The town most of the place's photos were taken in (nil while towns are not known yet).
+    static func dominantCity(of ids: [AssetID], in placeOf: [AssetID: PlaceComponents]) -> String? {
+        var counts: [String: Int] = [:]
+        for id in ids {
+            guard let city = placeOf[id]?.locality ?? placeOf[id]?.subAdministrativeArea, !city.isEmpty else { continue }
+            counts[city, default: 0] += 1
+        }
+        return counts.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key
     }
 
     // MARK: Chronology (4.9)

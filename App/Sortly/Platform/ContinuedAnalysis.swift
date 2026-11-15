@@ -4,17 +4,31 @@ import SortlyEngine
 import UIKit
 import UserNotifications
 
-/// iOS 26 continued processing: a long analysis the user started keeps running after they
-/// leave the app, and the system shows its progress on the Lock Screen and in the Dynamic
-/// Island. When it ends while Albumist is in the background, a local notification says so.
+/// iOS 26 continued processing: a long analysis keeps running after the user leaves the app,
+/// and the system shows its progress on the Lock Screen and in the Dynamic Island. When it
+/// ends while Albumist is in the background, a local notification says so.
+///
+/// First device test 15.11. ("nur einmal und dann einen Fehler"): the request was made only
+/// for the very first run, and when iOS ended the background time the analysis was paused
+/// for good. Now every long run asks (again after each return to the app), and when iOS ends
+/// the time the analysis is only held by iOS and goes on when the app is opened.
 @MainActor
 enum ContinuedAnalysis {
     nonisolated static let taskID = AppInfo.continuedAnalysisTaskPrefix + ".continued"
     private static var registered = false
+    /// The system runs our task right now (progress is on the Lock Screen).
+    private(set) static var isActive = false
+    /// The last request, so a refused or pending one is not repeated with every progress step.
+    private static var lastRequest: Date?
     private struct TaskBox: @unchecked Sendable { let task: BGContinuedProcessingTask }
 
-    /// Call right after a user action that starts a long analysis (must be in the foreground).
+    /// Asks for background time for the running analysis. Only while the app is on screen
+    /// (iOS starts these tasks from the foreground); repeated calls do nothing while a task
+    /// runs or a request was made less than a minute ago.
     static func begin() {
+        guard !isActive, UIApplication.shared.applicationState == .active else { return }
+        if let lastRequest, Date().timeIntervalSince(lastRequest) < 60 { return }
+        lastRequest = Date()
         registerIfNeeded()
         let request = BGContinuedProcessingTaskRequest(
             identifier: taskID,
@@ -25,14 +39,24 @@ enum ContinuedAnalysis {
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
-            // Not supported (simulator, older device) or already running: the analysis
-            // simply pauses in the background and continues on the next launch.
+            // Not supported (simulator, older device) or refused right now: the analysis is
+            // held while the app is in the background and goes on when it is opened.
         }
     }
 
     private static func registerIfNeeded() {
         guard !registered else { return }
         registered = register()
+    }
+
+    private static func started() {
+        isActive = true
+        lastRequest = nil
+    }
+
+    private static func ended() {
+        isActive = false
+        lastRequest = nil
     }
 
     /// Nonisolated: the system calls the handler on a background queue.
@@ -44,34 +68,63 @@ enum ContinuedAnalysis {
             }
             let box = TaskBox(task: continued)
             let monitor = Task { @MainActor in
+                started()
                 let model = AppModel.shared
-                // The analysis may need a moment to start after the request.
+                let units: Int64 = 10_000
+                box.task.progress.totalUnitCount = units
+                var reported: Int64 = 0
+                var lastStep = Date()
                 var idleChecks = 0
                 while !Task.isCancelled {
                     if model.analysis.isRunning {
                         idleChecks = 0
-                        // One bar over all stages, so the lock screen never jumps back to zero.
-                        let total = max(model.analysis.total, 1)
-                        let done = min(model.analysis.completed, total)
-                        box.task.progress.totalUnitCount = 1000
-                        box.task.progress.completedUnitCount = Int64(model.analysis.overall * 1000)
-                        let step = model.analysis.stage?.number ?? 1
-                        let steps = AnalysisPipeline.Stage.allCases.count
-                        box.task.updateTitle(String(localized: "Albumist analysiert deine Fotos"),
-                                             subtitle: String(localized: "Schritt \(step) von \(steps) · \(done.formatted()) von \(total.formatted())"))
+                        // One bar over all stages that only moves forward. iOS ends tasks that
+                        // seem stuck, so while one slow photo or place lookup takes long the bar
+                        // still moves a tiny step every 10 seconds (not while waiting for heat).
+                        let real = Int64(model.analysis.shownOverall * Double(units))
+                        if real > reported {
+                            reported = min(real, units - 1)
+                            lastStep = Date()
+                        } else if model.analysis.waiting == nil, Date().timeIntervalSince(lastStep) >= 10, reported < units - 1 {
+                            reported += 1
+                            lastStep = Date()
+                        }
+                        box.task.progress.completedUnitCount = reported
+                        box.task.updateTitle(String(localized: "Albumist analysiert deine Fotos"), subtitle: subtitle(model.analysis))
                     } else {
                         idleChecks += 1
                         if idleChecks > 3 { break }
                     }
                     try? await Task.sleep(for: .seconds(1))
                 }
-                box.task.setTaskCompleted(success: !Task.isCancelled)
+                ended()
+                if Task.isCancelled {
+                    box.task.setTaskCompleted(success: false)
+                } else {
+                    box.task.progress.completedUnitCount = units
+                    box.task.setTaskCompleted(success: true)
+                }
             }
+            // iOS ended the background time: only the task ends. The analysis is not paused;
+            // iOS holds the app, and the run goes on where it was when Albumist is opened.
             continued.expirationHandler = {
                 monitor.cancel()
-                Task { @MainActor in AppModel.shared.pauseAnalysis() }
             }
         }
+    }
+
+    private static func subtitle(_ analysis: AppModel.AnalysisState) -> String {
+        if let waiting = analysis.waiting {
+            return waiting == .batteryLow
+                ? String(localized: "Wartet, bis der Akku lädt")
+                : String(localized: "Kurze Pause, das iPhone kühlt ab")
+        }
+        guard let stage = analysis.stage, !analysis.isCatchingUp else {
+            return String(localized: "Macht da weiter, wo sie aufgehört hat")
+        }
+        let steps = AnalysisPipeline.Stage.allCases.count
+        guard analysis.total > 0 else { return String(localized: "Schritt \(stage.number) von \(steps)") }
+        return String(localized: "Schritt \(stage.number) von \(steps) · \(analysis.completed.formatted()) von \(analysis.total.formatted())")
     }
 
     // MARK: Notification

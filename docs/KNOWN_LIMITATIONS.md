@@ -2,8 +2,10 @@
 
 ## iOS
 - Fotos-Apps dürfen keine Smart-Alben, geteilten oder synchronisierten Alben verändern.
-- Hintergrundarbeit ist nicht garantiert; iOS entscheidet über `BGProcessingTask`. Die
-  erste Analyse läuft deshalb im Vordergrund und setzt nach Unterbrechung fort.
+- Hintergrundarbeit ist nicht garantiert; iOS entscheidet über `BGContinuedProcessingTask`
+  und `BGProcessingTask`, wie lange Albumist im Hintergrund rechnen darf. Endet die Zeit,
+  hält iOS die App an, und die Analyse geht beim nächsten Öffnen an derselben Stelle weiter.
+- Apps können die Fotos-App öffnen, aber nicht ein bestimmtes Album darin.
 - Bei „Ausgewählte Fotos“ sieht Albumist nur diese Auswahl.
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
   Länder und Regionen kommen immer aus der Offline-Karte.

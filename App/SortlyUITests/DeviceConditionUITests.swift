@@ -652,7 +652,8 @@ final class DeviceConditionUITests: XCTestCase {
         print(leftOver ? "UI_STEP_OK partial undo shown (\(fault ?? "real question"))" : "UI_STEP_MISSING partial undo shown (\(fault ?? "real question"))")
         XCTAssertTrue(leftOver, "The receipt does not say that not everything was taken back (\(fault ?? "real question"))")
         let because = anything(reason)
-        print("UI_FACT reason shown: \(because.exists ? (try? because.snapshot().label) ?? "?" : "none")")
+        let shownReason = (try? because.snapshot().label) ?? "none"
+        print("UI_FACT reason shown: \(shownReason)")
         XCTAssertTrue(because.exists, "The receipt does not say why (\(reason))")
         let rest = app.buttons["receipt.undoRest"]
         swipes = 0

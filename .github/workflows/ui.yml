@@ -1,7 +1,14 @@
 name: UI flow
 
-# End-to-end UI run on the simulator. Separate from CI with its own queue: a new push does
-# not cancel a running UI flow (it takes ~30 min); the newest commit runs next.
+# End-to-end UI tests on the simulator, split over parallel macOS runners. Separate from CI
+# with its own queue: a new push does not cancel a running UI flow; the newest commit runs next.
+#
+# One shard builds the app and the tests once (build-for-testing) and uploads them; every
+# shard, that one included, boots its own fresh simulator meanwhile and runs its tests with
+# test-without-building. Every UI test sets itself up (fast start, demo library), so any
+# group of tests can run alone. The shards are listed once, in `matrix.include` below; a new
+# test class is one more `tests` entry (.github/scripts/check_ui_shards.py checks that every
+# test is listed exactly once). GitHub runs up to five macOS jobs at once for this repository.
 on:
   pull_request:
     paths-ignore: ['**.md']
@@ -9,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # the shards wait for the build products of this run
 
 env:
   HOMEBREW_NO_AUTO_UPDATE: 1
@@ -19,100 +27,199 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  ui-flow:
-    # End-to-end run with the demo library: screenshots, timings and accessibility audit in the log.
-    name: UI flow and accessibility (simulator)
+  ui:
+    name: UI ${{ matrix.shard }}
     runs-on: xcode-27
-    timeout-minutes: 75
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # tests: Class or Class/test, separated by spaces. Classes run in alphabetical order
+          # within a shard, tests in alphabetical order within a class.
+          - shard: flow-a
+            build: true
+            video: true
+            tests: SortlyFlowUITests/test1_FullFlow SortlyFlowUITests/test2_LargeTextDarkMode SortlyFlowUITests/test3_TapThroughSweep SortlyFlowUITests/test4_DecisionsComeBackAfterRebuild SortlyLockedUITests
+          - shard: flow-b
+            tests: DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo SortlyFlowUITests/test1b_AtlasLibrarySearch SortlyFlowUITests/test1c_UndoFromHistory SortlyFlowUITests/test5_InterruptedPlanCanBeLeftAndRetried SortlySearchUITests
+          - shard: flow-c
+            tests: DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo SortlyFlowUITests/test1d_TripWorkshop SortlyFlowUITests/test6_AnalysisKeepsGoingThroughBackgroundAndTabs
+          - shard: device-a
+            tests: DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
+          - shard: device-b
+            tests: DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary
     steps:
       - uses: actions/checkout@v5
+      - name: Every UI test is in exactly one shard
+        run: python3 .github/scripts/check_ui_shards.py
       - name: Select newest Xcode
         run: |
           XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
           [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
           sudo xcode-select -s "$XCODE"
-      - name: Generate Xcode project
-        run: |
-          brew install xcodegen
-          cd App && xcodegen generate
-      - name: Prepare simulator
+      - name: Boot simulator (in the background)
         id: sim
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --pro)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          # CoreSimulator on the hosted Macs sometimes aborts during the first
-          # bootstatus (NSInternalInconsistencyException 'devicePair'); a retry
-          # after a short pause succeeds, so the run is not lost to it.
-          booted=0
-          for attempt in 1 2 3; do
-            xcrun simctl boot "$UDID" 2>/dev/null || true
-            if xcrun simctl bootstatus "$UDID" -b; then booted=1; break; fi
-            echo "bootstatus failed (attempt $attempt), retrying"
-            sleep 15
-          done
-          [ "$booted" = 1 ] || { echo "simulator did not boot"; exit 1; }
-          xcrun simctl privacy "$UDID" grant photos app.albumist.ios || echo "privacy grant failed"
-          xcrun simctl status_bar "$UDID" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
-      - name: Run UI flow
+          # Boots while the app is built or downloaded. CoreSimulator on the hosted Macs
+          # sometimes aborts during the first bootstatus ('devicePair'); a retry succeeds.
+          nohup bash -c '
+            for attempt in 1 2 3; do
+              xcrun simctl boot "$0" 2>/dev/null || true
+              if xcrun simctl bootstatus "$0" -b; then
+                xcrun simctl privacy "$0" grant photos app.albumist.ios || echo "privacy grant failed"
+                xcrun simctl status_bar "$0" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
+                echo ok > sim-ready; exit 0
+              fi
+              echo "bootstatus failed (attempt $attempt), retrying"; sleep 15
+            done
+            echo failed > sim-ready' "$UDID" > sim-boot.log 2>&1 &
+      - name: Build for testing
+        if: matrix.build
         run: |
           set +e
+          brew install xcodegen
+          cd App && xcodegen generate
+          xcodebuild build-for-testing \
+            -project Sortly.xcodeproj \
+            -scheme SortlyUI \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath ../build/dd \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1
+          status=$?
+          grep -aE "error:|\*\* " ../build-log.txt | head -100
+          [ $status = 0 ] || exit $status
+          # Only what the tests run: the apps and the .xctestrun (no modules or objects).
+          cd ../build/dd/Build/Products
+          tar --exclude '*.swiftmodule' --exclude '*.o' --exclude '*.a' --exclude '*.swiftdoc' -czf "$GITHUB_WORKSPACE/ui-products.tgz" .
+          ls -la "$GITHUB_WORKSPACE/ui-products.tgz"
+      - name: Upload build products
+        if: matrix.build
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-products
+          path: ui-products.tgz
+          retention-days: 1
+          compression-level: 0
+      - name: Wait for build products
+        if: '!matrix.build'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          # The building shard uploads them as soon as the build is done; it fails without
+          # uploading when the build fails, and then this shard stops too.
+          for i in $(seq 1 240); do
+            ID=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" --jq '.artifacts[] | select(.name == "ui-products") | .id' | head -1)
+            if [ -n "$ID" ]; then
+              gh api "repos/${{ github.repository }}/actions/artifacts/$ID/zip" > products.zip || exit 1
+              unzip -q products.zip || exit 1
+              rm products.zip
+              echo "build products after $((i * 10)) s"
+              exit 0
+            fi
+            BUILDER=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --jq '.jobs[] | select(.name == "UI flow-a") | .status + " " + (.conclusion // "")')
+            case "$BUILDER" in completed*) echo "::error::The building shard ended without build products ($BUILDER)"; exit 1;; esac
+            sleep 10
+          done
+          echo "::error::No build products after 40 minutes"; exit 1
+      - name: Unpack build products
+        run: |
+          mkdir -p products
+          tar -xzf ui-products.tgz -C products
+          ls products
+      - name: Wait for the simulator
+        run: |
+          for i in $(seq 1 120); do [ -f sim-ready ] && break; sleep 5; done
+          cat sim-boot.log
+          [ "$(cat sim-ready 2>/dev/null)" = ok ] || { echo "simulator did not boot"; exit 1; }
+      - name: Run UI tests
+        run: |
+          set +e
+          UDID="${{ steps.sim.outputs.udid }}"
+          ONLY=""
+          for t in ${{ matrix.tests }}; do ONLY="$ONLY -only-testing:SortlyUITests/$t"; done
+          echo "UI_SHARD ${{ matrix.shard }}: ${{ matrix.tests }}"
           # SwiftUI reports broken navigation (link without destination) and similar runtime
           # problems only in the system log, so it is recorded during the whole run.
-          xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log stream --style compact --level debug \
+          xcrun simctl spawn "$UDID" log stream --style compact --level debug \
             --predicate 'process == "Sortly" AND (subsystem == "com.apple.SwiftUI" OR messageType == fault OR eventMessage CONTAINS[c] "navigationDestination")' \
             > swiftui-log.txt 2>&1 &
           LOGPID=$!
-          # Video of the plan being applied (the "photos fly into albums" show): recording starts
-          # when the test opens the plan and stops a few seconds after the plan is done.
-          UDID="${{ steps.sim.outputs.udid }}"
           mkdir -p build
-          (
-            until grep -aq "UI_STEP_OK open plan" ui-log.txt 2>/dev/null; do sleep 1; done
-            xcrun simctl io "$UDID" recordVideo --codec=h264 --force build/sorting-show.mp4 > /dev/null 2>&1 &
-            REC=$!
-            for i in $(seq 1 240); do grep -aq "UI_TIMING apply" ui-log.txt 2>/dev/null && break; sleep 1; done
-            sleep 3
-            kill -INT $REC 2>/dev/null; wait $REC
-          ) &
-          WATCHPID=$!
-          cd App
-          xcodebuild test \
-            -project Sortly.xcodeproj \
-            -scheme SortlyUI \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            -resultBundlePath ../build/UITestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO > ../ui-log.txt 2>&1
+          WATCHPID=""
+          if [ "${{ matrix.video }}" = "true" ]; then
+            # Video of the plan being applied in test1 (the "photos fly into albums" show):
+            # recording starts when the test opens the plan and stops a few seconds after it is done.
+            (
+              until grep -aq "UI_STEP_OK open plan$" ui-log.txt 2>/dev/null; do sleep 1; done
+              xcrun simctl io "$UDID" recordVideo --codec=h264 --force build/sorting-show.mp4 > /dev/null 2>&1 &
+              REC=$!
+              for i in $(seq 1 240); do grep -aq "UI_TIMING apply" ui-log.txt 2>/dev/null && break; sleep 1; done
+              sleep 3
+              kill -INT $REC 2>/dev/null; wait $REC
+            ) &
+            WATCHPID=$!
+          fi
+          XCTESTRUN=$(ls products/*.xctestrun | head -1)
+          started=$(date +%s)
+          xcodebuild test-without-building \
+            -xctestrun "$XCTESTRUN" \
+            -destination "id=$UDID" \
+            -resultBundlePath build/UITestResults.xcresult \
+            $ONLY > ui-log.txt 2>&1
           status=$?
+          echo "UI_SHARD_TIME ${{ matrix.shard }} $(( $(date +%s) - started )) s"
           kill $LOGPID 2>/dev/null
-          pkill -INT -f "recordVideo" 2>/dev/null; sleep 2; kill $WATCHPID 2>/dev/null
-          ls -la ../build/sorting-show.mp4 2>/dev/null && echo "UI_VIDEO sorting-show.mp4"
-          # Artifact downloads are not reachable from every reviewer's machine, so a smaller copy of
-          # the video is also printed into the log (base64 chunks, like the screenshots).
-          if [ -f ../build/sorting-show.mp4 ]; then
-            avconvert --source ../build/sorting-show.mp4 --output ../build/sorting-show-small.mp4 \
+          if [ -n "$WATCHPID" ]; then pkill -INT -f "recordVideo" 2>/dev/null; sleep 2; kill $WATCHPID 2>/dev/null; fi
+          if [ -f build/sorting-show.mp4 ]; then
+            echo "UI_VIDEO sorting-show.mp4"
+            # Artifact downloads are not reachable from every reviewer's machine, so a smaller copy of
+            # the video is also printed into the log (base64 chunks, like the screenshots).
+            avconvert --source build/sorting-show.mp4 --output build/sorting-show-small.mp4 \
               --preset Preset1920x1080 --replace > /dev/null 2>&1 \
-              || cp ../build/sorting-show.mp4 ../build/sorting-show-small.mp4
-            bytes=$(stat -f%z ../build/sorting-show-small.mp4)
+              || cp build/sorting-show.mp4 build/sorting-show-small.mp4
+            bytes=$(stat -f%z build/sorting-show-small.mp4)
             echo "UI_VIDEO_SIZE $bytes"
             if [ "$bytes" -lt 25000000 ]; then
-              base64 -i ../build/sorting-show-small.mp4 | tr -d '\n' | fold -w 60000 | awk '{print "UI_VIDEO_B64 " NR " " $0}'
+              base64 -i build/sorting-show-small.mp4 | tr -d '\n' | fold -w 60000 | awk '{print "UI_VIDEO_B64 " NR " " $0}'
             fi
           fi
-          grep -aE "error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed" ../ui-log.txt | grep -v "/SourcePackages/" | head -8000
+          grep -aE "error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_SHARD|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed" ui-log.txt | grep -v "/SourcePackages/" | head -8000
           # Unique runtime warnings from the app (timestamps cut off; scene setup and view dumps are noise).
-          grep -avE "^Filtering|^Timestamp|SwiftUI:Scenes|_UIHostingView|renderbox" ../swiftui-log.txt | cut -c 25- | sort | uniq -c | sort -rn | head -40 | sed 's/^/UI_RUNTIME_WARNING /'
-          if grep -aqiE "no matching navigationDestination|NavigationLink is presenting|cannot be activated" ../swiftui-log.txt; then
+          grep -avE "^Filtering|^Timestamp|SwiftUI:Scenes|_UIHostingView|renderbox" swiftui-log.txt | cut -c 25- | sort | uniq -c | sort -rn | head -40 | sed 's/^/UI_RUNTIME_WARNING /'
+          if grep -aqiE "no matching navigationDestination|NavigationLink is presenting|cannot be activated" swiftui-log.txt; then
             echo "::error::SwiftUI navigation warning in the UI run (a link leads nowhere)"
             status=1
           fi
-          if grep -aqiE "Publishing changes from within view updates|Modifying state during view update" ../swiftui-log.txt; then
+          if grep -aqiE "Publishing changes from within view updates|Modifying state during view update" swiftui-log.txt; then
             echo "::warning::SwiftUI state was changed during a view update (see UI_RUNTIME_WARNING)"
           fi
           exit $status
       - name: Upload video of the sorting show
-        if: always() && hashFiles('build/sorting-show.mp4') != ''
+        if: always() && matrix.video && hashFiles('build/sorting-show.mp4') != ''
         uses: actions/upload-artifact@v6
         with:
           name: sorting-show-video
           path: build/sorting-show.mp4
           retention-days: 14
+
+  report:
+    # Wall time of the whole UI run and of each shard, in one place.
+    name: UI summary
+    needs: ui
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Shards and wall time
+        run: |
+          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --jq '
+            .jobs[] | select(.name | startswith("UI ")) | select(.name != "UI summary")
+            | "UI_SHARD_RESULT \(.name) \(.conclusion // .status) \(((.completed_at // now | if type == "string" then fromdateiso8601 else . end) - (.started_at | fromdateiso8601)) / 60 | floor) min"'
+          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq '"UI_WALL_TIME \((now - (.run_started_at | fromdateiso8601)) / 60 | floor) min"'

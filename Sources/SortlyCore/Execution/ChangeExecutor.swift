@@ -23,6 +23,15 @@ public protocol PhotoLibraryWriting: Sendable {
     func collection(_ id: CollectionID) async throws -> CollectionSnapshot?
 }
 
+/// Why Photos did not carry out a deletion, as far as the library adapter can tell. Other
+/// errors keep their system text (reduced to domain and code in the diagnostic report).
+public enum LibraryWriteFailure: Error, Sendable, Equatable {
+    /// The user answered "Don't Allow" when iOS asked to confirm the deletion.
+    case declinedByUser
+    /// Photos reported success, but the albums or folders were still there afterwards.
+    case notApplied
+}
+
 extension PhotoLibraryWriting {
     public func collection(_ id: CollectionID) async throws -> CollectionSnapshot? {
         try await currentInventory()[id]
@@ -428,6 +437,7 @@ public actor ChangeExecutor {
             if case .deleteCollection(let id, _) = plan.steps[i].operation { targets[i] = id }
         }
         var states: [Int: StepState] = [:]
+        var deletionFailure: LibraryWriteFailure?
         var allowed = Set<CollectionID>()
         var kept: [Int: (album: CollectionID, ours: [AssetID])] = [:]
         do {
@@ -467,9 +477,15 @@ public actor ChangeExecutor {
             for (_, k) in kept.sorted(by: { $0.key < $1.key }) where !k.ours.isEmpty {
                 try await library.removeAssets(k.ours, from: k.album)
             }
+        } catch let failure as LibraryWriteFailure {
+            // Said per step below, from what the library shows afterwards.
+            deletionFailure = failure
         } catch {
             for i in indices { states[i] = .failed(reason: String(describing: error)) }
         }
+        // Photos said nothing went wrong, or that the user declined: every album or folder
+        // that is still there gets the reason the user can act on.
+        let notGone = deletionFailure == .declinedByUser ? StepState.deletionDeclinedReason : StepState.deletionNotAppliedReason
         // Read back: success only for what is really gone.
         if let after = try? await library.currentInventory() {
             for (i, id) in targets {
@@ -488,12 +504,15 @@ public actor ChangeExecutor {
                 } else {
                     plan.record?.deletedAlbums[id] = nil
                     if states[i] == nil {
-                        states[i] = .failed(reason: allowed.contains(id) ? "deletion could not be verified" : "folder is not empty")
+                        // A folder that now holds something that was not to go stays on purpose.
+                        let holdsOther = after.collections.values.contains { $0.parentID == id && !allowed.contains($0.id) }
+                        states[i] = .failed(reason: !allowed.contains(id) || holdsOther ? "folder is not empty" : notGone)
                     }
                 }
             }
         }
-        for i in indices { plan.steps[i].state = states[i] ?? .failed(reason: "deletion could not be verified") }
+        let unread = deletionFailure == nil ? "deletion could not be verified" : notGone
+        for i in indices { plan.steps[i].state = states[i] ?? .failed(reason: unread) }
         try await store.save(plan)
         for i in indices { onEvent(.stepFinished(index: i, state: plan.steps[i].state)) }
     }

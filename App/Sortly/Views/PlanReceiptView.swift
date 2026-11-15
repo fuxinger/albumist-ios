@@ -237,6 +237,11 @@ struct PlanReceiptView: View {
                 if partlyUndone {
                     Text("Nicht alles ließ sich zurücknehmen. Du kannst es noch einmal versuchen oder es so lassen.")
                         .font(.subheadline).foregroundStyle(.secondary)
+                    // Why, in words the user can act on (first iPhone test, 15.11.).
+                    ForEach(StepProblemText.texts(undo.problems), id: \.self) { text in
+                        Label(text, systemImage: "exclamationmark.triangle")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
                     Button("Rest rückgängig machen", role: .destructive) { confirmUndo = true }
                         .disabled(model.execution.isRunning)
                         .accessibilityIdentifier("receipt.undoRest")

@@ -1418,6 +1418,7 @@ final class AppModel {
             lines += plans.map(PlanDiagnostics.describe)
         }
         if let failure = execution.failure { lines.append("last execution failure: \(PlanDiagnostics.reasonCode(failure))") }
+        if let deletion = DeletionLog.last { lines.append("last deletion \(deletion)") }
         return lines.joined(separator: "\n")
     }
 

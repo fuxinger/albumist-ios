@@ -7618,6 +7618,26 @@
           }
         }
       }
+    },
+    "Du hast das Löschen in der Frage von iOS nicht erlaubt. Die Alben sind noch da. Versuche es noch einmal und tippe dann auf „Löschen“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You did not allow the deletion when iOS asked. The albums are still there. Try again and tap “Delete”."
+          }
+        }
+      }
+    },
+    "Die Fotos-App hat das Löschen nicht ausgeführt, die Alben sind noch da. Versuche es in ein paar Minuten noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Photos app did not carry out the deletion; the albums are still there. Try again in a few minutes."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

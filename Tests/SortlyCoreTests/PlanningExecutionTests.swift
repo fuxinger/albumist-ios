@@ -281,6 +281,37 @@ struct PlanningExecutionTests {
         #expect(await library.assets == allAssets)
     }
 
+    /// First iPhone test (15.11.): undo ran three times, Photos raised no error, and the album
+    /// and both folders were still there. Each step must say why, in a way the user can act
+    /// on, nothing may be counted as removed, and trying again later must take it all back.
+    @Test(arguments: [InMemoryPhotoLibrary.DeletionBehavior.silentlyIgnored, .declined])
+    func undoThatPhotosDidNotCarryOutSaysWhyAndCanBeRepeated(_ behavior: InMemoryPhotoLibrary.DeletionBehavior) async throws {
+        let library = InMemoryPhotoLibrary(assets: allAssets)
+        let items = [ConfirmedProposal(proposal: proposal("m", .trip, "Marokko", ["Reisen"], ids("a", 0..<40)), decision: .createNew(title: nil, folderPath: nil))]
+        let plan = confirmed(planner.makePlan(from: items, inventory: try await library.currentInventory()))
+        let executed = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(plan)
+        let before = try await library.currentInventory()
+
+        await library.setDeletionBehavior(behavior, times: 1)
+        let undo = confirmed(UndoPlanner().undoPlan(for: executed, current: before))
+        let failed = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(undo)
+        #expect(failed.status == .completedWithErrors)
+        let reason = behavior == .declined ? StepState.deletionDeclinedReason : StepState.deletionNotAppliedReason
+        let deletions = failed.steps.filter { if case .deleteCollection = $0.operation { true } else { false } }
+        #expect(!deletions.isEmpty)
+        #expect(deletions.allSatisfy { $0.state == .failed(reason: reason) })
+        #expect(failed.record?.deletedAlbums.isEmpty ?? true)
+        #expect(PlanDiagnostics.reasonCode(reason) == reason)
+        #expect(try await library.currentInventory() == before)
+
+        // "Rest rückgängig machen" a few minutes later.
+        let again = confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory()))
+        let done = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(again)
+        #expect(done.status == .completed)
+        #expect(try await library.currentInventory().albums.contains { $0.title == "Marokko" } == false)
+        #expect(await library.assets == allAssets)
+    }
+
     /// The undo plan was made, then the user put an own album into one of our folders: the
     /// batch still deletes our albums but keeps that folder and every folder above it.
     @Test func batchDeletionKeepsAFolderThatGotAnOwnAlbumMeanwhile() async throws {

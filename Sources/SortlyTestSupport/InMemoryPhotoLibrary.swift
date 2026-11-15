@@ -146,9 +146,32 @@ public actor InMemoryPhotoLibrary: PhotoLibraryWriting {
     /// How often a batch deletion was requested (each one is one question from Photos).
     public private(set) var deleteRequests = 0
 
+    /// What Photos does with the next batch deletions (seen on an iPhone, 15.11.).
+    public enum DeletionBehavior: Sendable {
+        case deletes
+        /// The user taps "Don't Allow" in the iOS question.
+        case declined
+        /// No error, but nothing is gone (the adapter on the device reports `.notApplied`).
+        case silentlyIgnored
+    }
+    public private(set) var deletionBehavior: DeletionBehavior = .deletes
+    /// Behaves like this for the next `times` batch deletions, then deletes again.
+    public func setDeletionBehavior(_ behavior: DeletionBehavior, times: Int = .max) {
+        deletionBehavior = behavior
+        deletionBehaviorLeft = times
+    }
+    private var deletionBehaviorLeft = 0
+
     public func deleteCollections(_ ids: [CollectionID]) async throws {
         try countWrite()
         deleteRequests += 1
+        if deletionBehavior != .deletes {
+            let behavior = deletionBehavior
+            deletionBehaviorLeft -= 1
+            if deletionBehaviorLeft <= 0 { deletionBehavior = .deletes }
+            if behavior == .declined { throw LibraryWriteFailure.declinedByUser }
+            return
+        }
         for id in ids {
             guard let c = inventory[id] else { continue }
             if let parent = c.parentID, var p = inventory[parent] { p.childIDs.removeAll { $0 == id }; inventory.upsert(p) }

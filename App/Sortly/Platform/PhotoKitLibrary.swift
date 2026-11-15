@@ -259,15 +259,77 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// One request for everything: Photos asks the user once ("Delete 37 albums?") instead of
     /// once per album. A folder goes only if all it holds goes too (Photos deletes a folder's
     /// contents with it); this is checked here again, not only in the executor.
+    ///
+    /// First iPhone test (15.11.): undo ran, iOS never asked, nothing was deleted and Photos
+    /// reported no error. So the result is read back. What is still there is asked for once
+    /// more after a short pause (iOS then shows its question); if it still stays,
+    /// `.notApplied` is thrown instead of returning as if it had worked. "Don't Allow"
+    /// becomes `.declinedByUser`. The last outcome goes into the diagnostic report.
     func deleteCollections(_ ids: [CollectionID]) async throws {
-        let raws = ids.map(\.rawValue)
-        var safe = Set<String>()
-        PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: raws, options: nil)
-            .enumerateObjects { album, _, _ in safe.insert(album.localIdentifier) }
-        let albumRaws = Array(safe)
+        var log = DeletionLog.Entry(requested: ids.count)
+        defer { DeletionLog.record(log) }
+        var (albumRaws, listRaws) = Self.deletable(ids.map(\.rawValue), log: &log)
+        guard !albumRaws.isEmpty || !listRaws.isEmpty else {
+            log.outcome = "nothing deletable"
+            return
+        }
+        for attempt in 1...2 {
+            log.attempts = attempt
+            let albums = albumRaws, lists = listRaws
+            do {
+                try await PHPhotoLibrary.shared().performChanges {
+                    // Deletes only the album/folder containers. PhotoKit keeps the media.
+                    let albumResult = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: albums, options: nil)
+                    if albumResult.count > 0 { PHAssetCollectionChangeRequest.deleteAssetCollections(albumResult) }
+                    let listResult = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: lists, options: nil)
+                    if listResult.count > 0 { PHCollectionListChangeRequest.deleteCollectionLists(listResult) }
+                }
+            } catch {
+                let ns = error as NSError
+                if ns.domain == PHPhotosErrorDomain, ns.code == PHPhotosError.Code.userCancelled.rawValue {
+                    log.outcome = "declined"
+                    throw LibraryWriteFailure.declinedByUser
+                }
+                log.outcome = "error \(ns.domain) \(ns.code)"
+                throw error
+            }
+            // Photos may need a moment before the deletion shows in a new fetch.
+            for _ in 0..<8 {
+                if Self.remaining(albums: albums, lists: lists).isEmpty { break }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            let left = Self.remaining(albums: albums, lists: lists)
+            if left.isEmpty {
+                log.outcome = "deleted"
+                return
+            }
+            log.stillThere = left.count
+            albumRaws = albums.filter(left.contains)
+            listRaws = lists.filter(left.contains)
+            // A question that could not be shown (a dialog was still closing) shows now.
+            try? await Task.sleep(for: .seconds(1))
+        }
+        log.outcome = "not applied"
+        throw LibraryWriteFailure.notApplied
+    }
+
+    /// Albums, and folders whose whole content goes too. Each identifier is looked up with its
+    /// own kind: a lookup that mixes album and folder identifiers is not relied on.
+    private static func deletable(_ raws: [String], log: inout DeletionLog.Entry) -> (albums: [String], lists: [String]) {
+        var albums: [String] = []
         var lists: [PHCollectionList] = []
-        PHCollectionList.fetchCollectionLists(withLocalIdentifiers: raws, options: nil)
-            .enumerateObjects { list, _, _ in lists.append(list) }
+        for raw in raws {
+            if let album = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [raw], options: nil).firstObject {
+                albums.append(album.localIdentifier)
+                if !album.canPerform(.delete) { log.notDeletable += 1 }
+            } else if let list = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject {
+                lists.append(list)
+                if !list.canPerform(.delete) { log.notDeletable += 1 }
+            } else {
+                log.missing += 1
+            }
+        }
+        var safe = Set(albums)
         var listRaws: [String] = []
         var changed = true
         while changed {
@@ -284,14 +346,24 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                 }
             }
         }
-        guard !albumRaws.isEmpty || !listRaws.isEmpty else { return }
-        try await PHPhotoLibrary.shared().performChanges {
-            // Deletes only the album/folder containers. PhotoKit keeps the media.
-            let albums = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: albumRaws, options: nil)
-            if albums.count > 0 { PHAssetCollectionChangeRequest.deleteAssetCollections(albums) }
-            let folders = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: listRaws, options: nil)
-            if folders.count > 0 { PHCollectionListChangeRequest.deleteCollectionLists(folders) }
+        log.albums = albums.count
+        log.folders = lists.count
+        log.foldersKept = lists.count - listRaws.count
+        return (albums, listRaws)
+    }
+
+    /// Which of these albums and folders a new fetch still finds.
+    private static func remaining(albums: [String], lists: [String]) -> Set<String> {
+        var left = Set<String>()
+        if !albums.isEmpty {
+            PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: albums, options: nil)
+                .enumerateObjects { c, _, _ in left.insert(c.localIdentifier) }
         }
+        if !lists.isEmpty {
+            PHCollectionList.fetchCollectionLists(withLocalIdentifiers: lists, options: nil)
+                .enumerateObjects { c, _, _ in left.insert(c.localIdentifier) }
+        }
+        return left
     }
 
     func deleteCollection(_ id: CollectionID) async throws {

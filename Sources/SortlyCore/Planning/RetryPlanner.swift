@@ -8,6 +8,11 @@ extension StepState {
     public static let unclearReason = "outcome unclear after interruption"
     /// A step left out because the user deleted the album for this suggestion meanwhile.
     public static let deletedByUserReason = "album deleted by the user meanwhile"
+    /// The user answered "Don't Allow" when iOS asked whether Albumist may delete albums.
+    public static let deletionDeclinedReason = "deletion declined in Photos"
+    /// Photos took the deletion without an error, but the albums or folders were still there
+    /// afterwards (seen on an iPhone right after creating a large album, 15.11.).
+    public static let deletionNotAppliedReason = "deletion not applied by Photos"
 
     /// Reasons of steps that were skipped only because an earlier step of the same plan
     /// failed; they can run once that step works.

@@ -83,7 +83,9 @@ public actor AnalysisPipeline {
     }
 
     public static let contentVersion = 1
-    public static let textVersion = 1
+    /// 2: screenshot categories with whole-word flight rules and short keywords as whole words
+    /// (first device test 15.11.); every stored screenshot is read once more.
+    public static let textVersion = 2
 
     enum Key {
         static let trips = "analysis.trips"

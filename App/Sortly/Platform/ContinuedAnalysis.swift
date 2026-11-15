@@ -35,6 +35,9 @@ private struct ContinuedTaskShared: Sendable {
     var endedComplete = false
     /// Albumist is on screen (set with every scene change, read when iOS ends the time).
     var onScreen = true
+    /// Where the run stands, for "Öffne Albumist, dann geht es bei 2.431 von 5.683 Fotos
+    /// weiter." (M4, T10) when iOS ends the time.
+    var waitBody = ""
 }
 
 /// Completes the system task exactly once (the loop and the expiration may race).
@@ -86,7 +89,9 @@ enum ContinuedAnalysis {
         let running = analysis.isRunning, fraction = analysis.shownOverall
         let text = isActive && running ? subtitle(analysis, finish: finish) : ""
         let ending = running ? nil : ending(analysis)
+        let waitBody = running ? Self.waitBody(analysis.position) : ""
         shared.withLock {
+            if running { $0.waitBody = waitBody }
             $0.running = running
             // The bar keeps where the run got to (a run that ended has no stage, so 0).
             if running { $0.fraction = fraction }
@@ -218,7 +223,7 @@ enum ContinuedAnalysis {
             // Posted here, before the task is handed back: right after it, iOS may hold the
             // app, and work queued for the main thread would wait until Albumist is opened.
             let state = shared.withLock { $0 }
-            if state.running, !state.onScreen { postPausedNotification() }
+            if state.running, !state.onScreen { postPausedNotification(body: state.waitBody) }
             if box.complete(success: true) {
                 Task { @MainActor in ended("expired", fraction: state.fraction) }
             }
@@ -238,7 +243,14 @@ enum ContinuedAnalysis {
         if !analysis.needsResume, report?.pausedBecause == .userPaused {
             return (String(localized: "Analyse pausiert"), String(localized: "Öffne Albumist, um sie fortzusetzen."), false)
         }
-        return (String(localized: "Analyse wartet auf dich"), String(localized: "Öffne Albumist, dann geht es genau dort weiter."), false)
+        return (String(localized: "Analyse wartet auf dich"), waitBody(analysis.stoppedAt), false)
+    }
+
+    /// "Öffne Albumist, dann geht es bei 2.431 von 5.683 Fotos weiter." (M4); without a count
+    /// "… genau dort weiter."
+    static func waitBody(_ position: AnalysisCardState.Position?) -> String {
+        guard let position, position.hasCount else { return String(localized: "Öffne Albumist, dann geht es genau dort weiter.") }
+        return String(localized: "Öffne Albumist, dann geht es bei \(AnalysisText.count(position)) weiter.")
     }
 
     /// Point 5: "2.431 von 5.683 Fotos · fertig gegen 23:40", number first (iOS cuts long
@@ -273,10 +285,10 @@ enum ContinuedAnalysis {
 
     /// iOS ended the background time while the analysis was busy and Albumist was not on
     /// screen: says that nothing is lost and how it goes on.
-    nonisolated private static func postPausedNotification() {
+    nonisolated private static func postPausedNotification(body: String) {
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Analyse wartet auf dich")
-        content.body = String(localized: "Öffne Albumist, dann geht es genau dort weiter.")
+        content.body = body.isEmpty ? String(localized: "Öffne Albumist, dann geht es genau dort weiter.") : body
         let request = UNNotificationRequest(identifier: "analysis.paused", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }

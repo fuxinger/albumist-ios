@@ -8838,6 +8838,16 @@
           }
         }
       }
+    },
+    "Öffne Albumist, dann geht es bei %@ weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist and it continues at %@."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

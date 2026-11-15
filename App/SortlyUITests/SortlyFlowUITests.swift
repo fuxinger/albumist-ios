@@ -561,7 +561,9 @@ final class SortlyFlowUITests: XCTestCase {
             if finished { done.tap(); sleep(3) }
         }
 
-        guard openWorkshop(tripRow("01.08."), "split") else { return }
+        // Trip titles name only month and year since a352853 ("Island, August 2023"), so the
+        // Iceland trip is found by its place; after the split both parts carry that name.
+        guard openWorkshop(tripRow("Island"), "split") else { return }
         sleep(2)
         shot("60-trip-workshop"); audit("trip workshop")
         let day = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "workshop.day", "5. August")).firstMatch
@@ -578,13 +580,14 @@ final class SortlyFlowUITests: XCTestCase {
         finish("split", shotName: "62-split-done")
         let list = app.navigationBars["Reisen"].waitForExistence(timeout: 5)
         print(list ? "UI_STEP_OK back to trips after split" : "UI_STEP_MISSING back to trips after split")
-        let parts = tripRow("05.08.").waitForExistence(timeout: 10)
+        let icelandRows = app.collectionViews.cells.matching(NSPredicate(format: "label CONTAINS %@", "Island"))
+        let parts = tripRow("Island").waitForExistence(timeout: 10) && icelandRows.count >= 2
         print(parts ? "UI_STEP_OK second part is its own trip" : "UI_STEP_MISSING second part is its own trip")
-        XCTAssertTrue(parts, "After the split there is no trip starting on 5 August")
+        XCTAssertTrue(parts, "After the split the Iceland trip is not two trips")
         shot("63-trips-after-split")
 
         // The first part lists the split and offers to merge with the part after it.
-        guard openWorkshop(tripRow("01.08."), "merge") else { return }
+        guard openWorkshop(tripRow("Island"), "merge") else { return }
         sleep(2)
         let listed = app.buttons["workshop.undoChange"].exists
         print(listed ? "UI_STEP_OK workshop lists the split" : "UI_STEP_MISSING workshop lists the split")

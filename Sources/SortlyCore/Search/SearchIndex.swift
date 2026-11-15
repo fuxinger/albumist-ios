@@ -524,11 +524,14 @@ public struct SearchIndex: Sendable {
     }
 
     /// Starting points for an empty search field: the user's most photographed places and
-    /// topics, the newest year, and screenshots and videos when there are any.
-    public func featuredSuggestions(limit: Int = 6) -> [SearchSuggestion] {
+    /// topics, the newest year, and screenshots and videos when there are any; in the
+    /// language of the app, since the parser understands both.
+    public func featuredSuggestions(limit: Int = 6, english: Bool = false) -> [SearchSuggestion] {
         func take(_ kinds: Set<SearchToken.Kind>, _ n: Int) -> [SearchSuggestion] {
-            suggestionPool.filter { kinds.contains($0.kind) }.prefix(n)
-                .map { SearchSuggestion(completion: $0.german, label: $0.german, kind: $0.kind, count: $0.count) }
+            suggestionPool.filter { kinds.contains($0.kind) }.prefix(n).map {
+                let label = english ? $0.english : $0.german
+                return SearchSuggestion(completion: label, label: label, kind: $0.kind, count: $0.count)
+            }
         }
         var result = take([.place], 2) + take([.category], 2)
         if let year = yearRange?.upperBound, count(of: .year(year)) > 0 {

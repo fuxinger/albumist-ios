@@ -394,5 +394,33 @@ struct SearchQuerySetTests {
         }
         print("QUERYSET passed \(cases.count - failed.count) of \(cases.count)")
         for f in failed { print("QUERYSET FAIL \(f)") }
+        #expect(failed.isEmpty, "\(failed.joined(separator: "\n"))")
+    }
+
+    @Test func suggestionsComeFromTheLibrary() {
+        let index = Self.index
+        // The word being typed is completed from the user's own places and topics.
+        let italy = index.suggestions(for: "Ital")
+        #expect(italy.first?.label == "Italien")
+        #expect(italy.first?.kind == .country)
+        #expect((italy.first?.count ?? 0) > 0)
+        #expect(index.suggestions(for: "Hund Ital").first?.completion == "Hund Italien")
+        #expect(index.suggestions(for: "Beac").contains { $0.label == "Beach" })
+        // A finished word or a single letter offers nothing, so the results stay in view.
+        #expect(index.suggestions(for: "Italien").allSatisfy { $0.label != "Italien" })
+        #expect(index.suggestions(for: "Hund ").isEmpty)
+        #expect(index.suggestions(for: "I").isEmpty)
+        // Nothing the library does not have.
+        #expect(index.suggestions(for: "Japa").isEmpty)
+        // Starting points: every one finds photos, in the language of the app.
+        let featured = index.featuredSuggestions()
+        #expect(!featured.isEmpty)
+        for suggestion in featured {
+            #expect(!index.search(suggestion.completion, now: SearchLab.now).ids.isEmpty, "\(suggestion.completion)")
+        }
+        let english = index.featuredSuggestions(english: true)
+        for suggestion in english {
+            #expect(!index.search(suggestion.completion, now: SearchLab.now).ids.isEmpty, "\(suggestion.completion)")
+        }
     }
 }

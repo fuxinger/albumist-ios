@@ -150,7 +150,7 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
             case .createAlbum:
                 if !applied || succeeded { newAlbums += 1 }
             case .addAssets(.existing(let id), let assets):
-                let added = applied ? (record?.media[step.id] ?? (succeeded ? assets : [])) : assets
+                let added = applied ? confirmedMedia(of: step) : assets
                 if !added.isEmpty { extended.insert(id) }
             default:
                 break
@@ -160,6 +160,21 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
     }
     /// What really happened (planned counts for plans from older versions).
     public var appliedSummary: PlanSummary { PlanSummary(applied: self) }
+
+    /// Media an add or remove step verifiably changed: the settled journal entry, and nothing
+    /// while the outcome is unclear (interrupted, or the read-back failed), so an intent is
+    /// never counted as done (audit 2, 6.2). Plans from versions without a journal fall back
+    /// to their succeeded steps. Summary, free albums and receipt all count with this.
+    public func confirmedMedia(of step: PlanStep) -> [AssetID] {
+        let planned: [AssetID]
+        switch step.operation {
+        case .addAssets(_, let assets), .removeAssets(_, let assets): planned = assets
+        default: return []
+        }
+        let succeeded: Bool = if case .succeeded = step.state { true } else { false }
+        if record?.unverified.contains(step.id) == true { return [] }
+        return record?.media[step.id] ?? (succeeded ? planned : [])
+    }
 }
 
 /// The journal of what a plan really changed.
@@ -179,10 +194,13 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
     public var deletedAlbums: [CollectionID: DeletedAlbumRecord] = [:]
     /// Step id → number of planned media that were no longer in the library.
     public var unavailable: [String: Int] = [:]
+    /// Existing albums and folders the plan touched, with the name and folder path they had
+    /// when it ran, so the receipt keeps showing those names after a later rename (audit 2, 7.2).
+    public var names: [CollectionID: RecordedName] = [:]
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case media, unverified, adoptedKeys, deletedAlbums, unavailable }
+    enum CodingKeys: String, CodingKey { case media, unverified, adoptedKeys, deletedAlbums, unavailable, names }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -191,6 +209,32 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
         adoptedKeys = try c.decodeIfPresent(Set<String>.self, forKey: .adoptedKeys) ?? []
         deletedAlbums = try c.decodeIfPresent([CollectionID: DeletedAlbumRecord].self, forKey: .deletedAlbums) ?? [:]
         unavailable = try c.decodeIfPresent([String: Int].self, forKey: .unavailable) ?? [:]
+        names = try c.decodeIfPresent([CollectionID: RecordedName].self, forKey: .names) ?? [:]
+    }
+
+    /// Notes the current name and path of every existing album or folder the plan refers to,
+    /// once: a resumed run keeps the names from its first start.
+    mutating func recordNames(of plan: ChangePlan, inventory: CollectionInventory) {
+        func note(_ id: CollectionID) {
+            guard names[id] == nil, let node = inventory[id] else { return }
+            var path: [String] = []
+            var parent = node.parentID
+            while let p = parent, let folder = inventory[p], path.count < 32 {
+                path.insert(folder.title, at: 0)
+                parent = folder.parentID
+            }
+            names[id] = RecordedName(title: node.title, folderPath: path)
+        }
+        for step in plan.steps {
+            switch step.operation {
+            case .addAssets(.existing(let id), _), .removeAssets(let id, _), .renameCollection(let id, _, _), .deleteCollection(let id, _):
+                note(id)
+            case .createFolder(_, _, .existing(let id)), .createAlbum(_, _, .existing(let id)):
+                note(id)
+            default:
+                break
+            }
+        }
     }
 
     /// Writes the intent of a step before its library call.
@@ -204,6 +248,12 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
         media[step] = assets
         unverified.remove(step)
     }
+}
+
+public struct RecordedName: Hashable, Sendable, Codable {
+    public var title: String
+    /// Titles of the folders above it, outermost first.
+    public var folderPath: [String]
 }
 
 public struct DeletedAlbumRecord: Hashable, Sendable, Codable {
@@ -245,16 +295,16 @@ public struct PlanSummary: Hashable, Sendable {
             switch step.operation {
             case .createFolder: if succeeded { newFolders += 1 }
             case .createAlbum: if succeeded { newAlbums += 1 }
-            case .addAssets(let album, let assets):
-                let added = record?.media[step.id] ?? (succeeded ? assets : [])
+            case .addAssets(let album, _):
+                let added = plan.confirmedMedia(of: step)
                 distinct.formUnion(added)
                 totalAssignments += added.count
                 if case .existing(let id) = album, !added.isEmpty { extended.insert(id) }
                 unavailableAssets += record?.unavailable[step.id] ?? 0
             case .renameCollection: if succeeded { renamedCollections += 1 }
             case .moveCollection: if succeeded { movedCollections += 1 }
-            case .removeAssets(_, let assets):
-                removedMemberships += (record?.media[step.id] ?? (succeeded ? assets : [])).count
+            case .removeAssets:
+                removedMemberships += plan.confirmedMedia(of: step).count
             case .deleteCollection: if succeeded { deletedContainers += 1 }
             }
         }

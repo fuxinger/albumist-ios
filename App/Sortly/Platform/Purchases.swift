@@ -15,20 +15,22 @@ final class Purchases {
     static let unlockProductID = "app.albumist.ios.unlock"
     private static let usedKey = "purchases.albumsUsed"
     private static let byPlanKey = "purchases.albumsByPlan"
+    private static let returnedKey = "purchases.returnedPlans"
 
     private(set) var isUnlocked = false
     private(set) var product: Product?
     private(set) var isPurchasing = false
     var lastError: String?
 
-    /// Albums created or extended before counting per plan (older versions).
-    private var legacyUsed: Int = UserDefaults.standard.integer(forKey: Purchases.usedKey)
-    /// Plan id → albums that plan created or extended. Counting per plan makes recording
-    /// idempotent: a plan finalized again after a crash is not counted twice.
-    private var byPlan: [String: Int] = UserDefaults.standard.dictionary(forKey: Purchases.byPlanKey) as? [String: Int] ?? [:]
+    /// The free albums used, counted per plan (see `FreeAlbumLedger`).
+    private var ledger = FreeAlbumLedger(
+        legacyUsed: UserDefaults.standard.integer(forKey: Purchases.usedKey),
+        byPlan: UserDefaults.standard.dictionary(forKey: Purchases.byPlanKey) as? [String: Int] ?? [:],
+        returned: Set(UserDefaults.standard.stringArray(forKey: Purchases.returnedKey) ?? [])
+    )
 
     /// Albums created or extended so far. A completed undo gives its albums back.
-    var albumsUsed: Int { legacyUsed + byPlan.values.reduce(0, +) }
+    var albumsUsed: Int { ledger.used }
 
     private var updates: Task<Void, Never>?
 
@@ -41,20 +43,23 @@ final class Purchases {
     static var unlockedForUITests: Bool { UITestSupport.isRunning }
 
     func recordUsage(plan: SortlyID, albums: Int) {
-        guard albums > 0, byPlan[plan.rawValue] == nil else { return }
-        byPlan[plan.rawValue] = albums
-        UserDefaults.standard.set(byPlan, forKey: Self.byPlanKey)
+        if ledger.record(plan: plan, albums: albums) { saveLedger() }
     }
 
-    /// After an undo the albums are gone again, so they do not count as used. Plans counted by
-    /// an older version give back `albums` from the old total.
+    /// After an undo the albums are gone again, so they do not count as used. Once per plan.
     func returnUsage(plan: SortlyID, albums: Int) {
-        if byPlan.removeValue(forKey: plan.rawValue) != nil {
-            UserDefaults.standard.set(byPlan, forKey: Self.byPlanKey)
-        } else if albums > 0 {
-            legacyUsed = max(0, legacyUsed - albums)
-            UserDefaults.standard.set(legacyUsed, forKey: Self.usedKey)
-        }
+        if ledger.giveBack(plan: plan, albums: albums) { saveLedger() }
+    }
+
+    /// Self-repair at launch: a plan the store shows as taken back never counts.
+    func settleUndone(_ plans: Set<SortlyID>) {
+        if ledger.settleUndone(plans) { saveLedger() }
+    }
+
+    private func saveLedger() {
+        UserDefaults.standard.set(ledger.legacyUsed, forKey: Self.usedKey)
+        UserDefaults.standard.set(ledger.byPlan, forKey: Self.byPlanKey)
+        UserDefaults.standard.set(Array(ledger.returned), forKey: Self.returnedKey)
     }
 
     func start() {

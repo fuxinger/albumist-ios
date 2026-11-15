@@ -88,6 +88,8 @@ public struct PlanReceipt: Hashable, Sendable {
         var extended = Set<CollectionID>()
 
         func existingPath(_ id: CollectionID?) -> [String] {
+            // Names as they were when the plan ran; plans from older versions use today's.
+            if let id, let recorded = record?.names[id] { return recorded.folderPath + [recorded.title] }
             var titles: [String] = []
             var current = id
             while let c = current, let node = inventory[c], titles.count < 32 {
@@ -112,7 +114,10 @@ public struct PlanReceipt: Hashable, Sendable {
                          unavailable: 0, failed: false, unconfirmed: false, coverAssetID: nil)
         }
         func existingTitle(_ id: CollectionID) -> String {
-            inventory[id]?.title ?? record?.deletedAlbums[id]?.title ?? ""
+            record?.names[id]?.title ?? inventory[id]?.title ?? record?.deletedAlbums[id]?.title ?? ""
+        }
+        func existingFolder(_ id: CollectionID) -> [String] {
+            record?.names[id]?.folderPath ?? existingPath(inventory[id]?.parentID)
         }
 
         for step in plan.steps {
@@ -148,8 +153,8 @@ public struct PlanReceipt: Hashable, Sendable {
                 album.unconfirmed = album.unconfirmed || unconfirmed
                 lines[album.id] = album
 
-            case let .addAssets(ref, assets):
-                let added = unconfirmed ? [] : record?.media[step.id] ?? (succeeded ? assets : [])
+            case let .addAssets(ref, _):
+                let added = plan.confirmedMedia(of: step)
                 let unavailable = record?.unavailable[step.id] ?? 0
                 addedPhotos.formUnion(added)
                 assignmentsAdded += added.count
@@ -162,7 +167,7 @@ public struct PlanReceipt: Hashable, Sendable {
                     album = line("planned:" + key, title: planned?.title ?? "", folder: planned.map { path($0.parent) } ?? [],
                                  change: record?.adoptedKeys.contains(key) == true ? .adopted : .created)
                 case .existing(let id):
-                    album = line(id.rawValue, title: existingTitle(id), folder: existingPath(inventory[id]?.parentID), change: .extended)
+                    album = line(id.rawValue, title: existingTitle(id), folder: existingFolder(id), change: .extended)
                     if !added.isEmpty { extended.insert(id) }
                 }
                 album.added += Set(added).count
@@ -172,11 +177,11 @@ public struct PlanReceipt: Hashable, Sendable {
                 album.unconfirmed = album.unconfirmed || unconfirmed
                 lines[album.id] = album
 
-            case let .removeAssets(id, assets):
-                let removed = unconfirmed ? [] : record?.media[step.id] ?? (succeeded ? assets : [])
+            case let .removeAssets(id, _):
+                let removed = plan.confirmedMedia(of: step)
                 membershipsRemoved += removed.count
                 guard !removed.isEmpty || failed || unconfirmed else { continue }
-                var album = line(id.rawValue, title: existingTitle(id), folder: existingPath(inventory[id]?.parentID), change: .reduced)
+                var album = line(id.rawValue, title: existingTitle(id), folder: existingFolder(id), change: .reduced)
                 album.removed += removed.count
                 album.failed = album.failed || failed
                 album.unconfirmed = album.unconfirmed || unconfirmed
@@ -206,6 +211,9 @@ public struct PlanReceipt: Hashable, Sendable {
         self.problems = problems
     }
 
-    /// Whether everything the plan set out to do was done and confirmed.
-    public var isComplete: Bool { failedSteps == 0 && leftSteps == 0 && unconfirmedSteps == 0 && problems.isEmpty }
+    /// Whether everything the plan set out to do was done and confirmed. Photos that were no
+    /// longer in the library were not sorted in, so such a plan is not complete (audit 2, 7.1).
+    public var isComplete: Bool {
+        failedSteps == 0 && leftSteps == 0 && unconfirmedSteps == 0 && unavailablePhotos == 0 && problems.isEmpty
+    }
 }

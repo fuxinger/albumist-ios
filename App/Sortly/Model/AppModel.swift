@@ -573,6 +573,7 @@ final class AppModel {
             historyHasMore = plans.count > historyLimit
             history = plans.prefix(historyLimit).filter { $0.reverts == nil }
             undonePlans = try await store.undoneTargets()
+            Purchases.shared.settleUndone(undonePlans)
             // Photos that could not be read yet (failed attempts) do not count as looked at.
             let analyzed = Set(try await store.results(ContentAnalysis.self, kind: "content").filter { $0.value.failedAttempts == nil }.keys)
             let stored = try await store.overrides()
@@ -970,6 +971,7 @@ final class AppModel {
     /// albums are counted once per plan, from what really changed.
     private func finalize(_ result: ChangePlan) async {
         guard let store else { return }
+        var undone: SortlyID?
         do {
             let after = try await library.currentInventory()
             try await store.saveInventory(after)
@@ -986,6 +988,19 @@ final class AppModel {
                 // Counted before the store write: counting twice is impossible (per plan id),
                 // and a crash in between is completed at the next launch.
                 Purchases.shared.recordUsage(plan: result.id, albums: result.freeAlbumUse(applied: true))
+            } else if let original = result.reverts, result.status == .completed, let executed = try await store.plan(original) {
+                // A completed undo: part of the same recoverable finalization, so a crash right
+                // after the undo still gives the free albums back (audit 2, 6.3). Both are
+                // idempotent when the finalization runs again.
+                Purchases.shared.returnUsage(plan: executed.id, albums: executed.freeAlbumUse(applied: true))
+                // A removal that is taken back lets its suggestions come back as well.
+                let sources = executed.removalSources
+                if !sources.isEmpty {
+                    for o in try await store.overrides() where o.decision == .rejectProposal {
+                        if case .source(let s) = o.scope, sources.contains(s) { try await store.removeOverride(o.id) }
+                    }
+                }
+                undone = original
             }
             var done = result
             done.finalizedAt = Date()
@@ -996,6 +1011,7 @@ final class AppModel {
             ])
             decisions = newDecisions
             managedAlbums = states
+            if let undone { undonePlans.insert(undone) }
             saveSafetyBackup()
             SpotlightIndex.scheduleUpdate(self)
             // Suggestions see the new albums at once (e.g. "Album vollständig").
@@ -1263,19 +1279,8 @@ final class AppModel {
             var owned: [CollectionID: Set<AssetID>] = [:]
             for state in managedAlbums { owned[state.albumID, default: []].formUnion(state.addedBySortly) }
             let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned)
+            // Free albums and suggestions come back in `finalize`, with the undo itself.
             await run(undoPlan)
-            if let result = execution.finished, result.reverts == executed.id, result.status == .completed {
-                undonePlans.insert(executed.id)
-                // Albums that are gone again do not count against the free albums.
-                Purchases.shared.returnUsage(plan: executed.id, albums: executed.freeAlbumUse(applied: true))
-                // A removal that is taken back lets its suggestions come back as well.
-                let sources = executed.removalSources
-                if !sources.isEmpty {
-                    for o in try await store.overrides() where o.decision == .rejectProposal {
-                        if case .source(let s) = o.scope, sources.contains(s) { try await store.removeOverride(o.id) }
-                    }
-                }
-            }
         } catch {
             message = error.localizedDescription
         }

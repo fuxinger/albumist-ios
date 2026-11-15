@@ -115,10 +115,6 @@ struct PlanReceiptView: View {
             if receipt.containersDeleted > 0 { row("rectangle.stack.badge.minus", "Entfernte Alben und Ordner", receipt.containersDeleted) }
         } header: {
             Text("Das hat Albumist geändert")
-        } footer: {
-            if receipt.unavailablePhotos > 0 {
-                Text("\(receipt.unavailablePhotos) Fotos waren beim Umsetzen nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
-            }
         }
     }
 
@@ -143,6 +139,10 @@ struct PlanReceiptView: View {
             }
             if receipt.leftSteps > 0 {
                 Text("\(receipt.leftSteps) Schritte hast du nach der Unterbrechung so gelassen.")
+            }
+            // Not a failure, but not sorted in either: the plan is not complete (audit 2, 7.1).
+            if receipt.unavailablePhotos > 0 {
+                Text("\(receipt.unavailablePhotos) Fotos waren beim Umsetzen nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
             }
             ForEach(StepProblemText.texts(receipt.problems), id: \.self) { text in
                 Label(text, systemImage: "exclamationmark.triangle")
@@ -339,6 +339,7 @@ enum ReceiptText {
         var lines: [String] = []
         lines.append(String(localized: "Albumist – Änderungsbeleg"))
         lines.append(receipt.startedAt.formatted(date: .long, time: .shortened))
+        lines.append(receipt.isComplete ? String(localized: "Vollständig umgesetzt") : String(localized: "Teilweise umgesetzt"))
         lines.append("")
         func add(_ label: String.LocalizationValue, _ value: Int, always: Bool = false) {
             if always || value > 0 { lines.append("\(String(localized: label)): \(value.formatted())") }
@@ -347,6 +348,7 @@ enum ReceiptText {
         add("Ergänzte Alben", receipt.albumsExtended)
         add("Neue Ordner", receipt.createdFolders.count)
         add("Fotos einsortiert", receipt.photosAdded, always: true)
+        add("Nicht mehr in der Mediathek", receipt.unavailablePhotos)
         add("Aus Alben genommen", receipt.membershipsRemoved)
         add("Entfernte Alben und Ordner", receipt.containersDeleted)
         add("Originale gelöscht", receipt.originalsDeleted, always: true)

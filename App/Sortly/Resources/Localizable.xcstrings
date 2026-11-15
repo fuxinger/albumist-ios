@@ -7138,6 +7138,16 @@
           }
         }
       }
+    },
+    "Nicht mehr in der Mediathek" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No longer in the library"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

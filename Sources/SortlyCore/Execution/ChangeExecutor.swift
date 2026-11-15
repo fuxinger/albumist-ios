@@ -129,6 +129,8 @@ public actor ChangeExecutor {
         }
 
         plan.status = .running
+        let snapshot = plan
+        plan.record?.recordNames(of: snapshot, inventory: inventory)
         try await store.save(plan)
 
         for index in plan.steps.indices {

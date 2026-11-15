@@ -40,7 +40,9 @@ struct PlanReceiptTests {
         #expect(receipt.albumsCreated == 1 && receipt.albumsExtended == 1)
         #expect(receipt.unavailablePhotos == 1)
         #expect(receipt.originalsDeleted == 0 && receipt.originalsEdited == 0 && receipt.originalCopiesCreated == 0)
-        #expect(receipt.isComplete)
+        // One photo was not sorted in, so the plan is not complete (audit 2, 7.1).
+        #expect(!receipt.isComplete)
+        #expect(receipt.failedSteps == 0)
         #expect(receipt.unconfirmedSteps == 0)
     }
 

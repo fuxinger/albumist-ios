@@ -233,6 +233,11 @@ final class DeviceConditionUITests: XCTestCase {
             if next.exists && next.isHittable { next.tap() }
             sleep(1)
         }
+        guard choice == .full || button("Analyse starten").exists else {
+            // The limited picker could not be driven: the caller falls back to the switch.
+            print("UI_STEP_MISSING onboarding reached the start (\(choice))")
+            return false
+        }
         guard tap(button("Analyse starten"), "start analysis", timeout: 5) else { return false }
         answerNotificationQuestion(allow: false)
         return true

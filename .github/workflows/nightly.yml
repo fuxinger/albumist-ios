@@ -114,7 +114,6 @@ jobs:
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          xcrun simctl boot "$UDID" || true
       - name: Core tests with ${{ env.SORTLY_STRESS_SEEDS }} stress seeds
         run: |
           set -o pipefail

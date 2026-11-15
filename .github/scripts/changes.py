@@ -58,10 +58,16 @@ def is_swift(path):
     return path.endswith(".swift") or path in SWIFT_FILES
 
 
+FETCHES = [0]
+
+
 def has_commit(sha):
     if git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0:
         return True
-    # A commit only reachable from another branch or a pull request ref.
+    # A commit only reachable from a pull request ref or a deleted branch; a few at most.
+    if FETCHES[0] >= 5:
+        return False
+    FETCHES[0] += 1
     git("fetch", "--quiet", "--filter=blob:none", "origin", sha)
     return git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
 

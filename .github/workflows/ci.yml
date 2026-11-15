@@ -156,14 +156,14 @@ jobs:
             .build
           key: ios-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**', 'App/**') }}
           restore-keys: ios-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-
-      - name: Pick simulator and boot it during the build
+      - name: Pick simulator
         if: hashFiles('App/project.yml') != ''
         id: sim
+        # Not booted early on purpose: a first boot competes with the package build for the
+        # three cores and made both several minutes slower (run 43749559109).
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          # Booting now overlaps with the builds below; xcodebuild would boot it only afterwards.
-          xcrun simctl boot "$UDID" || true
       - name: Core tests (macOS)
         run: |
           set -o pipefail

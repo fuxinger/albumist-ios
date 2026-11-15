@@ -1525,7 +1525,9 @@ final class AppModel {
 
     private func plainSearch(_ query: String) async -> SearchResult {
         let index = await searchIndex()
-        let parsed = index.parse(query)
+        // Reading the query compares unknown words with every word on screenshots (typos);
+        // off the main thread, so typing stays smooth in a large library.
+        let parsed = await Task.detached(priority: .userInitiated) { index.parse(query) }.value
         // The organization state of every photo only when the query asks for it ("nicht sortiert").
         let statuses = parsed.usesStatus ? states.mapValues { resolver.overall($0) } : [:]
         return await Task.detached(priority: .userInitiated) { SearchEngine().run(parsed, in: index, statuses: statuses) }.value

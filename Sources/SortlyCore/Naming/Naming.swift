@@ -19,27 +19,39 @@ public enum TitleLanguage: String, Sendable, Codable, CaseIterable {
 /// The range describes the span of the photos, not a proven arrival/departure.
 public struct DateRangeFormatter: Sendable {
     public var language: TitleLanguage
+    /// Where the period starts: its first day is that place's date.
     public var timeZone: TimeZone
+    /// Where the period ends, when that is another time zone (nil: `timeZone`). A trip from
+    /// New York to Tokyo ends on Tokyo's date: its last photo, at 8 in the morning in Tokyo,
+    /// was still the day before in New York.
+    public var endTimeZone: TimeZone?
 
-    public init(language: TitleLanguage = .german, timeZone: TimeZone = .current) {
+    public init(language: TitleLanguage = .german, timeZone: TimeZone = .current, endTimeZone: TimeZone? = nil) {
         self.language = language
         self.timeZone = timeZone
+        self.endTimeZone = endTimeZone
     }
 
-    private var calendar: Calendar {
-        var c = Calendar(identifier: .gregorian)
-        c.timeZone = timeZone
-        return c
-    }
+    private typealias Day = (y: Int, m: Int, d: Int)
 
-    private func parts(_ date: Date) -> (y: Int, m: Int, d: Int) {
+    private func parts(_ date: Date, in zone: TimeZone? = nil) -> Day {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone ?? timeZone
         let c = calendar.dateComponents([.year, .month, .day], from: date)
         return (c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
-    public func format(start: Date, end: Date) -> String {
+    /// The first day where the period started, the last day where it ended.
+    private func days(_ start: Date, _ end: Date) -> (first: Day, last: Day) {
         let a = parts(min(start, end))
-        let b = parts(max(start, end))
+        let b = parts(max(start, end), in: endTimeZone)
+        // Flying from Asia to America across the date line can end a short period on an
+        // earlier date than it began; it is then one day.
+        return (a, (b.y, b.m, b.d) < (a.y, a.m, a.d) ? a : b)
+    }
+
+    public func format(start: Date, end: Date) -> String {
+        let (a, b) = days(start, end)
         switch language {
         case .german:
             func dm(_ p: (y: Int, m: Int, d: Int)) -> String { String(format: "%02d.%02d.", p.d, p.m) }
@@ -64,8 +76,7 @@ public struct DateRangeFormatter: Sendable {
     /// `precise` names the days too (`3.–5. Mai 2025`, `30. Juni – 2. Juli 2026`), for two
     /// trips that would otherwise get the same title.
     public func period(start: Date, end: Date, precise: Bool = false) -> String {
-        let a = parts(min(start, end))
-        let b = parts(max(start, end))
+        let (a, b) = days(start, end)
         let german = language == .german
         func day(_ p: (y: Int, m: Int, d: Int)) -> String { german ? "\(p.d). \(monthName(p.m))" : "\(p.d) \(monthName(p.m))" }
         if a == b { return "\(day(a)) \(a.y)" }
@@ -187,9 +198,13 @@ public struct NamingTemplate: Hashable, Sendable, Codable {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = formatter.timeZone
         let startParts = values.start.map { calendar.dateComponents([.year, .month, .day], from: $0) }
-        func dayString(_ d: Date?) -> String? {
+        func dayString(_ d: Date?, isEnd: Bool = false) -> String? {
             guard let d else { return nil }
-            return formatter.format(start: d, end: d)
+            // One day, in the time zone of where it was.
+            var single = formatter
+            if isEnd, let zone = formatter.endTimeZone { single.timeZone = zone }
+            single.endTimeZone = nil
+            return single.format(start: d, end: d)
         }
         let replacements: [String: String?] = [
             "place": values.place,
@@ -199,7 +214,7 @@ public struct NamingTemplate: Hashable, Sendable, Codable {
             "year": startParts?.year.map(String.init),
             "month": startParts?.month.map(formatter.monthName),
             "start": dayString(values.start),
-            "end": dayString(values.end),
+            "end": dayString(values.end, isEnd: true),
             "range": {
                 guard let s = values.start else { return nil }
                 return formatter.format(start: s, end: values.end ?? s)

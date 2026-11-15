@@ -264,6 +264,56 @@ struct ProposalCurationRuleTests {
         #expect(plain.filter { $0.kind == .trip }.count == 4)
     }
 
+    /// Lived in Hamburg until June 2024, in Munich since, back in Hamburg every two months: the
+    /// Hamburg album holds the visits, not a year and a half of everyday life there.
+    @Test func aFormerHomeTownHoldsTheVisitsNotTheYearsThere() throws {
+        let hamburgSpot = GeoCoordinate(latitude: 53.5511, longitude: 9.9937)
+        let weekends = [("2024-11-09", "2024-11-10"), ("2025-01-11", "2025-01-12"), ("2025-03-08", "2025-03-09"),
+                        ("2025-05-10", "2025-05-11"), ("2025-07-12", "2025-07-13"), ("2025-09-13", "2025-09-14")]
+        var lib = LibraryBuilder()
+        lib.daily(from: "2023-01-01", to: "2024-06-30", at: hamburgSpot, perDay: 2, hour: 18)
+        lib.daily(from: "2024-07-01", to: "2025-10-31", at: Fixture.Places.munichHome, perDay: 2, hour: 18, skipping: weekends)
+        var visits: [AssetID] = []
+        for (from, to) in weekends { visits += lib.daily(from: from, to: to, at: hamburgSpot, perDay: 6, hour: 10) }
+        let a = analysis(lib, places: places + [(hamburgSpot, place("DE", "Deutschland", "Hamburg", "Hamburg"))])
+        let proposals = germanEngine().proposals(for: a)
+        let album = try #require(proposals.first { $0.title == "Hamburg" && $0.folderPath == ["Reisen"] }, "\(proposals.map(\.title))")
+        // Before 15.11.: 1,166 photos, the visits and every photo from the years in Hamburg.
+        #expect(album.assetIDs.subtracting(visits).isEmpty, "\(album.assetIDs.subtracting(visits).count) photos from the years there")
+        #expect(album.assetIDs.count == visits.count)
+    }
+
+    /// New York, then Tokyo: the last photo, at 8 in the morning in Tokyo on 1 June, was still
+    /// 31 May in New York. The trip ended in June.
+    @Test func aTripEndsOnTheDateWhereItEnded() throws {
+        let newYork = GeoCoordinate(latitude: 40.7128, longitude: -74.0060)
+        let tokyo = GeoCoordinate(latitude: 35.6762, longitude: 139.6503)
+        let stops: [(GeoCoordinate, PlaceComponents, [String])] = [
+            (newYork, PlaceComponents(isoCountryCode: "US", country: "Vereinigte Staaten", administrativeArea: "New York", locality: "New York",
+                                      timeZoneIdentifier: "America/New_York"),
+             ["2025-05-26 14:00", "2025-05-27 14:00", "2025-05-28 14:00"]),
+            (tokyo, PlaceComponents(isoCountryCode: "JP", country: "Japan", administrativeArea: "Tokio", locality: "Tokio",
+                                    timeZoneIdentifier: "Asia/Tokyo"),
+             ["2025-05-30 01:00", "2025-05-31 01:00", "2025-05-31 21:40"]), // the last at 8:00 on 1 June in Tokyo
+        ]
+        var facts: [AssetFacts] = []
+        for (coordinate, place, mornings) in stops {
+            for morning in mornings {
+                for i in 0..<5 {
+                    let asset = AssetSnapshot(id: AssetID(String(format: "t-%03d", facts.count)),
+                                              creationDate: Fixture.date(morning).addingTimeInterval(Double(i) * 1_200), location: coordinate)
+                    facts.append(AssetFacts(asset: asset, place: place, placeSource: .gpsReverseGeocoded))
+                }
+            }
+        }
+        let start = try #require(facts.first?.asset.creationDate)
+        let end = try #require(facts.last?.asset.creationDate)
+        let trip = Trip(id: SortlyID("ny-tokyo"), start: start, end: end, geotaggedAssetIDs: facts.map(\.id), inferredAssetIDs: [],
+                        centroid: tokyo, maxDistanceFromHomeMeters: 9_000_000, distinctStops: 2, kind: .vacation)
+        let proposals = germanEngine { $0.enabledAreas = [.trips] }.proposals(for: AnalysisSnapshot(facts: facts, trips: [trip]))
+        #expect(proposals.map(\.title) == ["New York & Tokio, Mai–Juni 2025"])
+    }
+
     @Test func twoDayTripsAreTwoTripsNotThreeAlbums() {
         var lib = everydayLibrary()
         _ = trip(&lib, Self.innsbruckSpot, from: "2025-05-04", to: "2025-05-04", perDay: 15)

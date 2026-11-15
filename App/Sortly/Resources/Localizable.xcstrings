@@ -7218,6 +7218,16 @@
           }
         }
       }
+    },
+    "Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The interrupted run counts once you have decided above."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

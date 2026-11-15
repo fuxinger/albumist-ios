@@ -99,6 +99,13 @@ struct OverviewView: View {
                     Text(primaryAreasText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    if model.interruptedPlan != nil {
+                        // The unfinished run counts only once the user has decided above
+                        // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
+                        Text("Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }

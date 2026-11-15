@@ -64,6 +64,8 @@
   vor jedem Netzaufruf, Karten- und Kontonummern über Zeilenumbrüche maskiert (auch Altbestand),
   Gratis-Alben bei Rückgängig sicher zurück, Beleg mit damaligen Namen und ehrlich bei
   ausgelassenen Fotos, Speichern großer Pläne 160 s → 1,7 s.
+- Übersicht: Bei unterbrochenem Umsetzen stand „0 von … sortiert“ ohne Erklärung neben „39 von
+  61 Schritten erledigt“. Darunter steht jetzt, dass es zählt, sobald du entschieden hast.
 - Reise-Erkennung: Wer zu Hause wenig fotografiert, bekam nur eine Reise; das Zuhause
   braucht jetzt Fotos über mindestens drei Wochen verteilt.
 - Umgesetzte Vorschläge kamen als „mehrere passende Alben“ zurück, wenn zwei Alben dieselben

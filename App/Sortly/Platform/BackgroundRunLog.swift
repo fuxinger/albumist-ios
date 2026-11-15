@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import SortlyCore
 
 /// What happened to the analysis in the background, for the diagnostic report: counts, times
 /// and system states only, nothing about the photos. Written because the device test (15.11.)
@@ -86,6 +87,30 @@ enum BackgroundRunLog {
             "background time requested \(e.requested), started \(e.started), refused \(e.refused) (\(e.lastRefusal ?? "-")), "
                 + "last start \(start) at \(percent(e.lastStartProgress)), last end \(end) \(e.lastEndReason ?? "-") at \(progress), \(e.lastEndState ?? "-")",
             "last analysis run \(e.lastRunEnd ?? "-")",
+            "device now \(deviceState()), hottest during the last run \(HeatLog.hottest)",
         ]
+    }
+}
+
+/// The highest heat level iOS reported while the last run asked about the device (it asks
+/// before every photo). Device test 15.11.: "Es wird aber nicht warm. Sind das richtige Werte?"
+/// iOS reports the chip's state, not how warm the case feels; the report now shows it.
+enum HeatLog {
+    private static let level = LockedBox<DeviceState.Thermal?>(nil)
+
+    static func reset() { level.value = nil }
+
+    static func note(_ thermal: DeviceState.Thermal) {
+        if level.value.map({ thermal > $0 }) ?? true { level.value = thermal }
+    }
+
+    static var hottest: String {
+        switch level.value {
+        case nil: "-"
+        case .nominal: "nominal"
+        case .fair: "fair"
+        case .serious: "serious"
+        case .critical: "critical"
+        }
     }
 }

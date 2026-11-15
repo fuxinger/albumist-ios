@@ -86,6 +86,7 @@ final class DeviceConditions: AnalysisConditions, @unchecked Sendable {
     private func state() async -> DeviceState {
         let info = ProcessInfo.processInfo
         let thermal = DeviceState.Thermal(rawValue: info.thermalState.rawValue) ?? .critical
+        HeatLog.note(thermal)
         let battery: (level: Float, charging: Bool)
         if let cached = batteryCache.value, Date().timeIntervalSince(cached.read) < 5 {
             battery = (cached.level, cached.charging)

@@ -604,6 +604,7 @@ final class AppModel {
         analysis.total = 0
         analysis.waiting = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
+        HeatLog.reset()
         analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
         if userInitiated {
             ContinuedAnalysis.begin()

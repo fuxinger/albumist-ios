@@ -71,6 +71,12 @@ public actor AnalysisPipeline {
         /// so the card can show the wait instead of a count that stands for up to a minute;
         /// `nil` again when the lookups go on.
         public var waitLeft: Duration? = nil
+        /// Said once, with the end of the trips step: how much work the run has (the bar's
+        /// widths and the finish time come from it).
+        public var workload: AnalysisWorkload? = nil
+        /// The image step: the last photos looked at (never screenshots: B4), for the card's
+        /// "Gerade angesehen".
+        public var recent: [AssetID] = []
 
         /// One value for the whole run (0…1), so a bar never jumps back when the next stage starts.
         public static func overall(stage: Stage, completed: Int, total: Int) -> Double {
@@ -381,7 +387,6 @@ public actor AnalysisPipeline {
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
         report.completedStages.append(.patterns)
-        onProgress(Progress(stage: .patterns, completed: 1, total: 1))
 
         // The photos this run analyses: all of them, or one year and the trips that touch it.
         let range = Self.dateRange(of: scope, calendar: calendar)
@@ -393,6 +398,8 @@ public actor AnalysisPipeline {
         } else {
             scoped = all
         }
+        onProgress(Progress(stage: .patterns, completed: 1, total: 1,
+                            workload: try await workload(all: all, scoped: scoped, range: range)))
 
         // 3. Places
         let placeOutcome = try await resolvePlaces(scoped, trips: trips, frequent: frequent, refining: mode == .refinement, onProgress: onProgress)
@@ -453,6 +460,9 @@ public actor AnalysisPipeline {
         // Analyzer errors in a row, not counted against the photos yet: only when a later photo
         // works was it the photo. When every photo fails, the analyzer is the problem.
         var suspects: [AssetID] = []
+        // The last photos looked at, for "Gerade angesehen" (no screenshots: account numbers,
+        // ID cards would be shown large on the overview, B4).
+        var lookedAt: [AssetID] = []
         let analyzer = self.analyzer
         while true {
             if let reason = await shouldStop() { report.pausedBecause = reason; return report }
@@ -527,6 +537,10 @@ public actor AnalysisPipeline {
                         results.append((asset.id, result))
                         finished.append(asset.id)
                         analyzed += 1
+                        if !asset.isScreenshotLike {
+                            lookedAt.append(asset.id)
+                            if lookedAt.count > 3 { lookedAt.removeFirst() }
+                        }
                         // The analyzer works: the photos it failed on just before were the problem.
                         for id in suspects {
                             if try await recordContentFailure(id) { finished.append(id) }
@@ -567,7 +581,7 @@ public actor AnalysisPipeline {
             contentDone += finished.count
             report.contentAnalyzed += analyzed
             onProgress(Progress(stage: .content, completed: contentBefore + contentDone,
-                                total: contentBefore + max(contentTotal, contentDone)))
+                                total: contentBefore + max(contentTotal, contentDone), recent: lookedAt))
             if let stopped { report.pausedBecause = stopped; return report }
         }
         report.completedStages.append(.content)
@@ -599,6 +613,21 @@ public actor AnalysisPipeline {
     }
 
     // MARK: Stages
+
+    /// How much work this run has (see `AnalysisWorkload`): the amounts over the part of the
+    /// library the run works on, and what is still to do in the image and text steps.
+    private func workload(all: [AssetSnapshot], scoped: [AssetSnapshot], range: Range<Date>?) async throws -> AnalysisWorkload {
+        let photos = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
+        let screenshots = scoped.filter(\.isScreenshotLike)
+        let read = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
+        return AnalysisWorkload(
+            photos: photos,
+            located: scoped.filter { $0.usableLocation != nil }.count,
+            screenshots: screenshots.count,
+            contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, within: range),
+            textLeft: screenshots.filter { read[$0.id] == nil }.count
+        )
+    }
 
     /// Counts a failed read against a photo. Returns true when the photo is done with: read
     /// before (the image is unchanged, its earlier labels stay valid) or given up.

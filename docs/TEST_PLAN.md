@@ -99,6 +99,36 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | F5 Foto groß ansehen | 🟡 | UI test1 | Zoom |
 | G1 Zweitwohnsitz, Pendeln, Ferienwohnung, lange Reise | 🟡 | RecurringPlace-Lebenslagen (18 Muster: Pendeln, Wochenendhaus, Ferienwohnung, Familie, Umzug, Semester, 6-Monats-Reise, Dienstreisen, Nomaden), TripTimeZone (11), RecurringPlacePipeline | UI-Frage „Bist du hier öfter?“ im UI-Lauf |
 
+## Fortschrittsanzeige der Analyse (Branch `claude/pro-progress`, Plan vom 15.11.2026)
+Entwurf v3 (`progress-display/ENTWURF.md`) mit den 5 Punkten. Die Regeln liegen als reine Typen in
+`SortlyEngine/AnalysisDisplay.swift` (Schritte, Breiten, `ProgressEstimator`, `BarGlide`,
+`AnalysisCardState`, `AlreadyDone`, `ProgressMailbox`); die App zeigt nur deren Ergebnis.
+Messbare Grenzen (vom Produktverantwortlichen, 15.11.): Pause zeigt in unter 1 s eine Reaktion;
+keine Zahl und keine Uhrzeit steht länger als 10 s still, solange gearbeitet wird (Balken gleitet
+oder eine Statuszeile bewegt sich); keine Zahl geht zurück; nichts zeigt „fertig“ oder eine volle
+Zahl, solange noch gearbeitet wird.
+
+| Fall | Test (Linux) | Nur in der App / am iPhone |
+|---|---|---|
+| P1 Pause: sofort „Wird angehalten …“, nach 10 s „Dauert noch einen Moment.“, dann „Analyse pausiert“ an der Stelle | AnalysisDisplayTests: pauseReactsAtOnceAndSaysMoreAfterTenSeconds, pausedByUserShowsWhereItStopped; FullRunDisplay (b): Pause endet in 1 Foto + 2 s | Karte (UI-Test analysis.pause) |
+| P2 Sperren / Hintergrund ohne iOS-Aufgabe | AnalysisDisplayTests: tenMinutesInTheBackgroundDoNotCount; FullRunDisplay: backgroundGapResettles | Chip nur bei laufender Aufgabe 📱 |
+| P3 App mitten im Lauf beendet und neu gestartet | AnalysisDisplayTests: widthsSurviveAsStored; FullRunDisplay (c): Balken mit festgehaltenen Breiten geht nie zurück | — |
+| P4 App-Wechsel (nicht aktiv) | AnalysisDisplayTests: glideStopsWhenNotGliding | — |
+| P5 Wärme: warm (langsamer), sehr warm (wartet), kritisch | DeviceStateTests: slowerReason…; AnalysisDisplayTests: waitingHasNoFinishTimeAndSettlesAgain, speedChangeMovesTheTimeOnlyPastTheHysteresis; FullRunDisplay (e) | echte Wärme 📱 |
+| P6 Akku unter 10 % | DeviceStateTests: slowerReason…; AnalysisDisplayTests: cardStates | — |
+| P7 Stromsparmodus | DeviceStateTests: slowerReason… | — |
+| P8 Leere Mediathek | AnalysisDisplayTests: emptyLibraryWidths; FullRunDisplay: emptyLibraryShowsNoTime | — |
+| P9 Riesige Mediathek (50.000) | AnalysisDisplayTests: fiftyThousandPhotosStayBoundedAndAccurate | Zeit am Gerät 📱 |
+| P10 Kein / eingeschränkter Zugriff, Zugriff im Lauf entzogen | AnalysisDisplayTests: accessLostIsNotPausedNorFinished | — |
+| P11 Analysefehler (Vision fällt aus) | AnalysisDisplayTests: finishMomentOnlyForACompleteLongRun | — |
+| P12 Zweiter Lauf, „Neu prüfen“, „Analyse neu aufbauen“ | AnalysisDisplayTests: quickCheckShowsPauseAfterFiveSeconds; FullRunDisplay (d), (f) | — |
+| P13 Nichts steht länger als 10 s still | FullRunDisplay: Invariante 8 (Zahl, Wartezeit oder gleitender Balken ändert sich alle 10 s) | — |
+| P14 Fertig-Uhrzeit: erst verlässlich, nie beim Warten, ändert sich erst ab 2 Min., gerundet, morgen/Wochentag | AnalysisDisplayTests: noTimeBeforeThirtySecondsAndTwentyItems, roundingAndSoon, dayOfFinish; FullRunDisplay: Invariante 9 (Uhrzeit nahe am echten Ende) | Anzeige 📱 |
+| P15 Gleitender Balken: nie zurück, höchstens 1 % voraus | AnalysisDisplayTests: glideNeverBackNeverAheadMoreThanOnePercent; FullRunDisplay: Invariante 3 mit Gleiten | — |
+| P16 „Schon fertig“: erst ab Bildinhalten, Vorschläge stabil | AnalysisDisplayTests: alreadyDoneCounts; FullRunDisplay: earlyProposalsKeepTheirIDs | „Ansehen“ öffnet die Liste (UI-Test analysis.showDone) |
+| P17 Fertig-Moment und Mitteilung „Vorschläge prüfen“ | AnalysisDisplayTests: finishMomentOnlyForACompleteLongRun | Haptik, Mitteilungsknopf 📱 |
+| P18 Sperrbildschirm „2.431 von 5.683 Fotos · fertig gegen 23:40“, Ende „Analyse fertig“ / „216 Vorschläge“ | — | App-Test ContinuedAnalysisEndingTests (nur Syntax geprüft) |
+
 ## Testdaten
 Synthetische Bibliotheken (Koordinaten, Zeitstempel, Alben) in `Fixtures.swift`.
 Echte Testbilder nur mit freier Lizenz (CC0/gemeinfrei) und Lizenzliste.

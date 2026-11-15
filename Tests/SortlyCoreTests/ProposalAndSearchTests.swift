@@ -160,7 +160,7 @@ struct ProposalEngineTests {
 
 @Suite("Search")
 struct SearchTests {
-    func library() -> (facts: [AssetFacts], parser: QueryParser, dog: SortlyID) {
+    func library() -> (facts: [AssetFacts], index: SearchIndex, dog: SortlyID) {
         var lib = LibraryBuilder()
         lib.daily(from: "2025-12-01", to: "2025-12-03", at: Fixture.Places.munichHome, perDay: 2)
         lib.daily(from: "2026-05-12", to: "2026-05-14", at: Fixture.Places.rome, perDay: 3)
@@ -175,70 +175,63 @@ struct SearchTests {
         facts[12].document = DocumentInfo(type: .invoice, typeReliability: .likely, documentDate: nil, merchant: "Amazon", orderNumber: "302-1234567", invoiceNumber: nil, totalAmount: nil, subject: nil, keywords: [], sensitivity: .normal)
         facts[12].recognizedText = "Rechnung Amazon Bestellnummer 302-1234567"
         let groups = [ObservationGroup(id: dogID, kind: .dog, observationIDs: ["o1", "o2", "o3"], assetIDs: [facts[6].id], confirmedName: "Bello", isConfirmed: true)]
-        let vocabulary = SearchVocabulary.build(facts: facts, inventory: CollectionInventory([]), groups: groups)
-        return (facts, QueryParser(vocabulary: vocabulary), dogID)
+        return (facts, SearchIndex(facts: facts, groups: groups, calendar: Fixture.calendar), dogID)
     }
 
-    let engine = SearchEngine(calendar: Fixture.calendar)
+    let now = Fixture.date("2026-11-15 12:00")
 
     @Test func countryAndYear() {
-        let (facts, parser, _) = library()
-        let (filter, tokens) = parser.parse("Alle Fotos aus Italien 2026")
-        #expect(filter.countryCodes == ["IT"])
-        #expect(filter.years == [2026])
-        #expect(tokens.map(\.kind) == [.country, .year])
-        let hits = engine.search(filter, in: facts)
-        #expect(hits.count == 10) // 9 Rome photos + Garda video
+        let (_, index, _) = library()
+        let query = index.parse("Alle Fotos aus Italien 2026", now: now)
+        #expect(query.clauses.map(\.criterion) == [.country("IT"), .year(2026)])
+        #expect(query.tokens.map(\.kind) == [.country, .year])
+        #expect(index.search("Alle Fotos aus Italien 2026", now: now).ids.count == 10) // 9 Rome photos + Garda video
     }
 
     @Test func cityMonthAndMediaType() {
-        let (facts, parser, _) = library()
-        #expect(engine.search(parser.parse("Rom Mai").filter, in: facts).count == 9)
-        #expect(engine.search(parser.parse("Videos vom Gardasee").filter, in: facts).count == 1)
-        #expect(engine.search(parser.parse("Screenshots").filter, in: facts).count == 1)
+        let (_, index, _) = library()
+        #expect(index.search("Rom Mai", now: now).ids.count == 9)
+        #expect(index.search("Videos vom Gardasee", now: now).ids.count == 1)
+        #expect(index.search("Screenshots", now: now).ids.count == 1)
     }
 
     @Test func namedGroupAndCategory() {
-        let (facts, parser, dog) = library()
-        let named = parser.parse("Fotos von Bello")
-        #expect(named.filter.groupIDs == [dog])
-        #expect(engine.search(named.filter, in: facts).count == 1)
-        let category = parser.parse("Hunde in Rom")
-        #expect(category.filter.categories == ["animal.dog"])
-        #expect(engine.search(category.filter, in: facts).count == 2)
-        let mine = parser.parse("Fotos meines Hundes")
-        #expect(mine.filter.groupIDs == [dog])
+        let (_, index, dog) = library()
+        let named = index.parse("Fotos von Bello", now: now)
+        #expect(named.clauses.map(\.criterion) == [.group(dog)])
+        #expect(index.search("Fotos von Bello", now: now).ids.count == 1)
+        #expect(index.search("Hunde in Rom", now: now).ids.count == 2)
+        #expect(index.parse("Hunde in Rom", now: now).tokens.first?.kind == .category)
     }
 
     @Test func documentsMerchantsAndFields() {
-        let (facts, parser, _) = library()
-        let q = parser.parse("Amazon Rechnungen mit Bestellnummer")
-        #expect(q.filter.merchants == ["amazon"])
-        #expect(q.filter.documentTypes == [.invoice])
-        #expect(q.filter.requiresOrderNumber)
-        #expect(engine.search(q.filter, in: facts).count == 1)
+        let (facts, index, _) = library()
+        let result = index.search("Amazon Rechnungen mit Bestellnummer", now: now)
+        #expect(result.tokens.map(\.kind) == [.merchant, .document, .field])
+        #expect(result.ids == [facts[12].id])
     }
 
     @Test func freeTextAndLocationAndStatus() {
-        let (facts, parser, _) = library()
-        let text = parser.parse("302-1234567")
-        #expect(engine.search(text.filter, in: facts).count == 1)
-        let noLocation = parser.parse("Fotos ohne Standort")
-        #expect(noLocation.filter.hasLocation == false)
-        #expect(engine.search(noLocation.filter, in: facts).count == 1)
-        let unorganized = parser.parse("nicht organisiert")
+        let (facts, index, _) = library()
+        #expect(index.search("302-1234567", now: now).ids == [facts[12].id])
+        let noLocation = index.parse("Fotos ohne Standort", now: now)
+        #expect(noLocation.clauses.map(\.criterion) == [.hasLocation(false)])
+        #expect(index.search("Fotos ohne Standort", now: now).ids.count == 1)
+        let unorganized = index.parse("nicht organisiert", now: now)
+        #expect(unorganized.usesStatus)
         let statuses = Dictionary(uniqueKeysWithValues: facts.map { ($0.id, OverallStatus.fullyOrganized) })
             .merging([facts[0].id: OverallStatus.unorganized]) { $1 }
-        #expect(engine.search(unorganized.filter, in: facts, statuses: statuses) == [facts[0].id])
+        #expect(index.search("nicht organisiert", now: now, statuses: statuses).ids == [facts[0].id])
     }
 
     @Test func unknownValuesNeverMatch() {
         var facts = library().facts
         facts[0].asset.creationDate = nil
-        var filter = SearchFilter()
-        filter.years = [2025]
-        #expect(!engine.search(filter, in: facts).contains(facts[0].id))
-        #expect(SearchFilter().isEmpty)
+        let index = SearchIndex(facts: facts, calendar: Fixture.calendar)
+        #expect(!index.search("2025", now: now).ids.contains(facts[0].id))
+        #expect(!index.search("Dezember", now: now).ids.contains(facts[0].id))
+        #expect(index.search("", now: now).ids.isEmpty)
+        #expect(index.parse("Fotos", now: now).isEmpty)
     }
 }
 

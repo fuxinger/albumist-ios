@@ -7148,6 +7148,76 @@
           }
         }
       }
+    },
+    "Nach der Unterbrechung war nicht sicher, ob Fotos schon einsortiert waren. Albumist fügt sie nicht von selbst hinzu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "After the interruption it was unclear whether photos were already sorted in. Albumist does not add them on its own."
+          }
+        }
+      }
+    },
+    "Ein Album hattest du inzwischen gelöscht. Albumist legt es nicht wieder an." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You had deleted an album in the meantime. Albumist does not create it again."
+          }
+        }
+      }
+    },
+    "Am %@ teilweise rückgängig gemacht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partly undone on %@"
+          }
+        }
+      }
+    },
+    "Nicht alles ließ sich zurücknehmen. Du kannst es noch einmal versuchen oder es so lassen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not everything could be taken back. You can try again or leave it as it is."
+          }
+        }
+      }
+    },
+    "Rest rückgängig machen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo the Rest"
+          }
+        }
+      }
+    },
+    "Nimmt nur zurück, was noch von Albumist ist. Was du inzwischen selbst geändert hast, bleibt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only takes back what is still Albumist's. What you changed yourself in the meantime stays."
+          }
+        }
+      }
+    },
+    "Albumist konnte deine Alben gerade nicht lesen. Versuche es gleich noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist couldn't read your albums just now. Please try again in a moment."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

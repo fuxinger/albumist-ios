@@ -560,7 +560,7 @@ final class AppModel {
 
     func refreshDerived() async {
         guard let store, let pipeline else { return }
-        await reconcileManagedAlbums()
+        await reconcileManagedAlbums(quiet: true)
         do {
             snapshot = try await pipeline.latestProposals()
             facts = try await pipeline.currentFacts()
@@ -870,9 +870,8 @@ final class AppModel {
     func buildPlan() async {
         guard let store else { return }
         // The user's latest changes in Photos count before anything is planned.
-        guard await reconcileManagedAlbums() else { return }
+        guard let current = await reconcileManagedAlbums() else { return }
         do {
-            let current = try await library.currentInventory()
             let overrides = try await planningOverrides(store)
             let confirmed = acceptedProposals.map { proposal in
                 var decision = decisions[proposal.id] ?? .undecided
@@ -891,9 +890,8 @@ final class AppModel {
     /// (still through the normal preview, with undo).
     func singlePlan(for proposal: AlbumProposal) async -> ChangePlan? {
         guard let store else { return nil }
-        guard await reconcileManagedAlbums() else { return nil }
+        guard let current = await reconcileManagedAlbums() else { return nil }
         do {
-            let current = try await library.currentInventory()
             let overrides = try await planningOverrides(store)
             var decision = decisions[proposal.id] ?? .undecided
             if case .createNew(nil, let path) = decision, let title = userTitles[proposal.id], !title.isEmpty {
@@ -1054,9 +1052,8 @@ final class AppModel {
     /// The target keeps its name exactly as it is.
     func mergePlan(_ suggestion: AlbumOverlapAnalyzer.MergeSuggestion) async -> ChangePlan? {
         guard let store else { return nil }
-        guard await reconcileManagedAlbums() else { return nil }
+        guard let current = await reconcileManagedAlbums() else { return nil }
         do {
-            let current = try await library.currentInventory()
             let albums = suggestion.albumIDs.compactMap { current[$0] }
             guard let target = albums.max(by: { $0.assetIDs.count < $1.assetIDs.count }) else { return nil }
             let proposal = AlbumProposal(id: SortlyID(), kind: .rule, title: target.title, assetIDs: [], reliability: .certain)
@@ -1074,9 +1071,8 @@ final class AppModel {
     /// otherwise a new album is created (in the Albumist folder). Goes through the normal review.
     func manualPlan(assets: [AssetID], target: CollectionID?, newTitle: String?) async -> ChangePlan? {
         guard let store, !assets.isEmpty else { return nil }
-        guard await reconcileManagedAlbums() else { return nil }
+        guard let current = await reconcileManagedAlbums() else { return nil }
         do {
-            let current = try await library.currentInventory()
             let title = newTitle ?? target.flatMap { current[$0]?.title } ?? ""
             guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
             let proposal = AlbumProposal(id: SortlyID(), kind: .rule, title: title, assetIDs: Set(assets), reliability: .certain)
@@ -1093,57 +1089,54 @@ final class AppModel {
     // MARK: Albums created by Albumist
 
     /// Detects changes the user made in the Photos app (renamed, deleted, photos removed)
-    /// and turns them into overrides, so Albumist never undoes a manual decision. Returns
-    /// false only if what it found could not be stored; planning then waits.
+    /// and turns them into overrides, so Albumist never undoes a manual decision. Returns the
+    /// album list it compared with: planning uses exactly that snapshot, so nothing the user
+    /// changed between two reads slips through (audit 2, 1.5). Nil if the albums could not be
+    /// read or what was found could not be stored; planning then waits.
     @discardableResult
-    private func reconcileManagedAlbums() async -> Bool {
-        guard let store, let stored = try? await store.managedAlbums() else { return true }
-        // Only with full access: a limited library would look like deleted albums and photos.
-        guard !stored.isEmpty, !execution.isRunning, await library.access() == .full,
-              let current = try? await library.currentInventory() else {
-            managedAlbums = stored
-            return true
-        }
-        let result = ManagedAlbumTracker().reconcile(stored, with: current)
-        // An empty album list is a valid answer (the user deleted the last album). Only when
-        // every remembered album seems gone at once, a second read has to confirm it.
-        if result.updatedStates.isEmpty {
-            try? await Task.sleep(for: .milliseconds(300))
-            guard let again = try? await library.currentInventory(),
-                  stored.allSatisfy({ again[$0.albumID] == nil }) else {
+    private func reconcileManagedAlbums(quiet: Bool = false) async -> CollectionInventory? {
+        guard let store else { return nil }
+        do {
+            let stored = try await store.managedAlbums()
+            var current = try await library.currentInventory()
+            // Only with full access: a limited library would look like deleted albums and photos.
+            guard !stored.isEmpty, !execution.isRunning, await library.access() == .full else {
                 managedAlbums = stored
-                return true
+                return current
             }
-        }
-        if !result.changes.isEmpty {
-            do {
+            let tracker = ManagedAlbumTracker()
+            var result = tracker.reconcile(stored, with: current)
+            // An empty album list is a valid answer (the user deleted the last album). Only when
+            // every remembered album seems gone at once, a second read has to confirm it, and
+            // that read is then the one everything works with.
+            if result.updatedStates.isEmpty {
+                try? await Task.sleep(for: .milliseconds(300))
+                current = try await library.currentInventory()
+                result = tracker.reconcile(stored, with: current)
+            }
+            if !result.changes.isEmpty {
                 // Overrides and the new last-known state in one transaction: a manual change
                 // is never marked as seen without its override.
                 try await store.applyReconciliation(overrides: result.newOverrides, managedAlbums: result.updatedStates)
                 saveSafetyBackup()
-            } catch {
-                managedAlbums = stored
-                message = error.localizedDescription
-                return false
             }
+            managedAlbums = result.updatedStates
+            return current
+        } catch {
+            // Fails closed (audit 2, 1.5): without knowing what the user changed in Photos,
+            // nothing is planned, so a photo they took out is never put back by mistake.
+            if !quiet { message = String(localized: "Albumist konnte deine Alben gerade nicht lesen. Versuche es gleich noch einmal.") }
+            return nil
         }
-        managedAlbums = result.updatedStates
-        return true
     }
 
     /// Plan that takes Albumist's additions back out of one album (shown in the normal review).
     func removalPlan(for state: ManagedAlbumState) async -> ChangePlan? {
-        guard await reconcileManagedAlbums() else { return nil }
+        guard let current = await reconcileManagedAlbums() else { return nil }
         // The state may have changed with the reconciliation (photos the user took out).
         guard let fresh = managedAlbums.first(where: { $0.albumID == state.albumID }) else { return nil }
-        do {
-            let current = try await library.currentInventory()
-            let plan = ManagedAlbumTracker().removalPlan(for: fresh, current: current)
-            return plan.steps.isEmpty ? nil : plan
-        } catch {
-            message = error.localizedDescription
-            return nil
-        }
+        let plan = ManagedAlbumTracker().removalPlan(for: fresh, current: current)
+        return plan.steps.isEmpty ? nil : plan
     }
 
     /// After a removal the suggestion behind the album is not offered again.
@@ -1159,7 +1152,7 @@ final class AppModel {
     func resumeInterruptedPlan() async {
         guard let store, let interrupted = interruptedPlan, claimExecution() else { return }
         defer { releaseExecution() }
-        guard await reconcileManagedAlbums() else { return }
+        guard await reconcileManagedAlbums() != nil else { return }
         execution = ExecutionState()
         let overrides = (try? await store.overrides()).map { OverrideSet($0) } ?? OverrideSet()
         await run(interrupted.respecting(overrides), resume: true)
@@ -1225,9 +1218,8 @@ final class AppModel {
     /// "Erneut versuchen" for a plan that did not finish everything: a plan with only the
     /// steps that did not happen, for the normal review. Nil when nothing is left to do.
     func retryPlan(for executed: ChangePlan) async -> ChangePlan? {
-        guard let store, await reconcileManagedAlbums() else { return nil }
+        guard let store, let current = await reconcileManagedAlbums() else { return nil }
         do {
-            let current = try await library.currentInventory()
             guard let retry = RetryPlanner().retryPlan(for: executed, current: current) else { return nil }
             // Photos the user took out of an album since then are not added again.
             return retry.respecting(OverrideSet(try await store.overrides()))
@@ -1269,27 +1261,25 @@ final class AppModel {
     func undo(_ executed: ChangePlan) async {
         // Taking back the same plan twice would find nothing to do (or remove what the user
         // added in the meantime), so a plan is undone once.
-        guard let store, !undonePlans.contains(executed.id), executed.reverts == nil, claimExecution() else { return }
+        // A partial undo (completedWithErrors) does not count as undone: running it again takes
+        // back only what is still Albumist's (audit 2, 1.6).
+        guard !undonePlans.contains(executed.id), executed.reverts == nil, claimExecution() else { return }
         defer { releaseExecution() }
         // What the user changed by hand since counts first: a photo they took out and put back
         // is theirs now and stays.
-        guard await reconcileManagedAlbums() else { return }
-        do {
-            let current = try await library.currentInventory()
-            var owned: [CollectionID: Set<AssetID>] = [:]
-            for state in managedAlbums { owned[state.albumID, default: []].formUnion(state.addedBySortly) }
-            let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned)
-            // Free albums and suggestions come back in `finalize`, with the undo itself.
-            await run(undoPlan)
-        } catch {
-            message = error.localizedDescription
-        }
+        guard let current = await reconcileManagedAlbums() else { return }
+        var owned: [CollectionID: Set<AssetID>] = [:]
+        for state in managedAlbums { owned[state.albumID, default: []].formUnion(state.addedBySortly) }
+        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned)
+        // Free albums and suggestions come back in `finalize`, with the undo itself.
+        await run(undoPlan)
     }
 
     /// The change receipt of an executed plan (I01) and, if it was taken back, of its undo.
-    func receipt(for plan: ChangePlan) async -> (plan: PlanReceipt, undo: PlanReceipt?) {
-        let undo = try? await store?.reverts(of: plan.id).first
-        return (PlanReceipt(plan: plan, inventory: inventory), undo.map { PlanReceipt(plan: $0, inventory: inventory) })
+    /// Several undos when the first one was only partial: newest first.
+    func receipt(for plan: ChangePlan) async -> (plan: PlanReceipt, undos: [PlanReceipt]) {
+        let undos = (try? await store?.reverts(of: plan.id)) ?? []
+        return (PlanReceipt(plan: plan, inventory: inventory), undos.map { PlanReceipt(plan: $0, inventory: inventory) })
     }
 
     /// "Ältere anzeigen" in the history.

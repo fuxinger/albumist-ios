@@ -8,7 +8,11 @@ struct PlanReceiptView: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
     @State private var receipt: PlanReceipt?
-    @State private var undo: PlanReceipt?
+    /// Undos of this plan, newest first (more than one when the first was only partial).
+    @State private var undos: [PlanReceipt] = []
+    private var undo: PlanReceipt? { undos.first }
+    /// Taken back only in part: the rest can be taken back again (audit 2, 1.6).
+    private var partlyUndone: Bool { (undo.map { !$0.isComplete } ?? false) && !model.undonePlans.contains(plan.id) }
     @State private var showAllAlbums = false
     @State private var confirmUndo = false
     /// "Erneut versuchen": the plan with what is missing, opened in the normal review.
@@ -41,10 +45,11 @@ struct PlanReceiptView: View {
                 }
             }
         }
-        .task(id: model.undonePlans.contains(plan.id)) {
+        // Reloaded after an undo, also after one that was only partial.
+        .task(id: "\(model.undonePlans.contains(plan.id))-\(model.execution.finished?.id.rawValue ?? "")") {
             let loaded = await model.receipt(for: plan)
             receipt = loaded.plan
-            undo = loaded.undo
+            undos = loaded.undos
         }
         .confirmationDialog("Diese Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
             Button("Rückgängig machen", role: .destructive) {
@@ -86,7 +91,11 @@ struct PlanReceiptView: View {
                 // Taken back: said at the top too, or the "Neu" albums below read as still there.
                 if let undo {
                     Label {
-                        Text("Am \(undo.startedAt.formatted(date: .long, time: .shortened)) rückgängig gemacht")
+                        if partlyUndone {
+                            Text("Am \(undo.startedAt.formatted(date: .long, time: .shortened)) teilweise rückgängig gemacht")
+                        } else {
+                            Text("Am \(undo.startedAt.formatted(date: .long, time: .shortened)) rückgängig gemacht")
+                        }
                     } icon: {
                         Image(systemName: "arrow.uturn.backward.circle.fill")
                     }
@@ -215,13 +224,27 @@ struct PlanReceiptView: View {
     @ViewBuilder
     private func undoSection(_ receipt: PlanReceipt) -> some View {
         if let undo {
-            Section("Rückgängig gemacht") {
+            let deleted = undos.reduce(0) { $0 + $1.containersDeleted }
+            let removed = undos.reduce(0) { $0 + $1.membershipsRemoved }
+            Section {
                 Text(undo.startedAt.formatted(date: .long, time: .shortened))
-                if undo.containersDeleted > 0 { row("rectangle.stack.badge.minus", "Entfernte Alben und Ordner", undo.containersDeleted) }
-                if undo.membershipsRemoved > 0 { row("minus.rectangle", "Aus Alben genommen", undo.membershipsRemoved) }
-                if !undo.isComplete {
+                if deleted > 0 { row("rectangle.stack.badge.minus", "Entfernte Alben und Ordner", deleted) }
+                if removed > 0 { row("minus.rectangle", "Aus Alben genommen", removed) }
+                if partlyUndone {
+                    Text("Nicht alles ließ sich zurücknehmen. Du kannst es noch einmal versuchen oder es so lassen.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Button("Rest rückgängig machen", role: .destructive) { confirmUndo = true }
+                        .disabled(model.execution.isRunning)
+                        .accessibilityIdentifier("receipt.undoRest")
+                } else if !undo.isComplete {
                     Text("Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist.")
                         .font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Rückgängig gemacht")
+            } footer: {
+                if partlyUndone {
+                    Text("Nimmt nur zurück, was noch von Albumist ist. Was du inzwischen selbst geändert hast, bleibt.")
                 }
             }
         } else if !receipt.isUndo && !model.undonePlans.contains(plan.id)

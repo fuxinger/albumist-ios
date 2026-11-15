@@ -286,7 +286,8 @@ struct AuditRegressionTests {
     // MARK: 1.8 Resume does not put back what the user took out
 
     /// Audit 1.8: the add went through, the app stopped before writing that down, then the user
-    /// took one photo out again. Resuming does not put it back.
+    /// took one photo out again. Resuming does not put it back. Since audit 2 (1.1, 1.2) the
+    /// step stays unconfirmed: in the user's album Albumist cannot tell which photo it added.
     @Test func resumeDoesNotReaddPhotoRemovedAfterInterruptedCommit() async throws {
         let lib = InMemoryPhotoLibrary(assets: ["x", "y"], collections: [CollectionSnapshot(id: "sommer", title: "Sommer")])
         let store = InMemoryPlanStore()
@@ -299,13 +300,20 @@ struct AuditRegressionTests {
         await lib.userEdit { inv in if var a = inv["sommer"] { a.assetIDs.remove("x"); inv.upsert(a) } }
 
         let resumed = try await ChangeExecutor(library: lib, store: store).execute(crashed)
-        #expect(resumed.status == .completed)
         #expect(try await lib.currentInventory()["sommer"]?.assetIDs == ["y"])
-        #expect(resumed.record?.media[resumed.steps[addIndex].id] == ["y"])
+        #expect(resumed.steps[addIndex].state == .failed(reason: StepState.unclearReason))
+        #expect(resumed.record?.unverified.contains(resumed.steps[addIndex].id) == true)
+        #expect(resumed.appliedSummary.totalAssignments == 0)
+        // "Fehlendes erneut versuchen" offers x again, as a preview the user confirms first.
+        let retry = try #require(RetryPlanner().retryPlan(for: resumed, current: try await lib.currentInventory()))
+        #expect(retry.steps.map(\.operation) == [.addAssets(album: .existing("sommer"), assets: ["x"])])
+        #expect(retry.confirmedAt == nil)
     }
 
-    /// Audit 1.8, other side: the request had not reached Photos yet, so resuming adds normally.
-    @Test func resumeAddsWhenTheInterruptedRequestNeverRan() async throws {
+    /// Audit 1.8, other side: the request had not reached Photos yet. Since audit 2 (1.2) this
+    /// cannot be told apart from "the user took both out again", so resuming does not add by
+    /// itself; the retry shows both photos first and adds them once confirmed.
+    @Test func resumeAsksBeforeAddingWhenTheOutcomeIsUnclear() async throws {
         let lib = InMemoryPhotoLibrary(assets: ["x", "y"], collections: [CollectionSnapshot(id: "sommer", title: "Sommer")])
         let store = InMemoryPlanStore()
         let p = extendPlan(try await lib.currentInventory(), album: "sommer", assets: ["x", "y"])
@@ -314,8 +322,13 @@ struct AuditRegressionTests {
         await lib.setFailAfterWrites(nil)
         let addIndex = try index(of: p) { if case .addAssets = $0 { true } else { false } }
         let crashed = try #require(await store.saved.last { isRunning($0.steps[addIndex].state) })
-        let resumed = try await ChangeExecutor(library: lib, store: store).execute(crashed)
-        #expect(resumed.status == .completed)
+        let executor = ChangeExecutor(library: lib, store: store)
+        let resumed = try await executor.execute(crashed)
+        #expect(resumed.status == .completedWithErrors)
+        #expect(try await lib.currentInventory()["sommer"]?.assetIDs.isEmpty == true)
+        let retry = try #require(RetryPlanner().retryPlan(for: resumed, current: try await lib.currentInventory()))
+        let done = try await executor.execute(confirmed(retry))
+        #expect(done.status == .completed)
         #expect(try await lib.currentInventory()["sommer"]?.assetIDs == ["x", "y"])
     }
 

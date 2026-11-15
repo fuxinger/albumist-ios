@@ -219,12 +219,19 @@ extension ManagedAlbumTracker {
         var byID: [CollectionID: ManagedAlbumState] = [:]
         for state in states where byID[state.albumID] == nil { byID[state.albumID] = state }
         var touched: Set<CollectionID> = []
+        /// This plan's own verified changes per album, and the albums it created.
+        var addedNow: [CollectionID: Set<AssetID>] = [:]
+        var removedNow: [CollectionID: Set<AssetID>] = [:]
+        var createdNow: Set<CollectionID> = []
 
         let record = plan.record
         /// What a membership step really changed (planned media for plans from older versions).
+        /// An unverified intent counts only in an album this plan created: in any other album a
+        /// photo that is there may be the user's (audit 2, 1.1).
         func changed(_ step: PlanStep, album: CollectionID, planned: [AssetID], added: Bool) -> [AssetID] {
             if let media = record?.media[step.id] {
                 guard record?.unverified.contains(step.id) == true else { return media }
+                guard plan.createdVerifiably(album) else { return [] }
                 let members = inventory[album]?.assetIDs ?? []
                 return media.filter { members.contains($0) == added }
             }
@@ -243,6 +250,7 @@ extension ManagedAlbumTracker {
                 byID[id] = ManagedAlbumState(albumID: id, sourceID: source, lastKnownTitle: title, lastKnownParentID: nil,
                                              lastKnownMembers: [], addedBySortly: [], createdBySortly: !adopted)
                 touched.insert(id)
+                if !adopted { createdNow.insert(id) }
             case .addAssets(let ref, let assets):
                 let albumID: CollectionID? = switch ref {
                 case .existing(let id): id
@@ -255,11 +263,14 @@ extension ManagedAlbumTracker {
                     albumID: albumID, sourceID: source, lastKnownTitle: inventory[albumID]?.title ?? "",
                     lastKnownParentID: nil, lastKnownMembers: [], addedBySortly: [], createdBySortly: false)
                 state.addedBySortly.formUnion(added)
+                addedNow[albumID, default: []].formUnion(added)
                 if source != state.sourceID { state.otherSourceIDs.insert(source) }
                 byID[albumID] = state
                 touched.insert(albumID)
             case .removeAssets(let album, let assets):
-                byID[album]?.addedBySortly.subtract(changed(step, album: album, planned: assets, added: false))
+                let removed = changed(step, album: album, planned: assets, added: false)
+                byID[album]?.addedBySortly.subtract(removed)
+                removedNow[album, default: []].formUnion(removed)
                 touched.insert(album)
             case .deleteCollection(let id, _):
                 if case .succeeded = step.state {
@@ -276,15 +287,28 @@ extension ManagedAlbumTracker {
 
         var result: [ManagedAlbumState] = []
         for var state in byID.values {
-            if touched.contains(state.albumID) {
+            let id = state.albumID
+            if touched.contains(id) {
                 // Only albums this plan changed are refreshed; the others keep their last
                 // known state so manual changes are still detected by `reconcile`.
-                guard let album = inventory[state.albumID] else { continue }
-                state.lastKnownTitle = album.title
-                state.lastKnownParentID = album.parentID
-                state.lastKnownMembers = album.assetIDs
-                state.addedBySortly.formIntersection(album.assetIDs)
-                if state.addedBySortly.isEmpty { continue }
+                // The state is what the album held right after this plan, built from the last
+                // known members and the plan's verified changes, not read from the library
+                // now: if the user took photos out (or deleted the album) between the run and
+                // this moment, the next `reconcile` sees it as their decision (audit 2, 1.4).
+                let added = addedNow[id] ?? []
+                let known = state.lastKnownMembers.isEmpty && !createdNow.contains(id)
+                    ? (inventory[id]?.assetIDs ?? [])
+                    : state.lastKnownMembers
+                let expected = known.union(added).subtracting(removedNow[id] ?? [])
+                if let album = inventory[id] {
+                    state.lastKnownTitle = album.title
+                    state.lastKnownParentID = album.parentID
+                }
+                state.lastKnownMembers = expected
+                state.addedBySortly.formIntersection(expected)
+                // Nothing of Albumist's left: no longer managed. An album this plan created or
+                // filled stays, even if the user emptied it already, so a later deletion is seen.
+                if state.addedBySortly.isEmpty && !createdNow.contains(id) && added.isEmpty { continue }
             }
             result.append(state)
         }

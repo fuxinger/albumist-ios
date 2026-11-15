@@ -64,7 +64,17 @@ public actor InMemoryPhotoLibrary: PhotoLibraryWriting {
         inventoryReads += 1
         return inventory
     }
-    public func collection(_ id: CollectionID) async throws -> CollectionSnapshot? { inventory[id] }
+    /// Simulates reads of single albums that fail (a Photos hiccup right after a change).
+    public private(set) var failingCollectionReads = 0
+    public func setFailingCollectionReads(_ n: Int) { failingCollectionReads = n }
+    public struct ReadFailure: Error {}
+    public func collection(_ id: CollectionID) async throws -> CollectionSnapshot? {
+        if failingCollectionReads > 0 {
+            failingCollectionReads -= 1
+            throw ReadFailure()
+        }
+        return inventory[id]
+    }
     public func availableAssets(_ ids: [AssetID]) async throws -> Set<AssetID> { Set(ids).intersection(assets) }
 
     public func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID {

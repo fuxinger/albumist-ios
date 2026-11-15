@@ -208,8 +208,20 @@ public actor ChangeExecutor {
             case .addAssets(let ref, _):
                 if let albumID = resolve(ref, plan), let album = inventory[albumID], let intent = plan.record?.media[step.id] {
                     let arrived = intent.filter { album.assetIDs.contains($0) }
-                    plan.record?.settle(step.id, arrived)
-                    if !arrived.isEmpty { state = .succeeded(createdID: nil, verifiedAt: now) }
+                    if plan.createdVerifiably(albumID) {
+                        // An album this run made: what is in it came from this run.
+                        plan.record?.settle(step.id, arrived)
+                        if !arrived.isEmpty { state = .succeeded(createdID: nil, verifiedAt: now) }
+                    } else if intent.isEmpty {
+                        plan.record?.settle(step.id, [])
+                        state = .succeeded(createdID: nil, verifiedAt: now)
+                    } else if arrived.count == intent.count {
+                        // Everything is there, but the user may have put it there: it stays
+                        // unconfirmed, so undo leaves these photos alone (audit 2, 1.1).
+                        state = .succeeded(createdID: nil, verifiedAt: now)
+                    } else {
+                        state = .failed(reason: StepState.unclearReason)
+                    }
                 }
             case .removeAssets(let albumID, _):
                 if let album = inventory[albumID], let intent = plan.record?.media[step.id] {
@@ -285,7 +297,14 @@ public actor ChangeExecutor {
             let id = isFolder
                 ? try await library.createFolder(title: title, parent: parent)
                 : try await library.createAlbum(title: title, parent: parent)
-            guard let created = try await library.collection(id), created.title == title, created.parentID == parent else {
+            // Photos returned the new id: it is written down before the check, so a failed
+            // check never leads to a second album on retry, and undo can still remove this
+            // one (audit 2, 1.7).
+            plan.resolvedKeys[key] = id
+            try await store.save(plan)
+            let created: CollectionSnapshot?
+            do { created = try await library.collection(id) } catch { return .failed(reason: "created collection could not be verified") }
+            guard let created, created.title == title, created.parentID == parent else {
                 return .failed(reason: "created collection could not be verified")
             }
             return .succeeded(createdID: id, verifiedAt: now)
@@ -294,14 +313,25 @@ public actor ChangeExecutor {
             guard let albumID = resolve(albumRef, plan) else { return .skipped(reason: "target album was not created") }
             guard let album = try await library.collection(albumID) else { return .failed(reason: "album no longer exists") }
             if reconcile, plan.record?.unverified.contains(step.id) == true, let intent = plan.record?.media[step.id] {
+                // After an interruption the library alone cannot tell whether the request went
+                // through: a photo in the album may be Albumist's or the user's, a missing one
+                // may never have been added or been taken out by the user (audit 2, 1.1, 1.2).
+                // So nothing is added again by itself: "Fehlendes erneut versuchen" shows the
+                // missing photos first and adds them only after the user confirms.
                 let arrived = intent.filter { album.assetIDs.contains($0) }
-                if intent.isEmpty || !arrived.isEmpty {
-                    // The interrupted request went through (a Photos change is all or nothing),
-                    // or there was nothing to add. Whatever is missing now was taken out by
-                    // the user afterwards and stays out.
-                    plan.record?.settle(step.id, arrived)
+                if intent.isEmpty {
+                    plan.record?.settle(step.id, [])
                     return .succeeded(createdID: nil, verifiedAt: now)
                 }
+                if plan.createdVerifiably(albumID) {
+                    // An album this run made: what is in it came from this run; what is missing
+                    // was taken out by the user afterwards, or never added.
+                    plan.record?.settle(step.id, arrived)
+                    return arrived.isEmpty ? .failed(reason: StepState.unclearReason) : .succeeded(createdID: nil, verifiedAt: now)
+                }
+                // Someone else's album: nothing is claimed (the step stays unconfirmed, and
+                // undo leaves these photos where they are).
+                return arrived.count == intent.count ? .succeeded(createdID: nil, verifiedAt: now) : .failed(reason: StepState.unclearReason)
             }
             // Idempotent: only add what is missing and still available.
             let missing = assets.filter { !album.assetIDs.contains($0) && available.contains($0) }
@@ -507,6 +537,21 @@ extension PlannedOperation {
 }
 
 extension ChangePlan {
+    /// Whether this plan itself created the album (not one found after an interruption).
+    /// Only there can media of an interrupted step be attributed to Albumist; in any other
+    /// album a photo may just as well have been put there by the user (audit 2, 1.1).
+    public func createdVerifiably(_ album: CollectionID) -> Bool {
+        steps.contains { step in
+            guard case .createAlbum(let key, _, _) = step.operation, resolvedKeys[key] == album,
+                  record?.adoptedKeys.contains(key) != true else { return false }
+            switch step.state {
+            case .succeeded: return true
+            case .failed: return true // created, only the check afterwards failed (1.7)
+            default: return false
+            }
+        }
+    }
+
     var withoutBaseline: ChangePlan {
         var copy = self
         copy.baseline = [:]
@@ -542,10 +587,48 @@ extension ChangePlan {
     /// The plan with the user's newer decisions applied to the steps that have not run yet:
     /// before an interrupted plan is resumed, photos the user has taken out of an album since
     /// (or excluded) are not added anymore.
+    /// Albums for suggestions whose album the user deleted since are not made again, nor the
+    /// folders that would only have held them, nor filled (audit 2, 1.3).
     public func respecting(_ overrides: OverrideSet) -> ChangePlan {
         var copy = self
+        var dropped = Set<String>()
+        for index in copy.steps.indices where copy.steps[index].state == .pending {
+            guard case .createAlbum(let key, _, _) = copy.steps[index].operation,
+                  let source = copy.steps[index].sourceID, overrides.mustNotRecreate(source) else { continue }
+            copy.steps[index].state = .skipped(reason: StepState.deletedByUserReason)
+            dropped.insert(key)
+        }
+        var foldersChanged = !dropped.isEmpty
+        while foldersChanged {
+            foldersChanged = false
+            for index in copy.steps.indices where copy.steps[index].state == .pending {
+                guard case .createFolder(let key, _, _) = copy.steps[index].operation else { continue }
+                var children = 0
+                var kept = 0
+                for other in copy.steps {
+                    switch other.operation {
+                    case .createAlbum(let child, _, .planned(key)), .createFolder(let child, _, .planned(key)):
+                        children += 1
+                        if !dropped.contains(child) { kept += 1 }
+                    case .moveCollection(_, _, .planned(key)):
+                        children += 1
+                        kept += 1
+                    default:
+                        break
+                    }
+                }
+                guard children > 0, kept == 0 else { continue }
+                copy.steps[index].state = .skipped(reason: StepState.deletedByUserReason)
+                dropped.insert(key)
+                foldersChanged = true
+            }
+        }
         for index in copy.steps.indices {
             guard copy.steps[index].state == .pending, case .addAssets(let ref, let assets) = copy.steps[index].operation else { continue }
+            if case .planned(let key) = ref, dropped.contains(key) {
+                copy.steps[index].state = .skipped(reason: StepState.deletedByUserReason)
+                continue
+            }
             let album: CollectionID? = switch ref {
             case .existing(let id): id
             case .planned(let key): resolvedKeys[key]
@@ -595,9 +678,12 @@ public struct UndoPlanner: Sendable {
         }
         /// What a membership step really changed. An unverified intent counts as far as the
         /// library shows it happened (a Photos change is all or nothing).
+        /// Only in an album the plan created itself; elsewhere a photo that is there now may be
+        /// the user's and stays (audit 2, 1.1).
         func changed(_ step: PlanStep, album: CollectionID, planned: [AssetID], added: Bool) -> [AssetID] {
             if let media = record?.media[step.id] {
                 guard record?.unverified.contains(step.id) == true else { return media }
+                guard executed.createdVerifiably(album) else { return [] }
                 let members = current[album]?.assetIDs ?? []
                 return media.filter { members.contains($0) == added }
             }
@@ -612,8 +698,13 @@ public struct UndoPlanner: Sendable {
             switch step.operation {
             case .createAlbum(let key, _, _), .createFolder(let key, _, _):
                 // An album found after an interruption is never deleted: Albumist cannot prove it made it.
-                guard case .succeeded(let created, _) = step.state, let created = created ?? executed.resolvedKeys[key],
-                      record?.adoptedKeys.contains(key) != true else { continue }
+                guard record?.adoptedKeys.contains(key) != true else { continue }
+                let made: CollectionID? = switch step.state {
+                case .succeeded(let created, _): created ?? executed.resolvedKeys[key]
+                case .failed: executed.resolvedKeys[key] // created, only the check failed (1.7)
+                default: nil
+                }
+                guard let created = made else { continue }
                 if case .createAlbum = step.operation { createdAlbums.append(created) } else { createdFolders.append(created) }
             case .addAssets(let ref, let assets):
                 guard let albumID = resolved(ref) else { continue }

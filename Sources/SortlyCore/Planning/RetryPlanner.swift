@@ -3,6 +3,11 @@ import Foundation
 extension StepState {
     /// Reason of the steps the user chose to leave undone ("So lassen" after an interruption).
     public static let leftByUserReason = "left by user"
+    /// After an interruption it was not clear whether photos were already added; nothing is
+    /// added again without a new preview (audit 2, 1.1, 1.2).
+    public static let unclearReason = "outcome unclear after interruption"
+    /// A step left out because the user deleted the album for this suggestion meanwhile.
+    public static let deletedByUserReason = "album deleted by the user meanwhile"
 
     /// Reasons of steps that were skipped only because an earlier step of the same plan
     /// failed; they can run once that step works.
@@ -39,7 +44,11 @@ public struct RetryPlanner: Sendable {
         var recreated = Set<String>()
         for step in retried {
             switch step.operation {
-            case .createFolder(let key, _, _), .createAlbum(let key, _, _): recreated.insert(key)
+            case .createFolder(let key, _, _), .createAlbum(let key, _, _):
+                // Created by the first run although its check failed: that one is used, no
+                // second album is made (audit 2, 1.7).
+                if let made = executed.resolvedKeys[key], current[made] != nil { continue }
+                recreated.insert(key)
             default: break
             }
         }
@@ -70,11 +79,11 @@ public struct RetryPlanner: Sendable {
         for step in retried {
             switch step.operation {
             case let .createFolder(key, title, parent):
-                guard case .ref(let p) = folder(parent) else { continue }
+                guard recreated.contains(key), case .ref(let p) = folder(parent) else { continue }
                 if case .existing(let pid) = p { touched.insert(pid) }
                 append(.createFolder(key: key, title: title, parent: p), step.sourceID)
             case let .createAlbum(key, title, parent):
-                guard case .ref(let p) = folder(parent) else { continue }
+                guard recreated.contains(key), case .ref(let p) = folder(parent) else { continue }
                 if case .existing(let pid) = p { touched.insert(pid) }
                 append(.createAlbum(key: key, title: title, parent: p), step.sourceID)
             case let .addAssets(ref, assets):

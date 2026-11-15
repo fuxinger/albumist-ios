@@ -39,6 +39,10 @@ enum StepProblemText {
             String(localized: "Ein Album blieb, weil inzwischen eigene Fotos darin sind. Nur die Fotos von Albumist wurden herausgenommen.")
         case StepState.leftByUserReason:
             String(localized: "Du hast den Rest so gelassen.")
+        case StepState.unclearReason:
+            String(localized: "Nach der Unterbrechung war nicht sicher, ob Fotos schon einsortiert waren. Albumist fügt sie nicht von selbst hinzu.")
+        case StepState.deletedByUserReason:
+            String(localized: "Ein Album hattest du inzwischen gelöscht. Albumist legt es nicht wieder an.")
         case let r where r.hasSuffix("could not be verified"):
             String(localized: "Eine Änderung ließ sich in der Mediathek nicht nachprüfen.")
         default:

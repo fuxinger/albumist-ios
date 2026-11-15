@@ -634,6 +634,9 @@ final class AppModel {
                 analysis.lastReport = report
                 analysis.lastRun = Date()
                 finished = report
+            } catch is CancellationError {
+                // Stopped on purpose ("Analyse neu aufbauen", a new scope): not an error to show
+                // (plugin review N3: "Swift.CancellationError error 1").
             } catch {
                 message = error.localizedDescription
             }

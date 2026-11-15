@@ -185,7 +185,11 @@ struct SettingsView: View {
                 if purchases.isUnlocked {
                     Label("Freigeschaltet", systemImage: "checkmark.seal.fill").foregroundStyle(Theme.accent)
                 } else {
-                    LabeledContent("Noch kostenlos", value: "\(purchases.remainingFreeAlbums) Alben")
+                    LabeledContent {
+                        Text("\(purchases.remainingFreeAlbums) Alben")
+                    } label: {
+                        Text("Noch kostenlos")
+                    }
                     Button {
                         Task { await purchases.purchase() }
                     } label: {

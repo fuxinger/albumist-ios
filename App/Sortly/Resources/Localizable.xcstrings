@@ -6711,10 +6711,40 @@
     },
     "%lld Alben passen ähnlich gut. Albumist ergänzt erst, wenn du eines ausgewählt hast." : {
       "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Album passt. Albumist ergänzt erst, wenn du es ausgewählt hast."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Alben passen ähnlich gut. Albumist ergänzt erst, wenn du eines ausgewählt hast."
+                }
+              }
+            }
+          }
+        },
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld albums fit about equally well. Albumist adds nothing until you choose one."
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld album fits. Albumist adds nothing until you choose it."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld albums fit about equally well. Albumist adds nothing until you choose one."
+                }
+              }
+            }
           }
         }
       }
@@ -6751,10 +6781,40 @@
     },
     "Albumist sieht nur die %lld Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff." : {
       "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist sieht nur das %lld Foto, das du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist sieht nur die %lld Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff."
+                }
+              }
+            }
+          }
+        },
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist only sees the %lld photos you shared. To make albums from your whole library, Albumist needs full access."
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist only sees the %lld photo you shared. To make albums from your whole library, Albumist needs full access."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist only sees the %lld photos you shared. To make albums from your whole library, Albumist needs full access."
+                }
+              }
+            }
           }
         }
       }
@@ -7945,6 +8005,56 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Being recalculated"
+          }
+        }
+      }
+    },
+    "%lld Alben" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Album"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Alben"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld album"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld albums"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Deine Fotos bleiben auf deinem Gerät. Nichts wird hochgeladen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your photos stay on your device. Nothing is uploaded."
           }
         }
       }

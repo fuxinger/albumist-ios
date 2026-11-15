@@ -59,7 +59,7 @@ struct OnboardingView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, Theme.Spacing.s)
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-                promise("iphone", "Alles bleibt auf deinem Gerät. Nichts wird hochgeladen.")
+                promise("iphone", "Deine Fotos bleiben auf deinem Gerät. Nichts wird hochgeladen.")
                 promise("lock.shield", "Originale werden nie gelöscht, verändert oder kopiert.")
                 promise("checklist", "Du siehst jeden Vorschlag, bevor etwas passiert, und kannst alles rückgängig machen.")
                 promise("rectangle.stack", "Vorhandene Alben werden erkannt und ergänzt statt doppelt angelegt.")

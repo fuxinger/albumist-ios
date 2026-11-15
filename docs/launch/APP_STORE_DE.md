@@ -1,7 +1,6 @@
 # App Store – Deutsch (Entwurf)
 
-> Der Name „Albumist“ ist im App Store vergeben und muss vor dem Start ersetzt werden.
-> Platzhalter unten: **Albumist**.
+> App-Name: **Albumist** (gewählt am 14.11.2026; Marken- und Domainprüfung liegt noch bei Fuchs).
 
 **Untertitel (max. 30 Zeichen):** Fotos automatisch in Alben
 

@@ -487,7 +487,7 @@ struct StarterSetCard: View {
                 Text(ListFormatter.localizedString(byJoining: set.prefix(3).map { model.userTitles[$0.id] ?? $0.title })
                      + (set.count > 3 ? " …" : ""))
                     .font(.footnote).foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .compactLineLimit(2)
                 Button {
                     onStart(set)
                 } label: {

@@ -61,7 +61,7 @@ struct TripWorkshopView: View {
             if done == nil, working == nil, let index = splitIndex,
                let preview = TripWorkshop.split(days, before: index, dates: model.creationDates) {
                 splitBar(preview, day: days[index])
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .interactiveDismissDisabled(working != nil)
@@ -197,7 +197,7 @@ struct TripWorkshopView: View {
             .accessibilityIdentifier("workshop.split")
         }
         .padding(Theme.Spacing.m)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .floatingPanel()
         .padding(.horizontal, Theme.Spacing.m)
         .padding(.bottom, Theme.Spacing.s)
     }

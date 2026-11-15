@@ -46,10 +46,13 @@ struct PhotoGlow: View {
     @State private var colors: [Color] = []
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         ZStack {
-            if colors.count == 4 && !reduceTransparency {
+            // Text sits on the wash (category, title, count). Reduce Transparency and Increase
+            // Contrast both ask for a plain background behind text, so the wash stays off.
+            if colors.count == 4 && !reduceTransparency && contrast != .increased {
                 MeshGradient(width: 2, height: 3, points: [
                     [0, 0], [1, 0],
                     [0, 0.5], [1, 0.5],

@@ -76,10 +76,12 @@ jobs:
           ) &
           WATCHPID=$!
           cd App
+          # The accessibility tests run in their own job below, on their own small simulator.
           xcodebuild test \
             -project Sortly.xcodeproj \
             -scheme SortlyUI \
             -destination "id=${{ steps.sim.outputs.udid }}" \
+            -skip-testing:SortlyUITests/AccessibilityUITests \
             -resultBundlePath ../build/UITestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO > ../ui-log.txt 2>&1
           status=$?
@@ -116,3 +118,83 @@ jobs:
           name: sorting-show-video
           path: build/sorting-show.mp4
           retention-days: 14
+
+  accessibility:
+    # AccessibilityUITests on a small iPhone (SE, 375 pt) with Reduce Motion, then once more
+    # with Increase Contrast and Reduce Transparency. Its own runner and simulator, in parallel
+    # with the flow, so the whole UI run does not take longer; these tests fail on findings.
+    name: Accessibility (small iPhone)
+    runs-on: xcode-27
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd App && xcodegen generate
+      - name: Prepare small simulator
+        id: sim
+        run: |
+          # An iPhone SE on the newest runtime if the runtime still offers it, else the
+          # narrowest iPhone that is there (an "e" model, 390 pt).
+          RUNTIME=$(xcrun simctl list runtimes available -j | python3 -c '
+          import json, re, sys
+          rts = [r for r in json.load(sys.stdin)["runtimes"]
+                 if r.get("platform") == "iOS" and re.search(r"iOS-\d+(?:-\d+)*$", r["identifier"])]
+          rts.sort(key=lambda r: tuple(int(p) for p in r["version"].split(".")))
+          print(rts[-1]["identifier"] if rts else "")')
+          UDID=$(xcrun simctl create "Albumist SE" com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation "$RUNTIME" 2>/dev/null) \
+            || UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --small)
+          xcrun simctl list devices | grep "$UDID" || true
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          booted=0
+          for attempt in 1 2 3; do
+            xcrun simctl boot "$UDID" 2>/dev/null || true
+            if xcrun simctl bootstatus "$UDID" -b; then booted=1; break; fi
+            echo "bootstatus failed (attempt $attempt), retrying"
+            sleep 15
+          done
+          [ "$booted" = 1 ] || { echo "simulator did not boot"; exit 1; }
+          xcrun simctl privacy "$UDID" grant photos app.albumist.ios || echo "privacy grant failed"
+          xcrun simctl status_bar "$UDID" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
+          # Reduce Motion for the whole run (Settings › Accessibility › Motion). The app reads
+          # it at launch, so every test below starts with it on.
+          xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
+          echo "A11Y_SETTING ReduceMotionEnabled=$(xcrun simctl spawn "$UDID" defaults read com.apple.Accessibility ReduceMotionEnabled 2>&1)"
+      - name: Run accessibility tests
+        run: |
+          set +e
+          UDID="${{ steps.sim.outputs.udid }}"
+          cd App
+          xcodebuild test \
+            -project Sortly.xcodeproj \
+            -scheme SortlyUI \
+            -destination "id=$UDID" \
+            -only-testing:SortlyUITests/AccessibilityUITests \
+            -skip-testing:SortlyUITests/AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency \
+            -resultBundlePath ../build/A11yResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO > ../a11y-log.txt 2>&1
+          status=$?
+          # Second pass: Increase Contrast and Reduce Transparency on, same simulator and data.
+          xcrun simctl ui "$UDID" increase_contrast enabled \
+            || xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility DarkenSystemColors -bool true
+          xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility EnhancedBackgroundContrastEnabled -bool true
+          echo "A11Y_SETTING DarkenSystemColors=$(xcrun simctl spawn "$UDID" defaults read com.apple.Accessibility DarkenSystemColors 2>&1) EnhancedBackgroundContrastEnabled=$(xcrun simctl spawn "$UDID" defaults read com.apple.Accessibility EnhancedBackgroundContrastEnabled 2>&1)"
+          xcodebuild test-without-building \
+            -project Sortly.xcodeproj \
+            -scheme SortlyUI \
+            -destination "id=$UDID" \
+            -only-testing:SortlyUITests/AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency \
+            -resultBundlePath ../build/A11yContrastResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO > ../a11y-contrast-log.txt 2>&1
+          contrast=$?
+          for log in ../a11y-log.txt ../a11y-contrast-log.txt; do
+            grep -aE "error:|UI_STEP|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed" "$log" | grep -v "/SourcePackages/" | head -12000
+          done
+          echo "A11Y_SUMMARY fails $(cat ../a11y-log.txt ../a11y-contrast-log.txt | grep -ac 'A11Y_FAIL ') warnings $(cat ../a11y-log.txt ../a11y-contrast-log.txt | grep -ac 'A11Y_WARN ')"
+          [ $status -eq 0 ] && [ $contrast -eq 0 ]

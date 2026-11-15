@@ -111,6 +111,14 @@ struct OverviewView: View {
                         Text("\(model.progress.fully.formatted()) von \(model.progress.total.formatted()) sortiert")
                             .font(.headline)
                             .monospacedDigit()
+                        if model.progress.partially > 0 {
+                            // Photos already in a matching album for one main area but not yet for the
+                            // other count as partly sorted; without this line the ring looked too low
+                            // (device test 15.11.: 157 sorted, 1,199 partly).
+                            Text("Dazu \(model.progress.partially) teilweise sortiert")
+                                .font(.subheadline)
+                                .monospacedDigit()
+                        }
                         Text(primaryAreasText)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)

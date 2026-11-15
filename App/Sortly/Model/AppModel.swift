@@ -218,7 +218,7 @@ final class AppModel {
         case country(String)
     }
 
-    let library = PhotoKitLibrary()
+    let library = AppPhotoLibrary()
     private(set) var store: SortlyStore?
     /// Offline country outlines, also used for the shareable travel atlas.
     private(set) var worldMap: OfflineWorldMap?
@@ -266,7 +266,7 @@ final class AppModel {
         guard phase == .loading else { return }
         do {
             if UITestSupport.rebuildsDatabase, let url = try? Self.databaseURL() { Self.quarantineDatabase(at: url) }
-            let store = try SortlyStore(url: try Self.databaseURL())
+            let store = try SortlyStore(url: UITestSupport.databaseURL(try Self.databaseURL()))
             self.store = store
             access = await library.access()
             // A rebuilt (or newly restored) database gets the user's decisions back first.
@@ -280,9 +280,9 @@ final class AppModel {
             worldMap = map
             pipeline = AnalysisPipeline(
                 store: store, reader: library,
-                analyzer: UITestSupport.slowsAnalysis ? SlowedAnalyzer(base: VisionAnalyzer()) as any ContentAnalyzing : VisionAnalyzer() as any ContentAnalyzing,
-                geocoder: SystemGeocoder(locale: Locale(identifier: settings.titleLanguage.rawValue)),
-                map: map, conditions: DeviceConditions(), settings: settings,
+                analyzer: UITestSupport.analyzer(VisionAnalyzer()),
+                geocoder: UITestSupport.geocoder(SystemGeocoder(locale: Locale(identifier: settings.titleLanguage.rawValue))),
+                map: map, conditions: UITestSupport.conditions(DeviceConditions()), settings: settings,
                 foregroundOnlineBudget: 60
             )
             tripCorrections = (try? await pipeline?.tripCorrections()) ?? TripCorrections()

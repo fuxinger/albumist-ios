@@ -88,7 +88,7 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | E4 Zurücksetzen | ✅ | DataSafety: resetClearsTheAnalysisAndNothingElse, resetIncludingDecisionsLeavesNoJournalBehind | — |
 | F1 Jede Wahl beim Einstieg | 🟡 | UI test1 | Varianten (in Arbeit) |
 | F2 Jeder Bildschirm hin und zurück | 🟡 | UI test3 | tiefer, ohne Auslassliste (in Arbeit) |
-| F3 Suche mit echten Anfragen | 🟡 | Search: countryAndYear u. a. | 40+ Anfragen, UI prüft Ergebnisse (in Arbeit) |
+| F3 Suche mit echten Anfragen | 🟡 | SearchQuerySet: 100 echte Anfragen (alle 100 finden, was sie sollen); SearchPerformance: 50.000 Fotos; SortlySearchUITests: 6 Anfragen in der UI | erster UI-Lauf steht aus |
 | F4 Probejahr bleibt | 🟡 | trialYearIsKeptForLaterRuns, UI test6 | Neustart, Wahl im Onboarding |
 | F5 Foto groß ansehen | 🟡 | UI test1 | Zoom |
 | G1 Zweitwohnsitz, Pendeln, Ferienwohnung, lange Reise | ❌ | ProposalCuration: routineVisitsBecomeOneAlbumPerPlace, noAlbumForWhereTheUserLives | eigene Lebenslagen-Tests (in Arbeit) |

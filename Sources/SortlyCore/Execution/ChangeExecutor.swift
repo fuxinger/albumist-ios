@@ -208,7 +208,11 @@ public actor ChangeExecutor {
             switch step.operation {
             case .createFolder(let key, let title, let parentRef), .createAlbum(let key, let title, let parentRef):
                 let isFolder: Bool = if case .createFolder = step.operation { true } else { false }
-                if let parent = resolve(parentRef, plan),
+                if let made = plan.resolvedKeys[key] {
+                    // Photos returned this id before the app stopped: created by this run, so
+                    // undo may remove it (not merely found, which undo would have to keep).
+                    if inventory[made] != nil { state = .succeeded(createdID: made, verifiedAt: now) }
+                } else if let parent = resolve(parentRef, plan),
                    let found = adoptionCandidate(title: title, parent: parent, folder: isFolder, plan: plan, inventory: inventory) {
                     plan.resolvedKeys[key] = found
                     plan.record?.adoptedKeys.insert(key)
@@ -279,6 +283,20 @@ public actor ChangeExecutor {
             let isFolder: Bool = if case .createFolder = step.operation { true } else { false }
             guard let parent = resolve(parentRef, plan) else {
                 return .skipped(reason: "parent folder was not created")
+            }
+            if reconcile, let made = plan.resolvedKeys[key] {
+                // Photos had returned the new id and it was written down before the app
+                // stopped (audit 2, 1.7): the album is provably this run's own. It is taken as
+                // it is; the search by title below excludes ids the plan already resolved and
+                // would make a second album next to it, leaving the first one behind after undo.
+                guard let found = try await library.collection(made) else {
+                    // Created, and gone now: the user deleted it meanwhile. Not made again.
+                    return .skipped(reason: StepState.deletedByUserReason)
+                }
+                guard found.title == title, found.parentID == parent else {
+                    return .failed(reason: "created collection could not be verified")
+                }
+                return .succeeded(createdID: made, verifiedAt: now)
             }
             if reconcile {
                 // The app stopped while this was being created. A collection with the same
@@ -365,10 +383,19 @@ public actor ChangeExecutor {
             guard try await library.collection(id)?.title == to else { return .failed(reason: "rename could not be verified") }
             return .succeeded(createdID: nil, verifiedAt: now)
 
-        case .moveCollection(let id, let from, let toRef):
+        case .moveCollection(let id, _, let toRef):
             guard let target = resolve(toRef, plan) else { return .skipped(reason: "target folder was not created") }
             guard let c = try await library.collection(id) else { return .failed(reason: "album no longer exists") }
-            if c.parentID != target { try await library.moveCollection(id, from: from, to: target) }
+            if c.parentID != target {
+                // A target folder deleted meanwhile (on another device, say) stops the step:
+                // taken out of its folder, the album would end up at the top of the library.
+                if let target, try await library.collection(target) == nil {
+                    return .failed(reason: "parent folder no longer exists")
+                }
+                // Out of the folder it is in now, not the one it was in when the plan was
+                // made: the user may have moved it since (an undo runs long after its plan).
+                try await library.moveCollection(id, from: c.parentID, to: target)
+            }
             guard try await library.collection(id)?.parentID == target else { return .failed(reason: "move could not be verified") }
             return .succeeded(createdID: nil, verifiedAt: now)
 
@@ -437,11 +464,12 @@ public actor ChangeExecutor {
             if case .deleteCollection(let id, _) = plan.steps[i].operation { targets[i] = id }
         }
         var states: [Int: StepState] = [:]
-        var deletionFailure: LibraryWriteFailure?
+        var deletionError: (any Error)?
         var allowed = Set<CollectionID>()
         var kept: [Int: (album: CollectionID, ours: [AssetID])] = [:]
+        var before = CollectionInventory()
         do {
-            let before = try await library.currentInventory()
+            before = try await library.currentInventory()
             for (i, id) in targets {
                 guard let album = before[id], album.kind != .folder, let guarded = plan.deleteGuards?[id] else { continue }
                 if !album.assetIDs.isSubset(of: guarded) {
@@ -473,21 +501,33 @@ public actor ChangeExecutor {
                 plan.record?.begin(stepID, Array(Set(earlier).union(k.ours)).sorted())
             }
             try await store.save(plan)
-            if !allowed.isEmpty { try await library.deleteCollections(allowed.sorted()) }
-            for (_, k) in kept.sorted(by: { $0.key < $1.key }) where !k.ours.isEmpty {
-                try await library.removeAssets(k.ours, from: k.album)
+            if !allowed.isEmpty {
+                // Said per step below, from what the library shows afterwards.
+                do { try await library.deleteCollections(allowed.sorted()) } catch { deletionError = error }
             }
-        } catch let failure as LibraryWriteFailure {
-            // Said per step below, from what the library shows afterwards.
-            deletionFailure = failure
+            // Taking Albumist's photos out of a kept album needs no question from iOS: it
+            // runs even when the deletion was declined or not carried out, and a failure here
+            // is only this album's.
+            for (i, k) in kept.sorted(by: { $0.key < $1.key }) where !k.ours.isEmpty {
+                do { try await library.removeAssets(k.ours, from: k.album) } catch { states[i] = .failed(reason: String(describing: error)) }
+            }
         } catch {
             for i in indices { states[i] = .failed(reason: String(describing: error)) }
         }
-        // Photos said nothing went wrong, or that the user declined: every album or folder
-        // that is still there gets the reason the user can act on.
-        let notGone = deletionFailure == .declinedByUser ? StepState.deletionDeclinedReason : StepState.deletionNotAppliedReason
+        // Why an album or folder that should have gone is still there, in words the user can
+        // act on: they declined in the iOS question, Photos raised an error (its own text,
+        // reduced to domain and code in the diagnostic report), or Photos took the request
+        // without an error and did nothing.
+        let failure = deletionError as? LibraryWriteFailure
+        let notGone: String = if failure == .declinedByUser {
+            StepState.deletionDeclinedReason
+        } else if let deletionError, failure == nil {
+            String(describing: deletionError)
+        } else {
+            StepState.deletionNotAppliedReason
+        }
         // Read back: success only for what is really gone.
-        if let after = try? await library.currentInventory() {
+        if let after = await readBack(after: before, deleting: allowed) {
             for (i, id) in targets {
                 if let k = kept[i] {
                     let stepID = plan.steps[i].id
@@ -511,10 +551,33 @@ public actor ChangeExecutor {
                 }
             }
         }
-        let unread = deletionFailure == nil ? "deletion could not be verified" : notGone
+        let unread = deletionError == nil ? "deletion could not be verified" : notGone
         for i in indices { plan.steps[i].state = states[i] ?? .failed(reason: unread) }
+        // Only a verified deletion keeps what was written down as going: an album that may
+        // still be there is never "restored" by a later undo of this plan.
+        for (i, id) in targets {
+            if case .succeeded = plan.steps[i].state { continue }
+            plan.record?.deletedAlbums[id] = nil
+        }
         try await store.save(plan)
         for i in indices { onEvent(.stepFinished(index: i, state: plan.steps[i].state)) }
+    }
+
+    /// The album list after a batch deletion, as proof of what is gone. A read that lost
+    /// albums or folders the batch did not touch is not proof: Photos can hand out an
+    /// incomplete list for a moment (iCloud, a library being updated), and every album
+    /// missing from it would count as deleted while it is still there, and the plan as undone
+    /// for good. Such a read is repeated once after a short pause; if it stays like that, the
+    /// deletion counts as not verified. Nil when the list cannot be read.
+    private func readBack(after before: CollectionInventory, deleting allowed: Set<CollectionID>) async -> CollectionInventory? {
+        func trustworthy(_ after: CollectionInventory) -> Bool {
+            !before.collections.keys.contains { !allowed.contains($0) && after[$0] == nil }
+        }
+        guard let first = try? await library.currentInventory() else { return nil }
+        if trustworthy(first) { return first }
+        try? await Task.sleep(for: .milliseconds(500))
+        guard let second = try? await library.currentInventory(), trustworthy(second) else { return nil }
+        return second
     }
 
     /// After an interruption: the one collection this step may have created. It must be new
@@ -737,6 +800,8 @@ public struct UndoPlanner: Sendable {
         }
 
         // 1. Revert renames and moves if nobody changed them again.
+        /// Where the moves of this undo put an album or folder back (nil: the top level).
+        var movedBack: [CollectionID: CollectionID?] = [:]
         for step in executed.steps.reversed() {
             guard case .succeeded = step.state else { continue }
             switch step.operation {
@@ -748,11 +813,21 @@ public struct UndoPlanner: Sendable {
                 case .existing(let id): id
                 case .planned(let key): executed.resolvedKeys[key]
                 }
-                if let c = current[cid], c.parentID == to {
+                // The folder it came from was deleted meanwhile: there is no way back, and the
+                // top of the library is not where the user had it. It stays where it is (and
+                // so does the folder holding it).
+                if let from, current[from] == nil { continue }
+                if let c = current[cid], c.parentID == to, movedBack[cid] == nil {
                     append(.moveCollection(cid, from: to, to: from.map { .existing($0) } ?? .topLevel))
+                    movedBack[cid] = .some(from)
                 }
             default: break
             }
+        }
+        /// The folder an album or folder is in once the moves above ran.
+        func parentAfterUndo(_ c: CollectionSnapshot) -> CollectionID? {
+            if let back = movedBack[c.id] { return back }
+            return c.parentID
         }
 
         // 2. Created albums: delete only if they contain nothing the user added himself. The
@@ -817,7 +892,10 @@ public struct UndoPlanner: Sendable {
         var goingAway = Set(steps.compactMap { if case .deleteCollection(let id, _) = $0.operation { return id }; return nil })
         for folderID in createdFolders.reversed() {
             guard let folder = current[folderID] else { continue }
-            let keepsSomething = current.collections.values.contains { $0.parentID == folderID && !goingAway.contains($0.id) }
+            // Counted after the moves above: a folder that only held an album this undo moves
+            // back out goes too, instead of staying behind empty. Should that move fail, the
+            // deletion finds the album still inside and keeps the folder.
+            let keepsSomething = current.collections.values.contains { parentAfterUndo($0) == folderID && !goingAway.contains($0.id) }
             if !keepsSomething {
                 append(.deleteCollection(folderID, title: folder.title))
                 goingAway.insert(folderID)

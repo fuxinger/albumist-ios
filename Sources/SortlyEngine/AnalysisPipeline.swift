@@ -150,6 +150,13 @@ public actor AnalysisPipeline {
     /// Keeps the first analysis from spending up to an hour on town names before photos are
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
     private let foregroundOnlineBudget: Int?
+    /// When a run in the app last asked Apple for town names. A run within the hour after it
+    /// (Fortsetzen after a Pause, a restart) does not ask again: the lookups and Apple's waits
+    /// held "Orte werden bestimmt" for a minute or more before the run got back to where it was
+    /// (device test 15.11.: "es dauert lange, bis die App nach Pause weiterläuft"). The towns
+    /// still missing come with the overnight refinement or a run after the hour.
+    private var lastForegroundOnlineLookup: Date?
+    static let foregroundOnlineCooldown: TimeInterval = 60 * 60
     public private(set) var settings: OrganizationSettings
     /// The run in progress: `pause()` reaches it through its control.
     private var activeControl: AnalysisRunControl?
@@ -605,9 +612,10 @@ public actor AnalysisPipeline {
         // starts again after a pause goes on from the real state instead of from zero.
         let total = all.filter { $0.usableLocation != nil }.count
         let before = max(0, total - requests.count)
-        let budget = refining ? nil : foregroundOnlineBudget
+        let askedRecently = lastForegroundOnlineLookup.map { now().timeIntervalSince($0) < Self.foregroundOnlineCooldown } ?? false
+        let budget = refining ? nil : (askedRecently ? 0 : foregroundOnlineBudget)
         onProgress(Progress(stage: .places, completed: before, total: total))
-        return try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
+        let outcome = try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
                                          maxRateLimitWait: refining ? nil : Self.foregroundRateLimitWait,
                                          shouldStop: { [weak self] in await self?.stopRequested() ?? true },
                                          onlineAllowed: { [weak self] in await self?.settings.privacy.allowOnlineGeocoding ?? false },
@@ -616,6 +624,8 @@ public actor AnalysisPipeline {
                                          }) { batch in
             try await store.setPlaces(batch)
         }
+        if !refining, outcome.onlineRequests > 0 { lastForegroundOnlineLookup = now() }
+        return outcome
     }
 
     struct TextOutcome {

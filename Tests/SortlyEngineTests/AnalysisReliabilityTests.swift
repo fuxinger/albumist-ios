@@ -320,6 +320,27 @@ struct AnalysisReliabilityTests {
         #expect(report.placesPendingOnline > 0)
     }
 
+    /// Device test 15.11.: "es dauert lange, bis die App nach Pause weiterläuft". Fortsetzen
+    /// within the hour does not ask Apple for town names again; after the hour it does.
+    @Test func goingOnAfterAPauseDoesNotWaitForTownNamesAgain() async throws {
+        let geocoder = RefusingGeocoder()
+        let s = try setup(photos: 12, geocoder: geocoder, foregroundOnlineBudget: 60)
+        let first = try await s.pipeline.run()
+        #expect(first.onlineRequests > 0)
+        #expect(first.placesPendingOnline > 0)
+        let askedFirst = geocoder.calls.withLock { $0 }
+
+        s.clock.value.withLock { $0 = $0.addingTimeInterval(5 * 60) }
+        let second = try await s.pipeline.run()
+        #expect(second.onlineRequests == 0)
+        #expect(geocoder.calls.withLock { $0 } == askedFirst)
+        #expect(second.placesPendingOnline > 0)
+
+        s.clock.value.withLock { $0 = $0.addingTimeInterval(AnalysisPipeline.foregroundOnlineCooldown) }
+        let third = try await s.pipeline.run()
+        #expect(third.onlineRequests > 0)
+    }
+
     func newPhoto(id: String) -> AssetSnapshot {
         AssetSnapshot(id: AssetID(id), kind: .image, creationDate: Fixture.date("2026-08-01 10:00"),
                       location: Fixture.Places.munichHome, pixelWidth: 4032, pixelHeight: 3024)

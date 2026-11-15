@@ -52,7 +52,7 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | A14 VoiceOver / Prüfung | 🟡 | audit() in test1–7 | Befunde lassen den Test scheitern (in Arbeit) |
 | A15 Weniger Bewegung | ❌ | — | Barrierefreiheits-Test (in Arbeit) |
 | A16 Deutsch und Englisch | 🟡 | appShipsEnglish; ProposalCuration: englishTitles | UI-Lauf auf Englisch |
-| A17 Zeitzonen, Zeitumstellung | 🟡 | dayTripUsesDestinationCalendar… | Sommer-/Winterzeit, Reise über Zonen (in Arbeit) |
+| A17 Zeitzonen, Zeitumstellung | ✅ | TripTimeZone: 11 Tests (Reise über Zonen, Rückkehr ohne Foto); ProposalCuration: aTripEndsOnTheDateWhereItEnded; dayTripUsesDestinationCalendar… | — |
 | B1 Voller Zugriff | ✅ | UI test1 | — |
 | B2 Nur ausgewählte Fotos | 🟡 | authorizationMapping; AnalysisCoverage: accessReducedToLimited… | UI über das echte Onboarding |
 | B3 Zugriff abgelehnt | 🟡 | deniedAccessStopsImmediately | UI |
@@ -91,7 +91,7 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | F3 Suche mit echten Anfragen | 🟡 | SearchQuerySet: 100 echte Anfragen (alle 100 finden, was sie sollen); SearchPerformance: 50.000 Fotos; SortlySearchUITests: 6 Anfragen in der UI | erster UI-Lauf steht aus |
 | F4 Probejahr bleibt | 🟡 | trialYearIsKeptForLaterRuns, UI test6 | Neustart, Wahl im Onboarding |
 | F5 Foto groß ansehen | 🟡 | UI test1 | Zoom |
-| G1 Zweitwohnsitz, Pendeln, Ferienwohnung, lange Reise | ❌ | ProposalCuration: routineVisitsBecomeOneAlbumPerPlace, noAlbumForWhereTheUserLives | eigene Lebenslagen-Tests (in Arbeit) |
+| G1 Zweitwohnsitz, Pendeln, Ferienwohnung, lange Reise | 🟡 | RecurringPlace-Lebenslagen (18 Muster: Pendeln, Wochenendhaus, Ferienwohnung, Familie, Umzug, Semester, 6-Monats-Reise, Dienstreisen, Nomaden), TripTimeZone (11), RecurringPlacePipeline | UI-Frage „Bist du hier öfter?“ im UI-Lauf |
 
 ## Testdaten
 Synthetische Bibliotheken (Koordinaten, Zeitstempel, Alben) in `Fixtures.swift`.

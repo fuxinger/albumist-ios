@@ -115,6 +115,10 @@ public actor AnalysisPipeline {
         static let frequentPlaces = "analysis.frequentPlaces"
         static let groups = "analysis.groups"
         static let tripCorrections = "user.tripCorrections"
+        /// The user's answers to "Bist du hier öfter?" (part of the decisions copy in the backup).
+        static let recurringPlaces = "user.recurringPlaces"
+        /// Places to ask about, where each trip was, the photos of the places the user is often at.
+        static let recurringPlaceReport = "analysis.recurringPlaces"
         /// Trip identities across runs (kept by "Analyse neu aufbauen", like other user data).
         static let tripIdentities = "user.tripIdentities"
         static let groupingFeedback = "user.groupingFeedback"
@@ -333,8 +337,10 @@ public actor AnalysisPipeline {
 
         // 2. Patterns (pure computation over metadata, seconds even for large libraries)
         let all = try await store.allAssets()
-        let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections) ?? TripCorrections()
-        let detected = TripDetector(configuration: settings.trips.advanced, calendar: calendar).detect(in: all, corrections: corrections)
+        let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
+        let answers = try await recurringPlaceAnswers()
+        let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar).analyse(in: all, corrections: corrections, places: answers)
+        let detected = tripAnalysis.trips
         // Trips keep their identity when their photos change a little (an older photo
         // imported, the first one deleted): decisions and deleted albums stay attached.
         var known = try await store.value([TripIdentity].self, forKey: Key.tripIdentities) ?? []
@@ -344,6 +350,7 @@ public actor AnalysisPipeline {
         }
         var trips = TripIdentity.carryOver(detected, from: known)
         try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
+        try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
         var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar).detect(in: all)
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
         try await store.setValue(trips, forKey: Key.trips)
@@ -820,7 +827,7 @@ public actor AnalysisPipeline {
             return []
         }
         let contents = try await store.results(ContentAnalysis.self, kind: "content")
-        let feedback = try await store.value(GroupingFeedback.self, forKey: Key.groupingFeedback) ?? GroupingFeedback()
+        let feedback = try await store.value(GroupingFeedback.self, forKey: Key.groupingFeedback, defaults: GroupingFeedback()) ?? GroupingFeedback()
         let grouper = ObservationGrouper(distanceThreshold: settings.people.advanced.distanceThreshold, minGroupSize: settings.people.advanced.minGroupSize)
         var groups: [ObservationGroup] = []
         if settings.people.faceGroupingEnabled {
@@ -854,11 +861,14 @@ public actor AnalysisPipeline {
             .filter { scope.includes($0, calendar: calendar) }
         let overrides = OverrideSet(try await store.overrides())
         let scopedIDs = Set(facts.map(\.id))
+        let oftenHere = try await recurringPlaceReport()?.places ?? []
         let analysis = AnalysisSnapshot(
             facts: facts,
             trips: scope == .all ? trips : trips.filter { !scopedIDs.isDisjoint(with: $0.geotaggedAssetIDs) },
             frequentPlaces: scope == .all ? frequent : [],
-            groups: groups
+            groups: groups,
+            // Like trips: a place with photos in the trial year comes with all its photos.
+            recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) }
         )
         let proposals = ProposalEngine(settings: settings, calendar: calendar).proposals(for: analysis, overrides: overrides)
         var matches = AlbumMatcher().match(proposals, against: inventory, overrides: overrides,
@@ -878,11 +888,26 @@ public actor AnalysisPipeline {
     /// The trips the user split or merged (I07). Kept in time, so they hold for every
     /// later analysis; the next run applies them.
     public func tripCorrections() async throws -> TripCorrections {
-        try await store.value(TripCorrections.self, forKey: Key.tripCorrections) ?? TripCorrections()
+        try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
     }
 
     public func setTripCorrections(_ corrections: TripCorrections) async throws {
         try await store.setValue(corrections, forKey: Key.tripCorrections)
+    }
+
+    /// The user's answers to "Bist du hier öfter?". Kept by position, so they hold for every
+    /// later analysis; the next run applies them.
+    public func recurringPlaceAnswers() async throws -> RecurringPlaceAnswers {
+        try await store.value(RecurringPlaceAnswers.self, forKey: Key.recurringPlaces, defaults: RecurringPlaceAnswers()) ?? RecurringPlaceAnswers()
+    }
+
+    public func setRecurringPlaceAnswers(_ answers: RecurringPlaceAnswers) async throws {
+        try await store.setValue(answers, forKey: Key.recurringPlaces)
+    }
+
+    /// What the last analysis found about places visited again and again.
+    public func recurringPlaceReport() async throws -> RecurringPlaceReport? {
+        try await store.value(RecurringPlaceReport.self, forKey: Key.recurringPlaceReport)
     }
 
     public func currentFacts() async throws -> [AssetFacts] {

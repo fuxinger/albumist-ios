@@ -246,3 +246,22 @@ struct DemoLibraryTests {
         #expect(DemoLibrary.shared.expectedCount > 200)
     }
 }
+
+/// Device test 15.11.: the Lock Screen bar came only for the first analysis of an app session,
+/// because every request used the same identifier and iOS runs an identifier only once.
+@Suite("Continued analysis identifiers")
+struct ContinuedAnalysisIdentifierTests {
+    @Test func everyRequestHasItsOwnIdentifierThatInfoPlistPermits() throws {
+        let ids = (0..<50).map { _ in ContinuedAnalysis.makeIdentifier() }
+        #expect(Set(ids).count == ids.count)
+        let permitted = try #require(Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String])
+        let wildcard = try #require(permitted.first { $0.hasSuffix(".*") })
+        let prefix = String(wildcard.dropLast(1))
+        for id in ids {
+            #expect(id.hasPrefix(prefix))
+            #expect(id.count > prefix.count)
+            // Under the bundle identifier, as iOS requires for continued processing tasks.
+            #expect(id.hasPrefix(try #require(Bundle.main.bundleIdentifier) + "."))
+        }
+    }
+}

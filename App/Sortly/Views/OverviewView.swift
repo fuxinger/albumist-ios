@@ -433,8 +433,12 @@ struct InterruptedPlanCard: View {
                 // The three ways out (I16), each with what it does.
                 Button("Fortsetzen") { Task { await model.resumeInterruptedPlan() } }
                     .buttonStyle(PrimaryButtonStyle())
-                Button("Rückgängig machen") { confirmUndo = true }
-                    .buttonStyle(SecondaryButtonStyle())
+                // An interrupted undo cannot itself be taken back (Photos cannot bring deleted
+                // albums back): it can only go on or stay as it is.
+                if plan.reverts == nil {
+                    Button("Rückgängig machen") { confirmUndo = true }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
                 Button { Task { await model.keepInterruptedPlanAsIs() } } label: {
                     Text("So lassen")
                         .font(.subheadline.weight(.semibold))
@@ -442,9 +446,15 @@ struct InterruptedPlanCard: View {
                         .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("interrupted.keep")
-                Text("Fortsetzen legt den Rest an. Rückgängig nimmt das Erledigte zurück. So lassen behält das Erledigte und lässt den Rest weg; es steht dann im Verlauf und lässt sich später noch zurücknehmen.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Group {
+                    if plan.reverts == nil {
+                        Text("Fortsetzen legt den Rest an. Rückgängig nimmt das Erledigte zurück. So lassen behält das Erledigte und lässt den Rest weg; es steht dann im Verlauf und lässt sich später noch zurücknehmen.")
+                    } else {
+                        Text("Fortsetzen nimmt auch den Rest zurück. So lassen behält, was schon zurückgenommen ist; den Rest kannst du später im Änderungsbeleg zurücknehmen.")
+                    }
+                }
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
             if let failure = model.execution.failure {
                 Text(failure).font(.footnote).foregroundStyle(.red)

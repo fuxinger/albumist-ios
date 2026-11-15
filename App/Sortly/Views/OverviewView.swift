@@ -168,7 +168,10 @@ struct OverviewView: View {
                 Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
             }
         }
-        if model.history.isEmpty && model.managedAlbums.isEmpty {
+        // Every full analysis (the first one, after "Analyse neu aufbauen" or another part of
+        // the library), not the short check for new photos (Fuchs 15.11.: "wo sind die
+        // Animationen?" after a rebuild with albums already made).
+        if model.analysis.kind != .check {
             ScanShow()
         }
         if !isQuickCheck {

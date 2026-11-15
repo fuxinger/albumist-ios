@@ -154,9 +154,17 @@ public actor SafetyBackupWriter {
     }
 
     /// Writes `backup`, taken as snapshot number `sequence` (`SortlyStore.safetyBackupSnapshot`).
-    /// Returns false, without writing, when a later snapshot is already on disk.
+    /// Returns false, without writing, when a later snapshot is already on disk, or when an
+    /// empty snapshot would replace a copy that holds decisions: an empty database next to a
+    /// full copy is one whose restore did not happen (failed, full disk, a copy from a newer
+    /// version); overwriting the copy then would lose the decisions for good.
     public func write(_ backup: SafetyBackup, sequence: Int) throws -> Bool {
         if let newest = newestWritten, newest > sequence { return false }
+        if backup.isEmpty, FileManager.default.fileExists(atPath: url.path) {
+            // Unreadable counts as holding something: it may be a newer format.
+            let existing = try? SafetyBackup.read(from: url)
+            if existing?.isEmpty != true { return false }
+        }
         try backup.write(to: url)
         protect(url)
         newestWritten = sequence

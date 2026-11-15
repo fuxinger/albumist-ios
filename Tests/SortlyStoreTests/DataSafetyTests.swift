@@ -299,6 +299,30 @@ struct DataSafetyTests {
         #expect(try await s.overrides().count == 1)
     }
 
+    /// The check at the start reads the whole file once; it must stay cheap for a large
+    /// library (measured: about 40 ms for 33 MB on the CI machine).
+    @Test func integrityCheckAtLaunchStaysCheap() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("sortly.sqlite")
+        do {
+            let s = try SortlyStore(url: url)
+            let ids = (0..<20_000).map { AssetID("photo-identifier-\($0)/L0/001") }
+            try await s.upsertAssets(ids.enumerated().map { AssetSnapshot(id: $0.element, creationDate: Date(timeIntervalSince1970: Double($0.offset) * 600), location: Fixture.Places.rome) })
+            for id in ids {
+                try await s.saveResult(["labels": ["beach", "sea", "sky", "people"]], kind: "content", asset: id, version: 3)
+            }
+            for id in ids.prefix(2_000) { try await s.indexText("Bestellung Nummer 302-1234567 Lieferung Donnerstag Gesamtbetrag", for: id) }
+        }
+        let clock = ContinuousClock()
+        var reopened: SortlyStore?
+        let elapsed = try clock.measure { reopened = try SortlyStore(url: url) }
+        let size = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        print("[measure] open with integrity check, \(size / 1_000_000) MB: \(elapsed)")
+        #expect(try await reopened?.assetCount() == 20_000)
+        #expect(elapsed < .seconds(5))
+    }
+
     /// An empty file (a copy that never got its content) starts as a new database.
     @Test func emptyFileStartsAsNewDatabase() async throws {
         let dir = try folder()
@@ -371,6 +395,47 @@ struct DataSafetyTests {
         #expect(kept.count == 2)
         #expect(kept.contains(folders[2].lastPathComponent))
         #expect(try Data(contentsOf: folders[2].appendingPathComponent("sortly.sqlite")) == Data("db 2".utf8))
+    }
+
+    /// A restore that did not happen (failed, full disk, copy from a newer version) leaves an
+    /// empty database next to a full copy. The next save of the copy must not replace it with
+    /// the empty state, or the decisions would be gone for good.
+    @Test func emptyDatabaseNeverOverwritesAFullCopy() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("Backup/decisions.json")
+        let c = try await contents()
+        let full = try SortlyStore(url: nil)
+        try await full.addOverride(c.override)
+        try await full.save(c.plan)
+        let copy = try await full.safetyBackup(now: Date(timeIntervalSince1970: 1))
+        try copy.write(to: file)
+
+        let empty = try SortlyStore(url: nil)
+        let snapshot = try await empty.safetyBackupSnapshot(now: Date(timeIntervalSince1970: 2))
+        #expect(snapshot.backup.isEmpty)
+        let writer = SafetyBackupWriter(url: file)
+        #expect(try await !writer.write(snapshot.backup, sequence: snapshot.sequence))
+        #expect(try SafetyBackup.read(from: file) == copy)
+
+        // Same for a copy this version cannot read (a newer format, a damaged file).
+        var newer = copy
+        newer.formatVersion = SafetyBackup.formatVersion + 1
+        try newer.write(to: file)
+        #expect(try await !writer.write(snapshot.backup, sequence: snapshot.sequence + 1))
+        try Data("{ damaged".utf8).write(to: file)
+        #expect(try await !writer.write(snapshot.backup, sequence: snapshot.sequence + 2))
+        #expect(try Data(contentsOf: file) == Data("{ damaged".utf8))
+
+        // Once the database holds decisions again (restored, or new ones), the copy follows.
+        #expect(try await empty.restore(copy, includingLibraryState: true))
+        let restored = try await empty.safetyBackupSnapshot(now: Date(timeIntervalSince1970: 3))
+        #expect(try await writer.write(restored.backup, sequence: restored.sequence))
+        #expect(try SafetyBackup.read(from: file)?.overrides == copy.overrides)
+        // An empty copy may replace an empty one.
+        try SafetyBackup(formatVersion: 1, createdAt: Date(), schemaVersion: 4, overrides: [], rules: [], managedAlbums: [], plans: [], values: []).write(to: file)
+        let fresh = SafetyBackupWriter(url: file)
+        #expect(try await fresh.write(snapshot.backup, sequence: snapshot.sequence))
     }
 
     // MARK: Full disk in the middle of a write

@@ -66,6 +66,11 @@ public actor AnalysisPipeline {
         public var stage: Stage
         public var completed: Int
         public var total: Int
+        /// Set while the stage waits for Apple's geocoder (its limit of about 40 lookups a
+        /// minute, or after it refused): about how long the wait still takes. Said every 2 s,
+        /// so the card can show the wait instead of a count that stands for up to a minute;
+        /// `nil` again when the lookups go on.
+        public var waitLeft: Duration? = nil
 
         /// One value for the whole run (0…1), so a bar never jumps back when the next stage starts.
         public static func overall(stage: Stage, completed: Int, total: Int) -> Double {
@@ -347,6 +352,9 @@ public actor AnalysisPipeline {
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
 
         // 2. Patterns (pure computation over metadata, seconds even for large libraries)
+        // Said before the trips are computed, or the card stands at "Mediathek wird gelesen ·
+        // N von N" meanwhile (simulated full run: step 2 was first shown when it was done).
+        onProgress(Progress(stage: .patterns, completed: 0, total: 1))
         let all = try await store.allAssets()
         let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
         let answers = try await recurringPlaceAnswers()
@@ -460,6 +468,12 @@ public actor AnalysisPipeline {
             var analyzed = 0
             var stopped: PauseReason?
             var cancelled = false
+            // Saved and shown at least once a second: a batch of 50 photos took 5 s, on a warm
+            // device 18 s, and the count stood still meanwhile (simulated full run). The photos
+            // after the cut stay for the next batch.
+            let batchStart = now()
+            var cut = false
+            var next = 0
             // Decided without looking at the image: labels stored already, or a photo that
             // could not be read a short while ago (not again in this run).
             batch = batch.filter { asset in
@@ -475,13 +489,13 @@ public actor AnalysisPipeline {
             }
             await analyzer.willAnalyze(Array(batch.prefix(2 * contentLanes)))
             try await withThrowingTaskGroup(of: (AssetSnapshot, Result<ContentAnalysis, any Error>).self) { group in
-                var next = 0
                 var inFlight = 0
                 var width = contentLanes
                 while true {
                     // Fill the lanes. Heat, low battery or Pause are checked before every
                     // photo, so a stop takes effect within one photo per lane.
                     while stopped == nil, !cancelled, next < batch.count, inFlight < width {
+                        if next > 0, now().timeIntervalSince(batchStart) >= 1 { cut = true; break }
                         let (reason, lanes) = await admission(lanes: contentLanes)
                         if let reason { stopped = reason; break }
                         width = lanes
@@ -538,6 +552,12 @@ public actor AnalysisPipeline {
             }
             try await store.saveResults(results, kind: "content", version: Self.contentVersion, markingAnalyzed: finished)
             if cancelled { throw CancellationError() }
+            if cut {
+                // Goes on behind the last photo looked at (same order as the store's query);
+                // without a date, from the start of the photos still to analyse.
+                let last = batch[next - 1]
+                cursor = last.creationDate != nil ? last : nil
+            }
             contentDone += finished.count
             report.contentAnalyzed += analyzed
             onProgress(Progress(stage: .content, completed: contentBefore + contentDone,
@@ -615,12 +635,19 @@ public actor AnalysisPipeline {
         let askedRecently = lastForegroundOnlineLookup.map { now().timeIntervalSince($0) < Self.foregroundOnlineCooldown } ?? false
         let budget = refining ? nil : (askedRecently ? 0 : foregroundOnlineBudget)
         onProgress(Progress(stage: .places, completed: before, total: total))
+        // The count last shown, repeated with the time left while the run waits for the geocoder.
+        let shown = Mutex(before)
         let outcome = try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
                                          maxRateLimitWait: refining ? nil : Self.foregroundRateLimitWait,
                                          shouldStop: { [weak self] in await self?.stopRequested() ?? true },
                                          onlineAllowed: { [weak self] in await self?.settings.privacy.allowOnlineGeocoding ?? false },
                                          progress: { processed in
-                                             onProgress(Progress(stage: .places, completed: min(before + processed, total), total: total))
+                                             let completed = min(before + processed, total)
+                                             shown.withLock { $0 = completed }
+                                             onProgress(Progress(stage: .places, completed: completed, total: total))
+                                         },
+                                         waiting: { left in
+                                             onProgress(Progress(stage: .places, completed: shown.withLock { $0 }, total: total, waitLeft: left))
                                          }) { batch in
             try await store.setPlaces(batch)
         }
@@ -643,7 +670,6 @@ public actor AnalysisPipeline {
         guard settings.enabledAreas.contains(.screenshots) || settings.enabledAreas.contains(.documents) || settings.enabledAreas.contains(.messenger) else {
             return outcome
         }
-        onProgress(Progress(stage: .text, completed: 0, total: 0))
         // Masked first: a read that fails below writes the earlier result back, which must be
         // the masked one.
         try await remaskStoredTexts()
@@ -670,9 +696,10 @@ public actor AnalysisPipeline {
         }
         // Counted over all screenshots and documents, so a later run goes on from the real state.
         let textBefore = needing.count - candidates.count
-        if !candidates.isEmpty {
-            onProgress(Progress(stage: .text, completed: textBefore, total: needing.count))
-        }
+        // Said as soon as the count is known, also when nothing is left to read. A "0" said
+        // before the count put the bar of a run that goes on in this step below where the
+        // paused run had got to (simulated full run: 86 % back to 80 %).
+        onProgress(Progress(stage: .text, completed: textBefore, total: needing.count))
         let documents = DocumentAnalyzer()
         let screenshots = ScreenshotClassifier()
         let analyzer = self.analyzer

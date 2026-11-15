@@ -105,6 +105,8 @@ public actor PlaceResolutionService {
     private var requestTimes: [Duration] = []
     /// Time spent in this `resolve` waiting for the geocoder after it refused.
     private var rateLimitWaited: Duration = .zero
+    /// Told how long a wait for the geocoder still takes, and `nil` when it is over (see `resolve`).
+    private var onWait: (@Sendable (Duration?) async -> Void)?
     /// Longest single sleep between two checks of `shouldStop`: Pause, heat or the end of the
     /// app's time interrupt a wait for the geocoder within seconds, not after minutes.
     static let waitSlice: Duration = .seconds(2)
@@ -134,6 +136,12 @@ public actor PlaceResolutionService {
     /// `maxRateLimitWait`: how long this call may wait in total after the geocoder refused
     /// (rate limit). Once that is used up, or the geocoder still refuses after its retries, no
     /// more online lookups are made in this call and the rest is reported as pending.
+    ///
+    /// `progress`: how many requests are final (resolved, or not resolvable). Requests left
+    /// for a later call (budget, refusal, offline, Pause) are not counted.
+    ///
+    /// `waiting`: called every 2 s while this call waits for the geocoder (its limit of about
+    /// 40 lookups a minute, or a refusal) with the time left, and with `nil` when it goes on.
     public func resolve(
         _ requests: [Request],
         refining: Bool = false,
@@ -142,14 +150,20 @@ public actor PlaceResolutionService {
         shouldStop: (@Sendable () async -> Bool)? = nil,
         onlineAllowed: (@Sendable () async -> Bool)? = nil,
         progress: (@Sendable (Int) async -> Void)? = nil,
+        waiting: (@Sendable (Duration?) async -> Void)? = nil,
         sink: Sink
     ) async throws -> Outcome {
         var outcome = Outcome()
         rateLimitWaited = .zero
-        // How many requests are final (resolved, pending for later, or not resolvable). A
-        // country known early from the map does not count yet when the town still needs the
-        // online lookup, so the count rises with the real work (first device test 15.11.:
-        // "5.683 von 5.683" showed at once while the lookups had only begun).
+        onWait = waiting
+        defer { onWait = nil }
+        // How many requests are final (resolved, or not resolvable). A country known early from
+        // the map does not count yet when the town still needs the online lookup, so the count
+        // rises with the real work (first device test 15.11.: "5.683 von 5.683" showed at once
+        // while the lookups had only begun). Requests left for a later run do not count either:
+        // they are looked up again there, and that run's count starts where this one ended
+        // instead of below it (simulated full run: Pause in step 3 jumped to "1.615 von 1.615",
+        // the run that went on started at "271 von 1.615").
         var processed = 0
         var offlineOnly: [AssetID: ResolvedPlace] = [:]
         var needsOnline: [Request] = []
@@ -188,7 +202,7 @@ public actor PlaceResolutionService {
 
         var onlineDisabled = !policy.onlineAllowed || geocoder == nil
         for (cell, members) in groups {
-            processed += members.count
+            let pendingBefore = outcome.pendingOnline.count
             if Task.isCancelled { outcome.pendingOnline.formUnion(members.map(\.assetID)); continue }
             // Pause, heat or low battery: no more online lookups; cached cells still count.
             if !onlineDisabled, let shouldStop, await shouldStop() { onlineDisabled = true }
@@ -225,7 +239,6 @@ public actor PlaceResolutionService {
             }
             guard let online else {
                 outcome.pendingOnline.formUnion(members.map(\.assetID))
-                await progress?(processed)
                 continue
             }
             var batch: [AssetID: ResolvedPlace] = [:]
@@ -243,7 +256,11 @@ public actor PlaceResolutionService {
                 try await sink(batch)
                 outcome.resolved += batch.count - batch.keys.filter { offlineOnly[$0] != nil }.count
             }
-            await progress?(processed)
+            let final = members.count - (outcome.pendingOnline.count - pendingBefore)
+            if final > 0 {
+                processed += final
+                await progress?(processed)
+            }
         }
         return outcome
     }
@@ -345,16 +362,22 @@ public actor PlaceResolutionService {
     }
 
     /// Sleeps in short slices and asks `shouldStop` between them. False: stopped.
+    /// Each slice is announced with the time left, and the end of the wait too: without it the
+    /// count stood still for up to a minute while the run waited (simulated full run: 48 s at
+    /// the limit of 40 lookups a minute, 30 s after a refusal), and looked stuck.
     private func pause(for duration: Duration, _ shouldStop: (@Sendable () async -> Bool)?) async -> Bool {
         var left = duration
+        var stopped = false
         while left > .zero {
-            if Task.isCancelled { return false }
-            if let shouldStop, await shouldStop() { return false }
+            if Task.isCancelled { stopped = true; break }
+            if let shouldStop, await shouldStop() { stopped = true; break }
+            await onWait?(left)
             let slice = min(left, Self.waitSlice)
-            do { try await time.sleep(slice) } catch { return false }
+            do { try await time.sleep(slice) } catch { stopped = true; break }
             left -= slice
         }
-        return !Task.isCancelled
+        if duration > .zero { await onWait?(nil) }
+        return !stopped && !Task.isCancelled
     }
 
     private func waitForSlot(_ shouldStop: (@Sendable () async -> Bool)?) async -> Bool {

@@ -258,6 +258,14 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
         print("UI_TIMING analysis \(Int(Date().timeIntervalSince(analysed))) s")
         assertEveryPhotoAnalysed("after seeding")
+        // With every photo readable the suggestions reach the overview a little after the
+        // analysis card says done (run 43774578089: the overview changed during its audit,
+        // which ended test1 there). The audit waits for them.
+        let offers = Date()
+        let ready = waitStable("suggestions on the overview", timeout: 180) {
+            app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ (Vorschläge|Vorschlag) prüfen|[0-9]+ Alben (kostenlos )?anlegen")).firstMatch.exists
+        }
+        print("UI_FACT suggestions on the overview \(ready) after \(Int(Date().timeIntervalSince(offers))) s")
         // The demo library holds 12 trips; "1 Reisen" was a real detection bug.
         let teaser = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Dein Reise-Atlas")).firstMatch
         if teaser.waitForExistence(timeout: 10) {

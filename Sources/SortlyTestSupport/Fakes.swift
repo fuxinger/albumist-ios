@@ -60,22 +60,27 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
     public var assets: [AssetSnapshot]
     public var inventory: CollectionInventory
     public var accessLevel: LibraryAccess
+    /// Photos in the Hidden album: only read when the user lets Albumist see them.
+    public var hidden: Set<AssetID>
 
-    public init(assets: [AssetSnapshot], inventory: CollectionInventory = CollectionInventory(), access: LibraryAccess = .full) {
+    public init(assets: [AssetSnapshot], inventory: CollectionInventory = CollectionInventory(), access: LibraryAccess = .full,
+                hidden: Set<AssetID> = []) {
         self.assets = assets
         self.inventory = inventory
         self.accessLevel = access
+        self.hidden = hidden
     }
 
     public func set(assets: [AssetSnapshot]) { self.assets = assets }
     public func set(inventory: CollectionInventory) { self.inventory = inventory }
     public func set(access: LibraryAccess) { accessLevel = access }
+    public func set(hidden: Set<AssetID>) { self.hidden = hidden }
 
     public func access() async -> LibraryAccess { accessLevel }
     /// Like PhotoKit: file details (name, type, RAW flag) only for assets that are new to the
     /// store or changed since their details were stored.
     public func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date]) async throws -> [AssetSnapshot] {
-        assets.map { asset in
+        assets.filter { includeHidden || !hidden.contains($0.id) }.map { asset in
             guard let known = knownDetails[asset.id], AssetSnapshot.sameModification(known, asset.modificationDate) else { return asset }
             var bare = asset
             bare.uniformTypeIdentifier = nil

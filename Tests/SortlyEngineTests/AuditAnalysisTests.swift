@@ -227,12 +227,16 @@ struct AuditAnalysisTests {
         analyzer.state.withLock { $0.contentFailures = [ids[1]: 1] }
         let reader = InMemoryLibraryReader(assets: assets)
         let store = try SortlyStore(url: nil)
-        let p = pipeline(store: store, reader: reader, analyzer: analyzer)
+        let clock = Clock()
+        let p = pipeline(store: store, reader: reader, analyzer: analyzer, clock: clock)
         let first = try await p.run()
         #expect(first.contentAnalyzed == 2)
         #expect(try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 1)
         #expect(try await store.result(ContentAnalysis.self, kind: "content", asset: ids[1])?.failedAttempts == 1)
 
+        // Retried in a later run, spaced out (first device test 15.11.: catch-up runs follow
+        // each other within seconds).
+        clock.advance(ContentAnalysis.retrySpacing)
         let second = try await p.run()
         #expect(second.contentAnalyzed == 1)
         let result = try #require(try await store.result(ContentAnalysis.self, kind: "content", asset: ids[1]))
@@ -246,8 +250,12 @@ struct AuditAnalysisTests {
         analyzer.state.withLock { $0.contentFailures = [ids[0]: 10] }
         let reader = InMemoryLibraryReader(assets: assets)
         let store = try SortlyStore(url: nil)
-        let p = pipeline(store: store, reader: reader, analyzer: analyzer)
-        for _ in 0..<3 { _ = try await p.run() }
+        let clock = Clock()
+        let p = pipeline(store: store, reader: reader, analyzer: analyzer, clock: clock)
+        for _ in 0..<3 {
+            _ = try await p.run()
+            clock.advance(ContentAnalysis.retrySpacing)
+        }
         #expect(try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 0)
         #expect(try await store.result(ContentAnalysis.self, kind: "content", asset: ids[0])?.failedAttempts == 3)
         let reads = analyzer.state.withLock { $0.contentCalls }

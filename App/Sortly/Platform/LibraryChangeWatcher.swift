@@ -9,6 +9,8 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
     static let shared = LibraryChangeWatcher()
     private var registered = false
     private var pending: Task<Void, Never>?
+    /// Least time between the end of one run and a catch-up run.
+    private static let minimumGap: TimeInterval = 20
 
     /// Only with read access: registering earlier could bring up the permission question.
     func start() {
@@ -21,14 +23,20 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
         Task { @MainActor in LibraryChangeWatcher.shared.scheduleCatchUp() }
     }
 
-    private func scheduleCatchUp() {
+    /// Also called when a run ends that saw changes arrive meanwhile.
+    func scheduleCatchUp() {
         let model = AppModel.shared
         // Albumist's own changes are followed by an analysis anyway.
         guard !model.execution.isRunning else { return }
         pending?.cancel()
         pending = Task {
-            // Several changes in a row (an album and its photos) start one analysis.
-            try? await Task.sleep(for: .seconds(3))
+            // Several changes in a row (an album and its photos) start one analysis. While
+            // iCloud syncs, Photos reports changes every few seconds: at most one check every
+            // 20 s then, so full checks of the library do not run back to back and warm the
+            // iPhone (each one reads the whole library again).
+            var delay: TimeInterval = 3
+            if let last = model.analysis.lastRun { delay = max(delay, Self.minimumGap - Date().timeIntervalSince(last)) }
+            try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
             // A run in progress read the library at its start: one more pass follows it, so
             // new screenshots do not wait for the next app start.

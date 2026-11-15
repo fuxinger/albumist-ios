@@ -7648,6 +7648,86 @@
           }
         }
       }
+    },
+    "Keine Verbindung zum App Store. Bitte prüfe deine Internetverbindung und versuche es noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No connection to the App Store. Please check your internet connection and try again."
+          }
+        }
+      }
+    },
+    "Kein Kauf gefunden. Wenn du Albumist mit einem anderen Apple Account gekauft hast, melde dich damit im App Store an." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No purchase found. If you bought Albumist with a different Apple Account, sign in with it in the App Store."
+          }
+        }
+      }
+    },
+    "Kein Foto passt zu allen Begriffen. Ohne %@ gesucht." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No photo matches every term. Searched without %@."
+          }
+        }
+      }
+    },
+    "Nicht verstanden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not understood"
+          }
+        }
+      }
+    },
+    "Zu „%@“ gibt es keine Fotos in deiner Mediathek." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "There are no photos for “%@” in your library."
+          }
+        }
+      }
+    },
+    "Beste Treffer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top Results"
+          }
+        }
+      }
+    },
+    "korrigiert aus %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "corrected from %@"
+          }
+        }
+      }
+    },
+    "nicht berücksichtigt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "left out"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

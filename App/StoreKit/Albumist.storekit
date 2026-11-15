@@ -1,0 +1,40 @@
+{
+  "identifier" : "6E0D3C1A",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "6755000001",
+      "localizations" : [
+        {
+          "description" : "Unbegrenzt Alben anlegen. Einmal kaufen, kein Abo.",
+          "displayName" : "Albumist freischalten",
+          "locale" : "de_DE"
+        },
+        {
+          "description" : "Create unlimited albums. Buy once, no subscription.",
+          "displayName" : "Unlock Albumist",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "app.albumist.ios.unlock",
+      "referenceName" : "Albumist Unlock",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "de_DE",
+    "_storefront" : "DEU"
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

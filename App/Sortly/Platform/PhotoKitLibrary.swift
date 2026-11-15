@@ -66,12 +66,23 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         // store keeps the earlier values for the rest.
         var snapshots: [AssetSnapshot] = []
         snapshots.reserveCapacity(result.count)
-        result.enumerateObjects { asset, _, _ in
-            let needsResources = knownDetails[AssetID(asset.localIdentifier)].map { known in
-                !AssetSnapshot.sameModification(known, asset.modificationDate)
-            } ?? true
-            snapshots.append(Self.snapshot(asset, withResources: needsResources))
+        result.enumerateObjects { asset, _, stop in
+            // Ended (the app's time ran out, "Analyse neu aufbauen"): stop reading. The
+            // partial list is never returned, it would count the rest as deleted.
+            if Task.isCancelled {
+                stop.pointee = true
+                return
+            }
+            // PhotoKit objects and resource lists are autoreleased: without a pool per photo a
+            // first run over tens of thousands of photos kept all of them until the walk ended.
+            autoreleasepool {
+                let needsResources = knownDetails[AssetID(asset.localIdentifier)].map { known in
+                    !AssetSnapshot.sameModification(known, asset.modificationDate)
+                } ?? true
+                snapshots.append(Self.snapshot(asset, withResources: needsResources))
+            }
         }
+        try Task.checkCancellation()
         return snapshots
     }
 

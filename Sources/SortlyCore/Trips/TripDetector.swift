@@ -275,7 +275,9 @@ public struct TripDetector: Sendable {
         let end = members.last!.creationDate!
         let coordinates = members.map { $0.usableLocation! }
         let centroid = GeoMath.centroid(coordinates) ?? coordinates[0]
-        let maxDistance = zip(members, coordinates).map { home.distanceToHome($1, at: $0.creationDate!) }.max() ?? 0
+        // Without a known home (a small library, or GPS only on trips) the distance is
+        // "far", not infinite: infinity cannot be stored as JSON and failed every run.
+        let maxDistance = zip(members, coordinates).map { min(home.distanceToHome($1, at: $0.creationDate!), .greatestFiniteMagnitude) }.max() ?? 0
 
         // Inferred members: binary search the time window. A split by the user is a hard
         // edge: a photo without GPS belongs to the part on its side only (audit 2, 2.2).

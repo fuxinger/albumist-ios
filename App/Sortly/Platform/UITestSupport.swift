@@ -31,6 +31,33 @@ enum UITestSupport {
     static let slowsAnalysis: Bool = isRunning && ProcessInfo.processInfo.arguments.contains("-SortlyUITestSlowAnalysis")
 }
 
+// MARK: Locked purchase (free-album limit and unlock card)
+
+extension UITestSupport {
+    /// `-SortlyUITestLocked`: the purchase is not skipped; free albums count as in the shipped
+    /// app and the unlock card appears, so the locked path is tested end to end.
+    static let locksPurchase: Bool = isRunning && ProcessInfo.processInfo.arguments.contains("-SortlyUITestLocked")
+
+    /// `-SortlyUITestFreeAlbumsLeft N` (with `-SortlyUITestLocked`): the run starts with N free
+    /// albums left.
+    static let freeAlbumsLeft: Int? = {
+        guard locksPurchase else { return nil }
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-SortlyUITestFreeAlbumsLeft"), index + 1 < arguments.count else { return nil }
+        return Int(arguments[index + 1])
+    }()
+
+    private static let lockedPurchaseSuite = "app.albumist.uitest.purchases"
+
+    /// The free-album count of a locked UI run: its own domain, emptied at every launch, so
+    /// the count of one run never reaches the next one or the normal runs.
+    static func lockedPurchaseDefaults() -> UserDefaults? {
+        guard locksPurchase, let defaults = UserDefaults(suiteName: lockedPurchaseSuite) else { return nil }
+        defaults.removePersistentDomain(forName: lockedPurchaseSuite)
+        return defaults
+    }
+}
+
 /// The real analyzer with a pause per photo (UI tests only, see `slowsAnalysis`).
 struct SlowedAnalyzer: ContentAnalyzing {
     var base: any ContentAnalyzing

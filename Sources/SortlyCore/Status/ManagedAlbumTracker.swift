@@ -127,6 +127,48 @@ public struct ManagedAlbumTracker: Sendable {
         }
         return Reconciliation(changes: changes, updatedStates: updated, newOverrides: overrides)
     }
+
+    /// `reconcile` against the library itself (plugin review W3). A deletion is recorded for
+    /// good (the suggestion never comes back), so an album missing from the album list counts
+    /// as deleted only once Photos confirms it when asked for that album on its own: the list
+    /// can lack some albums for a while (iCloud still syncing after a restore from a backup, a
+    /// library being updated). An album found that way, with the folders above it, is added to
+    /// the list everything else works with. Only when every remembered album still seems gone,
+    /// the whole list is read once more after `pause` (the user may also have deleted them all).
+    /// A failed read throws: nothing is recorded, and planning waits (audit 2, 1.5).
+    /// - Parameter listed: the album list as just read.
+    /// - Returns: the reconciliation and the album list it compared with.
+    public func reconcile(_ states: [ManagedAlbumState], listed: CollectionInventory, in library: any PhotoLibraryWriting,
+                          changing: Set<CollectionID> = [], pause: Duration = .milliseconds(300),
+                          now: Date = Date()) async throws -> (reconciliation: Reconciliation, inventory: CollectionInventory) {
+        var current = try await completed(listed, states: states, changing: changing, in: library)
+        var result = reconcile(states, with: current, changing: changing, now: now)
+        if !states.isEmpty, result.updatedStates.isEmpty {
+            try? await Task.sleep(for: pause)
+            current = try await completed(try await library.currentInventory(), states: states, changing: changing, in: library)
+            result = reconcile(states, with: current, changing: changing, now: now)
+        }
+        return (result, current)
+    }
+
+    /// The list with every remembered album it lacks looked up on its own, and the folders
+    /// above an album found that way.
+    private func completed(_ listed: CollectionInventory, states: [ManagedAlbumState], changing: Set<CollectionID>,
+                           in library: any PhotoLibraryWriting) async throws -> CollectionInventory {
+        var current = listed
+        for state in states where current[state.albumID] == nil && !changing.contains(state.albumID) {
+            guard let found = try await library.collection(state.albumID) else { continue }
+            current.upsert(found)
+            var parent = found.parentID
+            var depth = 0
+            while let id = parent, current[id] == nil, depth < 32, let folder = try await library.collection(id) {
+                current.upsert(folder)
+                parent = folder.parentID
+                depth += 1
+            }
+        }
+        return current
+    }
 }
 
 /// A manual user decision that takes precedence over every automatic rule (prompt §8, §9).

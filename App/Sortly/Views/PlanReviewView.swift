@@ -133,6 +133,14 @@ struct PlanReviewView: View {
         let albums = plan.freeAlbumUse(applied: false)
         if model.access == .limited && !UITestSupport.isRunning {
             FullAccessCard()
+        } else if PlanGate.refusal(for: plan, interrupted: model.interruptedPlan) != nil {
+            // One plan at a time (plugin review K2): the one that was cut off is settled first.
+            Card {
+                Label("Erst das unterbrochene Umsetzen abschließen", systemImage: "pause.circle").font(.headline)
+                Text("Ein früheres Umsetzen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht: Fortsetzen, Rückgängig machen oder So lassen. Danach kannst du diese Änderungen umsetzen, und nichts wird doppelt angelegt.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         } else if !purchases.allows(albums: albums) {
             UnlockCard(albumsInPlan: albums, onLimit: limitToFreeAlbums)
         } else {

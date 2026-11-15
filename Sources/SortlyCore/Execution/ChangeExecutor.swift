@@ -759,9 +759,14 @@ public struct UndoPlanner: Sendable {
     /// - Parameter owned: media Albumist still owns per album, from the managed-album records
     ///   after the latest reconciliation. Media the user took out and later put back by hand
     ///   are no longer Albumist's and stay. Pass `nil` for a plan that was never recorded
-    ///   (an interrupted one).
+    ///   (an interrupted one). An album without a record there falls back to what the plan's
+    ///   own journal says it added (plugin review W3): a record lost to an album list that was
+    ///   incomplete for a moment must not leave the album in Photos after "Rückgängig".
+    /// - Parameter earlierUndos: undos of the same plan that ran before and did not get
+    ///   everything back (plugin review W1). An album one of them brought back is used again
+    ///   and only gets the photos still missing, instead of a second album of the same name.
     public func undoPlan(for executed: ChangePlan, current: CollectionInventory, owned: [CollectionID: Set<AssetID>]? = nil,
-                         id: SortlyID = SortlyID(), now: Date = Date()) -> ChangePlan {
+                         earlierUndos: [ChangePlan] = [], id: SortlyID = SortlyID(), now: Date = Date()) -> ChangePlan {
         var steps: [PlanStep] = []
         var notes: [PlanNote] = []
         var guards: [CollectionID: Set<AssetID>] = [:]
@@ -813,7 +818,11 @@ public struct UndoPlanner: Sendable {
             }
         }
         if let owned {
-            for (albumID, ours) in addedByUs { addedByUs[albumID] = ours.intersection(owned[albumID] ?? []) }
+            for (albumID, ours) in addedByUs {
+                // No record of the album: the plan's own journal is all there is to go by.
+                guard let still = owned[albumID] else { continue }
+                addedByUs[albumID] = ours.intersection(still)
+            }
         }
 
         // 1. Revert renames and moves if nobody changed them again.
@@ -876,6 +885,29 @@ public struct UndoPlanner: Sendable {
         //    a new album: Photos cannot restore the old one). Undo plans themselves are not
         //    reverted this way.
         if executed.reverts == nil {
+            // What earlier undos of this plan already did (W1): the albums they brought back,
+            // and the photos they verifiably put back. A photo they put back that is missing
+            // again was taken out by the user since and stays out.
+            var restoredBefore: [String: CollectionID] = [:]
+            var putBackBefore: [CollectionID: Set<AssetID>] = [:]
+            for earlier in earlierUndos where earlier.reverts == executed.id {
+                for step in earlier.steps {
+                    switch step.operation {
+                    case .createAlbum(let key, _, _) where key.hasPrefix("restore-"):
+                        // Photos returned an id: the album was made (or found after an
+                        // interruption), whatever its check said afterwards.
+                        if let made = earlier.resolvedKeys[key], restoredBefore[key] == nil { restoredBefore[key] = made }
+                    case .addAssets(let ref, _):
+                        let album: CollectionID? = switch ref {
+                        case .existing(let id): id
+                        case .planned(let key): earlier.resolvedKeys[key]
+                        }
+                        if let album { putBackBefore[album, default: []].formUnion(earlier.confirmedMedia(of: step)) }
+                    default:
+                        break
+                    }
+                }
+            }
             for step in executed.steps {
                 let albumID: CollectionID
                 switch step.operation {
@@ -889,13 +921,22 @@ public struct UndoPlanner: Sendable {
                 }
                 guard let album = current[albumID] else { continue }
                 let removed = changed(step, album: albumID, planned: step.operation.removedAssets, added: false)
-                let back = removed.filter { !album.assetIDs.contains($0) }
+                let back = removed.filter { !album.assetIDs.contains($0) && !(putBackBefore[albumID]?.contains($0) ?? false) }
                 if !back.isEmpty { append(.addAssets(album: .existing(albumID), assets: back), source: step.sourceID) }
             }
             for step in executed.steps {
                 guard case .deleteCollection(let cid, _) = step.operation, case .succeeded = step.state,
                       let gone = record?.deletedAlbums[cid], current[cid] == nil else { continue }
                 let key = "restore-\(cid.rawValue)"
+                if let restored = restoredBefore[key] {
+                    // An earlier undo brought the album back already: never a second one. It
+                    // gets the photos that undo could not put back. If the user deleted it
+                    // since, it stays deleted.
+                    guard let album = current[restored] else { continue }
+                    let missing = gone.members.filter { !album.assetIDs.contains($0) && !(putBackBefore[restored]?.contains($0) ?? false) }
+                    if !missing.isEmpty { append(.addAssets(album: .existing(restored), assets: missing), source: step.sourceID) }
+                    continue
+                }
                 let parent: FolderRef = gone.parentID.flatMap { current[$0] != nil ? FolderRef.existing($0) : nil } ?? .topLevel
                 append(.createAlbum(key: key, title: gone.title, parent: parent), source: step.sourceID)
                 if !gone.members.isEmpty { append(.addAssets(album: .planned(key), assets: gone.members), source: step.sourceID) }

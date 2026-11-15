@@ -224,6 +224,14 @@ final class AppModel {
     private(set) var worldMap: OfflineWorldMap?
     private var pipeline: AnalysisPipeline?
     private var analysisTask: Task<Void, Never>?
+    /// The run in progress: Pause reaches exactly this run, at once (no hop to the pipeline,
+    /// so a Pause during the start of a run is not lost and a late one stops no later run).
+    @ObservationIgnored private var analysisControl: AnalysisRunControl?
+    /// Counts runs: progress that arrives late from an earlier run is dropped.
+    @ObservationIgnored private var analysisGeneration = 0
+    /// Runs in a row that ended early by themselves (an error, Vision failing): tried again
+    /// a little later instead of only at the next start of the app.
+    @ObservationIgnored private var unattendedRetries = 0
     /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile.
     @ObservationIgnored private var analysisResetting = false
     /// One plan at a time (apply, resume, undo, take back): claimed before the first await of
@@ -283,7 +291,9 @@ final class AppModel {
                 analyzer: UITestSupport.slowsAnalysis ? SlowedAnalyzer(base: VisionAnalyzer()) as any ContentAnalyzing : VisionAnalyzer() as any ContentAnalyzing,
                 geocoder: SystemGeocoder(locale: Locale(identifier: settings.titleLanguage.rawValue)),
                 map: map, conditions: DeviceConditions(), settings: settings,
-                foregroundOnlineBudget: 60
+                foregroundOnlineBudget: 60,
+                // UI tests slow each photo down to see a run in progress: one lane keeps that.
+                contentLanes: UITestSupport.slowsAnalysis ? 1 : 4
             )
             tripCorrections = (try? await pipeline?.tripCorrections()) ?? TripCorrections()
             analysisScope = (try? await pipeline?.storedScope()) ?? .all
@@ -542,13 +552,19 @@ final class AppModel {
     func changeScope(_ scope: OrganizationScope) {
         guard scope != analysisScope else { return }
         analysisScope = scope
-        AnalysisMarker.reset()
         Task {
+            // Stored first: whichever run starts next (this one, a catch-up, the next launch)
+            // works on the new part, also if another run slips in before ours.
+            try? await pipeline?.setScope(scope)
             if analysis.isRunning {
-                await pipeline?.pause()
+                analysisControl?.pause()
                 await analysisTask?.value
             }
-            startAnalysis(scope: scope, userInitiated: true)
+            // Changed again meanwhile: that call starts its own run.
+            guard analysisScope == scope else { return }
+            // Only now: late progress of the old run cannot mark the new part as half done.
+            AnalysisMarker.reset()
+            startAnalysis(userInitiated: true)
         }
     }
 
@@ -580,7 +596,14 @@ final class AppModel {
         analysis.waiting = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
         analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
-        if userInitiated { ContinuedAnalysis.begin() }
+        if userInitiated {
+            ContinuedAnalysis.begin()
+            unattendedRetries = 0
+        }
+        analysisGeneration += 1
+        let generation = analysisGeneration
+        let control = AnalysisRunControl()
+        analysisControl = control
         analysisTask = Task {
             if let scope {
                 try? await pipeline.setScope(scope)
@@ -590,12 +613,13 @@ final class AppModel {
             // one before (audit 2, 4.2).
             var finished: AnalysisPipeline.Report?
             do {
-                let report = try await pipeline.run(mode: mode, onProgress: { progress in
-                    Task { @MainActor in AppModel.shared.receive(progress) }
+                let report = try await pipeline.run(mode: mode, control: control, onProgress: { progress in
+                    Task { @MainActor in AppModel.shared.receive(progress, run: generation) }
                 }, onWaiting: { reason in
                     Task { @MainActor in
-                        guard AppModel.shared.analysis.isRunning else { return }
-                        AppModel.shared.analysis.waiting = reason
+                        let model = AppModel.shared
+                        guard model.analysisGeneration == generation, model.analysis.isRunning else { return }
+                        model.analysis.waiting = reason
                     }
                 })
                 analysis.lastReport = report
@@ -604,6 +628,7 @@ final class AppModel {
             } catch {
                 message = error.localizedDescription
             }
+            if analysisControl === control { analysisControl = nil }
             analysis.isRunning = false
             analysis.stage = nil
             analysis.waiting = nil
@@ -611,10 +636,15 @@ final class AppModel {
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
             }
-            // Ended early without the user's Pause (an error, the app's time ran out): the
-            // next time the app is opened it goes on by itself.
+            // Ended early without the user's Pause (an error, the app's time ran out, the photo
+            // access was changed in Settings): the next time the app is opened it goes on by
+            // itself; with the access back, from where it was.
             let reason = finished?.pausedBecause
-            analysis.needsResume = finished == nil || (reason != nil && reason != .userPaused && reason != .accessRevoked)
+            analysis.needsResume = finished == nil || (reason != nil && reason != .userPaused)
+            if reason == .accessRevoked {
+                // Shown as it is now (limited or none), so the overview offers the way back.
+                access = await library.access()
+            }
             await refreshDerived()
             // Trip identities (names and corrections stay with their trip) are kept in the copy.
             saveSafetyBackup()
@@ -623,21 +653,41 @@ final class AppModel {
                 ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
             }
             BackgroundWork.scheduleRefinement()
+            if finished?.isComplete == true { unattendedRetries = 0 }
             // Photos changed in Photos while this ran (new pictures, an album): one more pass.
             if catchUpAfterRun {
                 catchUpAfterRun = false
-                if reason != .userPaused { startAnalysis() }
+                if reason != .userPaused { LibraryChangeWatcher.shared.scheduleCatchUp() }
+            } else if analysis.needsResume {
+                retryUnattendedRun(after: generation)
             }
         }
     }
 
-    /// Progress of the running analysis. Late updates of a finished run are dropped, and a
-    /// count never goes back within a stage (the updates hop here one by one).
-    private func receive(_ progress: AnalysisPipeline.Progress) {
-        guard analysis.isRunning else { return }
+    /// A run that ended early by itself (an error, Vision failing, the app's time ran out)
+    /// goes on a little later, a few times, instead of waiting until the app is opened again.
+    /// Nothing happens when another run started meanwhile or the user paused.
+    private func retryUnattendedRun(after run: Int) {
+        guard unattendedRetries < 2 else { return }
+        unattendedRetries += 1
+        let delay = 30 * unattendedRetries
+        Task {
+            try? await Task.sleep(for: .seconds(delay))
+            guard analysisGeneration == run, analysis.needsResume, !analysis.isRunning,
+                  phase == .ready, access.canRead, !execution.isRunning, !analysisResetting else { return }
+            startAnalysis()
+        }
+    }
+
+    /// Progress of the running analysis. Late updates of an earlier run are dropped (a run
+    /// that starts right after another one would otherwise show the old run's stage), and a
+    /// count never goes back within a stage (the updates hop here one by one and can overtake
+    /// each other).
+    private func receive(_ progress: AnalysisPipeline.Progress, run: Int) {
+        guard run == analysisGeneration, analysis.isRunning else { return }
         if let stage = analysis.stage {
             if progress.stage.number < stage.number { return }
-            if progress.stage == stage, progress.total == analysis.total, progress.completed < analysis.completed { return }
+            if progress.stage == stage, progress.completed < analysis.completed { return }
         }
         // Trips and places are ready before the image analysis: show them now.
         if progress.stage == .content, analysis.stage != .content, snapshot == nil {
@@ -672,24 +722,44 @@ final class AppModel {
             keepRunningInBackgroundIfLong()
             return
         }
-        guard analysis.needsResume, phase == .ready, access.canRead, !execution.isRunning, !analysisResetting else { return }
+        guard analysis.needsResume, phase == .ready, !execution.isRunning, !analysisResetting else { return }
+        unattendedRetries = 0
+        guard access.canRead else {
+            // The run ended because the access was taken away: it may be back from Settings.
+            Task {
+                await refreshAccess()
+                if access.canRead { startAnalysis() }
+            }
+            return
+        }
         startAnalysis()
     }
 
     func pauseAnalysis() {
         analysis.needsResume = false
-        Task { await pipeline?.pause() }
+        analysisControl?.pause()
     }
 
     /// Called by the background task while charging.
     func runBackgroundRefinement() async -> Bool {
         if phase == .loading { await bootstrap() }
-        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead else { return false }
+        // A run from the app that iOS held in the background goes on while this charging
+        // window keeps the app awake, instead of the window being handed back at once. It is
+        // not ended when the window closes; it is held again and goes on later.
+        while analysis.isRunning, !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(5))
+        }
+        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return false }
         analysis.isRunning = true
         defer { analysis.isRunning = false }
+        // Late progress of the run before must not show up during this one.
+        analysisGeneration += 1
+        let control = AnalysisRunControl()
+        analysisControl = control
+        defer { if analysisControl === control { analysisControl = nil } }
         // Held like a foreground run, so "Analyse neu aufbauen" can wait until this run has
         // really ended before it clears the tables (audit 2, 4.1).
-        let run = Task { try await pipeline.run(mode: .refinement) }
+        let run = Task { try await pipeline.run(mode: .refinement, control: control) }
         analysisTask = Task { await withTaskCancellationHandler { _ = try? await run.value } onCancel: { run.cancel() } }
         do {
             let report = try await withTaskCancellationHandler { try await run.value } onCancel: { run.cancel() }
@@ -1423,7 +1493,7 @@ final class AppModel {
         lines.append("photos \(progress.total), fully sorted \(progress.fully), partly \(progress.partially), unsorted \(progress.unorganized), pending \(progress.pending)")
         if let report = analysis.lastReport {
             let last = analysis.lastRun.map { iso.string(from: $0) } ?? "?"
-            lines.append("analysis last \(last), complete \(report.isComplete), paused \(report.pausedBecause?.rawValue ?? "no"), stages \(report.completedStages.count), content \(report.contentAnalyzed), text \(report.textRecognized), text waiting \(report.textWaitingForOriginal), places pending online \(report.placesPendingOnline)")
+            lines.append("analysis last \(last), complete \(report.isComplete), paused \(report.pausedBecause?.rawValue ?? "no"), stages \(report.completedStages.count), content \(report.contentAnalyzed), text \(report.textRecognized), text waiting \(report.textWaitingForOriginal), places pending online \(report.placesPendingOnline), places throttled \(report.placesThrottled), analyzer failing \(report.analyzerUnavailable)")
         } else {
             lines.append("analysis not run in this session")
         }
@@ -1547,7 +1617,7 @@ final class AppModel {
         analysisResetting = true
         defer { analysisResetting = false }
         if analysis.isRunning {
-            await pipeline?.pause()
+            analysisControl?.pause()
             analysisTask?.cancel()
         }
         // Foreground and background runs both have a task: waited for until they really

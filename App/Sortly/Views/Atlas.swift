@@ -356,7 +356,7 @@ struct AtlasContent: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
                         if index < shown.count - 1 { Divider() }
                     }
                 }
@@ -376,7 +376,7 @@ struct AtlasContent: View {
             Text(label).font(.footnote).foregroundStyle(.secondary)
             if let detail {
                 // Where the longest trip went: flag and country.
-                Text(verbatim: detail).font(.footnote.weight(.semibold)).lineLimit(2)
+                Text(verbatim: detail).font(.footnote.weight(.semibold)).compactLineLimit(2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -554,11 +554,15 @@ struct ShareCardSheet: View {
                         .scaleEffect(scale, anchor: .topLeading)
                         .frame(width: 720 * scale, height: 1280 * scale, alignment: .topLeading)
                         .clipShape(RoundedRectangle(cornerRadius: 24 * scale * 2, style: .continuous))
+                        // The preview is a picture of the image that gets shared, scaled down
+                        // to fit: one element for VoiceOver. On the GeometryReader this did not
+                        // hide the card's own texts, which the audit then measured at 10 pt.
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text("Vorschau des Teilen-Bilds"))
+                        .accessibilityAddTraits(.isImage)
                         .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text("Vorschau des Teilen-Bilds"))
                 if cover != nil {
                     Toggle("Foto vom Lieblingsziel zeigen", isOn: $showPhoto.animation())
                 }

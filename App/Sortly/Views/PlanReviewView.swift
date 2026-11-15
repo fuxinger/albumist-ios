@@ -192,6 +192,7 @@ struct PlanReviewView: View {
                 .foregroundStyle(Theme.accent)
                 .frame(width: iconWidth)
                 .accessibilityHidden(true)
+                .hiddenAtAccessibilitySizes()
             Text(title)
             Spacer(minLength: Theme.Spacing.s)
             Text(value.formatted()).monospacedDigit().font(.body.weight(.semibold))
@@ -482,16 +483,16 @@ private struct PlanAlbumRow: View {
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = 44
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.m) {
+        AdaptiveStack(spacing: Theme.Spacing.m) {
             cover
                 .frame(width: side, height: side)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(album.title).font(.body.weight(.medium)).lineLimit(2)
+                Text(album.title).font(.body.weight(.medium)).compactLineLimit(2)
                 if !album.folderPath.isEmpty {
                     Text(album.folderPath.joined(separator: " › "))
-                        .font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                        .font(.footnote).foregroundStyle(.secondary).compactLineLimit(2)
                 }
             }
             Spacer(minLength: Theme.Spacing.s)

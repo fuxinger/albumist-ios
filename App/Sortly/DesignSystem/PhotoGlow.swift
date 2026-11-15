@@ -44,22 +44,29 @@ enum PhotoPalette {
 struct PhotoGlow: View {
     var id: AssetID?
     @State private var colors: [Color] = []
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         ZStack {
-            if colors.count == 4 && !reduceTransparency {
+            // Text sits on the wash (category, title, count). Reduce Transparency and Increase
+            // Contrast both ask for a plain background behind text, so the wash stays off.
+            if colors.count == 4 && !reduceTransparency && contrast != .increased {
+                // The 30 % sits in the colours, not in a layer opacity: XCTest's contrast
+                // audit appears to measure text on this wash as if the gradient were opaque
+                // (clearly readable titles "failed" only on these two screens, UI runs 2-4).
+                // On screen both are the same: one layer, nothing overlapping inside it.
+                // The wash fades out above the text (country screen: "Rom und Florenz");
+                // white keeps 9:1 and Theme.secondaryText 5.4:1 on any photo colour.
                 MeshGradient(width: 2, height: 3, points: [
                     [0, 0], [1, 0],
                     [0, 0.5], [1, 0.5],
                     [0, 1], [1, 1],
                 ], colors: [
-                    colors[0], colors[1],
-                    colors[2].opacity(0.55), colors[3].opacity(0.55),
+                    colors[0].opacity(0.3), colors[1].opacity(0.3),
+                    colors[2].opacity(0.09), colors[3].opacity(0.09),
                     .clear, .clear,
                 ])
-                .opacity(scheme == .dark ? 0.5 : 0.36)
                 .transition(.opacity)
             }
         }

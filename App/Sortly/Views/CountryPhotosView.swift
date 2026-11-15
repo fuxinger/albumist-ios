@@ -79,7 +79,7 @@ struct CountryPhotosView: View {
                 Text(summary(country)).font(.headline)
                 if !country.topPlaces.isEmpty {
                     Text(country.topPlaces.formatted(.list(type: .and)))
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.subheadline).foregroundStyle(Theme.secondaryText) // sits on the photo wash
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

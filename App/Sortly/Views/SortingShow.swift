@@ -97,6 +97,11 @@ struct SortingShow: View {
                 .monospacedDigit()
                 .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(counted)))
         }
+        // Wrapped lines stay centred under the count. The show lasts a few seconds and its
+        // progress is spoken in full below, so the captions stop growing at AX1: beyond that
+        // they outgrow the 56 pt count and push the albums off a small screen.
+        .multilineTextAlignment(.center)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Fotos werden einsortiert"))

@@ -282,6 +282,22 @@ final class SortlyFlowUITests: XCTestCase {
                 print(opened ? "UI_STEP_OK suggestion detail opened" : "UI_STEP_MISSING suggestion detail opened")
                 XCTAssertTrue(opened, "Tapping a suggestion did not open its detail")
                 shot("08-suggestion-detail"); audit("suggestion detail")
+                // Design review D3: every photo of a suggestion is a named button (its date),
+                // so VoiceOver and Voice Control can pick photos to take out.
+                let all = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Alle ")).firstMatch
+                if tap(all, "open all photos of the suggestion", timeout: 5) {
+                    let photo = app.buttons["proposalPhotos.photo"].firstMatch
+                    let named = photo.waitForExistence(timeout: 5) && photo.label.range(of: "20[0-9][0-9]", options: .regularExpression) != nil
+                    print(named ? "UI_STEP_OK suggestion photos are named buttons (\(photo.label))" : "UI_STEP_MISSING suggestion photos are named buttons")
+                    XCTAssertTrue(named, "The photos of a suggestion are not buttons named by their date")
+                    if tap(button("Auswählen"), "select photos of the suggestion", timeout: 5) {
+                        photo.tap()
+                        XCTAssertTrue(photo.isSelected, "A selected photo does not report the selected trait")
+                        shot("08a-suggestion-photos"); audit("suggestion photos")
+                        tap(button("Fertig"), "end photo selection")
+                    }
+                    back(); sleep(1)
+                }
                 // "Album anlegen" opens a preview; back without creating selects nothing.
                 let create = app.buttons["Album anlegen"]
                 if create.exists {
@@ -412,6 +428,7 @@ final class SortlyFlowUITests: XCTestCase {
                 }
                 tap(button("Fertig"), "end selection")
             }
+            ignoreAndUndo()
         }
 
         // Albums
@@ -534,6 +551,78 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Fertig"), "close settings after trip reset")
             _ = waitStable("analysis after trip reset", timeout: 180) { analysisIdle }
         }
+    }
+
+    /// Design review D4 (15.11.): "Ignorieren" can be taken back, right after the action
+    /// ("Widerrufen") and later in "Ignoriert" ("Nicht mehr ignorieren"). Runs in the library.
+    private func ignoreAndUndo() {
+        let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
+        func ignoreTwo(_ step: String) -> Bool {
+            guard tap(button("Auswählen"), "select mode for \(step)") else { return false }
+            guard photos.count >= 2 else { print("UI_STEP_MISSING two photos for \(step)"); return false }
+            photos.element(boundBy: 0).tap(); photos.element(boundBy: 1).tap()
+            return tap(app.buttons["selection.ignore"], "ignore two photos (\(step))")
+        }
+        // 1. Ignore, then "Widerrufen" in the note right after.
+        if ignoreTwo("undo") {
+            let note = anything("2 Fotos ignoriert")
+            let shown = note.waitForExistence(timeout: 5)
+            print(shown ? "UI_STEP_OK ignore note" : "UI_STEP_MISSING ignore note")
+            XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring")
+            shot("16a-ignore-note"); audit("ignore note")
+            if tap(app.buttons["ignore.undo"], "undo ignore") {
+                XCTAssertTrue(waitGone(note, timeout: 5), "The ignore note stayed after Widerrufen")
+                tap(app.buttons["Ignoriert"], "ignored area after undo")
+                sleep(2)
+                let empty = anything("Keine Fotos").waitForExistence(timeout: 5)
+                print(empty ? "UI_STEP_OK undo restored the photos" : "UI_STEP_MISSING undo restored the photos")
+                XCTAssertTrue(empty, "Widerrufen left photos in Ignoriert")
+                tap(app.buttons["Alle"], "all photos")
+                sleep(1)
+            }
+        }
+        // 2. Ignore again, then bring one back from "Ignoriert".
+        if ignoreTwo("unignore") {
+            sleep(2)
+            tap(app.buttons["Ignoriert"], "ignored area")
+            sleep(2)
+            shot("16b-ignored")
+            if tap(button("Auswählen"), "select in ignored") {
+                let ignored = photos.count
+                print("UI_FACT ignored photos \(ignored)")
+                XCTAssertEqual(ignored, 2, "Ignoriert should hold the two photos")
+                if ignored > 0 { photos.element(boundBy: 0).tap() }
+                // No red, destructive look for a step that can be taken back.
+                if tap(app.buttons["selection.unignore"], "unignore one photo") {
+                    sleep(2)
+                    XCTAssertEqual(photos.count, max(0, ignored - 1), "Nicht mehr ignorieren did not bring the photo back")
+                }
+            }
+            // The other one through the photo's own detail.
+            if photos.count > 0, tap(photos.element(boundBy: 0), "open ignored photo") {
+                sleep(1)
+                openPhotoInfo()
+                if tap(app.buttons["detail.unignore"], "unignore in detail") {
+                    sleep(2)
+                    closeViewerIfOpen()
+                    let empty = anything("Keine Fotos").waitForExistence(timeout: 5)
+                    print(empty ? "UI_STEP_OK ignored area empty again" : "UI_STEP_MISSING ignored area empty again")
+                    XCTAssertTrue(empty, "Nicht mehr ignorieren in the detail did not bring the photo back")
+                }
+            }
+            tap(app.buttons["Alle"], "all photos after unignore")
+        }
+    }
+
+    /// A photo opens large; its details sit behind the "i" button (design review W12).
+    private func openPhotoInfo() {
+        let info = app.buttons["viewer.info"]
+        if info.waitForExistence(timeout: 5) { info.tap(); sleep(1) }
+    }
+
+    private func closeViewerIfOpen() {
+        let close = app.buttons["viewer.close"]
+        if close.waitForExistence(timeout: 2) { close.tap(); sleep(1) }
     }
 
     /// Reise-Werkstatt (I07), from the trip list. The demo library's Iceland trip is

@@ -229,7 +229,7 @@ final class AppModel {
     /// What the latest analysis asks about recurring places, and where each trip mostly was.
     private(set) var recurringPlaceReport: RecurringPlaceReport?
     var execution = ExecutionState()
-    var message: String?
+    var message: AppMessage?
     /// Where Siri, Shortcuts or a Spotlight result wants to go; the overview opens it.
     var route: Route?
 
@@ -309,7 +309,7 @@ final class AppModel {
                 // Not readable even then: the app starts with the standard settings and says
                 // so, instead of not starting at all.
                 settings = OrganizationSettings()
-                message = String(localized: "Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. Bitte prüfe sie in den Einstellungen.")
+                message = .failure(String(localized: "Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. Bitte prüfe sie in den Einstellungen."))
             }
             await dropOldRootFolderDefault(store)
             decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
@@ -669,7 +669,7 @@ final class AppModel {
                 // Stopped on purpose ("Analyse neu aufbauen", a new scope): not an error to show
                 // (plugin review N3: "Swift.CancellationError error 1").
             } catch {
-                message = error.localizedDescription
+                message = .failure(error.localizedDescription)
             }
             if analysisControl === control { analysisControl = nil }
             BackgroundRunLog.runEnded(paused: finished?.pausedBecause?.rawValue,
@@ -884,7 +884,7 @@ final class AppModel {
                 unreadable: scope == .all ? unreadable.count : unreadable.intersection(scopedIDs).count
             )
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
         SpotlightIndex.scheduleUpdate(self)
     }
@@ -1094,7 +1094,7 @@ final class AppModel {
             startAnalysis()
             return true
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return false
         }
     }
@@ -1177,7 +1177,7 @@ final class AppModel {
             if rerun { startAnalysis() }
             return true
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return false
         }
     }
@@ -1214,7 +1214,7 @@ final class AppModel {
             }
             if let rematched = try await pipeline?.rematch() { snapshot = rematched }
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
     }
 
@@ -1259,7 +1259,7 @@ final class AppModel {
             }
             plan = OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle).makePlan(from: confirmed, inventory: current, overrides: overrides)
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
     }
 
@@ -1278,7 +1278,7 @@ final class AppModel {
                 .makePlan(from: [ConfirmedProposal(proposal: proposal, decision: decision)], inventory: current, overrides: overrides)
             return plan.steps.isEmpty ? nil : plan
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return nil
         }
     }
@@ -1421,7 +1421,7 @@ final class AppModel {
             // Suggestions see the new albums at once (e.g. "Album vollständig").
             if let rematched = try await pipeline?.rematch() { snapshot = rematched }
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
         return stored
     }
@@ -1469,7 +1469,7 @@ final class AppModel {
             return OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle)
                 .makePlan(from: [ConfirmedProposal(proposal: proposal, decision: decision)], inventory: current, overrides: overrides)
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return nil
         }
     }
@@ -1488,7 +1488,7 @@ final class AppModel {
             return OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle)
                 .makePlan(from: [ConfirmedProposal(proposal: proposal, decision: decision)], inventory: current, overrides: overrides)
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return nil
         }
     }
@@ -1537,7 +1537,7 @@ final class AppModel {
         } catch {
             // Fails closed (audit 2, 1.5): without knowing what the user changed in Photos,
             // nothing is planned, so a photo they took out is never put back by mistake.
-            if !quiet { message = String(localized: "Albumist konnte deine Alben gerade nicht lesen. Versuche es gleich noch einmal.") }
+            if !quiet { message = .failure(String(localized: "Albumist konnte deine Alben gerade nicht lesen. Versuche es gleich noch einmal.")) }
             return nil
         }
     }
@@ -1615,12 +1615,12 @@ final class AppModel {
                         try await store.save(original)
                     }
                 } else {
-                    message = [String(localized: "Nicht alles ließ sich zurücknehmen. Das unterbrochene Umsetzen steht jetzt unter Einstellungen › Verlauf. Dort kannst du den Rest zurücknehmen."),
-                               execution.failure].compactMap { $0 }.joined(separator: "\n\n")
+                    message = .failure([String(localized: "Nicht alles ließ sich zurücknehmen. Das unterbrochene Umsetzen steht jetzt unter Einstellungen › Verlauf. Dort kannst du den Rest zurücknehmen."),
+                                        execution.failure].compactMap { $0 }.joined(separator: "\n\n"))
                 }
             }
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
         // What is still open, from the store: nothing, or an undo that was cut off itself.
         interruptedPlan = try? await store.unfinishedPlans().last
@@ -1649,7 +1649,7 @@ final class AppModel {
             interruptedPlan = nil
             await refreshDerived()
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
     }
 
@@ -1662,7 +1662,7 @@ final class AppModel {
             // Photos the user took out of an album since then are not added again.
             return retry.respecting(OverrideSet(try await store.overrides()))
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return nil
         }
     }
@@ -1730,11 +1730,11 @@ final class AppModel {
         // Undos of this plan that did not get everything back (plugin review W1): an album one
         // of them brought back gets the photos still missing, never a second album.
         let earlier: [ChangePlan]
-        do { earlier = try await store.reverts(of: executed.id) } catch { message = error.localizedDescription; return }
+        do { earlier = try await store.reverts(of: executed.id) } catch { message = .failure(error.localizedDescription); return }
         let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
-            message = interruptedPlanFirst
+            message = AppMessage(title: String(localized: "Erst das unterbrochene Umsetzen abschließen"), text: interruptedPlanFirst)
             return
         }
         // Free albums and suggestions come back in `finalize`, with the undo itself.
@@ -1771,11 +1771,44 @@ final class AppModel {
         return members
     }
 
+    /// The photos the last "Ignorieren" newly ignored, for "Widerrufen" right after it
+    /// (design review D4: ignoring could not be taken back). A new id per action, so the
+    /// note shows again and its timer starts over.
+    struct IgnoreUndo: Identifiable, Equatable {
+        let id = UUID()
+        let assets: [AssetID]
+    }
+
+    var lastIgnored: IgnoreUndo?
+
+    /// "Ignorieren": no confirmation, because it can be taken back right away ("Widerrufen")
+    /// and later in the "Ignoriert" area ("Nicht mehr ignorieren").
     func ignore(_ assets: [AssetID]) {
         Task {
-            for id in assets { try? await store?.addOverride(UserOverride(scope: .asset(id), decision: .ignoreAsset)) }
-            saveSafetyBackup()
-            await refreshDerived()
+            guard let store else { return }
+            do {
+                let added = try await store.ignoreAssets(assets)
+                saveSafetyBackup()
+                await refreshDerived()
+                lastIgnored = added.isEmpty ? nil : IgnoreUndo(assets: added)
+            } catch {
+                message = .failure(error.localizedDescription)
+            }
+        }
+    }
+
+    /// "Nicht mehr ignorieren" and "Widerrufen": Albumist counts and suggests these photos again.
+    func unignore(_ assets: [AssetID]) {
+        if let last = lastIgnored, !Set(last.assets).isDisjoint(with: assets) { lastIgnored = nil }
+        Task {
+            guard let store else { return }
+            do {
+                try await store.unignoreAssets(assets)
+                saveSafetyBackup()
+                await refreshDerived()
+            } catch {
+                message = .failure(error.localizedDescription)
+            }
         }
     }
 
@@ -1871,7 +1904,7 @@ final class AppModel {
             try await store?.resetAnalysis(includingDecisions: false)
             await pipeline?.forgetRecentOnlineLookups()
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
         snapshot = nil
         SpotlightIndex.clear()
@@ -1897,5 +1930,17 @@ struct RecountState: Codable, Equatable {
         } else {
             UserDefaults.standard.removeObject(forKey: key)
         }
+    }
+}
+
+/// An alert with its own title (design review W15: every message, error or not, came with
+/// the title "Hinweis"). The text says what happened and what the user can do.
+struct AppMessage: Equatable {
+    var title: String
+    var text: String
+
+    /// Something did not work.
+    static func failure(_ text: String) -> AppMessage {
+        AppMessage(title: String(localized: "Das hat nicht geklappt"), text: text)
     }
 }

@@ -119,7 +119,9 @@ struct ProposalRow: View {
                 if proposal.requiresUserName && model.userTitles[proposal.id] == nil {
                     // A place only the user can name: says what is missing instead of
                     // "Neues Album" (first device test 15.11.: 44 "Häufiger Ort N").
-                    StatusBadge(text: "Name fehlt", tint: .orange)
+                    // The app's warning colour: system orange on its 12 % badge was about 2:1
+                    // in light mode (design review D1); this one is 5.0–7.6:1.
+                    StatusBadge(text: "Name fehlt", tint: Theme.tint(for: .documents))
                 } else if let status = model.match(for: proposal)?.status {
                     StatusBadge(text: status.label, tint: status.tint)
                 }
@@ -675,37 +677,39 @@ struct ProposalPhotosView: View {
         }
     }
 
-    private func traits(selected isSelected: Bool) -> AccessibilityTraits {
-        guard selecting else { return [.isButton] }
-        return isSelected ? [.isButton, .isSelected] : [.isButton]
-    }
-
+    /// A real button with the photo's date as its name, like the library grid (design review
+    /// D3: the tile had only a tap gesture and no name, so VoiceOver and Voice Control could
+    /// not pick photos to take out of the suggestion).
     private func tile(_ id: AssetID) -> some View {
         let isSelected = selected.contains(id)
-        return AssetThumbnail(id: id, side: 120)
-            .aspectRatio(1, contentMode: .fill)
-            .clipped()
-            .overlay(alignment: .bottomTrailing) {
-                if selecting {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.25))
-                        .padding(5)
-                        .accessibilityHidden(true)
-                }
+        return Button {
+            // Outside "Auswählen" a tap opens the photo large (first device test 15.11.).
+            guard selecting else {
+                viewing = PhotoViewer.Start(id: id)
+                return
             }
-            .opacity(selecting && !isSelected ? 0.85 : 1)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                // Outside "Auswählen" a tap opens the photo large (first device test 15.11.).
-                guard selecting else {
-                    viewing = PhotoViewer.Start(id: id)
-                    return
+            if isSelected { selected.remove(id) } else { selected.insert(id) }
+        } label: {
+            AssetThumbnail(id: id, side: 120)
+                .aspectRatio(1, contentMode: .fill)
+                .clipped()
+                .overlay(alignment: .bottomTrailing) {
+                    if selecting {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.25))
+                            .padding(5)
+                            .accessibilityHidden(true)
+                    }
                 }
-                if isSelected { selected.remove(id) } else { selected.insert(id) }
-            }
-            .accessibilityAddTraits(traits(selected: isSelected))
+                .opacity(selecting && !isSelected ? 0.85 : 1)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(model.creationDates[id]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+        .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
+        .accessibilityIdentifier("proposalPhotos.photo")
     }
 }
 

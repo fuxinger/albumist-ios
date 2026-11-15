@@ -206,7 +206,7 @@ struct SettingsView: View {
                         .disabled(purchases.isPurchasing)
                     Button("Code einlösen") { redeeming = true }
                     if let error = purchases.lastError {
-                        Text(error).font(.footnote).foregroundStyle(.red)
+                        ErrorNote(text: error)
                     }
                 }
             }

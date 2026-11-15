@@ -502,7 +502,7 @@ struct InterruptedPlanCard: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
             if let failure = model.execution.failure {
-                Text(failure).font(.footnote).foregroundStyle(.red)
+                ErrorNote(text: failure)
             }
         }
         .confirmationDialog("Bisherige Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {

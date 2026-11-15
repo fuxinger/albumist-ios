@@ -70,6 +70,9 @@ struct CountryPhotosView: View {
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {}
         }
+        // "Widerrufen" after ignoring a photo from its detail (design review D4).
+        .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }
+        .animation(.snappy, value: model.lastIgnored)
     }
 
     private func header(_ country: CountryPhotos) -> some View {

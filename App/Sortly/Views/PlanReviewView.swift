@@ -431,7 +431,7 @@ struct UnlockCard: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             if let error = purchases.lastError {
-                Text(error).font(.footnote).foregroundStyle(.red)
+                ErrorNote(text: error)
             }
         }
         // The price comes from StoreKit; a start without network is made up for here.

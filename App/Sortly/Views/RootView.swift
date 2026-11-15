@@ -101,10 +101,12 @@ struct MainTabs: View {
         .onChange(of: model.route, initial: true) { _, target in
             if target != nil { tab = .overview }
         }
-        .alert("Hinweis", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
+        // Each message brings its own title (design review W15), e.g. "Das hat nicht geklappt".
+        .alert(model.message?.title ?? "", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } }),
+               presenting: model.message) { _ in
             Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.message ?? "")
+        } message: { message in
+            Text(message.text)
         }
     }
 

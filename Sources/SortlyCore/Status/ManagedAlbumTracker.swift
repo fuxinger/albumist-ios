@@ -209,6 +209,14 @@ public struct UserOverride: Hashable, Sendable, Codable, Identifiable {
     }
 }
 
+extension UserOverride {
+    /// The photo this override ignores ("Ignorieren"), or nil for any other decision.
+    public var ignoredAsset: AssetID? {
+        if case .asset(let id) = scope, decision == .ignoreAsset { return id }
+        return nil
+    }
+}
+
 /// Fast lookup over all overrides.
 public struct OverrideSet: Sendable {
     private var neverAddInAlbum: Set<String> = []

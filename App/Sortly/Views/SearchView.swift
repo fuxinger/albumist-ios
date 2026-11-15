@@ -74,6 +74,9 @@ struct SearchView: View {
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {}
         }
+        // "Widerrufen" after ignoring a photo from its detail (design review D4).
+        .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }
+        .animation(.snappy, value: model.lastIgnored)
         .searchable(text: $query, isPresented: $searchActive,
                     prompt: SmartAssistant.isAvailable ? Text("z. B. Grillen bei Oma letzten Sommer") : Text("z. B. Hunde Italien 2023"))
         .onAppear { if query.isEmpty { searchActive = true } }

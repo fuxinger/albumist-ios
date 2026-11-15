@@ -72,17 +72,21 @@ struct LibraryView: View {
         }
         .safeAreaInset(edge: .bottom) {
             if selecting && !selection.isEmpty {
-                SelectionBar(count: selection.count, canIgnore: bucket != .ignored) {
+                // In "Ignoriert" the way back instead of ignoring again (design review D4).
+                SelectionBar(count: selection.count, ignoreAction: bucket == .ignored ? .unignore : .ignore) {
                     addingToAlbum = Array(selection)
                 } ignore: {
-                    model.ignore(Array(selection))
+                    if bucket == .ignored { model.unignore(Array(selection)) } else { model.ignore(Array(selection)) }
                     selection = []
                     selecting = false
                 }
                 .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                IgnoreUndoBar()
             }
         }
         .animation(.snappy, value: selection.isEmpty)
+        .animation(.snappy, value: model.lastIgnored)
         .sheet(item: $detail) { facts in
             AssetDetailView(facts: facts) { addingToAlbum = [facts.id] }
                 .navigationTransition(.zoom(sourceID: facts.id, in: zoom))
@@ -210,8 +214,10 @@ struct LibraryView: View {
 
 /// Actions for the selected photos, floating above the tab bar.
 struct SelectionBar: View {
+    enum IgnoreAction { case ignore, unignore }
+
     var count: Int
-    var canIgnore: Bool
+    var ignoreAction: IgnoreAction
     var addToAlbum: () -> Void
     var ignore: () -> Void
 
@@ -221,12 +227,15 @@ struct SelectionBar: View {
                 Label("Zu Album hinzufügen", systemImage: "rectangle.stack.badge.plus").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            if canIgnore {
-                Button(action: ignore) {
-                    Label("Ignorieren", systemImage: "eye.slash")
+            // Not red: nothing is deleted, and it can be taken back (design review D4).
+            Button(action: ignore) {
+                switch ignoreAction {
+                case .ignore: Label("Ignorieren", systemImage: "eye.slash")
+                case .unignore: Label("Nicht mehr ignorieren", systemImage: "eye")
                 }
-                .buttonStyle(.bordered)
             }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier(ignoreAction == .ignore ? "selection.ignore" : "selection.unignore")
         }
         .controlSize(.large)
         .padding(Theme.Spacing.m)
@@ -241,6 +250,46 @@ struct SelectionBar: View {
                 .foregroundStyle(Theme.onAccent)
                 .offset(x: -14, y: -8)
                 .accessibilityLabel(Text("\(count) ausgewählt"))
+        }
+    }
+}
+
+/// Right after "Ignorieren": "12 Fotos ignoriert" with "Widerrufen" (design review D4), like
+/// the undo note Mail shows after moving a message. It goes away by itself after a few
+/// seconds (later with VoiceOver), and the photos can still be brought back from "Ignoriert".
+struct IgnoreUndoBar: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+
+    var body: some View {
+        if let undo = model.lastIgnored {
+            HStack(spacing: Theme.Spacing.m) {
+                Label {
+                    Text("\(undo.assets.count) Fotos ignoriert")
+                } icon: {
+                    Image(systemName: "eye.slash")
+                }
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Widerrufen") { model.unignore(undo.assets) }
+                    .font(.subheadline.weight(.semibold))
+                    .minimumHitTarget()
+                    .accessibilityIdentifier("ignore.undo")
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.xs)
+            .floatingPanel(cornerRadius: 22)
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.bottom, Theme.Spacing.s)
+            .accessibilityElement(children: .contain)
+            .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
+            .task(id: undo.id) {
+                AccessibilityNotification.Announcement(String(localized: "\(undo.assets.count) Fotos ignoriert")).post()
+                // Longer with VoiceOver (time to reach the button), and in UI tests, whose
+                // accessibility audit of the note takes a few seconds itself.
+                try? await Task.sleep(for: .seconds(voiceOver || UITestSupport.isRunning ? 20 : 6))
+                if !Task.isCancelled, model.lastIgnored?.id == undo.id { model.lastIgnored = nil }
+            }
         }
     }
 }
@@ -310,14 +359,31 @@ struct AssetDetailView: View {
                     } label: {
                         Label("Zu Album hinzufügen", systemImage: "rectangle.stack.badge.plus")
                     }
-                    Button(role: .destructive) {
-                        model.ignore([facts.id])
-                        dismiss()
-                    } label: {
-                        Label("Ignorieren", systemImage: "eye.slash")
+                    // No destructive role: ignoring deletes nothing and can be taken back
+                    // (design review D4); an ignored photo offers the way back here too.
+                    if isIgnored {
+                        Button {
+                            model.unignore([facts.id])
+                            dismiss()
+                        } label: {
+                            Label("Nicht mehr ignorieren", systemImage: "eye")
+                        }
+                        .accessibilityIdentifier("detail.unignore")
+                    } else {
+                        Button {
+                            model.ignore([facts.id])
+                            dismiss()
+                        } label: {
+                            Label("Ignorieren", systemImage: "eye.slash")
+                        }
+                        .accessibilityIdentifier("detail.ignore")
                     }
                 } footer: {
-                    Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts.")
+                    if isIgnored {
+                        Text("Albumist zählt das Foto dann wieder mit und kann es wieder vorschlagen.")
+                    } else {
+                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit zurücknehmen.")
+                    }
                 }
             }
             .navigationTitle("Foto")
@@ -326,6 +392,10 @@ struct AssetDetailView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
             }
         }
+    }
+
+    private var isIgnored: Bool {
+        model.states[facts.id].map { model.resolver.overall($0) == .ignored } ?? false
     }
 
     private var aspect: CGFloat {

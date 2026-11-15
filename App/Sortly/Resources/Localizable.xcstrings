@@ -2931,16 +2931,6 @@
         }
       }
     },
-    "Hinweis" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Note"
-          }
-        }
-      }
-    },
     "Häufige Orte" : {
       "localizations" : {
         "en" : {
@@ -2967,16 +2957,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ignored"
-          }
-        }
-      }
-    },
-    "Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist no longer suggests ignored photos. The photo itself stays unchanged."
           }
         }
       }
@@ -8205,6 +8185,106 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Plus %lld partly sorted"
+          }
+        }
+      }
+    },
+    "Nicht mehr ignorieren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop Ignoring"
+          }
+        }
+      }
+    },
+    "%lld Fotos ignoriert" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto ignoriert"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos ignoriert"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo ignored"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos ignored"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Widerrufen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo"
+          }
+        }
+      }
+    },
+    "Albumist zählt das Foto dann wieder mit und kann es wieder vorschlagen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist then counts the photo again and may suggest it again."
+          }
+        }
+      }
+    },
+    "Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit zurücknehmen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist no longer suggests ignored photos. The photo itself stays unchanged, and you can take it back at any time."
+          }
+        }
+      }
+    },
+    "Fehler: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Error: %@"
+          }
+        }
+      }
+    },
+    "Das hat nicht geklappt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That Didn’t Work"
           }
         }
       }

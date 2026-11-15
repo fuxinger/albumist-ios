@@ -18,35 +18,70 @@ enum ImageQuality {
     case original
 }
 
+/// The small previews of the next few photos, loaded ahead while the current ones are
+/// analysed (the content stage tells which, see `ContentAnalyzing.willAnalyze`). Requests for
+/// a preview go through the same manager with the same size and options, or the cache misses.
+enum PreviewCache {
+    /// PhotoKit's image managers are thread-safe.
+    nonisolated(unsafe) static let manager = PHCachingImageManager()
+    static let size = CGSize(width: 512, height: 512)
+
+    static func options() -> PHImageRequestOptions {
+        let options = PHImageRequestOptions()
+        options.isSynchronous = false
+        options.isNetworkAccessAllowed = false
+        options.version = .current
+        options.deliveryMode = .fastFormat
+        options.resizeMode = .fast
+        return options
+    }
+
+    static func start(_ ids: [AssetID]) {
+        guard !ids.isEmpty else { return }
+        var assets: [PHAsset] = []
+        PHAsset.fetchAssets(withLocalIdentifiers: ids.map(\.rawValue), options: nil).enumerateObjects { asset, _, _ in assets.append(asset) }
+        manager.startCachingImages(for: assets, targetSize: size, contentMode: .aspectFit, options: options())
+    }
+
+    /// Analysed: its preview is not kept for longer than needed.
+    static func stop(_ asset: PHAsset) {
+        manager.stopCachingImages(for: [asset], targetSize: size, contentMode: .aspectFit, options: options())
+    }
+}
+
 /// Loads images from PhotoKit for analysis.
 enum ImageLoader {
     static func image(for id: AssetID, quality: ImageQuality, allowNetwork: Bool) async throws -> LoadedImage? {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject else {
             throw AnalysisError.unreadable
         }
-        let options = PHImageRequestOptions()
-        options.isSynchronous = false
-        options.isNetworkAccessAllowed = allowNetwork
-        options.version = .current
+        let options: PHImageRequestOptions
         let target: CGSize
+        let manager: PHImageManager
         switch quality {
         case .localPreview:
-            options.deliveryMode = .fastFormat
-            options.resizeMode = .fast
-            target = CGSize(width: 512, height: 512)
+            options = PreviewCache.options()
+            target = PreviewCache.size
+            manager = PreviewCache.manager
         case .original:
+            options = PHImageRequestOptions()
+            options.isSynchronous = false
+            options.isNetworkAccessAllowed = allowNetwork
+            options.version = .current
             options.deliveryMode = .highQualityFormat
             options.resizeMode = .exact
             target = CGSize(width: 2_400, height: 2_400)
+            manager = PHImageManager.default()
         }
+        defer { if quality == .localPreview { PreviewCache.stop(asset) } }
         // One request resumes the caller exactly once: with the final image, with an error, or
         // with CancellationError when the analysis stops (the PhotoKit request, maybe an
         // iCloud download, is cancelled with it instead of running on).
-        let request = ImageRequest()
+        let request = ImageRequest(manager: manager)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LoadedImage?, Error>) in
                 guard request.start(continuation) else { return }
-                let id = PHImageManager.default().requestImage(for: asset, targetSize: target, contentMode: .aspectFit, options: options) { image, info in
+                let id = manager.requestImage(for: asset, targetSize: target, contentMode: .aspectFit, options: options) { image, info in
                     if (info?[PHImageCancelledKey] as? Bool) == true {
                         request.finish(.failure(CancellationError()))
                         return
@@ -75,9 +110,15 @@ enum ImageLoader {
 /// once and a cancelled request is cancelled in PhotoKit too.
 private final class ImageRequest: @unchecked Sendable {
     private let lock = NSLock()
+    /// The manager that made the request (only it can cancel it).
+    private let manager: PHImageManager
     private var continuation: CheckedContinuation<LoadedImage?, Error>?
     private var requestID: PHImageRequestID?
     private var cancelled = false
+
+    init(manager: PHImageManager) {
+        self.manager = manager
+    }
 
     /// Stores the continuation, or resumes it at once when the task was already cancelled.
     func start(_ continuation: CheckedContinuation<LoadedImage?, Error>) -> Bool {
@@ -97,7 +138,7 @@ private final class ImageRequest: @unchecked Sendable {
         requestID = id
         let cancelNow = cancelled
         lock.unlock()
-        if cancelNow { PHImageManager.default().cancelImageRequest(id) }
+        if cancelNow { manager.cancelImageRequest(id) }
     }
 
     func finish(_ result: Result<LoadedImage?, Error>) {
@@ -115,7 +156,7 @@ private final class ImageRequest: @unchecked Sendable {
         let pending = continuation
         continuation = nil
         lock.unlock()
-        if let id { PHImageManager.default().cancelImageRequest(id) }
+        if let id { manager.cancelImageRequest(id) }
         pending?.resume(throwing: CancellationError())
     }
 }
@@ -146,13 +187,27 @@ struct VisionAnalyzer: ContentAnalyzing {
         var labels: [LabelScore] = []
         if request.classify {
             let observations = try await ClassifyImageRequest().perform(on: image.cgImage, orientation: image.orientation)
-            labels = observations
-                .filter { $0.confidence >= 0.1 }
-                .map { LabelScore($0.identifier, Double($0.confidence)) }
+            labels = observations.compactMap { observation in
+                // Vision's calibration per label (a raw confidence means something different for
+                // every label): kept with the label, and a label it is sure of is kept even
+                // below the usual confidence floor.
+                let precise = observation.hasMinimumRecall(0.01, forPrecision: LabelScore.preciseAt)
+                guard observation.confidence >= 0.1 || precise else { return nil }
+                return LabelScore(observation.identifier, Double(observation.confidence), isPrecise: precise)
+            }
         }
+        // Same image, same pass: how good a photo it is (for covers) and whether it is a
+        // utility image (documents, receipts). Optional: a failure here never costs the labels.
+        let aesthetics = try? await CalculateImageAestheticsScoresRequest().perform(on: image.cgImage, orientation: image.orientation)
         // Individual faces and pets need identity embeddings; they are produced only after
         // the user opted in (GDPR Art. 9). The grouping UI ships in a later iteration.
-        return ContentAnalysis(labels: labels, source: .localPreview)
+        return ContentAnalysis(labels: labels, source: .localPreview,
+                               aestheticsScore: aesthetics.map { Double($0.overallScore) },
+                               isUtility: aesthetics?.isUtility)
+    }
+
+    func willAnalyze(_ upcoming: [AssetSnapshot]) async {
+        PreviewCache.start(upcoming.filter { $0.kind == .image || $0.kind == .video }.map(\.id))
     }
 
     func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {

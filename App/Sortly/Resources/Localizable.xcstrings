@@ -7908,6 +7908,16 @@
           }
         }
       }
+    },
+    "Wird angehalten …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausing …"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

@@ -207,8 +207,8 @@ final class SortlyFlowUITests: XCTestCase {
             print(cities.waitForExistence(timeout: 3) ? "UI_STEP_OK cities switch in onboarding" : "UI_STEP_MISSING cities switch in onboarding")
             tap(button("Weiter"), "areas")
             shot("03-access")
-            if button("Zugriff erlauben").waitForExistence(timeout: 5) {
-                button("Zugriff erlauben").tap()
+            if app.buttons["access.continue"].waitForExistence(timeout: 5) {
+                app.buttons["access.continue"].tap()
                 allowPhotosIfAsked()
             }
             // With access granted the app moves on by itself; "Weiter" only appears when

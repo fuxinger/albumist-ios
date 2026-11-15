@@ -62,8 +62,9 @@ jobs:
     needs: check
     if: needs.check.outputs.ready == 'true'
     runs-on: ubuntu-24.04
-    # CI takes ~10 min, the UI flow ~30 min plus queueing; the script gives up after 90 min.
-    timeout-minutes: 100
+    # CI takes ~10 min, the UI flow ~30 min, plus queueing when the Mac runners are busy; the
+    # script gives up after 3 hours (waiting on a Linux runner costs nothing in a public repo).
+    timeout-minutes: 190
     permissions:
       contents: read
       actions: read
@@ -90,7 +91,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
-          WAIT_MINUTES: 90
+          WAIT_MINUTES: 180
         run: python3 .github/scripts/ci_gate.py
 
   upload:

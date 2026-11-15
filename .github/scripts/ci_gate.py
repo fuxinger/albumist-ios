@@ -12,7 +12,7 @@ Writes `ok=true|false` and `reason=...` to $GITHUB_OUTPUT and a line to the job 
 Never fails itself (exit 0) unless --fail is given, so a red test run shows up as a skipped
 upload with the reason, not as a second red workflow.
 
-Environment: GH_TOKEN, GITHUB_REPOSITORY, SHA (commit to check), WAIT_MINUTES (default 90),
+Environment: GH_TOKEN, GITHUB_REPOSITORY, SHA (commit to check), WAIT_MINUTES (default 180),
 NO_RUN_MINUTES (give up when no CI run has appeared after this long, default 15).
 """
 import json
@@ -26,7 +26,7 @@ import urllib.request
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 REPO = os.environ["GITHUB_REPOSITORY"]
 SHA = os.environ["SHA"]
-WAIT = float(os.environ.get("WAIT_MINUTES", "90")) * 60
+WAIT = float(os.environ.get("WAIT_MINUTES", "180")) * 60
 NO_RUN = float(os.environ.get("NO_RUN_MINUTES", "15")) * 60
 POLL = 60
 CI, CI_JOB = "ci.yml", "iOS build and tests"

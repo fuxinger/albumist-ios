@@ -83,7 +83,8 @@ jobs:
       # compiler still checks every source (content-based times), so a stale entry costs time,
       # never correctness. The nightly run builds without any cache.
       - name: Build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
           key: spm-linux-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
@@ -104,6 +105,14 @@ jobs:
         run: |
           python3 .github/scripts/test_summary.py summary --title "Core tests (Linux)" \
             --swift-log core-linux.log --swift-log load.log --load-log load.log >> "$GITHUB_STEP_SUMMARY" || true
+      # Saved also when a test failed: the build products are valid either way, and the next
+      # run (usually the fix) starts from them.
+      - name: Save build cache
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' && hashFiles('.build/debug.yaml') != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   names:
     # App name candidates against the App Store (the API is only reachable from CI).
@@ -149,7 +158,8 @@ jobs:
       # source files carry content-based times, so a changed file is always recompiled. The
       # nightly run builds without any cache to catch an incremental-build problem within a day.
       - name: Build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/Library/Developer/Xcode/DerivedData
@@ -212,9 +222,19 @@ jobs:
             build-log.txt
             build/TestResults.xcresult
           retention-days: 7
+      # Saved also when a test failed: the build products are valid either way, and the next
+      # run (usually the fix) starts from them. Logs and the index are left out.
       - name: Keep the build cache small
-        # Logs and the index are not needed for the next build (indexing is off anyway).
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
         run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
+      - name: Save build cache
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' && hashFiles('build-log.txt') != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            .build
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   simulator:
     # Manual only (workflow_dispatch input "appetize"): builds the simulator app and uploads it

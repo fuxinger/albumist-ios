@@ -3,6 +3,8 @@
 The log snippets are cut from real UI runs of November 2026 (job ids in the comments).
 Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
+import contextlib
+import io
 import os
 import sys
 import unittest
@@ -438,6 +440,83 @@ class FlakyTests(unittest.TestCase):
             with open(path, "w") as f:
                 json.dump(ui_tests.flaky_record("accessibility", RESTART, ["simulator not booted"], self.RETRY_LOG, "pass"), f)
             self.assertEqual(ui_tests.main(["flaky-summary", path, os.path.join(folder, "missing.json")]), 0)
+
+
+class SweepSkipTests(unittest.TestCase):
+    """Rows the tap-through sweep (UI test 3) leaves out appear in the run's UI summary (review 16.11.)."""
+
+    LOG = ("Test Case '-[SortlyUITests.SortlyFlowUITests test3_TapThroughEveryScreen]' started.\n"
+           "UI_SWEEP_OK Vorschläge › Reisen 2024 → Reisen 2024\n"
+           "UI_SWEEP_SKIP Vorschläge › Länder und Orte (section header or footer text)\n"
+           "UI_SWEEP_SKIP Vorschläge row 7 (no label, no text)\n"
+           "UI_SWEEP_SKIP Mediathek › Alles rückgängig machen (changes the library)\n"
+           "UI_SWEEP_SKIP Vorschläge › Länder und Orte (section header or footer text)\n"
+           "UI_SWEEP_SKIP Suchen › Strand › photo (not hittable)\n"
+           "/x/SortlyFlowUITests.swift:9: error: -[SortlyUITests.SortlyFlowUITests test3] : UI_SWEEP_SKIP quoted (x)\n")
+
+    def test_skip_lines_are_collected_once_each(self):
+        self.assertEqual(ui_tests.sweep_skips(self.LOG), [
+            {"where": "Vorschläge › Länder und Orte", "why": "section header or footer text"},
+            {"where": "Vorschläge row 7", "why": "no label, no text"},
+            {"where": "Mediathek › Alles rückgängig machen", "why": "changes the library"},
+            {"where": "Suchen › Strand › photo", "why": "not hittable"},
+        ])
+
+    def test_a_label_with_brackets_keeps_its_reason(self):
+        skips = ui_tests.sweep_skips("UI_SWEEP_SKIP Alben › Urlaub (Italien) 2024 (section header or footer text)\n")
+        self.assertEqual(skips, [{"where": "Alben › Urlaub (Italien) 2024", "why": "section header or footer text"}])
+
+    def test_run_summary_lists_the_skipped_rows(self):
+        record = ui_tests.flaky_record("flow-other", self.LOG, [], None, None)
+        record["sweep_skips"] = ui_tests.sweep_skips(self.LOG) + [{"where": "Alben › A | B", "why": "section header or footer text"}]
+        markdown, lines = ui_tests.flaky_summary([record, ui_tests.flaky_record("flow-full", "", [], None, None)])
+        self.assertEqual(lines, [])
+        self.assertIn("### UI test 3: rows the tap-through sweep did not tap", markdown)
+        self.assertIn("5 row(s) left out", markdown)
+        self.assertIn("| flow-other | Vorschläge › Länder und Orte | section header or footer text |", markdown)
+        self.assertIn("| flow-other | Alben › A \\| B |", markdown)
+
+    def test_no_section_without_skips(self):
+        markdown, _ = ui_tests.flaky_summary([ui_tests.flaky_record("flow-full", "", [], None, None)])
+        self.assertNotIn("tap-through sweep", markdown)
+
+    def test_the_group_job_summary_shows_skips_even_without_repeats(self):
+        import json
+        import tempfile
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as folder:
+            summary = os.path.join(folder, "summary.md")
+            record = ui_tests.flaky_record("flow-other", self.LOG, [], None, None)
+            record["sweep_skips"] = ui_tests.sweep_skips(self.LOG)
+            saved = os.environ.get("GITHUB_STEP_SUMMARY")
+            os.environ["GITHUB_STEP_SUMMARY"] = summary
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    ui_tests.write_flaky(SimpleNamespace(out=folder, name="flow-other"), record)
+            finally:
+                if saved is None:
+                    os.environ.pop("GITHUB_STEP_SUMMARY")
+                else:
+                    os.environ["GITHUB_STEP_SUMMARY"] = saved
+            with open(summary, encoding="utf-8") as f:
+                self.assertIn("Vorschläge › Länder und Orte", f.read())
+            with open(os.path.join(folder, "flaky-flow-other.json"), encoding="utf-8") as f:
+                self.assertEqual(len(json.load(f)["sweep_skips"]), 4)
+
+    def test_summary_command_prints_the_skips_of_every_group(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "flaky-flow-other.json")
+            record = ui_tests.flaky_record("flow-other", self.LOG, [], None, None)
+            record["sweep_skips"] = ui_tests.sweep_skips(self.LOG)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(record, f)
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(ui_tests.main(["flaky-summary", path]), 0)
+            self.assertIn("| flow-other | Vorschläge row 7 | no label, no text |", out.getvalue())
+            self.assertIn("::notice title=UI sweep::4 row(s)", err.getvalue())
 
 
 class WatchdogTests(unittest.TestCase):

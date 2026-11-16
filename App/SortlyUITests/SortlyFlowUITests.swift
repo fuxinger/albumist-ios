@@ -926,6 +926,8 @@ final class SortlyFlowUITests: XCTestCase {
     /// than one text or an image: a suggestion or album row has its title, "12 Fotos" and a
     /// thumbnail. A section header ("Länder und Orte") or footer is a cell with one text and
     /// nothing to open (UI run 43906501407: they were tapped as rows and reported as dead).
+    /// Every cell skipped this way is printed as UI_SWEEP_SKIP, and ui_tests.py lists those in
+    /// the job summary and the run's "UI summary", so a real row skipped here is seen.
     private func looksLikeRow(_ element: XCUIElement) -> Bool {
         element.staticTexts.count >= 2 || element.images.count > 0
     }

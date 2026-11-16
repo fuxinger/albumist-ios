@@ -312,6 +312,42 @@ def flaky_lines(record: dict) -> list[str]:
     return lines
 
 
+SWEEP_SKIP = re.compile(r"\bUI_SWEEP_SKIP (.+?)\s*$")
+
+
+def sweep_skips(log: str) -> list[dict]:
+    """The rows the tap-through sweep (UI test 3) left out, from its UI_SWEEP_SKIP lines, in
+    order and each once: {"where": "Vorschläge › Länder und Orte", "why": "section header or
+    footer text"}. The sweep skips a cell without its own label that has fewer than two texts
+    and no image as a section header or footer; listed in the run summary so that a real row
+    skipped that way is seen."""
+    found: list[dict] = []
+    for line in log.splitlines():
+        match = SWEEP_SKIP.search(line)
+        if not match or ": error:" in line:
+            continue
+        text = match.group(1)
+        why = re.match(r"^(.*?) \(([^()]*)\)$", text)
+        entry = {"where": why.group(1), "why": why.group(2)} if why else {"where": text, "why": ""}
+        if entry not in found:
+            found.append(entry)
+    return found
+
+
+def sweep_summary(records: list[dict]) -> str:
+    """Markdown: every row the sweep left out, per group ("" when no group has any)."""
+    rows = [(r["group"], s) for r in records for s in r.get("sweep_skips", [])]
+    if not rows:
+        return ""
+    cell = lambda text: text.replace("|", "\\|")  # noqa: E731
+    md = ["### UI test 3: rows the tap-through sweep did not tap", "",
+          f"{len(rows)} row(s) left out. \"section header or footer text\" is a cell without its own label "
+          "with fewer than two texts and no image; if a real row is listed so, the sweep missed it.", "",
+          "| Group | Where | Why |", "|---|---|---|"]
+    md += [f"| {group} | {cell(s['where'])} | {cell(s['why'])} |" for group, s in rows]
+    return "\n".join(md) + "\n"
+
+
 def flaky_summary(records: list[dict]) -> tuple[str, list[str]]:
     """(Markdown for the run summary, FLAKY lines) over every group's record."""
     boots = sum(len(r.get("boot", [])) for r in records)
@@ -327,7 +363,8 @@ def flaky_summary(records: list[dict]) -> tuple[str, list[str]]:
             md += [f"| {r['group']} | boot | | | {b} |" for b in r.get("boot", [])]
             md += [f"| {r['group']} | repeat | | | {x['result']}: {'; '.join(x['reasons'])} |" for x in r.get("retries", [])]
             md += [f"| {r['group']} | flaky | {f['test']} | {f['first']} | {f['reason']} |" for f in r.get("flaky", [])]
-    return "\n".join(md) + "\n", lines
+    sweep = sweep_summary(records)
+    return "\n".join(md) + "\n" + ("\n" + sweep if sweep else ""), lines
 
 
 def sh(command: list[str], timeout: float = 300, quiet: bool = False) -> tuple[int, str]:
@@ -703,7 +740,9 @@ def command_run(args) -> int:
                 retry_result = "not started (simulator did not come back)"
         if retry is None:
             retry_reasons = []
-    write_flaky(args, flaky_record(args.name, first_log, retry_reasons, retry_log, retry_result, boot_retries(args.out)))
+    record = flaky_record(args.name, first_log, retry_reasons, retry_log, retry_result, boot_retries(args.out))
+    record["sweep_skips"] = sweep_skips(first_log + "\n" + (retry_log or ""))
+    write_flaky(args, record)
     # The result is the last pass: the first one when nothing was repeated, else the repeat
     # (which ran every test that had not passed in the first one).
     failed = passes[-1][1] != 0
@@ -778,7 +817,8 @@ def boot_retries(out: str) -> list[str]:
 
 def write_flaky(args, record: dict) -> None:
     """build/flaky-NAME.json (collected by the UI summary job), FLAKY lines in the log and,
-    when anything was repeated, rows in the job summary. Nothing is repeated silently."""
+    when anything was repeated or the sweep left rows out, rows in the job summary. Nothing is
+    repeated silently."""
     with open(os.path.join(args.out, f"flaky-{args.name}.json"), "w", encoding="utf-8") as f:
         json.dump(record, f, indent=1)
     lines = flaky_lines(record)
@@ -788,7 +828,7 @@ def write_flaky(args, record: dict) -> None:
         print(f"::warning title=UI {args.name} flaky::{len(record['flaky'])} test(s) passed only on the repeat: "
               + ", ".join(f["test"] for f in record["flaky"]), flush=True)
     path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if path and lines:
+    if path and (lines or record.get("sweep_skips")):
         with open(path, "a", encoding="utf-8") as out:
             out.write("\n" + flaky_summary([record])[0])
 
@@ -887,6 +927,10 @@ def main(argv: list[str] | None = None) -> int:
         if flaky or retries:
             print(f"::notice title=UI flaky tests::{retries} repeat(s) after a simulator failure, "
                   f"{flaky} test(s) passed only on the repeat", file=sys.stderr)
+        skipped = sum(len(r.get("sweep_skips", [])) for r in records)
+        if skipped:
+            print(f"::notice title=UI sweep::{skipped} row(s) not tapped by the tap-through sweep "
+                  "(listed in the run summary)", file=sys.stderr)
         print(markdown)
         return 0
     if args.command == "classify":

@@ -430,7 +430,7 @@ final class SortlyFlowUITests: XCTestCase {
                 if tap(app.buttons["viewer.info"], "photo info") {
                     sleep(1)
                     shot("15a-photo-detail"); audit("photo detail")
-                    tap(button("Fertig"), "close photo info")
+                    tap(app.buttons["detail.close"], "close photo info")
                     sleep(1)
                 }
                 let close = app.buttons["viewer.close"]

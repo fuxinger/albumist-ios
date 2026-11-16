@@ -140,8 +140,13 @@ struct PlanReviewView: View {
         } else if PlanGate.refusal(for: plan, interrupted: model.interruptedPlan) != nil {
             // One plan at a time (plugin review K2): the one that was cut off is settled first.
             Card {
-                Label("Erst das unterbrochene Anlegen abschließen", systemImage: "pause.circle").font(.headline)
-                Text("Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt.")
+                // Names what was cut off: creating albums or taking them back.
+                let isUndo = model.interruptedPlan?.reverts != nil
+                Label(isUndo ? LocalizedStringKey("Erst das unterbrochene Zurücknehmen abschließen") : LocalizedStringKey("Erst das unterbrochene Anlegen abschließen"),
+                      systemImage: "pause.circle").font(.headline)
+                Text(isUndo
+                     ? LocalizedStringKey("Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt zurückgenommen.")
+                     : LocalizedStringKey("Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt."))
                     .font(.subheadline).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

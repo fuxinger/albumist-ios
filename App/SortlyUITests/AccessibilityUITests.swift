@@ -288,7 +288,7 @@ final class AccessibilityUITests: XCTestCase {
                 if tap(app.buttons["viewer.info"], "\(tag) photo info", timeout: 5) {
                     sleep(1)
                     check("\(tag) photo info", english: english)
-                    tap(button(w.done), "\(tag) close photo info")
+                    tap(app.buttons["detail.close"], "\(tag) close photo info")
                     sleep(1)
                 }
                 tap(app.buttons["viewer.close"], "\(tag) close photo", timeout: 5)
@@ -304,16 +304,17 @@ final class AccessibilityUITests: XCTestCase {
             sleep(2)
             check("\(tag) settings", english: english)
             if !short {
-                let list = app.collectionViews.firstMatch
-                (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
-                check("\(tag) settings lower", english: english)
-                (list.exists ? list : app).swipeDown(); (list.exists ? list : app).swipeDown(); sleep(1)
-                // Design review W16: history and undo on their own screen.
+                // Design review W16: history and undo on their own screen. Opened first, from
+                // the top of the list: after scrolling down and back the first row was not in
+                // the tree again (UI run 43773339053, "history" missing).
                 if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
                     sleep(1)
                     check("\(tag) history", english: english)
                     back(); sleep(1)
                 }
+                let list = app.collectionViews.firstMatch
+                (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
+                check("\(tag) settings lower", english: english)
             }
             tap(button(w.done), "\(tag) close settings")
             sleep(1)

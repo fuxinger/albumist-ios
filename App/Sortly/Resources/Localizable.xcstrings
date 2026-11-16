@@ -121,46 +121,6 @@
         }
       }
     },
-    "%lld Fotos waren beim Umsetzen nicht mehr in deiner Mediathek und wurden nicht einsortiert." : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photo was no longer in your library when the plan ran and was not sorted."
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photos were no longer in your library when the plan ran and were not sorted."
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Foto war beim Umsetzen nicht mehr in deiner Mediathek und wurde nicht einsortiert."
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Fotos waren beim Umsetzen nicht mehr in deiner Mediathek und wurden nicht einsortiert."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "%lld Originale bearbeitet" : {
       "localizations" : {
         "en" : {
@@ -2111,16 +2071,6 @@
         }
       }
     },
-    "Entfernt nur die neuen Alben und Zuordnungen dieses Umsetzens. Deine Fotos bleiben." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Removes only the new albums and assignments of this run. Your photos stay."
-          }
-        }
-      }
-    },
     "Entfernte Alben und Ordner" : {
       "localizations" : {
         "en" : {
@@ -2837,26 +2787,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Suggest names"
-          }
-        }
-      }
-    },
-    "Namen wie beim Umsetzen. Was du danach in Fotos geändert hast, respektiert Albumist." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Names as they were when the plan ran. Albumist respects what you changed in Photos afterwards."
-          }
-        }
-      }
-    },
-    "So sah es beim Umsetzen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This is how it looked when applied. What was taken back is listed below under “Undone”."
           }
         }
       }
@@ -7943,16 +7873,6 @@
         }
       }
     },
-    "Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du auf „Alben jetzt anlegen“ tippst. Vorher siehst du jedes Album noch einmal." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recommended are certain and likely suggestions without personal topics. Nothing is created until you tap “Create Albums Now”. You see every album before that."
-          }
-        }
-      }
-    },
     "Vielleicht passend" : {
       "localizations" : {
         "en" : {
@@ -7969,16 +7889,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose New Album"
-          }
-        }
-      }
-    },
-    "Angelegt wird erst, wenn du auf „Alben jetzt anlegen“ tippst." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nothing is created until you tap “Create Albums Now”."
           }
         }
       }
@@ -8058,7 +7968,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Create the Rest"
+            "value" : "Finish Creating Albums"
           }
         }
       }
@@ -9278,7 +9188,7 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "„%1$@“ enthält %#@photos@, die nicht dazugehören. Sie bleiben unverändert."
+            "value" : "„%1$@“ enthält %#@photos@"
           },
           "substitutions" : {
             "photos" : {
@@ -9289,13 +9199,13 @@
                   "one" : {
                     "stringUnit" : {
                       "state" : "translated",
-                      "value" : "%arg weiteres Foto"
+                      "value" : "%arg weiteres Foto, das nicht dazugehört. Es bleibt unverändert."
                     }
                   },
                   "other" : {
                     "stringUnit" : {
                       "state" : "translated",
-                      "value" : "%arg weitere Fotos"
+                      "value" : "%arg weitere Fotos, die nicht dazugehören. Sie bleiben unverändert."
                     }
                   }
                 }
@@ -9306,7 +9216,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“%1$@” contains %#@photos@ that don’t belong. They stay unchanged."
+            "value" : "“%1$@” contains %#@photos@"
           },
           "substitutions" : {
             "photos" : {
@@ -9317,13 +9227,13 @@
                   "one" : {
                     "stringUnit" : {
                       "state" : "translated",
-                      "value" : "%arg other photo"
+                      "value" : "%arg other photo that doesn’t belong. It stays unchanged."
                     }
                   },
                   "other" : {
                     "stringUnit" : {
                       "state" : "translated",
-                      "value" : "%arg other photos"
+                      "value" : "%arg other photos that don’t belong. They stay unchanged."
                     }
                   }
                 }
@@ -9719,6 +9629,126 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist couldn’t take back the interrupted changes just now. They are now under Settings › History and Undo, where you can take them back."
+          }
+        }
+      }
+    },
+    "%lld Fotos waren beim Anlegen nicht mehr in deiner Mediathek und wurden nicht einsortiert." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo was no longer in your library when the albums were created and was not sorted."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos were no longer in your library when the albums were created and were not sorted."
+                }
+              }
+            }
+          }
+        },
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto war beim Anlegen nicht mehr in deiner Mediathek und wurde nicht einsortiert."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos waren beim Anlegen nicht mehr in deiner Mediathek und wurden nicht einsortiert."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "So sah es beim Anlegen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This is how it looked when the albums were created. What was taken back is listed below under “Undone”."
+          }
+        }
+      }
+    },
+    "Namen wie beim Anlegen. Was du danach in Fotos geändert hast, respektiert Albumist." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Names as they were when the albums were created. Albumist respects what you changed in Photos afterwards."
+          }
+        }
+      }
+    },
+    "Entfernt nur die neuen Alben und Zuordnungen dieser Änderungen. Deine Fotos bleiben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removes only the new albums and assignments of these changes. Your photos stay."
+          }
+        }
+      }
+    },
+    "Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du in der Vorschau bestätigst. Dort siehst du jedes Album noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recommended are certain and likely suggestions without personal topics. Nothing is created until you confirm in the preview, where you see every album once more."
+          }
+        }
+      }
+    },
+    "Angelegt wird erst, wenn du in der Vorschau bestätigst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing is created until you confirm in the preview."
+          }
+        }
+      }
+    },
+    "Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undoing earlier changes was interrupted. Decide on the overview how to go on; then you can continue here."
+          }
+        }
+      }
+    },
+    "Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt zurückgenommen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undoing earlier changes was interrupted. Decide on the overview how to go on. Then you can continue here, and nothing is taken back twice."
+          }
+        }
+      }
+    },
+    "Erst das unterbrochene Zurücknehmen abschließen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish the Interrupted Undo First"
           }
         }
       }

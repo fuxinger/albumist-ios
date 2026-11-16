@@ -267,7 +267,6 @@ struct SelectionBar: View {
 /// seconds (later with VoiceOver), and the photos can still be brought back from "Ignoriert".
 struct IgnoreUndoBar: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
     var body: some View {
         if let undo = model.lastIgnored {
@@ -291,13 +290,6 @@ struct IgnoreUndoBar: View {
             .padding(.bottom, Theme.Spacing.s)
             .accessibilityElement(children: .contain)
             .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
-            .task(id: undo.id) {
-                AccessibilityNotification.Announcement(String(localized: "\(undo.assets.count) Fotos ignoriert")).post()
-                // Longer with VoiceOver (time to reach the button), and in UI tests, whose
-                // accessibility audit of the note takes a few seconds itself.
-                try? await Task.sleep(for: .seconds(voiceOver || UITestSupport.isRunning ? 20 : 6))
-                if !Task.isCancelled, model.lastIgnored?.id == undo.id { model.lastIgnored = nil }
-            }
         }
     }
 }
@@ -391,7 +383,12 @@ struct AssetDetailView: View {
             .navigationTitle("Info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
+                // An xmark like the viewer's own close button: "Fertig" was clipped at the
+                // largest text size (UI run 43773339053).
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
+                        .accessibilityIdentifier("detail.close")
+                }
             }
         }
     }

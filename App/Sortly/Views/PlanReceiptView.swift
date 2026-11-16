@@ -3,7 +3,7 @@ import SortlyCore
 
 /// The change receipt of one executed plan (I01): what Albumist really changed, album by
 /// album, read from the execution journal, and what it did not touch. Opened from
-/// Einstellungen › Verlauf and from the result after "Jetzt umsetzen".
+/// Einstellungen › Verlauf and from the result after "Alben jetzt anlegen".
 struct PlanReceiptView: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
@@ -168,7 +168,7 @@ struct PlanReceiptView: View {
             }
             // Not a failure, but not sorted in either: the plan is not complete (audit 2, 7.1).
             if receipt.unavailablePhotos > 0 {
-                Text("\(receipt.unavailablePhotos) Fotos waren beim Umsetzen nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
+                Text("\(receipt.unavailablePhotos) Fotos waren beim Anlegen nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
             }
             ForEach(StepProblemText.texts(receipt.problems), id: \.self) { text in
                 Label(text, systemImage: "exclamationmark.triangle")
@@ -231,9 +231,9 @@ struct PlanReceiptView: View {
             Text("Alben")
         } footer: {
             if undo != nil {
-                Text("So sah es beim Umsetzen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“.")
+                Text("So sah es beim Anlegen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“.")
             } else {
-                Text("Namen wie beim Umsetzen. Was du danach in Fotos geändert hast, respektiert Albumist.")
+                Text("Namen wie beim Anlegen. Was du danach in Fotos geändert hast, respektiert Albumist.")
             }
         }
     }
@@ -276,7 +276,7 @@ struct PlanReceiptView: View {
                     .disabled(model.execution.isRunning)
                     .accessibilityIdentifier("receipt.undo")
             } footer: {
-                Text("Entfernt nur die neuen Alben und Zuordnungen dieses Umsetzens. Deine Fotos bleiben.")
+                Text("Entfernt nur die neuen Alben und Zuordnungen dieser Änderungen. Deine Fotos bleiben.")
             }
         }
     }

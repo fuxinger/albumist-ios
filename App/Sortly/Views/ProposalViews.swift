@@ -63,7 +63,7 @@ struct ProposalListView: View {
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 } footer: {
-                    Text("Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du auf „Alben jetzt anlegen“ tippst. Vorher siehst du jedes Album noch einmal.")
+                    Text("Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du in der Vorschau bestätigst. Dort siehst du jedes Album noch einmal.")
                 }
             }
             if area == nil {
@@ -561,7 +561,7 @@ struct AdjustProposalView: View {
             } header: {
                 Text("Neues Album")
             } footer: {
-                Text("Angelegt wird erst, wenn du auf „Alben jetzt anlegen“ tippst.")
+                Text("Angelegt wird erst, wenn du in der Vorschau bestätigst.")
             }
             Section {
                 ForEach(candidates, id: \.albumID) { candidate in
@@ -692,7 +692,7 @@ struct ProposalPhotosView: View {
             Text("Sie kommen nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleiben sie.")
         }
         .fullScreenCover(item: $viewing) { start in
-            PhotoViewer(ids: members, current: start.id, showsInfo: true)
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
         }
     }
 
@@ -704,7 +704,8 @@ struct ProposalPhotosView: View {
         return Button {
             // Outside "Auswählen" a tap opens the photo large (first device test 15.11.).
             guard selecting else {
-                viewing = PhotoViewer.Start(id: id)
+                // A snapshot: a photo ignored from its details must not reshuffle the pages.
+                viewing = PhotoViewer.Start(id: id, ids: model.members(of: proposal))
                 return
             }
             if isSelected { selected.remove(id) } else { selected.insert(id) }

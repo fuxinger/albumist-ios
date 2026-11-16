@@ -36,7 +36,7 @@ struct CountryPhotosView: View {
                                 Text("Ohne Datum").font(.title3.weight(.bold))
                             }
                             Spacer()
-                            Text("\(group.photos.count) Fotos").font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                            Text("\(group.photos.count) Fotos").font(.subheadline).foregroundStyle(Theme.secondaryText).monospacedDigit() // on the photo wash
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityAddTraits(.isHeader)

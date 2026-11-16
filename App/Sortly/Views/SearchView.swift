@@ -249,7 +249,11 @@ struct SearchView: View {
         let key = source + ":" + id.rawValue
         return Button {
             zoomSource = key
-            viewing = PhotoViewer.Start(id: id, ids: Array(result.ids.prefix(shown)))
+            // The best hits sit above the grid and may lie beyond the pages shown: the
+            // viewer always contains the photo that was tapped.
+            var ids = Array(result.ids.prefix(shown))
+            if !ids.contains(id) { ids.insert(id, at: 0) }
+            viewing = PhotoViewer.Start(id: id, ids: ids)
         } label: {
             AssetThumbnail(id: id, side: 110)
                 .aspectRatio(1, contentMode: .fill)

@@ -69,9 +69,13 @@ struct PhotoViewer: View {
         .sheet(item: $info) { facts in
             AssetDetailView(facts: facts) { addingToAlbum = [facts.id] }
                 .presentationDetents([.medium, .large])
+                // A half-height sheet is see-through glass in iOS 26: over the black viewer
+                // the light text lost its contrast ("Taken", UI run 43773339053). Solid.
+                .presentationBackground(Theme.background)
         }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {}
+                .presentationBackground(Theme.background)
         }
     }
 

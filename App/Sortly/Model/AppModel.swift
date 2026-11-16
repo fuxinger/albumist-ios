@@ -4,6 +4,9 @@ import SortlyCore
 import SortlyEngine
 import SortlyStore
 import SortlyWorldMap
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// App state and use cases. Views read it; all work happens in the core/engine actors.
 @MainActor
@@ -1371,8 +1374,12 @@ final class AppModel {
     }
 
     /// Why nothing new runs while a plan that was cut off is open (plugin review K2).
+    /// Names what was cut off: creating albums, or taking them back (review of the design
+    /// branch: an interrupted undo was called "Anlegen" too).
     private var interruptedPlanFirst: String {
-        String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
+        interruptedPlan?.reverts != nil
+            ? String(localized: "Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
+            : String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
     }
 
     /// The plan offered to continue, take back or keep, read again from the store after every
@@ -1777,7 +1784,10 @@ final class AppModel {
         let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
-            message = AppMessage(title: String(localized: "Erst das unterbrochene Anlegen abschließen"), text: interruptedPlanFirst)
+            message = AppMessage(title: interruptedPlan?.reverts != nil
+                                 ? String(localized: "Erst das unterbrochene Zurücknehmen abschließen")
+                                 : String(localized: "Erst das unterbrochene Anlegen abschließen"),
+                                 text: interruptedPlanFirst)
             return
         }
         // Free albums and suggestions come back in `finalize`, with the undo itself.
@@ -1833,10 +1843,31 @@ final class AppModel {
                 let added = try await store.ignoreAssets(assets)
                 saveSafetyBackup()
                 await refreshDerived()
-                lastIgnored = added.isEmpty ? nil : IgnoreUndo(assets: added)
+                guard !added.isEmpty else { lastIgnored = nil; return }
+                let undo = IgnoreUndo(assets: added)
+                lastIgnored = undo
+                announceAndExpire(undo)
             } catch {
                 message = .failure(error.localizedDescription)
             }
+        }
+    }
+
+    /// Said once by VoiceOver, and the offer ends here, not in the note: a note in a viewer
+    /// that closed within seconds kept it alive, and it came back much later on another
+    /// screen; every reappearance also announced it again (review of the design branch).
+    /// Longer with VoiceOver (time to reach the button), and in UI tests, whose audit of the
+    /// note takes a few seconds itself.
+    private func announceAndExpire(_ undo: IgnoreUndo) {
+        #if canImport(UIKit)
+        let voiceOver = UIAccessibility.isVoiceOverRunning
+        UIAccessibility.post(notification: .announcement, argument: String(localized: "\(undo.assets.count) Fotos ignoriert"))
+        #else
+        let voiceOver = false
+        #endif
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(voiceOver || UITestSupport.isRunning ? 20 : 6))
+            if self?.lastIgnored?.id == undo.id { self?.lastIgnored = nil }
         }
     }
 

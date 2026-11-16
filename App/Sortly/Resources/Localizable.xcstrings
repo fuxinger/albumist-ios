@@ -9712,6 +9712,16 @@
           }
         }
       }
+    },
+    "Albumist konnte den unterbrochenen Vorgang gerade nicht zurücknehmen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn zurücknehmen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist couldn’t take back the interrupted changes just now. They are now under Settings › History and Undo, where you can take them back."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

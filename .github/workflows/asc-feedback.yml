@@ -15,8 +15,6 @@ name: TestFlight feedback
 # Everything testers send is untrusted text. It only ever travels in files: never in ${{ }}
 # expressions, shell commands or the log (a log line starting with "::" would be a command).
 on:
-  push:   # TEMPORARY: one evaluation run of the key on this branch (counts only), removed right after
-    branches: [claude/asc-feedback]
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
@@ -72,7 +70,7 @@ jobs:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           KEY_PATH: ${{ runner.temp }}/asc/AuthKey.p8
-          SUMMARY_MODE: ${{ github.event_name == 'push' && 'counts' || inputs.report || 'full' }}
+          SUMMARY_MODE: ${{ inputs.report || 'full' }}
         run: |
           python3 .github/scripts/asc_feedback.py --bundle-id app.albumist.ios \
             --out "$RUNNER_TEMP/feedback" --summary "$GITHUB_STEP_SUMMARY" --summary-mode "$SUMMARY_MODE"
@@ -80,7 +78,7 @@ jobs:
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"
       - name: Keep report, screenshots and crash logs
-        if: always() && steps.secrets.outputs.ready == 'true' && github.event_name != 'push' && (inputs.report || 'full') == 'full'
+        if: always() && steps.secrets.outputs.ready == 'true' && (inputs.report || 'full') == 'full'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: testflight-feedback

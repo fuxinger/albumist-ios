@@ -1172,7 +1172,13 @@ final class SortlyFlowUITests: XCTestCase {
         } else {
             print("UI_SWEEP_SKIP Suchen › \(label) › photo (not hittable)")
         }
-        if app.buttons["Abbrechen"].exists { app.buttons["Abbrechen"].tap(); sleep(1) }
+        // Leave the search: "Abbrechen", or on iOS 26 the field's "Schließen" (UI run
+        // 43964816778: the search stayed open with its keyboard, and the tap on the
+        // "Übersicht" tab after the sweep left the app on "Suchen").
+        for label in ["Abbrechen", "Schließen"] where app.buttons[label].exists && app.buttons[label].isHittable {
+            app.buttons[label].tap(); sleep(1)
+            break
+        }
         return reached
     }
 
@@ -1211,7 +1217,14 @@ final class SortlyFlowUITests: XCTestCase {
             }
         }
         // Suggestions list, the screen that had dead rows.
-        tabButton("Übersicht").tap(); sleep(1)
+        // Back on the overview before looking for its button: a tab tap while the search is
+        // still active can leave the app on "Suchen" (UI run 43964816778).
+        let overview = app.navigationBars["Übersicht"]
+        var tries = 0
+        repeat {
+            tabButton("Übersicht").tap(); sleep(1)
+            tries += 1
+        } while !overview.waitForExistence(timeout: 3) && tries < 3
         let suggestions = reviewSuggestionsButton()
         if suggestions.waitForExistence(timeout: 5) {
             suggestions.tap(); sleep(2)

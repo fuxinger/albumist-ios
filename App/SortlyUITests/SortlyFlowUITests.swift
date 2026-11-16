@@ -1059,6 +1059,23 @@ final class SortlyFlowUITests: XCTestCase {
             if reached == 0 { XCTFail("The sweep reached no screen from \(tab)") }
         }
         check("Übersicht", sweep("Übersicht", depth: 0))
+        // Suggestions list, the screen that had dead rows. Before the other tabs: the search
+        // tab, swept last, focuses its field, and the keyboard then covers the tab bar (UI run
+        // 43954645840: the tap meant for "Übersicht" stayed on the search screen with its
+        // keyboard up, so "Vorschläge prüfen" was never on screen; also runs 43930277920 and
+        // 43945035122).
+        tabButton("Übersicht").tap(); sleep(1)
+        let suggestions = reviewSuggestionsButton()
+        if suggestions.waitForExistence(timeout: 5) {
+            suggestions.tap(); sleep(2)
+            check("Vorschläge", sweep("Vorschläge", depth: 0, strict: true))
+            back()
+        } else {
+            print("UI_STEP_MISSING sweep suggestions")
+            shot("x-missing-sweep-suggestions") // what was on screen instead
+            XCTFail("No \"Vorschläge prüfen\" on the overview for the sweep")
+        }
+        // The search tab last (see above).
         for tab in ["Mediathek", "Alben", "Suchen"] {
             let button = tab == "Suchen" ? searchTabButton() : tabButton(tab)
             guard button.waitForExistence(timeout: 5) else {
@@ -1078,18 +1095,6 @@ final class SortlyFlowUITests: XCTestCase {
             } else {
                 check(tab, sweep(tab, depth: 0))
             }
-        }
-        // Suggestions list, the screen that had dead rows.
-        tabButton("Übersicht").tap(); sleep(1)
-        let suggestions = reviewSuggestionsButton()
-        if suggestions.waitForExistence(timeout: 5) {
-            suggestions.tap(); sleep(2)
-            check("Vorschläge", sweep("Vorschläge", depth: 0, strict: true))
-            back()
-        } else {
-            print("UI_STEP_MISSING sweep suggestions")
-            shot("x-missing-sweep-suggestions") // what was on screen instead (UI runs 43930277920, 43945035122)
-            XCTFail("No \"Vorschläge prüfen\" on the overview for the sweep")
         }
         print("UI_SWEEP_DONE")
     }

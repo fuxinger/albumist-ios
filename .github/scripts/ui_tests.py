@@ -33,16 +33,19 @@ new one, and only for the tests that did not pass (-only-testing as before, plus
     "Restarting after unexpected exit, crash, or test timeout" alone is NOT enough: it is
     also what an app hang or crash looks like;
   - no log line points at the app or the tests: no failed test case or suite, no ": error:"
-    line (other than the infrastructure lines above), no recorded issue, no A11Y_FAIL, no
-    "Fatal error", "Crash:", "crashed", "Test crashed with signal ..." (other than the SIGTERM
+    line (other than the infrastructure lines above; but a test's own ": error: -[...]", a
+    "Test Case ... failed" or a crash other than SIGTERM counts even when it quotes one), no
+    recorded issue, no A11Y_FAIL, no "Fatal error", "Crash:", "crashed", "Test crashed with signal ..." (other than the SIGTERM
     above) or "execution time allowance";
   - no crash report of the app or the test runner (~/Library/Logs/DiagnosticReports/Sortly*)
     was written during the pass;
   - the result bundle agrees: no test case failed with a message other than the
-    infrastructure ones above, no issue outside a test, and it can be read at all.
+    infrastructure ones above, no issue outside a test, and it can be read at all (a JSON
+    object with a list "testNodes").
 Anything else is never repeated: a real failure stays red. A pass that ran no test at all
 fails (a renamed test would otherwise make an empty, green selection), and a repeat whose
-selection would be empty is not started. Both passes keep their own log and result bundle
+selection would be empty is not started (only possible when every --only entry is a single
+test; a class or skip-only selection always starts the repeat, see `retry_arguments`). Both passes keep their own log and result bundle
 (NAME.xcresult, NAME-retry.xcresult); the screenshots of the tests that passed in the first
 pass are printed from its log.
 """
@@ -102,6 +105,14 @@ REAL = [
     (re.compile(r"\*\* (?:TEST )?BUILD FAILED \*\*"), "build failed"),
 ]
 
+# A test's own failure, even on a line that also quotes one of the infrastructure messages
+# (an assertion whose text contains a CoreSimulatorService error is still an assertion).
+STRONG_REAL = [
+    (re.compile(r": error: -\["), "an error was recorded"),
+    (re.compile(r"Test [Cc]ase .* failed"), "a test failed"),
+    (re.compile(r"Test crashed with signal (?!term)"), "a test crashed"),
+]
+
 # Lines that carry data, not messages (base64 screenshots and video).
 DATA_LINE = re.compile(r"PREVIEW_JPEG|UI_VIDEO_B64")
 
@@ -127,6 +138,11 @@ def is_infra(line: str) -> list[str]:
     return [reason for pattern, reason in INFRA if pattern.search(line)]
 
 
+def strong_real(line: str) -> list[str]:
+    """Reasons from STRONG_REAL: these count even on a line that is also an infrastructure line."""
+    return [reason for pattern, reason in STRONG_REAL if pattern.search(line)]
+
+
 def scan(text: str) -> tuple[list[str], list[str]]:
     """(real reasons, infrastructure reasons) found in a log, line by line."""
     real: list[str] = []
@@ -134,6 +150,7 @@ def scan(text: str) -> tuple[list[str], list[str]]:
     for line in text.splitlines():
         if DATA_LINE.search(line):
             continue
+        real += [reason for reason in strong_real(line) if reason not in real]
         found = is_infra(line)
         if found:
             infra += [r for r in found if r not in infra]
@@ -144,13 +161,18 @@ def scan(text: str) -> tuple[list[str], list[str]]:
 
 def bundle_findings(tests: dict) -> list[str]:
     """Problems in `xcresulttool get test-results tests` output that are not the simulator's:
-    any failure message that is not an infrastructure line, and any test case that did not
-    pass without saying why. Tests that never started are not in the bundle."""
+    any failure message that is not an infrastructure line (or that is one but also names a
+    test's own failure, STRONG_REAL), and any test case that did not pass without saying why.
+    Tests that never started are not in the bundle."""
     findings: list[str] = []
+
+    def children(node: dict) -> list[dict]:
+        found = node.get("children") or []
+        return [child for child in found if isinstance(child, dict)] if isinstance(found, list) else []
 
     def messages(node: dict) -> list[str]:
         found = []
-        for child in node.get("children", []) or []:
+        for child in children(node):
             if child.get("nodeType") == "Failure Message":
                 found.append(child.get("name", ""))
             found += messages(child)
@@ -160,14 +182,14 @@ def bundle_findings(tests: dict) -> list[str]:
         kind = node.get("nodeType")
         if kind == "Failure Message":
             text = node.get("name", "")
-            if not is_infra(text):
+            if strong_real(text) or not is_infra(text):
                 findings.append(f"result bundle: {text[:200]}")
         if kind == "Test Case" and node.get("result") not in PASSED and not messages(node):
             findings.append(f"result bundle: {node.get('name', '?')} {node.get('result', 'no result')} without a message")
-        for child in node.get("children", []) or []:
+        for child in children(node):
             walk(child)
 
-    for node in tests.get("testNodes", []) or []:
+    for node in children({"children": tests.get("testNodes")}):
         walk(node)
     return findings
 
@@ -201,8 +223,16 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
 
 
 def retry_arguments(only: list[str], skip: list[str], log: str) -> list[str] | None:
-    """xcodebuild selection for the repeat: the same tests minus every test that passed.
-    None when nothing is left (every test named in --only passed): no "-only X -skip X"."""
+    """xcodebuild selection for the repeat: the same tests minus every test that passed or
+    was skipped in the first pass.
+
+    None (no repeat) only when every --only entry is a single test ("Class/test") that passed,
+    was skipped or is in --skip: then there is nothing left to name. In every other case a
+    selection is returned, also when nothing may be left to run: with a class in --only
+    ("AccessibilityUITests") or with no --only at all (the flow-other group selects by
+    --skip only) the script cannot tell from the log whether the class or target holds tests
+    that never started, so the repeat starts with the passed tests skipped. If none is left,
+    that repeat runs no test and `decide` fails it ("no test ran"): the group stays red."""
     done = [name for name, state in finished_tests(log).items() if state in ("passed", "skipped")]
     if only and all("/" in t and (t in done or t in skip) for t in only):
         return None
@@ -320,15 +350,24 @@ def reset(udid: str, reduce_motion: bool, increase_contrast: bool) -> bool:
     return True
 
 
+def parse_bundle(text: str) -> list[str]:
+    """`bundle_findings` of `xcresulttool get test-results tests` output, or why it is not
+    readable (then no repeat): it must be a JSON object with a list "testNodes"."""
+    try:
+        tests = json.loads(text)
+    except ValueError as error:
+        return [f"result bundle not readable ({error})"]
+    if not isinstance(tests, dict) or not isinstance(tests.get("testNodes"), list):
+        return [f"result bundle not readable (no testNodes list in {text.strip()[:120]!r})"]
+    return bundle_findings(tests)
+
+
 def read_bundle(path: str) -> list[str]:
     """`bundle_findings` of a result bundle, or why it could not be read (then no repeat)."""
     code, output = sh(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", path], timeout=300, quiet=True)
     if code != 0:
         return [f"result bundle not readable ({output.strip()[:200]})"]
-    try:
-        return bundle_findings(json.loads(output))
-    except ValueError as error:
-        return [f"result bundle not readable ({error})"]
+    return parse_bundle(output)
 
 
 def crash_reports(since: float) -> list[str]:
@@ -645,7 +684,7 @@ def main(argv: list[str] | None = None) -> int:
         bundle = []
         if args.bundle_json:
             with open(args.bundle_json, encoding="utf-8") as tests:
-                bundle = bundle_findings(json.load(tests))
+                bundle = parse_bundle(tests.read())
         verdict, reasons = decide(args.status, text, args.crash_report, bundle=bundle)
         print(f"{verdict}: {'; '.join(reasons)}")
         return 0

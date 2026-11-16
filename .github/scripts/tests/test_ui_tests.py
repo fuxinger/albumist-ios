@@ -263,6 +263,65 @@ class BundleTests(unittest.TestCase):
     def test_skipped_and_expected_failures_are_clean(self):
         self.assertEqual(ui_tests.bundle_findings(bundle(case("a()", "Skipped"), case("b()", "Expected Failure"))), [])
 
+    def test_infra_quoted_in_a_test_failure_message_is_a_finding(self):
+        # A test's own failure that quotes the simulator service is still the test's failure.
+        quoted = ("/Users/runner/work/App/SortlyUITests/SortlyFlowUITests.swift:60: error: "
+                  "-[SortlyUITests.SortlyFlowUITests test1_FullFlow] : failed - "
+                  "Error returned in reply from CoreSimulatorService: Connection interrupted")
+        self.assertEqual(len(ui_tests.bundle_findings(bundle(case("test1_FullFlow()", "Failed", quoted)))), 1)
+        crashed = "Test crashed with signal abrt (CoreSimulatorService: Connection interrupted)"
+        self.assertEqual(len(ui_tests.bundle_findings(bundle(case("test1_FullFlow()", "Failed", crashed)))), 1)
+
+
+class ParseBundleTests(unittest.TestCase):
+    """xcresulttool output that is not an object with a list "testNodes" is not readable (no repeat)."""
+
+    def test_valid_output_is_parsed(self):
+        import json
+        self.assertEqual(ui_tests.parse_bundle(json.dumps(bundle(case("a()", "Passed")))), [])
+        self.assertEqual(len(ui_tests.parse_bundle(json.dumps(bundle(case("a()", "Failed", "boom"))))), 1)
+
+    def test_other_shapes_are_not_readable(self):
+        for text in ["[]", "null", "42", '"tests"', "{}", '{"testNodes": null}', '{"testNodes": {}}',
+                     '{"devices": []}', "not json", ""]:
+            with self.subTest(text=text):
+                findings = ui_tests.parse_bundle(text)
+                self.assertEqual(len(findings), 1)
+                self.assertTrue(findings[0].startswith("result bundle not readable"), findings)
+                self.assertEqual(ui_tests.decide(65, AX_TIMEOUT, bundle=findings)[0], "fail")
+
+    def test_odd_nodes_inside_the_list_do_not_crash(self):
+        self.assertEqual(ui_tests.parse_bundle('{"testNodes": [1, "x", {"children": 3}]}'), [])
+
+
+class StrongRealTests(unittest.TestCase):
+    """A test's own failure counts even on a line that also quotes a simulator service error."""
+
+    SERVICE = "Error returned in reply from CoreSimulatorService: Connection interrupted"
+
+    def check(self, line, reason):
+        real, infra = ui_tests.scan(line + "\n")
+        self.assertIn(reason, real)
+        self.assertIn("CoreSimulatorService connection lost", infra)
+        self.assertEqual(ui_tests.decide(65, SERVICE_INTERRUPTED + line + "\n")[0], "fail")
+
+    def test_error_of_a_test_quoting_the_service(self):
+        self.check("/Users/runner/work/App/SortlyUITests/AccessibilityUITests.swift:148: error: "
+                   "-[SortlyUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode] : " + self.SERVICE,
+                   "an error was recorded")
+
+    def test_failed_test_case_quoting_the_service(self):
+        self.check("Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' failed (12.0 seconds). " + self.SERVICE,
+                   "a test failed")
+
+    def test_crash_signal_quoting_the_service(self):
+        self.check("SortlyUITests-Runner encountered an error (Test crashed with signal abrt. " + self.SERVICE + ")",
+                   "a test crashed")
+
+    def test_sigterm_before_the_tests_stays_infrastructure(self):
+        self.assertEqual(ui_tests.scan(RUNNER_TERMINATED)[0], [])
+        self.assertEqual(ui_tests.decide(65, RUNNER_TERMINATED)[0], "retry")
+
 
 class SelectionTests(unittest.TestCase):
     def test_no_repeat_when_every_named_test_passed(self):
@@ -285,6 +344,18 @@ class SelectionTests(unittest.TestCase):
             "-skip-testing:SortlyUITests/AccessibilityUITests/test3_LargestTextDarkModeReduceMotion",
             "-skip-testing:SortlyUITests/AccessibilityUITests/test4_Landscape",
         ])
+
+    def test_class_and_skip_only_selections_always_start_the_repeat(self):
+        # The log cannot tell whether a class holds tests that never started: the repeat runs
+        # with the passed tests skipped, and if none is left it runs no test and fails.
+        log = "".join(f"Test Case '-[SortlyUITests.AccessibilityUITests test{i}]' passed (1.0 seconds).\n" for i in (1, 2))
+        self.assertEqual(ui_tests.retry_arguments(["AccessibilityUITests"], [], log), [
+            "-only-testing:SortlyUITests/AccessibilityUITests",
+            "-skip-testing:SortlyUITests/AccessibilityUITests/test1",
+            "-skip-testing:SortlyUITests/AccessibilityUITests/test2"])
+        self.assertEqual(ui_tests.retry_arguments([], ["SortlyFlowUITests/test1_FullFlow"], log)[0],
+                         "-skip-testing:SortlyUITests/SortlyFlowUITests/test1_FullFlow")
+        self.assertEqual(ui_tests.decide(0, "** TEST SUCCEEDED **\n")[0], "fail")
 
     def test_retry_of_a_runner_that_never_started_repeats_everything(self):
         self.assertEqual(ui_tests.retry_arguments([], ["AccessibilityUITests", "SortlyFlowUITests/test1_FullFlow"], AX_TIMEOUT),

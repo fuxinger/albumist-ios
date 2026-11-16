@@ -174,6 +174,10 @@ struct OverviewView: View {
             if let state = model.analysisCard {
                 // Running, waiting, pausing, paused by the user, just finished, quick check.
                 AnalysisProgressCard(state: state)
+                // The finish moment sits on top of the plain card, which still says what is
+                // analysed and offers "Neu prüfen" (UI run 43796538247, test6: after a long run
+                // the card had neither "Alle 246 Fotos analysiert" nor "Neu prüfen").
+                if case .finished = state { finishedAnalysis }
                 // The photo mosaic: first analysis only (Fuchs 16.11., `ScanShowRule`).
                 if model.showsScanShow { ScanShow() }
             } else if let reason = model.analysis.lastReport?.pausedBecause {

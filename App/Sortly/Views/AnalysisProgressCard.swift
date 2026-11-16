@@ -507,7 +507,8 @@ struct AnalysisFinishedView: View {
                     .accessibilityHidden(true)
                 Text("Analyse fertig").font(.headline)
             }
-            Text(String(localized: "\(photos) Fotos angesehen.") + " " + String(localized: "\(proposals) Vorschläge warten auf dich."))
+            // How many photos are analysed says the plain card under it ("Alle 246 Fotos analysiert").
+            Text(String(localized: "\(proposals) Vorschläge warten auf dich."))
                 .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if proposals > 0 {

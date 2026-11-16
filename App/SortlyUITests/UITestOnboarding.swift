@@ -10,28 +10,48 @@ import XCTest
 /// itself when test 1 did not reach its end, so a cut-off costs test 1 and nothing else.
 @MainActor
 enum UITestOnboarding {
-    /// Markers of test 1 in the runner's temporary folder. A static flag starts fresh in a
-    /// restarted runner (run 43816787321: test 2 did not notice the cut-off); a file stays.
-    private static let folder = FileManager.default.temporaryDirectory
-    private static let started = folder.appending(path: "albumist-ui-full-flow-started")
-    private static let finished = folder.appending(path: "albumist-ui-full-flow-finished")
+    /// Start and end markers of a first test in the runner's temporary folder. A static flag
+    /// starts fresh in a restarted runner (run 43816787321: test 2 did not notice the
+    /// cut-off); a file stays.
+    struct Markers: Sendable {
+        let started: URL
+        let finished: URL
 
-    static func fullFlowStarts() {
-        try? FileManager.default.removeItem(at: finished)
-        try? Data().write(to: started)
+        init(_ name: String) {
+            let folder = FileManager.default.temporaryDirectory
+            started = folder.appending(path: "albumist-ui-\(name)-started")
+            finished = folder.appending(path: "albumist-ui-\(name)-finished")
+        }
+
+        func starts() {
+            try? FileManager.default.removeItem(at: finished)
+            try? Data().write(to: started)
+        }
+
+        func ends() {
+            try? Data().write(to: finished)
+        }
+
+        var wasCutOff: Bool {
+            FileManager.default.fileExists(atPath: started.path) && !FileManager.default.fileExists(atPath: finished.path)
+        }
+
+        var reachedItsEnd: Bool {
+            FileManager.default.fileExists(atPath: finished.path)
+        }
     }
 
-    static func fullFlowFinished() {
-        try? Data().write(to: finished)
-    }
+    /// SortlyFlowUITests.test1_FullFlow.
+    static let fullFlow = Markers("full-flow")
+    /// AccessibilityUITests.test1_OnboardingAtLargestTextInDarkMode (run 43823834271: a UI
+    /// query timed out while the demo library was being created, which ended test 1, and
+    /// tests 2 to 4 found no suggestions).
+    static let accessibilityOnboarding = Markers("a11y-onboarding")
 
-    static var fullFlowWasCutOff: Bool {
-        FileManager.default.fileExists(atPath: started.path) && !FileManager.default.fileExists(atPath: finished.path)
-    }
-
-    static var fullFlowReachedItsEnd: Bool {
-        FileManager.default.fileExists(atPath: finished.path)
-    }
+    static func fullFlowStarts() { fullFlow.starts() }
+    static func fullFlowFinished() { fullFlow.ends() }
+    static var fullFlowWasCutOff: Bool { fullFlow.wasCutOff }
+    static var fullFlowReachedItsEnd: Bool { fullFlow.reachedItsEnd }
 
     /// The overview says the analysis is done and nothing runs (as `analysisIdle` in the tests).
     static func analysisIdle(_ app: XCUIApplication) -> Bool {
@@ -72,11 +92,7 @@ enum UITestOnboarding {
         let demo = button("Beispiel-Mediathek anlegen")
         if demo.waitForExistence(timeout: 30) {
             demo.tap()
-            let seeded = waitStable(timeout: 600) {
-                !app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Beispielfotos werden angelegt")).firstMatch.exists
-                    && !demo.exists
-            }
-            XCTAssertTrue(seeded, "\(test): demo library not created")
+            XCTAssertTrue(demoLibraryCreated(app), "\(test): demo library not created")
         }
         let idle = waitStable(timeout: 1200) { analysisIdle(app) }
         print(idle ? "UI_STEP_OK \(test) onboarding and demo library" : "UI_STEP_MISSING \(test) onboarding and demo library")
@@ -100,14 +116,28 @@ enum UITestOnboarding {
         }
     }
 
-    /// `condition` held on three checks in a row, 2 s apart.
-    private static func waitStable(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+    /// Waits until the demo card no longer creates photos and no longer offers to.
+    ///
+    /// Run 43823834271: a query over every element ("label CONTAINS" on `.any`) every 2 s timed
+    /// out while the app wrote the photos at the largest text size ("Failed to get matching
+    /// snapshots: Timed out while evaluating UI query"), and a failed query ends the test. The
+    /// wait asks only for the card's text and button, every 5 s.
+    static func demoLibraryCreated(_ app: XCUIApplication, timeout: TimeInterval = 600) -> Bool {
+        let seeding = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Beispielfotos werden angelegt")).firstMatch
+        let offer = app.buttons["Beispiel-Mediathek anlegen"]
+        let created = waitStable(timeout: timeout, interval: 5) { !seeding.exists && !offer.exists }
+        if !created { print("UI_STEP_MISSING demo library created (timeout \(Int(timeout)) s)") }
+        return created
+    }
+
+    /// `condition` held on three checks in a row, `interval` seconds apart.
+    private static func waitStable(timeout: TimeInterval, interval: UInt32 = 2, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
         while Date() < deadline {
             streak = condition() ? streak + 1 : 0
             if streak >= 3 { return true }
-            sleep(2)
+            sleep(interval)
         }
         return false
     }

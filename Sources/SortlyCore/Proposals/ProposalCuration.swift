@@ -1,5 +1,58 @@
 import Foundation
 
+/// Photos that get no album of their own in an area because another suggestion's album stands
+/// for them there. The sorted count takes that album for them (device test 15.11.: the
+/// country of a trip went with the trip, and its photos counted as unsorted for "Länder und
+/// Orte" although the user's own trip album held them).
+public struct StandIn: Hashable, Sendable, Codable {
+    public enum Reason: String, Hashable, Sendable, Codable {
+        /// A place or theme seen on one trip only: the trip's album is its album.
+        case partOfTrip
+        /// Screenshots inside a document album.
+        case partOfDocuments
+        /// The same photos as a more telling suggestion.
+        case samePhotos
+        /// A photo on a trip whose place has no album of its own (the home country, a country
+        /// with too few photos): the trip's album is its place album.
+        case placeOfTrip
+        /// A routine visit is not a trip: the album of the place visited is its album.
+        case routineVisit
+    }
+
+    /// The area in which the photos have no album of their own.
+    public var area: OrganizationArea
+    /// The suggestion whose album stands for them.
+    public var suggestion: SortlyID
+    /// The suggestion (or trip) that was left out, if there was one.
+    public var dropped: SortlyID?
+    public var assetIDs: Set<AssetID>
+    public var reason: Reason
+
+    public init(area: OrganizationArea, suggestion: SortlyID, dropped: SortlyID?, assetIDs: Set<AssetID>, reason: Reason) {
+        self.area = area
+        self.suggestion = suggestion
+        self.dropped = dropped
+        self.assetIDs = assetIDs
+        self.reason = reason
+    }
+}
+
+/// What suggesting produced: the suggestions to show, the ones the user dismissed ("Nicht
+/// jetzt", or the album deleted in Photos) and which album stands for photos without an album
+/// of their own. Dismissed suggestions are not shown, but an own album that fits one still
+/// counts as sorted.
+public struct Suggestions: Sendable {
+    public var open: [AlbumProposal]
+    public var dismissed: [AlbumProposal]
+    public var standIns: [StandIn]
+
+    public init(open: [AlbumProposal], dismissed: [AlbumProposal] = [], standIns: [StandIn] = []) {
+        self.open = open
+        self.dismissed = dismissed
+        self.standIns = standIns
+    }
+}
+
 /// The last step of suggesting: one album for one set of photos.
 ///
 /// On the first iPhone (15.11., 5,683 photos) about 250 suggestions came out, many of them the
@@ -24,6 +77,13 @@ extension ProposalEngine {
     static let sameAlbumShare = 0.9
 
     func curated(_ proposals: [AlbumProposal], profile: LibraryProfile) -> [AlbumProposal] {
+        var standIns: [StandIn] = []
+        return curated(proposals, profile: profile, standIns: &standIns)
+    }
+
+    /// - Parameter standIns: gets, for every suggestion left out under rule 2 or 3, the
+    ///   suggestion that stands for its photos. Rule 1 has none: home is no album at all.
+    func curated(_ proposals: [AlbumProposal], profile: LibraryProfile, standIns: inout [StandIn]) -> [AlbumProposal] {
         let tripFolder = labels.folder(for: .trips)
         func isPlaceAlbum(_ p: AlbumProposal) -> Bool {
             if case .placeCollection = p.kind { return p.folderPath.first != tripFolder }
@@ -46,8 +106,12 @@ extension ProposalEngine {
                 guard isPlaceAlbum(p) || isTheme(p), !p.assetIDs.isEmpty else { return false }
                 var perTrip: [Int: Int] = [:]
                 for id in p.assetIDs { if let t = tripOf[id] { perTrip[t, default: 0] += 1 } }
-                guard let most = perTrip.values.max() else { return false }
-                return Double(most) >= Double(p.assetIDs.count) * Self.nestedShare
+                guard let most = perTrip.max(by: { ($0.value, $1.key) < ($1.value, $0.key) }),
+                      Double(most.value) >= Double(p.assetIDs.count) * Self.nestedShare else { return false }
+                let trip = trips[most.key]
+                standIns.append(StandIn(area: p.kind.area, suggestion: trip.id, dropped: p.id,
+                                        assetIDs: p.assetIDs.intersection(trip.assetIDs), reason: .partOfTrip))
+                return true
             }
         }
 
@@ -61,8 +125,12 @@ extension ProposalEngine {
                 guard case .screenshotCategory = p.kind, !p.assetIDs.isEmpty else { return false }
                 var perDocument: [Int: Int] = [:]
                 for id in p.assetIDs { for d in documentOf[id] ?? [] { perDocument[d, default: 0] += 1 } }
-                guard let most = perDocument.values.max() else { return false }
-                return Double(most) >= Double(p.assetIDs.count) * Self.nestedShare
+                guard let most = perDocument.max(by: { ($0.value, $1.key) < ($1.value, $0.key) }),
+                      Double(most.value) >= Double(p.assetIDs.count) * Self.nestedShare else { return false }
+                let document = documents[most.key]
+                standIns.append(StandIn(area: p.kind.area, suggestion: document.id, dropped: p.id,
+                                        assetIDs: p.assetIDs.intersection(document.assetIDs), reason: .partOfDocuments))
+                return true
             }
         }
 
@@ -93,16 +161,50 @@ extension ProposalEngine {
             let p = list[offset]
             var shared: [Int: Int] = [:]
             for id in p.assetIDs { for k in keptOf[id] ?? [] { shared[k, default: 0] += 1 } }
-            let duplicate = shared.contains { kept, count in
+            let duplicate = shared.filter { kept, count in
                 let larger = max(p.assetIDs.count, list[kept].assetIDs.count)
                 return Double(count) >= Double(larger) * Self.sameAlbumShare
-            }
-            if duplicate {
+            }.max { ($0.value, $1.key) < ($1.value, $0.key) }
+            if let duplicate {
                 dropped.insert(offset)
+                let kept = list[duplicate.key]
+                standIns.append(StandIn(area: p.kind.area, suggestion: kept.id, dropped: p.id,
+                                        assetIDs: p.assetIDs.intersection(kept.assetIDs), reason: .samePhotos))
             } else {
                 for id in p.assetIDs { keptOf[id, default: []].append(offset) }
             }
         }
         return list.enumerated().filter { !dropped.contains($0.offset) }.map(\.element)
+    }
+
+    /// Photos on a trip that no place suggestion holds (their country is the home country or
+    /// has too few photos, or went with the trip): the trip's album is their place album, as
+    /// curation rule 2 says for a country seen on one trip only.
+    func placesOfTrips(_ kept: [AlbumProposal], standIns: [StandIn]) -> [StandIn] {
+        var placed = Set<AssetID>()
+        for p in kept where p.kind.area == .places { placed.formUnion(p.assetIDs) }
+        for s in standIns where s.area == .places { placed.formUnion(s.assetIDs) }
+        return kept.compactMap { trip in
+            guard trip.kind == .trip else { return nil }
+            let open = trip.assetIDs.subtracting(placed)
+            return open.isEmpty ? nil : StandIn(area: .places, suggestion: trip.id, dropped: nil, assetIDs: open, reason: .placeOfTrip)
+        }
+    }
+
+    /// Stand-ins point at a suggestion that is kept: one that was itself left out (a routine
+    /// visit's place album with the same photos as a town) hands its photos on to the one kept
+    /// for it. Stand-ins that lead nowhere are dropped.
+    static func resolved(_ standIns: [StandIn], kept: Set<SortlyID>) -> [StandIn] {
+        var next: [SortlyID: SortlyID] = [:]
+        for s in standIns { if let dropped = s.dropped, next[dropped] == nil { next[dropped] = s.suggestion } }
+        return standIns.compactMap { s in
+            var s = s
+            var hops = 0
+            while !kept.contains(s.suggestion), let further = next[s.suggestion], hops < 8 {
+                s.suggestion = further
+                hops += 1
+            }
+            return kept.contains(s.suggestion) ? s : nil
+        }
     }
 }

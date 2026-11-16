@@ -8209,6 +8209,16 @@
         }
       }
     },
+    "Albumist konnte das unterbrochene Umsetzen gerade nicht zurücknehmen. Es steht jetzt unter Einstellungen › Verlauf. Dort kannst du es zurücknehmen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist could not take back the interrupted run just now. It is now in Settings › History, where you can take it back."
+          }
+        }
+      }
+    },
     "Sucht neue Fotos" : {
       "localizations" : {
         "en" : {
@@ -8639,6 +8649,16 @@
         }
       }
     },
+    "Öffne Albumist, dann geht es bei %@ weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist and it continues at %@."
+          }
+        }
+      }
+    },
     "von %lld Fotos" : {
       "localizations" : {
         "de" : {
@@ -8835,16 +8855,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "Öffne Albumist, dann geht es bei %@ weiter." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Albumist and it continues at %@."
           }
         }
       }

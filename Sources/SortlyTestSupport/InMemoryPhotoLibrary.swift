@@ -204,9 +204,11 @@ public actor InMemoryPhotoLibrary: PhotoLibraryWriting {
 }
 
 /// Plan store that keeps every saved version (lets tests inspect the journal).
-public actor InMemoryPlanStore: ChangePlanStoring {
+public actor InMemoryPlanStore: PlanJournal {
     public private(set) var saved: [ChangePlan] = []
     public init() {}
     public func save(_ plan: ChangePlan) async throws { saved.append(plan) }
+    public func save(_ plans: [ChangePlan]) async throws { saved.append(contentsOf: plans) }
+    public func plan(_ id: SortlyID) async throws -> ChangePlan? { saved.last { $0.id == id } }
     public var latest: ChangePlan? { saved.last }
 }

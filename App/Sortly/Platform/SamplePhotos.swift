@@ -109,7 +109,8 @@ final class SamplePhotos {
     /// Deletes Albumist's own sample photos (only the written-down identifiers) and the albums
     /// it made of nothing but them, with one iOS question. "Nicht erlauben" changes nothing.
     func remove(model: AppModel) async {
-        guard !isAdding, !isRemoving, let store = model.store else { return }
+        // Not while a plan changes albums: the albums to delete are decided from a settled state.
+        guard !isAdding, !isRemoving, !model.execution.isRunning, model.interruptedPlan == nil, let store = model.store else { return }
         isRemoving = true
         defer { isRemoving = false }
         do {

@@ -10,6 +10,15 @@ name: TestFlight
 # both passed and CI's iOS job really ran. A docs-only commit (iOS job skipped) is not uploaded.
 # A manual run with "force" skips the wait for emergencies.
 #
+# The release archive is built while the tests run, not after them: as soon as CI's Linux jobs
+# for this commit passed (core tests, app rules; "Wait for Linux tests"), "Build release
+# archive" archives exactly this commit on a Mac and keeps it as an artifact of this run. Only
+# when the full gate is green does "Upload to TestFlight" sign that archive for the App Store
+# and upload it (about 3 min after the gate instead of a whole build). It checks that the
+# archive was built from the gated commit with this run's build number. A commit whose Linux
+# tests fail never starts a Mac job; one whose UI or iOS tests fail is archived but never
+# uploaded, and the archive artifact is deleted at the end of the run either way.
+#
 # Why not `workflow_run`: that trigger only works from the workflow file on the default branch
 # (main), which lags behind the release branch, and it would run fork-PR code with these
 # secrets unless guarded. Waiting from the push itself works on every release branch as is.
@@ -57,12 +66,45 @@ jobs:
             echo "::notice::TestFlight skipped: the App Store Connect secrets are not set yet (docs/TESTFLIGHT.md)."
           fi
 
+  linux:
+    name: Wait for Linux tests
+    needs: check
+    if: needs.check.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    # CI's Linux jobs take ~4-6 min; the archive starts right after them.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: testflight-linux-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      ok: ${{ steps.force.outputs.ok || steps.linux.outputs.ok }}
+    steps:
+      - name: Forced upload
+        id: force
+        if: inputs.force
+        run: echo "ok=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ !inputs.force }}
+        with:
+          sparse-checkout: .github/scripts
+      - name: Wait for CI's Linux jobs of this commit
+        id: linux
+        if: ${{ !inputs.force }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          WAIT_MINUTES: 55
+        run: python3 .github/scripts/ci_gate.py --linux
+
   gate:
     name: Wait for green tests
     needs: check
     if: needs.check.outputs.ready == 'true'
     runs-on: ubuntu-24.04
-    # CI takes ~10 min, the UI flow ~30 min, plus queueing when the Mac runners are busy; the
+    # CI takes ~20 min, the UI run ~45 min, plus queueing when the Mac runners are busy; the
     # script gives up after 3 hours (waiting on a Linux runner costs nothing in a public repo).
     timeout-minutes: 190
     permissions:
@@ -94,19 +136,17 @@ jobs:
           WAIT_MINUTES: 180
         run: python3 .github/scripts/ci_gate.py
 
-  upload:
-    name: Build and upload to TestFlight
-    needs: [check, gate]
-    if: needs.gate.outputs.ok == 'true' && (github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main')
+  archive:
+    name: Build release archive
+    needs: [check, linux]
+    if: needs.linux.outputs.ok == 'true' && (github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main')
     runs-on: xcode-27
-    timeout-minutes: 60
-    # Uploads run one after another and are never cancelled half way; a newer one waits.
+    timeout-minutes: 45
+    # A newer push replaces an archive that is still being built (its gate is replaced too).
     concurrency:
-      group: testflight-upload
-      cancel-in-progress: false
+      group: testflight-archive-${{ github.ref }}
+      cancel-in-progress: true
     env:
-      KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -122,10 +162,7 @@ jobs:
           # system would treat all of them as changed.
           defaults write com.apple.dt.XCBuild IgnoreFileSystemDeviceInodeChanges -bool YES
       - name: Paths
-        run: |
-          echo "KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
-          echo "ARCHIVE=$RUNNER_TEMP/Albumist.xcarchive" >> "$GITHUB_ENV"
-          echo "EXPORT_OPTIONS=$RUNNER_TEMP/ExportOptions.plist" >> "$GITHUB_ENV"
+        run: echo "ARCHIVE=$RUNNER_TEMP/Albumist.xcarchive" >> "$GITHUB_ENV"
       - name: Generate Xcode project
         run: |
           brew install xcodegen
@@ -143,17 +180,10 @@ jobs:
           path: ~/Library/Developer/Xcode/DerivedData
           key: archive-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'App/**') }}
           restore-keys: archive-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-
-      - name: App Store Connect key
-        env:
-          KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-        run: |
-          mkdir -p "$(dirname "$KEY_PATH")"
-          printf '%s\n' "$KEY_P8" > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
       # The archive is built unsigned: automatic signing would want a development profile,
-      # and Apple only makes one when an iPhone is registered to the team. The export below
-      # signs for the App Store with Apple's cloud-managed distribution certificate (needs the
-      # Admin key), which works without any registered device.
+      # and Apple only makes one when an iPhone is registered to the team. The export (upload
+      # job) signs for the App Store with Apple's cloud-managed distribution certificate (needs
+      # the Admin key), which works without any registered device.
       # The build number is this workflow's run number: it only grows (build 27 was run 27).
       - name: Archive (unsigned; signed for the App Store during export)
         run: |
@@ -173,6 +203,81 @@ jobs:
           status=$?
           grep -E "error:|\*\* ARCHIVE" ../archive-log.txt | head -80
           exit $status
+      - name: Pack archive
+        # tar keeps file modes and links (an artifact alone would drop the executable bit).
+        # build-info.txt says which commit and build number the archive is; the upload checks it.
+        run: |
+          [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ] || { echo "::error::checkout is not $GITHUB_SHA"; exit 1; }
+          printf 'sha=%s\nbuild=%s\nxcode=%s\n' "$GITHUB_SHA" "${{ github.run_number }}" "${{ steps.xcode.outputs.id }}" > "$RUNNER_TEMP/build-info.txt"
+          tar -czf release-archive.tgz -C "$RUNNER_TEMP" Albumist.xcarchive build-info.txt
+          ls -la release-archive.tgz
+          cat "$RUNNER_TEMP/build-info.txt"
+      - name: Keep archive for the upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testflight-archive
+          path: release-archive.tgz
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
+      - name: Keep the build cache small
+        if: ${{ false }}
+        run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
+
+  upload:
+    name: Upload to TestFlight
+    needs: [check, gate, archive]
+    if: needs.gate.outputs.ok == 'true' && needs.archive.result == 'success' && (github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main')
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read # gh run download (the archive of this run)
+    # Uploads run one after another and are never cancelled half way; a newer one waits.
+    concurrency:
+      group: testflight-upload
+      cancel-in-progress: false
+    env:
+      KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - name: Paths
+        run: |
+          echo "KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
+          echo "ARCHIVE=$RUNNER_TEMP/release/Albumist.xcarchive" >> "$GITHUB_ENV"
+          echo "EXPORT_OPTIONS=$RUNNER_TEMP/ExportOptions.plist" >> "$GITHUB_ENV"
+      - name: Archive of the gated commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name testflight-archive --dir "$RUNNER_TEMP/download"
+          mkdir -p "$RUNNER_TEMP/release"
+          tar -xzf "$RUNNER_TEMP/download/release-archive.tgz" -C "$RUNNER_TEMP/release"
+          cat "$RUNNER_TEMP/release/build-info.txt"
+          # Exactly the commit the gate checked, with this run's build number.
+          grep -qx "sha=$GITHUB_SHA" "$RUNNER_TEMP/release/build-info.txt" \
+            || { echo "::error::The archive was not built from $GITHUB_SHA"; exit 1; }
+          version=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" "$ARCHIVE/Info.plist")
+          [ "$version" = "${{ github.run_number }}" ] \
+            || { echo "::error::The archive has build number $version, not ${{ github.run_number }}"; exit 1; }
+          echo "Archive of ${GITHUB_SHA:0:7}, build $version"
+          xcode="$(xcodebuild -version | tr -c 'A-Za-z0-9.\n' '-' | paste -sd- -)"
+          grep -qx "xcode=$xcode" "$RUNNER_TEMP/release/build-info.txt" \
+            || echo "::warning::The archive was built with another Xcode than this export uses ($xcode)"
+      - name: App Store Connect key
+        env:
+          KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p "$(dirname "$KEY_PATH")"
+          printf '%s\n' "$KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
       - name: Upload to TestFlight
         run: |
           plutil -create xml1 "$EXPORT_OPTIONS"
@@ -198,9 +303,23 @@ jobs:
       - name: Remove key
         if: always()
         run: rm -rf "$(dirname "$KEY_PATH")"
-      - name: Keep the build cache small
-        if: ${{ false }}
-        run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
+
+  cleanup:
+    # The archive artifact (unsigned build with the team id in it) does not outlive the run.
+    name: Remove the archive artifact
+    needs: [archive, upload]
+    if: always() && needs.archive.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | select(.name == "testflight-archive") | .id'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" && echo "removed artifact $id"
+          done
 
   notes:
     # Sets the German "Was testen" text from docs/TESTFLIGHT_NOTES.md once App Store Connect

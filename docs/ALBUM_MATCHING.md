@@ -139,3 +139,12 @@ In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen V
 ### Mehrere passende Alben
 Albumist ergänzt dann nichts von sich aus. Die Erklärung nennt jedes passende Album; der
 Hauptknopf heißt „Album auswählen“ und öffnet die Auswahl.
+
+## Dein Zuhause (16.11.2026)
+Die Einstellungen in „Dein Zuhause“ ändern, **welche** Vorschläge entstehen (Reisen, Reisenamen,
+Orte-Alben des Zuhauses), nicht wie ein Vorschlag mit vorhandenen Alben abgeglichen wird:
+`AlbumMatcher` ist unverändert, `AlbumMatcher.version` bleibt. Nach einer Änderung macht
+`AnalysisPipeline.resuggest` die Vorschläge neu und gleicht sie wie nach jeder Analyse ab.
+Ein Vorschlag, den der Nutzer schon ausgewählt hat und den die Änderung verändern oder entfernen
+würde, bleibt mit seinem Inhalt von damals (`HeldSuggestions`, Schlüssel `user.heldSuggestions`)
+und wird gegen die Alben von jetzt abgeglichen; er geht erst, wenn er angelegt oder abgewählt ist.

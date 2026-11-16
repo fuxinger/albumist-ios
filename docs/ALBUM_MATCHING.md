@@ -162,7 +162,13 @@ Regeln, wann ein gewähltes Zuhause gilt:
   (`HomeSettings.confirmedFrom`). Davor entscheidet weiter die Erkennung, in den Monaten eines
   Umzugs mit beiden Zuhause; „Stimmt“ ändert also nichts an der Vergangenheit und hält das Zuhause
   nur für spätere Fotos fest. Ohne Namen (noch kein Ort bekannt) wird „Stimmt“ nicht angeboten.
-- **Ein Ort unter „Ändern“** gilt für jedes Datum, das kein früheres Zuhause abdeckt.
+- **Ein Ort unter „Ändern“** gilt ab dem Tag, seit dem der Nutzer dort wohnt, nie für alle Zeit
+  (Produktregel, Re-Review 16.11.). Nach der Wahl fragt die App „Seit wann wohnst du dort?“,
+  vorgeschlagen ist der erste Tag des letzten ununterbrochenen Aufenthalts dort
+  (`HomeCandidates.stayStart`: Fototage im Umkreis; nur eine Strecke von mindestens vier Wochen
+  mit Fotos woanders und keinem dort beendet ihn, Reisen nicht). Der Nutzer kann das Datum ändern.
+  Davor entscheidet die Erkennung wie nach „Stimmt“ (derselbe `confirmedFrom`). So werden die
+  Jahre am alten Wohnort keine Reise, auch nicht, wenn dort vorher ein Zuhause bestätigt war.
 - **Frühere Zuhause** gelten bis zu ihrem Datum (Kette, siehe `HomeSettings.home(at:)`).
 - Welche Länder, Regionen und Orte ein gewähltes Zuhause sind, kommt aus den Fotos im Umkreis
   (30 km) bei jedem Vorschlagslauf (`HomeContext`), der Name bei der Wahl ist nur Ersatz: ein Ort

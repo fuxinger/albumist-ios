@@ -54,6 +54,8 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
         // The demo library starts its own analysis once every photo is there.
         if DemoLibrary.shared.isSeeding { return false }
         #endif
+        // The sample photos start one analysis after the last chunk, and after a removal.
+        if SamplePhotos.shared.isAdding || SamplePhotos.shared.isRemoving { return false }
         return model.phase == .ready && model.access.canRead && !model.execution.isRunning && !model.analysis.isRunning
     }
 }

@@ -185,7 +185,8 @@ final class SortlyLockedUITests: XCTestCase {
         if unlock.waitForExistence(timeout: 10) {
             print("UI_STEP_OK unlock card")
             XCTAssertFalse(app.buttons["plan.apply"].exists, "A plan over the free albums offered \"Alben jetzt anlegen\"")
-            XCTAssertTrue(button("Freischalten").exists, "No unlock button")
+            // With or without a price from StoreKit (W7: "Preis wird geladen …" until it is there).
+            XCTAssertTrue(app.buttons["unlock.buy"].exists, "No unlock button")
             XCTAssertTrue(button("Kauf wiederherstellen").exists, "No restore button")
             guard tap(button("jetzt kostenlos anlegen"), "keep the free albums only") else { return }
             sleep(3)

@@ -286,3 +286,21 @@ struct PurchaseRulesTests {
         #expect(found.isEmpty, "Hard-coded price: \(found.joined(separator: "\n"))")
     }
 }
+
+/// W7: the unlock button without a price from the App Store.
+@Suite("Unlock button without a price")
+struct UnlockButtonTests {
+    @Test func noPriceMeansLoadingAndNoTap() {
+        #expect(PurchaseRules.unlockButton(hasPrice: false, isPurchasing: false) == .loadingPrice)
+        #expect(!PurchaseRules.unlockButton(hasPrice: false, isPurchasing: false).isEnabled)
+        #expect(PurchaseRules.unlockButton(hasPrice: true, isPurchasing: false) == .buy)
+        #expect(PurchaseRules.unlockButton(hasPrice: true, isPurchasing: false).isEnabled)
+        #expect(PurchaseRules.unlockButton(hasPrice: true, isPurchasing: true) == .purchasing)
+        #expect(!PurchaseRules.unlockButton(hasPrice: false, isPurchasing: true).isEnabled)
+    }
+
+    @Test func priceIsLoadedAgainWithGrowingPauses() {
+        #expect((0...6).map(PurchaseRules.priceRetryDelay) == [2, 4, 8, 16, 30, 30, 30])
+        #expect(PurchaseRules.priceRetryDelay(attempt: -1) == 2)
+    }
+}

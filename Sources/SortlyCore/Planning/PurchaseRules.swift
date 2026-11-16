@@ -77,4 +77,23 @@ public enum PurchaseRules {
     public static func isUnlocked(by entitlements: [Entitlement], productID: String) -> Bool {
         entitlements.contains { $0.productID == productID && $0.isVerified && !$0.isRevoked }
     }
+
+    /// What the unlock button shows (plugin review W7). Without a price from the App Store the
+    /// button cannot buy anything: it says "Preis wird geladen …" and cannot be tapped, instead
+    /// of "Freischalten" followed by "Der Kauf ist gerade nicht verfügbar" (App Review 2.1).
+    public enum UnlockButton: Hashable, Sendable {
+        case loadingPrice, buy, purchasing
+
+        public var isEnabled: Bool { self == .buy }
+    }
+
+    public static func unlockButton(hasPrice: Bool, isPurchasing: Bool) -> UnlockButton {
+        if isPurchasing { return .purchasing }
+        return hasPrice ? .buy : .loadingPrice
+    }
+
+    /// Seconds before the next try to load the price (offline at the start): 2, 4, 8, … 30.
+    public static func priceRetryDelay(attempt: Int) -> Int {
+        min(30, 2 << min(max(0, attempt), 4))
+    }
 }

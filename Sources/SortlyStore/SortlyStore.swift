@@ -423,11 +423,20 @@ public actor SortlyStore: PlanJournal {
     /// Stores what a reconciliation found (the user's manual changes as overrides, and the
     /// new last-known state of Albumist's albums) in one transaction: either both are saved or
     /// neither, so a manual change is never marked as seen without its override.
-    public func applyReconciliation(overrides: [UserOverride], managedAlbums: [ManagedAlbumState]) throws {
+    /// - Parameter expected: the records the reconciliation started from. When the stored ones
+    ///   are different by now (a plan finished and stored its albums while the slow comparison
+    ///   with Photos ran, plugin review N7), nothing is written: the older list would overwrite
+    ///   the plan's fresh records. Nil writes in any case.
+    /// - Returns: whether the reconciliation was stored.
+    @discardableResult
+    public func applyReconciliation(overrides: [UserOverride], managedAlbums: [ManagedAlbumState],
+                                    expected: [ManagedAlbumState]? = nil) throws -> Bool {
         try db.durably {
             try db.transaction {
+                if let expected, try self.managedAlbums() != expected { return false }
                 for o in overrides { try insertOverride(o) }
                 try replaceManagedAlbums(managedAlbums)
+                return true
             }
         }
     }

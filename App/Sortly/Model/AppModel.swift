@@ -2140,7 +2140,9 @@ final class AppModel {
         // of them brought back gets the photos still missing, never a second album.
         let earlier: [ChangePlan]
         do { earlier = try await store.reverts(of: executed.id) } catch { message = .failure(error.localizedDescription); return }
-        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, earlierUndos: earlier)
+        // An album another plan made, left with only this plan's photos, goes too (plugin review N5).
+        let created: Set<CollectionID> = Set(managedAlbums.filter { $0.createdBySortly }.map { $0.albumID })
+        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, createdByAlbumist: created, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
             message = AppMessage(title: interruptedPlan?.reverts != nil

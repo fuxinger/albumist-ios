@@ -283,6 +283,17 @@ final class SortlyFlowUITests: XCTestCase {
         // Demo library
         let demo = button("Beispiel-Mediathek anlegen")
         if demo.waitForExistence(timeout: 30) {
+            // A fresh simulator holds only its own handful of sample photos, like many App Review
+            // devices (plugin review K6): once the first analysis is done, the overview explains
+            // why there is nothing to suggest and offers Albumist's sample photos (not tapped:
+            // the demo library below is the bigger one).
+            let hint = app.descendants(matching: .any)["overview.libraryHint"]
+            let explained = hint.waitForExistence(timeout: 120)
+            print(explained ? "UI_STEP_OK empty-library hint" : "UI_STEP_MISSING empty-library hint")
+            XCTAssertTrue(explained, "A nearly empty library shows no explanation")
+            let offer = app.buttons["samples.add"].exists
+            print(offer ? "UI_STEP_OK sample photos offered" : "UI_STEP_MISSING sample photos offered")
+            XCTAssertTrue(offer, "A nearly empty library does not offer the sample photos")
             shot("05-overview-empty")
             tap(demo, "seed demo library")
             let started = Date()

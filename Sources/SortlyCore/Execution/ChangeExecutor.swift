@@ -323,6 +323,12 @@ public actor ChangeExecutor {
                     return .failed(reason: "a collection with this title appeared meanwhile")
                 }
             }
+            // An album an undo brings back: only if the old one is really gone. Its deletion
+            // may not have been verified (plugin review N6), and the album list the undo was
+            // planned with can lack albums for a moment (W3); asked on its own, Photos knows.
+            if !isFolder, let original = step.operation.restoredAlbum, try await library.collection(original) != nil {
+                return .skipped(reason: StepState.stillThereReason)
+            }
             // The folder may have been deleted meanwhile (e.g. on another device): never fall
             // back to the top level of the library.
             if let parent, try await library.collection(parent) == nil {
@@ -558,12 +564,16 @@ public actor ChangeExecutor {
                 }
             }
         }
-        let unread = deletionError == nil ? "deletion could not be verified" : notGone
+        let unread = deletionError == nil ? StepState.deletionUnverifiedReason : notGone
         for i in indices { plan.steps[i].state = states[i] ?? .failed(reason: unread) }
-        // Only a verified deletion keeps what was written down as going: an album that may
-        // still be there is never "restored" by a later undo of this plan.
+        // A verified deletion keeps what was written down as going, and so does one whose
+        // outcome the album list could not show (plugin review N6: the album may well be gone,
+        // and without the entry an undo could never bring it back). An undo restores such an
+        // album only once Photos, asked for that album on its own, says it is gone (see
+        // `perform`, `restoredAlbum`). Every other album still there loses the entry.
         for (i, id) in targets {
             if case .succeeded = plan.steps[i].state { continue }
+            if case .failed(let reason) = plan.steps[i].state, reason == StepState.deletionUnverifiedReason { continue }
             plan.record?.deletedAlbums[id] = nil
         }
         try await store.save(plan)
@@ -604,6 +614,14 @@ public actor ChangeExecutor {
 }
 
 extension PlannedOperation {
+    /// The album an undo's "restore-…" step brings back (see `UndoPlanner`, step 4).
+    var restoredAlbum: CollectionID? {
+        guard case .createAlbum(let key, _, _) = self, key.hasPrefix(Self.restorePrefix) else { return nil }
+        return CollectionID(String(key.dropFirst(Self.restorePrefix.count)))
+    }
+
+    static let restorePrefix = "restore-"
+
     var plannedKey: String? {
         switch self {
         case .createFolder(let key, _, _), .createAlbum(let key, _, _): key
@@ -775,7 +793,12 @@ public struct UndoPlanner: Sendable {
     /// - Parameter earlierUndos: undos of the same plan that ran before and did not get
     ///   everything back (plugin review W1). An album one of them brought back is used again
     ///   and only gets the photos still missing, instead of a second album of the same name.
+    /// - Parameter createdByAlbumist: albums another plan of Albumist created (managed-album
+    ///   records). Such an album that this plan only extended goes away when nothing but this
+    ///   plan's photos is left in it (plugin review N5: P creates A, Q adds to A; taking back
+    ///   P and then Q left A behind empty).
     public func undoPlan(for executed: ChangePlan, current: CollectionInventory, owned: [CollectionID: Set<AssetID>]? = nil,
+                         createdByAlbumist: Set<CollectionID> = [],
                          earlierUndos: [ChangePlan] = [], id: SortlyID = SortlyID(), now: Date = Date()) -> ChangePlan {
         var steps: [PlanStep] = []
         var notes: [PlanNote] = []
@@ -883,6 +906,14 @@ public struct UndoPlanner: Sendable {
         // 3. Extended existing albums (and adopted ones): remove only our additions that are still there.
         for (albumID, ours) in addedByUs.sorted(by: { $0.key < $1.key }) where !createdSet.contains(albumID) {
             guard let album = current[albumID] else { continue }
+            if createdByAlbumist.contains(albumID), !album.assetIDs.isEmpty, album.assetIDs.isSubset(of: ours) {
+                // Albumist's own album, made by another plan that was taken back already: once
+                // these photos are out it would stay empty. It goes, guarded like the albums
+                // above (a photo the user puts in before the deletion runs keeps it).
+                albumDeletions.append(.deleteCollection(albumID, title: album.title))
+                guards[albumID] = ours
+                continue
+            }
             let removable = album.assetIDs.intersection(ours).sorted()
             if !removable.isEmpty { append(.removeAssets(album: albumID, assets: removable)) }
         }
@@ -899,7 +930,7 @@ public struct UndoPlanner: Sendable {
             for earlier in earlierUndos where earlier.reverts == executed.id {
                 for step in earlier.steps {
                     switch step.operation {
-                    case .createAlbum(let key, _, _) where key.hasPrefix("restore-"):
+                    case .createAlbum(let key, _, _) where key.hasPrefix(PlannedOperation.restorePrefix):
                         // Photos returned an id: the album was made (or found after an
                         // interruption), whatever its check said afterwards.
                         if let made = earlier.resolvedKeys[key], restoredBefore[key] == nil { restoredBefore[key] = made }
@@ -931,9 +962,9 @@ public struct UndoPlanner: Sendable {
                 if !back.isEmpty { append(.addAssets(album: .existing(albumID), assets: back), source: step.sourceID) }
             }
             for step in executed.steps {
-                guard case .deleteCollection(let cid, _) = step.operation, case .succeeded = step.state,
+                guard case .deleteCollection(let cid, _) = step.operation, step.state.deletionMayHaveHappened,
                       let gone = record?.deletedAlbums[cid], current[cid] == nil else { continue }
-                let key = "restore-\(cid.rawValue)"
+                let key = PlannedOperation.restorePrefix + cid.rawValue
                 if let restored = restoredBefore[key] {
                     // An earlier undo brought the album back already: never a second one. It
                     // gets the photos that undo could not put back. If the user deleted it

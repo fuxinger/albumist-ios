@@ -187,16 +187,7 @@ struct SettingsView: View {
                     } label: {
                         Text("Noch kostenlos")
                     }
-                    Button {
-                        Task { await purchases.purchase() }
-                    } label: {
-                        if let product = purchases.product {
-                            Text("Freischalten für \(product.displayPrice)")
-                        } else {
-                            Text("Freischalten")
-                        }
-                    }
-                    .disabled(purchases.isPurchasing)
+                    UnlockButton() // without a price: "Preis wird geladen …", not tappable (W7)
                     Button("Kauf wiederherstellen") { Task { await purchases.restore() } }
                         .disabled(purchases.isPurchasing)
                     Button("Code einlösen") { redeeming = true }
@@ -210,6 +201,8 @@ struct SettingsView: View {
             .offerCodeRedemption(isPresented: $redeeming) { _ in
                 Task { await purchases.refreshEntitlements(mayLock: false) }
             }
+
+            SamplePhotosSection()
 
             #if targetEnvironment(simulator)
             Section {

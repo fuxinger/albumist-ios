@@ -37,6 +37,20 @@ public struct ManagedAlbumCheck: Sendable {
     /// - Throws: when the albums or the records cannot be read or stored. Nothing is recorded
     ///   then, and planning waits (fails closed, audit 2, 1.5).
     public func run(access: LibraryAccess, now: Date = Date()) async throws -> Outcome {
+        // The comparison can take a while (albums looked up one by one, a second read). A plan
+        // that finished meanwhile stored its own records, and the list this comparison started
+        // from is old (plugin review N7): it is never written over them. Then everything is
+        // compared once more from the fresh state; if that is overtaken too, planning waits.
+        if let outcome = try await attempt(access: access, now: now) { return outcome }
+        if let outcome = try await attempt(access: access, now: now) { return outcome }
+        throw Overtaken()
+    }
+
+    /// Albumist's records changed while the check ran, twice in a row.
+    public struct Overtaken: Error {}
+
+    /// Nil when the records changed while it ran.
+    private func attempt(access: LibraryAccess, now: Date) async throws -> Outcome? {
         let stored = try await store.managedAlbums()
         let listed = try await library.currentInventory()
         guard !stored.isEmpty, access == .full else {
@@ -47,8 +61,14 @@ public struct ManagedAlbumCheck: Sendable {
         let result = checked.reconciliation
         if !result.changes.isEmpty {
             // Overrides and the new last-known state in one transaction: a manual change is
-            // never marked as seen without its override.
-            try await store.applyReconciliation(overrides: result.newOverrides, managedAlbums: result.updatedStates)
+            // never marked as seen without its override. Refused when the records changed since.
+            guard try await store.applyReconciliation(overrides: result.newOverrides, managedAlbums: result.updatedStates, expected: stored) else {
+                return nil
+            }
+        } else if try await store.managedAlbums() != stored {
+            // Nothing to write, but a plan changed the albums meanwhile: the album list for
+            // planning would be from before it.
+            return nil
         }
         return Outcome(managedAlbums: result.updatedStates, inventory: checked.inventory, foundChanges: !result.changes.isEmpty)
     }

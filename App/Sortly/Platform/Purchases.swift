@@ -181,6 +181,13 @@ final class Purchases {
     #if DEBUG
     /// Unit tests: every transaction update the listener received, in order.
     @ObservationIgnored private(set) var heardUpdates: [String] = []
+    /// Unit tests: StoreKit's list and latest transaction of the unlock in place of StoreKit's
+    /// own, to test the decisions of the re-reads with any answer (an empty list, a refund
+    /// the listener missed). Release builds always ask StoreKit.
+    @ObservationIgnored var entitlementsReader: (@MainActor () async -> [PurchaseRules.Entitlement])?
+    @ObservationIgnored var latestReader: (@MainActor () async -> PurchaseRules.Entitlement?)?
+    /// Unit tests: how often StoreKit's list was read (the pending re-reads stop in time).
+    @ObservationIgnored private(set) var entitlementReads = 0
     #endif
 
     // MARK: Second paths besides the listener
@@ -198,10 +205,35 @@ final class Purchases {
 
     /// The app came back on screen: an approval or a purchase elsewhere shows now at the
     /// latest, without a restart.
+    ///
+    /// This read may only unlock: a purchase known only from StoreKit's list is not in `known`,
+    /// so one empty or lagging read would otherwise lock a paying user. Locking is left to
+    /// the listener, the launch read and "Kauf wiederherstellen", and to an explicit
+    /// revocation: StoreKit's latest transaction of the unlock, refunded while the listener
+    /// missed it, locks here too.
     func becameActive() async {
         guard !(Self.hostsUnitTests && self === Purchases.shared) else { return }
-        await refreshEntitlements()
-        if isUnlocked { lastError = nil }
+        if let latest = await latestEntitlement(), latest.isVerified, latest.isRevoked, let id = latest.transactionID {
+            known.saw(transactionID: id, productID: latest.productID, isRevoked: true, unlockProductID: productID)
+            await refreshEntitlements()
+        } else {
+            await refreshEntitlements(mayLock: false)
+        }
+        if isUnlocked {
+            lastError = nil
+            await finishUnfinished()
+        }
+    }
+
+    /// Transactions of the unlock that the re-read found but nobody finished (their update
+    /// never reached the listener): finished now, so StoreKit stops handing them out.
+    private func finishUnfinished() async {
+        #if DEBUG
+        if entitlementsReader != nil { return }
+        #endif
+        for await result in Transaction.unfinished where result.unsafePayloadValue.productID == productID {
+            if case .verified(let transaction) = result { Self.finishLater(transaction) }
+        }
     }
 
     /// After a pending answer (Ask to Buy): the list is re-read for a while, so the approval
@@ -214,7 +246,7 @@ final class Purchases {
             for _ in 0..<count {
                 try? await Task.sleep(for: interval)
                 guard let self, !Task.isCancelled, !self.isUnlocked else { return }
-                await self.refreshEntitlements()
+                await self.refreshEntitlements(mayLock: false)
                 if self.isUnlocked {
                     self.lastError = nil
                     return
@@ -290,7 +322,23 @@ final class Purchases {
 
     /// StoreKit's list, merged with what this run was told (`known`): a read that started
     /// before a purchase, approval or refund cannot undo it.
-    func refreshEntitlements() async {
+    /// `mayLock` false: the read may only unlock (re-reads on screen, while pending, after a
+    /// redeemed offer code); see `becameActive()`.
+    func refreshEntitlements(mayLock: Bool = true) async {
+        let listed = await listedEntitlements()
+        let merged = known.isUnlocked(listed: listed, productID: productID)
+        if mayLock {
+            isUnlocked = merged
+        } else if merged {
+            isUnlocked = true
+        }
+    }
+
+    private func listedEntitlements() async -> [PurchaseRules.Entitlement] {
+        #if DEBUG
+        entitlementReads += 1
+        if let entitlementsReader { return await entitlementsReader() }
+        #endif
         var entitlements: [PurchaseRules.Entitlement] = []
         for await result in Transaction.currentEntitlements {
             switch result {
@@ -303,7 +351,21 @@ final class Purchases {
                                                               transactionID: transaction.id))
             }
         }
-        isUnlocked = known.isUnlocked(listed: entitlements, productID: productID)
+        return entitlements
+    }
+
+    /// StoreKit's latest transaction of the unlock (it carries a refund as `revocationDate`).
+    private func latestEntitlement() async -> PurchaseRules.Entitlement? {
+        #if DEBUG
+        if let latestReader { return await latestReader() }
+        #endif
+        guard let result = await Transaction.latest(for: productID) else { return nil }
+        let transaction = result.unsafePayloadValue
+        var verified = false
+        if case .verified = result { verified = true }
+        return PurchaseRules.Entitlement(productID: transaction.productID, isVerified: verified,
+                                         isRevoked: transaction.revocationDate != nil,
+                                         isFamilyShared: transaction.ownershipType == .familyShared, transactionID: transaction.id)
     }
 
     func purchase() async {

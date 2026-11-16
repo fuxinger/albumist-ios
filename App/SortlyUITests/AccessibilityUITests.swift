@@ -166,7 +166,8 @@ final class AccessibilityUITests: XCTestCase {
             allowNotificationsIfAsked()
         }
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: welcome ? 30 : 5) {
+        let seeds = demo.waitForExistence(timeout: welcome ? 30 : 5)
+        if seeds {
             tap(demo, "seed demo library")
             XCTAssertTrue(UITestOnboarding.demoLibraryCreated(app), "Demo library not created")
         } else if checking {
@@ -174,7 +175,14 @@ final class AccessibilityUITests: XCTestCase {
             XCTFail("No \"Beispiel-Mediathek anlegen\" after the onboarding on a fresh simulator")
         }
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
-        UITestOnboarding.finishInterruptedAnalysis(app, in: checking ? "accessibility test 1" : "accessibility")
+        let test = checking ? "accessibility test 1" : "accessibility"
+        if welcome || seeds {
+            // This test watched the analysis run to its end: a partial count now is an early stop.
+            UITestOnboarding.expectCompleteAnalysis(app, in: test)
+        } else {
+            // A relaunch into a library seeded earlier, whose analysis a restarted runner may have cut off.
+            UITestOnboarding.finishInterruptedAnalysis(app, in: test)
+        }
         return welcome
     }
 

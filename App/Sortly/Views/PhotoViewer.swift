@@ -196,8 +196,12 @@ private struct ZoomablePhoto: View {
             .task(id: id) {
                 unavailable = false
                 let pixels = CGSize(width: geo.size.width * displayScale * 2, height: geo.size.height * displayScale * 2)
-                image = await ThumbnailCache.shared.largeImage(for: id, pixels: pixels)
-                if image == nil && !Task.isCancelled { unavailable = true }
+                let loaded = await ThumbnailCache.shared.largeImage(for: id, pixels: pixels)
+                // After a swipe to the next photo this task is cancelled; its late image must
+                // not replace the new photo's.
+                guard !Task.isCancelled else { return }
+                image = loaded
+                if loaded == nil { unavailable = true }
             }
             .task(id: id) {
                 // Photos may never answer for a photo that is only in iCloud.

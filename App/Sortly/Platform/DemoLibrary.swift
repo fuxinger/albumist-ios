@@ -115,10 +115,9 @@ final class DemoLibrary {
             // The random generator is handed through each batch in order, so the library stays
             // the same every time.
             let part = Array(specs[start..<min(start + 15, specs.count)])
-            // Utility priority: the main thread, the Photos service writing the batch before and
-            // the accessibility snapshots of a UI test come first (the demo library takes about
-            // a minute either way).
-            let made = await Task.detached(priority: .utility) { [rng, number] in
+            // Off the main actor (drawing a batch takes seconds). No priority of its own: the
+            // task is awaited right here, which raises it to the priority of this task anyway.
+            let made = await Task.detached { [rng, number] in
                 Self.items(part, sources: sources, firstNumber: number, rng: rng)
             }.value
             rng = made.rng

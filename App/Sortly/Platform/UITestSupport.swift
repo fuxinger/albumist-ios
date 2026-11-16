@@ -1,6 +1,7 @@
 import Foundation
 import os
 import SortlyCore
+import UIKit
 
 /// Debug builds started by the UI tests (`-SortlyUITestUnlocked`): no purchase sheet and no
 /// system rating prompt, which would cover the screen the test is about to tap.
@@ -88,8 +89,12 @@ struct SlowedAnalyzer: ContentAnalyzing {
 ///   main thread was in while it did not answer (`unmarked`: SwiftUI, UIKit or XCTest's own
 ///   work, such as an accessibility audit, which runs on the app's main thread)
 /// - `UI_MAIN_STALL 1-2 s in <section>`: shorter stalls, counted per section
-/// - `UI_MAIN_SLOW <section> 250 ms to 1 s` / `1 s or more`: a marked section that took that
-///   long, counted per section (`section(_:_:)`)
+/// - `UI_MAIN_SLOW <section> 250 ms to 1 s` / `UI_MAIN_SLOW <section> 3.4 s`: a marked section
+///   that took that long (`section(_:_:)`), shorter ones counted per section
+/// - `UI_MAIN_STALL the main thread has not answered for 10.0 s ...`: a hang, again at 20, 40,
+///   80 s ..., with the section it hangs in and how long that section has been running
+/// Stall lines end in `(app not active)` when the app was in the background or behind a
+/// system alert during the stall: the system may hold back a main thread then.
 final class MainThreadWatch: @unchecked Sendable {
     static let shared = MainThreadWatch()
     private let logger = Logger(subsystem: "app.albumist.ios", category: "uitest")
@@ -97,23 +102,40 @@ final class MainThreadWatch: @unchecked Sendable {
     /// Uptime (ns) and wall clock (s since 1970) of the ping the main thread has not answered yet.
     private var askedAt: UInt64?
     private var askedWall: Double = 0
-    private var reportedStuck = false
+    /// The hang report of the current ping is written again once the wait reaches this (s).
+    private var nextStuckReport: Double = 10
     private var started = false
-    /// Marked sections the main thread is in now, outermost first (changed on the main thread).
-    private var sections: [String] = []
+    /// Marked sections the main thread is in now, outermost first, with their start (uptime
+    /// ns); changed on the main thread.
+    private var sections: [(name: String, began: UInt64)] = []
     /// The sections seen while the current ping was not answered.
     private var seenInStall: [String] = []
+    /// The app is foreground-active (changed on the main thread by the app's notifications).
+    private var active = true
+    /// The app was not active at some point while the current ping waited.
+    private var inactiveInStall = false
 
+    @MainActor
     func start() {
         guard UITestSupport.isRunning else { return }
         lock.lock()
         defer { lock.unlock() }
         guard !started else { return }
         started = true
+        let center = NotificationCenter.default
+        _ = center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { [self] _ in setActive(true) }
+        _ = center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: nil) { [self] _ in setActive(false) }
         let thread = Thread { [self] in watch() }
         thread.name = "Albumist main-thread watch"
         thread.qualityOfService = .userInteractive
         thread.start()
+    }
+
+    private func setActive(_ value: Bool) {
+        lock.lock()
+        active = value
+        if !value { inactiveInStall = true }
+        lock.unlock()
     }
 
     /// Marks main-thread work, so a stall line names it. Costs nothing outside UI runs.
@@ -122,14 +144,18 @@ final class MainThreadWatch: @unchecked Sendable {
         guard UITestSupport.isRunning, Thread.isMainThread else { return try body() }
         let begin = DispatchTime.now().uptimeNanoseconds
         lock.lock()
-        sections.append(name)
+        sections.append((name, begin))
         lock.unlock()
         defer {
             lock.lock()
             if !sections.isEmpty { sections.removeLast() }
             lock.unlock()
             let took = Self.seconds(DispatchTime.now().uptimeNanoseconds - begin)
-            if took >= 0.25 { note("UI_MAIN_SLOW \(name) \(took >= 1 ? "1 s or more" : "250 ms to 1 s")") }
+            if took >= 1 {
+                note("UI_MAIN_SLOW \(name) \(Self.text(took)) s")
+            } else if took >= 0.25 {
+                note("UI_MAIN_SLOW \(name) 250 ms to 1 s")
+            }
         }
         return try body()
     }
@@ -149,19 +175,23 @@ final class MainThreadWatch: @unchecked Sendable {
                 askedAt = now
                 askedWall = Date().timeIntervalSince1970
                 seenInStall = []
+                nextStuckReport = 10
+                inactiveInStall = !active
             }
             let waited = pending.map { Self.seconds(now - $0) } ?? 0
             if waited >= 0.5 {
-                let path = sections.isEmpty ? "unmarked" : sections.joined(separator: ">")
+                let path = sections.isEmpty ? "unmarked" : sections.map { $0.name }.joined(separator: ">")
                 if !seenInStall.contains(path) && seenInStall.count < 4 { seenInStall.append(path) }
             }
-            let stuck = pending != nil && waited >= 10 && !reportedStuck
-            if stuck { reportedStuck = true }
+            let stuck = pending != nil && waited >= nextStuckReport
+            if stuck { nextStuckReport *= 2 }
             let since = askedWall
             let names = seenInStall.joined(separator: ", ")
+            let current = sections.last.map { "\($0.name) running for \(Self.text(Self.seconds(now - $0.began))) s" } ?? "no marked section"
+            let inactive = inactiveInStall
             lock.unlock()
             if stuck {
-                note("UI_MAIN_STALL the main thread has not answered for \(Self.text(waited)) s, since \(Self.clock(since)) UTC, in \(names)")
+                note("UI_MAIN_STALL the main thread has not answered for \(Self.text(waited)) s, since \(Self.clock(since)) UTC, in \(names) (now \(current))\(Self.tag(inactive))")
             }
             if pending == nil {
                 DispatchQueue.main.async { [self] in answered() }
@@ -175,17 +205,19 @@ final class MainThreadWatch: @unchecked Sendable {
         let asked = askedAt
         let since = askedWall
         let names = seenInStall.isEmpty ? "unmarked" : seenInStall.joined(separator: ", ")
+        let inactive = inactiveInStall
         askedAt = nil
-        reportedStuck = false
         lock.unlock()
         guard let asked else { return }
         let waited = Self.seconds(now - asked)
         if waited >= 2 {
-            note("UI_MAIN_STALL \(Self.text(waited)) s from \(Self.clock(since)) UTC in \(names)")
+            note("UI_MAIN_STALL \(Self.text(waited)) s from \(Self.clock(since)) UTC in \(names)\(Self.tag(inactive))")
         } else if waited >= 1 {
-            note("UI_MAIN_STALL 1-2 s in \(names)")
+            note("UI_MAIN_STALL 1-2 s in \(names)\(Self.tag(inactive))")
         }
     }
+
+    private static func tag(_ inactive: Bool) -> String { inactive ? " (app not active)" : "" }
 
     private func note(_ text: String) {
         logger.fault("\(text, privacy: .public)")

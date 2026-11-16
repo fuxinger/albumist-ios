@@ -84,7 +84,7 @@ enum UITestOnboarding {
             let idle = waitStable(timeout: 1200) { analysisIdle(app) }
             print(idle ? "UI_STEP_OK \(test) demo library" : "UI_STEP_MISSING \(test) demo library")
             XCTAssertTrue(idle, "\(test): the analysis of the demo library did not finish")
-            finishInterruptedAnalysis(app, in: test)
+            expectCompleteAnalysis(app, in: test)
             return true
         }
         print("UI_FACT \(test): the app is at its welcome screen, onboarding first")
@@ -114,20 +114,72 @@ enum UITestOnboarding {
         let idle = waitStable(timeout: 1200) { analysisIdle(app) }
         print(idle ? "UI_STEP_OK \(test) onboarding and demo library" : "UI_STEP_MISSING \(test) onboarding and demo library")
         XCTAssertTrue(idle, "\(test): the analysis of the demo library did not finish")
-        finishInterruptedAnalysis(app, in: test)
+        expectCompleteAnalysis(app, in: test)
         return true
     }
 
-    /// An analysis cut off by a restarted test runner (the app was ended in the middle of it)
-    /// does not go on by itself in UI runs, which start no analysis at launch: the card says
+    /// What the analysis card says when not every photo counts as analysed: "58 von 246 Fotos
+    /// analysiert", and possibly "12 Fotos konnten noch nicht gelesen werden" below it.
+    struct PartialAnalysis {
+        let label: String
+        let analyzed: Int
+        let photos: Int
+        let unreadable: Int
+        /// The image loads the app counted (the label's value in UI runs).
+        let loads: String
+
+        /// Photos the analysis never came to; unreadable ones it tried and keeps for later.
+        var cutOff: Bool { analyzed + unreadable < photos }
+
+        var unreadableText: String {
+            "\(unreadable) of \(photos) photos could not be read ('\(label)', \(loads))"
+        }
+    }
+
+    /// The partial count on the overview, or nil when every photo is analysed. German only.
+    static func partialAnalysis(_ app: XCUIApplication, wait: TimeInterval = 3) -> PartialAnalysis? {
+        let partial = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ von [0-9.]+ Fotos analysiert")).firstMatch
+        guard partial.waitForExistence(timeout: wait) else { return nil }
+        let label = partial.label
+        func number(_ text: Substring) -> Int { Int(text.filter(\.isNumber)) ?? 0 }
+        let parts = label.split(separator: " ")
+        let analyzed = parts.first.map(number) ?? 0
+        let photos = parts.count > 2 ? number(parts[2]) : 0
+        let note = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "konnten noch nicht gelesen")).firstMatch
+        let unreadable = note.exists ? (note.label.split(separator: " ").first.map(number) ?? 0) : 0
+        return PartialAnalysis(label: label, analyzed: analyzed, photos: photos, unreadable: unreadable, loads: (partial.value as? String) ?? "")
+    }
+
+    /// After a test watched the analysis finish in this app process, every photo must count as
+    /// analysed: a partial count is an analysis that stopped early and said "fertig" (never
+    /// allowed), not something to repair with "Neu prüfen".
+    static func expectCompleteAnalysis(_ app: XCUIApplication, in test: String) {
+        guard let partial = partialAnalysis(app) else { return }
+        if partial.cutOff {
+            print("UI_STEP_MISSING \(test) complete analysis: '\(partial.label)'")
+            XCTFail("\(test): the analysis ended early at '\(partial.label)' (\(partial.unreadable) unreadable, \(partial.loads)) although this test watched it finish")
+        } else {
+            print("UI_STEP_MISSING \(test) readable demo photos: \(partial.unreadableText)")
+            XCTFail("\(test): \(partial.unreadableText)")
+        }
+    }
+
+    /// Only for a relaunch into a library seeded earlier (no welcome screen, no demo button):
+    /// an analysis cut off by a restarted test runner (the app was ended in the middle of it)
+    /// does not go on by itself in UI runs, which start no analysis at launch. The card says
     /// "58 von 246 Fotos analysiert" with "Neu prüfen", and `analysisIdle` takes that as done
     /// (run 43918684247: the runner was restarted in accessibility test 1, and tests 2 to 4
-    /// found "No suggestions yet"). "Neu prüfen" analyses the rest, as a user would.
-    /// German only (every caller launches the app in German).
+    /// found "No suggestions yet"). "Neu prüfen" analyses the rest, as a user would. Photos that
+    /// could not be read are no cut-off: checking again would not change them, so they fail at
+    /// once with their count instead of after a 20-minute wait.
     static func finishInterruptedAnalysis(_ app: XCUIApplication, in test: String) {
-        let partial = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ von [0-9.]+ Fotos analysiert")).firstMatch
-        guard partial.waitForExistence(timeout: 3) else { return }
-        print("UI_FACT \(test): the analysis was cut off at '\(partial.label)', checking again")
+        guard let partial = partialAnalysis(app) else { return }
+        guard partial.cutOff else {
+            print("UI_STEP_MISSING \(test) readable demo photos: \(partial.unreadableText)")
+            XCTFail("\(test): \(partial.unreadableText)")
+            return
+        }
+        print("UI_FACT \(test): the analysis was cut off at '\(partial.label)' (\(partial.unreadable) unreadable), checking again")
         let again = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Neu prüfen")).firstMatch
         guard again.waitForExistence(timeout: 5) else {
             print("UI_STEP_MISSING \(test) check again after a cut-off analysis")
@@ -142,9 +194,11 @@ enum UITestOnboarding {
             swipes += 1
         }
         again.tap()
-        let done = waitStable(timeout: 1200) { analysisIdle(app) && !partial.exists }
+        // Idle with a count that no longer leaves photos out (unreadable ones are judged below).
+        let done = waitStable(timeout: 1200) { analysisIdle(app) && partialAnalysis(app, wait: 0)?.cutOff != true }
         print(done ? "UI_STEP_OK \(test) cut-off analysis finished" : "UI_STEP_MISSING \(test) cut-off analysis finished")
         XCTAssertTrue(done, "\(test): the cut-off analysis did not finish after \"Neu prüfen\"")
+        if done { expectCompleteAnalysis(app, in: test) }
     }
 
     private static func allowPhotosIfAsked(_ app: XCUIApplication) {

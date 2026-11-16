@@ -46,12 +46,87 @@ final class ThumbnailCache {
     /// waited in turn: UI run 43930277920 measured the main thread blocked for up to 65 s
     /// right after a plan ran (the sorting show prefetches its photos while Photos writes),
     /// and the UI tests' accessibility queries timed out.
+    ///
+    /// Lookups wait in a queue and run one batch at a time (one fetch for all waiting ids), so a
+    /// screen full of thumbnails costs one database read and never a pile of blocked threads.
+    /// Each id is looked up once even if several cells ask; an id whose cells all went away
+    /// before its batch ran is skipped; an id Photos does not know is not asked again for a
+    /// few seconds (a deleted photo stays deleted, and a cell that asks again soon gets the
+    /// same answer).
     private func photoAsset(for id: AssetID) async -> ThumbnailRequest.Asset? {
-        let key = id.rawValue as NSString
-        if let known = assets.object(forKey: key) { return ThumbnailRequest.Asset(known) }
-        guard let fetched = await ThumbnailRequest.lookUp(id) else { return nil }
-        assets.setObject(fetched.value, forKey: key)
-        return fetched
+        let key = id.rawValue
+        // The empty id is the placeholder of cards that have no photo yet.
+        guard !key.isEmpty else { return nil }
+        if let known = assets.object(forKey: key as NSString) { return ThumbnailRequest.Asset(known) }
+        if let since = missing[key], ContinuousClock.now - since < Self.missingKept { return nil }
+        nextToken &+= 1
+        let token = nextToken
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                self.enqueue(key, token: token, continuation)
+            }
+        } onCancel: {
+            Task { @MainActor in self.stopWaiting(for: key, token: token) }
+        }
+    }
+
+    private struct Waiter {
+        let token: UInt64
+        let continuation: CheckedContinuation<ThumbnailRequest.Asset?, Never>
+    }
+    /// Cells waiting for an asset, by id; every waiter is resumed exactly once, always here
+    /// on the main actor and after leaving this list.
+    private var waiting: [String: [Waiter]] = [:]
+    /// Ids not yet in a batch, in the order they were asked for.
+    private var queued: [String] = []
+    private var lookingUp = false
+    private var nextToken: UInt64 = 0
+    private var missing: [String: ContinuousClock.Instant] = [:]
+    private static let missingKept = Duration.seconds(5)
+    /// One fetch reads at most this many ids, so a long wait for Photos stays one wait.
+    private static let batchLimit = 400
+
+    private func enqueue(_ key: String, token: UInt64, _ continuation: CheckedContinuation<ThumbnailRequest.Asset?, Never>) {
+        if Task.isCancelled {
+            continuation.resume(returning: nil)
+            return
+        }
+        if waiting[key] == nil { queued.append(key) }
+        waiting[key, default: []].append(Waiter(token: token, continuation: continuation))
+        guard !lookingUp else { return }
+        lookingUp = true
+        Task { await lookUpWaiting() }
+    }
+
+    private func stopWaiting(for key: String, token: UInt64) {
+        guard var waiters = waiting[key], let index = waiters.firstIndex(where: { $0.token == token }) else { return }
+        let waiter = waiters.remove(at: index)
+        waiting[key] = waiters.isEmpty ? nil : waiters
+        waiter.continuation.resume(returning: nil)
+    }
+
+    private func lookUpWaiting() async {
+        while !queued.isEmpty {
+            var seen = Set<String>()
+            let wanted = queued.filter { waiting[$0] != nil && seen.insert($0).inserted }
+            let ids = Array(wanted.prefix(Self.batchLimit))
+            queued = Array(wanted.dropFirst(Self.batchLimit))
+            guard !ids.isEmpty else { continue }
+            let found = await ThumbnailRequest.lookUp(ids)
+            let now = ContinuousClock.now
+            if missing.count > 1000 { missing = missing.filter { now - $0.value < Self.missingKept } }
+            for id in ids {
+                let asset = found[id]
+                if let asset {
+                    assets.setObject(asset.value, forKey: id as NSString)
+                    missing[id] = nil
+                } else {
+                    missing[id] = now
+                }
+                for waiter in waiting.removeValue(forKey: id) ?? [] { waiter.continuation.resume(returning: asset) }
+            }
+        }
+        lookingUp = false
     }
 }
 
@@ -68,16 +143,22 @@ enum ThumbnailRequest {
         init(_ value: PHAsset) { self.value = value }
     }
 
-    /// Asset lookups wait while Photos writes its database, so they run on their own queue:
-    /// neither the main thread nor the few threads of Swift's shared pool (the analysis runs
-    /// there) wait for them.
-    private static let lookups = DispatchQueue(label: "app.albumist.thumbnail-lookup", qos: .userInitiated, attributes: .concurrent)
+    /// Asset lookups wait while Photos writes its database, so they run on their own serial
+    /// queue: neither the main thread nor the few threads of Swift's shared pool (the analysis
+    /// runs there) wait for them, and only one thread ever does.
+    private static let lookups = DispatchQueue(label: "app.albumist.thumbnail-lookup", qos: .userInitiated)
 
-    nonisolated static func lookUp(_ id: AssetID) async -> Asset? {
+    /// The assets Photos knows among `ids`, by local identifier, in one fetch.
+    nonisolated static func lookUp(_ ids: [String]) async -> [String: Asset] {
         await withCheckedContinuation { continuation in
             lookups.async {
-                let found = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject
-                continuation.resume(returning: found.map { Asset($0) })
+                let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+                var found: [String: Asset] = [:]
+                for index in 0..<result.count {
+                    let asset = result.object(at: index)
+                    found[asset.localIdentifier] = Asset(asset)
+                }
+                continuation.resume(returning: found)
             }
         }
     }
@@ -172,7 +253,12 @@ struct AssetThumbnail: View {
                 }
             }
             .clipped()
-            .task(id: id) { image = await ThumbnailCache.shared.image(for: id, side: side) }
+            .task(id: id) {
+                let loaded = await ThumbnailCache.shared.image(for: id, side: side)
+                // A cell that moved on to another photo keeps the new one's image.
+                guard !Task.isCancelled else { return }
+                image = loaded
+            }
             .accessibilityHidden(true)
     }
 }

@@ -183,7 +183,9 @@ final class SortlyFlowUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
         while Date() < deadline {
+            let asked = Date()
             streak = condition() ? streak + 1 : 0
+            UITestOnboarding.reportSlowCheck(since: asked)
             if streak >= stableChecks { return true }
             sleep(2)
         }

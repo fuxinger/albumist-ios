@@ -74,13 +74,17 @@ enum UITestOnboarding {
         }
         guard button("Los geht").waitForExistence(timeout: 10) else {
             let demo = button("Beispiel-Mediathek anlegen")
-            guard demo.waitForExistence(timeout: 5) else { return false }
+            guard demo.waitForExistence(timeout: 5) else {
+                finishInterruptedAnalysis(app, in: test)
+                return false
+            }
             print("UI_FACT \(test): past the onboarding without the demo library, creating it first")
             demo.tap()
             XCTAssertTrue(demoLibraryCreated(app), "\(test): demo library not created")
             let idle = waitStable(timeout: 1200) { analysisIdle(app) }
             print(idle ? "UI_STEP_OK \(test) demo library" : "UI_STEP_MISSING \(test) demo library")
             XCTAssertTrue(idle, "\(test): the analysis of the demo library did not finish")
+            finishInterruptedAnalysis(app, in: test)
             return true
         }
         print("UI_FACT \(test): the app is at its welcome screen, onboarding first")
@@ -110,7 +114,37 @@ enum UITestOnboarding {
         let idle = waitStable(timeout: 1200) { analysisIdle(app) }
         print(idle ? "UI_STEP_OK \(test) onboarding and demo library" : "UI_STEP_MISSING \(test) onboarding and demo library")
         XCTAssertTrue(idle, "\(test): the analysis of the demo library did not finish")
+        finishInterruptedAnalysis(app, in: test)
         return true
+    }
+
+    /// An analysis cut off by a restarted test runner (the app was ended in the middle of it)
+    /// does not go on by itself in UI runs, which start no analysis at launch: the card says
+    /// "58 von 246 Fotos analysiert" with "Neu prüfen", and `analysisIdle` takes that as done
+    /// (run 43918684247: the runner was restarted in accessibility test 1, and tests 2 to 4
+    /// found "No suggestions yet"). "Neu prüfen" analyses the rest, as a user would.
+    /// German only (every caller launches the app in German).
+    static func finishInterruptedAnalysis(_ app: XCUIApplication, in test: String) {
+        let partial = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ von [0-9.]+ Fotos analysiert")).firstMatch
+        guard partial.waitForExistence(timeout: 3) else { return }
+        print("UI_FACT \(test): the analysis was cut off at '\(partial.label)', checking again")
+        let again = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Neu prüfen")).firstMatch
+        guard again.waitForExistence(timeout: 5) else {
+            print("UI_STEP_MISSING \(test) check again after a cut-off analysis")
+            XCTFail("\(test): an analysis was cut off and the overview offers no \"Neu prüfen\"")
+            return
+        }
+        // Below other cards the button can sit under the tab bar, where a tap lands on the bar.
+        let tabs = app.tabBars.firstMatch
+        var swipes = 0
+        while swipes < 4, tabs.exists, again.frame.maxY > tabs.frame.minY {
+            app.swipeUp()
+            swipes += 1
+        }
+        again.tap()
+        let done = waitStable(timeout: 1200) { analysisIdle(app) && !partial.exists }
+        print(done ? "UI_STEP_OK \(test) cut-off analysis finished" : "UI_STEP_MISSING \(test) cut-off analysis finished")
+        XCTAssertTrue(done, "\(test): the cut-off analysis did not finish after \"Neu prüfen\"")
     }
 
     private static func allowPhotosIfAsked(_ app: XCUIApplication) {
@@ -138,8 +172,10 @@ enum UITestOnboarding {
     static func demoLibraryCreated(_ app: XCUIApplication, timeout: TimeInterval = 600) -> Bool {
         let seeding = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Beispielfotos werden angelegt")).firstMatch
         let offer = app.buttons["Beispiel-Mediathek anlegen"]
+        let started = Date()
         let created = waitStable(timeout: timeout, interval: 5) { !seeding.exists && !offer.exists }
         if !created { print("UI_STEP_MISSING demo library created (timeout \(Int(timeout)) s)") }
+        print("UI_TIMING demo library \(Int(Date().timeIntervalSince(started))) s")
         return created
     }
 
@@ -148,10 +184,20 @@ enum UITestOnboarding {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
         while Date() < deadline {
+            let asked = Date()
             streak = condition() ? streak + 1 : 0
+            reportSlowCheck(since: asked)
             if streak >= 3 { return true }
             sleep(interval)
         }
         return false
+    }
+
+    /// One check (a few queries) normally answers in well under a second. A slow one is printed
+    /// with the time, so a run whose queries time out shows whether the answers slowed down
+    /// first or stopped at once (compare `UI_MAIN_STALL` / `UI_PROCESS_STALL` from the app).
+    static func reportSlowCheck(since asked: Date) {
+        let took = Date().timeIntervalSince(asked)
+        if took >= 5 { print("UI_SLOW_QUERY a check took \(Int(took)) s") }
     }
 }

@@ -174,6 +174,7 @@ final class AccessibilityUITests: XCTestCase {
             XCTFail("No \"Beispiel-Mediathek anlegen\" after the onboarding on a fresh simulator")
         }
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
+        UITestOnboarding.finishInterruptedAnalysis(app, in: checking ? "accessibility test 1" : "accessibility")
         return welcome
     }
 
@@ -295,7 +296,7 @@ final class AccessibilityUITests: XCTestCase {
         }
 
         // Travel atlas and the share image
-        if tap(button(w.atlas), "\(tag) open atlas", timeout: 20) {
+        if tap(button(w.atlas), "\(tag) open atlas", timeout: 20), opened(app.navigationBars[w.atlas], "\(tag) atlas") {
             sleep(3)
             check("\(tag) atlas", english: english)
             if !short {
@@ -742,15 +743,33 @@ final class AccessibilityUITests: XCTestCase {
             XCTFail("Missing: \(step)")
             return false
         }
+        // Content under the tab bar also counts as hittable, but a tap there lands on the bar
+        // (contrast run 43918684247: the atlas teaser sat under the tab bar on a fresh simulator,
+        // the tap opened nothing, and `back()` then tapped the overview's settings button).
         let bar = app.navigationBars.firstMatch
+        let tabs = app.tabBars.firstMatch
         var swipes = 0
         while swipes < 10 {
             let underBar = bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY
-            if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
+            let underTabs = tabs.exists && !tabs.frame.contains(element.frame) && element.frame.midY > tabs.frame.minY
+            if underBar { app.swipeDown() } else if underTabs || !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
         element.tap()
         print("UI_STEP_OK \(step)")
+        return true
+    }
+
+    /// A screen that was tapped open is there. Only such a screen is left with `back()`: on the
+    /// overview the first button of the navigation bar is the settings button, and `back()`
+    /// there opened the settings in the middle of the walk (contrast run 43918684247).
+    private func opened(_ screen: XCUIElement, _ step: String) -> Bool {
+        guard screen.waitForExistence(timeout: 10) else {
+            print("UI_STEP_MISSING \(step) opened")
+            shot("a11y-x-missing-" + slug("\(step) opened"))
+            XCTFail("Not opened: \(step)")
+            return false
+        }
         return true
     }
 
@@ -816,7 +835,9 @@ final class AccessibilityUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
         while Date() < deadline {
+            let asked = Date()
             streak = condition() ? streak + 1 : 0
+            UITestOnboarding.reportSlowCheck(since: asked)
             if streak >= stableChecks { return true }
             sleep(2)
         }

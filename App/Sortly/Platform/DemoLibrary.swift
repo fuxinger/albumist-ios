@@ -105,7 +105,7 @@ final class DemoLibrary {
         }
         total = specs.count
 
-        let sources = SourceImages(images: await sampleImages())
+        let sources = SourceImages(images: await Self.sampleImages())
         var number = 1000
         for start in stride(from: 0, to: specs.count, by: 15) {
             // Cropping, drawing and JPEG encoding take seconds per batch. Off the main actor,
@@ -115,7 +115,10 @@ final class DemoLibrary {
             // The random generator is handed through each batch in order, so the library stays
             // the same every time.
             let part = Array(specs[start..<min(start + 15, specs.count)])
-            let made = await Task.detached(priority: .userInitiated) { [rng, number] in
+            // Utility priority: the main thread, the Photos service writing the batch before and
+            // the accessibility snapshots of a UI test come first (the demo library takes about
+            // a minute either way).
+            let made = await Task.detached(priority: .utility) { [rng, number] in
                 Self.items(part, sources: sources, firstNumber: number, rng: rng)
             }.value
             rng = made.rng
@@ -175,7 +178,9 @@ final class DemoLibrary {
 
     // MARK: Images
 
-    private func sampleImages() async -> [UIImage] {
+    /// Off the main actor: the fetch is a synchronous call to the Photos service, which is
+    /// busy with the library being written.
+    nonisolated private static func sampleImages() async -> [UIImage] {
         let options = PHFetchOptions()
         options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
         options.fetchLimit = 12
@@ -199,20 +204,24 @@ final class DemoLibrary {
         var chunk: [Item] = []
         for spec in specs {
             number += 1
-            switch spec {
-            case let .photo(spot, spread, day):
-                let location = CLLocation(
-                    coordinate: CLLocationCoordinate2D(latitude: spot.lat + rng.next(in: -spread...spread),
-                                                       longitude: spot.lon + rng.next(in: -spread...spread)),
-                    altitude: 0, horizontalAccuracy: 8, verticalAccuracy: 8, timestamp: day)
-                let source = sources.images.isEmpty ? Self.fallbackImage() : sources.images[Int(rng.next(in: 0...999)) % sources.images.count]
-                let image = Self.crop(source, rng: &rng)
-                chunk.append(Item(data: image.jpegData(compressionQuality: 0.85)!, type: .jpeg, name: "IMG_\(number).JPG", date: day, location: location))
-            case let .screenshot(lines, day):
-                chunk.append(Item(data: Self.screenshotPNG(lines), type: .png, name: "IMG_\(number).PNG", date: day, location: nil))
-            case let .document(lines, day):
-                chunk.append(Item(data: Self.documentPhoto(lines).jpegData(compressionQuality: 0.85)!, type: .jpeg,
-                                  name: "IMG_\(number).JPG", date: day, location: nil))
+            // Each photo's bitmaps (a 1600 × 1200 rendering, its source crop) are freed before
+            // the next one; without a pool a batch kept all of them until the task ended.
+            autoreleasepool {
+                switch spec {
+                case let .photo(spot, spread, day):
+                    let location = CLLocation(
+                        coordinate: CLLocationCoordinate2D(latitude: spot.lat + rng.next(in: -spread...spread),
+                                                           longitude: spot.lon + rng.next(in: -spread...spread)),
+                        altitude: 0, horizontalAccuracy: 8, verticalAccuracy: 8, timestamp: day)
+                    let source = sources.images.isEmpty ? Self.fallbackImage() : sources.images[Int(rng.next(in: 0...999)) % sources.images.count]
+                    let image = Self.crop(source, rng: &rng)
+                    chunk.append(Item(data: image.jpegData(compressionQuality: 0.85)!, type: .jpeg, name: "IMG_\(number).JPG", date: day, location: location))
+                case let .screenshot(lines, day):
+                    chunk.append(Item(data: Self.screenshotPNG(lines), type: .png, name: "IMG_\(number).PNG", date: day, location: nil))
+                case let .document(lines, day):
+                    chunk.append(Item(data: Self.documentPhoto(lines).jpegData(compressionQuality: 0.85)!, type: .jpeg,
+                                      name: "IMG_\(number).JPG", date: day, location: nil))
+                }
             }
         }
         return (chunk, rng)

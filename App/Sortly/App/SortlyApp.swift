@@ -11,6 +11,8 @@ struct SortlyApp: App {
         BackgroundWork.register()
         // Before launch ends, so the tap on "Analyse fertig" that opened the app arrives.
         NotificationRouter.register()
+        // UI runs only: says in the log when the main thread or the whole app stood still.
+        MainThreadWatch.shared.start()
     }
 
     var body: some Scene {

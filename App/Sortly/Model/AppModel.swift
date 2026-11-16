@@ -316,8 +316,14 @@ final class AppModel {
     private(set) var homeChangeNotice: HomeChangeNotice?
     /// A change in "Dein Zuhause" is being applied (the suggestions are made again).
     private(set) var homeChangeRunning = false
-    /// An analysis was asked for while a change in "Dein Zuhause" was applied: it starts after.
-    @ObservationIgnored private var analysisAfterHomeChange = false
+    /// An analysis was asked for while a change in "Dein Zuhause" was applied: it starts after,
+    /// with what was asked for.
+    @ObservationIgnored private var analysisAfterHomeChange: QueuedAnalysis?
+    struct QueuedAnalysis {
+        var scope: OrganizationScope?
+        var mode: AnalysisPipeline.Mode
+        var userInitiated: Bool
+    }
     @ObservationIgnored private var homeCandidatesCache: [HomeCandidate]?
     @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
     var execution = ExecutionState()
@@ -727,9 +733,13 @@ final class AppModel {
     func startAnalysis(scope: OrganizationScope? = nil, mode: AnalysisPipeline.Mode = .incremental, userInitiated: Bool = false) {
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
         // A change in "Dein Zuhause" is being applied: the run starts right after it, so it
-        // never takes the run lock in the middle of the change.
+        // never takes the run lock in the middle of the change. Several requests meanwhile are
+        // one run; one started by a tap keeps what a tap gets (background time, retries reset).
         if homeChangeRunning {
-            analysisAfterHomeChange = true
+            let queued = analysisAfterHomeChange
+            analysisAfterHomeChange = QueuedAnalysis(scope: scope ?? queued?.scope,
+                                                     mode: mode == .incremental ? (queued?.mode ?? mode) : mode,
+                                                     userInitiated: userInitiated || (queued?.userInitiated ?? false))
             return
         }
         analysis.isRunning = true
@@ -1589,9 +1599,18 @@ final class AppModel {
         _ = await changeHome(home: { $0.confirming(place, date: .now) })
     }
 
-    /// A place the user chose under "Ändern": their home for every date no former home covers.
-    func chooseHome(_ candidate: HomeCandidate) async {
-        _ = await changeHome(home: { $0.choosing(candidate.homePlace, date: .now) })
+    /// A place the user chose under "Ändern", their home since `since` ("Seit wann wohnst du
+    /// dort?"). Before that day the detection decides, as after "Stimmt", so the years in the old
+    /// town never become a trip; former homes the user entered win for their periods.
+    func chooseHome(_ candidate: HomeCandidate, since: Date) async {
+        let from = Calendar.current.startOfDay(for: since)
+        _ = await changeHome(home: { $0.choosing(candidate.homePlace, from: from, date: .now) })
+    }
+
+    /// The proposed answer to "Seit wann wohnst du dort?": the first day of the latest stay near
+    /// the place in the user's photos (`HomeCandidates.stayStart`); today without one.
+    func homeStayStart(_ candidate: HomeCandidate) -> Date {
+        HomeCandidates.stayStart(near: candidate.center, assets: facts.lazy.map(\.asset)) ?? Calendar.current.startOfDay(for: .now)
     }
 
     /// "Kein Zuhause festlegen".
@@ -1642,8 +1661,7 @@ final class AppModel {
                             places: (RecurringPlaceAnswers) -> RecurringPlaceAnswers = { $0 }) async -> Bool {
         guard let pipeline else { return false }
         guard canChangeHome else {
-            message = AppMessage(title: String(localized: "Gerade nicht möglich"),
-                                 text: String(localized: "Albumist ist gerade beschäftigt. Versuch es gleich noch einmal."))
+            message = .busy
             return false
         }
         homeChangeRunning = true
@@ -1653,9 +1671,9 @@ final class AppModel {
         defer {
             assertion.end()
             homeChangeRunning = false
-            if analysisAfterHomeChange {
-                analysisAfterHomeChange = false
-                startAnalysis()
+            if let queued = analysisAfterHomeChange {
+                analysisAfterHomeChange = nil
+                startAnalysis(scope: queued.scope, mode: queued.mode, userInitiated: queued.userInitiated)
             }
         }
         do {
@@ -1801,8 +1819,12 @@ final class AppModel {
 
     private func claimExecution() -> Bool {
         // Not while a change in "Dein Zuhause" makes the suggestions again: a plan must not see
-        // its suggestions change under it.
-        guard !executionClaimed, !execution.isRunning, !homeChangeRunning else { return false }
+        // its suggestions change under it. Said, not silently ignored (apply, undo, resume).
+        if homeChangeRunning {
+            message = .busy
+            return false
+        }
+        guard !executionClaimed, !execution.isRunning else { return false }
         executionClaimed = true
         return true
     }
@@ -2480,6 +2502,12 @@ final class AppModel {
     /// "Analyse neu aufbauen": a running analysis stops first and is waited for, so it cannot
     /// write old results into the fresh tables; Spotlight forgets the old results too.
     func resetAnalysis() async {
+        // Not while a change in "Dein Zuhause" makes the suggestions again (the pipeline would
+        // wait for it; the settings screen and the overview would show it half done).
+        if homeChangeRunning {
+            message = .busy
+            return
+        }
         // No new run starts while the tables are cleared.
         analysisResetting = true
         defer { analysisResetting = false }
@@ -2537,5 +2565,12 @@ struct AppMessage: Equatable {
     /// Something did not work.
     static func failure(_ text: String) -> AppMessage {
         AppMessage(title: String(localized: "Das hat nicht geklappt"), text: text)
+    }
+
+    /// Asked for while Albumist cannot do it (a change in "Dein Zuhause", an analysis or a plan
+    /// is busy): try again in a moment.
+    static var busy: AppMessage {
+        AppMessage(title: String(localized: "Gerade nicht möglich"),
+                   text: String(localized: "Albumist ist gerade beschäftigt. Versuch es gleich noch einmal."))
     }
 }

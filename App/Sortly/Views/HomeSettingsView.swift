@@ -120,8 +120,7 @@ struct HomeSettingsView: View {
             }
             switch model.homeSettings.currentMode {
             case .confirmed:
-                homeRow(title: HomeText.area(model.homeSettings.confirmed?.components),
-                        detail: model.homeSettings.confirmedFrom == nil ? Text("Von dir festgelegt") : Text("Von dir bestätigt"), symbol: "house.fill")
+                homeRow(title: HomeText.area(model.homeSettings.confirmed?.components), detail: Text("Von dir festgelegt"), symbol: "house.fill")
                 // The newest photos point somewhere else (moved since): said, never changed by itself.
                 if let detected = model.detectedHomePlace, let chosen = model.homeSettings.confirmed,
                    GeoMath.distance(detected.center, chosen.center) > HomeText.radiusMeters {
@@ -208,7 +207,8 @@ struct HomeSettingsView: View {
             HomePlacePicker(purpose: .current) { choice in
                 Task {
                     switch choice {
-                    case .place(let candidate): await model.chooseHome(candidate)
+                    case .home(let candidate, let since): await model.chooseHome(candidate, since: since)
+                    case .place: break
                     case .noHome: await model.chooseNoHome()
                     case .automatic: await model.chooseAutomaticHome()
                     }
@@ -288,13 +288,16 @@ struct HomeSettingsView: View {
 /// Choose a place from the user's own photos: towns (offline, regions), searchable.
 struct HomePlacePicker: View {
     enum Purpose { case current, former, place }
-    enum Choice { case place(HomeCandidate), noHome, automatic }
+    /// `home`: the current home with the day the user moved there; `place`: a place for a form.
+    enum Choice { case home(HomeCandidate, since: Date), place(HomeCandidate), noHome, automatic }
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     var purpose: Purpose
     var onPick: (Choice) -> Void
     @State private var query = ""
+    /// The town picked as the current home, asking since when.
+    @State private var askingSince: HomeCandidate?
 
     private var candidates: [HomeCandidate] { HomeCandidates.filter(model.homeCandidates, query: query) }
     /// Picking the current home changes it at once: not while Albumist is busy. The other
@@ -332,8 +335,12 @@ struct HomePlacePicker: View {
                 }
                 ForEach(candidates) { candidate in
                     Button {
-                        onPick(.place(candidate))
-                        dismiss()
+                        if purpose == .current {
+                            askingSince = candidate
+                        } else {
+                            onPick(.place(candidate))
+                            dismiss()
+                        }
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(HomeText.short(candidate.components)).foregroundStyle(.primary)
@@ -352,6 +359,13 @@ struct HomePlacePicker: View {
         .searchable(text: $query, prompt: Text("Ort suchen"))
         .navigationTitle(purpose == .current ? Text("Zuhause wählen") : Text("Ort wählen"))
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $askingSince) { candidate in
+            HomeSinceSheet(candidate: candidate, proposed: model.homeStayStart(candidate)) { since in
+                askingSince = nil
+                onPick(.home(candidate, since: since))
+                dismiss()
+            }
+        }
     }
 
     private func choiceButton(_ choice: Choice, title: Text, detail: Text, symbol: String) -> some View {
@@ -380,6 +394,47 @@ struct HomePlacePicker: View {
         let days = String(localized: "\(candidate.photoDays) Tage mit Fotos")
         let region = parts.joined(separator: ", ")
         return parts.isEmpty ? days : String(localized: "\(region) · \(days)")
+    }
+}
+
+/// "Seit wann wohnst du dort?" after picking the current home under "Ändern": proposed from the
+/// photos (the start of the latest stay there), changeable. Before that day nothing changes.
+struct HomeSinceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var candidate: HomeCandidate
+    var onConfirm: (Date) -> Void
+    @State private var since: Date
+
+    init(candidate: HomeCandidate, proposed: Date, onConfirm: @escaping (Date) -> Void) {
+        self.candidate = candidate
+        self.onConfirm = onConfirm
+        _since = State(initialValue: min(proposed, .now))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("Ort", value: HomeText.short(candidate.components))
+                    DatePicker("Seit wann wohnst du dort?", selection: $since, in: ...Date.now, displayedComponents: .date)
+                        .accessibilityIdentifier("home.since")
+                } footer: {
+                    Text("Vorgeschlagen nach deinen Fotos. Fotos von davor misst Albumist weiter wie bisher, so wird die Zeit am alten Wohnort keine Reise.")
+                }
+            }
+            .navigationTitle("Zuhause festlegen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Festlegen") { onConfirm(since) }
+                        .accessibilityIdentifier("home.since.confirm")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

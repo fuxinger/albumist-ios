@@ -11643,16 +11643,6 @@
         }
       }
     },
-    "Von dir bestätigt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Confirmed by you"
-          }
-        }
-      }
-    },
     "Albumist kennt die Orte dort noch nicht. Sobald sie bekannt sind, kannst du dein Zuhause bestätigen." : {
       "localizations" : {
         "en" : {
@@ -11669,6 +11659,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist is busy right now. Please try again in a moment."
+          }
+        }
+      }
+    },
+    "Seit wann wohnst du dort?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Since when have you lived there?"
+          }
+        }
+      }
+    },
+    "Zuhause festlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Home"
+          }
+        }
+      }
+    },
+    "Festlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set"
+          }
+        }
+      }
+    },
+    "Vorgeschlagen nach deinen Fotos. Fotos von davor misst Albumist weiter wie bisher, so wird die Zeit am alten Wohnort keine Reise." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggested from your photos. Albumist keeps judging earlier photos as before, so the time where you lived before does not become a trip."
           }
         }
       }

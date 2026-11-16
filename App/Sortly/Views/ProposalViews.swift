@@ -373,7 +373,7 @@ struct ProposalDetailView: View {
             }
             Button("Ja, hier bin ich öfter") { answerOftenHere(true) }
                 .buttonStyle(SecondaryButtonStyle())
-                .disabled(model.analysis.isRunning || model.execution.isRunning)
+                .disabled(!model.canChangeHome)
                 .accessibilityIdentifier("proposal.oftenHere.yes")
             Button("Nein, das sind Reisen") { answerOftenHere(false) }
                 .buttonStyle(SecondaryButtonStyle())
@@ -390,7 +390,8 @@ struct ProposalDetailView: View {
         }
     }
 
-    /// A "Ja" makes this suggestion go away with the analysis it starts: back to the list.
+    /// A "Ja" makes this suggestion go away when the suggestions are made again (like every
+    /// change in "Dein Zuhause"): back to the list.
     private func answerOftenHere(_ oftenHere: Bool) {
         Task {
             if await model.answerRecurringPlace(oftenHere, for: proposal), oftenHere { dismiss() }

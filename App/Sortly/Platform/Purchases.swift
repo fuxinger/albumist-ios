@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import StoreKit
 import SortlyCore
+import UIKit
 
 /// One-time unlock (decision 2026-11-13): free download, the first albums are free, then
 /// a single non-consumable purchase unlocks everything. No subscription, no tracking.
@@ -118,21 +119,84 @@ final class Purchases {
 
     @ObservationIgnored private var updates: Task<Void, Never>?
 
+    /// What this run of the app was told about the unlock's transactions, merged with every
+    /// read of StoreKit's list (see `PurchaseRules.SessionKnowledge`).
+    @ObservationIgnored private var known = PurchaseRules.SessionKnowledge()
+
+    /// A purchase or restore that never returns would keep Buy and Restore disabled until the
+    /// next launch; after this time they work again (the late answer is still handled).
+    @ObservationIgnored var purchaseTimeLimit: Duration = .seconds(120)
+    @ObservationIgnored private var attempt = 0
+
+    #if DEBUG
+    /// Unit tests only (release builds cannot replace the sheet): the StoreKit test session in
+    /// place of Apple's purchase sheet. In the test host the sheet never appears and
+    /// `Product.purchase()` never returns (CI runs 43763150106 and 43764929910, also with the
+    /// window scene named), so the tests buy through the session and everything around this
+    /// one call stays the app's code.
+    @ObservationIgnored var confirmPurchase: (@MainActor (Product) async throws -> Product.PurchaseResult)?
+    #endif
+
+    /// Apple's purchase sheet, shown in the window scene on screen (Apple's guidance since
+    /// iOS 17 is to name the scene instead of leaving StoreKit to look for one).
+    private func confirm(_ product: Product) async throws -> Product.PurchaseResult {
+        #if DEBUG
+        if let confirmPurchase { return try await confirmPurchase(product) }
+        #endif
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        if let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first {
+            return try await product.purchase(confirmIn: scene)
+        }
+        return try await product.purchase()
+    }
+
+    /// Marks a purchase or restore as running, with the time limit above. Returns the
+    /// attempt's number for `endAttempt`.
+    private func beginAttempt() -> Int {
+        attempt += 1
+        let mine = attempt
+        isPurchasing = true
+        let limit = purchaseTimeLimit
+        Task { [weak self] in
+            try? await Task.sleep(for: limit)
+            self?.endAttempt(mine)
+        }
+        return mine
+    }
+
+    /// Only the attempt still running ends it: a late end of an older one never re-enables
+    /// the buttons during a newer purchase.
+    private func endAttempt(_ mine: Int) {
+        if attempt == mine { isPurchasing = false }
+    }
+
+    /// Unit tests: stops the transaction listener (each test's own Purchases object).
+    func stop() {
+        updates?.cancel()
+        updates = nil
+    }
+
+    /// Debug builds hosting the unit tests: the app's own instance stays away from the App
+    /// Store, so the StoreKit tests (PurchaseStoreKitTests) talk to their test session only
+    /// and nothing the host asked the real App Store at launch gets in between.
+    static var hostsUnitTests: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        #else
+        false
+        #endif
+    }
+
     func start() {
-        guard updates == nil else { return }
+        guard updates == nil, !(Self.hostsUnitTests && self === Purchases.shared) else { return }
         updates = Task { [weak self] in
             // A purchase approved later (Ask to Buy), made on another device, refunded or no
-            // longer shared by the family arrives here: the entitlements are read again.
+            // longer shared by the family arrives here and is applied (see `apply(update:)`);
+            // the transaction is finished afterwards (see `finishLater`).
             for await result in Transaction.updates {
-                switch result {
-                case .verified(let transaction):
-                    await transaction.finish()
-                    guard let self else { return }
-                    await self.refreshEntitlements()
-                    if self.isUnlocked { self.lastError = nil }
-                case .unverified(let transaction, _):
-                    await transaction.finish()
-                }
+                guard let self else { return }
+                if case .verified(let transaction) = result { await self.apply(update: transaction) }
+                Self.finishLater(result.unsafePayloadValue)
             }
         }
         Task {
@@ -155,6 +219,26 @@ final class Purchases {
         if product == nil { await loadProduct() }
     }
 
+    /// A transaction that changed (approved, bought elsewhere, refunded, sharing ended). The
+    /// update itself decides: right after it StoreKit may not list the change in
+    /// `currentEntitlements` yet (in the Xcode test environment a purchase was missing there
+    /// right after it was made, CI run 43772050228), so reading the list alone could miss an
+    /// approval or keep a refunded purchase unlocked.
+    func apply(update transaction: Transaction) async {
+        guard transaction.productID == productID else { return }
+        let revoked = transaction.revocationDate != nil
+        known.saw(transactionID: transaction.id, productID: transaction.productID, isRevoked: revoked, unlockProductID: productID)
+        if !revoked {
+            isUnlocked = true
+            lastError = nil
+        } else {
+            // Revoked: another entitlement (bought by the user and shared) may still unlock.
+            await refreshEntitlements()
+        }
+    }
+
+    /// StoreKit's list, merged with what this run was told (`known`): a read that started
+    /// before a purchase, approval or refund cannot undo it.
     func refreshEntitlements() async {
         var entitlements: [PurchaseRules.Entitlement] = []
         for await result in Transaction.currentEntitlements {
@@ -162,25 +246,26 @@ final class Purchases {
             case .verified(let transaction):
                 entitlements.append(PurchaseRules.Entitlement(
                     productID: transaction.productID, isVerified: true, isRevoked: transaction.revocationDate != nil,
-                    isFamilyShared: transaction.ownershipType == .familyShared))
+                    isFamilyShared: transaction.ownershipType == .familyShared, transactionID: transaction.id))
             case .unverified(let transaction, _):
-                entitlements.append(PurchaseRules.Entitlement(productID: transaction.productID, isVerified: false))
+                entitlements.append(PurchaseRules.Entitlement(productID: transaction.productID, isVerified: false,
+                                                              transactionID: transaction.id))
             }
         }
-        isUnlocked = PurchaseRules.isUnlocked(by: entitlements, productID: productID)
+        isUnlocked = known.isUnlocked(listed: entitlements, productID: productID)
     }
 
     func purchase() async {
         guard !isPurchasing else { return }
-        isPurchasing = true
-        defer { isPurchasing = false }
+        let mine = beginAttempt()
+        defer { endAttempt(mine) }
         await loadProductIfNeeded()
         guard let product else {
             lastError = String(localized: "Der Kauf ist gerade nicht verfügbar. Bitte versuche es später noch einmal.")
             return
         }
         do {
-            await handle(try await product.purchase())
+            await handle(try await confirm(product))
         } catch {
             handle(error)
         }
@@ -192,13 +277,16 @@ final class Purchases {
         case .success(let verification):
             switch verification {
             case .verified(let transaction):
-                await transaction.finish()
-                if transaction.productID == productID && transaction.revocationDate == nil { isUnlocked = true }
+                if transaction.productID == productID && transaction.revocationDate == nil {
+                    known.saw(transactionID: transaction.id, productID: transaction.productID, isRevoked: false, unlockProductID: productID)
+                    isUnlocked = true
+                }
                 lastError = nil
+                Self.finishLater(transaction)
             case .unverified(let transaction, _):
                 // Never unlock on an unverified receipt, but close the transaction so
                 // it does not come back on every launch.
-                await transaction.finish()
+                Self.finishLater(transaction)
                 lastError = String(localized: "Der Kauf konnte nicht bestätigt werden. Tippe auf „Kauf wiederherstellen“ oder versuche es später noch einmal.")
             }
         case .pending:
@@ -209,6 +297,15 @@ final class Purchases {
         @unknown default:
             break
         }
+    }
+
+    /// Apple's order: deliver what was bought, then finish the transaction. The finish runs on
+    /// its own so it never holds up the unlock or the purchase call: StoreKit may take long
+    /// or fail with it (the Xcode test environment logged "Error finishing transaction ...
+    /// StoreKitInternalError.unknown", CI run 43770704675). An unfinished transaction only
+    /// comes back through `Transaction.updates` at the next start and is finished then.
+    private static func finishLater(_ transaction: Transaction) {
+        Task.detached { await transaction.finish() }
     }
 
     /// A purchase or restore that threw.
@@ -240,8 +337,8 @@ final class Purchases {
     /// usually knows the purchase without it; the sync asks the App Store when it does not.
     func restore() async {
         guard !isPurchasing else { return }
-        isPurchasing = true
-        defer { isPurchasing = false }
+        let mine = beginAttempt()
+        defer { endAttempt(mine) }
         var syncError: (any Error)?
         do { try await AppStore.sync() } catch { syncError = error }
         await refreshEntitlements()

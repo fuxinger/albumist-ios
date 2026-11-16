@@ -76,7 +76,8 @@ Produkt-ID `app.albumist.ios.unlock`.
   mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
   Archiv nicht mehr und schlägt absichtlich fehl.
 - Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,
-  daneben die Build-Nummer `CFBundleVersion`). Vor dem Hochladen prüft der Lauf beides und dass die
-  App-Datei Byte für Byte die archivierte ist. Gebaut wird mit dem festgelegten Xcode aus
+  daneben die Build-Nummer `CFBundleVersion` und das Xcode `DTXcodeBuild`). Vor dem Hochladen prüft
+  der Lauf alle drei und dass jede Datei der App Byte für Byte die archivierte ist (Liste aller
+  Dateien mit SHA-256, verglichen vor dem Signieren, weil das Signieren die App-Datei ändert). Gebaut wird mit dem festgelegten Xcode aus
   `.github/toolchain.json`, nie mit einer Beta. Nach dem Hochladen trägt der Commit das Git-Tag
   `build-<Nummer>` (`git show build-41` zeigt den Code von Build 41).

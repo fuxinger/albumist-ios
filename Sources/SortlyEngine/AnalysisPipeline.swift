@@ -214,6 +214,10 @@ public actor AnalysisPipeline {
     /// Bumped whenever the albums changed outside a run (a plan was applied): a run that
     /// computed its matches before that matches again before it saves them.
     private var albumGeneration = 0
+    /// Bumped whenever "Dein Zuhause" or the places the user is often at changed: a run that
+    /// detected its trips before that detects them again before it makes suggestions, so its
+    /// suggestions never undo the change.
+    private var homeGeneration = 0
     /// Online place lookups per normal run; the rest waits for the overnight refinement run.
     /// Keeps the first analysis from spending up to an hour on town names before photos are
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
@@ -432,6 +436,7 @@ public actor AnalysisPipeline {
         // N von N" meanwhile (simulated full run: step 2 was first shown when it was done).
         onProgress(Progress(stage: .patterns, completed: 0, total: 1))
         let all = try await store.allAssets()
+        var patternsGeneration = homeGeneration
         var (trips, frequent) = try await detectPatterns(all: all)
         report.completedStages.append(.patterns)
 
@@ -479,6 +484,7 @@ public actor AnalysisPipeline {
         // analysis, which takes hours on a large library. The full set replaces them later;
         // suggestion ids are stable, so decisions made in between stay valid.
         if contentTotal > 0, try await latestProposals() == nil {
+            if let fresh = try await patternsAfterAHomeChange(since: &patternsGeneration, all: all) { (trips, frequent) = fresh }
             let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
             _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope, early: true)
             report.earlyProposals = true
@@ -644,6 +650,7 @@ public actor AnalysisPipeline {
         // 7. Proposals
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
         onProgress(Progress(stage: .proposals, completed: 0, total: 0))
+        if let fresh = try await patternsAfterAHomeChange(since: &patternsGeneration, all: all) { (trips, frequent) = fresh }
         let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope).snapshot
         report.proposals = snapshot.proposals.count
         report.completedStages.append(.proposals)
@@ -655,6 +662,16 @@ public actor AnalysisPipeline {
 
     /// Step 2: trips, the places the user is often at, frequent places and the home, from time
     /// and GPS alone (no network, seconds even for a large library). Stored as it goes.
+    /// Trips and places detected again when "Dein Zuhause" or the places the user is often at
+    /// changed since `generation` (a run that was busy meanwhile follows the change); `nil` when
+    /// nothing changed.
+    private func patternsAfterAHomeChange(since generation: inout Int, all: [AssetSnapshot]) async throws -> (trips: [Trip], frequent: [FrequentPlace])? {
+        guard generation != homeGeneration else { return nil }
+        generation = homeGeneration
+        let (trips, frequent) = try await detectPatterns(all: all)
+        return (try await inDestinationTime(trips, all: all), frequent)
+    }
+
     private func detectPatterns(all: [AssetSnapshot]) async throws -> (trips: [Trip], frequent: [FrequentPlace]) {
         let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
         let answers = try await recurringPlaceAnswers()
@@ -1128,6 +1145,7 @@ public actor AnalysisPipeline {
 
     public func setRecurringPlaceAnswers(_ answers: RecurringPlaceAnswers) async throws {
         try await store.setValue(answers, forKey: Key.recurringPlaces)
+        homeGeneration += 1
     }
 
     /// What the last analysis found about places visited again and again.
@@ -1146,6 +1164,7 @@ public actor AnalysisPipeline {
     /// Stores the settings; `resuggest()` applies them.
     public func setHomeSettings(_ home: HomeSettings) async throws {
         try await store.setValue(home, forKey: Key.homeSettings)
+        homeGeneration += 1
     }
 
     /// The home Albumist found by itself in the last analysis.

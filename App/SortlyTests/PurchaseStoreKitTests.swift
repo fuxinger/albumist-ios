@@ -797,13 +797,18 @@ struct StoreKitStepTimedOut: Error, CustomStringConvertible {
 /// did not answer within 30 s. The tests after it still met a slow environment (a session
 /// buy that did not answer within 20 s), and from the fourth test on every step answered at
 /// once again: the environment was slow to come up, not broken. The whole app test run took
-/// 187 s there and 23 s in the re-run. So the environment is brought up here once, with a
-/// budget for a cold simulator, and every path the tests use is gone through once (session,
-/// product, a buy, StoreKit's list, clearing); the time it took is printed. After it, every
-/// step of a test keeps its own limit (30 s, a buy 20 s).
+/// 187 s there and 23 s in the re-run. Measured here in CI run 43969714929: the first session
+/// set-up on the fresh simulator took 18.5 s and finished, loading the product 0.6 s, a buy
+/// 0.15 s. So the first set-up gets a budget for a cold simulator, once, and the time it
+/// took is printed; after it, every step of a test keeps its own limit (30 s, a buy 20 s).
+///
+/// No purchase here: in that run a warm-up buy (cleared again) left StoreKit's own state
+/// behind (the next purchase, again transaction #0, was missing from the list for 10 s and
+/// no update reached any listener for a while), so every purchase stays inside its test.
 @MainActor
 enum StoreKitEnvironment {
-    /// For the first start on a just-booted simulator only.
+    /// For the first set-up on a just-booted simulator only (18.5 s measured on an idle one;
+    /// over 30 s while the other suites ran alongside).
     static let budget: Double = 180
     private static var bringingUp: Task<String?, Never>?
 
@@ -857,7 +862,7 @@ enum StoreKitEnvironment {
         let unlock = Purchases.unlockProductID
         do {
             let url = try PurchaseStoreKitTests.configurationURL()
-            let store = try await onSessionQueue("bring up the test session", seconds: left()) {
+            _ = try await onSessionQueue("bring up the test session", seconds: left()) {
                 let session = try SKTestSession(contentsOf: url)
                 StoreKitEnvironment.configure(session)
                 return PurchaseTestStore(session)
@@ -872,22 +877,6 @@ enum StoreKitEnvironment {
                 try await Task.sleep(for: .milliseconds(500))
             }
             done.append("product \(elapsed()) ms")
-            try await onSessionQueue("buy once", seconds: left()) { try store.session.buyProduct(productIdentifier: unlock) }
-            done.append("buy \(elapsed()) ms")
-            let seconds = left()
-            guard try await within("see the purchase in StoreKit's list", seconds: seconds + 1, { await StoreKitEnvironment.waitUntil(listed: true, unlock, seconds: seconds) }) else {
-                throw StoreKitStepTimedOut(description: "StoreKit never listed the purchase")
-            }
-            done.append("listed \(elapsed()) ms")
-            let held = try await onSessionQueue("clear the session", seconds: left()) {
-                store.session.clearTransactions()
-                return store.session.allTransactions().count
-            }
-            let rest = left()
-            guard held == 0, try await within("StoreKit lists no unlock", seconds: rest + 1, { await StoreKitEnvironment.waitUntil(listed: false, unlock, seconds: rest) }) else {
-                throw StoreKitStepTimedOut(description: "the purchase stayed after clearing (session holds \(held))")
-            }
-            done.append("cleared \(elapsed()) ms")
             storeKitTrace("StoreKit test environment up after \(elapsed()) ms (\(done.joined(separator: ", ")))")
             return nil
         } catch {

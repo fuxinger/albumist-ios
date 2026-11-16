@@ -94,7 +94,10 @@ public struct TripDetector: Sendable {
         }
 
         var segments: [[AssetSnapshot]] = []
+        /// Per segment: it starts where the user split a trip (Reise-Werkstatt).
+        var splitBefore: [Bool] = []
         var current: Segment?
+        var currentSplit = false
 
         func joinProtects(_ a: Date, _ b: Date) -> Bool {
             corrections.forcedJoins.contains { $0.contains(a) && $0.contains(b) }
@@ -119,9 +122,13 @@ public struct TripDetector: Sendable {
                     let cameHome = seg.firstHomeAfterLastAway.map { date.timeIntervalSince($0) > configuration.homeInterludeTolerance } ?? false
                     let protected = joinProtects(seg.lastAway, date)
                     let mustBreak = forcedBreakBetween(seg.lastAway, date)
-                    if mustBreak || (!protected && (gap > allowedGap || cameHome)) {
+                    let naturalBreak = !protected && (gap > allowedGap || cameHome)
+                    if mustBreak || naturalBreak {
                         segments.append(seg.members)
+                        splitBefore.append(currentSplit)
                         current = Segment(members: [asset], lastAway: date, lastCoordinate: coordinate)
+                        // Only the user's split made two parts here.
+                        currentSplit = mustBreak && !naturalBreak
                     } else {
                         seg.members.append(asset)
                         seg.lastAway = date
@@ -131,6 +138,7 @@ public struct TripDetector: Sendable {
                     }
                 } else {
                     current = Segment(members: [asset], lastAway: date, lastCoordinate: coordinate)
+                    currentSplit = false
                 }
             } else if var seg = current {
                 if seg.firstHomeAfterLastAway == nil {
@@ -139,29 +147,54 @@ public struct TripDetector: Sendable {
                 }
             }
         }
-        if let seg = current { segments.append(seg.members) }
+        if let seg = current {
+            segments.append(seg.members)
+            splitBefore.append(currentSplit)
+        }
 
-        let candidates = segments.filter { $0.count >= configuration.minPhotos }
+        // A trip the user split stays split into all its parts, however small a part is, as
+        // long as the whole trip was big enough to be found (audit 2, 2.1): the workshop
+        // promised exactly these parts.
+        var keep = segments.map { $0.count >= configuration.minPhotos }
+        var groupStart = 0
+        for index in segments.indices {
+            let endsGroup = index + 1 == segments.count || !splitBefore[index + 1]
+            guard endsGroup else { continue }
+            let group = groupStart...index
+            if group.count > 1, group.reduce(0, { $0 + segments[$1].count }) >= configuration.minPhotos {
+                for member in group { keep[member] = true }
+            }
+            groupStart = index + 1
+        }
+        let candidates = segments.indices.filter { keep[$0] }.map { segments[$0] }
         let nonGeo = assets
             .filter { $0.usableLocation == nil && $0.creationDate != nil && !$0.isScreenshotLike && ($0.kind == .image || $0.kind == .video) }
             .filter { !corrections.excludedAssets.contains($0.id) && !excludeFromInference($0) }
             .sorted { ($0.creationDate!, $0.id) < ($1.creationDate!, $1.id) }
+        let breaks = corrections.forcedBreaks.sorted()
 
         return candidates.map { members in
-            makeTrip(members, home: home, nonGeo: nonGeo)
+            makeTrip(members, home: home, nonGeo: nonGeo, breaks: breaks)
         }
     }
 
-    private func makeTrip(_ members: [AssetSnapshot], home: HabitualArea, nonGeo: [AssetSnapshot]) -> Trip {
+    private func makeTrip(_ members: [AssetSnapshot], home: HabitualArea, nonGeo: [AssetSnapshot], breaks: [Date]) -> Trip {
         let start = members.first!.creationDate!
         let end = members.last!.creationDate!
         let coordinates = members.map { $0.usableLocation! }
         let centroid = GeoMath.centroid(coordinates) ?? coordinates[0]
         let maxDistance = zip(members, coordinates).map { home.distanceToHome($1, at: $0.creationDate!) }.max() ?? 0
 
-        // Inferred members: binary search the time window.
-        let lower = start.addingTimeInterval(-configuration.inferenceTolerance)
-        let upper = end.addingTimeInterval(configuration.inferenceTolerance)
+        // Inferred members: binary search the time window. A split by the user is a hard
+        // edge: a photo without GPS belongs to the part on its side only (audit 2, 2.2).
+        var lower = start.addingTimeInterval(-configuration.inferenceTolerance)
+        var upper = end.addingTimeInterval(configuration.inferenceTolerance)
+        var upperIsOpen = false
+        if let edge = breaks.last(where: { $0 <= start }), edge > lower { lower = edge }
+        if let edge = breaks.first(where: { $0 > end }), edge <= upper {
+            upper = edge
+            upperIsOpen = true
+        }
         var lo = 0, hi = nonGeo.count
         while lo < hi {
             let mid = (lo + hi) / 2
@@ -169,15 +202,36 @@ public struct TripDetector: Sendable {
         }
         var inferred: [AssetID] = []
         var i = lo
-        while i < nonGeo.count, nonGeo[i].creationDate! <= upper {
+        while i < nonGeo.count, upperIsOpen ? nonGeo[i].creationDate! < upper : nonGeo[i].creationDate! <= upper {
             inferred.append(nonGeo[i].id)
             i += 1
         }
 
+        let (kind, stops) = Self.classify(dates: members.map { $0.creationDate! }, coordinates: coordinates, calendar: calendar)
+
+        return Trip(
+            id: .stable("trip", members.first!.id.rawValue),
+            start: start,
+            end: end,
+            geotaggedAssetIDs: members.map(\.id),
+            inferredAssetIDs: inferred,
+            centroid: centroid,
+            maxDistanceFromHomeMeters: maxDistance,
+            distinctStops: stops,
+            kind: kind
+        )
+    }
+
+    /// Kind of a trip from its photos (sorted by date) and the number of distinct overnight
+    /// stops. Days and evening hours are counted in `calendar`, which should use the
+    /// destination's time zone when it is known: an evening flight home across midnight is
+    /// still a day trip there.
+    public static func classify(dates: [Date], coordinates: [GeoCoordinate], calendar: Calendar) -> (kind: TripKind, stops: Int) {
+        guard let start = dates.first, let end = dates.last else { return (.dayTrip, 1) }
         // Distinct stops: ~25 km cells where photos were taken in the evening/night.
         var stopCells = Set<GeoCell>()
-        for (asset, c) in zip(members, coordinates) {
-            let hour = calendar.component(.hour, from: asset.creationDate!)
+        for (date, c) in zip(dates, coordinates) {
+            let hour = calendar.component(.hour, from: date)
             if hour >= 18 || hour < 6 { stopCells.insert(GeoCell(c, sizeMeters: 25_000)) }
         }
         let allCells = Set(coordinates.map { GeoCell($0, sizeMeters: 25_000) })
@@ -197,18 +251,30 @@ public struct TripDetector: Sendable {
         } else {
             kind = .vacation
         }
+        return (kind, max(stopCells.count, 1))
+    }
 
-        return Trip(
-            id: .stable("trip", members.first!.id.rawValue),
-            start: start,
-            end: end,
-            geotaggedAssetIDs: members.map(\.id),
-            inferredAssetIDs: inferred,
-            centroid: centroid,
-            maxDistanceFromHomeMeters: maxDistance,
-            distinctStops: max(stopCells.count, 1),
-            kind: kind
-        )
+    /// The trips with kind and stops counted in their destination's time zone (the most
+    /// common one among their photos' places), where that differs from `calendar`'s.
+    public static func inDestinationTime(_ trips: [Trip], assets: [AssetID: AssetSnapshot], timeZones: [AssetID: String], calendar: Calendar) -> [Trip] {
+        trips.map { trip in
+            var counts: [String: Int] = [:]
+            for id in trip.geotaggedAssetIDs { if let zone = timeZones[id] { counts[zone, default: 0] += 1 } }
+            guard let identifier = counts.max(by: { ($0.value, $1.key) < ($1.value, $0.key) })?.key,
+                  let zone = TimeZone(identifier: identifier), zone.identifier != calendar.timeZone.identifier else { return trip }
+            var local = calendar
+            local.timeZone = zone
+            let members = trip.geotaggedAssetIDs.compactMap { assets[$0] }
+                .compactMap { a -> (Date, GeoCoordinate)? in
+                    guard let date = a.creationDate, let c = a.usableLocation else { return nil }
+                    return (date, c)
+                }
+                .sorted { $0.0 < $1.0 }
+            guard !members.isEmpty else { return trip }
+            var result = trip
+            (result.kind, result.distinctStops) = classify(dates: members.map(\.0), coordinates: members.map(\.1), calendar: local)
+            return result
+        }
     }
 }
 
@@ -235,6 +301,13 @@ struct HabitualArea: Sendable {
     private let calendar: Calendar
     private var homesByDay: [Date: [Int]] = [:]
     private var globalHome: Int?
+    /// Photo days per cluster, ascending.
+    private var clusterDays: [[Date]] = []
+    private var requireSpread = false
+    /// A place only counts as home when its photo days inside the window lie at least this
+    /// far apart. A burst of holiday days (one trip, even a long one) never makes a place
+    /// "home", which matters for people who mostly take photos while travelling.
+    static let minimumHomeSpread: TimeInterval = 21 * 86_400
 
     init(assets: [AssetSnapshot], calendar: Calendar, windowDays: Int) {
         self.calendar = calendar
@@ -262,9 +335,16 @@ struct HabitualArea: Sendable {
         }
         clusterCentroids = result.clusters.map(\.centroid)
         days = dayPoints.enumerated().map { Day(day: $1.0, coordinate: $1.1, cluster: labels[$0]) }
+        clusterDays = Array(repeating: [], count: result.clusters.count)
+        for d in days where d.cluster >= 0 { clusterDays[d.cluster].append(d.day) }
+        // Spread is only demanded once some place shows it; a library of a few weeks keeps
+        // the plain majority rule (otherwise its home would turn into one long trip).
+        requireSpread = clusterDays.contains { ($0.last ?? .distantPast).timeIntervalSince($0.first ?? .distantPast) >= Self.minimumHomeSpread }
 
         var global: [Int: Int] = [:]
-        for d in days where d.cluster >= 0 { global[d.cluster, default: 0] += 1 }
+        for d in days where d.cluster >= 0 && isSpread(d.cluster, from: .distantPast, to: .distantFuture) {
+            global[d.cluster, default: 0] += 1
+        }
         if let best = global.max(by: { ($0.value, -$0.key) < ($1.value, -$1.key) }), best.value >= 5 { globalHome = best.key }
 
         // Sliding window over the sorted days: O(days) instead of O(days²).
@@ -280,7 +360,9 @@ struct HabitualArea: Sendable {
                 if days[lo].cluster >= 0 { counts[days[lo].cluster, default: 0] -= 1 }
                 lo += 1
             }
-            homesByDay[d.day] = Self.select(counts: counts.filter { $0.value > 0 }, total: hi - lo, fallback: globalHome)
+            let lower = d.day.addingTimeInterval(-window), upper = d.day.addingTimeInterval(window)
+            let candidates = counts.filter { $0.value > 0 && isSpread($0.key, from: lower, to: upper) }
+            homesByDay[d.day] = Self.select(counts: candidates, total: hi - lo, fallback: globalHome)
         }
     }
 
@@ -301,7 +383,21 @@ struct HabitualArea: Sendable {
             total += 1
             if d.cluster >= 0 { counts[d.cluster, default: 0] += 1 }
         }
-        return Self.select(counts: counts, total: total, fallback: globalHome)
+        return Self.select(counts: counts.filter { isSpread($0.key, from: lower, to: upper) }, total: total, fallback: globalHome)
+    }
+
+    /// True if the cluster's photo days between `lower` and `upper` span at least `minimumHomeSpread`.
+    private func isSpread(_ cluster: Int, from lower: Date, to upper: Date) -> Bool {
+        guard requireSpread else { return true }
+        let list = clusterDays[cluster]
+        var lo = 0, hi = list.count
+        while lo < hi { let mid = (lo + hi) / 2; if list[mid] < lower { lo = mid + 1 } else { hi = mid } }
+        let first = lo
+        lo = first; hi = list.count
+        while lo < hi { let mid = (lo + hi) / 2; if list[mid] <= upper { lo = mid + 1 } else { hi = mid } }
+        let last = lo - 1
+        guard first < list.count, last >= first else { return false }
+        return list[last].timeIntervalSince(list[first]) >= Self.minimumHomeSpread
     }
 
     private static func select(counts: [Int: Int], total: Int, fallback: Int?) -> [Int] {

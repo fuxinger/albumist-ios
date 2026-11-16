@@ -382,7 +382,9 @@ struct DecisionLifecycleTests {
     /// the photos of other years.
     @Test func completeAlbumOfADismissedSuggestionIsNotExtended() throws {
         let y19 = Set((0..<150).map { AssetID("it19-\($0)") }), y23 = Set((0..<150).map { AssetID("it23-\($0)") })
-        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: y19)
+        // Not named exactly like the country: an album called "Italien" goes to the country
+        // since the decision of 16.11. (ENTWURF Q8, sameNameWinsInThePipeline below).
+        let album = CollectionSnapshot(id: "it", title: "Urlaub in Italien", assetIDs: y19)
         let trip = AlbumProposal(id: SortlyID("t19"), kind: .trip, title: "Italien · Mai 2019", assetIDs: y19)
         let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
                                     folderPath: ["Länder"], assetIDs: y19.union(y23))
@@ -391,6 +393,21 @@ struct DecisionLifecycleTests {
         #expect(matches[trip.id]?.status == .alreadyComplete)
         let decision = ProposalDecision.recommended(for: country, match: matches[country.id])
         #expect(decision == .createNew(title: nil, folderPath: nil), "\(String(describing: matches[country.id]?.status))")
+    }
+
+    /// Decision Fuchs 16.11. (ENTWURF Q8): the user's "Italien" holds the dismissed 2019 trip
+    /// completely. The shown country "Italien" extends it anyway; the trip, matched together
+    /// with it, no longer keeps it.
+    @Test func sameNameWinsInThePipeline() throws {
+        let y19 = Set((0..<150).map { AssetID("it19-\($0)") }), y23 = Set((0..<150).map { AssetID("it23-\($0)") })
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: y19)
+        let trip = AlbumProposal(id: SortlyID("t19"), kind: .trip, title: "Italien · Mai 2019", assetIDs: y19)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
+                                    folderPath: ["Länder"], assetIDs: y19.union(y23))
+        let matches = AnalysisPipeline.match([country], dismissed: [trip], against: CollectionInventory([album]),
+                                             overrides: OverrideSet(), assignments: [:], trips: [y19, y23])
+        #expect(ProposalDecision.recommended(for: country, match: matches[country.id]) == .extendExisting("it"))
+        #expect(matches[trip.id]?.status != .alreadyComplete)
     }
 }
 

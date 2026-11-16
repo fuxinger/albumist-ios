@@ -119,7 +119,17 @@ auf einer einzigen Reise besucht hat).
 
 ### Ein Album pro Lauf für einen Vorschlag (Prüfung 16.11.2026, A5/A10)
 In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen Vorschlag:
-- Ein Album, das einen Vorschlag schon vollständig enthält („Album so lassen“, auch ohne dass
+- **Gleicher Name gewinnt** (Entscheidung Fuchs 16.11.2026): Heißt das Album genau wie ein
+  Vorschlag (ohne Groß-/Kleinschreibung und Akzente, z. B. „Italien“ für das Land Italien)
+  und würde dieser Vorschlag es ergänzen, gehört es ihm – auch wenn eine Reise im selben Lauf
+  es ergänzen will oder schon ganz darin steckt, und auch gegenüber zurückgestellten
+  Vorschlägen. Das Land ergänzt dann „Italien“ (in der Vorschau unter „Ergänzt“, rückgängig
+  zu machen); die Reise „Italien · Mai 2019“ bekommt ein eigenes Album und sieht „Italien“
+  nur unter „Anpassen“. Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
+  die Reise. Ausnahmen: Albumist hat das Album schon für einen anderen Vorschlag angelegt
+  oder ergänzt („Alben anderer Vorschläge“), oder ein Vorschlag mit genau diesem Namen ist
+  schon vollständig darin.
+- Sonst: Ein Album, das einen Vorschlag schon vollständig enthält („Album so lassen“, auch ohne dass
   man es antippt), gehört diesem Vorschlag. Kein anderer Vorschlag ergänzt es. Das gilt auch
   für Vorschläge, die man mit „Nicht jetzt“ zurückgestellt hat.
 - Wollen mehrere Vorschläge dasselbe Album ergänzen, bekommt es der, dem es am ähnlichsten

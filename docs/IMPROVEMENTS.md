@@ -27,6 +27,8 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 
 | Status | Punkt | Aufwand | Quelle |
 |---|---|---|---|
+| offen | Tausenderpunkt in den Ring-Zeilen („1.199 teilweise sortiert“): `format: .number` fand den Katalog-Schlüssel nicht (Englisch zeigte „57 Fotos von zu Hause“), daher zurück zu einfachen Zahlen. Richtig: eigene Schlüssel mit `%@` plus Plural über eine Zahl-Variable, oder `AttributedString` mit `inflect`. | S | T 16.11. |
+| offen | Ortsnamen-Stunde: wenn Apple bei jeder Abfrage einen anderen Fehler meldet (nicht Netz, nicht Drosselung), startet die Stunde nie und jeder Lauf fragt wieder bis zu 60 Zellen. Vorschlag: Stunde auch starten, wenn mehr als eine Abfrage einer Runde fehlschlug. | S | Zweitprüfung 16.11. |
 | ✅ | „Ähnliche Alben“ schlug vor, Albumists eigene Alben zusammenzulegen (Land enthält seine Reisen). Eigene Alben und Teil-Alben (Rom in Italien) sind jetzt ausgenommen. | S | T 14.11. |
 | ✅ | Sortier-Show: beim schnellen Blättern überlappten sich Alben, der Platzhalter schimmerte durch das Titelbild. | S | T 14.11. (Video) |
 | ✅ | UI-Test: Tab-Leiste schrumpfte beim Scrollen und versteckte die Tabs; fehlende Schritte machen jetzt ein Bildschirmfoto. | S | T 14.11. |

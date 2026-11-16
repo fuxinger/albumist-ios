@@ -211,11 +211,22 @@ struct ProposalDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("Alle \(model.members(of: proposal).count) Fotos ansehen"))
+                // The cover's colours glow behind the photos and end just below them, so the
+                // text under them sits on the plain background. Behind the text, XCTest's
+                // contrast audit kept failing clearly readable lines (8.9:1 measured in the
+                // screenshot) whatever the wash's colours were: "31 photos in Italien.",
+                // "LÄNDER UND ORTE · SICHER" (UI runs 2-4, 43773339053, 43779950348).
+                .background(alignment: .top) {
+                    PhotoGlow(id: model.previewIDs(for: proposal, count: 1).first ?? proposal.coverAssetID)
+                        .padding(.horizontal, -Theme.Spacing.l)
+                        .padding(.top, -240)
+                        .padding(.bottom, -Theme.Spacing.s)
+                }
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     // Tapping the label explains what "Sicher" or "Wahrscheinlich" means.
                     Button { explainReliability = true } label: {
-                        // On the photo wash only the measured grey is sure to keep 4.5:1; the
+                        // The measured grey keeps 4.5:1 on any background; the
                         // symbol alone carries the accent (design review W18). 44 pt to tap (W9).
                         HStack(spacing: 4) {
                             Text("\(Text(proposal.kind.area.title)) · \(Text(proposal.reliability.label))")
@@ -261,7 +272,7 @@ struct ProposalDetailView: View {
                         }
                     }
                     ForEach(Array(proposal.reasons.enumerated()), id: \.offset) { _, reason in
-                        Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(Theme.secondaryText) // sits on the photo wash
+                        Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(Theme.secondaryText) // below the photo glow, on the plain background
                     }
                 }
 
@@ -320,15 +331,8 @@ struct ProposalDetailView: View {
             }
             .padding(Theme.Spacing.l)
         }
-        .background(alignment: .top) {
-            // Each suggestion gets its own soft colours from its cover photo.
-            ZStack(alignment: .top) {
-                Theme.background
-                PhotoGlow(id: model.previewIDs(for: proposal, count: 1).first ?? proposal.coverAssetID)
-                    .frame(height: 440)
-            }
-            .ignoresSafeArea()
-        }
+        // Each suggestion gets its own soft colours from its cover photo: behind the photos above.
+        .background(Theme.background.ignoresSafeArea())
         .navigationTitle("Vorschlag")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { name = model.userTitles[proposal.id] ?? "" }

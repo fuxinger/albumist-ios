@@ -118,7 +118,7 @@ struct OverviewView: View {
                             // Photos already in a matching album for one main area but not yet for the
                             // other count as partly sorted; without this line the ring looked too low
                             // (device test 15.11.: 157 sorted, 1,199 partly).
-                            Text("Dazu \(model.progress.partially, format: .number) teilweise sortiert")
+                            Text("Dazu \(model.progress.partially) teilweise sortiert")
                                 .font(.subheadline)
                                 .monospacedDigit()
                         }
@@ -159,10 +159,10 @@ struct OverviewView: View {
     private var leftOutText: String? {
         var parts: [String] = []
         if model.leftOut.home > 0 {
-            parts.append(String(localized: "\(model.leftOut.home, format: .number) Fotos von zu Hause"))
+            parts.append(String(localized: "\(model.leftOut.home) Fotos von zu Hause"))
         }
         if model.leftOut.noAlbum > 0 {
-            parts.append(String(localized: "\(model.leftOut.noAlbum, format: .number) Fotos, für die sich kein eigenes Album lohnt"))
+            parts.append(String(localized: "\(model.leftOut.noAlbum) Fotos, für die sich kein eigenes Album lohnt"))
         }
         guard !parts.isEmpty else { return nil }
         return String(localized: "Außerdem nicht mitgezählt: \(parts.formatted(.list(type: .and))).")

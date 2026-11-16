@@ -90,6 +90,10 @@ public actor PlaceResolutionService {
         public var stoppedBecauseOffline = false
         /// Apple's geocoder kept refusing (rate limit): the remaining cells wait for a later run.
         public var stoppedBecauseThrottled = false
+        /// The run's lookup limit ran out while cells that were neither cached nor asked remained.
+        public var stoppedAtRequestLimit = false
+        /// Asking stopped early because the run was paused (or got too hot, or the battery ran low).
+        public var stoppedAsking = false
         public init() {}
     }
 
@@ -205,7 +209,7 @@ public actor PlaceResolutionService {
             let pendingBefore = outcome.pendingOnline.count
             if Task.isCancelled { outcome.pendingOnline.formUnion(members.map(\.assetID)); continue }
             // Pause, heat or low battery: no more online lookups; cached cells still count.
-            if !onlineDisabled, let shouldStop, await shouldStop() { onlineDisabled = true }
+            if !onlineDisabled, let shouldStop, await shouldStop() { onlineDisabled = true; outcome.stoppedAsking = true }
             // The user's consent is read again before every online lookup: switching it off in
             // the settings stops the next request, not only the next run (audit 2, 5.2).
             if !onlineDisabled, let onlineAllowed, !(await onlineAllowed()) { onlineDisabled = true }
@@ -233,9 +237,13 @@ public actor PlaceResolutionService {
                     outcome.stoppedBecauseThrottled = true
                 case .stopped:
                     onlineDisabled = true
+                    outcome.stoppedAsking = true
                 case .failed:
                     outcome.onlineRequests += 1
                 }
+            } else if !onlineDisabled, geocoder != nil {
+                // Not cached and not asked: the run's lookup limit is used up.
+                outcome.stoppedAtRequestLimit = true
             }
             guard let online else {
                 outcome.pendingOnline.formUnion(members.map(\.assetID))

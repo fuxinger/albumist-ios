@@ -85,6 +85,8 @@ jobs:
       # compiler still checks every source (content-based times), so a stale entry costs time,
       # never correctness. The nightly run builds without any cache.
       - name: Build cache
+        # Off since 16.11.: a restored cache hid a change in SortlyCore (CI 43796841063: 'AlbumMatcher has no member tiedWithBest' although Linux built it). Back on only with a proven fix.
+        if: ${{ false }}
         id: cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -110,7 +112,7 @@ jobs:
       # Saved also when a test failed: the build products are valid either way, and the next
       # run (usually the fix) starts from them.
       - name: Save build cache
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' && hashFiles('.build/debug.yaml') != '' }}
+        if: ${{ false }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
@@ -162,6 +164,8 @@ jobs:
       # source files carry content-based times, so a changed file is always recompiled. The
       # nightly run builds without any cache to catch an incremental-build problem within a day.
       - name: Build cache
+        # Off since 16.11.: a restored cache hid a change in SortlyCore (CI 43796841063: 'AlbumMatcher has no member tiedWithBest' although Linux built it). Back on only with a proven fix.
+        if: ${{ false }}
         id: cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -243,10 +247,10 @@ jobs:
       # Saved also when a test failed: the build products are valid either way, and the next
       # run (usually the fix) starts from them. Logs and the index are left out.
       - name: Keep the build cache small
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ false }}
         run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
       - name: Save build cache
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' && hashFiles('build-log.txt') != '' }}
+        if: ${{ false }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |

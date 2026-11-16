@@ -375,17 +375,19 @@ struct AnalysisTextTests {
     }
 }
 
-/// Counts in catalog sentences: an integer with `format: .number` keeps the `%lld` key (so the
-/// plural forms still apply) and gets the locale's thousands separator ("1.354", not "1354").
+/// Counts in catalog sentences stay plain integers (`%lld` keys with plural forms). A thousands
+/// separator needs its own catalog keys first (docs/IMPROVEMENTS.md).
 struct CountFormattingTests {
-    @Test func countsKeepPluralsAndGetThousandsSeparators() {
+    /// Run 43796534873: `format: .number` turned the key into one the catalog does not have, so
+    /// the English overview showed "57 Fotos von zu Hause". The plain count must find the key.
+    @Test func countLinesFindTheirCatalogKeyAndPlurals() {
         let one = 1, many = 1354
-        let single = String(localized: "\(one, format: .number) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
-        let plural = String(localized: "\(many, format: .number) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
+        let single = String(localized: "\(one) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
+        let plural = String(localized: "\(many) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
         print("COUNT_FORMAT \(single) | \(plural)")
-        // The test host may run in English or German: the singular form proves the key (and
-        // its plural variations) was found, the "1.354" the grouping of the German locale.
+        // The test host may run in English or German: the singular form proves the key (and its
+        // plural variations) was found; an untranslated key would keep "Fotos" for one photo.
         #expect(single.hasPrefix("1 ") && !single.contains("Fotos") && !single.contains("photos"))
-        #expect(plural.hasPrefix("1.354 "))
+        #expect(plural.contains("Fotos") || plural.contains("photos"))
     }
 }

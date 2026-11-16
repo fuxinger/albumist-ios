@@ -203,11 +203,18 @@ public actor AnalysisPipeline {
     /// Keeps the first analysis from spending up to an hour on town names before photos are
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
     private let foregroundOnlineBudget: Int?
-    /// When a run in the app last asked Apple for town names. A run within the hour after it
+    /// When a run in the app last asked Apple for town names and was left with towns still
+    /// waiting because asking stopped early (Apple refused, the run's budget ran out, or a Pause).
+    /// A one-off error, being offline or a border cell whose answer is from the other country do
+    /// not count, so photos near a border do not hold back new towns. A run within the hour after it
     /// (Fortsetzen after a Pause, a restart) does not ask again: the lookups and Apple's waits
     /// held "Orte werden bestimmt" for a minute or more before the run got back to where it was
     /// (device test 15.11.: "es dauert lange, bis die App nach Pause weiterläuft"). The towns
     /// still missing come with the overnight refinement or a run after the hour.
+    /// A round that got every town it asked for sets nothing: photos added after it (new trip
+    /// photos, an import) get their towns in the next run. Otherwise one early lookup kept
+    /// every later photo at region names for an hour (UI run 43779950348: "Latium" instead of
+    /// "Rom", the Iceland trip "Reykjavík" instead of "Island", 5 instead of 22 towns).
     private var lastForegroundOnlineLookup: Date?
     static let foregroundOnlineCooldown: TimeInterval = 60 * 60
 
@@ -731,7 +738,13 @@ public actor AnalysisPipeline {
                                          }) { batch in
             try await store.setPlaces(batch)
         }
-        if !refining, outcome.onlineRequests > 0 { lastForegroundOnlineLookup = now() }
+        // Only a refusal, a used-up lookup limit or a Pause in the middle of asking starts the hour.
+        // A one-off error, being offline or towns that stay open after an answer (a border cell)
+        // do not: photos added later get their towns at once.
+        if !refining, outcome.onlineRequests > 0,
+           outcome.stoppedBecauseThrottled || outcome.stoppedAtRequestLimit || outcome.stoppedAsking {
+            lastForegroundOnlineLookup = now()
+        }
         return outcome
     }
 

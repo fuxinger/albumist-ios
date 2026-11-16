@@ -341,6 +341,67 @@ struct AnalysisReliabilityTests {
         #expect(third.onlineRequests > 0)
     }
 
+    /// UI run 43779950348: a first run that got all its towns must not hold back the towns of
+    /// photos added minutes later (the demo library arrives in chunks, a device gets new trip
+    /// photos): they were left with region names for an hour.
+    @Test func photosAddedAfterACompleteLookupGetTheirTownsAtOnce() async throws {
+        let geocoder = FakeGeocoder()
+        let s = try setup(photos: 12, geocoder: geocoder, foregroundOnlineBudget: 60)
+        let first = try await s.pipeline.run()
+        #expect(first.onlineRequests > 0)
+        #expect(first.placesPendingOnline == 0)
+
+        s.clock.value.withLock { $0 = $0.addingTimeInterval(5 * 60) }
+        await s.reader.set(assets: (await s.reader.assets) + romePhotos(6))
+        let second = try await s.pipeline.run()
+        #expect(second.onlineRequests > 0)
+        #expect(second.placesPendingOnline == 0)
+        let places = try await s.store.places()
+        #expect(places[AssetID("rome0")]?.components.locality == "Rom")
+    }
+
+    func romePhotos(_ count: Int) -> [AssetSnapshot] {
+        (0..<count).map { i in
+            AssetSnapshot(id: AssetID("rome\(i)"), kind: .image, creationDate: Fixture.date("2026-06-20 10:00").addingTimeInterval(Double(i) * 3_600),
+                          location: Fixture.Places.rome, pixelWidth: 4032, pixelHeight: 3024)
+        }
+    }
+
+    /// The device case the hour was made for: the run's lookup limit is used up with towns left.
+    /// A run soon after (Fortsetzen, a restart) does not ask again; a run after the hour does.
+    @Test func aUsedUpLookupLimitWaitsAnHour() async throws {
+        let geocoder = FakeGeocoder()
+        let s = try setup(photos: 12, geocoder: geocoder, foregroundOnlineBudget: 1)
+        await s.reader.set(assets: (await s.reader.assets) + romePhotos(6))
+        let first = try await s.pipeline.run()
+        #expect(first.onlineRequests == 1)
+        #expect(first.placesPendingOnline > 0)
+
+        s.clock.value.withLock { $0 = $0.addingTimeInterval(5 * 60) }
+        let soon = try await s.pipeline.run()
+        #expect(soon.onlineRequests == 0)
+
+        s.clock.value.withLock { $0 = $0.addingTimeInterval(61 * 60) }
+        let later = try await s.pipeline.run()
+        #expect(later.onlineRequests == 1)
+        #expect(later.placesPendingOnline == 0)
+    }
+
+    /// A single failed answer (not a refusal) does not hold back the next run for an hour.
+    @Test func aOneOffLookupErrorDoesNotWaitAnHour() async throws {
+        let geocoder = FakeGeocoder(failures: [.failed])
+        let s = try setup(photos: 12, geocoder: geocoder, foregroundOnlineBudget: 60)
+        let first = try await s.pipeline.run()
+        #expect(first.onlineRequests == 1)
+        #expect(first.placesPendingOnline > 0)
+
+        s.clock.value.withLock { $0 = $0.addingTimeInterval(5 * 60) }
+        let second = try await s.pipeline.run()
+        #expect(second.onlineRequests > 0)
+        #expect(second.placesPendingOnline == 0)
+        #expect(try await s.store.places()[s.photos[0]]?.components.locality == "München")
+    }
+
     /// "Analyse neu aufbauen" within the hour: the place cache is gone, so the rebuild asks again.
     @Test func aRebuildAsksForTownNamesAgainAtOnce() async throws {
         let geocoder = RefusingGeocoder()

@@ -16,8 +16,10 @@ struct UndoResuggestTests {
     let lifecycle = DecisionLifecycleTests()
 
     /// What `AppModel.finalize` stores after a plan, then `pipeline.rematch()`.
-    func finalize(_ plan: ChangePlan, in w: DecisionLifecycleTests.World) async throws -> ProposalSnapshot {
-        let after = try await w.library.currentInventory()
+    /// `listed`: what the album list returned (nil: the library as it is).
+    func finalize(_ plan: ChangePlan, in w: DecisionLifecycleTests.World, listed: CollectionInventory? = nil) async throws -> ProposalSnapshot {
+        let current = try await w.library.currentInventory()
+        let after = listed ?? current
         try await w.store.saveInventory(after)
         try await w.store.saveManagedAlbums(ManagedAlbumTracker().record(plan, into: try await w.store.managedAlbums(), inventory: after))
         await w.reader.set(inventory: after)
@@ -64,7 +66,7 @@ struct UndoResuggestTests {
 
     /// "Empfohlene auswählen" on suggestions whose albums are complete selects nothing, and a
     /// "So lassen" whose album an undo took away goes back to open (what `AppModel.finalize`
-    /// does with `ProposalDecision.keepsWithoutAlbum`).
+    /// does with `ProposalDecision.keepsOfAlbumsDeleted`).
     @Test func completeSuggestionsAreNotRecommendedAndAKeptOneComesBackAfterTheUndo() async throws {
         let w = try await lifecycle.world()
         _ = try await w.pipeline.run()
@@ -98,7 +100,7 @@ struct UndoResuggestTests {
         let undone = try await ChangeExecutor(library: w.library, store: InMemoryPlanStore()).execute(undo)
         #expect(undone.status == .completed)
         let rematched = try await finalize(undone, in: w)
-        for id in ProposalDecision.keepsWithoutAlbum(decisions, inventory: try await w.library.currentInventory()) { decisions[id] = nil }
+        for id in ProposalDecision.keepsOfAlbumsDeleted(by: undone, in: decisions) { decisions[id] = nil }
 
         // `AppModel.openProposals`: no decision and not complete.
         let open = Set(rematched.proposals.filter { decisions[$0.id] == nil && rematched.matches[$0.id]?.status != .alreadyComplete }.map(\.id))
@@ -107,5 +109,44 @@ struct UndoResuggestTests {
         // The album of the user stays, and so does the decision to leave it as it is.
         let kept = decisions.compactMap { _, d -> CollectionID? in if case .keepExisting(let a) = d { a } else { nil } }
         #expect(kept.allSatisfy { w.initial[$0] != nil })
+    }
+
+    /// Review of 697852f: the album list can come back with few or no albums (limited access,
+    /// an iCloud sync). A "So lassen" is dropped only for an album the undo's own deletion
+    /// steps removed; one for an album the list merely lacks survives, after a plan and after
+    /// an undo.
+    @Test func aKeepSurvivesAnAlbumListWithoutAlbums() async throws {
+        let w = try await lifecycle.world()
+        _ = try await w.pipeline.run()
+        let first = try #require(try await w.pipeline.latestProposals())
+        let items = lifecycle.acceptSafe(first)
+        let plan = lifecycle.confirmed(lifecycle.planner.makePlan(from: items, inventory: try await w.library.currentInventory(),
+                                                                  overrides: OverrideSet(try await w.store.overrides())))
+        let executed = try await ChangeExecutor(library: w.library, store: InMemoryPlanStore()).execute(plan)
+        _ = try await finalize(executed, in: w)
+        let createdAlbums = Set(try await w.store.managedAlbums().filter(\.createdBySortly).map(\.albumID))
+        #expect(!createdAlbums.isEmpty)
+        let userAlbum: CollectionID = "sommer-rom"
+        let other = try #require(first.proposals.first { p in !items.contains { $0.proposal.id == p.id } })
+        let created = try #require(items.first { if case .createNew = $0.decision { true } else { false } })
+        var decisions: [SortlyID: ProposalDecision] = [
+            other.id: .keepExisting(userAlbum),
+            created.proposal.id: .keepExisting(try #require(createdAlbums.first)),
+        ]
+
+        // A plan finishes while the album list is empty: nothing is dropped.
+        #expect(ProposalDecision.keepsOfAlbumsDeleted(by: executed, in: decisions).isEmpty)
+
+        // The undo deletes Albumist's albums; the list read after it is empty as well.
+        var owned: [CollectionID: Set<AssetID>] = [:]
+        for state in try await w.store.managedAlbums() { owned[state.albumID, default: []].formUnion(state.addedBySortly) }
+        let undo = lifecycle.confirmed(UndoPlanner().undoPlan(for: executed, current: try await w.library.currentInventory(), owned: owned))
+        let undone = try await ChangeExecutor(library: w.library, store: InMemoryPlanStore()).execute(undo)
+        _ = try await finalize(undone, in: w, listed: CollectionInventory())
+        let dropped = ProposalDecision.keepsOfAlbumsDeleted(by: undone, in: decisions)
+        for id in dropped { decisions[id] = nil }
+        #expect(decisions[other.id] == .keepExisting(userAlbum), "A deliberate \"So lassen\" was lost")
+        #expect(try await w.library.currentInventory()[userAlbum] != nil)
+        #expect(dropped == [created.proposal.id])
     }
 }

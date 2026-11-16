@@ -337,14 +337,24 @@ extension ProposalDecision {
             && match?.status != .possibleMatch && recommended.isAccepted && !recommended.isKeepExisting
     }
 
-    /// "So lassen" decisions whose album is gone: taken back by an undo or deleted in Photos.
-    /// Such a decision changes nothing and is not counted as open either, so its suggestion
-    /// could never be created again (UI run 43823834271: two plans taken back, their 15
-    /// suggestions stayed "Ausgewählt" with "Neues Album" and nothing to create). They go back
-    /// to open.
-    public static func keepsWithoutAlbum(_ decisions: [SortlyID: ProposalDecision], inventory: CollectionInventory) -> Set<SortlyID> {
-        Set(decisions.compactMap { id, decision in
-            if case .keepExisting(let album) = decision, inventory[album] == nil { return id }
+    /// "So lassen" decisions for albums an undo deleted: such a decision changes nothing and
+    /// is not counted as open either, so its suggestion could never be created again (UI run
+    /// 43823834271: two plans taken back, their 15 suggestions stayed "Ausgewählt" with "Neues
+    /// Album" and nothing to create). They go back to open.
+    ///
+    /// Only albums the undo's own deletion steps removed (verified by the executor), never an
+    /// album that an album list lacks: with limited access or during an iCloud sync the list can
+    /// hold few or no albums, and a deliberate "So lassen" must not be lost to that (review of
+    /// 697852f: the Startpaket could then extend that album).
+    public static func keepsOfAlbumsDeleted(by plan: ChangePlan, in decisions: [SortlyID: ProposalDecision]) -> Set<SortlyID> {
+        guard plan.reverts != nil else { return [] }
+        let deleted = Set(plan.steps.compactMap { step -> CollectionID? in
+            guard case .deleteCollection(let id, _) = step.operation, case .succeeded = step.state else { return nil }
+            return id
+        })
+        guard !deleted.isEmpty else { return [] }
+        return Set(decisions.compactMap { id, decision in
+            if case .keepExisting(let album) = decision, deleted.contains(album) { return id }
             return nil
         })
     }

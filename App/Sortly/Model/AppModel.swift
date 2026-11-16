@@ -1799,9 +1799,10 @@ final class AppModel {
                 }
                 undone = original
             }
-            // "So lassen" for an album this plan took away (an undo of the plan that created
-            // it) leaves nothing to keep: the suggestion is open again (UI run 43823834271).
-            for id in ProposalDecision.keepsWithoutAlbum(newDecisions, inventory: after) {
+            // "So lassen" for an album this undo deleted leaves nothing to keep: the suggestion is
+            // open again (UI run 43823834271). Only by the undo's own verified deletions, never
+            // by an album list that may lack albums (limited access, iCloud sync).
+            for id in ProposalDecision.keepsOfAlbumsDeleted(by: result, in: newDecisions) {
                 newDecisions[id] = nil
                 previewOnly[id] = nil
             }

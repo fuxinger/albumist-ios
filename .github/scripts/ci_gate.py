@@ -5,8 +5,11 @@ Used before a TestFlight upload and before a release tag. Green means:
      "iOS build and tests (macOS)" really ran and succeeded in it or in an earlier run of the
      same commit. When it was skipped everywhere (only documentation changed since the last
      tested commit), there is nothing new to ship.
-  2. If a UI flow run (ui.yml) exists for this commit (it runs for pull requests), its newest
-     run succeeded too. Pushes to main have no UI flow run; there CI alone decides.
+  2. The newest UI flow run (ui.yml) for exactly this commit succeeded too. Always: a commit
+     without a UI flow run is not green (owner decision 16.11.), so nothing is uploaded or
+     released that never ran the UI tests. ui.yml runs for pull requests (on the PR's head
+     commit); a commit that never was a PR head, e.g. a merge commit pushed to main, needs a
+     manual "UI flow" run on that commit first.
 
 Earlier stages, for starting work that may run before the whole gate is green:
   --ci     only point 1 (the CI run, with its iOS job). TestFlight builds the release archive
@@ -20,7 +23,8 @@ Never fails itself (exit 0) unless --fail is given, so a red test run shows up a
 upload with the reason, not as a second red workflow.
 
 Environment: GH_TOKEN, GITHUB_REPOSITORY, SHA (commit to check), WAIT_MINUTES (default 180),
-NO_RUN_MINUTES (give up when no CI run has appeared after this long, default 15).
+NO_RUN_MINUTES (give up when no CI run has appeared after this long, or no UI flow run this
+long after CI turned green; default 15).
 """
 import json
 import os
@@ -39,6 +43,7 @@ POLL = 60
 CI, CI_JOB = "ci.yml", "iOS build and tests"
 LINUX_JOBS = ("Core tests (Linux)", "App rules and strings")
 UI = "ui.yml"
+NO_CI, NO_UI = "no CI run", "no UI flow run"
 
 
 def api(path, **params):
@@ -75,7 +80,7 @@ def check(ui_too=True):
     """(done, ok, reason) for the current state of the runs (CI alone when not ui_too)."""
     ci = newest_run(CI)
     if ci is None:
-        return False, False, f"no CI run for {SHA[:7]} yet"
+        return False, False, f"{NO_CI} for {SHA[:7]} yet"
     if ci["status"] != "completed":
         return False, False, f"waiting for {describe(ci)}"
     if ci["conclusion"] != "success":
@@ -101,7 +106,8 @@ def check(ui_too=True):
         return True, True, f"{describe(ci)} passed"
     ui = newest_run(UI)
     if ui is None:
-        return True, True, f"{describe(ci)} passed (no UI flow run for this commit)"
+        # Not green, ever: main() waits NO_RUN_MINUTES for one to appear, then gives up.
+        return False, False, f"{NO_UI} for {SHA[:7]} yet ({describe(ci)} passed)"
     if ui["status"] != "completed":
         return False, False, f"CI passed; waiting for {describe(ui)}"
     if ui["conclusion"] != "success":
@@ -113,7 +119,7 @@ def check_linux():
     """(done, ok, reason): the Linux jobs of the newest CI run for this commit."""
     ci = newest_run(CI)
     if ci is None:
-        return False, False, f"no CI run for {SHA[:7]} yet"
+        return False, False, f"{NO_CI} for {SHA[:7]} yet"
     jobs = {j["name"]: j for j in api(f"actions/runs/{ci['id']}/jobs", per_page=100).get("jobs", [])}
     states = []
     for name in LINUX_JOBS:
@@ -128,21 +134,35 @@ def check_linux():
     return True, True, f"{' and '.join(states)} passed in {describe(ci)}"
 
 
+def missing_run(kind):
+    """The final reason when the run of `kind` (NO_CI or NO_UI) never appeared."""
+    minutes = int(NO_RUN // 60)
+    if kind == NO_CI:
+        return (f"{NO_CI} appeared for {SHA[:7]} within {minutes} min (CI runs for pull requests and "
+                "pushes to main; start it by hand, or use force)")
+    return (f"{NO_UI} for {SHA[:7]} (none appeared within {minutes} min after CI passed): the gate needs "
+            "a green UI flow run on exactly this commit. UI flow runs for pull requests on the PR's head "
+            "commit; for a commit that never was one (e.g. a merge commit pushed to main) start "
+            "'UI flow' by hand on this commit, then run this workflow again, or use force")
+
+
 def main():
     started = time.monotonic()
     linux, ci_only = "--linux" in sys.argv, "--ci" in sys.argv
+    missing_since = {}  # NO_CI / NO_UI -> when that run was first seen missing
     while True:
         try:
             done, ok, reason = check_linux() if linux else check(ui_too=not ci_only)
         except RuntimeError as error:
             done, ok, reason = False, False, str(error)
-        waited = time.monotonic() - started
+        now = time.monotonic()
+        waited = now - started
         print(f"GATE {int(waited // 60):>3} min: {reason}", flush=True)
         if done:
             break
-        if reason.startswith("no CI run") and waited >= NO_RUN:
-            reason = (f"no CI run appeared for {SHA[:7]} within {int(NO_RUN // 60)} min (CI runs for pull "
-                      "requests and pushes to main; start it by hand, or use force)")
+        kind = next((k for k in (NO_CI, NO_UI) if reason.startswith(k)), None)
+        if kind and now - missing_since.setdefault(kind, now) >= NO_RUN:
+            reason = missing_run(kind)
             break
         if waited >= WAIT:
             reason = f"tests not finished after {int(WAIT // 60)} min ({reason})"

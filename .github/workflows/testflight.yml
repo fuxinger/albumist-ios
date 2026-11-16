@@ -5,9 +5,12 @@ name: TestFlight
 # until then it stops after one quick check on Linux and costs no macOS minutes.
 #
 # Only a commit whose tests are green goes to TestFlight. The job "Wait for green tests"
-# (.github/scripts/ci_gate.py) waits on a free Linux runner for the CI run of exactly this
-# commit and, where one exists, its UI flow run (pull requests); the upload starts only when
-# both passed and CI's iOS job really ran. A docs-only commit (iOS job skipped) is not uploaded.
+# (.github/scripts/ci_gate.py) waits on a free Linux runner for the CI run and the UI flow run
+# of exactly this commit; the upload starts only when both passed and CI's iOS job really ran.
+# A commit without a UI flow run is never green: ui.yml runs for pull requests on the PR's head
+# commit, so a merge commit pushed to main needs a manual "UI flow" run on it, then a new run of
+# this workflow (the gate gives up 15 min after CI passed with no UI run in sight). A docs-only
+# commit (iOS job skipped) is not uploaded.
 # A manual run with "force" skips the wait for emergencies.
 #
 # The release archive is built while the UI tests still run, not after them: as soon as the

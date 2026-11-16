@@ -66,8 +66,13 @@ Produkt-ID `app.albumist.ios.unlock`.
 - Ein TestFlight-Build läuft 90 Tage.
 - Die Bundle-ID `app.albumist.ios` lässt sich nach dem ersten Hochladen nicht mehr ändern.
 - Ablauf in GitHub: sobald CI für den Commit grün ist, baut ein Mac schon das Archiv; signiert
-  und hochgeladen wird erst, wenn auch der UI-Lauf grün ist, und nur ein Archiv genau dieses
-  Commits. Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl, den Lauf
+  und hochgeladen wird erst, wenn auch der UI-Lauf genau dieses Commits grün ist, und nur ein
+  Archiv genau dieses Commits. Ohne UI-Lauf auf diesem Commit gibt es keinen Upload (und kein
+  Release): der UI-Lauf startet nur für Pull Requests, auf deren letztem Commit. Wird auf `main`
+  ein Merge-Commit gepusht, den es in keinem Pull Request gab, dann unter Actions > **UI flow** >
+  Run workflow den Lauf für `main` starten und danach den TestFlight-Lauf mit **Re-run all jobs**
+  neu starten; die Prüfung
+  wartet nach grünem CI 15 Minuten auf einen UI-Lauf und meldet dann „no UI flow run“. Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl, den Lauf
   mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
   Archiv nicht mehr und schlägt absichtlich fehl.
 - Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,

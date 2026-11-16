@@ -187,7 +187,9 @@ public actor AnalysisPipeline {
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
     private let foregroundOnlineBudget: Int?
     /// When a run in the app last asked Apple for town names and was left with towns still
-    /// waiting (Apple refused, or the run's budget ran out). A run within the hour after it
+    /// waiting because asking stopped early (Apple refused, the run's budget ran out, or a Pause).
+    /// A one-off error, being offline or a border cell whose answer is from the other country do
+    /// not count, so photos near a border do not hold back new towns. A run within the hour after it
     /// (Fortsetzen after a Pause, a restart) does not ask again: the lookups and Apple's waits
     /// held "Orte werden bestimmt" for a minute or more before the run got back to where it was
     /// (device test 15.11.: "es dauert lange, bis die App nach Pause weiterläuft"). The towns
@@ -694,7 +696,13 @@ public actor AnalysisPipeline {
                                          }) { batch in
             try await store.setPlaces(batch)
         }
-        if !refining, outcome.onlineRequests > 0, !outcome.pendingOnline.isEmpty { lastForegroundOnlineLookup = now() }
+        // Only a refusal, a used-up lookup limit or a Pause in the middle of asking starts the hour.
+        // A one-off error, being offline or towns that stay open after an answer (a border cell)
+        // do not: photos added later get their towns at once.
+        if !refining, outcome.onlineRequests > 0,
+           outcome.stoppedBecauseThrottled || outcome.stoppedAtRequestLimit || outcome.stoppedAsking {
+            lastForegroundOnlineLookup = now()
+        }
         return outcome
     }
 

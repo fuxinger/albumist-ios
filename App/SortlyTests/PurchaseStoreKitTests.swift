@@ -29,7 +29,15 @@ struct PurchaseStoreKitTests {
 
     /// A fresh session without transactions or dialogs, German storefront. `price`: the same
     /// product with another price, as App Store Connect sets it for the launch week.
+    ///
+    /// Every test starts the same way, whatever ran before it: the StoreKit test environment
+    /// is up (brought up once per run, see `StoreKitEnvironment`), no StoreKit step of an
+    /// earlier test is still running (one its test gave up on would otherwise act on this
+    /// test's session, CI run 43949938467), and the new session holds nothing and StoreKit
+    /// lists no unlock.
     func session(price: String? = nil) async throws -> PurchaseTestStore {
+        try await StoreKitEnvironment.ready()
+        try await StoreKitSteps.shared.waitUntilIdle(seconds: 60)
         var url = try Self.configurationURL()
         if let price {
             let text = try String(contentsOf: url, encoding: .utf8)
@@ -38,28 +46,27 @@ struct PurchaseStoreKitTests {
             try text.replacingOccurrences(of: #""displayPrice" : "4.99""#, with: #""displayPrice" : "\#(price)""#)
                 .write(to: url, atomically: true, encoding: .utf8)
         }
-        // The previous test's session is cleared first, so it never wipes this one's purchase.
-        if let cleanup = Self.cleanup { try await within("clear the previous session") { await cleanup.value } }
         let file = url
-        return try await within("set up the test session") {
+        let store = try await onSessionQueue("set up the test session") {
             let session = try SKTestSession(contentsOf: file)
-            session.resetToDefaultState()
-            session.disableDialogs = true
-            session.askToBuyEnabled = false
-            session.storefront = "DEU"
-            session.locale = Locale(identifier: "de_DE")
-            session.clearTransactions()
+            StoreKitEnvironment.configure(session)
             return PurchaseTestStore(session)
         }
+        let held = try await onSessionQueue("read the new session's transactions") {
+            store.session.allTransactions().map { "\($0.productIdentifier) #\($0.identifier)" }
+        }
+        try #require(held.isEmpty, "the new session already holds \(held)")
+        let unlock = Purchases.unlockProductID
+        let gone = try await within("StoreKit lists no unlock") { await StoreKitEnvironment.waitUntil(listed: false, unlock, seconds: 15) }
+        try #require(gone, "StoreKit still lists the unlock 15 s after the session was cleared")
+        return store
     }
 
-    /// Leaves no transaction behind for the next test (run off the main actor like every
-    /// session call; awaited by the next `session()`).
+    /// Leaves no transaction behind for the next test. Runs on the session queue after
+    /// everything this test asked of the session; the next `session()` waits for it.
     func clearAfterwards(_ store: PurchaseTestStore) {
-        Self.cleanup = Task.detached { store.session.clearTransactions() }
+        startOnSessionQueue("clear the session after the test") { store.session.clearTransactions() }
     }
-
-    static var cleanup: Task<Void, Never>?
 
     /// A Purchases object as on a fresh install: its own empty defaults.
     func freshInstall(_ name: String = UUID().uuidString, productID: String = Purchases.unlockProductID) -> (Purchases, UserDefaults) {
@@ -119,10 +126,13 @@ struct PurchaseStoreKitTests {
 
     /// "Kauf wiederherstellen" without blocking the test on `AppStore.sync()`: the test waits
     /// for the flag with a time limit instead.
+    /// Counted as a running StoreKit step until it ends, also when its test stopped waiting.
     func restoreInBackground(_ purchases: Purchases) -> Flag {
         let flag = Flag()
+        let token = StoreKitSteps.shared.begin("restore")
         Task { @MainActor in
             await purchases.restore()
+            StoreKitSteps.shared.end(token)
             flag.done = true
         }
         return flag
@@ -140,7 +150,7 @@ struct PurchaseStoreKitTests {
 
     func transactions(_ store: PurchaseTestStore) async throws -> [SessionTransaction] {
         let unlock = Purchases.unlockProductID // read here: Purchases belongs to the main actor
-        return try await within("read the session's transactions") {
+        return try await onSessionQueue("read the session's transactions") {
             store.session.allTransactions().filter { $0.productIdentifier == unlock }
                 .map { SessionTransaction(identifier: $0.identifier, pendingAskToBuyConfirmation: $0.pendingAskToBuyConfirmation) }
         }
@@ -164,7 +174,7 @@ struct PurchaseStoreKitTests {
 
     /// The test session's view of the transactions, for failure messages.
     func describe(_ store: PurchaseTestStore) async -> String {
-        let all = (try? await within("describe the session") {
+        let all = (try? await onSessionQueue("describe the session") {
             store.session.allTransactions().map { "\($0.productIdentifier) #\($0.identifier) askToBuy \($0.pendingAskToBuyConfirmation)" }
         }) ?? ["(session did not answer)"]
         return all.joined(separator: "; ")
@@ -190,12 +200,12 @@ struct PurchaseStoreKitTests {
             let id = product.id
             storeKitTrace("session buy \(id): start")
             do {
-                try await within("buy in the test session", seconds: 20) { try store.session.buyProduct(productIdentifier: id) }
+                try await onSessionQueue("buy in the test session", seconds: 20) { try store.session.buyProduct(productIdentifier: id) }
             } catch {
                 storeKitTrace("session buy \(id): threw \(error)")
                 throw error
             }
-            let held = try await within("read the session's transactions") {
+            let held = try await onSessionQueue("read the session's transactions") {
                 store.session.allTransactions().map { "#\($0.identifier) \($0.productIdentifier) askToBuy \($0.pendingAskToBuyConfirmation)" }
             }
             storeKitTrace("session buy \(id): done, session holds \(held)")
@@ -338,7 +348,7 @@ struct PurchaseStoreKitTests {
         // registers with StoreKit on its own schedule, so there is nothing to wait for instead.
         try await Task.sleep(for: .seconds(5))
         let unlock = Purchases.unlockProductID
-        try await within("buy in the session (another device)") { try store.session.buyProduct(productIdentifier: unlock) }
+        try await onSessionQueue("buy in the session (another device)") { try store.session.buyProduct(productIdentifier: unlock) }
         let bought = try await transactions(store)
         #expect(bought.count == 1)
         let heard = await waitQuietly(timeout: 20) { running.isUnlocked }
@@ -582,7 +592,7 @@ struct PurchaseStoreKitTests {
         #expect(purchases.lastError == String(localized: "Der Kauf wartet noch auf eine Bestätigung, zum Beispiel durch die Familienfreigabe. Albumist schaltet sich danach von selbst frei."))
 
         let unlock = Purchases.unlockProductID
-        try await within("approval: the purchase completes in the session") { try store.session.buyProduct(productIdentifier: unlock) }
+        try await onSessionQueue("approval: the purchase completes in the session") { try store.session.buyProduct(productIdentifier: unlock) }
         let heard = await waitQuietly(timeout: 20) { purchases.isUnlocked }
         storeKitTrace("Ask to Buy approved: app unlocked \(heard); app's listener heard \(purchases.heardUpdates); independent listener heard \(observer.heard)")
         // The app's listener acts on every approval StoreKit delivers ...
@@ -701,7 +711,7 @@ struct PurchaseStoreKitTests {
         let first = try await transactions(store).first
         let bought = try #require(first)
         let id = bought.identifier
-        try await within("refund in the session") { try store.session.refundTransaction(identifier: id) }
+        try await onSessionQueue("refund in the session") { try store.session.refundTransaction(identifier: id) }
         _ = await waitUntil("locked by the transaction listener after the refund") { !purchases.isUnlocked }
         // A read right after the refund never unlocks again, even if the list still shows it.
         try await within("read the entitlements right after the refund") { await purchases.refreshEntitlements() }
@@ -768,9 +778,9 @@ struct PurchaseStoreKitTests {
     }
 }
 
-/// The StoreKit test session, handed to `within` so its calls run off the main actor: a
-/// session call that waits for the app's own StoreKit client (which delivers on the main
-/// actor) would otherwise wait for the very thread it blocks.
+/// The StoreKit test session, handed to `onSessionQueue` so its blocking calls run on a thread
+/// of their own: on the main actor, a session call that waits for the app's own StoreKit
+/// client (which delivers on the main actor) would wait for the very thread it blocks.
 final class PurchaseTestStore: @unchecked Sendable {
     let session: SKTestSession
     init(_ session: SKTestSession) { self.session = session }
@@ -780,13 +790,202 @@ struct StoreKitStepTimedOut: Error, CustomStringConvertible {
     let description: String
 }
 
-/// Runs one StoreKit step off the main actor and gives up after `seconds`, so a step that
-/// never answers fails its test with the step's name instead of stopping the whole test run.
+/// The StoreKit test environment, brought up once per test run before the first test uses it.
+///
+/// CI run 43949938467 (job 133593104236): the simulator is booted by `xcodebuild test` right
+/// before the tests, and the suite's very first call, the session set-up of the first test,
+/// did not answer within 30 s. The tests after it still met a slow environment (a session
+/// buy that did not answer within 20 s), and from the fourth test on every step answered at
+/// once again: the environment was slow to come up, not broken. The whole app test run took
+/// 187 s there and 23 s in the re-run. So the environment is brought up here once, with a
+/// budget for a cold simulator, and every path the tests use is gone through once (session,
+/// product, a buy, StoreKit's list, clearing); the time it took is printed. After it, every
+/// step of a test keeps its own limit (30 s, a buy 20 s).
+@MainActor
+enum StoreKitEnvironment {
+    /// For the first start on a just-booted simulator only.
+    static let budget: Double = 180
+    private static var bringingUp: Task<String?, Never>?
+
+    /// Throws, for every test, why the environment did not come up (the first failure, once).
+    static func ready() async throws {
+        let task: Task<String?, Never>
+        if let running = bringingUp {
+            task = running
+        } else {
+            task = Task { await StoreKitEnvironment.bringUp() }
+            bringingUp = task
+        }
+        if let failure = await task.value { throw StoreKitStepTimedOut(description: failure) }
+    }
+
+    /// No transactions, no dialogs, German storefront.
+    nonisolated static func configure(_ session: SKTestSession) {
+        session.resetToDefaultState()
+        session.disableDialogs = true
+        session.askToBuyEnabled = false
+        session.storefront = "DEU"
+        session.locale = Locale(identifier: "de_DE")
+        session.clearTransactions()
+    }
+
+    /// Whether StoreKit lists the product among the entitlements (one read).
+    nonisolated static func lists(_ id: String) async -> Bool {
+        for await result in Transaction.currentEntitlements where result.unsafePayloadValue.productID == id {
+            return true
+        }
+        return false
+    }
+
+    /// Reads StoreKit's list until it does (or does not) list the product; false if it still
+    /// shows the other state after `seconds`.
+    nonisolated static func waitUntil(listed: Bool, _ id: String, seconds: Double) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while await StoreKitEnvironment.lists(id) != listed {
+            if Date() > deadline { return false }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return true
+    }
+
+    /// nil when the environment is up, otherwise why not.
+    private static func bringUp() async -> String? {
+        let started = Date()
+        var done: [String] = []
+        func elapsed() -> Int { Int(Date().timeIntervalSince(started) * 1000) }
+        func left() -> Double { max(1, StoreKitEnvironment.budget - Date().timeIntervalSince(started)) }
+        let unlock = Purchases.unlockProductID
+        do {
+            let url = try PurchaseStoreKitTests.configurationURL()
+            let store = try await onSessionQueue("bring up the test session", seconds: left()) {
+                let session = try SKTestSession(contentsOf: url)
+                StoreKitEnvironment.configure(session)
+                return PurchaseTestStore(session)
+            }
+            done.append("session \(elapsed()) ms")
+            // StoreKit answers from the configuration file only when it knows the test host (see
+            // `requireTestEnvironment`); until the environment is up the list may come back empty.
+            while try await within("load the product", seconds: left(), { (try? await Product.products(for: [unlock]).count) ?? 0 }) == 0 {
+                if Date().timeIntervalSince(started) > StoreKitEnvironment.budget {
+                    throw StoreKitStepTimedOut(description: "no product from the test session (is the test host signed with its bundle id?)")
+                }
+                try await Task.sleep(for: .milliseconds(500))
+            }
+            done.append("product \(elapsed()) ms")
+            try await onSessionQueue("buy once", seconds: left()) { try store.session.buyProduct(productIdentifier: unlock) }
+            done.append("buy \(elapsed()) ms")
+            let seconds = left()
+            guard try await within("see the purchase in StoreKit's list", seconds: seconds + 1, { await StoreKitEnvironment.waitUntil(listed: true, unlock, seconds: seconds) }) else {
+                throw StoreKitStepTimedOut(description: "StoreKit never listed the purchase")
+            }
+            done.append("listed \(elapsed()) ms")
+            let held = try await onSessionQueue("clear the session", seconds: left()) {
+                store.session.clearTransactions()
+                return store.session.allTransactions().count
+            }
+            let rest = left()
+            guard held == 0, try await within("StoreKit lists no unlock", seconds: rest + 1, { await StoreKitEnvironment.waitUntil(listed: false, unlock, seconds: rest) }) else {
+                throw StoreKitStepTimedOut(description: "the purchase stayed after clearing (session holds \(held))")
+            }
+            done.append("cleared \(elapsed()) ms")
+            storeKitTrace("StoreKit test environment up after \(elapsed()) ms (\(done.joined(separator: ", ")))")
+            return nil
+        } catch {
+            let failure = "StoreKit test environment not up after \(elapsed()) ms (done: \(done.isEmpty ? "nothing" : done.joined(separator: ", "))): \(error); host \(Bundle.main.bundleIdentifier ?? "-")"
+            storeKitTrace(failure)
+            return failure
+        }
+    }
+}
+
+/// Every StoreKit step that started and has not ended, also one whose test stopped waiting
+/// for it. A step given up on goes on running; `PurchaseStoreKitTests.session()` lets no
+/// test start before it ended, so it never acts on the next test's session.
+final class StoreKitSteps: @unchecked Sendable {
+    static let shared = StoreKitSteps()
+    private let lock = NSLock()
+    private var steps: [Int: String] = [:]
+    private var count = 0
+
+    func begin(_ step: String) -> Int {
+        lock.withLock {
+            count += 1
+            steps[count] = step
+            return count
+        }
+    }
+
+    func end(_ token: Int) {
+        lock.withLock { steps[token] = nil }
+    }
+
+    var running: [String] {
+        lock.withLock { steps.keys.sorted().compactMap { steps[$0] } }
+    }
+
+    func waitUntilIdle(seconds: Double) async throws {
+        let deadline = Date().addingTimeInterval(seconds)
+        while true {
+            let open = running
+            if open.isEmpty { return }
+            if Date() > deadline {
+                throw StoreKitStepTimedOut(description: "StoreKit steps of an earlier test still running after \(Int(seconds)) s: \(open.joined(separator: "; "))")
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+}
+
+/// The one thread for the test session's blocking calls (set up, buy, refund, clear, read).
+/// Not Swift's cooperative pool: the simulator on the CI runner has three cores, so the pool
+/// has three threads, shared with the other suites running alongside. A blocking call that
+/// hangs there takes one of them for as long as it hangs, also after its test gave up on it.
+/// One serial queue also keeps the session's calls in order: none overlaps another.
+let storeKitSessionQueue = DispatchQueue(label: "albumist.tests.storekit-session", qos: .userInitiated)
+
+/// Runs one blocking call of the test session on `storeKitSessionQueue` and gives up after
+/// `seconds`, so a call that never answers fails its test with the step's name. The call
+/// counts as running (`StoreKitSteps`) until it really returns.
+func onSessionQueue<T: Sendable>(_ step: String, seconds: Double = 30, _ call: @escaping @Sendable () throws -> T) async throws -> T {
+    let token = StoreKitSteps.shared.begin(step)
+    return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
+        let once = ResumeOnce(continuation)
+        storeKitSessionQueue.async {
+            let result = Result<T, any Error> { try call() }
+            StoreKitSteps.shared.end(token)
+            once.resume(result)
+        }
+        Task.detached {
+            try? await Task.sleep(for: .seconds(seconds))
+            once.resume(.failure(StoreKitStepTimedOut(description: "StoreKit step did not finish within \(Int(seconds)) s: \(step)")))
+        }
+    }
+}
+
+/// A call on the session queue whose end nobody awaits (the clear after a test); counted as
+/// running until it returns.
+func startOnSessionQueue(_ step: String, _ call: @escaping @Sendable () -> Void) {
+    let token = StoreKitSteps.shared.begin(step)
+    storeKitSessionQueue.async {
+        call()
+        StoreKitSteps.shared.end(token)
+    }
+}
+
+/// Runs one asynchronous StoreKit step (product, StoreKit's list, the app's purchase call)
+/// off the main actor and gives up after `seconds`, so a step that never answers fails its
+/// test with the step's name instead of stopping the whole test run. The step counts as
+/// running (`StoreKitSteps`) until it really ends. Blocking calls of the test session go
+/// through `onSessionQueue` instead.
 func within<T: Sendable>(_ step: String, seconds: Double = 30, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
+    let token = StoreKitSteps.shared.begin(step)
+    return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
         let once = ResumeOnce(continuation)
         Task.detached {
-            do { once.resume(.success(try await operation())) } catch { once.resume(.failure(error)) }
+            let result: Result<T, any Error>
+            do { result = .success(try await operation()) } catch { result = .failure(error) }
+            StoreKitSteps.shared.end(token)
+            once.resume(result)
         }
         Task.detached {
             try? await Task.sleep(for: .seconds(seconds))

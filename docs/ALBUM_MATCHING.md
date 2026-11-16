@@ -139,3 +139,47 @@ In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen V
 ### Mehrere passende Alben
 Albumist ergänzt dann nichts von sich aus. Die Erklärung nennt jedes passende Album; der
 Hauptknopf heißt „Album auswählen“ und öffnet die Auswahl.
+
+## Dein Zuhause (16.11.2026)
+Die Einstellungen in „Dein Zuhause“ ändern, **welche** Vorschläge entstehen (Reisen, Reisenamen,
+Orte-Alben des Zuhauses), nicht wie ein Vorschlag mit vorhandenen Alben abgeglichen wird:
+`AlbumMatcher` ist unverändert, `AlbumMatcher.version` bleibt. Nach einer Änderung macht
+`AnalysisPipeline.resuggest` die Vorschläge neu und gleicht sie wie nach jeder Analyse ab.
+Ein Vorschlag, den der Nutzer schon ausgewählt hat und den die Änderung verändern oder entfernen
+würde, bleibt mit seinem Inhalt von damals (`HeldSuggestions`, Schlüssel `user.heldSuggestions`)
+und wird gegen die Alben von jetzt abgeglichen; er geht erst, wenn er angelegt oder abgewählt ist.
+Fotos, die nicht mehr in der Mediathek sind, fallen aus ihm heraus; bleibt keines, geht er.
+
+Welcher Schritt die Vorschläge nach einer Änderung macht, ist gleich: die Änderung wird mit einer
+Vormerkung (`analysis.pendingHomeChange`, die Vorschläge von vorher) in einer Transaktion
+gespeichert. Wer zuerst Vorschläge macht – `resuggest`, ein Lauf, der den Lock vorher bekam, oder
+der Lauf nach dem nächsten Start, wenn die App dazwischen beendet wurde –, hält die Auswahl, schreibt
+den Hinweis für die Übersicht und löscht die Vormerkung in derselben Transaktion wie die neuen
+Vorschläge. „Analyse neu aufbauen“ läuft über denselben Lock und löscht die Vormerkung mit.
+
+Regeln, wann ein gewähltes Zuhause gilt:
+- **„Stimmt“** auf dem erkannten Zuhause gilt ab dem Moment der Bestätigung
+  (`HomeSettings.confirmedFrom`). Davor entscheidet weiter die Erkennung, in den Monaten eines
+  Umzugs mit beiden Zuhause; „Stimmt“ ändert also nichts an der Vergangenheit und hält das Zuhause
+  nur für spätere Fotos fest. Ohne Namen (noch kein Ort bekannt) wird „Stimmt“ nicht angeboten.
+- **Ein Ort unter „Ändern“** gilt ab dem Tag, seit dem der Nutzer dort wohnt, nie für alle Zeit
+  (Produktregel, Re-Review 16.11.). Nach der Wahl fragt die App „Seit wann wohnst du dort?“,
+  vorgeschlagen ist der Beginn des letzten Aufenthalts dort (`HomeCandidates.stayStart`, Runde 4).
+  Gezählt werden nur Tage mit Fotos, jeder im Umkreis (30 km) oder woanders, je nachdem, wo die
+  meisten seiner Fotos liegen; Tage ohne Fotos sagen nichts. Vom neuesten Tag im Umkreis zurück
+  endet der Aufenthalt an der ersten Strecke von 28 Fototagen, von denen mehr als die Hälfte
+  woanders sind (`moveStretchDays`, `moveShareElsewhere`). Er beginnt an dem Tag im Umkreis, ab
+  dem (bis heute) die Tage im Umkreis am weitesten vor den Tagen woanders liegen, ein Tag woanders
+  zählt doppelt; bei Gleichstand der neuere. So ziehen Besuche vor einem Umzug, auch jedes
+  Wochenende (2 von 7 Tagen), das Datum nicht zurück, eine kurze Reise in den Wochen nach dem
+  Umzug schiebt es nicht dahinter, und eine Woche woanders jeden Monat (ein Viertel) beendet
+  keinen Aufenthalt. Ab etwa zwei Wochen Urlaub mit Fotos jeden Tag (oder seltenen Fotos zu Hause)
+  liegt das Datum nach dem Urlaub: das ist harmlos, denn davor entscheidet die Erkennung, und die
+  Reisen bleiben, wie sie waren (getestet). Der Nutzer kann das Datum ändern.
+  Davor entscheidet die Erkennung wie nach „Stimmt“ (derselbe `confirmedFrom`). So werden die
+  Jahre am alten Wohnort keine Reise, auch nicht, wenn dort vorher ein Zuhause bestätigt war.
+- **Frühere Zuhause** gelten bis zu ihrem Datum (Kette, siehe `HomeSettings.home(at:)`).
+- Welche Länder, Regionen und Orte ein gewähltes Zuhause sind, kommt aus den Fotos im Umkreis
+  (30 km) bei jedem Vorschlagslauf (`HomeContext`), der Name bei der Wahl ist nur Ersatz: ein Ort
+  mit mindestens einem Viertel der Fotos dort, oder dessen Fotos überwiegend dort liegen (ein Land
+  jenseits der nahen Grenze, solange seine Fotos Alltag sind).

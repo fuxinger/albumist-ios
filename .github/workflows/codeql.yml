@@ -74,12 +74,8 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Select newest Xcode
-        run: |
-          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_*.app' | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(find /Applications -maxdepth 1 -name 'Xcode*.app' | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
-          xcodebuild -version
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode
       - name: Generate Xcode project
         run: |
           brew install xcodegen

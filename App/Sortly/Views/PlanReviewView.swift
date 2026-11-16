@@ -166,7 +166,9 @@ struct PlanReviewView: View {
                 applyTitle(summary)
             }
             .buttonStyle(PrimaryButtonStyle())
-            .disabled(blocking || plan.steps.isEmpty)
+            // Not while a change in "Dein Zuhause" makes the suggestions again (the plan would
+            // not start, after the fly animation).
+            .disabled(blocking || plan.steps.isEmpty || model.homeChangeRunning)
             .accessibilityIdentifier("plan.apply")
             if blocking {
                 Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")

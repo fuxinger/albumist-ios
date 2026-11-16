@@ -17,7 +17,14 @@ public enum StoredDefaults {
     ) throws -> T {
         // Written by this version: nothing to fill in.
         if let value = try? decoder.decode(T.self, from: data) { return value }
-        let stored = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        // Bytes that are not JSON at all (damage) fail like any other value that cannot be
+        // decoded: a `DecodingError`, which readers of user values treat as "not stored".
+        let stored: Any
+        do {
+            stored = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        } catch {
+            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: [], debugDescription: "The stored value is not JSON.", underlyingError: error))
+        }
         let base = try JSONSerialization.jsonObject(with: encoder.encode(defaults), options: [.fragmentsAllowed])
         let merged = try JSONSerialization.data(withJSONObject: merge(stored, over: base), options: [.fragmentsAllowed])
         return try decoder.decode(T.self, from: merged)

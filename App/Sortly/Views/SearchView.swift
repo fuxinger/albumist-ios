@@ -58,6 +58,7 @@ struct SearchView: View {
                         // The previous answer stays while the next one is computed (no flicker).
                         if resultQuery.isEmpty {
                             ProgressView().frame(maxWidth: .infinity)
+                                .accessibilityLabel(Text("Suche läuft"))
                         } else {
                             emptyState
                         }
@@ -236,6 +237,7 @@ struct SearchView: View {
             ProgressView()
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Theme.Spacing.m)
+                .accessibilityLabel(Text("Weitere Treffer werden geladen"))
                 .onScrollVisibilityChange(threshold: 0.1) { visible in
                     if visible { shown += Self.page }
                 }

@@ -60,7 +60,7 @@ public struct Suggestions: Sendable {
 /// "Tickets" among the screenshots and among the documents; "Deutschland" with most of the
 /// library. A suggestion list is read top to bottom, so every duplicate costs attention and
 /// hides a good suggestion further down. The rules, in order:
-/// 1. Where the user lives is not an album (see `LibraryProfile`).
+/// 1. Where the user lives is not an album (see `HomeContext`, `LibraryProfile`).
 /// 2. A country, region, town or theme seen on one trip only is that trip's album. It comes
 ///    back by itself after a second trip there. Likewise a screenshot album inside a document
 ///    album.
@@ -78,12 +78,14 @@ extension ProposalEngine {
 
     func curated(_ proposals: [AlbumProposal], profile: LibraryProfile) -> [AlbumProposal] {
         var standIns: [StandIn] = []
-        return curated(proposals, profile: profile, standIns: &standIns)
+        return curated(proposals, home: HomeContext(profile: profile), standIns: &standIns)
     }
 
-    /// - Parameter standIns: gets, for every suggestion left out under rule 2 or 3, the
-    ///   suggestion that stands for its photos. Rule 1 has none: home is no album at all.
-    func curated(_ proposals: [AlbumProposal], profile: LibraryProfile, standIns: inout [StandIn]) -> [AlbumProposal] {
+    /// - Parameters:
+    ///   - home: which countries, regions and towns are home at some time (rule 1).
+    ///   - standIns: gets, for every suggestion left out under rule 2 or 3, the suggestion that
+    ///     stands for its photos. Rule 1 has none: home is no album at all.
+    func curated(_ proposals: [AlbumProposal], home: HomeContext, standIns: inout [StandIn]) -> [AlbumProposal] {
         let tripFolder = labels.folder(for: .trips)
         func isPlaceAlbum(_ p: AlbumProposal) -> Bool {
             if case .placeCollection = p.kind { return p.folderPath.first != tripFolder }
@@ -94,8 +96,8 @@ extension ProposalEngine {
             return false
         }
 
-        // 1. Everyday places.
-        var list = proposals.filter { p in !(isPlaceAlbum(p) && p.placeKeys.contains(where: profile.isEveryday)) }
+        // 1. Everyday places: the home of any time (the one the user chose, or the detected one).
+        var list = proposals.filter { p in !(isPlaceAlbum(p) && p.placeKeys.contains(where: home.isHomeAtSomeTime)) }
 
         // 2. Places and themes inside a single trip.
         var tripOf: [AssetID: Int] = [:]

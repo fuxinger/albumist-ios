@@ -108,9 +108,20 @@ final class AccessibilityUITests: XCTestCase {
     func test1_OnboardingAtLargestTextInDarkMode() {
         continueAfterFailure = true
         UITestOnboarding.accessibilityOnboarding.starts()
+        // Test 1 runs first on a freshly erased simulator (ui.yml; a repeat after a simulator
+        // failure erases it again), so it always meets the welcome screen and checks every step.
+        // An issue that ends the method early must not let it pass without its later checks.
+        let end = UITestOnboarding.accessibilityOnboarding.finished
+        addTeardownBlock {
+            if !FileManager.default.fileExists(atPath: end.path) {
+                print("UI_STEP_MISSING accessibility onboarding reached its end")
+                XCTFail("test1_OnboardingAtLargestTextInDarkMode stopped before its end")
+            }
+        }
         launch(textSize: Self.largestText, dark: true)
         if !onboardAndSeed(checking: true) {
-            print("UI_STEP_MISSING onboarding (already done on this simulator?)")
+            print("UI_STEP_MISSING onboarding")
+            XCTFail("test1 must start on a fresh simulator: no welcome screen, so the onboarding was not checked")
         }
         check("overview after first analysis")
         UITestOnboarding.accessibilityOnboarding.ends()
@@ -158,6 +169,9 @@ final class AccessibilityUITests: XCTestCase {
         if demo.waitForExistence(timeout: welcome ? 30 : 5) {
             tap(demo, "seed demo library")
             XCTAssertTrue(UITestOnboarding.demoLibraryCreated(app), "Demo library not created")
+        } else if checking {
+            print("UI_STEP_MISSING demo button")
+            XCTFail("No \"Beispiel-Mediathek anlegen\" after the onboarding on a fresh simulator")
         }
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
         return welcome

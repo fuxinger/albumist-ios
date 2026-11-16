@@ -243,7 +243,7 @@ final class DeviceConditionUITests: XCTestCase {
             asked = grantOnNoAccessScreen(.full)
         }
         // In UI runs 43766407272 and 43795445305 iOS answered for the user after a reset (no
-        // question, access denied), and every later test of the shard ran without photos.
+        // question, access denied), and every later test of the group ran without photos.
         if attempt < 3, !app.tabBars.firstMatch.exists, toSettings.waitForExistence(timeout: 3) {
             print("UI_FACT photo access denied: given back from the Mac")
             grantFromHost()
@@ -1093,9 +1093,9 @@ final class DeviceConditionUITests: XCTestCase {
 
     // MARK: 12 Stress: 50 000 photos, iCloud-only, offline
 
-    /// Runs only when the runner sets SORTLY_STRESS_PHOTOS (ui.yml dispatched with a stress
-    /// count; xcodebuild hands TEST_RUNNER_SORTLY_STRESS_PHOTOS on as that); the normal shards
-    /// skip it at once. Two phases, so that neither disturbs the other (stress runs
+    /// Runs only when the runner sets SORTLY_STRESS_PHOTOS (ui-stress.yml, started by hand;
+    /// xcodebuild hands TEST_RUNNER_SORTLY_STRESS_PHOTOS on as that); the "device conditions"
+    /// group of ui.yml skips it at once. Two phases, so that neither disturbs the other (stress runs
     /// 43795785359 and 43823462215 mixed them):
     /// 1. Creating: launches with `-SortlyUITestCreateOnly` add that many photos and end the
     ///    app when they are done, writing how far they are into a file of the runner's.

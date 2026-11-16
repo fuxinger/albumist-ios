@@ -45,10 +45,17 @@ jobs:
             echo "::error::Use NavigationLink { destination } label: { … } instead of NavigationLink(value:)"
             exit 1
           fi
+      - name: Spinner rule
+        # A bare spinner is an element with no description (accessibility audit, VoiceOver).
+        run: python3 .github/scripts/spinner_rule.py .
       - name: Every UI string has English
         run: python3 .github/scripts/check_strings.py .
       - name: Code map lists every Swift file
         run: python3 scripts/gen_codemap.py --check
+      - name: CI scripts (unit tests)
+        # The retry rule of the UI jobs (ui_tests.py) and the test gate (ci_gate.py), with log
+        # snippets of real runs: a simulator failure is repeated, a real finding never.
+        run: python3 -m unittest discover -s .github/scripts/tests -v
       - name: Test-plan map names real tests
         # Warnings only: a stale name in docs/TEST_COVERAGE_MAP.txt makes a case look untested
         # in the job summary, it does not make the app worse.
@@ -138,17 +145,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Select newest Xcode
+      - name: Select pinned Xcode
         id: xcode
+        # Xcode and simulator runtime pinned in .github/toolchain.json; the job stops when the
+        # image lacks them. The id output (Xcode version and build) is part of the cache key:
+        # products of another compiler are never reused.
         run: |
-          ls -d /Applications/Xcode*.app
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
-          xcodebuild -version
-          xcrun simctl list runtimes
-          # The exact Xcode build is part of the cache key: products of another compiler are never reused.
-          echo "id=$(xcodebuild -version | tr -c 'A-Za-z0-9.\n' '-' | paste -sd- -)" >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/toolchain.py xcode --runtime
           # Files restored from the cache have new inode numbers; without this Xcode's build
           # system would treat all of them as changed and rebuild everything.
           defaults write com.apple.dt.XCBuild IgnoreFileSystemDeviceInodeChanges -bool YES
@@ -180,7 +183,7 @@ jobs:
         # Not booted early on purpose: a first boot competes with the package build for the
         # three cores and made both several minutes slower (run 43749559109).
         run: |
-          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py)
+          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --role default)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
       - name: Core tests (macOS)
         run: |
@@ -267,11 +270,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Select newest Xcode
-        run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode
       - name: Generate Xcode project
         run: |
           brew install xcodegen

@@ -10992,6 +10992,886 @@
           }
         }
       }
+    },
+    "Foto wird geladen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading photo"
+          }
+        }
+      }
+    },
+    "Name wird vorgeschlagen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggesting a name"
+          }
+        }
+      }
+    },
+    "Wird vorbereitet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing"
+          }
+        }
+      }
+    },
+    "Geschichte wird erzählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Writing your story"
+          }
+        }
+      }
+    },
+    "Suche läuft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Searching"
+          }
+        }
+      }
+    },
+    "Kauf läuft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Purchasing"
+          }
+        }
+      }
+    },
+    "Dein Zuhause" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your home"
+          }
+        }
+      }
+    },
+    "%@ und Umgebung" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ and surroundings"
+          }
+        }
+      }
+    },
+    "Gegend in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Area in %@"
+          }
+        }
+      }
+    },
+    "Ort ohne Namen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Place without a name"
+          }
+        }
+      }
+    },
+    "Keins" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None"
+          }
+        }
+      }
+    },
+    "Noch nicht erkannt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not found yet"
+          }
+        }
+      }
+    },
+    "Bis %@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Until %1$@: %2$@"
+          }
+        }
+      }
+    },
+    "Eltern" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parents"
+          }
+        }
+      }
+    },
+    "Zweitwohnung" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Second home"
+          }
+        }
+      }
+    },
+    "Arbeit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Work"
+          }
+        }
+      }
+    },
+    "Anderer Ort" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other place"
+          }
+        }
+      }
+    },
+    "Vorschläge werden angepasst …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updating suggestions …"
+          }
+        }
+      }
+    },
+    "Von dir festgelegt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set by you"
+          }
+        }
+      }
+    },
+    "Ändern" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change"
+          }
+        }
+      }
+    },
+    "Kein Zuhause festgelegt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No home set"
+          }
+        }
+      }
+    },
+    "Alle Fotos mit Ort zählen für Länder und Orte." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All photos with a location count for Countries and Places."
+          }
+        }
+      }
+    },
+    "Stimmt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That's right"
+          }
+        }
+      }
+    },
+    "Albumist verwendet dieses Zuhause ab jetzt, auch wenn sich deine Fotos ändern." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist uses this home from now on, even if your photos change."
+          }
+        }
+      }
+    },
+    "Noch kein Zuhause erkannt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No home found yet"
+          }
+        }
+      }
+    },
+    "Albumist erkennt dein Zuhause an Fotos mit Ort, die über mehrere Wochen in derselben Gegend entstehen. Dafür reicht es noch nicht, oder die Analyse ist noch nicht so weit." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist finds your home from photos with a location taken in the same area over several weeks. There aren't enough of them yet, or the analysis hasn't got that far."
+          }
+        }
+      }
+    },
+    "Selbst wählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose yourself"
+          }
+        }
+      }
+    },
+    "Zuhause" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Home"
+          }
+        }
+      }
+    },
+    "Fotos aus deinem Zuhause und der Umgebung (etwa 30 km) sind keine Reise und brauchen kein eigenes Orte-Album." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos from your home and its surroundings (about 30 km) are not a trip and need no place album of their own."
+          }
+        }
+      }
+    },
+    "Änderungen passen nur die Vorschläge an. Deine Alben in Fotos und Vorschläge, die du schon ausgewählt hast, bleiben, wie sie sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Changes only update the suggestions. Your albums in Photos and the suggestions you already selected stay as they are."
+          }
+        }
+      }
+    },
+    "Während die Analyse oder das Anlegen läuft, kannst du hier nichts ändern." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can't change anything here while the analysis or album creation is running."
+          }
+        }
+      }
+    },
+    "Von Albumist erkannt, seit %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Found by Albumist, since %@"
+          }
+        }
+      }
+    },
+    "Von Albumist erkannt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Found by Albumist"
+          }
+        }
+      }
+    },
+    "Früheres Zuhause hinzufügen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add former home"
+          }
+        }
+      }
+    },
+    "Früher" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Before"
+          }
+        }
+      }
+    },
+    "Wenn du umgezogen bist: Reisen von damals misst Albumist am Zuhause von damals." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "If you moved: Albumist judges trips from back then by your home back then."
+          }
+        }
+      }
+    },
+    "Ort hinzufügen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add place"
+          }
+        }
+      }
+    },
+    "Andere Orte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other places"
+          }
+        }
+      }
+    },
+    "Zum Beispiel deine Eltern, eine Zweitwohnung oder die Arbeit. Aufenthalte dort zählen nicht als Reisen. Jeder Ort bekommt stattdessen ein eigenes Album." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For example your parents, a second home or work. Stays there don't count as trips. Each place gets an album of its own instead."
+          }
+        }
+      }
+    },
+    "Albumist erkennt dein Zuhause selbst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist finds your home by itself."
+          }
+        }
+      }
+    },
+    "Kein Zuhause festlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Don't set a home"
+          }
+        }
+      }
+    },
+    "Kein Ort gilt als Zuhause. Alle Fotos mit Ort zählen für Länder und Orte." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No place counts as home. All photos with a location count for Countries and Places."
+          }
+        }
+      }
+    },
+    "Noch keine Orte" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No places yet"
+          }
+        }
+      }
+    },
+    "Sobald Albumist die Orte deiner Fotos kennt, kannst du hier einen wählen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As soon as Albumist knows the places of your photos, you can choose one here."
+          }
+        }
+      }
+    },
+    "Orte aus deinen Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Places from your photos"
+          }
+        }
+      }
+    },
+    "Ort suchen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search places"
+          }
+        }
+      }
+    },
+    "Zuhause wählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose home"
+          }
+        }
+      }
+    },
+    "Ort wählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose place"
+          }
+        }
+      }
+    },
+    "%lld Tage mit Fotos" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Tag mit Fotos"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Tage mit Fotos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld day with photos"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld days with photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Wählen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose"
+          }
+        }
+      }
+    },
+    "Gewohnt bis" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lived there until"
+          }
+        }
+      }
+    },
+    "Fotos bis zu diesem Tag misst Albumist an diesem Zuhause. Gab es davor noch ein Zuhause, füge es ebenso hinzu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist judges photos up to this day by this home. If you had another home before, add it the same way."
+          }
+        }
+      }
+    },
+    "Früheres Zuhause" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Former home"
+          }
+        }
+      }
+    },
+    "Hinzufügen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add"
+          }
+        }
+      }
+    },
+    "Was ist das für ein Ort?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What is this place?"
+          }
+        }
+      }
+    },
+    "Name, zum Beispiel Oma" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name, for example Grandma"
+          }
+        }
+      }
+    },
+    "Eigener Name (optional)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your own name (optional)"
+          }
+        }
+      }
+    },
+    "Aufenthalte dort zählen nicht als Reisen. Der Name ist nur für dich, das Album heißt wie der Ort." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stays there don't count as trips. The name is just for you; the album is named after the place."
+          }
+        }
+      }
+    },
+    "Zuhause geändert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Home changed"
+          }
+        }
+      }
+    },
+    "%lld Vorschläge passen nicht mehr und sind weggefallen." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Vorschlag passt nicht mehr und ist weggefallen."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Vorschläge passen nicht mehr und sind weggefallen."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld suggestion no longer fits and was removed."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld suggestions no longer fit and were removed."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld neue Vorschläge." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld neuer Vorschlag."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld neue Vorschläge."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new suggestion."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld new suggestions."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld ausgewählte Vorschläge bleiben, wie du sie gewählt hast." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ausgewählter Vorschlag bleibt, wie du ihn gewählt hast."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ausgewählte Vorschläge bleiben, wie du sie gewählt hast."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld selected suggestion stays as you chose it."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld selected suggestions stay as you chose them."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "An deinen Alben in Fotos hat sich nichts geändert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing changed in your albums in Photos."
+          }
+        }
+      }
+    },
+    "Wo du wohnst und welche Orte keine Reisen sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Where you live and which places aren't trips."
+          }
+        }
+      }
+    },
+    "Deine neuesten Fotos sprechen für %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your newest photos point to %@."
+          }
+        }
+      }
+    },
+    "Albumist kennt die Orte dort noch nicht. Sobald sie bekannt sind, kannst du dein Zuhause bestätigen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist doesn't know the places there yet. Once it does, you can confirm your home."
+          }
+        }
+      }
+    },
+    "Albumist ist gerade beschäftigt. Versuch es gleich noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is busy right now. Please try again in a moment."
+          }
+        }
+      }
+    },
+    "Seit wann wohnst du dort?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Since when have you lived there?"
+          }
+        }
+      }
+    },
+    "Zuhause festlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Home"
+          }
+        }
+      }
+    },
+    "Festlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set"
+          }
+        }
+      }
+    },
+    "Vorgeschlagen nach deinen Fotos. Für Fotos von davor bleibt alles wie bisher." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggested from your photos. Nothing changes for photos from before then."
+          }
+        }
+      }
+    },
+    "Gleich wieder möglich: Albumist passt gerade die Vorschläge an deine Änderung in „Dein Zuhause“ an." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Possible again in a moment: Albumist is updating the suggestions for your change in “Your home”."
+          }
+        }
+      }
+    },
+    "„Ja“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Yes” is available once the analysis has been rebuilt, because Albumist then plans your trips again."
+          }
+        }
+      }
+    },
+    "„Keine Reise“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Not a trip” is available once the analysis has been rebuilt, because Albumist then plans your trips again."
+          }
+        }
+      }
+    },
+    "„Keine Reise“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Not a trip” is available once creating is finished, because Albumist then plans your trips again."
+          }
+        }
+      }
+    },
+    "„Keine Reise“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Not a trip” is available once the analysis is finished, because Albumist then plans your trips again."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

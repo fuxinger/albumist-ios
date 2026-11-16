@@ -1,31 +1,59 @@
 name: UI flow
 
-# End-to-end UI tests on the simulator, split over parallel macOS runners. Separate from CI
-# with its own queue: a new push does not cancel a running UI flow; the newest commit runs next.
+# End-to-end UI tests on the simulator. Separate from CI with its own queue: a new push does
+# not cancel a running UI run; the newest commit runs next.
 #
-# One job builds the app and the tests once (build-for-testing) and uploads them; then every
-# shard boots its own fresh simulator and runs its tests with test-without-building. (The
-# shards wait with `needs` instead of on a runner: runners are shared with the other
-# workflows, and a shard waiting on a runner could hold the one the build needs.)
-# Every UI test sets itself up (fast start, demo library), so any group of tests can run
-# alone. The shards are listed once, in `matrix.include` below; a new test class is one more
-# `tests` entry (.github/scripts/check_ui_shards.py checks that every test is listed exactly
-# once). GitHub runs up to five macOS jobs at once for this repository.
+#   1. Core tests (Linux): the core library's tests on a free Linux runner. No macOS runner
+#      starts for a commit whose core tests fail (fast first, then expensive).
+#   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
+#   3. Five test groups, each on its own runner and freshly booted simulator
+#      (test-without-building), at most four at a time (max-parallel), so the slowest group
+#      sets the wall time, not the sum. Job times measured in UI run 43906501407, including
+#      5-7 min simulator setup (device conditions: UI runs 43827092443 and 43795445305 of
+#      claude/pro-switches):
+#        - device conditions: DeviceConditionUITests 01-04, 06, 09-12 (hot iPhone, battery,
+#                          background expiry, iCloud offline, full disk, photo access, empty
+#                          and large library; test12 is the stress test and skips itself here,
+#                          see ui-stress.yml), ~65 min
+#        - full flow:      SortlyFlowUITests/test1_FullFlow (onboarding, demo library, plan,
+#                          the sorting-show video), 32 min
+#        - other flows:    every other UI test except the accessibility tests (flow tests 2-6,
+#                          locked purchase, search, and DeviceConditionUITests 05, 07, 08: undo
+#                          and interrupted plans, flows with a plan like flow test 5; each brings
+#                          the app to an onboarded demo library by itself, see
+#                          UITestOnboarding), 44 min + ~20 min
+#        - accessibility:  AccessibilityUITests 1-4 on a small iPhone with Reduce Motion,
+#                          ~48 min (56.5 min with the contrast pass, which is now apart)
+#        - contrast:       AccessibilityUITests test5 with Increase Contrast and Reduce
+#                          Transparency on its own small iPhone, ~18 min (it onboards first)
+#      "other flows" is defined as "everything the other groups do not run", so a new test
+#      class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests checks
+#      every UI test against the groups).
+#      With CI's one macOS job this is at most five macOS jobs per push at the peak (the build
+#      job runs before the groups; max-parallel 4 holds the fifth group back), about all the
+#      repository has; accepted on 16.11. Contrast is listed last, so it is the group that
+#      waits: it starts when the first group (the full flow, ~32 min) is done and ends with
+#      the others.
+#      The 50,000-photo stress run is not part of this run: .github/workflows/ui-stress.yml,
+#      started by hand.
+#
+# Each group runs through .github/scripts/ui_tests.py: a pass that the simulator service lost
+# (an explicit "Error returned in reply from CoreSimulatorService", "Timed out waiting for AX
+# loaded notification", runner not installed or launched, ...) and in which neither the log,
+# a crash report nor the result bundle shows anything about the app is repeated once, on an
+# erased and newly prepared simulator, for the tests that did not pass only. A failed test,
+# an error line, an accessibility finding, a crash, a timeout or a bare runner restart is
+# never repeated, and a pass that ran no test fails. Result bundles and logs are uploaded
+# when a group fails. Nothing is repeated silently: every repeat, every test that passed only
+# on it and every failed boot attempt is a FLAKY... line in the group's log and job summary
+# and goes into build/flaky-GROUP.json; 4. "UI summary" (Linux) counts them over all groups.
 on:
   pull_request:
     paths-ignore: ['**.md']
   workflow_dispatch:
-    inputs:
-      stress_photos:
-        # A stress run instead of the shards: DeviceConditionUITests/test12 with this many
-        # photos (iCloud-only, offline), on one runner, with the app's memory sampled on the Mac.
-        description: Stress run with this many photos (empty = the normal UI run)
-        type: string
-        default: ''
 
 permissions:
   contents: read
-  actions: read # the summary reads the shards' times
 
 env:
   HOMEBREW_NO_AUTO_UPDATE: 1
@@ -36,19 +64,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  core-linux:
+    # Same tests as CI's "Core tests (Linux)" (CI runs them for this commit too, but a manual
+    # UI run on a branch has no CI run to wait for). ~4 min on a free runner.
+    name: Core tests (Linux)
+    runs-on: ubuntu-24.04
+    container: swift:6.2-noble
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install SQLite headers
+        run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev > /dev/null
+      - name: Build and test
+        run: swift test --parallel
+
   build:
     name: UI build
+    needs: core-linux
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - name: Every UI test is in exactly one shard
-        run: python3 .github/scripts/check_ui_shards.py
-      - name: Select newest Xcode
-        run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode
       - name: Build for testing
         run: |
           set +e
@@ -62,461 +103,206 @@ jobs:
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1
           status=$?
-          grep -aE "error:|\*\* " ../build-log.txt | head -100
+          grep -aE "error:|\*\* " ../build-log.txt | grep -v "/SourcePackages/" | head -100
           [ $status = 0 ] || exit $status
+          set -e
           # Only what the tests run: the apps and the .xctestrun (no modules or objects).
           cd ../build/dd/Build/Products
+          ls
           tar --exclude '*.swiftmodule' --exclude '*.o' --exclude '*.a' --exclude '*.swiftdoc' -czf "$GITHUB_WORKSPACE/ui-products.tgz" .
           ls -la "$GITHUB_WORKSPACE/ui-products.tgz"
       - name: Upload build products
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-products
           path: ui-products.tgz
           retention-days: 1
           compression-level: 0
+          overwrite: true
 
   ui:
-    name: UI ${{ matrix.shard }}
+    name: UI ${{ matrix.title }}
     needs: build
-    if: inputs.stress_photos == '' || inputs.stress_photos == null
     runs-on: xcode-27
-    timeout-minutes: 75
+    # A group takes 25-65 min; a repeat after a simulator failure can add up to its length.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
+      # Four groups + CI's macOS job = five macOS jobs at the peak (see the top of this file).
+      max-parallel: 4
       matrix:
         include:
-          # tests: Class or Class/test, separated by spaces. Classes run in alphabetical order
-          # within a shard, tests in alphabetical order within a class.
-          - shard: flow-a
+          # only / skip: "Class" or "Class/testMethod" of SortlyUITests, separated by spaces.
+          - group: device
+            # The device-condition switches (App/Sortly/Platform/UITestSwitches.swift) on the Pro
+            # simulator. A test that resets the photo access asks the Mac to give it back
+            # (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07 and
+            # 08 (undo, interrupted plan) run with the other flows.
+            title: device conditions
+            device: pro
+            only: >-
+              DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish
+              DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording
+              DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue
+              DeviceConditionUITests/test04_UnreadableICloudOfflineComplete
+              DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
+              DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked
+              DeviceConditionUITests/test10_EmptyLibrary
+              DeviceConditionUITests/test11_LargeLibrary
+              DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
+            skip: ''
+          - group: flow-full
+            title: full flow and video
+            device: pro
+            only: SortlyFlowUITests/test1_FullFlow
+            skip: ''
             video: true
-            tests: SortlyFlowUITests/test1_FullFlow SortlyFlowUITests/test2_LargeTextDarkMode SortlyFlowUITests/test3_TapThroughSweep SortlyFlowUITests/test4_DecisionsComeBackAfterRebuild SortlySearchUITests
-          - shard: flow-b
-            tests: DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo SortlyFlowUITests/test1b_AtlasLibrarySearch SortlyFlowUITests/test1c_UndoFromHistory SortlyFlowUITests/test5_InterruptedPlanCanBeLeftAndRetried
-          - shard: flow-c
-            tests: DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo SortlyFlowUITests/test1d_TripWorkshop SortlyFlowUITests/test6_AnalysisKeepsGoingThroughBackgroundAndTabs SortlyLockedUITests
-          - shard: device-a
-            tests: DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
-          - shard: device-b
-            tests: DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
+          - group: flow-other
+            title: other flows, purchase and search
+            device: pro
+            only: ''
+            # Everything the other groups run (keep in step with them; GroupTests checks it).
+            skip: >-
+              SortlyFlowUITests/test1_FullFlow
+              AccessibilityUITests
+              DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish
+              DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording
+              DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue
+              DeviceConditionUITests/test04_UnreadableICloudOfflineComplete
+              DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
+              DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked
+              DeviceConditionUITests/test10_EmptyLibrary
+              DeviceConditionUITests/test11_LargeLibrary
+              DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
+          - group: accessibility
+            # AccessibilityUITests 1-4 on a small iPhone (SE, 375 pt) with Reduce Motion. These
+            # tests fail on findings.
+            title: accessibility (small iPhone)
+            device: se
+            only: AccessibilityUITests
+            skip: AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency
+            reduce_motion: true
+          - group: contrast
+            # AccessibilityUITests test5 on its own small iPhone with Reduce Motion, Increase
+            # Contrast and Reduce Transparency switched on before the first launch; the test
+            # brings the app to an onboarded demo library by itself (onboardAndSeed). Its own job
+            # since 16.11. (UI run 43906501407: 8 min after tests 1-4 made accessibility the
+            # longest group, 56.5 min).
+            title: contrast (small iPhone)
+            device: se
+            only: AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency
+            skip: ''
+            reduce_motion: true
+            increase_contrast: true
+    env:
+      GROUP: ${{ matrix.group }}
+      DEVICE: ${{ matrix.device }}
+      ONLY: ${{ matrix.only }}
+      SKIP: ${{ matrix.skip }}
+      INCREASE_CONTRAST: ${{ matrix.increase_contrast }}
+      REDUCE_MOTION: ${{ matrix.reduce_motion }}
+      VIDEO: ${{ matrix.video }}
     steps:
-      - uses: actions/checkout@v5
-      - name: Select newest Xcode
-        run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode --runtime
       - name: Boot simulator (in the background)
         id: sim
+        # The first boot of a fresh simulator takes 3-7 min on the hosted Macs; it runs while
+        # the build products are downloaded.
         run: |
-          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --pro)
+          UDID=$(python3 .github/scripts/ui_tests.py pick --device "$DEVICE")
+          [ -n "$UDID" ] || { echo "no simulator"; exit 1; }
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          # Boots while the build products are downloaded and unpacked. CoreSimulator on the hosted Macs
-          # sometimes aborts during the first bootstatus ('devicePair'); a retry succeeds.
-          nohup bash -c '
-            for attempt in 1 2 3; do
-              xcrun simctl boot "$0" 2>/dev/null || true
-              if xcrun simctl bootstatus "$0" -b; then
-                xcrun simctl privacy "$0" grant photos app.albumist.ios || echo "privacy grant failed"
-                xcrun simctl status_bar "$0" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
-                # One app launched and closed before the tests: the first test of a shard on a
-                # just-booted simulator failed to launch the app (runs 43795445305, 43827092443).
-                xcrun simctl launch "$0" com.apple.Preferences > /dev/null 2>&1; sleep 8
-                xcrun simctl terminate "$0" com.apple.Preferences > /dev/null 2>&1
-                echo ok > sim-ready; exit 0
-              fi
-              echo "bootstatus failed (attempt $attempt), retrying"; sleep 15
-            done
-            echo failed > sim-ready' "$UDID" > sim-boot.log 2>&1 &
+          flags=()
+          [ "$REDUCE_MOTION" = "true" ] && flags+=(--reduce-motion)
+          nohup python3 .github/scripts/ui_tests.py boot --udid "$UDID" "${flags[@]}" --ready-file sim-ready > sim-boot.log 2>&1 &
       - name: Download build products
-        uses: actions/download-artifact@v5
+        # v8 is the download action that pairs with upload-artifact v7 (its README).
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ui-products
+          path: products-download
       - name: Unpack build products
         run: |
           mkdir -p products
-          tar -xzf ui-products.tgz -C products
+          tar -xzf products-download/ui-products.tgz -C products
           ls products
       - name: Wait for the simulator
         run: |
-          for i in $(seq 1 120); do [ -f sim-ready ] && break; sleep 5; done
+          for _ in $(seq 1 180); do [ -f sim-ready ] && break; sleep 5; done
           cat sim-boot.log
           [ "$(cat sim-ready 2>/dev/null)" = ok ] || { echo "simulator did not boot"; exit 1; }
       - name: Run UI tests
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
         run: |
           set +e
-          UDID="${{ steps.sim.outputs.udid }}"
-          ONLY=""
-          for t in ${{ matrix.tests }}; do ONLY="$ONLY -only-testing:SortlyUITests/$t"; done
-          echo "UI_SHARD ${{ matrix.shard }}: ${{ matrix.tests }}"
-          # SwiftUI reports broken navigation (link without destination) and similar runtime
-          # problems only in the system log, so it is recorded during the whole run.
-          xcrun simctl spawn "$UDID" log stream --style compact --level debug \
-            --predicate 'process == "Sortly" AND (subsystem == "com.apple.SwiftUI" OR messageType == fault OR eventMessage CONTAINS[c] "navigationDestination")' \
-            > swiftui-log.txt 2>&1 &
-          LOGPID=$!
-          mkdir -p build
-          WATCHPID=""
-          if [ "${{ matrix.video }}" = "true" ]; then
-            # Video of the plan being applied in test1 (the "photos fly into albums" show):
-            # recording starts when the test opens the plan and stops a few seconds after it is done.
-            (
-              until grep -aq "UI_STEP_OK open plan$" ui-log.txt 2>/dev/null; do sleep 1; done
-              xcrun simctl io "$UDID" recordVideo --codec=h264 --force build/sorting-show.mp4 > /dev/null 2>&1 &
-              REC=$!
-              for i in $(seq 1 240); do grep -aq "UI_TIMING apply" ui-log.txt 2>/dev/null && break; sleep 1; done
-              sleep 3
-              kill -INT $REC 2>/dev/null; wait $REC
-            ) &
-            WATCHPID=$!
-          fi
-          XCTESTRUN=$(ls products/*.xctestrun | head -1)
-          started=$(date +%s)
-          xcodebuild test-without-building \
-            -xctestrun "$XCTESTRUN" \
-            -destination "id=$UDID" \
-            -resultBundlePath build/UITestResults.xcresult \
-            $ONLY > ui-log.txt 2>&1 &
-          XCB=$!
-          # The CI simulator shows no iOS photo question after a reset (the answer is "denied" at
-          # once); a test that needs the access back asks with UI_HOST_GRANT_PHOTOS in the log.
-          ( tail -n +1 -f ui-log.txt 2>/dev/null | grep --line-buffered -a "UI_HOST_GRANT_PHOTOS" | while read -r _; do
-              xcrun simctl privacy "$UDID" grant photos app.albumist.ios && echo "UI_HOST photo access granted"
-            done ) &
-          # Steps as they happen (screenshots at the end), so a shard that runs out of time
-          # still shows how far it got; it is stopped before the job's own limit for that.
-          tail -n +1 -f ui-log.txt | grep --line-buffered -aE "error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_HOST|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error" | grep --line-buffered -v "/SourcePackages/" &
-          ( sleep 3900; echo "::error::UI shard ${{ matrix.shard }} stopped after 65 minutes"; kill -INT $XCB ) &
-          WATCHDOG=$!
-          wait $XCB
-          status=$?
-          kill $WATCHDOG 2>/dev/null
-          sleep 2
-          pkill -f "tail -n \+1 -f ui-log.txt" 2>/dev/null
-          echo "UI_SHARD_TIME ${{ matrix.shard }} $(( $(date +%s) - started )) s"
-          kill $LOGPID 2>/dev/null
-          if [ -n "$WATCHPID" ]; then pkill -INT -f "recordVideo" 2>/dev/null; sleep 2; kill $WATCHPID 2>/dev/null; fi
-          if [ -f build/sorting-show.mp4 ]; then
-            echo "UI_VIDEO sorting-show.mp4"
-            # Artifact downloads are not reachable from every reviewer's machine, so a smaller copy of
-            # the video is also printed into the log (base64 chunks, like the screenshots).
-            avconvert --source build/sorting-show.mp4 --output build/sorting-show-small.mp4 \
-              --preset Preset1920x1080 --replace > /dev/null 2>&1 \
-              || cp build/sorting-show.mp4 build/sorting-show-small.mp4
-            bytes=$(stat -f%z build/sorting-show-small.mp4)
-            echo "UI_VIDEO_SIZE $bytes"
-            if [ "$bytes" -lt 25000000 ]; then
-              base64 -i build/sorting-show-small.mp4 | tr -d '\n' | fold -w 60000 | awk '{print "UI_VIDEO_B64 " NR " " $0}'
-            fi
-          fi
-          grep -aE "A11Y_|PREVIEW_JPEG" ui-log.txt | head -8000
-          # A test runner that ends inside a test leaves no "passed"/"failed" line (run 43816787321:
-          # test 1 vanished after the trial step). XCTest's own step log before the restart and
-          # the crash reports of the runner or the app say where and why.
-          grep -anB60 "Restarting after" ui-log.txt | grep -av "PREVIEW_JPEG" | cut -c 1-300 | head -400 | sed 's/^/UI_RESTART_CONTEXT /'
-          for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -30); do
-            case "$(basename "$f")" in
-              *Sortly*|*Runner*|*testmanagerd*|*XCTest*)
-                echo "UI_CRASH_REPORT $f"
-                head -c 4000 "$f" | sed 's/^/UI_CRASH_REPORT /' ;;
-            esac
-          done
-          # Unique runtime warnings from the app (timestamps cut off; scene setup and view dumps are noise).
-          grep -avE "^Filtering|^Timestamp|SwiftUI:Scenes|_UIHostingView|renderbox" swiftui-log.txt | cut -c 25- | sort | uniq -c | sort -rn | head -40 | sed 's/^/UI_RUNTIME_WARNING /'
-          if grep -aqiE "no matching navigationDestination|NavigationLink is presenting|cannot be activated" swiftui-log.txt; then
-            echo "::error::SwiftUI navigation warning in the UI run (a link leads nowhere)"
-            status=1
-          fi
-          if grep -aqiE "Publishing changes from within view updates|Modifying state during view update" swiftui-log.txt; then
-            echo "::warning::SwiftUI state was changed during a view update (see UI_RUNTIME_WARNING)"
-          fi
-          exit $status
+          XCTESTRUN=$(ls products/*.xctestrun 2>/dev/null | head -1)
+          [ -n "$XCTESTRUN" ] || { echo "::error::no .xctestrun in the build products"; exit 1; }
+          flags=()
+          [ "$REDUCE_MOTION" = "true" ] && flags+=(--reduce-motion --a11y-summary)
+          [ "$INCREASE_CONTRAST" = "true" ] && flags+=(--increase-contrast)
+          [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)
+          python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
+            --only "$ONLY" --skip "$SKIP" "${flags[@]}"
+      - name: Job summary
+        if: always()
+        run: |
+          args=()
+          for log in build/*-log.txt; do [ -f "$log" ] && args+=(--swift-log "$log"); done
+          python3 .github/scripts/test_summary.py summary --title "UI ${{ matrix.title }}" "${args[@]}" >> "$GITHUB_STEP_SUMMARY" || true
       - name: Upload video of the sorting show
         if: always() && matrix.video && hashFiles('build/sorting-show.mp4') != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sorting-show-video
           path: build/sorting-show.mp4
           retention-days: 14
-
-  stress:
-    # Only when dispatched with stress_photos: one long test on one runner. The app's memory
-    # (resident size of the simulator's app process on the Mac) is sampled every 5 s; the
-    # test prints speed, Pause reaction and how long a display stood still. Kept under 2 h:
-    # creating 50,000 photos (about 30 min) and SORTLY_STRESS_MINUTES of analysis.
-    name: UI stress ${{ inputs.stress_photos }} photos
-    needs: build
-    if: inputs.stress_photos != '' && inputs.stress_photos != null
-    runs-on: xcode-27
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@v5
-      - name: Select newest Xcode
-        run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
-      - name: Download build products
-        uses: actions/download-artifact@v5
-        with:
-          name: ui-products
-      - name: Boot simulator
-        id: sim
-        run: |
-          mkdir -p products
-          tar -xzf ui-products.tgz -C products
-          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --pro)
-          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          for attempt in 1 2 3; do
-            xcrun simctl boot "$UDID" 2>/dev/null || true
-            xcrun simctl bootstatus "$UDID" -b && break
-            sleep 15
-          done
-          xcrun simctl privacy "$UDID" grant photos app.albumist.ios || echo "privacy grant failed"
-      - name: Stress run
-        env:
-          # xcodebuild hands TEST_RUNNER_* variables to the tests without the prefix.
-          TEST_RUNNER_SORTLY_STRESS_PHOTOS: ${{ inputs.stress_photos }}
-          # Minutes of analysis measured after the photos are created (the simulator's Vision
-          # needs about 8 h for 50,000 photos; a device is faster).
-          TEST_RUNNER_SORTLY_STRESS_MINUTES: 45
-        run: |
-          set +e
-          UDID="${{ steps.sim.outputs.udid }}"
-          # Memory of the app process every 5 s, tagged with the test's phase (create / measure).
-          echo prepare > phase.txt
-          ( while true; do
-              pid=$(pgrep -f "Sortly.app/Sortly" | head -1)
-              [ -n "$pid" ] && echo "$(date +%s) $(ps -o rss= -p "$pid" | tr -d ' ') $(cat phase.txt)" >> memory.txt
-              sleep 5
-            done ) &
-          SAMPLER=$!
-          XCTESTRUN=$(ls products/*.xctestrun | head -1)
-          started=$(date +%s)
-          xcodebuild test-without-building \
-            -xctestrun "$XCTESTRUN" \
-            -destination "id=$UDID" \
-            -resultBundlePath build/StressResults.xcresult \
-            -only-testing:SortlyUITests/DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline > ui-log.txt 2>&1 &
-          XCB=$!
-          # The CI simulator shows no iOS photo question after a reset (the answer is "denied" at
-          # once); a test that needs the access back asks with UI_HOST_GRANT_PHOTOS in the log.
-          ( tail -n +1 -f ui-log.txt 2>/dev/null | grep --line-buffered -a "UI_HOST_GRANT_PHOTOS" | while read -r _; do
-              xcrun simctl privacy "$UDID" grant photos app.albumist.ios && echo "UI_HOST photo access granted"
-            done ) &
-          ( tail -n +1 -f ui-log.txt 2>/dev/null | grep --line-buffered -ao "UI_STRESS_PHASE [a-z]*" | while read -r _ phase; do echo "$phase" > phase.txt; done ) &
-          tail -n +1 -f ui-log.txt | grep --line-buffered -aE "error:|UI_STEP|UI_TIMING|UI_FACT|UI_HOST|UI_STRESS|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error" | grep --line-buffered -v "/SourcePackages/" &
-          # Memory once a minute while it runs ("no app" when the last sample is older than 30 s).
-          ( while kill -0 $XCB 2>/dev/null; do sleep 60
-              tail -1 memory.txt 2>/dev/null | awk -v s=$started -v now=$(date +%s) '{ if (now-$1 > 30) printf "STRESS_MEMORY %d min no app (last %d MB, %s)\n", (now-s)/60, $2/1024, $3; else printf "STRESS_MEMORY %d min %d MB %s\n", (now-s)/60, $2/1024, $3 }'
-            done ) &
-          ( sleep 7800; echo "::error::Stress run stopped after 130 minutes"; kill -INT $XCB ) &
-          WATCHDOG=$!
-          wait $XCB
-          status=$?
-          kill $WATCHDOG $SAMPLER 2>/dev/null
-          sleep 2
-          pkill -f "tail -n \+1 -f ui-log.txt" 2>/dev/null
-          echo "STRESS_TIME $(( $(date +%s) - started )) s"
-          for phase in prepare create measure; do
-            awk -v p=$phase '$3 == p' memory.txt | sort -k2 -n | tail -1 | awk -v p=$phase '{printf "STRESS_MEMORY_MAX %s %d MB\n", p, $2/1024}'
-          done
-          tail -1 memory.txt | awk '{printf "STRESS_MEMORY_END %d MB (%s)\n", $2/1024, $3}'
-          # Why the app ended, if it did: creating progress, iOS's reason (RunningBoard, jetsam),
-          # crash reports of the app on the Mac and in the simulator, and the result bundle.
-          xcrun simctl spawn "$UDID" log show --last 3h --style compact --predicate 'eventMessage CONTAINS "UITEST_"' 2>/dev/null | grep -av UITEST_MAIN_BLOCKED | cut -c 1-300 | tail -80 | sed 's/^/STRESS_LOG /'
-          # The main thread's stalls (-SortlyUITestWatchMain): how many, and the 20 longest.
-          xcrun simctl spawn "$UDID" log show --last 3h --style compact --predicate 'eventMessage CONTAINS "UITEST_MAIN_BLOCKED"' 2>/dev/null | grep -a "UITEST_MAIN_BLOCKED" > main-blocked.txt
-          echo "STRESS_MAIN_BLOCKED $(wc -l < main-blocked.txt) times over 1 s"
-          sed -E 's/.*UITEST_MAIN_BLOCKED ([0-9]+) ms.*/\1 &/' main-blocked.txt | sort -rn | head -20 | cut -d' ' -f2- | cut -c 1-200 | sed 's/^/STRESS_MAIN_BLOCKED /'
-          xcrun simctl spawn "$UDID" log show --last 3h --style compact \
-            --predicate '(subsystem == "com.apple.runningboard" OR process == "SpringBoard" OR process == "launchd_sim" OR eventMessage CONTAINS[c] "jetsam") AND eventMessage CONTAINS "albumist"' 2>/dev/null \
-            | grep -aiE "termin|exit|kill|jetsam|crash|memory|limit|watchdog|signal" | cut -c 1-300 | tail -60 | sed 's/^/STRESS_END_REASON /'
-          for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips ~/Library/Logs/DiagnosticReports/*.crash ~/Library/Logs/CoreSimulator/*/*.ips 2>/dev/null | head -40); do
-            case "$(basename "$f")" in
-              *Sortly*|*Albumist*|*Runner*|*testmanagerd*|*JetsamEvent*)
-                echo "STRESS_CRASH_REPORT $f"
-                head -c 30000 "$f" | sed 's/^/STRESS_CRASH_REPORT /' ;;
-            esac
-          done
-          find ~/Library/Developer/CoreSimulator/Devices/"$UDID"/data/Library/Logs -name "*.ips" 2>/dev/null | head -10 | while read -r f; do
-            echo "STRESS_CRASH_REPORT $f"; head -c 30000 "$f" | sed 's/^/STRESS_CRASH_REPORT /'
-          done
-          xcrun xcresulttool get test-results tests --path build/StressResults.xcresult 2>/dev/null | head -c 20000 | sed 's/^/STRESS_RESULT /'
-          grep -anB60 "Restarting after" ui-log.txt | grep -av "PREVIEW_JPEG" | cut -c 1-300 | head -300 | sed 's/^/STRESS_RESTART_CONTEXT /'
-          grep -aE "PREVIEW_JPEG" ui-log.txt | head -2000
-          exit $status
-
-  report:
-    # Wall time of the whole UI run and of each shard, in one place.
-    name: UI summary
-    needs: [build, ui, accessibility, stress]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Shards and wall time
-        run: |
-          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --jq '
-            .jobs[] | select(.name | startswith("UI ")) | select(.name != "UI summary")
-            | "UI_SHARD_RESULT \(.name) \(.conclusion // .status) \(((.completed_at // now | if type == "string" then fromdateiso8601 else . end) - (.started_at | fromdateiso8601)) / 60 | floor) min"'
-          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq '"UI_WALL_TIME \((now - (.run_started_at | fromdateiso8601)) / 60 | floor) min"'
-
-  accessibility:
-    # AccessibilityUITests on a small iPhone (SE, 375 pt) with Reduce Motion, then once more
-    # with Increase Contrast and Reduce Transparency. Its own runner and simulator, in parallel
-    # with the flow, so the whole UI run does not take longer; these tests fail on findings.
-    name: Accessibility (small iPhone)
-    if: inputs.stress_photos == '' || inputs.stress_photos == null
-    runs-on: xcode-27
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v5
-      - name: Select newest Xcode
-        run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
-      - name: Generate Xcode project
-        run: |
-          brew install xcodegen
-          cd App && xcodegen generate
-      - name: Prepare small simulator
-        id: sim
-        run: |
-          # An iPhone SE on the newest runtime if the runtime still offers it, else the
-          # narrowest iPhone that is there (an "e" model, 390 pt).
-          RUNTIME=$(xcrun simctl list runtimes available -j | python3 -c '
-          import json, re, sys
-          rts = [r for r in json.load(sys.stdin)["runtimes"]
-                 if r.get("platform") == "iOS" and re.search(r"iOS-\d+(?:-\d+)*$", r["identifier"])]
-          rts.sort(key=lambda r: tuple(int(p) for p in r["version"].split(".")))
-          print(rts[-1]["identifier"] if rts else "")')
-          UDID=$(xcrun simctl create "Albumist SE" com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation "$RUNTIME" 2>/dev/null) \
-            || UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --small)
-          xcrun simctl list devices | grep "$UDID" || true
-          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          booted=0
-          for attempt in 1 2 3; do
-            xcrun simctl boot "$UDID" 2>/dev/null || true
-            if xcrun simctl bootstatus "$UDID" -b; then booted=1; break; fi
-            echo "bootstatus failed (attempt $attempt), retrying"
-            sleep 15
-          done
-          [ "$booted" = 1 ] || { echo "simulator did not boot"; exit 1; }
-          xcrun simctl privacy "$UDID" grant photos app.albumist.ios || echo "privacy grant failed"
-          xcrun simctl status_bar "$UDID" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
-          # Reduce Motion for the whole run (Settings › Accessibility › Motion). The app reads
-          # it at launch, so every test below starts with it on.
-          xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
-          echo "A11Y_SETTING ReduceMotionEnabled=$(xcrun simctl spawn "$UDID" defaults read com.apple.Accessibility ReduceMotionEnabled 2>&1)"
-      - name: Run accessibility tests
-        run: |
-          set +e
-          UDID="${{ steps.sim.outputs.udid }}"
-          cd App
-          # The simulator service on the hosted Macs sometimes drops the connection or the test
-          # runner never starts ("CoreSimulatorService: Connection interrupted", "Timed out
-          # waiting for AX loaded notification"). Such a pass found nothing about the app: it is
-          # repeated once on a freshly booted simulator. A pass with a real finding is never repeated.
-          infra_only() {
-            grep -aqE "CoreSimulatorService|failed to initialize for UI testing|Failed to install or launch the test runner|Failed to establish communication with the test runner|device is not booted" "$1" \
-              && ! grep -aqE "A11Y_FAIL |recorded an issue|Test Case .* failed|with [1-9][0-9]* failures? \(" "$1"
-          }
-          reboot_sim() {
-            xcrun simctl shutdown "$UDID" 2>/dev/null
-            for attempt in 1 2 3; do
-              xcrun simctl boot "$UDID" 2>/dev/null || true
-              xcrun simctl bootstatus "$UDID" -b && return 0
-              sleep 15
-            done
-            return 1
-          }
-          xcodebuild test \
-            -project Sortly.xcodeproj \
-            -scheme SortlyUI \
-            -destination "id=$UDID" \
-            -only-testing:SortlyUITests/AccessibilityUITests \
-            -skip-testing:SortlyUITests/AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency \
-            -resultBundlePath ../build/A11yResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO > ../a11y-log.txt 2>&1
-          status=$?
-          if [ $status -ne 0 ] && infra_only ../a11y-log.txt && reboot_sim; then
-            echo "A11Y_INFRA_RETRY first pass: simulator service failed, repeating once"
-            grep -aE "CoreSimulatorService|Testing failed|encountered an error" ../a11y-log.txt | head -5
-            rm -rf ../build/A11yResults.xcresult
-            xcodebuild test-without-building \
-              -project Sortly.xcodeproj \
-              -scheme SortlyUI \
-              -destination "id=$UDID" \
-              -only-testing:SortlyUITests/AccessibilityUITests \
-              -skip-testing:SortlyUITests/AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency \
-              -resultBundlePath ../build/A11yResults.xcresult \
-              CODE_SIGNING_ALLOWED=NO > ../a11y-log.txt 2>&1
-            status=$?
-          fi
-          # Second pass: Increase Contrast and Reduce Transparency on, same simulator and data.
-          xcrun simctl ui "$UDID" increase_contrast enabled \
-            || xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility DarkenSystemColors -bool true
-          xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility EnhancedBackgroundContrastEnabled -bool true
-          echo "A11Y_SETTING DarkenSystemColors=$(xcrun simctl spawn "$UDID" defaults read com.apple.Accessibility DarkenSystemColors 2>&1) EnhancedBackgroundContrastEnabled=$(xcrun simctl spawn "$UDID" defaults read com.apple.Accessibility EnhancedBackgroundContrastEnabled 2>&1)"
-          xcodebuild test-without-building \
-            -project Sortly.xcodeproj \
-            -scheme SortlyUI \
-            -destination "id=$UDID" \
-            -only-testing:SortlyUITests/AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency \
-            -resultBundlePath ../build/A11yContrastResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO > ../a11y-contrast-log.txt 2>&1
-          contrast=$?
-          if [ $contrast -ne 0 ] && infra_only ../a11y-contrast-log.txt && reboot_sim; then
-            echo "A11Y_INFRA_RETRY contrast pass: simulator service failed, repeating once"
-            grep -aE "CoreSimulatorService|Testing failed|encountered an error" ../a11y-contrast-log.txt | head -5
-            rm -rf ../build/A11yContrastResults.xcresult
-            # The contrast settings are written again: the reboot keeps them, this makes it certain.
-            xcrun simctl ui "$UDID" increase_contrast enabled \
-              || xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility DarkenSystemColors -bool true
-            xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility EnhancedBackgroundContrastEnabled -bool true
-            xcodebuild test-without-building \
-              -project Sortly.xcodeproj \
-              -scheme SortlyUI \
-              -destination "id=$UDID" \
-              -only-testing:SortlyUITests/AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency \
-              -resultBundlePath ../build/A11yContrastResults.xcresult \
-              CODE_SIGNING_ALLOWED=NO > ../a11y-contrast-log.txt 2>&1
-            contrast=$?
-          fi
-          for log in ../a11y-log.txt ../a11y-contrast-log.txt; do
-            grep -aE "error:|UI_STEP|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error" "$log" | grep -v "/SourcePackages/" | head -12000
-          done
-          # A pass that fails before any test runs leaves nothing for the filter above.
-          if [ $contrast -ne 0 ] && ! grep -aq "Test Case" ../a11y-contrast-log.txt; then
-            grep -av PREVIEW_JPEG ../a11y-contrast-log.txt | tail -40
-          fi
-          # A test that was restarted (app crash, hang or test timeout) shows what led up to it,
-          # and any crash report of the app on this Mac is printed, so a crash is never mistaken
-          # for a simulator hiccup.
-          for log in ../a11y-log.txt ../a11y-contrast-log.txt; do
-            grep -anB60 "Restarting after" "$log" | grep -av "PREVIEW_JPEG" | cut -c 1-300 | head -300 | sed 's/^/A11Y_RESTART_CONTEXT /'
-          done
-          if grep -aq "Restarting after" ../a11y-log.txt ../a11y-contrast-log.txt; then
-            find "$HOME/Library/Logs/DiagnosticReports" -newer ../a11y-log.txt -o -name 'Sortly*' -mmin -120 2>/dev/null \
-              | grep -a "Sortly" | head -3 | while read -r report; do
-                echo "A11Y_CRASH_REPORT $report"
-                head -120 "$report" | sed 's/^/A11Y_CRASH /'
-              done
-          fi
-          echo "A11Y_SUMMARY fails $(cat ../a11y-log.txt ../a11y-contrast-log.txt | grep -ac 'A11Y_FAIL ') warnings $(cat ../a11y-log.txt ../a11y-contrast-log.txt | grep -ac 'A11Y_WARN ')"
-          [ $status -eq 0 ] && [ $contrast -eq 0 ]
-      - name: Upload accessibility results
-        # Crash logs and the screens of a failed test are in the result bundles.
+      - name: Upload results
+        # Crash logs, screens and attachments of a failed test are in the result bundles.
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: a11y-results
+          name: ui-results-${{ matrix.group }}
           path: |
-            build/A11yResults.xcresult
-            build/A11yContrastResults.xcresult
+            build/*.xcresult
+            build/*-log.txt
+            build/*-swiftui.txt
+            sim-boot.log
           retention-days: 7
           if-no-files-found: ignore
+      - name: Keep the retry record for the run summary
+        # build/flaky-*.json: repeats after a simulator failure and the tests that passed only
+        # on them (ui_tests.py); the summary job below counts them over all groups.
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-flaky-${{ matrix.group }}
+          path: build/flaky-*.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+  summary:
+    name: UI summary (retries and flaky tests)
+    # Linux only; reads the records of all groups, also of failed ones. It never fails the run:
+    # the groups decide that. Nothing that was repeated stays hidden in a single job's log.
+    needs: ui
+    if: ${{ always() && needs.ui.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github
+          persist-credentials: false
+      - name: Retry records of the groups
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ui-flaky-*
+          path: flaky
+          merge-multiple: true
+      - name: Count repeats and flaky tests
+        run: |
+          shopt -s nullglob
+          python3 .github/scripts/ui_tests.py flaky-summary flaky/*.json >> "$GITHUB_STEP_SUMMARY"

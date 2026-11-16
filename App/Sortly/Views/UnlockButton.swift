@@ -27,6 +27,7 @@ struct UnlockButton: View {
             switch state {
             case .purchasing:
                 ProgressView().tint(prominent ? Theme.onAccent : nil)
+                    .accessibilityLabel(Text("Kauf läuft"))
             case .buy:
                 if let product = purchases.product {
                     Text("Freischalten für \(product.displayPrice)")
@@ -34,6 +35,7 @@ struct UnlockButton: View {
             case .loadingPrice:
                 HStack(spacing: Theme.Spacing.s) {
                     ProgressView().tint(prominent ? Theme.onAccent : nil)
+                        .accessibilityHidden(true) // the text beside it says what runs
                     Text("Preis wird geladen …")
                 }
             }

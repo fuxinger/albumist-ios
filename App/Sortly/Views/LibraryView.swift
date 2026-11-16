@@ -50,6 +50,7 @@ struct LibraryView: View {
                         ProgressView()
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, Theme.Spacing.m)
+                            .accessibilityLabel(Text("Weitere Fotos werden geladen"))
                             .onScrollVisibilityChange(threshold: 0.1) { visible in
                                 if visible { shown += Self.page }
                             }

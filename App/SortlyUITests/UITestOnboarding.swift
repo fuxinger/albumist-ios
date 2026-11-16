@@ -8,6 +8,8 @@ import XCTest
 /// new runner at test 2 with an app still at its welcome screen, and every later test failed
 /// on that one cut-off (13 failures). Each later test now brings the app to that state by
 /// itself when test 1 did not reach its end, so a cut-off costs test 1 and nothing else.
+/// In CI (ui.yml) test 1 runs in its own group; the other flow tests run on another simulator
+/// and always onboard by themselves there.
 @MainActor
 enum UITestOnboarding {
     /// Start and end markers of a first test in the runner's temporary folder. A static flag
@@ -32,10 +34,6 @@ enum UITestOnboarding {
             try? Data().write(to: finished)
         }
 
-        var wasCutOff: Bool {
-            FileManager.default.fileExists(atPath: started.path) && !FileManager.default.fileExists(atPath: finished.path)
-        }
-
         var reachedItsEnd: Bool {
             FileManager.default.fileExists(atPath: finished.path)
         }
@@ -50,7 +48,6 @@ enum UITestOnboarding {
 
     static func fullFlowStarts() { fullFlow.starts() }
     static func fullFlowFinished() { fullFlow.ends() }
-    static var fullFlowWasCutOff: Bool { fullFlow.wasCutOff }
     static var fullFlowReachedItsEnd: Bool { fullFlow.reachedItsEnd }
 
     /// The overview says the analysis is done and nothing runs (as `analysisIdle` in the tests).
@@ -62,14 +59,30 @@ enum UITestOnboarding {
             && !app.buttons["Pause"].exists
     }
 
-    /// Onboarding, demo library and first analysis, only when the app still shows its welcome
-    /// screen. Returns true when it had to do that.
+    /// Onboarding, demo library and first analysis, when the app still shows its welcome
+    /// screen, or only the demo library and its analysis when the app is past the onboarding
+    /// but still offers it (as `onboardAndSeed` in AccessibilityUITests). Returns true when it
+    /// had to do either.
+    ///
+    /// UI run 43893790053 (group "flow-other"): the runner ended in test 2 right after it tapped
+    /// "Beispiel-Mediathek anlegen"; tests 3 to 7 found the app past its welcome screen and ran
+    /// on the simulator's own handful of photos (no suggestions, no albums: 10 failures).
     @discardableResult
     static func completeIfNeeded(_ app: XCUIApplication, in test: String) -> Bool {
         func button(_ text: String) -> XCUIElement {
             app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         }
-        guard button("Los geht").waitForExistence(timeout: 10) else { return false }
+        guard button("Los geht").waitForExistence(timeout: 10) else {
+            let demo = button("Beispiel-Mediathek anlegen")
+            guard demo.waitForExistence(timeout: 5) else { return false }
+            print("UI_FACT \(test): past the onboarding without the demo library, creating it first")
+            demo.tap()
+            XCTAssertTrue(demoLibraryCreated(app), "\(test): demo library not created")
+            let idle = waitStable(timeout: 1200) { analysisIdle(app) }
+            print(idle ? "UI_STEP_OK \(test) demo library" : "UI_STEP_MISSING \(test) demo library")
+            XCTAssertTrue(idle, "\(test): the analysis of the demo library did not finish")
+            return true
+        }
         print("UI_FACT \(test): the app is at its welcome screen, onboarding first")
         button("Los geht").tap()
         if button("Weiter").waitForExistence(timeout: 10) { button("Weiter").tap() }

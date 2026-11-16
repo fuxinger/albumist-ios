@@ -8,6 +8,13 @@ Used before a TestFlight upload and before a release tag. Green means:
   2. If a UI flow run (ui.yml) exists for this commit (it runs for pull requests), its newest
      run succeeded too. Pushes to main have no UI flow run; there CI alone decides.
 
+Earlier stages, for starting work that may run before the whole gate is green:
+  --ci     only point 1 (the CI run, with its iOS job). TestFlight builds the release archive
+           on a Mac once CI is green, while the full gate still waits for the UI run; the
+           upload needs both.
+  --linux  only CI's Linux jobs ("Core tests (Linux)" and "App rules and strings"), for
+           starting even earlier (one more Mac job at the same time as CI's).
+
 Writes `ok=true|false` and `reason=...` to $GITHUB_OUTPUT and a line to the job summary.
 Never fails itself (exit 0) unless --fail is given, so a red test run shows up as a skipped
 upload with the reason, not as a second red workflow.
@@ -30,6 +37,7 @@ WAIT = float(os.environ.get("WAIT_MINUTES", "180")) * 60
 NO_RUN = float(os.environ.get("NO_RUN_MINUTES", "15")) * 60
 POLL = 60
 CI, CI_JOB = "ci.yml", "iOS build and tests"
+LINUX_JOBS = ("Core tests (Linux)", "App rules and strings")
 UI = "ui.yml"
 
 
@@ -63,8 +71,8 @@ def describe(run):
     return f"{run['name']} #{run['run_number']} ({run['event']}, {run['html_url']})"
 
 
-def check():
-    """(done, ok, reason) for the current state of the runs."""
+def check(ui_too=True):
+    """(done, ok, reason) for the current state of the runs (CI alone when not ui_too)."""
     ci = newest_run(CI)
     if ci is None:
         return False, False, f"no CI run for {SHA[:7]} yet"
@@ -89,6 +97,8 @@ def check():
         return True, False, (f"the iOS tests did not run for this commit ({state}); only documentation "
                              "changed since the last tested commit, so there is nothing new to ship (to test this exact "
                              "commit anyway, start CI by hand on it)")
+    if not ui_too:
+        return True, True, f"{describe(ci)} passed"
     ui = newest_run(UI)
     if ui is None:
         return True, True, f"{describe(ci)} passed (no UI flow run for this commit)"
@@ -99,11 +109,31 @@ def check():
     return True, True, f"{describe(ci)} and {describe(ui)} passed"
 
 
+def check_linux():
+    """(done, ok, reason): the Linux jobs of the newest CI run for this commit."""
+    ci = newest_run(CI)
+    if ci is None:
+        return False, False, f"no CI run for {SHA[:7]} yet"
+    jobs = {j["name"]: j for j in api(f"actions/runs/{ci['id']}/jobs", per_page=100).get("jobs", [])}
+    states = []
+    for name in LINUX_JOBS:
+        job = jobs.get(name)
+        if job is None or job.get("status") != "completed":
+            if ci["status"] == "completed":
+                return True, False, f"{describe(ci)} ended without '{name}'"
+            return False, False, f"waiting for '{name}' in {describe(ci)}"
+        if job.get("conclusion") != "success":
+            return True, False, f"'{name}' ended with '{job.get('conclusion')}' in {describe(ci)}"
+        states.append(name)
+    return True, True, f"{' and '.join(states)} passed in {describe(ci)}"
+
+
 def main():
     started = time.monotonic()
+    linux, ci_only = "--linux" in sys.argv, "--ci" in sys.argv
     while True:
         try:
-            done, ok, reason = check()
+            done, ok, reason = check_linux() if linux else check(ui_too=not ci_only)
         except RuntimeError as error:
             done, ok, reason = False, False, str(error)
         waited = time.monotonic() - started
@@ -123,7 +153,8 @@ def main():
     with open(os.environ.get("GITHUB_OUTPUT", os.devnull), "a", encoding="utf-8") as out:
         out.write(f"ok={'true' if ok else 'false'}\nreason={reason}\n")
     with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:
-        out.write(f"### Test gate for {SHA[:7]}: {'✅ green' if ok else '⛔ not green'}\n\n{reason}\n")
+        part = "Linux tests" if linux else ("CI" if ci_only else "Test gate")
+        out.write(f"### {part} for {SHA[:7]}: {'✅ green' if ok else '⛔ not green'}\n\n{reason}\n")
     return 1 if ("--fail" in sys.argv and not ok) else 0
 
 

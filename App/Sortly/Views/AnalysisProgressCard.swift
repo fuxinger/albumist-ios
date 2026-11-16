@@ -129,6 +129,7 @@ struct AnalysisProgressCard: View {
         HStack(spacing: Theme.Spacing.s) {
             if case .pausing = state {
                 ProgressView().controlSize(.small)
+                    .accessibilityHidden(true) // the text beside it says what runs
             } else if let headingSymbol {
                 Image(systemName: headingSymbol).foregroundStyle(.secondary)
             }
@@ -361,6 +362,7 @@ struct AnalysisProgressCard: View {
     private func quickCheck(showsPause: Bool) -> some View {
         HStack(spacing: Theme.Spacing.s) {
             ProgressView().controlSize(.small)
+                .accessibilityHidden(true) // the text beside it says what runs
             Text("Sucht neue Fotos").font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Theme.Spacing.s)

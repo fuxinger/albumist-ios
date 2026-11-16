@@ -449,6 +449,51 @@ public actor SortlyStore: PlanJournal {
         }
     }
 
+    /// "Ignorieren" for several photos in one transaction. A photo that is already ignored
+    /// keeps its one override (no duplicates). Returns the photos that were newly ignored,
+    /// so "Widerrufen" right after the action takes back exactly those and not a photo the
+    /// user had ignored earlier.
+    @discardableResult
+    public func ignoreAssets(_ ids: [AssetID], at date: Date = Date()) throws -> [AssetID] {
+        try db.durably {
+            try db.transaction {
+                var ignored = Set(try overrides().compactMap(\.ignoredAsset))
+                var added: [AssetID] = []
+                for id in ids where !ignored.contains(id) {
+                    try insertOverride(UserOverride(scope: .asset(id), decision: .ignoreAsset, createdAt: date))
+                    ignored.insert(id)
+                    added.append(id)
+                }
+                return added
+            }
+        }
+    }
+
+    /// "Nicht mehr ignorieren": removes every "ignore" override of these photos (also
+    /// duplicates written by older versions) in one transaction; other decisions about the
+    /// same photos stay. Returns how many photos were ignored before.
+    @discardableResult
+    public func unignoreAssets(_ ids: [AssetID]) throws -> Int {
+        let wanted = Set(ids)
+        guard !wanted.isEmpty else { return 0 }
+        return try db.durably {
+            try db.transaction {
+                var restored: Set<AssetID> = []
+                for o in try overrides() {
+                    guard let id = o.ignoredAsset, wanted.contains(id) else { continue }
+                    try db.execute("DELETE FROM overrides WHERE id = ?", [.text(o.id.rawValue)])
+                    restored.insert(id)
+                }
+                return restored.count
+            }
+        }
+    }
+
+    /// Photos the user ignored, for the "Ignoriert" area and its way back.
+    public func ignoredAssets() throws -> Set<AssetID> {
+        Set(try overrides().compactMap(\.ignoredAsset))
+    }
+
     public func removeOverride(_ id: SortlyID) throws {
         try db.execute("DELETE FROM overrides WHERE id = ?", [.text(id.rawValue)])
     }

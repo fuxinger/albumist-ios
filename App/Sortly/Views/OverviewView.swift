@@ -325,7 +325,11 @@ struct OverviewView: View {
     private var areasSection: some View {
         let byArea = Dictionary(grouping: model.proposals, by: \.kind.area)
         return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("BEREICHE")
+            // Caps by style, not in the text (EN reads "Areas"), and a heading for VoiceOver
+            // (design review W10).
+            Text("Bereiche")
+                .textCase(.uppercase)
+                .accessibilityAddTraits(.isHeader)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.top, Theme.Spacing.s)
@@ -460,7 +464,8 @@ struct RestoredFromBackupCard: View {
 }
 
 /// Shown after the app was closed while a plan ran: the rest can be done now, or what
-/// already happened can be taken back.
+/// already happened can be taken back. Each button says what it does (design review W17:
+/// "Fortsetzen / Rückgängig machen / So lassen" needed a paragraph to explain them).
 struct InterruptedPlanCard: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
@@ -468,47 +473,53 @@ struct InterruptedPlanCard: View {
 
     var body: some View {
         let done = plan.steps.filter { if case .succeeded = $0.state { true } else { false } }.count
+        let isUndo = plan.reverts != nil
         Card {
-            Label("Umsetzen wurde unterbrochen", systemImage: "pause.circle").font(.headline)
-            Text("\(done) von \(plan.steps.count) Schritten sind erledigt. Du entscheidest, wie es weitergeht. Nichts wird doppelt angelegt, deine Fotos bleiben in jedem Fall unverändert.")
-                .font(.subheadline).foregroundStyle(.secondary)
+            Group {
+                if isUndo {
+                    Label("Rückgängig wurde unterbrochen", systemImage: "pause.circle")
+                } else {
+                    Label("Anlegen wurde unterbrochen", systemImage: "pause.circle")
+                }
+            }
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
+            Text("Erledigt: \(done) von \(plan.steps.count) Schritten")
+                .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if model.execution.isRunning {
                 ProgressView(value: Double(model.execution.completedSteps), total: Double(max(1, model.execution.totalSteps)))
                     .tint(Theme.accent)
             } else {
-                // The three ways out (I16), each with what it does.
-                Button("Fortsetzen") { Task { await model.resumeInterruptedPlan() } }
+                // The ways out (I16). An interrupted undo cannot itself be taken back (Photos
+                // cannot bring deleted albums back): it can only go on or stay as it is.
+                Button(isUndo ? LocalizedStringKey("Rest zurücknehmen") : LocalizedStringKey("Rest anlegen")) { Task { await model.resumeInterruptedPlan() } }
                     .buttonStyle(PrimaryButtonStyle())
-                // An interrupted undo cannot itself be taken back (Photos cannot bring deleted
-                // albums back): it can only go on or stay as it is.
-                if plan.reverts == nil {
-                    Button("Rückgängig machen") { confirmUndo = true }
+                    .accessibilityIdentifier("interrupted.resume")
+                if !isUndo {
+                    Button("Alles zurücknehmen") { confirmUndo = true }
                         .buttonStyle(SecondaryButtonStyle())
+                        .accessibilityIdentifier("interrupted.undo")
                 }
                 Button { Task { await model.keepInterruptedPlanAsIs() } } label: {
-                    Text("So lassen")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .contentShape(Rectangle())
+                    Group {
+                        if isUndo { Text("So lassen") } else { Text("Nur Erledigtes behalten") }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("interrupted.keep")
-                Group {
-                    if plan.reverts == nil {
-                        Text("Fortsetzen legt den Rest an. Rückgängig nimmt das Erledigte zurück. So lassen behält das Erledigte und lässt den Rest weg; es steht dann im Verlauf und lässt sich später noch zurücknehmen.")
-                    } else {
-                        Text("Fortsetzen nimmt auch den Rest zurück. So lassen behält, was schon zurückgenommen ist; den Rest kannst du später im Änderungsbeleg zurücknehmen.")
-                    }
-                }
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("Deine Fotos bleiben in jedem Fall unverändert.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let failure = model.execution.failure {
-                Text(failure).font(.footnote).foregroundStyle(.red)
+                ErrorNote(text: failure)
             }
         }
-        .confirmationDialog("Bisherige Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
-            Button("Rückgängig machen", role: .destructive) {
+        .confirmationDialog("Alles zurücknehmen?", isPresented: $confirmUndo, titleVisibility: .visible) {
+            Button("Alles zurücknehmen", role: .destructive) {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
@@ -528,7 +539,7 @@ struct StarterSetCard: View {
         let set = model.starterSet(limit: limit)
         if set.count >= 3 {
             Card {
-                Text("Dein Startpaket").font(.headline)
+                Text("Dein Startpaket").font(.headline).accessibilityAddTraits(.isHeader)
                 Text("Die \(set.count) besten Alben aus deiner Mediathek, fertig zum Anlegen. Du siehst vorher genau, was passiert.")
                     .font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: -14) {
@@ -569,7 +580,7 @@ struct LimitedAccessCard: View {
 
     var body: some View {
         Card {
-            Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline)
+            Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline).accessibilityAddTraits(.isHeader)
             Text("Albumist sieht nur die \(model.progress.allPhotos) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
                 .font(.subheadline).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

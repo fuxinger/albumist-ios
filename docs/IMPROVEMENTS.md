@@ -126,6 +126,10 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | ✅ | Einheitliche Wörter: überall „sortiert“ statt „organisiert“. „Umsetzen“ bleibt für das Anlegen eines ganzen Plans. | S | E1 Oberfläche |
 | 💡 | iPad: Inhalte nicht über die ganze Breite ziehen, Liste und Detail nebeneinander. | M | E1 Oberfläche |
 | 💡 | Erhöhter Kontrast: eigene Farbvarianten. | S | E1 Oberfläche |
+| 💡 | Design-Prüfung 15.11., N7: Fußnote im Startschritt der Einführung kürzen. Zurückgestellt, weil sie zur neuen Fortschrittsanzeige auf `claude/pro-progress` passen muss. | S | Design-Prüfung |
+| 💡 | Design-Prüfung 15.11., W4-Rest: „%lld Aufnahmen“ in der Scan-Show und „Fortsetzen“ in der Analysekarte; der Satz „Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.“ in der Statuskarte. Zurückgestellt, weil diese Bereiche auf `claude/pro-progress` neu gebaut werden. | S | Design-Prüfung |
+| 💡 | Atlas: „Land/Länder“, „Stadt/Städte“, „Reise/Reisen“ und „Tag/Tage“ werden im Code gewählt statt über Mehrzahl im Katalog. Für Deutsch und Englisch richtig; für weitere Sprachen auf Katalog-Mehrzahl umstellen (Zahl und Wort sind getrennt gestaltet). | S | Design-Prüfung |
+| 💡 | Teaser „Dein Reise-Atlas“ hat keine Überschrift-Eigenschaft, weil er ein Link ist; prüfen, ob VoiceOver-Nutzer ihn im Rotor vermissen. | S | Design-Prüfung |
 
 ## Produkt und App Store
 

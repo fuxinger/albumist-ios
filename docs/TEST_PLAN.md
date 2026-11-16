@@ -115,3 +115,41 @@ Echte Testbilder nur mit freier Lizenz (CC0/gemeinfrei) und Lizenzliste.
 ## Offen
 Messung der Analysezeit auf echten Geräten mit 15 000+ Fotos, Speicherverbrauch,
 Wärmeverhalten, iCloud-Downloads, VoiceOver-Durchgang.
+
+## Design-Prüfung mit den Plugins (15.11.2026, Branch `claude/pro-design2`)
+Befunde aus `design-plugin-review-2026-11-15/BEFUNDE.md`. „UI“ heißt: Schritt im UI-Lauf, der auf
+dem Cloud-Mac noch laufen muss; bis dahin ist die Oberfläche nur syntaktisch geprüft.
+
+| Fall | Stand | Test | Lücke |
+|---|---|---|---|
+| D1 Abzeichen „Name fehlt“ lesbar (Warnfarbe der App statt Systemorange) | 🟡 | Kontrast-Audit der Vorschlagsliste (AccessibilityUITests), wenn die Beispiel-Mediathek einen Ort ohne Namen hat | UI-Lauf |
+| D2 Fehlertext in Primärfarbe mit rotem Symbol (`ErrorNote`) | 🟡 | — | UI-Schalter für einen Kauffehler fehlt |
+| D3 Fotos eines Vorschlags sind benannte Knöpfe, „Ausgewählt“ für VoiceOver | 🟡 | UI test1: „suggestion photos are named buttons“, `isSelected` | UI-Lauf |
+| D4 Ignorieren zurücknehmen: „Widerrufen“ direkt danach, „Nicht mehr ignorieren“ in „Ignoriert“ und im Foto | 🟡 | IgnoreUndoTests (5: nur Neues wird zurückgenommen, keine Doppelten, andere Entscheidungen bleiben, Status kehrt zurück); UI test1 `ignoreAndUndo` | UI-Lauf |
+| W1 Originale: „Kein Original gelöscht“ statt „0 Originale gelöscht“ (Vorschau, Änderungen, geteilte Liste) | 🟡 | UI test1 sucht „Kein Original gelöscht“ | UI-Lauf |
+| W2 Ein Name für den Vorgang: „Vorschau“, „Das ändert sich in Fotos“, „Alben jetzt anlegen“ (`plan.apply`), „Anlegen wurde unterbrochen“, „Änderungen“ | 🟡 | UI test1, test5, Locked, Accessibility (neue Titel und `plan.apply`) | UI-Lauf |
+| W4 „Fotos“ statt „Aufnahmen/Bilder/Medien“ | ✅ | StringCatalogTests.photosAreCalledFotos (nur ScanShow ausgenommen, wird auf `claude/pro-progress` neu gebaut) | — |
+| W5 Mehrzahl in Zählungen (auch mehrere Zahlen über Substitutionen) | ✅ | StringCatalogTests: everySubstitutionIsDefined, countVariesByPlural (11 Texte) | Anzeige im Simulator |
+| W6 Suchbeispiele übersetzt und in beiden Sprachen verstanden | ✅ | SearchExampleTests (12 Beispiele, gleiche Treffer DE/EN, Liste = App und Katalog) | — |
+| W17 Unterbrochen: „Rest anlegen“, „Alles zurücknehmen“, „Nur Erledigtes behalten“ (Rückgängig: „Rest zurücknehmen“, „So lassen“) | 🟡 | UI test5 (`interrupted.keep`) | UI-Lauf |
+| W7/W18 Grauer Suchbegriff und „REISEN · SICHER“ auf der Fotofarbe in `Theme.secondaryText` | 🟡 | Kontrast-Audit Suche und Vorschlag (AccessibilityUITests) | UI-Lauf |
+| W8 Lange Suchbegriffe brechen bei großer Schrift im Chip um | 🟡 | Baum-Prüfung „Text läuft aus dem Bildschirm“ (AccessibilityUITests, größte Schrift) | Anfrage mit langem Zeitraum im UI-Lauf fehlt |
+| W9 Tippflächen 44 pt (Mediathek-Filter, Atlas-Jahre, Zuverlässigkeit, Kauf wiederherstellen/Code, Verlaufszeile) | 🟡 | `hitRegion`-Audit (AccessibilityUITests) | UI-Lauf |
+| W10 Überschriften für VoiceOver („Bereiche“ als Text, Kartentitel) | 🟡 | — | VoiceOver-Rotor 📱 |
+| W11 Großansicht mit System-Toolbar, nach unten wischen schließt, Datum/Ort für VoiceOver, „nicht verfügbar“ statt Endlos-Kreis | 🟡 | UI test1 „pull down closes the photo“; AccessibilityUITests „photo viewer“ | Foto nur in iCloud 📱 |
+| W12 Tippen öffnet überall die Großansicht, Infos hinter „i“; Album zeigt alle Fotos | 🟡 | UI test1 „photo info“, „album photo opens large“ | UI-Lauf |
+| W13 Einführung mit Zurück (Navigation) | 🟡 | UI test1 „onboarding back to areas“ | UI-Lauf |
+| W16 Einstellungen: „Verlauf und Rückgängig“ als erste Zeile, „Zählt als sortiert“, „Ordner für neue Alben“ | 🟡 | UI test1, test4, test5 über `settings.history`; AccessibilityUITests „history“ | UI-Lauf |
+| N1 Tab „Alben“ mit `rectangle.stack` wie in Fotos | 🟡 | — | Sichtprüfung 📱 |
+| N2 Startbildschirm: VoiceOver sagt „Albumist wird geladen“ | 🟡 | — | VoiceOver 📱 |
+| N3 „Animation überspringen“ als normaler Zweitknopf statt Glas im Inhalt | 🟡 | — | Sichtprüfung |
+| N4 Albumcover = neuestes Foto | ✅ | DesignReviewMinorTests.albumCoverIsTheNewestPhoto (`PreviewPicker.newest`) | — |
+| N5 „Vielleicht passend: 12 Fotos“ | 🟡 | — | Sichtprüfung |
+| N6 Hinweis „Wähle mindestens einen Bereich.“ unter „Weiter“ | 🟡 | — | UI-Lauf |
+| N8 Hinweis, warum nur „Ja“ wartet (Analyse oder Anlegen läuft) | 🟡 | — | Frage während einer Analyse 📱 |
+| N9 „Alben von Albumist“ (auch ergänzte Alben) | 🟡 | — | Sichtprüfung |
+| N10 Mediathek und Suche laden weitere Fotos beim Scrollen (`library.loadingMore`, `search.loadingMore`) | 🟡 | — | Mediathek mit über 3.000 Fotos 📱 |
+| N11 Weltanteil im Format der Sprache, ein Land ist nicht „0 %“ | ✅ | DesignReviewMinorTests.worldShareKeepsSmallSharesAndTheLocaleStyle | — |
+| N12 Leere Album-Suche mit `ContentUnavailableView.search` | 🟡 | — | UI-Lauf |
+| N13 „Ähnliche Alben“: Ladekreis (`merge.preparing`), bis die Vorschau fertig ist | 🟡 | — | Mediathek mit ähnlichen Alben 📱 |
+| N14 „Suchbegriff nicht erkannt“ | 🟡 | — | UI-Lauf |

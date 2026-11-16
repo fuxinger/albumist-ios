@@ -132,7 +132,7 @@ final class DemoLibrary {
                 try await Self.save(items)
                 created += items.count
             } catch {
-                model.message = error.localizedDescription
+                model.message = .failure(error.localizedDescription)
                 return
             }
             await Task.yield()

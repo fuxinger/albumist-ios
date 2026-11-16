@@ -60,10 +60,10 @@ struct SortingShow: View {
             .accessibilityHidden(true)
 
             // Ends only the animation; the albums keep being created in the background.
+            // A plain secondary button: glass belongs to the bars above the content
+            // (Theme.swift, design review N3).
             Button("Animation überspringen", action: onFinish)
-                .font(.subheadline.weight(.semibold))
-                .buttonStyle(.glass)
-                .controlSize(.large)
+                .buttonStyle(SecondaryButtonStyle())
         }
         // iPad: a focused column instead of a small cluster in a wide band.
         .frame(maxWidth: 520)

@@ -63,7 +63,7 @@ struct ProposalListView: View {
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                 } footer: {
-                    Text("Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du auf „Alben anlegen“ tippst. Vorher siehst du jedes Album noch einmal.")
+                    Text("Empfohlen sind sichere und wahrscheinliche Vorschläge ohne persönliche Themen. Angelegt wird erst, wenn du in der Vorschau bestätigst. Dort siehst du jedes Album noch einmal.")
                 }
             }
             if area == nil {
@@ -115,11 +115,14 @@ struct ProposalRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.userTitles[proposal.id] ?? proposal.title).font(.body.weight(.medium)).lineLimit(typeSize.isAccessibilitySize ? 5 : 2)
-                Text("\(proposal.assetIDs.count - (model.removedFromProposals[proposal.id]?.count ?? 0)) Aufnahmen").font(.footnote).foregroundStyle(.secondary)
+                // "Fotos" everywhere, not "Aufnahmen", "Bilder" or "Medien" (design review W4).
+                Text("\(proposal.assetIDs.count - (model.removedFromProposals[proposal.id]?.count ?? 0)) Fotos").font(.footnote).foregroundStyle(.secondary)
                 if proposal.requiresUserName && model.userTitles[proposal.id] == nil {
                     // A place only the user can name: says what is missing instead of
                     // "Neues Album" (first device test 15.11.: 44 "Häufiger Ort N").
-                    StatusBadge(text: "Name fehlt", tint: .orange)
+                    // The app's warning colour: system orange on its 12 % badge was about 2:1
+                    // in light mode (design review D1); this one is 5.0–7.6:1.
+                    StatusBadge(text: "Name fehlt", tint: Theme.tint(for: .documents))
                 } else if let status = model.match(for: proposal)?.status {
                     StatusBadge(text: status.label, tint: status.tint)
                 }
@@ -212,14 +215,17 @@ struct ProposalDetailView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     // Tapping the label explains what "Sicher" or "Wahrscheinlich" means.
                     Button { explainReliability = true } label: {
+                        // On the photo wash only the measured grey is sure to keep 4.5:1; the
+                        // symbol alone carries the accent (design review W18). 44 pt to tap (W9).
                         HStack(spacing: 4) {
                             Text("\(Text(proposal.kind.area.title)) · \(Text(proposal.reliability.label))")
                                 .textCase(.uppercase)
+                                .foregroundStyle(Theme.secondaryText)
                             Image(systemName: "info.circle")
+                                .foregroundStyle(Theme.accent)
                         }
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.accent)
-                        .frame(minHeight: 32, alignment: .leading)
+                        .frame(minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -272,7 +278,8 @@ struct ProposalDetailView: View {
                     LabeledContent("Ordner", value: ([model.settings.rootFolderTitle] + proposal.folderPath)
                         .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " › "))
                     if !proposal.optionalAssetIDs.isEmpty {
-                        LabeledContent("Nur vorgeschlagen", value: "\(proposal.optionalAssetIDs.count)")
+                        // Says what the number is (design review N5: "Nur vorgeschlagen: 12").
+                        LabeledContent("Vielleicht passend") { Text("\(proposal.optionalAssetIDs.count) Fotos") }
                     }
                     if proposal.isSensitive {
                         Label("Persönlicher Inhalt: wird nie automatisch ausgewählt.", systemImage: "lock")
@@ -367,8 +374,14 @@ struct ProposalDetailView: View {
             Button("Nein, das sind Reisen") { answerOftenHere(false) }
                 .buttonStyle(SecondaryButtonStyle())
                 .accessibilityIdentifier("proposal.oftenHere.no")
-            if model.analysis.isRunning {
-                Text("Antworten kannst du, sobald die Analyse fertig ist.").font(.footnote).foregroundStyle(.secondary)
+            // Only "Ja" waits: it plans the trips anew, "Nein" changes nothing (design review
+            // N8 found the two buttons behaving differently without a word why).
+            if model.analysis.isRunning || model.execution.isRunning {
+                Text(model.execution.isRunning
+                     ? LocalizedStringKey("„Ja“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
+                     : LocalizedStringKey("„Ja“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu."))
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -535,15 +548,20 @@ struct AdjustProposalView: View {
 
     var body: some View {
         Form {
-            Section("Neues Album") {
+            // Choosing only selects; nothing is created here (design review W3).
+            Section {
                 TextField("Titel", text: $title)
-                Button("Als neues Album anlegen") {
+                Button("Neues Album wählen") {
                     let trimmed = title.trimmingCharacters(in: .whitespaces)
                     if !trimmed.isEmpty { model.setUserTitle(trimmed, for: proposal) }
                     model.setDecision(.createNew(title: trimmed.isEmpty ? nil : trimmed, folderPath: nil), for: proposal)
                     dismiss()
                 }
                 .disabled(proposal.requiresUserName && title.trimmingCharacters(in: .whitespaces).isEmpty)
+            } header: {
+                Text("Neues Album")
+            } footer: {
+                Text("Angelegt wird erst, wenn du in der Vorschau bestätigst.")
             }
             Section {
                 ForEach(candidates, id: \.albumID) { candidate in
@@ -553,7 +571,7 @@ struct AdjustProposalView: View {
                     } label: {
                         VStack(alignment: .leading) {
                             Text(candidate.albumTitle)
-                            Text("\(candidate.metrics.intersection) gemeinsame Aufnahmen").font(.footnote).foregroundStyle(.secondary)
+                            Text("\(candidate.metrics.intersection) gemeinsame Fotos").font(.footnote).foregroundStyle(.secondary)
                         }
                     }
                     .foregroundStyle(.primary)
@@ -592,8 +610,11 @@ struct AlbumPickerView: View {
 
     var body: some View {
         List {
-            if albums.isEmpty {
-                Text(query.isEmpty ? LocalizedStringKey("Noch keine Alben") : LocalizedStringKey("Kein Album gefunden")).foregroundStyle(.secondary)
+            // The system's empty search state (design review N12).
+            if albums.isEmpty && !query.isEmpty {
+                ContentUnavailableView.search(text: query)
+            } else if albums.isEmpty {
+                Text("Noch keine Alben").foregroundStyle(.secondary)
             }
             ForEach(albums) { album in
                 Button {
@@ -671,41 +692,44 @@ struct ProposalPhotosView: View {
             Text("Sie kommen nicht in dieses Album. In deiner Mediathek und in anderen Vorschlägen bleiben sie.")
         }
         .fullScreenCover(item: $viewing) { start in
-            PhotoViewer(ids: members, current: start.id)
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
         }
     }
 
-    private func traits(selected isSelected: Bool) -> AccessibilityTraits {
-        guard selecting else { return [.isButton] }
-        return isSelected ? [.isButton, .isSelected] : [.isButton]
-    }
-
+    /// A real button with the photo's date as its name, like the library grid (design review
+    /// D3: the tile had only a tap gesture and no name, so VoiceOver and Voice Control could
+    /// not pick photos to take out of the suggestion).
     private func tile(_ id: AssetID) -> some View {
         let isSelected = selected.contains(id)
-        return AssetThumbnail(id: id, side: 120)
-            .aspectRatio(1, contentMode: .fill)
-            .clipped()
-            .overlay(alignment: .bottomTrailing) {
-                if selecting {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.25))
-                        .padding(5)
-                        .accessibilityHidden(true)
-                }
+        return Button {
+            // Outside "Auswählen" a tap opens the photo large (first device test 15.11.).
+            guard selecting else {
+                // A snapshot: a photo ignored from its details must not reshuffle the pages.
+                viewing = PhotoViewer.Start(id: id, ids: model.members(of: proposal))
+                return
             }
-            .opacity(selecting && !isSelected ? 0.85 : 1)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                // Outside "Auswählen" a tap opens the photo large (first device test 15.11.).
-                guard selecting else {
-                    viewing = PhotoViewer.Start(id: id)
-                    return
+            if isSelected { selected.remove(id) } else { selected.insert(id) }
+        } label: {
+            AssetThumbnail(id: id, side: 120)
+                .aspectRatio(1, contentMode: .fill)
+                .clipped()
+                .overlay(alignment: .bottomTrailing) {
+                    if selecting {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.25))
+                            .padding(5)
+                            .accessibilityHidden(true)
+                    }
                 }
-                if isSelected { selected.remove(id) } else { selected.insert(id) }
-            }
-            .accessibilityAddTraits(traits(selected: isSelected))
+                .opacity(selecting && !isSelected ? 0.85 : 1)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(model.creationDates[id]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+        .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
+        .accessibilityIdentifier("proposalPhotos.photo")
     }
 }
 

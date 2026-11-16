@@ -259,5 +259,29 @@ jobs:
           if [ $contrast -ne 0 ] && ! grep -aq "Test Case" ../a11y-contrast-log.txt; then
             grep -av PREVIEW_JPEG ../a11y-contrast-log.txt | tail -40
           fi
+          # A test that was restarted (app crash, hang or test timeout) shows what led up to it,
+          # and any crash report of the app on this Mac is printed, so a crash is never mistaken
+          # for a simulator hiccup.
+          for log in ../a11y-log.txt ../a11y-contrast-log.txt; do
+            grep -anB60 "Restarting after" "$log" | grep -av "PREVIEW_JPEG" | cut -c 1-300 | head -300 | sed 's/^/A11Y_RESTART_CONTEXT /'
+          done
+          if grep -aq "Restarting after" ../a11y-log.txt ../a11y-contrast-log.txt; then
+            find "$HOME/Library/Logs/DiagnosticReports" -newer ../a11y-log.txt -o -name 'Sortly*' -mmin -120 2>/dev/null \
+              | grep -a "Sortly" | head -3 | while read -r report; do
+                echo "A11Y_CRASH_REPORT $report"
+                head -120 "$report" | sed 's/^/A11Y_CRASH /'
+              done
+          fi
           echo "A11Y_SUMMARY fails $(cat ../a11y-log.txt ../a11y-contrast-log.txt | grep -ac 'A11Y_FAIL ') warnings $(cat ../a11y-log.txt ../a11y-contrast-log.txt | grep -ac 'A11Y_WARN ')"
           [ $status -eq 0 ] && [ $contrast -eq 0 ]
+      - name: Upload accessibility results
+        # Crash logs and the screens of a failed test are in the result bundles.
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: a11y-results
+          path: |
+            build/A11yResults.xcresult
+            build/A11yContrastResults.xcresult
+          retention-days: 7
+          if-no-files-found: ignore

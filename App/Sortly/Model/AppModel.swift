@@ -348,8 +348,6 @@ final class AppModel {
         static let decisions = "user.decisions"
         static let titles = "user.titles"
         static let onboardingDone = "onboarding.done"
-        /// How many suggestions the last rule update set back to open, until the user tapped OK.
-        static let recheckedSuggestions = "user.recheckedSuggestions"
         /// Plans that started and whose results are not stored yet (finished at the next launch).
         static let pendingFinalization = SortlyStore.pendingFinalizationKey
     }
@@ -470,9 +468,14 @@ final class AppModel {
     var restoredFromBackup: BackupRestore?
     /// Suggestions an update of the matching rules set back to open (re-check 16.11.): their
     /// "ergänzen" was accepted under the old rules and is no longer a certain match. The
-    /// overview says so until the user taps OK; kept across launches until then.
-    var recheckedSuggestions = UserDefaults.standard.integer(forKey: Key.recheckedSuggestions) {
-        didSet { UserDefaults.standard.set(recheckedSuggestions, forKey: Key.recheckedSuggestions) }
+    /// overview says so until the user taps OK. The count is stored by the pipeline in the
+    /// same transaction as the reopened decisions (`AnalysisPipeline.recheckedSuggestionsKey`).
+    var recheckedSuggestions = 0
+
+    /// "OK" on the card.
+    func dismissRecheckNotice() {
+        recheckedSuggestions = 0
+        Task { try? await store?.setValue(0, forKey: AnalysisPipeline.recheckedSuggestionsKey) }
     }
 
     struct BackupRestore: Equatable {
@@ -1167,6 +1170,7 @@ final class AppModel {
             let refresh = try await pipeline.refreshMatchesIfOutdated()
             snapshot = refresh.snapshot
             reopenAfterRecheck(refresh.reopened)
+            recheckedSuggestions = try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0
             recurringPlaceReport = try await pipeline.recurringPlaceReport()
             facts = try await pipeline.currentFacts()
             inventory = try await store.loadInventory()
@@ -1556,18 +1560,15 @@ final class AppModel {
         }
     }
 
-    /// Accepted decisions that would extend an album without a certain match under the new
-    /// rules go back to open, never silently: the overview shows how many. Applied
-    /// suggestions have no decision any more; started plans are left out by the pipeline.
+    /// Decisions the pipeline set back to open after a rule update (already saved, together
+    /// with the count the overview shows): dropped here too, and the backup copy follows.
     private func reopenAfterRecheck(_ ids: Set<SortlyID>) {
-        let reopened = ids.filter { decisions[$0]?.isAccepted == true }
-        guard !reopened.isEmpty else { return }
-        for id in reopened {
+        guard !ids.isEmpty else { return }
+        for id in ids {
             decisions[id] = nil
             previewOnly[id] = nil
         }
         persistDecisions()
-        recheckedSuggestions += reopened.count
     }
 
     func setUserTitle(_ title: String, for proposal: AlbumProposal) {

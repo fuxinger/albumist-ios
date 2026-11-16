@@ -432,7 +432,7 @@ struct RecheckedSuggestionsCard: View {
             Text("Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert.")
                 .font(.subheadline).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("OK") { model.recheckedSuggestions = 0 }
+            Button("OK") { model.dismissRecheckNotice() }
                 .buttonStyle(SecondaryButtonStyle())
                 .accessibilityIdentifier("overview.rechecked.ok")
         }

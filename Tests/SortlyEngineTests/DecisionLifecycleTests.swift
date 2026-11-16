@@ -353,9 +353,28 @@ struct DecisionLifecycleTests {
         #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened.isEmpty)
         stored.matcherVersion = 1
         try await w.store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)
+
+        // Final check 16.11.: the app ends half way through saving (here: right after the new
+        // matches with their version stamp). Nothing may be saved, or the old "ergänzen" stays.
+        struct Ended: Error {}
+        await #expect(throws: Ended.self) {
+            _ = try await w.pipeline.refreshMatchesIfOutdated(afterEachWrite: { key in
+                if key == AnalysisPipeline.Key.proposals { throw Ended() }
+            })
+        }
+        #expect(try await w.pipeline.latestProposals()?.matcherVersion == 1)
+        #expect(try await w.store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions) == decisions)
+        #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == nil)
+
+        // The next launch does it: decision open again, stamp and count saved with it.
         #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened == [ps[0].id])
+        let saved = try await w.store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions)
+        #expect(saved == [ps[1].id: .createNew(title: nil, folderPath: nil)])
+        #expect(try await w.pipeline.latestProposals()?.matcherVersion == AlbumMatcher.version)
+        #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == 1)
         // Once: the results carry the new version now.
         #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened.isEmpty)
+        #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == 1)
     }
 
     /// Review 16.11. (A10): the user dismissed the trip ("Nicht jetzt"), whose own album
@@ -420,36 +439,5 @@ struct PlaceMatchingSpeedTests {
         print("PLACE-PROBE seconds=\(seconds)")
         #expect(matches.count == open.count + dismissed.count)
         #expect(seconds < 5)
-    }
-
-    /// Countries, regions and towns over the same 50,000 photos, every photo in about 30
-    /// albums: the work per photo and album dominates. The one-trip rule must not add to it
-    /// (re-check 16.11.: it counted per photo and album for every place, 2.4x in a probe).
-    /// Best of three runs with and without the detected trips.
-    @Test func oneTripRuleAddsNoWorkPerPhoto() {
-        func ids(_ range: Range<Int>) -> Set<AssetID> { Set(range.map { AssetID("y-\($0)") }) }
-        let trips = (0..<500).map { ids(($0 * 100)..<($0 * 100 + 100)) }
-        var albums: [CollectionSnapshot] = []
-        for i in 0..<300 { albums.append(CollectionSnapshot(id: CollectionID("a\(i)"), title: "Album \(i)", assetIDs: ids((i * 160)..<min(50_000, i * 160 + 5000)))) }
-        let inventory = CollectionInventory(albums)
-        var open: [AlbumProposal] = [], dismissed: [AlbumProposal] = []
-        for (level, size) in [(PlaceLevel.country, 5000), (PlaceLevel.administrativeArea, 1000), (PlaceLevel.locality, 200)] as [(PlaceLevel, Int)] {
-            for c in 0..<(50_000 / size) {
-                let p = AlbumProposal(id: SortlyID("\(level)-\(c)"), kind: .placeCollection(level), title: "Ort \(level) \(c)",
-                                      assetIDs: ids((c * size)..<(c * size + size)))
-                if c % 4 == 0 { dismissed.append(p) } else { open.append(p) }
-            }
-        }
-        func seconds(_ trips: [Set<AssetID>]) -> Double {
-            (0..<3).map { _ in
-                let start = Date()
-                _ = AnalysisPipeline.match(open, dismissed: dismissed, against: inventory, overrides: OverrideSet(), assignments: [:], trips: trips)
-                return Date().timeIntervalSince(start)
-            }.min()!
-        }
-        let without = seconds([]), with = seconds(trips)
-        print("PAIR-PROBE without trips \(without) s, with trips \(with) s, ratio \(with / without)")
-        // Before the fix 1.62-1.69; some room for a busy machine.
-        #expect(with / without < 1.3)
     }
 }

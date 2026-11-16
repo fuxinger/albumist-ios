@@ -188,7 +188,8 @@ public actor AnalysisPipeline {
         static let home = "analysis.home"
         /// The trial run's year chosen at the start (kept by "Analyse neu aufbauen").
         static let scope = "user.analysisScope"
-        /// The user's decisions on suggestions (written by the app, read here only).
+        /// The user's decisions on suggestions (written by the app; here only to set decisions
+        /// back to open after a rule update, together with the new matches).
         static let decisions = "user.decisions"
     }
 
@@ -1147,6 +1148,13 @@ public actor AnalysisPipeline {
     /// albums were created or the user said an album does not fit. The suggestions then show
     /// the right state at once instead of after the next analysis.
     public func rematch() async throws -> ProposalSnapshot? {
+        guard let snapshot = try await rematched() else { return nil }
+        try await store.setValue(snapshot, forKey: Key.proposals)
+        return snapshot
+    }
+
+    /// The stored suggestions matched again with the current rules, not saved yet.
+    private func rematched() async throws -> ProposalSnapshot? {
         albumGeneration += 1
         guard var snapshot = try await latestProposals() else { return nil }
         let inventory = try await store.loadInventory()
@@ -1155,33 +1163,55 @@ public actor AnalysisPipeline {
         snapshot.matches = Self.match(snapshot.proposals, dismissed: snapshot.dismissed, against: inventory, overrides: overrides,
                                       assignments: Self.assignments(try await store.managedAlbums()), trips: trips)
         snapshot.matcherVersion = AlbumMatcher.version
-        try await store.setValue(snapshot, forKey: Key.proposals)
         return snapshot
     }
 
-    /// What `refreshMatchesIfOutdated` found.
+    /// What `refreshMatchesIfOutdated` did.
     public struct MatchRefresh: Sendable {
         /// The suggestions with their matches (nil: there are none).
         public var snapshot: ProposalSnapshot?
-        /// Suggestions whose accepted "extend this album" decision is no longer a certain
-        /// match under the new rules (`ProposalDecision.uncertainExtensions`). The app sets them
-        /// back to open and says so; the decisions themselves are written by the app only.
+        /// Suggestions whose accepted "extend this album" decision was no longer a certain
+        /// match under the new rules (`ProposalDecision.uncertainExtensions`) and is open again
+        /// in the store. The app drops them from its decisions in memory too.
         public var reopened: Set<SortlyID> = []
     }
+
+    /// How many suggestions a rule update set back to open, until the user tapped OK on the
+    /// overview. Kept in the store and written together with the reopened decisions.
+    public static let recheckedSuggestionsKey = "user.recheckedSuggestions"
 
     /// At launch: suggestions matched by an older version of the rules are matched again, so
     /// a fixed rule (review 16.11.: possible matches never change albums) holds at once and not
     /// only after the next analysis. Decisions accepted under the old rules that would now
-    /// extend an album without a certain match are reported in `reopened`; suggestions of a
+    /// extend an album without a certain match go back to open (`reopened`); suggestions of a
     /// plan that already started (not finished) are never among them.
+    ///
+    /// The new matches with their version stamp, the decisions without the reopened ones and
+    /// the count for the overview are written in one transaction (final check 16.11.): if the
+    /// app is ended in between, nothing is written and the next launch does it again. Before,
+    /// the stamp was saved first, and an old "ergänzen" survived such a crash for good.
     public func refreshMatchesIfOutdated() async throws -> MatchRefresh {
+        try await refreshMatchesIfOutdated(afterEachWrite: nil)
+    }
+
+    /// `afterEachWrite`: for tests, runs inside the transaction after each value (see
+    /// `SortlyStore.setValues`); throwing there is the app ending half way.
+    func refreshMatchesIfOutdated(afterEachWrite: (@Sendable (String) throws -> Void)?) async throws -> MatchRefresh {
         guard let snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
         guard snapshot.matcherVersion < AlbumMatcher.version else { return MatchRefresh(snapshot: snapshot) }
-        guard let rematched = try await rematch() else { return MatchRefresh(snapshot: nil) }
-        let decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
+        guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
+        var decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
         let started = Set(try await store.unfinishedPlans().flatMap { $0.steps.compactMap(\.sourceID) })
         let reopened = ProposalDecision.uncertainExtensions(decisions, proposals: rematched.proposals + rematched.dismissed,
                                                             matches: rematched.matches, protected: started)
+        var values: [String: any Encodable & Sendable] = [Key.proposals: rematched]
+        if !reopened.isEmpty {
+            for id in reopened { decisions[id] = nil }
+            let shown = try await store.value(Int.self, forKey: Self.recheckedSuggestionsKey) ?? 0
+            values[Key.decisions] = decisions
+            values[Self.recheckedSuggestionsKey] = shown + reopened.count
+        }
+        try await store.setValues(values, afterEach: afterEachWrite)
         return MatchRefresh(snapshot: rematched, reopened: reopened)
     }
 }

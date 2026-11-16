@@ -62,7 +62,10 @@ stark wächst („2026“ im Januar angelegt): Es wird ergänzt, nie ein zweites
 Entscheidung, die ein Album ergänzen würde, das nach den neuen Regeln nicht mehr sicher passt
 (z. B. „ergänzen“ aus dem Startpaket auf jetzt nur „Ähnliches Album gefunden“), ist danach
 wieder offen. Die Übersicht sagt es: „N Vorschläge neu geprüft: bitte noch einmal ansehen“.
-Ausgeführte und angefangene Pläne bleiben unberührt.
+Ausgeführte und angefangene Pläne bleiben unberührt. Neue Ergebnisse mit Versionsstempel,
+die wieder geöffneten Entscheidungen und die Zahl für die Übersicht werden in einem Schritt
+gespeichert: Endet die App mittendrin, ist nichts gespeichert, und der nächste Start
+wiederholt es.
 
 ## Konfliktstrategien
 - Fotos, die der Nutzer selbst aus einem Album entfernt hat, werden nie wieder hinzugefügt.

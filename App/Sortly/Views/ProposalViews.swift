@@ -408,7 +408,7 @@ struct ProposalDetailView: View {
                     Image(systemName: [.newAlbumRequired, .possibleMatch].contains(match.status) ? "plus.rectangle.on.folder" : "checkmark.circle.fill")
                         .foregroundStyle(match.status.tint)
                 }
-                ForEach(Array(match.reasons.enumerated()), id: \.offset) { _, reason in
+                ForEach(Array(shownReasons(match).enumerated()), id: \.offset) { _, reason in
                     Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(.secondary)
                 }
                 if let choice = chosenAlbumText {
@@ -441,9 +441,17 @@ struct ProposalDetailView: View {
         return false
     }
 
-    /// The user's pick from "Anpassen", shown where Albumist could not decide alone.
+    /// "Albumist legt ein neues Album an" is not true any more once the user picked the
+    /// album under "Anpassen"; "Deine Wahl" says what happens instead.
+    private func shownReasons(_ match: MatchResult) -> [MatchReason] {
+        guard case .extendExisting = model.decision(for: proposal) else { return match.reasons }
+        return match.reasons.filter { if case .keptUnchangedUntilChosen = $0 { false } else { true } }
+    }
+
+    /// The user's pick from "Anpassen", shown where Albumist could not decide alone (several
+    /// albums, none clearly, or only a possible match).
     private var chosenAlbumText: String? {
-        guard let match, [.multipleMatches, .ambiguous].contains(match.status) else { return nil }
+        guard let match, [.multipleMatches, .ambiguous, .possibleMatch].contains(match.status) else { return nil }
         switch model.decision(for: proposal) {
         case .extendExisting(let id):
             let title = model.inventory[id]?.title ?? ""

@@ -389,8 +389,10 @@ final class AccessibilityUITests: XCTestCase {
         sleep(1)
         shot("a11y-" + slug(screen))
         let chrome = chromeFrames()
+        UITestOnboarding.clock("check start \(screen)")
         inspectTree(screen, chrome: chrome, english: english)
         audit(screen, chrome: chrome)
+        UITestOnboarding.clock("check end \(screen)")
         let failures = auditFailures + screenFailures
         if failures.isEmpty {
             print("A11Y_SCREEN_OK \(screen)")
@@ -761,6 +763,7 @@ final class AccessibilityUITests: XCTestCase {
         if tabs.exists, swipes > 0 || element.frame.maxY > tabs.frame.minY {
             print("UI_FACT tap \(step): element \(element.frame), tab bar \(tabs.frame), \(swipes) swipes")
         }
+        UITestOnboarding.clock("tap \(step)")
         element.tap()
         print("UI_STEP_OK \(step)")
         return true

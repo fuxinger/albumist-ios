@@ -76,6 +76,7 @@ final class SortlyFlowUITests: XCTestCase {
             if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
+        UITestOnboarding.clock("tap \(step)")
         element.tap()
         print("UI_STEP_OK \(step)")
         return true
@@ -118,6 +119,8 @@ final class SortlyFlowUITests: XCTestCase {
     }
 
     private func audit(_ screen: String) {
+        UITestOnboarding.clock("audit start \(screen)")
+        defer { UITestOnboarding.clock("audit end \(screen)") }
         // The screen first comes to rest (a ring or count still moving after an analysis):
         // an audit of a screen in motion ends the whole test (see `UITestOnboarding`).
         // One snapshot per check (labels and frames); element addresses differ every time.

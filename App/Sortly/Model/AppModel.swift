@@ -183,7 +183,7 @@ final class AppModel {
         // Cache hits must still register the dependency, or views would never see new facts.
         access(keyPath: \.facts)
         if let cached = atlasCache[year ?? 0] { return cached }
-        let atlas = TravelAtlas.compute(facts: facts, year: year)
+        let atlas = MainThreadWatch.shared.section("travel atlas") { TravelAtlas.compute(facts: facts, year: year) }
         atlasCache[year ?? 0] = atlas
         return atlas
     }
@@ -191,7 +191,7 @@ final class AppModel {
     var atlasYears: [Int] {
         access(keyPath: \.facts)
         if let cached = atlasYearsCache { return cached }
-        let years = TravelAtlas.years(facts: facts)
+        let years = MainThreadWatch.shared.section("atlas years") { TravelAtlas.years(facts: facts) }
         atlasYearsCache = years
         return years
     }
@@ -204,7 +204,9 @@ final class AppModel {
     var factsByID: [AssetID: AssetFacts] {
         access(keyPath: \.facts)
         if let factsIndex { return factsIndex }
-        let index = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let index = MainThreadWatch.shared.section("facts by id") {
+            Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        }
         factsIndex = index
         return index
     }
@@ -213,7 +215,9 @@ final class AppModel {
     var creationDates: [AssetID: Date] {
         access(keyPath: \.facts)
         if let datesCache { return datesCache }
-        let dates = Dictionary(facts.compactMap { f in f.asset.creationDate.map { (f.id, $0) } }, uniquingKeysWith: { first, _ in first })
+        let dates = MainThreadWatch.shared.section("creation dates") {
+            Dictionary(facts.compactMap { f in f.asset.creationDate.map { (f.id, $0) } }, uniquingKeysWith: { first, _ in first })
+        }
         datesCache = dates
         return dates
     }
@@ -248,7 +252,7 @@ final class AppModel {
         let key = "\(code)|\(year ?? 0)"
         access(keyPath: \.facts)
         if let cached = countryCache[key] { return cached }
-        let photos = CountryPhotos.collect(countryCode: code, facts: facts, year: year)
+        let photos = MainThreadWatch.shared.section("country photos") { CountryPhotos.collect(countryCode: code, facts: facts, year: year) }
         countryCache[key] = photos
         return photos
     }
@@ -972,6 +976,10 @@ final class AppModel {
     /// One tick (every 250 ms while a run is busy, S2): takes the newest progress, measures the
     /// speed, moves the bar, and decides what the card says. Nothing here runs per report.
     private func tick(run: Int) {
+        MainThreadWatch.shared.section("analysis tick") { tickNow(run: run) }
+    }
+
+    private func tickNow(run: Int) {
         guard run == analysisGeneration, analysis.isRunning else { return }
         let now = ContinuousClock.now
         let taken = progressMailbox.take()
@@ -1204,7 +1212,8 @@ final class AppModel {
             recurringPlaceReport = try await pipeline.recurringPlaceReport()
             detectedHome = try await pipeline.detectedHome()
             homeChangeNotice = try await pipeline.homeChangeNotice()
-            facts = try await pipeline.currentFacts()
+            let newFacts = try await pipeline.currentFacts()
+            MainThreadWatch.shared.section("refresh: facts") { facts = newFacts }
             inventory = try await store.loadInventory()
             let inventory = inventory
             // Albumist's own albums overlap on purpose (a country holds its trips).
@@ -1229,13 +1238,17 @@ final class AppModel {
             let facts = facts, snapshot = snapshot, settings = settings
             // Photos Albumist put into albums count as sorted in the area of their suggestion,
             // also once that suggestion is no longer shown.
-            let byAlbumist = LibraryStatus.organizedBySortly(managedAlbums, inventory: inventory, snapshot: snapshot)
+            let byAlbumist = MainThreadWatch.shared.section("refresh: sorted by Albumist") {
+                LibraryStatus.organizedBySortly(managedAlbums, inventory: inventory, snapshot: snapshot)
+            }
             let (computed, reasons) = await Task.detached(priority: .userInitiated) {
                 LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
                                                  contentAnalyzed: analyzed, organizedBySortly: byAlbumist)
             }.value
-            states = computed
-            statusReasons = reasons
+            MainThreadWatch.shared.section("refresh: states") {
+                states = computed
+                statusReasons = reasons
+            }
             // The trial year counts only its own photos (the ring said "839 von 5.683" over
             // the whole library while the suggestions were for 2026).
             let scope = analysisScope, calendar = Calendar.sortlyDefault
@@ -1785,7 +1798,9 @@ final class AppModel {
                 }
                 return ConfirmedProposal(proposal: proposal, decision: decision)
             }
-            plan = OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle).makePlan(from: confirmed, inventory: current, overrides: overrides)
+            plan = MainThreadWatch.shared.section("make plan") {
+                OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle).makePlan(from: confirmed, inventory: current, overrides: overrides)
+            }
         } catch {
             message = .failure(error.localizedDescription)
         }
@@ -2340,7 +2355,9 @@ final class AppModel {
     /// Several undos when the first one was only partial: newest first.
     func receipt(for plan: ChangePlan) async -> (plan: PlanReceipt, undos: [PlanReceipt]) {
         let undos = (try? await store?.reverts(of: plan.id)) ?? []
-        return (PlanReceipt(plan: plan, inventory: inventory), undos.map { PlanReceipt(plan: $0, inventory: inventory) })
+        return MainThreadWatch.shared.section("receipt") {
+            (PlanReceipt(plan: plan, inventory: inventory), undos.map { PlanReceipt(plan: $0, inventory: inventory) })
+        }
     }
 
     /// "Ältere anzeigen" in the history.
@@ -2357,11 +2374,13 @@ final class AppModel {
         access(keyPath: \.settings)
         if let cached = bucketCache[bucket] { return cached }
         let resolver = resolver
-        let members = facts.filter { f in
-            guard let state = states[f.id] else { return bucket == .all }
-            return resolver.buckets(state).contains(bucket)
+        let members = MainThreadWatch.shared.section("library bucket") {
+            facts.filter { f in
+                guard let state = states[f.id] else { return bucket == .all }
+                return resolver.buckets(state).contains(bucket)
+            }
+            .sorted { ($0.asset.creationDate ?? .distantPast) > ($1.asset.creationDate ?? .distantPast) }
         }
-        .sorted { ($0.asset.creationDate ?? .distantPast) > ($1.asset.creationDate ?? .distantPast) }
         bucketCache[bucket] = members
         return members
     }

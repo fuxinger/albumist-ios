@@ -76,19 +76,33 @@ struct SlowedAnalyzer: ContentAnalyzing {
 // MARK: Main-thread watch
 
 /// UI runs only (`-SortlyUITestUnlocked`): writes a fault to the system log when the main
-/// thread did not answer for a second or more, and when the whole process got no time (the
-/// watch's own 0.2 s sleep took seconds). The UI workflow prints the app's fault lines
-/// (`UI_RUNTIME_WARNING`), so a run whose UI queries time out ("Failed to get matching
+/// thread did not answer, and when the whole process got no time (the watch's own 0.2 s sleep
+/// took seconds). The UI workflow prints the app's fault lines (`UI_RUNTIME_WARNING`, the 40
+/// most frequent distinct lines), so a run whose UI queries time out ("Failed to get matching
 /// snapshots: Timed out while evaluating UI query", runs 43893790053 and 43918684247) says
 /// whether Albumist blocked its main thread or the simulator stood still.
+///
+/// Lines (kept few, so the 40 printed lines hold them):
+/// - `UI_MAIN_STALL 12.3 s from 18:31:05.2 UTC in <section>`: every stall of 2 s or more, with
+///   its start (the test prints `UI_CLOCK` lines on the same clock) and the marked section the
+///   main thread was in while it did not answer (`unmarked`: SwiftUI, UIKit or XCTest's own
+///   work, such as an accessibility audit, which runs on the app's main thread)
+/// - `UI_MAIN_STALL 1-2 s in <section>`: shorter stalls, counted per section
+/// - `UI_MAIN_SLOW <section> 250 ms to 1 s` / `1 s or more`: a marked section that took that
+///   long, counted per section (`section(_:_:)`)
 final class MainThreadWatch: @unchecked Sendable {
     static let shared = MainThreadWatch()
     private let logger = Logger(subsystem: "app.albumist.ios", category: "uitest")
     private let lock = NSLock()
-    /// Uptime (ns) of the ping the main thread has not answered yet.
+    /// Uptime (ns) and wall clock (s since 1970) of the ping the main thread has not answered yet.
     private var askedAt: UInt64?
+    private var askedWall: Double = 0
     private var reportedStuck = false
     private var started = false
+    /// Marked sections the main thread is in now, outermost first (changed on the main thread).
+    private var sections: [String] = []
+    /// The sections seen while the current ping was not answered.
+    private var seenInStall: [String] = []
 
     func start() {
         guard UITestSupport.isRunning else { return }
@@ -102,6 +116,24 @@ final class MainThreadWatch: @unchecked Sendable {
         thread.start()
     }
 
+    /// Marks main-thread work, so a stall line names it. Costs nothing outside UI runs.
+    @discardableResult
+    func section<T>(_ name: String, _ body: () throws -> T) rethrows -> T {
+        guard UITestSupport.isRunning, Thread.isMainThread else { return try body() }
+        let begin = DispatchTime.now().uptimeNanoseconds
+        lock.lock()
+        sections.append(name)
+        lock.unlock()
+        defer {
+            lock.lock()
+            if !sections.isEmpty { sections.removeLast() }
+            lock.unlock()
+            let took = Self.seconds(DispatchTime.now().uptimeNanoseconds - begin)
+            if took >= 0.25 { note("UI_MAIN_SLOW \(name) \(took >= 1 ? "1 s or more" : "250 ms to 1 s")") }
+        }
+        return try body()
+    }
+
     private func watch() {
         while true {
             let before = DispatchTime.now().uptimeNanoseconds
@@ -109,16 +141,28 @@ final class MainThreadWatch: @unchecked Sendable {
             let now = DispatchTime.now().uptimeNanoseconds
             let slept = Self.seconds(now - before)
             if slept >= 1.5 {
-                note("UI_PROCESS_STALL the watch slept \(Self.text(slept)) s instead of 0.2 s (the whole process got no time)")
+                note("UI_PROCESS_STALL the watch slept \(Self.text(slept)) s instead of 0.2 s from \(Self.clock(Date().timeIntervalSince1970 - slept)) UTC (the whole process got no time)")
             }
             lock.lock()
             let pending = askedAt
-            if pending == nil { askedAt = now }
+            if pending == nil {
+                askedAt = now
+                askedWall = Date().timeIntervalSince1970
+                seenInStall = []
+            }
             let waited = pending.map { Self.seconds(now - $0) } ?? 0
+            if waited >= 0.5 {
+                let path = sections.isEmpty ? "unmarked" : sections.joined(separator: ">")
+                if !seenInStall.contains(path) && seenInStall.count < 4 { seenInStall.append(path) }
+            }
             let stuck = pending != nil && waited >= 10 && !reportedStuck
             if stuck { reportedStuck = true }
+            let since = askedWall
+            let names = seenInStall.joined(separator: ", ")
             lock.unlock()
-            if stuck { note("UI_MAIN_STALL the main thread has not answered for \(Self.text(waited)) s") }
+            if stuck {
+                note("UI_MAIN_STALL the main thread has not answered for \(Self.text(waited)) s, since \(Self.clock(since)) UTC, in \(names)")
+            }
             if pending == nil {
                 DispatchQueue.main.async { [self] in answered() }
             }
@@ -129,12 +173,18 @@ final class MainThreadWatch: @unchecked Sendable {
         let now = DispatchTime.now().uptimeNanoseconds
         lock.lock()
         let asked = askedAt
+        let since = askedWall
+        let names = seenInStall.isEmpty ? "unmarked" : seenInStall.joined(separator: ", ")
         askedAt = nil
         reportedStuck = false
         lock.unlock()
         guard let asked else { return }
         let waited = Self.seconds(now - asked)
-        if waited >= 1 { note("UI_MAIN_STALL the main thread was blocked for \(Self.text(waited)) s") }
+        if waited >= 2 {
+            note("UI_MAIN_STALL \(Self.text(waited)) s from \(Self.clock(since)) UTC in \(names)")
+        } else if waited >= 1 {
+            note("UI_MAIN_STALL 1-2 s in \(names)")
+        }
     }
 
     private func note(_ text: String) {
@@ -143,4 +193,12 @@ final class MainThreadWatch: @unchecked Sendable {
 
     private static func seconds(_ nanoseconds: UInt64) -> Double { Double(nanoseconds) / 1_000_000_000 }
     private static func text(_ seconds: Double) -> String { String(format: "%.1f", seconds) }
+
+    /// Time of day in UTC with tenths ("18:31:05.2"), as the UI tests print it (`UI_CLOCK`).
+    static func clock(_ since1970: Double) -> String {
+        let day = since1970.truncatingRemainder(dividingBy: 86_400)
+        let hours = Int(day / 3600), minutes = Int(day.truncatingRemainder(dividingBy: 3600) / 60)
+        let rest = day.truncatingRemainder(dividingBy: 60)
+        return String(format: "%02d:%02d:%04.1f", hours, minutes, rest)
+    }
 }

@@ -198,6 +198,20 @@ enum UITestOnboarding {
     /// first or stopped at once (compare `UI_MAIN_STALL` / `UI_PROCESS_STALL` from the app).
     static func reportSlowCheck(since asked: Date) {
         let took = Date().timeIntervalSince(asked)
-        if took >= 5 { print("UI_SLOW_QUERY a check took \(Int(took)) s") }
+        if took >= 5 { print("UI_SLOW_QUERY a check took \(Int(took)) s, from \(clockText(asked)) UTC") }
+    }
+
+    /// `UI_CLOCK 18:31:05.2 <event>`: the time of a test step in UTC, on the clock the app's
+    /// `UI_MAIN_STALL` lines use (`MainThreadWatch.clock`), so a stall can be put next to the
+    /// step, the tap or the accessibility audit that ran then.
+    static func clock(_ event: String) {
+        print("UI_CLOCK \(clockText(Date())) \(event)")
+    }
+
+    static func clockText(_ date: Date) -> String {
+        let day = date.timeIntervalSince1970.truncatingRemainder(dividingBy: 86_400)
+        let hours = Int(day / 3600), minutes = Int(day.truncatingRemainder(dividingBy: 3600) / 60)
+        let rest = day.truncatingRemainder(dividingBy: 60)
+        return String(format: "%02d:%02d:%04.1f", hours, minutes, rest)
     }
 }

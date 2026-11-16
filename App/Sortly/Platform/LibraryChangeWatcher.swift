@@ -16,7 +16,11 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
     func start() {
         guard !registered else { return }
         registered = true
-        PHPhotoLibrary.shared().register(self)
+        // Off the main thread: registering talks to the Photos service, which can keep a caller
+        // waiting while it sets up or writes the library (a fresh simulator, new photos).
+        DispatchQueue.global(qos: .utility).async { [self] in
+            PHPhotoLibrary.shared().register(self)
+        }
     }
 
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
@@ -25,6 +29,10 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
 
     /// Also called when a run ends that saw changes arrive meanwhile.
     func scheduleCatchUp() {
+        MainThreadWatch.shared.section("library change") { scheduleCatchUpNow() }
+    }
+
+    private func scheduleCatchUpNow() {
         let model = AppModel.shared
         // Albumist's own changes are followed by an analysis anyway.
         guard !model.execution.isRunning else { return }

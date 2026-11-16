@@ -20,6 +20,10 @@ struct ScanShow: View {
 
     /// Photos spread over the whole library, so the mosaic shows years, not one afternoon.
     private var mosaicPhotos: [AssetID] {
+        MainThreadWatch.shared.section("scan show photos") { pickMosaicPhotos() }
+    }
+
+    private func pickMosaicPhotos() -> [AssetID] {
         let facts = model.facts
         let count = columns * rows
         guard facts.count > count else { return facts.map(\.id) }

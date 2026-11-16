@@ -13,7 +13,7 @@ enum PhotoPalette {
     static func colors(for id: AssetID) async -> [Color] {
         if let cached = cache[id] { return cached }
         guard let image = await ThumbnailCache.shared.image(for: id, side: 60), let cg = image.cgImage else { return [] }
-        let colors = sample(cg)
+        let colors = MainThreadWatch.shared.section("photo glow colours") { sample(cg) }
         cache[id] = colors
         return colors
     }

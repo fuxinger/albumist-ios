@@ -105,7 +105,7 @@ final class SortlyLockedUITests: XCTestCase {
         sleep(1)
         var undone = 0
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for index in 0..<4 where undone < limit {
+        for index in 0..<(limit + 4) where undone < limit {
             let rows = app.buttons.matching(identifier: "history.row")
             guard index < rows.count else { break }
             rows.element(boundBy: index).tap()
@@ -181,7 +181,10 @@ final class SortlyLockedUITests: XCTestCase {
         if !apply.waitForExistence(timeout: 5) && !selectRecommended("open suggestions (locked)") {
             print("UI_FACT locked: nothing recommendable left, taking back the newest plans")
             let before = openSuggestionCount()
-            if takeBackNewestPlans(limit: 2) > 0 {
+            // Four: the newest plans need not come from suggestions (flow test 5 cuts off a
+            // new album of two photos when nothing recommended is left, and keeps and retries
+            // it: two plans whose undo brings no suggestion back, UI run 43949880264).
+            if takeBackNewestPlans(limit: 4) > 0 {
                 // The suggestions of the plans taken back return once the undo is stored and
                 // matched again; the count on the overview says when (run 43804947107 went on
                 // at once and found the one suggestion that was there before).

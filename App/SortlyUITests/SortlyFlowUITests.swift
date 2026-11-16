@@ -650,7 +650,11 @@ final class SortlyFlowUITests: XCTestCase {
             sleep(2)
             shot("18-albums"); audit("albums")
             // Design review W12: an album shows all its photos, and each opens large.
-            let album = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9] Fotos?")).firstMatch
+            // An album with photos: one a plan created but whose photos were never added
+            // ("Rest anlegen" after an interruption does not add on guesswork, audit 2, 1.1;
+            // DeviceConditionUITests test07 leaves "Testalbum Vollendet, 0 Fotos" on this
+            // simulator, UI run 43949880264) has none to open.
+            let album = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "(.*[^0-9.])?[1-9][0-9.]* Fotos?")).firstMatch
             if tap(album, "open an album", timeout: 5) {
                 let photo = app.buttons["album.photo"].firstMatch
                 if tap(photo, "open a photo of the album", timeout: 10) {
@@ -1212,6 +1216,11 @@ final class SortlyFlowUITests: XCTestCase {
             back()
         } else {
             print("UI_STEP_MISSING sweep suggestions")
+            // What the overview showed instead (UI runs 43930271358, 43930277920, 43949880264
+            // left no picture of it): screen title, buttons and the analysis card.
+            let buttons = app.buttons.allElementsBoundByIndex.prefix(30).map(\.label).filter { !$0.isEmpty }
+            print("UI_FACT sweep overview: \(screenTitle) | \(buttons.joined(separator: " | "))")
+            shot("x-sweep-no-suggestions")
             XCTFail("No \"Vorschläge prüfen\" on the overview for the sweep")
         }
         print("UI_SWEEP_DONE")

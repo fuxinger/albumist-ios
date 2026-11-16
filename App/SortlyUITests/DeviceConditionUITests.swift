@@ -518,7 +518,7 @@ final class DeviceConditionUITests: XCTestCase {
         guard tap(field, "name for \(title)") else { return false }
         field.typeText(title)
         guard tap(app.buttons["Anlegen"], "create \(title)") else { return false }
-        let plan = app.navigationBars["Umsetzen"].waitForExistence(timeout: 20)
+        let plan = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
         print(plan ? "UI_STEP_OK plan for \(title)" : "UI_STEP_MISSING plan for \(title)")
         XCTAssertTrue(plan, "Adding photos to a new album did not open its plan")
         return plan
@@ -526,7 +526,7 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// Applies a new album of two photos and waits for the result card.
     private func applyManualPlan(_ title: String) -> Bool {
-        guard openManualPlan(title), tap(button("Jetzt umsetzen"), "apply \(title)", timeout: 30) else { return false }
+        guard openManualPlan(title), tap(app.buttons["plan.apply"], "apply \(title)", timeout: 30) else { return false }
         let done = app.buttons["result.receipt"].waitForExistence(timeout: 180)
         print(done ? "UI_STEP_OK \(title) applied" : "UI_STEP_MISSING \(title) applied")
         XCTAssertTrue(done, "The plan for \(title) did not finish")
@@ -537,7 +537,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// Fails (instead of passing silently) when the plan was done before the app was closed.
     private func interruptManualPlan(_ title: String) -> Bool {
         start(["-SortlyUITestSlowPlan"])
-        guard openManualPlan(title), tap(button("Jetzt umsetzen"), "start \(title)", timeout: 30) else { return false }
+        guard openManualPlan(title), tap(app.buttons["plan.apply"], "start \(title)", timeout: 30) else { return false }
         // The first change goes through at once, every later one waits 30 s: after 5 s one
         // step is done and the next is not.
         sleep(5)
@@ -545,7 +545,7 @@ final class DeviceConditionUITests: XCTestCase {
         app.terminate()
         sleep(2)
         start()
-        let card = anything("Umsetzen wurde unterbrochen").waitForExistence(timeout: 30)
+        let card = anything("wurde unterbrochen").waitForExistence(timeout: 30)
         print(card ? "UI_STEP_OK interruption card for \(title)" : "UI_STEP_MISSING interruption card for \(title)")
         XCTAssertTrue(card, "No interruption card: the plan for \(title) finished before the app was closed")
         if card { sleep(1); shot("interrupted-\(title.replacingOccurrences(of: " ", with: "-"))") }
@@ -817,7 +817,7 @@ final class DeviceConditionUITests: XCTestCase {
 
         start(["-SortlyUITestDiskFull", "plan"])
         let title = "Testalbum Speicher"
-        guard openManualPlan(title), tap(button("Jetzt umsetzen"), "apply \(title)", timeout: 30) else { return }
+        guard openManualPlan(title), tap(app.buttons["plan.apply"], "apply \(title)", timeout: 30) else { return }
         let failure = anything("Speicher deines iPhone ist voll")
         let said = failure.waitForExistence(timeout: 120)
         shot("12-disk-full-plan")
@@ -831,11 +831,11 @@ final class DeviceConditionUITests: XCTestCase {
         app.terminate()
         sleep(2)
         start()
-        let card = anything("Umsetzen wurde unterbrochen")
+        let card = anything("wurde unterbrochen")
         let offered = card.waitForExistence(timeout: 30)
         print(offered ? "UI_STEP_OK plan offered after full disk" : "UI_STEP_MISSING plan offered after full disk")
         XCTAssertTrue(offered, "After the full disk the unfinished plan is not offered")
-        guard offered, tap(app.buttons["Fortsetzen"], "continue plan after full disk") else { return }
+        guard offered, tap(app.buttons["Rest anlegen"], "continue plan after full disk") else { return }
         let resumed = waitGone(card, timeout: 120)
         dismissNotices()
         XCTAssertTrue(resumed, "Continuing the plan after the full disk did not finish it")
@@ -846,29 +846,29 @@ final class DeviceConditionUITests: XCTestCase {
     // MARK: 7–8 Interrupted plan, removing an album
 
     /// A5: the app is closed while a plan runs (made slow, so it always lands half way). Both
-    /// ways out: "Fortsetzen" finishes the album, "Rückgängig machen" takes back what was done.
+    /// ways out: "Rest anlegen" finishes the album, "Alles zurücknehmen" takes back what was done.
     func test07_InterruptedPlanContinueAndUndo() {
         continueAfterFailure = true
         prepare()
-        let card = anything("Umsetzen wurde unterbrochen")
+        let card = anything("wurde unterbrochen")
         let continued = "Testalbum Fortsetzen"
-        if interruptManualPlan(continued), tap(app.buttons["Fortsetzen"], "continue interrupted plan") {
+        if interruptManualPlan(continued), tap(app.buttons["Rest anlegen"], "continue interrupted plan") {
             let done = waitGone(card, timeout: 120)
             print(done ? "UI_STEP_OK interrupted plan continued" : "UI_STEP_MISSING interrupted plan continued")
-            XCTAssertTrue(done, "\"Fortsetzen\" did not finish the interrupted plan")
+            XCTAssertTrue(done, "\"Rest anlegen\" did not finish the interrupted plan")
             dismissNotices()
-            XCTAssertTrue(albumExists(continued), "After \"Fortsetzen\" the album is missing")
+            XCTAssertTrue(albumExists(continued), "After \"Rest anlegen\" the album is missing")
         }
         let undone = "Testalbum Zurueck"
-        if interruptManualPlan(undone), tap(app.buttons["Rückgängig machen"].firstMatch, "undo interrupted plan") {
-            confirm("Rückgängig machen", "confirm undo of interrupted plan")
+        if interruptManualPlan(undone), tap(app.buttons["Alles zurücknehmen"].firstMatch, "undo interrupted plan") {
+            confirm("Alles zurücknehmen", "confirm undo of interrupted plan")
             let asked = answerDeleteQuestion(allow: true, timeout: 30) { !card.exists }
             print("UI_FACT undo of interrupted plan asked by iOS: \(asked)")
             let done = waitGone(card, timeout: 120)
             print(done ? "UI_STEP_OK interrupted plan taken back" : "UI_STEP_MISSING interrupted plan taken back")
-            XCTAssertTrue(done, "\"Rückgängig machen\" did not settle the interrupted plan")
+            XCTAssertTrue(done, "\"Alles zurücknehmen\" did not settle the interrupted plan")
             dismissNotices()
-            XCTAssertFalse(albumExists(undone), "After \"Rückgängig machen\" the album is still there")
+            XCTAssertFalse(albumExists(undone), "After \"Alles zurücknehmen\" the album is still there")
         }
     }
 
@@ -891,7 +891,7 @@ final class DeviceConditionUITests: XCTestCase {
         shot("14-managed-albums")
         guard tap(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch, "managed album row"),
               confirm("Album entfernen", "remove managed album") else { return }
-        guard app.navigationBars["Umsetzen"].waitForExistence(timeout: 20), tap(button("Jetzt umsetzen"), "apply removal", timeout: 30) else {
+        guard app.navigationBars["Vorschau"].waitForExistence(timeout: 20), tap(app.buttons["plan.apply"], "apply removal", timeout: 30) else {
             print("UI_STEP_MISSING removal plan")
             XCTFail("Removing the album did not open its plan")
             return

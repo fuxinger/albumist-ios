@@ -6,23 +6,37 @@ import SortlyEngine
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
-    @State private var step = 0
+    /// The steps after the welcome screen are pushed (design review W13): the system back
+    /// button and the swipe from the edge lead back, e.g. to change the areas; the welcome
+    /// screen itself has no way back.
+    enum Step: Hashable { case areas, access, start }
+
+    @State private var path: [Step] = []
     @State private var trialYear: Int?
 
     var body: some View {
-        NavigationStack {
-            Group {
-                switch step {
-                case 0: welcome
-                case 1: areas
-                case 2: access
-                default: start
+        NavigationStack(path: $path) {
+            screen(welcome)
+                .navigationDestination(for: Step.self) { step in
+                    switch step {
+                    case .areas: screen(areas)
+                    case .access: screen(access)
+                    case .start: screen(start)
+                    }
                 }
-            }
+        }
+    }
+
+    private func screen(_ content: some View) -> some View {
+        content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.background)
-            .animation(.default, value: step)
-        }
+            .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Goes one step on; a second tap while the push runs does not add the step twice.
+    private func go(_ step: Step) {
+        if path.last != step { path.append(step) }
     }
 
     /// One onboarding step: the content scrolls when it does not fit (large text, small
@@ -66,7 +80,7 @@ struct OnboardingView: View {
                 promise("rectangle.stack", "Vorhandene Alben werden erkannt und ergänzt statt doppelt angelegt.")
             }
         } footer: {
-            Button("Los geht’s") { step = 1 }.buttonStyle(PrimaryButtonStyle())
+            Button("Los geht’s") { go(.areas) }.buttonStyle(PrimaryButtonStyle())
         }
     }
 
@@ -90,12 +104,21 @@ struct OnboardingView: View {
                 }
             }
         } footer: {
-            Button("Weiter") {
-                model.saveSettings()
-                step = 2
+            VStack(spacing: Theme.Spacing.s) {
+                Button("Weiter") {
+                    model.saveSettings()
+                    go(.access)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(model.settings.enabledAreas.isEmpty)
+                // Why the button is grey (design review N6).
+                if model.settings.enabledAreas.isEmpty {
+                    Text("Wähle mindestens einen Bereich.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("onboarding.areasHint")
+                }
             }
-            .buttonStyle(PrimaryButtonStyle())
-            .disabled(model.settings.enabledAreas.isEmpty)
         }
     }
 
@@ -154,12 +177,13 @@ struct OnboardingView: View {
             switch model.access {
             case .denied, .restricted:
                 Card {
-                    Label("Der Zugriff wurde abgelehnt.", systemImage: "exclamationmark.triangle").font(.headline)
-                    Text("Du kannst ihn in den Einstellungen unter Datenschutz › Fotos erlauben.")
+                    // The path of iOS 18 and later, like the other access screens (design review W14).
+                    Label("Kein Zugriff auf deine Fotos", systemImage: "exclamationmark.triangle").font(.headline)
+                    Text("Erlaube ihn unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff.")
                 }
             case .limited:
                 Card {
-                    Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline)
+                    Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline).accessibilityAddTraits(.isHeader)
                     Text("Albumist sortiert dann nur die Fotos, die du freigegeben hast. Für die ganze Mediathek kannst du später vollen Zugriff erlauben.")
                 }
             default:
@@ -167,7 +191,7 @@ struct OnboardingView: View {
             }
         } footer: {
             if model.access.canRead {
-                Button("Weiter") { step = 3 }.buttonStyle(PrimaryButtonStyle())
+                Button("Weiter") { go(.start) }.buttonStyle(PrimaryButtonStyle())
             } else if model.access == .denied || model.access == .restricted {
                 // iOS does not ask a second time: the way on is the Settings app.
                 Button("Einstellungen öffnen") {
@@ -181,7 +205,7 @@ struct OnboardingView: View {
                 Button("Weiter") {
                     Task {
                         await model.requestAccess()
-                        if model.access.canRead { step = 3 }
+                        if model.access.canRead { go(.start) }
                     }
                 }
                 .buttonStyle(PrimaryButtonStyle())

@@ -35,12 +35,19 @@ public struct ProposalEngine: Sendable {
     var labels: Labels { Labels(settings.titleLanguage) }
 
     public func proposals(for analysis: AnalysisSnapshot, overrides: OverrideSet = OverrideSet()) -> [AlbumProposal] {
+        suggestions(for: analysis, overrides: overrides).open
+    }
+
+    /// The suggestions to show, the ones the user dismissed, and which album stands for the
+    /// photos that get no album of their own (`Suggestions`).
+    public func suggestions(for analysis: AnalysisSnapshot, overrides: OverrideSet = OverrideSet()) -> Suggestions {
         let usable = analysis.facts.filter { !overrides.isExcluded($0.id) && !overrides.isIgnored($0.id) }
         let profile = LibraryProfile(facts: usable, trips: analysis.trips)
         var result: [AlbumProposal] = []
+        var standIns: [StandIn] = []
         let areas = settings.enabledAreas
         if areas.contains(.places) { result += placeProposals(usable, profile: profile) }
-        if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile) }
+        if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile, routineVisits: &standIns) }
         if areas.contains(.frequentPlaces) { result += frequentPlaceProposals(analysis.frequentPlaces, facts: analysis.facts) }
         // A place the user is often at gets one album instead of its trips, so it comes with
         // either area (Trips/RecurringPlaces.swift).
@@ -54,8 +61,11 @@ public struct ProposalEngine: Sendable {
         if areas.contains(.peopleAndPets) { result += groupProposals(analysis.groups) }
         // Curated before rejections are taken out: a trip the user said no to still stands for
         // its country, which would otherwise come back as the same photos under another name.
-        return curated(result, profile: profile)
-            .filter { !overrides.isRejected($0.id) && !overrides.mustNotRecreate($0.id) }
+        let kept = curated(result, profile: profile, standIns: &standIns)
+        if areas.contains(.places) { standIns += placesOfTrips(kept, standIns: standIns) }
+        let dismissed = { (p: AlbumProposal) in overrides.isRejected(p.id) || overrides.mustNotRecreate(p.id) }
+        return Suggestions(open: kept.filter { !dismissed($0) }, dismissed: kept.filter(dismissed),
+                           standIns: Self.resolved(standIns, kept: Set(kept.map(\.id))))
     }
 
     // MARK: Places (4.1)
@@ -144,6 +154,13 @@ public struct ProposalEngine: Sendable {
     }
 
     func tripProposals(_ trips: [Trip], facts: [AssetFacts], profile: LibraryProfile = LibraryProfile()) -> [AlbumProposal] {
+        var routineVisits: [StandIn] = []
+        return tripProposals(trips, facts: facts, profile: profile, routineVisits: &routineVisits)
+    }
+
+    /// - Parameter routineVisits: gets, per routine visit, the album of the place visited
+    ///   that stands for it (a routine visit is not a trip of its own).
+    func tripProposals(_ trips: [Trip], facts: [AssetFacts], profile: LibraryProfile, routineVisits: inout [StandIn]) -> [AlbumProposal] {
         let byID = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let collections = settings.trips.placeCollectionForRepeatedTrips
         let regular = collections ? regularDestinations(trips, facts: byID) : RegularDestinations()
@@ -213,6 +230,7 @@ public struct ProposalEngine: Sendable {
         // One album per place the user goes to again and again (Scenario B): every routine
         // visit there, and the longer trips there too.
         var made = Set<SortlyID>()
+        let tripsByID = Dictionary(trips.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for destination in regular.destinations {
             let places = destination.members.compactMap { byID[$0]?.gpsPlace }
             let (name, key, _) = Self.primaryPlaceName(places, kind: .shortTrip, labels: labels, profile: profile)
@@ -220,6 +238,15 @@ public struct ProposalEngine: Sendable {
             let id = SortlyID.stable("trip-place", key?.description ?? destination.anchor)
             guard made.insert(id).inserted else { continue }
             result.append(collection(id: id, name: name, key: key, members: destination.members, facts: byID))
+            // The routine visits there have no trip album: this album is theirs.
+            let members = Set(destination.members)
+            for tripID in destination.trips where regular.outings.contains(tripID) {
+                guard let trip = tripsByID[tripID] else { continue }
+                let visit = members.intersection(trip.geotaggedAssetIDs)
+                if !visit.isEmpty {
+                    routineVisits.append(StandIn(area: .trips, suggestion: id, dropped: tripID, assetIDs: visit, reason: .routineVisit))
+                }
+            }
         }
         // Repeated trips to the same place get that place's album next to the trips. Day trips
         // do not count: two afternoons in Innsbruck made three albums of the same 40 photos.
@@ -278,6 +305,8 @@ public struct ProposalEngine: Sendable {
             var members: [AssetID]
             /// Fallback identity when the place has no name yet.
             var anchor: String
+            /// The short trips with days there (routine visits among them).
+            var trips: [SortlyID] = []
         }
         var destinations: [Destination] = []
         /// Short trips spent mostly at such places.
@@ -336,7 +365,7 @@ public struct ProposalEngine: Sendable {
                     && !spots.query(near: photo.at, radius: Self.destinationRadius).isEmpty
             }.map(\.id).sorted()
             let anchor = String(format: "%.2f,%.2f", cluster.centroid.latitude, cluster.centroid.longitude)
-            result.destinations.append(.init(members: members, anchor: anchor))
+            result.destinations.append(.init(members: members, anchor: anchor, trips: shortTrips.sorted().map { trips[$0].id }))
             for i in cluster.memberIndices where points[i].short { routineMembers[points[i].trip, default: 0] += points[i].members.count }
         }
         for (index, count) in routineMembers {

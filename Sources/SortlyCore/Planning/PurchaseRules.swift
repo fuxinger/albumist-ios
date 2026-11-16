@@ -13,12 +13,62 @@ public enum PurchaseRules {
         /// Bought by a family member and shared through Family Sharing (only delivered when
         /// Family Sharing is switched on for the product in App Store Connect).
         public var isFamilyShared: Bool
+        /// StoreKit's transaction id, to match the list with what the app already saw.
+        public var transactionID: UInt64?
 
-        public init(productID: String, isVerified: Bool = true, isRevoked: Bool = false, isFamilyShared: Bool = false) {
+        public init(productID: String, isVerified: Bool = true, isRevoked: Bool = false, isFamilyShared: Bool = false,
+                    transactionID: UInt64? = nil) {
             self.productID = productID
             self.isVerified = isVerified
             self.isRevoked = isRevoked
             self.isFamilyShared = isFamilyShared
+            self.transactionID = transactionID
+        }
+    }
+
+    /// What the running app itself was told about the unlock's transactions: a purchase
+    /// result, or an update (Ask to Buy approved, bought elsewhere, refunded, sharing ended).
+    /// StoreKit's list of entitlements may lag behind both (in the Xcode test environment a
+    /// purchase was missing from it right after it was made), and reads of the list run at
+    /// the same time as purchases and updates (launch, restore, redeemed offer code). Merged
+    /// with this, an older read can neither lock what was just bought nor unlock what was
+    /// just refunded.
+    public struct SessionKnowledge: Sendable, Equatable {
+        /// Verified transactions of the unlock that the app was handed and that are not revoked.
+        public private(set) var unlocking: Set<UInt64> = []
+        /// Transactions of the unlock known to be revoked; the list never brings them back.
+        public private(set) var revoked: Set<UInt64> = []
+
+        public init() {}
+
+        /// A verified transaction the app was handed. Others than the unlock are ignored.
+        public mutating func saw(transactionID id: UInt64, productID: String, isRevoked: Bool, unlockProductID: String) {
+            guard productID == unlockProductID else { return }
+            if isRevoked {
+                unlocking.remove(id)
+                revoked.insert(id)
+            } else if !revoked.contains(id) {
+                unlocking.insert(id)
+            }
+        }
+
+        /// StoreKit's list merged with this knowledge. A transaction the list shows revoked is
+        /// remembered as revoked; a known revoked one in the list is left out; a known
+        /// unlocking one counts even when the list does not show it yet.
+        public mutating func isUnlocked(listed: [Entitlement], productID: String) -> Bool {
+            var counted: [Entitlement] = []
+            for entitlement in listed {
+                if let id = entitlement.transactionID {
+                    if revoked.contains(id) { continue }
+                    if entitlement.isRevoked && entitlement.isVerified && entitlement.productID == productID {
+                        unlocking.remove(id)
+                        revoked.insert(id)
+                        continue
+                    }
+                }
+                counted.append(entitlement)
+            }
+            return PurchaseRules.isUnlocked(by: counted, productID: productID) || !unlocking.isEmpty
         }
     }
 

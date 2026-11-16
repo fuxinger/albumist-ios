@@ -3,7 +3,7 @@ import SortlyCore
 
 /// Local persistence for Albumist. Stores metadata and analysis results only – never image
 /// data or copies of originals (prompt §13). All access is serialized by this actor.
-public actor SortlyStore: ChangePlanStoring {
+public actor SortlyStore: PlanJournal {
     let db: SQLiteDatabase
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -449,6 +449,51 @@ public actor SortlyStore: ChangePlanStoring {
         }
     }
 
+    /// "Ignorieren" for several photos in one transaction. A photo that is already ignored
+    /// keeps its one override (no duplicates). Returns the photos that were newly ignored,
+    /// so "Widerrufen" right after the action takes back exactly those and not a photo the
+    /// user had ignored earlier.
+    @discardableResult
+    public func ignoreAssets(_ ids: [AssetID], at date: Date = Date()) throws -> [AssetID] {
+        try db.durably {
+            try db.transaction {
+                var ignored = Set(try overrides().compactMap(\.ignoredAsset))
+                var added: [AssetID] = []
+                for id in ids where !ignored.contains(id) {
+                    try insertOverride(UserOverride(scope: .asset(id), decision: .ignoreAsset, createdAt: date))
+                    ignored.insert(id)
+                    added.append(id)
+                }
+                return added
+            }
+        }
+    }
+
+    /// "Nicht mehr ignorieren": removes every "ignore" override of these photos (also
+    /// duplicates written by older versions) in one transaction; other decisions about the
+    /// same photos stay. Returns how many photos were ignored before.
+    @discardableResult
+    public func unignoreAssets(_ ids: [AssetID]) throws -> Int {
+        let wanted = Set(ids)
+        guard !wanted.isEmpty else { return 0 }
+        return try db.durably {
+            try db.transaction {
+                var restored: Set<AssetID> = []
+                for o in try overrides() {
+                    guard let id = o.ignoredAsset, wanted.contains(id) else { continue }
+                    try db.execute("DELETE FROM overrides WHERE id = ?", [.text(o.id.rawValue)])
+                    restored.insert(id)
+                }
+                return restored.count
+            }
+        }
+    }
+
+    /// Photos the user ignored, for the "Ignoriert" area and its way back.
+    public func ignoredAssets() throws -> Set<AssetID> {
+        Set(try overrides().compactMap(\.ignoredAsset))
+    }
+
     public func removeOverride(_ id: SortlyID) throws {
         try db.execute("DELETE FROM overrides WHERE id = ?", [.text(id.rawValue)])
     }
@@ -582,20 +627,40 @@ public actor SortlyStore: ChangePlanStoring {
             .compactMap { try loadPlan($0["payload"]) }
     }
 
+    /// The plan offered to continue, take back or keep: the latest unfinished one (one at a
+    /// time, plugin review K2). The app reads it again after every run and every way out, so a
+    /// plan that fails half way in the same session is offered too, and once one is settled
+    /// the next one is (review of 6c6ef79).
+    public func openInterruptedPlan() throws -> ChangePlan? {
+        try unfinishedPlans().last
+    }
+
+    /// Plans that finished but whose results are not stored yet (on the app's list of plans to
+    /// finalize). They are finalized at the next launch, and before an undo of them is planned.
+    public func plansAwaitingFinalization() throws -> [ChangePlan] {
+        let pending = try value([SortlyID].self, forKey: Self.pendingFinalizationKey) ?? []
+        return try pending.compactMap { id in
+            guard let plan = try plan(id), plan.finalizedAt == nil,
+                  plan.status == .completed || plan.status == .completedWithErrors else { return nil }
+            return plan
+        }
+    }
+
+    /// Whether this plan finished but its results are not stored yet.
+    public func awaitsFinalization(_ id: SortlyID) throws -> Bool {
+        try plansAwaitingFinalization().contains { $0.id == id }
+    }
+
     /// Albums and folders that Albumist's own plans may still be changing (plugin review W2):
     /// those of every plan that is unfinished (cut off, offered to continue or take back), and
-    /// of every plan that finished but whose results are not stored yet (on the app's list of
-    /// plans to finalize). A difference there may be Albumist's own doing, not the user's: the
-    /// album check leaves these albums alone until the plan is settled (see
-    /// `ManagedAlbumTracker.reconcile`), so an undo cut off during its finalization never turns
-    /// into "deleted by you".
+    /// of every plan that finished but whose results are not stored yet. A difference there may
+    /// be Albumist's own doing, not the user's: the album check leaves these albums alone until
+    /// the plan is settled (see `ManagedAlbumTracker.reconcile`), so an undo cut off during its
+    /// finalization never turns into "deleted by you", whichever runs first at launch.
     public func collectionsInFlight() throws -> Set<CollectionID> {
         var result = Set<CollectionID>()
         for plan in try unfinishedPlans() { result.formUnion(plan.touchedCollections) }
-        let pending = try value([SortlyID].self, forKey: Self.pendingFinalizationKey) ?? []
-        for id in pending {
-            guard let plan = try plan(id), plan.finalizedAt == nil,
-                  plan.status == .completed || plan.status == .completedWithErrors else { continue }
+        for plan in try plansAwaitingFinalization() {
             result.formUnion(plan.touchedCollections)
         }
         return result

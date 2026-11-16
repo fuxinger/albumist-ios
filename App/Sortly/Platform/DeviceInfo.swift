@@ -24,7 +24,7 @@ enum StepProblemText {
     static func text(_ reason: String) -> String {
         switch reason {
         case "interrupted":
-            String(localized: "Das Umsetzen wurde unterbrochen.")
+            String(localized: "Der Vorgang wurde unterbrochen.")
         case "parent folder was not created", "target album was not created", "target folder was not created":
             String(localized: "Ein Ordner oder Album, das davor angelegt werden sollte, fehlte.")
         case "a collection with this title appeared meanwhile":

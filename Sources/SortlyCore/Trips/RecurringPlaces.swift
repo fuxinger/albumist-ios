@@ -121,6 +121,9 @@ public struct TripAnalysis: Sendable {
     public var trips: [Trip]
     public var stays: [AwayStay]
     public var places: [RecurringPlace]
+    /// Photos taken where the user lives: the home town and its surroundings (within the home
+    /// radius of the habitual area of their time). Places the user is often at are not home.
+    public var atHome: Set<AssetID> = []
 }
 
 /// What the app needs to ask about recurring places and to offer "Keine Reise, hier bin ich

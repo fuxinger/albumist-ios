@@ -20,6 +20,8 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
     /// Recognized text, kept only on device for search.
     public var recognizedText: String?
     public var keywords: Set<String>
+    /// Taken where the user lives (`TripAnalysis.atHome`): no place album is made for it.
+    public var atHome: Bool
 
     public init(
         asset: AssetSnapshot,
@@ -34,7 +36,8 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         groupIDs: Set<SortlyID> = [],
         albumIDs: Set<CollectionID> = [],
         recognizedText: String? = nil,
-        keywords: Set<String> = []
+        keywords: Set<String> = [],
+        atHome: Bool = false
     ) {
         self.asset = asset
         self.place = place
@@ -49,6 +52,7 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         self.albumIDs = albumIDs
         self.recognizedText = recognizedText
         self.keywords = keywords
+        self.atHome = atHome
     }
 
     public var id: AssetID { asset.id }

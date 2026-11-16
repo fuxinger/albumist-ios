@@ -211,6 +211,8 @@ extension AtlasView {
             .padding(.horizontal, 14).padding(.vertical, 8)
             .background(selected ? Theme.accent : Theme.card, in: Capsule())
             .foregroundStyle(selected ? Theme.onAccent : Color.primary)
+            // The capsule stays as it is; the tap area is 44 pt (design review W9).
+            .minimumHitTarget()
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -221,7 +223,7 @@ extension AtlasView {
         let years = PhotoStory.availableYears(model.facts)
         Card {
             HStack {
-                Text("Deine Foto-Geschichte").font(.headline)
+                Text("Deine Foto-Geschichte").font(.headline).accessibilityAddTraits(.isHeader)
                 Spacer()
                 Picker("Geschichte über", selection: $storyScope) {
                     Text("Reisen").tag(PhotoStory.Scope.trips)
@@ -295,7 +297,8 @@ struct AtlasContent: View {
                             .contentTransition(.numericText())
                         Text(shown.count == 1 ? "Land" : "Länder").font(.title2.weight(.semibold))
                     }
-                    Text("\(Int(atlas.worldShare * 100)) % der Welt · \(atlas.continents.count) von 7 Kontinenten")
+                    // Locale percent with two significant digits: one country is not "0 %" (N11).
+                    Text("\(atlas.worldShare.formatted(TravelAtlas.worldShareStyle)) der Welt · \(atlas.continents.count) von 7 Kontinenten")
                         .font(.subheadline).foregroundStyle(.secondary)
                     if atlas.year != nil && !atlas.newCountryCodes.isEmpty {
                         Label {
@@ -469,7 +472,7 @@ struct ShareCard: View {
                             Text("davon \(atlas.newCountryCodes.count) zum ersten Mal · \(atlas.continents.count) von 7 Kontinenten")
                                 .font(.system(size: 24, weight: .medium)).foregroundStyle(.secondary)
                         } else {
-                            Text("\(Int(atlas.worldShare * 100)) % der Welt · \(atlas.continents.count) von 7 Kontinenten")
+                            Text("\(atlas.worldShare.formatted(TravelAtlas.worldShareStyle)) der Welt · \(atlas.continents.count) von 7 Kontinenten")
                                 .font(.system(size: 24, weight: .medium)).foregroundStyle(.secondary)
                         }
                     }

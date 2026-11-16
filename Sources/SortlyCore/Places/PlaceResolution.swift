@@ -78,11 +78,16 @@ public actor PlaceResolutionService {
         /// is ever saved over it, not the map's country before the lookup, nor a country after
         /// a lookup whose town was dropped (review of d612bc0: a stopped refinement lost towns).
         public var hasTown: Bool
-        public init(assetID: AssetID, coordinate: GeoCoordinate, priority: Int = 0, hasTown: Bool = false) {
+        /// The photo got its country from the map in an earlier run and waits for its town:
+        /// the map pass does not check it again, it counts as checked from the start (review
+        /// of 9f0bc40: after a Pause the "geprüft" count started lower again).
+        public var hasCountry: Bool
+        public init(assetID: AssetID, coordinate: GeoCoordinate, priority: Int = 0, hasTown: Bool = false, hasCountry: Bool = false) {
             self.assetID = assetID
             self.coordinate = coordinate
             self.priority = priority
             self.hasTown = hasTown
+            self.hasCountry = hasCountry
         }
     }
 
@@ -180,7 +185,11 @@ public actor PlaceResolutionService {
         // the run that went on started at "271 von 1.615").
         var processed = 0
         var offlineOnly: [AssetID: ResolvedPlace] = [:]
-        var needsOnline: [Request] = []
+        // Checked against the map in an earlier run (country saved, town still open, which
+        // needs the online lookup at any level that asks for towns): straight to the lookups.
+        let checkedBefore = requests.filter { $0.hasCountry && !$0.hasTown && policy.deepestLevel >= .locality }
+        let toCheck = checkedBefore.isEmpty ? requests : requests.filter { !($0.hasCountry && !$0.hasTown && policy.deepestLevel >= .locality) }
+        var needsOnline: [Request] = checkedBefore
         var offlineCache: [GeoCell: OfflineWorldMap.Match] = [:]
 
         // Every place saved from the map, so a town found later is not counted a second time
@@ -190,7 +199,8 @@ public actor PlaceResolutionService {
         // looked at. 50,000 photos at once stood at "0 von 50.233 Orten" for a minute
         // (stress run 43833158673); with towns on (the default) none of them is final before
         // its lookup, so `checked` is the honest sign of life of this pass.
-        for (index, r) in requests.enumerated() {
+        if !checkedBefore.isEmpty { await checked?(checkedBefore.count) }
+        for (index, r) in toCheck.enumerated() {
             if index > 0, index % Self.offlineChunk == 0 {
                 if !offlineOnly.isEmpty {
                     try await sink(offlineOnly)
@@ -198,15 +208,15 @@ public actor PlaceResolutionService {
                     savedFromMap.formUnion(offlineOnly.keys)
                     offlineOnly.removeAll(keepingCapacity: true)
                 }
-                let final = index - needsOnline.count
+                let final = index - (needsOnline.count - checkedBefore.count)
                 if final > processed {
                     processed = final
                     await progress?(processed)
                 }
-                await checked?(index)
+                await checked?(checkedBefore.count + index)
                 // Pause: what is saved stays; the rest is asked for again by the next run.
                 if paused?() == true || Task.isCancelled {
-                    outcome.pendingOnline.formUnion(requests[index...].map(\.assetID))
+                    outcome.pendingOnline.formUnion(toCheck[index...].map(\.assetID))
                     outcome.pendingOnline.formUnion(needsOnline.map(\.assetID))
                     return outcome
                 }

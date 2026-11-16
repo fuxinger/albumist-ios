@@ -728,6 +728,22 @@ public actor SortlyStore: PlanJournal {
         return try StoredDefaults.decode(T.self, from: data, defaults: defaults, encoder: encoder, decoder: decoder)
     }
 
+    // MARK: - Identity
+
+    static let identityKey = "database.identity"
+
+    /// A stamp made the first time this database is asked for it. What is kept outside the
+    /// database belongs to it only with the same stamp: the analysis marker lives in
+    /// UserDefaults, which a device backup restores, while the database folder is excluded
+    /// from backup (review of 9f0bc40: after a restore or on a new iPhone an empty database met
+    /// a stale "64 %"). `isNew`: the stamp was made just now.
+    public func identity() throws -> (id: String, isNew: Bool) {
+        if let id = try value(String.self, forKey: Self.identityKey) { return (id, false) }
+        let id = UUID().uuidString
+        try setValue(id, forKey: Self.identityKey)
+        return (id, true)
+    }
+
     // MARK: - Reset
 
     /// Deletes all local analysis data. Never touches the photo library (prompt §11).

@@ -115,7 +115,7 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | 💡 | Analyseergebnisse kompakter speichern (152 MB → unter 30 MB bei 100.000 Fotos). | M | E1 Tempo |
 | 💡 | CI: Zwischenergebnisse der Mac-Builds speichern (jeder Lauf ein paar Minuten schneller). | S | U |
 | ✅ | Stresslauf 50.000 Fotos: Mediathek lesen zählt in 250er-Schritten, der Kartendurchgang der Orte sagt „… mit der Karte geprüft“; Pause wirkt in beiden beim nächsten Schritt. Die Übersicht rechnet alles, was mit der Mediathek wächst, außerhalb des Haupt-Threads. | S | Stresslauf 43833158673, Review |
-| ✅ | Fortsetzen nach neuen Fotos: Prozentzahl geht nie zurück und bewegt sich mit der Arbeit; ein veralteter Stand (Datenbank beiseitegelegt) wird verworfen statt hochgerechnet. | S | Stresslauf 43833158673, Review |
+| ✅ | Fortsetzen: Prozentzahl geht nie zurück und bewegt sich mit der Arbeit (neue oder gelöschte Fotos, neue Analyseversion, abgebrochenes erstes Lesen). Der gemerkte Stand gehört zu seiner Datenbank (Stempel), eine neue oder leer wiederhergestellte Datenbank beginnt neu. Pause beim Lesen behält die schon gelesenen Dateidetails. | S | Stresslauf 43833158673, Reviews |
 | 💡 | Erstes Lesen großer Mediatheken beschleunigen: Dateidetails (Originalname, RAW) kosten pro Foto einige ms (50.000 Fotos: rund 10 Min. im Simulator); erst später im Hintergrund lesen. | M | Stresslauf 43833158673 |
 
 ## Oberfläche und Bedienung

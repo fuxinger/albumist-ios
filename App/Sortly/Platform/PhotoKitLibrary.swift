@@ -72,7 +72,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         var snapshots: [AssetSnapshot] = []
         let total = result.count
         snapshots.reserveCapacity(total)
-        if !progress(0, total) { throw CancellationError() }
+        if !progress(0, total) { throw LibraryReadPaused(read: []) }
         var stopped = false
         result.enumerateObjects { asset, index, stop in
             // Ended (the app's time ran out, "Analyse neu aufbauen"): stop reading. The
@@ -97,7 +97,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                 stop.pointee = true
             }
         }
-        if stopped { throw CancellationError() }
+        if stopped { throw LibraryReadPaused(read: snapshots) }
         _ = progress(snapshots.count, total)
         try Task.checkCancellation()
         return snapshots

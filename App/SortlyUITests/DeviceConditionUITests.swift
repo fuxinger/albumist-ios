@@ -1228,12 +1228,6 @@ final class DeviceConditionUITests: XCTestCase {
         shot("27-stress-library")
     }
 
-    /// Pause during the image step. The card must react to the tap at once ("Wird angehalten"
-    /// or "Analyse pausiert" in the first look after the tap: XCTest's tap returns once the app
-    /// took the touch, and Pause changes the card in that same call). Then the photos in work
-    /// are finished (one per lane) and Fortsetzen appears, within the 10 s after which the card
-    /// says "Dauert noch einen Moment". Stress run 43833158673 looked for a button labelled
-    /// "Fortsetzen", but its label is "Analyse fortsetzen": found by its identifier now.
     /// The app's main-thread stalls over 0.5 s ("<end, s since 1970> <ms>"), written by the
     /// app (-SortlyUITestWatchMainLog) into this file of ours.
     private var mainStalls: String { NSTemporaryDirectory() + "stress-main-stalls.txt" }
@@ -1250,6 +1244,12 @@ final class DeviceConditionUITests: XCTestCase {
         }
     }
 
+    /// Pause during the image step. The card must react to the tap at once ("Wird angehalten"
+    /// or "Analyse pausiert" in the first look after the tap: XCTest's tap returns once the app
+    /// took the touch, and Pause changes the card in that same call). Then the photos in work
+    /// are finished (one per lane) and Fortsetzen appears, within the 10 s after which the card
+    /// says "Dauert noch einen Moment". Stress run 43833158673 looked for a button labelled
+    /// "Fortsetzen", but its label is "Analyse fortsetzen": found by its identifier now.
     private func measurePauseAndResume() {
         let pause = app.buttons["analysis.pause"]
         guard pause.waitForExistence(timeout: 5) else { print("UI_STEP_MISSING stress pause"); return }

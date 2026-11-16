@@ -432,7 +432,7 @@ struct AnalysisDisplayTests {
     /// while the bar stayed at 64 %. It keeps the value it went on from.
     @Test func pausedWhileCatchingUpKeepsTheValue() {
         let w = StepWidths.standard
-        let run = ResumedRun(stage: 4, shown: 0.64, stoppedTotal: 5_683)
+        let run = ResumedRun(stage: 4, shown: 0.64)
         #expect(run.isCatchingUp(running: true, at: 1))
         #expect(!run.isCatchingUp(running: false, at: nil))
         let readSoFar = w.overall(step: .library, completed: 30_000, total: 50_246)
@@ -441,48 +441,68 @@ struct AnalysisDisplayTests {
         #expect(run.shown(running: false, catchingUp: false, overall: 0, stopped: nil) == 0.64)
     }
 
-    /// Review of d612bc0 (2): the database was set aside but the marker stayed. Back at step 4
-    /// with no more photos than before, the 64 % is stale: dropped, the real value is shown
-    /// (instead of a fresh analysis spread over 64…100 % for hours), and a Pause after that
-    /// shows where it stopped, not 64 % again.
-    @Test func staleValueIsDroppedWithoutNewWork() {
-        let w = StepWidths.standard
-        var run = ResumedRun(stage: 4, shown: 0.64, stoppedTotal: 50_246)
-        // Catching up: steps 1 to 3 do not decide anything yet.
-        let r1 = run.back(at: 3, step: .places, completed: 10, total: 50_233, widths: w)
-        #expect(r1 == nil)
-        #expect(run.floor == 0.64)
-        let r2 = run.back(at: 4, step: .content, completed: 0, total: 50_246, widths: w)
-        #expect(r2 == nil)
-        #expect(run.floor == nil)
-        #expect(!run.isCatchingUp(running: true, at: 4))
-        let real = w.overall(step: .content, completed: 500, total: 50_246)
-        #expect(run.shown(running: true, catchingUp: false, overall: real, stopped: nil) == real)
-        #expect(run.shown(running: false, catchingUp: false, overall: 0, stopped: real) == real)
-        // An older marker without a total counts as no new work either.
-        var old = ResumedRun(stage: 4, shown: 0.64, stoppedTotal: nil)
-        let r3 = old.back(at: 4, step: .content, completed: 0, total: 50_246, widths: w)
-        #expect(r3 == nil)
-        #expect(old.floor == nil)
+    /// Review of 9f0bc40 (A): a marker belongs to the database it was written for. A new or
+    /// restored empty database (the database folder is not in the device backup, UserDefaults
+    /// are) ignores an old marker; a marker without a stamp (older version) counts only for a
+    /// database that has photos.
+    @Test func markerBelongsToItsDatabase() {
+        #expect(ResumedRun.markerApplies(markerDatabase: "A", database: "A", databaseHasPhotos: true))
+        #expect(!ResumedRun.markerApplies(markerDatabase: "A", database: "B", databaseHasPhotos: true))
+        #expect(!ResumedRun.markerApplies(markerDatabase: "A", database: "B", databaseHasPhotos: false))
+        #expect(ResumedRun.markerApplies(markerDatabase: nil, database: "B", databaseHasPhotos: true))
+        #expect(!ResumedRun.markerApplies(markerDatabase: nil, database: "B", databaseHasPhotos: false))
     }
 
-    /// Review of d612bc0 (5): the widths continue once, when the run is back at its step with
-    /// more photos than before, and never again on later reports.
-    @Test func widthsContinueOnceWhenTheWorkGrew() throws {
+    /// Review of 9f0bc40 (A), cases 1–3: with the marker bound to its database, a real value
+    /// below the floor is always more work than before. The run goes on from the floor, once,
+    /// and moves with every photo: photos deleted (1), more work with the same total (2), and
+    /// a first read that was cut off in step 1, which has no earlier steps to shrink (3).
+    @Test(arguments: [
+        (stoppedStage: 4, step: AnalysisStep.content, completed: 25_000, total: 45_000, stopAt: 30_000, stopOf: 50_000),
+        (stoppedStage: 4, step: AnalysisStep.content, completed: 0, total: 50_000, stopAt: 30_000, stopOf: 50_000),
+        (stoppedStage: 1, step: AnalysisStep.library, completed: 0, total: 50_000, stopAt: 40_000, stopOf: 50_000),
+    ])
+    func moreWorkGoesOnFromTheFloor(c: (stoppedStage: Int, step: AnalysisStep, completed: Int, total: Int, stopAt: Int, stopOf: Int)) {
         let w = StepWidths.standard
-        var run = ResumedRun(stage: 4, shown: 0.64, stoppedTotal: 4_000)
+        let floor = w.overall(step: c.step, completed: c.stopAt, total: c.stopOf)
+        var run = ResumedRun(stage: c.stoppedStage, shown: floor)
+        let continued = run.back(at: c.stoppedStage, step: c.step, completed: c.completed, total: c.total, widths: w)
+        let widths = continued ?? w
+        var last = floor - 1e-9
+        for done in stride(from: c.completed, through: c.total, by: max(1, (c.total - c.completed) / 50)) {
+            let v = run.shown(running: true, catchingUp: false, overall: widths.overall(step: c.step, completed: done, total: c.total), stopped: nil)
+            #expect(v >= last, "back at \(done): \(v) after \(last)")
+            last = v
+        }
+        let atStart = run.shown(running: true, catchingUp: false, overall: widths.overall(step: c.step, completed: c.completed, total: c.total), stopped: nil)
+        #expect(abs(atStart - floor) < 1e-9)
+        let later = run.shown(running: true, catchingUp: false,
+                              overall: widths.overall(step: c.step, completed: c.completed + (c.total - c.completed) / 10, total: c.total), stopped: nil)
+        #expect(later > floor, "stands still")
+        // Paused there: the value it showed, not lower.
+        let stopped = widths.overall(step: c.step, completed: c.completed + 100, total: c.total)
+        #expect(run.shown(running: false, catchingUp: false, overall: 0, stopped: stopped) >= floor)
+        // Once: later reports change nothing.
+        let again = run.back(at: c.stoppedStage, step: c.step, completed: c.completed + 1, total: c.total, widths: widths)
+        #expect(again == nil)
+    }
+
+    /// Review of d612bc0 (5): the widths continue once, when the run is back at its step, and
+    /// never again on later reports; nothing changes when the real value is ahead.
+    @Test func widthsContinueOnce() throws {
+        let w = StepWidths.standard
+        var run = ResumedRun(stage: 4, shown: 0.64)
         let first = run.back(at: 4, step: .content, completed: 2_000, total: 50_246, widths: w)
         let continued = try #require(first)
         #expect(abs(continued.overall(step: .content, completed: 2_000, total: 50_246) - 0.64) < 1e-9)
-        #expect(run.floor == 0.64)
-        let r4 = run.back(at: 4, step: .content, completed: 2_001, total: 50_246, widths: continued)
-        #expect(r4 == nil)
-        let r5 = run.back(at: 5, step: .text, completed: 0, total: 900, widths: continued)
-        #expect(r5 == nil)
-        // Not lower than the real value when the real value is ahead: nothing to continue.
-        var ahead = ResumedRun(stage: 4, shown: 0.30, stoppedTotal: 4_000)
-        let r6 = ahead.back(at: 4, step: .content, completed: 4_000, total: 5_000, widths: w)
-        #expect(r6 == nil)
+        let r1 = run.back(at: 4, step: .content, completed: 2_001, total: 50_246, widths: continued)
+        #expect(r1 == nil)
+        let r2 = run.back(at: 5, step: .text, completed: 0, total: 900, widths: continued)
+        #expect(r2 == nil)
+        var ahead = ResumedRun(stage: 4, shown: 0.30)
+        let r3 = ahead.back(at: 4, step: .content, completed: 4_000, total: 5_000, widths: w)
+        #expect(r3 == nil)
+        #expect(ahead.shown(running: true, catchingUp: false, overall: 0.7, stopped: nil) == 0.7)
     }
 
     // MARK: Card states (P1, P5–P7, P10–P12, P17)

@@ -528,23 +528,38 @@ public struct BarGlide: Sendable, Equatable {
 
 /// A run that goes on from where an earlier one stopped (the marker kept across launches):
 /// whether it is still catching up on the quick steps before that point, what the card says,
-/// and, once, whether the bar's widths continue from the value shown before. Pure, so the
-/// Linux tests cover what `AppModel` does with it (review of d612bc0).
+/// and, once, how the rest of the work is spread over the rest of the bar. Pure, so the Linux
+/// tests cover what `AppModel` does with it.
+///
+/// The value never goes below what the card showed when the earlier run stopped (the floor).
+/// Whether the floor still belongs to this database is decided before (`markerApplies`): a
+/// marker is bound to the database it was written for. So a real value below the floor here
+/// is always more work than before (photos came in, photos were deleted, an update asks for
+/// the images again, a first read was cut off), never a stale value, and the run goes on from
+/// the floor (review of 9f0bc40: the step-total rule let all four cases fall back).
 public struct ResumedRun: Sendable, Equatable {
     /// Pipeline stage number (1…7) the earlier run stopped in.
     public let stage: Int
-    /// What the card showed when it stopped: never shown less while catching up, nor after a
-    /// Pause in between. `nil` once it no longer applies (a stale value, see `back`).
-    public private(set) var floor: Double?
-    /// How much that stage had to do then (`nil` in markers of older versions).
-    public let stoppedTotal: Int?
+    /// What the card showed when it stopped.
+    public let floor: Double
     /// The run got back to `stage` (decided once).
     public private(set) var isBack = false
+    /// Only where widths cannot carry it (the first step, which has nothing before it): the
+    /// real value `base` when the run got back is drawn at the floor, the rest of the real way
+    /// (base…1) over the rest of the bar (floor…1).
+    public private(set) var base: Double?
 
-    public init(stage: Int, shown: Double, stoppedTotal: Int?) {
+    public init(stage: Int, shown: Double) {
         self.stage = stage
-        self.floor = shown.isFinite ? min(1, max(0, shown)) : nil
-        self.stoppedTotal = stoppedTotal
+        self.floor = shown.isFinite ? min(1, max(0, shown)) : 0
+    }
+
+    /// A marker belongs to the database it was written for. Markers of older versions carry no
+    /// stamp: they count only for a database that has photos already (not for a new one, nor
+    /// for one restored empty on a new iPhone).
+    public static func markerApplies(markerDatabase: String?, database: String, databaseHasPhotos: Bool) -> Bool {
+        guard let markerDatabase else { return databaseHasPhotos }
+        return markerDatabase == database
     }
 
     public func isCatchingUp(running: Bool, at current: Int?) -> Bool {
@@ -552,33 +567,35 @@ public struct ResumedRun: Sendable, Equatable {
     }
 
     /// Every report of the run. The first time it reaches `stage` (and only then), with the
-    /// real value below the floor:
-    /// - that stage has more to do than when it stopped (photos came in): widths that go on
-    ///   from the floor (`StepWidths.continuing`), applied once, so the bar keeps the honest
-    ///   speed of the work (re-spreading on every report let the glide's lead pile up);
-    /// - otherwise the floor is stale (a database set aside while the marker stayed, the
-    ///   cause of stress run 43833158673's 64 % → 38 %): it is dropped and the real value is
-    ///   shown, instead of spreading a fresh analysis over 64…100 %.
+    /// real value below the floor: widths that spread the rest of the work over the rest of the
+    /// bar from the floor (`StepWidths.continuing`), applied once, so the bar keeps the honest
+    /// speed of the work (re-spreading on every report let the glide's lead pile up). In the
+    /// first step, which has no earlier steps to shrink, `base` does the same on the value.
     public mutating func back(at stage: Int, step: AnalysisStep, completed: Int, total: Int, widths: StepWidths) -> StepWidths? {
         guard !isBack, stage >= self.stage else { return nil }
         isBack = true
-        guard let floor else { return nil }
-        guard widths.overall(step: step, completed: completed, total: total) < floor else { return nil }
-        let grew = stage == self.stage && (stoppedTotal.map { total > $0 } ?? false)
-        if grew, let continued = widths.continuing(held: floor, step: step, completed: completed, total: total) {
+        let real = widths.overall(step: step, completed: completed, total: total)
+        guard real < floor - 1e-9 else { return nil }
+        if let continued = widths.continuing(held: floor, step: step, completed: completed, total: total) {
             return continued
         }
-        self.floor = nil
+        base = real
         return nil
     }
 
+    /// The real value as the card draws it after `back`.
+    func drawn(_ real: Double) -> Double {
+        guard let base, base < 1 else { return real }
+        return min(1, max(floor, floor + (real - base) * (1 - floor) / (1 - base)))
+    }
+
     /// The value the card shows. `stopped`: where the run ended, when it is not running.
-    /// A run paused while catching up keeps the floor (review: the paused card said "3 %"
-    /// after "64 %", while the bar stayed at 64 %).
+    /// A run paused while catching up keeps the floor (the paused card said "3 %" after
+    /// "64 %", while the bar stayed at 64 %).
     public func shown(running: Bool, catchingUp: Bool, overall: Double, stopped: Double?) -> Double {
-        if running { return catchingUp ? max(overall, floor ?? 0) : overall }
-        if let stopped { return max(stopped, floor ?? 0) }
-        return floor ?? overall
+        if running { return catchingUp ? max(overall, floor) : max(floor, drawn(overall)) }
+        if let stopped { return max(drawn(stopped), floor) }
+        return floor
     }
 }
 
@@ -639,8 +656,9 @@ public enum AnalysisCardState: Sendable, Equatable {
     public static let pauseShownAfter: Duration = .seconds(5)
 
     /// How often the overview looks again for the early suggestions during the image step
-    /// while none are shown: every 10 s, and 10 s more per 5,000 photos (each look derives the
-    /// status of every photo; review of d612bc0: every 10 s with 50,000 photos).
+    /// while none are shown: 10 s for each full 5,000 photos, at least 10 s (5,683 photos:
+    /// 10 s; 50,000: 100 s). Each look derives the status of every photo (review of d612bc0:
+    /// every 10 s with 50,000 photos).
     public static func earlyLookInterval(photos: Int) -> Duration {
         .seconds(10 * max(1, photos / 5_000))
     }

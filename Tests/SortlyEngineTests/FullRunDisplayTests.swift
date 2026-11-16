@@ -1046,10 +1046,14 @@ final class Sim: @unchecked Sendable {
                 if let workload = p.workload {
                     estimator.setWorkload(workload)
                     if !widthsFixed {
-                        // As AppModel.tick: new widths, the glide starts at the new real value.
-                        w = StepWidths(workload: workload)
+                        // As AppModel.tick: new widths, continued from the bar drawn so far
+                        // where they would put it lower (review of 9f0bc40: never falls).
+                        let held = glide.value(at: instant(event.t), gliding: false)
+                        var nw = StepWidths(workload: workload)
+                        if let c = nw.continuing(held: held, step: s, completed: p.completed, total: p.total) { nw = c }
+                        w = nw
                         widthsFixed = true
-                        glide.reset()
+                        glide.reset(keeping: held)
                     }
                 }
                 if let step, s < step { continue }
@@ -1074,6 +1078,11 @@ final class Sim: @unchecked Sendable {
                 // kept the old widths' value and so hid the frozen bar, review I3).
                 if bar > real + BarGlide.maxLead * w.width(of: s) + 1e-9 {
                     fail(run, 3, "drawn bar \(pct(bar)) more than 1 % of the step ahead of \(pct(real))", at: event.t)
+                }
+                // The drawn value never falls within a run, also not when the widths come
+                // from the workload (review of 9f0bc40).
+                if bar + 1e-9 < lastShownBar {
+                    fail(run, 3, "drawn bar fell from \(pct(lastShownBar)) to \(pct(bar)) at \(p.stage) \(p.completed)/\(p.total)", at: event.t)
                 }
                 lastShownBar = bar
                 lastFills = fills

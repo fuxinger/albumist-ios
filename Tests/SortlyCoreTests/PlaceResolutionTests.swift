@@ -108,6 +108,32 @@ struct PlaceResolutionTests {
         #expect(fresh.allSatisfy { places[$0.assetID]?.components.country == "Italien" })
     }
 
+    /// Review of 9f0bc40 (C): at town level a Pause left the photos with their country from the
+    /// map; the next run checked them again and its "geprüft" count started lower. They count
+    /// as checked from the start now, and the count only rises.
+    @Test func checkedCountGoesOnAfterAPause() async throws {
+        actor Log { var counts: [Int] = []; func add(_ n: Int) { counts.append(n) } }
+        let n = 3 * PlaceResolutionService.offlineChunk
+        let all = requests(Fixture.Places.rome, count: n, prefix: "r")
+        // First run: paused after the second part.
+        let first = Log()
+        let parts = Mutex(0)
+        _ = try await service(level: .locality, geocoder: FakeGeocoder(failures: [.offline]))
+            .resolve(all, checked: { await first.add($0); parts.withLock { $0 += 1 } }, paused: { parts.withLock { $0 >= 2 } }) { _ in }
+        let lastShown = try #require(await first.counts.last)
+        #expect(lastShown == 2 * PlaceResolutionService.offlineChunk)
+        // Next run: what has its country is passed on as such.
+        let next = Log()
+        let again = all.enumerated().map { i, r in
+            PlaceResolutionService.Request(assetID: r.assetID, coordinate: r.coordinate, hasCountry: i < lastShown)
+        }
+        _ = try await service(level: .locality, geocoder: FakeGeocoder(failures: [.offline]))
+            .resolve(again, checked: { await next.add($0) }) { _ in }
+        let counts = await next.counts
+        #expect(counts.first == lastShown, "started at \(counts.first ?? -1) after \(lastShown)")
+        #expect(counts == counts.sorted() && counts.last == n)
+    }
+
     @Test func cachedCellsAreNotRequestedAgain() async throws {
         let cache = MemoryPlaceCache()
         let first = FakeGeocoder()

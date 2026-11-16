@@ -116,8 +116,8 @@ struct PipelineTests {
         func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
                          progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot] {
             for read in stride(from: 50, to: assets.count, by: 50) {
-                // Like PhotoKitLibrary: a `false` ends the read, and nothing of it is returned.
-                if !progress(read, assets.count) { throw CancellationError() }
+                // Like PhotoKitLibrary: a `false` ends the read with what was read until then.
+                if !progress(read, assets.count) { throw LibraryReadPaused(read: Array(assets.prefix(read))) }
                 if read == pauseAt { onPauseAt?() }
             }
             return assets
@@ -171,6 +171,31 @@ struct PipelineTests {
         #expect(reads.withLock { $0.max() ?? 0 } <= 100, "read on after Pause: \(reads.withLock { $0 })")
         // Half the library was "read" before the stop; none of the other half is gone.
         #expect(try await s.store.allAssets().count == stored)
+    }
+
+    /// Review of 9f0bc40 (D): a paused read threw away everything it had read, so a user who
+    /// paused again and again never got further. The file details read until the Pause are
+    /// kept (the next read skips them); nothing else changes.
+    @Test func pausedReadKeepsWhatItRead() async throws {
+        let s = try setup()
+        let assets = try await s.reader.fetchAssets(includeHidden: false, knownDetails: [:]).map { a in
+            var a = a
+            a.uniformTypeIdentifier = "public.jpeg"
+            return a
+        }
+        let reader = ReaderInParts(assets: assets)
+        let control = AnalysisRunControl()
+        await reader.pause(at: 100) { control.pause() }
+        let pipeline = AnalysisPipeline(
+            store: s.store, reader: reader, analyzer: s.analyzer, geocoder: s.geocoder, map: Self.map,
+            conditions: s.conditions, settings: OrganizationSettings(), calendar: Fixture.calendar, time: ManualTime().source
+        )
+        let report = try await pipeline.run(control: control)
+        #expect(report.pausedBecause == .userPaused)
+        let known = try await s.store.assetsWithFileDetails()
+        #expect(known.count == 150, "kept \(known.count) of the 150 read")
+        #expect(Set(assets.prefix(150).map(\.id)) == Set(known.keys))
+        #expect(try await s.store.allAssets().count == 150)
     }
 
     @Test func secondRunIsIncremental() async throws {

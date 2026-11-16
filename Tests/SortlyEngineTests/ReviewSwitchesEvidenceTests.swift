@@ -26,7 +26,7 @@ struct ReviewSwitchesEvidenceTests {
         let held = 0.64
         var widths = StepWidths.standard
         let oneShot = try #require(widths.continuing(held: held, step: .content, completed: 0, total: total))
-        var resumed = ResumedRun(stage: 4, shown: held, stoppedTotal: 10_000)
+        var resumed = ResumedRun(stage: 4, shown: held)
         var glide = BarGlide()
         glide.reset(keeping: held)
         var bar = glide.value(at: Self.at(0), gliding: false)

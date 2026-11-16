@@ -423,8 +423,10 @@ public actor AnalysisPipeline {
             return report
         }
         // Said while reading (the count moves on a large first read) and once more when the
-        // photos are stored. Pause ends the read at the next report; nothing of a stopped read
-        // is stored (it would count the photos not read yet as deleted).
+        // photos are stored. Pause ends the read at the next report. The photos read until then
+        // keep their file details (the next read skips those), but the partial list is never
+        // taken as the library: nothing is removed (review of 9f0bc40: a user who paused again
+        // and again started from nothing each time).
         let assets: [AssetSnapshot]
         do {
             assets = try await reader.fetchAssets(includeHidden: settings.privacy.includeHiddenAssets,
@@ -432,6 +434,10 @@ public actor AnalysisPipeline {
                 onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
                 return !control.isPaused
             }
+        } catch let paused as LibraryReadPaused {
+            if !paused.read.isEmpty { _ = try await store.upsertAssets(paused.read) }
+            report.pausedBecause = .userPaused
+            return report
         } catch is CancellationError where control.isPaused {
             report.pausedBecause = .userPaused
             return report
@@ -742,8 +748,9 @@ public actor AnalysisPipeline {
                 guard pendingTown || refine else { return nil }
             }
             let priority = tripMembers.contains(asset.id) ? 10 : (frequentMembers.contains(asset.id) ? 5 : 0)
+            let stored = existing[asset.id]
             return .init(assetID: asset.id, coordinate: coordinate, priority: priority,
-                         hasTown: existing[asset.id]?.precisionMeters != nil)
+                         hasTown: stored?.precisionMeters != nil, hasCountry: stored != nil && stored?.precisionMeters == nil)
         }
         guard !requests.isEmpty else { return .init() }
         let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time)

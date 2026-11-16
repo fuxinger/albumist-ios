@@ -25,11 +25,19 @@ public protocol PhotoLibraryReading: Sendable {
     /// reads, so the count moves during a long first read: reading 50,000 photos without
     /// their file details took minutes on the simulator with nothing moving on the card
     /// (stress run 43833158673). `progress` answers whether to go on: `false` (Pause) ends
-    /// the read with `CancellationError`, and nothing of it is returned (a partial list would
-    /// count the rest as deleted). Readers that are quick anyway use the plain one.
+    /// the read with `LibraryReadPaused`, which carries the photos read so far. They are never
+    /// taken as the whole library (that would count the rest as deleted), but their file
+    /// details are kept, so a user who pauses again and again still gets further each time.
+    /// Readers that are quick anyway use the plain one.
     func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
                      progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot]
     func currentInventory() async throws -> CollectionInventory
+}
+
+/// A library read ended by Pause: the photos read until then (see `fetchAssets(progress:)`).
+public struct LibraryReadPaused: Error, Sendable {
+    public var read: [AssetSnapshot]
+    public init(read: [AssetSnapshot]) { self.read = read }
 }
 
 public extension PhotoLibraryReading {

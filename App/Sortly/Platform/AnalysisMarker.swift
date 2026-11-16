@@ -13,10 +13,9 @@ enum AnalysisMarker {
         /// restart keeps them, so the bar does not jump. `nil` in markers of older versions and
         /// before the workload is known (the standard widths).
         var widths: StepWidths? = nil
-        /// How much that stage had to do (photos, places, screenshots): a run that goes on
-        /// continues the bar from `overall` only when there is more now (`ResumedRun.back`).
-        /// `nil` in markers of older versions.
-        var total: Int? = nil
+        /// The database it was written for (`SortlyStore.identity`): a device backup brings
+        /// the marker back but not the database. `nil` in markers of older versions.
+        var database: String? = nil
     }
 
     private static let unfinishedKey = "analysis.unfinished"

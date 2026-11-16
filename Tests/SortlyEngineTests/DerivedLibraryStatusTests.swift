@@ -61,6 +61,27 @@ struct DerivedLibraryStatusTests {
         if scope != .all { #expect(derived.photos < facts.count) }
     }
 
+    /// Review of 9f0bc40 (B): two refreshes overlap; the older one finishes last. Only the
+    /// newest assigns its result, as AppModel.refreshDerived does with `LatestCall`.
+    @Test func olderRefreshFinishingLastDoesNotWin() async {
+        actor Model {
+            var calls = LatestCall()
+            var shown = ""
+            func refresh(_ value: String, takes: Duration) async {
+                let call = calls.begin()
+                try? await Task.sleep(for: takes)
+                guard calls.isNewest(call) else { return }
+                shown = value
+            }
+        }
+        let model = Model()
+        async let older: Void = model.refresh("older", takes: .milliseconds(300))
+        try? await Task.sleep(for: .milliseconds(50))
+        async let newer: Void = model.refresh("newer", takes: .milliseconds(10))
+        _ = await (older, newer)
+        #expect(await model.shown == "newer")
+    }
+
     /// The early look during the image step: every 10 s in a small library, less often in a
     /// large one (each look derives the status of every photo).
     @Test func earlyLookIsRarerInALargeLibrary() {

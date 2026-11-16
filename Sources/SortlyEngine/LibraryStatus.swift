@@ -255,6 +255,21 @@ public enum LibraryStatus {
     }
 }
 
+// MARK: Overlapping calls
+
+/// Calls that may overlap (`AppModel.refreshDerived` waits for detached work): only the newest
+/// one may assign its result. An older call that finishes later would otherwise put back an
+/// older state (review of 9f0bc40).
+public struct LatestCall: Sendable {
+    public private(set) var newest = 0
+    public init() {}
+    public mutating func begin() -> Int {
+        newest += 1
+        return newest
+    }
+    public func isNewest(_ call: Int) -> Bool { call == newest }
+}
+
 // MARK: Everything the overview derives from the analysis, in one pass off the main actor
 
 /// What `AppModel.refreshDerived` shows: the photo states, the ring's progress, what it leaves

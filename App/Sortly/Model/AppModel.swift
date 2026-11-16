@@ -169,6 +169,10 @@ final class AppModel {
     /// The widths came from a workload (this analysis), not the standard ones.
     @ObservationIgnored private var widthsFixed = false
     /// When the overview last looked for the early suggestions without finding them.
+    /// `refreshDerived` calls that overlap: only the newest assigns its result.
+    @ObservationIgnored private var derivedCalls = LatestCall()
+    /// The open database's stamp (`SortlyStore.identity`), written into the analysis marker.
+    @ObservationIgnored private var databaseID: String?
     @ObservationIgnored private var lastEarlyLook: ContinuousClock.Instant?
     /// The fallback look still running (saving the early suggestions can take longer than
     /// 10 s: the looks must not pile up, re-review b).
@@ -396,6 +400,18 @@ final class AppModel {
             let url = UITestSupport.databaseURL(try Self.databaseURL())
             let store = try await Task.detached(priority: .userInitiated) { try SortlyStore(url: url) }.value
             self.store = store
+            // Where the analysis got to (UserDefaults, restored by a device backup) belongs to
+            // this database only; the database folder is not backed up (review of 9f0bc40).
+            let identity = try await store.identity()
+            let hasPhotos = try await store.assetCount() > 0
+            databaseID = identity.id
+            if let marker = AnalysisMarker.unfinished,
+               !ResumedRun.markerApplies(markerDatabase: marker.database, database: identity.id, databaseHasPhotos: hasPhotos) {
+                AnalysisMarker.reset()
+            } else if identity.isNew, !hasPhotos {
+                // A new, empty database: its first analysis is a full one, not a quick check.
+                AnalysisMarker.reset()
+            }
             access = await library.access()
             // A rebuilt (or newly restored) database gets the user's decisions back first.
             await restoreFromBackupIfNeeded(store)
@@ -741,7 +757,7 @@ final class AppModel {
         analysis.appleWait = false
         analysis.stoppedAt = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
-        analysis.resumed = analysis.resumeFrom.map { ResumedRun(stage: $0.stage, shown: $0.overall, stoppedTotal: $0.total) }
+        analysis.resumed = analysis.resumeFrom.map { ResumedRun(stage: $0.stage, shown: $0.overall) }
         analysis.mapPass = nil
         HeatLog.reset()
         analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
@@ -896,23 +912,21 @@ final class AppModel {
         analysis.waiting = nil
         analysis.appleWait = progress.waitLeft != nil
         analysis.mapPass = progress.stage == .places ? progress.mapPass : nil
-        // Back at the step it went on from, once (`ResumedRun.back`): with more work there
-        // than when it stopped the widths go on from the value shown; a stale value (database
-        // set aside) is dropped, and the bar is drawn from the real value again.
+        // Back at the step it went on from, once (`ResumedRun.back`): below the value shown
+        // before (more work than then), the rest of the work is spread over the rest of the
+        // bar from that value. Nothing here ever draws the bar lower.
         if var resumed = analysis.resumed {
-            let hadFloor = resumed.floor != nil
             if let continued = resumed.back(at: progress.stage.number, step: AnalysisStep(progress.stage),
                                             completed: progress.completed, total: progress.total, widths: analysis.widths) {
                 analysis.widths = continued
                 widthsFixed = true
             }
-            if hadFloor, resumed.floor == nil { glide.reset() }
             analysis.resumed = resumed
         }
         // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`).
         if !analysis.isCatchingUp {
-            AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.overall,
-                                              widths: widthsFixed ? analysis.widths : nil, total: progress.total)
+            AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.shownOverall,
+                                              widths: widthsFixed ? analysis.widths : nil, database: databaseID)
         }
         let step = AnalysisStep(progress.stage)
         if !analysis.pausing {
@@ -984,14 +998,22 @@ final class AppModel {
         if let workload = taken.workload {
             estimator.setWorkload(workload)
             if !widthsFixed {
-                // Before this the first two steps used the standard widths. The glide starts
-                // again at the real value under the new widths (review I3: it held the old
-                // value, so the bar stood still well into the places step). Nothing is drawn
-                // back: the workload comes with the end of the trips step, where both widths
-                // draw the first two segments full and the rest empty.
-                analysis.widths = StepWidths(workload: workload)
+                // Before this the first two steps used the standard widths. The bar goes on
+                // under the new widths (review I3: holding the old value made it stand still
+                // well into the places step). Where the new widths put the end of the trips
+                // step below what was shown (8 % with the standard widths), they continue from
+                // the value shown (`StepWidths.continuing`), so neither the bar nor the number
+                // ever falls (review of 9f0bc40).
+                let held = max(analysis.shownOverall, analysisBar)
+                var widths = StepWidths(workload: workload)
+                let at = taken.progress.map { (AnalysisStep($0.stage), $0.completed, $0.total) }
+                    ?? analysis.step.map { ($0, analysis.completed, analysis.total) }
+                if let at, let continued = widths.continuing(held: held, step: at.0, completed: at.1, total: at.2) {
+                    widths = continued
+                }
+                analysis.widths = widths
                 widthsFixed = true
-                glide.reset()
+                glide.reset(keeping: analysisBar)
                 if let step = analysis.step {
                     glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
                                  itemsPerSecond: nil, total: analysis.total)
@@ -1002,8 +1024,8 @@ final class AppModel {
         // "Schon fertig": the early suggestions are read once they are saved (the report that
         // starts the image step comes before that, review I2). Should that read miss them,
         // it is tried again during the image step (the only step they are made in; refreshDerived
-        // is not cheap, so not in the later ones): every 10 s, less often in a large library
-        // (`AnalysisCardState.earlyLookInterval`).
+        // is not cheap, so not in the later ones): every 10 s for each full 5,000 photos,
+        // at least every 10 s (`AnalysisCardState.earlyLookInterval`: 50,000 photos, every 100 s).
         if taken.earlyProposals {
             lastEarlyLook = now
             Task { await refreshDerived() }
@@ -1200,6 +1222,7 @@ final class AppModel {
 
     func refreshDerived() async {
         guard let store, let pipeline else { return }
+        let call = derivedCalls.begin()
         await reconcileManagedAlbums(quiet: true)
         do {
             // Results of an older matching version are matched again once (review 16.11.).
@@ -1236,6 +1259,9 @@ final class AppModel {
                 DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
                                             contents: contents, managed: managed, inventory: inventory, scope: scope)
             }.value
+            // A newer call started meanwhile, or the part of the library changed: this result
+            // is older than what is or will be shown (review of 9f0bc40).
+            guard derivedCalls.isNewest(call), scope == analysisScope else { return }
             states = derived.states
             statusReasons = derived.reasons
             progress = derived.progress

@@ -450,7 +450,7 @@ struct UnlockCard: View {
             }
             .font(.subheadline)
             .offerCodeRedemption(isPresented: $redeeming) { _ in
-                Task { await purchases.refreshEntitlements() }
+                Task { await purchases.refreshEntitlements(mayLock: false) }
             }
             if let onLimit {
                 Button("Die ersten \(purchases.remainingFreeAlbums) jetzt kostenlos anlegen", action: onLimit)

@@ -208,7 +208,7 @@ struct SettingsView: View {
             // The price comes from StoreKit; a start without network is made up for here.
             .task { await purchases.loadProductIfNeeded() }
             .offerCodeRedemption(isPresented: $redeeming) { _ in
-                Task { await purchases.refreshEntitlements() }
+                Task { await purchases.refreshEntitlements(mayLock: false) }
             }
 
             #if targetEnvironment(simulator)

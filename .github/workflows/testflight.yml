@@ -8,7 +8,7 @@ name: TestFlight
 # (.github/scripts/ci_gate.py) waits on a free Linux runner for the CI run and the UI flow run
 # of exactly this commit; the upload starts only when both passed and CI's iOS job really ran.
 # A commit without a UI flow run is never green: ui.yml runs for pull requests on the PR's head
-# commit, so a merge commit pushed to main needs a manual "UI flow" run on it, then a new run of
+# commit. main is released by hand only: a manual "UI flow" run on it, then a manual run of
 # this workflow (the gate gives up 15 min after CI passed with no UI run in sight). A docs-only
 # commit (iOS job skipped) is not uploaded.
 # A manual run with "force" skips the wait for emergencies.
@@ -40,9 +40,12 @@ name: TestFlight
 # secrets unless guarded. Waiting from the push itself works on every release branch as is.
 on:
   push:
-    # No paths filter on purpose: the gate decides. If a code push's tests were cancelled by a
-    # following docs-only push, CI tests the code again on that push and it must be uploaded.
-    branches: [claude/sortly-app, main]
+    # Only the release branch uploads by itself. A merge into main never starts a build
+    # (16.11.: merging the website into main started a build of an old app state); main is
+    # released by a manual run once its UI run is green. No paths filter: the "check" job asks
+    # app_changed.py instead, which compares with the last uploaded build (tag build-<n>), so a
+    # website- or docs-only push starts nothing, while code pushed before such a push still ships.
+    branches: [claude/sortly-app]
   workflow_dispatch:
     inputs:
       force:
@@ -66,8 +69,21 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      ready: ${{ steps.secrets.outputs.ready }}
+      ready: ${{ steps.secrets.outputs.ready == 'true' && (github.event_name != 'push' || steps.app.outputs.changed == 'true') }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: App changes since the last TestFlight build
+        id: app
+        if: github.event_name == 'push'
+        run: |
+          python3 .github/scripts/app_changed.py >> "$GITHUB_OUTPUT"
+          if grep -q '^changed=false' "$GITHUB_OUTPUT"; then
+            echo "::notice::TestFlight skipped: only website or documents changed since the last uploaded build."
+          fi
       - id: secrets
         env:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}

@@ -68,11 +68,15 @@ Produkt-ID `app.albumist.ios.unlock`.
 - Ablauf in GitHub: sobald CI für den Commit grün ist, baut ein Mac schon das Archiv; signiert
   und hochgeladen wird erst, wenn auch der UI-Lauf genau dieses Commits grün ist, und nur ein
   Archiv genau dieses Commits. Ohne UI-Lauf auf diesem Commit gibt es keinen Upload (und kein
-  Release): der UI-Lauf startet nur für Pull Requests, auf deren letztem Commit. Wird auf `main`
-  ein Merge-Commit gepusht, den es in keinem Pull Request gab, dann unter Actions > **UI flow** >
-  Run workflow den Lauf für `main` starten und danach den TestFlight-Lauf mit **Re-run all jobs**
-  neu starten; die Prüfung wartet nach grünem CI 15 Minuten auf einen UI-Lauf und meldet dann
-  „no UI flow run“. Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl,
+  Release): der UI-Lauf startet nur für Pull Requests, auf deren letztem Commit.
+- Von selbst lädt nur ein Push auf `claude/sortly-app` hoch. Ein Merge in `main` startet keinen
+  Build (16.11.: das Zusammenführen der Webseite startete sonst einen Build mit altem App-Stand).
+  `main` wird von Hand freigegeben: Actions > **UI flow** > Run workflow für `main`, wenn grün:
+  Actions > **TestFlight** > Run workflow für `main`; die Prüfung wartet nach grünem CI
+  15 Minuten auf einen UI-Lauf und meldet sonst „no UI flow run“.
+- Ändert ein Push seit dem letzten hochgeladenen Build (Git-Tag `build-<Nummer>`) nur die
+  Webseite (`website/`) oder Dokumente (`docs/`, `*.md`), startet kein Build
+  (`.github/scripts/app_changed.py`). Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl,
   den Lauf mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
   Archiv nicht mehr und schlägt absichtlich fehl.
 - Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,

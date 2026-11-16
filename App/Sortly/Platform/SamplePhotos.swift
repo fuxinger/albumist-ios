@@ -156,10 +156,15 @@ final class SamplePhotos {
             let present = Self.existing(storedIDs)
             let inventory = try await model.library.currentInventory()
             let history = try await store.planHistory(limit: 1000)
-            let removal = SampleLibrary.removal(sampleIDs: Set(storedIDs.map(AssetID.init)), libraryAssets: Set(present.map(AssetID.init)),
-                                                managedAlbums: try await store.managedAlbums(), inventory: inventory, history: history)
+            let sampleIDs: Set<AssetID> = Set(storedIDs.map { (id: String) -> AssetID in AssetID(id) })
+            let presentIDs: Set<AssetID> = Set(present.map { (id: String) -> AssetID in AssetID(id) })
+            let managed: [ManagedAlbumState] = try await store.managedAlbums()
+            let removal: SampleLibrary.Removal = SampleLibrary.removal(sampleIDs: sampleIDs, libraryAssets: presentIDs,
+                                                                       managedAlbums: managed, inventory: inventory, history: history)
             if !removal.isEmpty {
-                try await Self.delete(assets: removal.assets.map(\.rawValue), collections: removal.albums.map(\.rawValue))
+                let assetIDs: [String] = removal.assets.map(\AssetID.rawValue)
+                let collectionIDs: [String] = removal.albums.map(\CollectionID.rawValue)
+                try await Self.delete(assets: assetIDs, collections: collectionIDs)
             }
             // The deleted albums are not the user's deletions: their records go, and plans that
             // only made sample albums give their free albums back.

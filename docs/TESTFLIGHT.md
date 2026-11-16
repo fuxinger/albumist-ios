@@ -66,12 +66,18 @@ Produkt-ID `app.albumist.ios.unlock`.
 - Ein TestFlight-Build läuft 90 Tage.
 - Die Bundle-ID `app.albumist.ios` lässt sich nach dem ersten Hochladen nicht mehr ändern.
 - Ablauf in GitHub: sobald CI für den Commit grün ist, baut ein Mac schon das Archiv; signiert
-  und hochgeladen wird erst, wenn auch der UI-Lauf grün ist, und nur ein Archiv genau dieses
-  Commits. Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl, den Lauf
-  mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
+  und hochgeladen wird erst, wenn auch der UI-Lauf genau dieses Commits grün ist, und nur ein
+  Archiv genau dieses Commits. Ohne UI-Lauf auf diesem Commit gibt es keinen Upload (und kein
+  Release): der UI-Lauf startet nur für Pull Requests, auf deren letztem Commit. Wird auf `main`
+  ein Merge-Commit gepusht, den es in keinem Pull Request gab, dann unter Actions > **UI flow** >
+  Run workflow den Lauf für `main` starten und danach den TestFlight-Lauf mit **Re-run all jobs**
+  neu starten; die Prüfung wartet nach grünem CI 15 Minuten auf einen UI-Lauf und meldet dann
+  „no UI flow run“. Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl,
+  den Lauf mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
   Archiv nicht mehr und schlägt absichtlich fehl.
 - Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,
-  daneben die Build-Nummer `CFBundleVersion`). Vor dem Hochladen prüft der Lauf beides und dass die
-  App-Datei Byte für Byte die archivierte ist. Gebaut wird mit dem festgelegten Xcode aus
+  daneben die Build-Nummer `CFBundleVersion` und das Xcode `DTXcodeBuild`). Vor dem Hochladen prüft
+  der Lauf alle drei und dass jede Datei der App Byte für Byte die archivierte ist (Liste aller
+  Dateien mit SHA-256, verglichen vor dem Signieren, weil das Signieren die App-Datei ändert). Gebaut wird mit dem festgelegten Xcode aus
   `.github/toolchain.json`, nie mit einer Beta. Nach dem Hochladen trägt der Commit das Git-Tag
   `build-<Nummer>` (`git show build-41` zeigt den Code von Build 41).

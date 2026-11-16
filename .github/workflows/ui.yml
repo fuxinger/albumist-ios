@@ -46,7 +46,8 @@ name: UI flow
 # never repeated, and a pass that ran no test fails. Result bundles and logs are uploaded
 # when a group fails. Nothing is repeated silently: every repeat, every test that passed only
 # on it and every failed boot attempt is a FLAKY... line in the group's log and job summary
-# and goes into build/flaky-GROUP.json; 4. "UI summary" (Linux) counts them over all groups.
+# and goes into build/flaky-GROUP.json; 4. "UI summary" (Linux) counts them over all groups
+# and lists the rows the tap-through sweep did not tap (UI_SWEEP_SKIP, also in that JSON).
 on:
   pull_request:
     paths-ignore: ['**.md']
@@ -286,7 +287,9 @@ jobs:
   summary:
     name: UI summary (retries and flaky tests)
     # Linux only; reads the records of all groups, also of failed ones. It never fails the run:
-    # the groups decide that. Nothing that was repeated stays hidden in a single job's log.
+    # the groups decide that. Nothing that was repeated stays hidden in a single job's log, and
+    # neither does a row the tap-through sweep (UI test 3) left out: the records carry its
+    # UI_SWEEP_SKIP lines, listed here per group (a real row taken for a section header shows).
     needs: ui
     if: ${{ always() && needs.ui.result != 'skipped' }}
     runs-on: ubuntu-24.04

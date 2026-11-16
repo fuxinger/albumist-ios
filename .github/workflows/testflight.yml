@@ -5,9 +5,12 @@ name: TestFlight
 # until then it stops after one quick check on Linux and costs no macOS minutes.
 #
 # Only a commit whose tests are green goes to TestFlight. The job "Wait for green tests"
-# (.github/scripts/ci_gate.py) waits on a free Linux runner for the CI run of exactly this
-# commit and, where one exists, its UI flow run (pull requests); the upload starts only when
-# both passed and CI's iOS job really ran. A docs-only commit (iOS job skipped) is not uploaded.
+# (.github/scripts/ci_gate.py) waits on a free Linux runner for the CI run and the UI flow run
+# of exactly this commit; the upload starts only when both passed and CI's iOS job really ran.
+# A commit without a UI flow run is never green: ui.yml runs for pull requests on the PR's head
+# commit, so a merge commit pushed to main needs a manual "UI flow" run on it, then a new run of
+# this workflow (the gate gives up 15 min after CI passed with no UI run in sight). A docs-only
+# commit (iOS job skipped) is not uploaded.
 # A manual run with "force" skips the wait for emergencies.
 #
 # The release archive is built while the UI tests still run, not after them: as soon as the
@@ -17,8 +20,8 @@ name: TestFlight
 # TestFlight" sign that archive for the App Store and upload it (about 3 min after the gate
 # instead of a whole build). It checks that the archive was built from the gated commit with
 # this run's build number and the pinned Xcode: build-info.txt, the app's own Info.plist
-# (AlbumistCommit, CFBundleVersion) and the SHA-256 of the app's executable as the archive job
-# recorded it (.github/scripts/archive_check.py). The export only signs that app; nothing is
+# (AlbumistCommit, CFBundleVersion, DTXcodeBuild) and the SHA-256 of every file of the app as
+# the archive job recorded it (.github/scripts/archive_check.py; compared before signing). The export only signs that app; nothing is
 # rebuilt between the gate and the upload. After a successful upload the commit gets the git tag
 # build-<number> (job "tag", the only one with contents: write).
 # Waiting for CI rather than starting at once keeps a push at five Mac jobs at a time (CI's
@@ -163,6 +166,9 @@ jobs:
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes; no token stays in .git/config next to the build.
+          persist-credentials: false
       - name: Select pinned Xcode
         id: xcode
         # The pinned release Xcode (.github/toolchain.json), never a beta: App Store Connect
@@ -217,17 +223,19 @@ jobs:
           exit $status
       - name: Pack archive
         # tar keeps file modes and links (an artifact alone would drop the executable bit).
-        # build-info.txt says which commit, build number and Xcode the archive is and the
-        # SHA-256 of the app's executable; the app's Info.plist carries the commit and build
-        # number itself. The upload checks all of it before it signs and ships the archive.
+        # build-info.txt says which commit, build number and Xcode the archive is, the SHA-256
+        # of the app's executable and of its whole file tree (app-manifest.txt lists every file
+        # with its SHA-256, so a difference can be named); the app's Info.plist carries the
+        # commit, build number and Xcode build (DTXcodeBuild) itself. The upload checks all of
+        # it before it signs and ships the archive.
         run: |
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ] || { echo "::error::checkout is not $GITHUB_SHA"; exit 1; }
-          python3 .github/scripts/archive_check.py "$ARCHIVE" --sha "$GITHUB_SHA" --build "${{ github.run_number }}"
+          python3 .github/scripts/archive_check.py "$ARCHIVE" --sha "$GITHUB_SHA" --build "${{ github.run_number }}" --pinned-xcode
           {
             printf 'sha=%s\nbuild=%s\nxcode=%s\n' "$GITHUB_SHA" "${{ github.run_number }}" "${{ steps.xcode.outputs.id }}"
-            python3 .github/scripts/archive_check.py "$ARCHIVE" --print-binary-hash
+            python3 .github/scripts/archive_check.py "$ARCHIVE" --print-hashes --manifest "$RUNNER_TEMP/app-manifest.txt"
           } > "$RUNNER_TEMP/build-info.txt"
-          tar -czf release-archive.tgz -C "$RUNNER_TEMP" Albumist.xcarchive build-info.txt
+          tar -czf release-archive.tgz -C "$RUNNER_TEMP" Albumist.xcarchive build-info.txt app-manifest.txt
           ls -la release-archive.tgz
           cat "$RUNNER_TEMP/build-info.txt"
       - name: Keep archive for the upload
@@ -286,10 +294,11 @@ jobs:
           version=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" "$ARCHIVE/Info.plist")
           [ "$version" = "${{ github.run_number }}" ] \
             || { echo "::error::The archive has build number $version, not ${{ github.run_number }}"; exit 1; }
-          # The app inside: its Info.plist names this commit and build, and its executable is
-          # byte for byte the one the archive job hashed.
+          # The app inside: its Info.plist names this commit, build and the pinned Xcode build,
+          # and every file of it is byte for byte the one the archive job hashed (checked before
+          # the export signs it; signing changes the executable, see archive_check.py).
           python3 .github/scripts/archive_check.py "$ARCHIVE" --sha "$GITHUB_SHA" --build "${{ github.run_number }}" \
-            --build-info "$RUNNER_TEMP/release/build-info.txt"
+            --pinned-xcode --build-info "$RUNNER_TEMP/release/build-info.txt" --manifest "$RUNNER_TEMP/release/app-manifest.txt"
           echo "Archive of ${GITHUB_SHA:0:7}, build $version"
           xcode="$(python3 .github/scripts/toolchain.py id)"
           grep -qx "xcode=$xcode" "$RUNNER_TEMP/release/build-info.txt" \

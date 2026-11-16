@@ -27,6 +27,12 @@ final class SortlyFlowUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
+    /// "16 Vorschläge prüfen", or "1 Vorschlag prüfen" once a single suggestion is left open
+    /// (UI run 43796844064: the locked run after a complete flow found only the singular).
+    private func reviewSuggestionsButton() -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9.]+ Vorschl(ag|äge) prüfen.*")).firstMatch
+    }
+
     /// The search tab (`Tab(role: .search)`) carries the system's own label.
     private func searchTabButton() -> XCUIElement {
         for label in ["Suchen", "Suche", "Search"] where app.tabBars.buttons[label].exists {
@@ -308,7 +314,7 @@ final class SortlyFlowUITests: XCTestCase {
         }
 
         // Suggestions
-        if tap(button("Vorschläge prüfen"), "open suggestions", timeout: 20) {
+        if tap(reviewSuggestionsButton(), "open suggestions", timeout: 20) {
             sleep(1)
             shot("07-suggestions"); audit("suggestions")
             // Rows live in a List (collection view), not a scroll view. The first cell can be
@@ -877,7 +883,7 @@ final class SortlyFlowUITests: XCTestCase {
         }
         // Suggestions list, the screen that had dead rows.
         tabButton("Übersicht").tap(); sleep(1)
-        let suggestions = button("Vorschläge prüfen")
+        let suggestions = reviewSuggestionsButton()
         if suggestions.waitForExistence(timeout: 5) {
             suggestions.tap(); sleep(2)
             sweep("Vorschläge", depth: 0, strict: true)
@@ -946,7 +952,7 @@ final class SortlyFlowUITests: XCTestCase {
         _ = waitStable("analysis idle before interruption", timeout: 120) { analysisIdle }
         // Select something to apply: the selection of earlier runs, else the recommended ones.
         var apply = button("ausgewählte Alben anlegen")
-        if !apply.waitForExistence(timeout: 5), tap(button("Vorschläge prüfen"), "open suggestions for interruption", timeout: 20) {
+        if !apply.waitForExistence(timeout: 5), tap(reviewSuggestionsButton(), "open suggestions for interruption", timeout: 20) {
             sleep(1)
             if button("empfohlene auswählen").waitForExistence(timeout: 5) { button("empfohlene auswählen").tap(); sleep(1) }
             back(); sleep(1)

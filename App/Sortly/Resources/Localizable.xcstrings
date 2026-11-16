@@ -11632,6 +11632,16 @@
           }
         }
       }
+    },
+    "Deine neuesten Fotos sprechen für %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your newest photos point to %@."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

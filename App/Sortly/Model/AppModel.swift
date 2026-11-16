@@ -169,7 +169,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { bucketCache = [:]; atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; resetSearchIndex() } }
+    var facts: [AssetFacts] = [] { didSet { bucketCache = [:]; atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { bucketCache = [:] } }
     /// Filtered and sorted library buckets; rebuilt only when facts or states change, not on
     /// every redraw of the library (a selection tap redraws it).
@@ -317,6 +317,7 @@ final class AppModel {
     /// A change in "Dein Zuhause" is being applied (the suggestions are made again).
     private(set) var homeChangeRunning = false
     @ObservationIgnored private var homeCandidatesCache: [HomeCandidate]?
+    @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
     var execution = ExecutionState()
     var message: AppMessage?
     /// Where Siri, Shortcuts or a Spotlight result wants to go; the overview opens it.
@@ -1546,9 +1547,14 @@ final class AppModel {
     }
 
     /// The detected home with its name from the user's own photos (town, or offline the region).
+    /// Named once per analysis result, not on every redraw of the settings.
     var detectedHomePlace: HomePlace? {
+        access(keyPath: \.facts)
         guard let detectedHome else { return nil }
-        return HomePlace(center: detectedHome.center, components: HomeName.components(near: detectedHome.center, facts: facts))
+        if let cached = detectedHomePlaceCache, cached.center == detectedHome.center { return cached }
+        let place = HomePlace(center: detectedHome.center, components: HomeName.components(near: detectedHome.center, facts: facts))
+        detectedHomePlaceCache = place
+        return place
     }
 
     /// The places of the library the user can choose from, most photo days first.

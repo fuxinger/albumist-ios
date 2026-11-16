@@ -26,6 +26,9 @@ struct HomeSettingsRow: View {
 
 /// Texts of "Dein Zuhause", in one place so they read the same everywhere.
 enum HomeText {
+    /// The surroundings that count as home (the trip detection's home radius).
+    static let radiusMeters = TripDetector.Configuration().homeRadiusMeters
+
     /// "München und Umgebung"; offline, where only the region is known, "Gegend in Bayern".
     static func area(_ components: PlaceComponents?) -> String {
         let name = HomeName(components)
@@ -118,6 +121,13 @@ struct HomeSettingsView: View {
             switch model.homeSettings.currentMode {
             case .confirmed:
                 homeRow(title: HomeText.area(model.homeSettings.confirmed?.components), detail: Text("Von dir festgelegt"), symbol: "house.fill")
+                // The newest photos point somewhere else (moved since): said, never changed by itself.
+                if let detected = model.detectedHomePlace, let chosen = model.homeSettings.confirmed,
+                   GeoMath.distance(detected.center, chosen.center) > HomeText.radiusMeters {
+                    Text("Deine neuesten Fotos sprechen für \(HomeText.area(detected.components)).")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
                 changeLink(Text("Ändern"))
             case .none:
                 homeRow(title: String(localized: "Kein Zuhause festgelegt"),

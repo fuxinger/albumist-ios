@@ -1,0 +1,122 @@
+name: Sanitizers
+
+# Opt-in Thread Sanitizer run of the core tests (swift test) and the app's unit tests
+# (xcodebuild test, scheme Sortly) on the pinned Xcode and simulator. TSan slows the tests
+# several times over, so it never runs on a push or pull request: it is meant for the nightly
+# pass and the pass before an upload. Start it by hand (Actions › Sanitizers › Run workflow) or
+# from another workflow (the nightly pipeline will add exactly this):
+#
+#   tsan:
+#     uses: ./.github/workflows/sanitize.yml
+#     with: { sanitize: thread, ref: <commit> }
+#
+# It is a build of its own (own runner, own DerivedData, -enableThreadSanitizer YES and
+# swift test --sanitize=thread); CI (ci.yml), the UI flow (ui.yml) and the build that is
+# uploaded (testflight.yml) are not touched and stay as fast as they are. Any line with
+# "ThreadSanitizer:" in the test logs fails the job, also when every test passed, and every
+# report (with its stacks and SUMMARY line) is in the job summary
+# (.github/scripts/sanitizer_report.py). Nothing is suppressed.
+on:
+  workflow_dispatch:
+    inputs:
+      sanitize:
+        description: Sanitizer to build the tests with
+        type: choice
+        options: [thread]
+        default: thread
+  workflow_call:
+    inputs:
+      sanitize:
+        description: Sanitizer to build the tests with (thread)
+        type: string
+        default: thread
+      ref:
+        description: Commit, branch or tag to test (empty = the calling run's commit)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+concurrency:
+  group: sanitize-${{ github.ref }}-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tsan:
+    name: Thread Sanitizer (core and app unit tests)
+    if: ${{ inputs.sanitize == 'thread' }}
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode --runtime
+      - name: Core tests with Thread Sanitizer
+        # Not stopped by a failing test: the app tests below still run and every report counts.
+        continue-on-error: true
+        id: core
+        run: |
+          set -o pipefail
+          mkdir -p build
+          swift test --sanitize=thread --scratch-path build/tsan-spm 2>&1 | tee build/tsan-core.log
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd App && xcodegen generate
+      - name: App unit tests with Thread Sanitizer
+        continue-on-error: true
+        id: app
+        run: |
+          set +e
+          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --role default)
+          [ -n "$UDID" ] || { echo "::error::pinned simulator not found"; exit 1; }
+          cd App
+          # history_size=7: the previous access of a race keeps its stack in long tests.
+          TEST_RUNNER_TSAN_OPTIONS="history_size=7" xcodebuild test \
+            -project Sortly.xcodeproj \
+            -scheme Sortly \
+            -destination "id=$UDID" \
+            -enableThreadSanitizer YES \
+            -derivedDataPath ../build/tsan-dd \
+            -resultBundlePath ../build/tsan-app.xcresult \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO > ../build/tsan-app.log 2>&1
+          status=$?
+          grep -aE "error:|Executed|\*\* |Test Suite 'All tests'|ThreadSanitizer:" ../build/tsan-app.log | grep -v "/SourcePackages/" | head -400
+          exit $status
+      - name: Thread Sanitizer reports
+        if: always()
+        run: |
+          # The test host's console as the result bundle kept it, in case xcodebuild's own
+          # output left a line out (the same report then counts twice, it is shown once).
+          xcrun xcresulttool get log --path build/tsan-app.xcresult --type console > build/tsan-app-console.log 2>/dev/null || true
+          python3 .github/scripts/sanitizer_report.py build/tsan-core.log build/tsan-app.log build/tsan-app-console.log >> "$GITHUB_STEP_SUMMARY"
+      - name: Tests passed
+        # A failing test fails the job too (after the reports above were written).
+        if: always()
+        env:
+          CORE: ${{ steps.core.outcome }}
+          APP: ${{ steps.app.outcome }}
+        run: |
+          echo "core tests: $CORE, app unit tests: $APP"
+          [ "$CORE" = success ] && [ "$APP" = success ]
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tsan-logs
+          path: |
+            build/tsan-core.log
+            build/tsan-app.log
+            build/tsan-app-console.log
+            build/tsan-app.xcresult
+          retention-days: 14
+          if-no-files-found: ignore

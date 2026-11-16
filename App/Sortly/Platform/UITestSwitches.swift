@@ -155,6 +155,8 @@ extension UITestSupport {
         #if DEBUG
         if fastStart { AppModel.shared.onboardingDone = true }
         if watchesMain { MainThreadWatch.start(log: watchMainLog) }
+        // Every UI run: hangs with their stacks, cold start and Pause (UITestHangWatch.swift).
+        HangWatch.shared.start()
         #endif
     }
 

@@ -11872,6 +11872,16 @@
           }
         }
       }
+    },
+    "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Einstellungen › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The rest is done, but not everything worked. The change is listed under Settings › History and Undo. There you can see what is missing and add it with “Try Missing Steps Again”."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

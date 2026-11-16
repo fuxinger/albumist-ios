@@ -558,6 +558,21 @@ final class DeviceConditionUITests: XCTestCase {
         return exists
     }
 
+    /// How many photos the album's row in the albums tab names ("Testalbum Vollendet, 2 Fotos"),
+    /// nil when the row is not there.
+    private func albumPhotoCount(_ title: String) -> Int? {
+        guard tap(tabButton("Alben"), "albums tab for the photos of \(title)") else { return nil }
+        sleep(2)
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        var swipes = 0
+        while !row.exists && swipes < 3 { app.swipeUp(); sleep(1); swipes += 1 }
+        let label = row.exists ? row.label : ""
+        print("UI_FACT album row \(title): \(label)")
+        tap(tabButton("Übersicht"), "overview after albums")
+        guard let count = label.firstMatch(of: #/([0-9][0-9.]*) Fotos?/#)?.1 else { return nil }
+        return Int(count.replacingOccurrences(of: ".", with: ""))
+    }
+
     // MARK: 1–2 Heat, battery, Low Power Mode
 
     /// A warm iPhone only slows the analysis down, a hot one makes it wait and say so; it is
@@ -846,6 +861,8 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// A5: the app is closed while a plan runs (made slow, so it always lands half way). Both
     /// ways out: "Rest anlegen" finishes the album, "Alles zurücknehmen" takes back what was done.
+    /// The slow plan stops before its add request reaches Photos, so "Rest anlegen" has to fill
+    /// the album the plan made (UI run 43949880264 left "Testalbum Vollendet" with 0 photos).
     func test07_InterruptedPlanContinueAndUndo() {
         continueAfterFailure = true
         prepare()
@@ -859,8 +876,14 @@ final class DeviceConditionUITests: XCTestCase {
             let done = waitGone(card, timeout: 120)
             print(done ? "UI_STEP_OK interrupted plan continued" : "UI_STEP_MISSING interrupted plan continued")
             XCTAssertTrue(done, "\"Rest anlegen\" did not finish the interrupted plan")
+            // Nothing left over: no "Das hat nicht geklappt" (it would name an unfinished step).
+            let leftOver = anything("nicht geklappt").waitForExistence(timeout: 3)
+            print("UI_FACT \"Rest anlegen\" left something undone: \(leftOver)")
+            XCTAssertFalse(leftOver, "\"Rest anlegen\" reported something left undone")
             dismissNotices()
-            XCTAssertTrue(albumExists(continued), "After \"Rest anlegen\" the album is missing")
+            let photos = albumPhotoCount(continued)
+            XCTAssertNotNil(photos, "After \"Rest anlegen\" the album is missing")
+            XCTAssertEqual(photos, 2, "After \"Rest anlegen\" the album does not hold the two photos of the plan")
         }
         let undone = "Testalbum Zurueck"
         if interruptManualPlan(undone), tap(app.buttons["Alles zurücknehmen"].firstMatch, "undo interrupted plan") {

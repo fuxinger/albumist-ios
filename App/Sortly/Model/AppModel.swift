@@ -2283,7 +2283,10 @@ final class AppModel {
 
     /// Finishes an interrupted plan. Steps that already ran are skipped; a step that was
     /// running is checked against the library first, so nothing is created twice. Photos the
-    /// user has taken out of an album since then are not added anymore.
+    /// user has taken out of an album since then are not added anymore. An album the plan
+    /// created itself is filled when none of the interrupted step's photos reached it (the
+    /// request never got to Photos); the user's own albums get nothing without a preview
+    /// (`ChangeExecutor`, docs/DECISIONS.md).
     func resumeInterruptedPlan() async {
         guard let store, let interrupted = interruptedPlan, claimExecution() else { return }
         defer { releaseExecution() }
@@ -2291,6 +2294,13 @@ final class AppModel {
         execution = ExecutionState()
         let overrides = (try? await store.overrides()).map { OverrideSet($0) } ?? OverrideSet()
         await run(interrupted.respecting(overrides), resume: true)
+        // The card goes away once the plan is done; what is left (photos for the user's own
+        // albums that wait for a preview, a step Photos refused) is said, not left to be found
+        // in the history.
+        if let finished = execution.finished, finished.id == interrupted.id, finished.status == .completedWithErrors {
+            message = .failure([String(localized: "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Einstellungen › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen."),
+                                execution.failure].compactMap { $0 }.joined(separator: "\n\n"))
+        }
         // Read again, not cleared: a plan that stopped once more stays offered, and so does
         // another one that is still open (review of 6c6ef79).
         await reloadInterruptedPlan()

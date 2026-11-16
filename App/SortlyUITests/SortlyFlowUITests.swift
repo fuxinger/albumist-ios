@@ -655,10 +655,7 @@ final class SortlyFlowUITests: XCTestCase {
             sleep(2)
             shot("18-albums"); audit("albums")
             // Design review W12: an album shows all its photos, and each opens large.
-            // An album with photos: one a plan created but whose photos were never added
-            // ("Rest anlegen" after an interruption does not add on guesswork, audit 2, 1.1;
-            // DeviceConditionUITests test07 leaves "Testalbum Vollendet, 0 Fotos" on this
-            // simulator, UI run 43949880264) has none to open.
+            // An album with photos: an empty one has none to open.
             let album = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "(.*[^0-9.])?[1-9][0-9.]* Fotos?")).firstMatch
             if tap(album, "open an album", timeout: 5) {
                 let photo = app.buttons["album.photo"].firstMatch

@@ -364,14 +364,25 @@ public actor ChangeExecutor {
                     return .succeeded(createdID: nil, verifiedAt: now)
                 }
                 if plan.createdVerifiably(albumID) {
-                    // An album this run made: what is in it came from this run; what is missing
-                    // was taken out by the user afterwards, or never added.
-                    plan.record?.settle(step.id, arrived)
-                    return arrived.isEmpty ? .failed(reason: StepState.unclearReason) : .succeeded(createdID: nil, verifiedAt: now)
+                    // An album this run made: what is in it came from this run. A Photos change
+                    // is all or nothing, so once something arrived the request went through and
+                    // what is missing now was taken out by the user afterwards: it stays out.
+                    if !arrived.isEmpty {
+                        plan.record?.settle(step.id, arrived)
+                        return .succeeded(createdID: nil, verifiedAt: now)
+                    }
+                    // Nothing arrived: the request did not reach Photos (the app was closed
+                    // before or while it was sent). "Rest anlegen" was the user's confirmation
+                    // to finish this album, so it is filled below like a first run; before, it
+                    // stayed empty (UI run 43949880264, test07). Only this plan's own album:
+                    // whatever is added is recorded as Albumist's and undo takes exactly that
+                    // out again. The user's own albums never get this (below).
+                } else {
+                    // Someone else's album: nothing is claimed (the step stays unconfirmed, and
+                    // undo leaves these photos where they are), and nothing is added without a
+                    // preview (audit 2, 1.1, 1.2).
+                    return arrived.count == intent.count ? .succeeded(createdID: nil, verifiedAt: now) : .failed(reason: StepState.unclearReason)
                 }
-                // Someone else's album: nothing is claimed (the step stays unconfirmed, and
-                // undo leaves these photos where they are).
-                return arrived.count == intent.count ? .succeeded(createdID: nil, verifiedAt: now) : .failed(reason: StepState.unclearReason)
             }
             // Idempotent: only add what is missing and still available.
             let missing = assets.filter { !album.assetIDs.contains($0) && available.contains($0) }

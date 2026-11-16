@@ -521,12 +521,16 @@ struct AnalysisFinishedView: View {
             }
         }
         .sensoryFeedback(.success, trigger: bounce) { _, new in new > 0 && !reduceMotion }
-        .onAppear {
-            guard !reduceMotion, model.claimFinishMoment() else { return }
-            bounce += 1
-        }
+        .onAppear(perform: play)
+        // Finished while the app was in the background: played when it is on screen again.
+        .onChange(of: model.isOnScreen) { _, onScreen in if onScreen { play() } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("analysis.finished")
+    }
+
+    private func play() {
+        guard model.claimFinishMoment(), !reduceMotion else { return }
+        bounce += 1
     }
 }
 

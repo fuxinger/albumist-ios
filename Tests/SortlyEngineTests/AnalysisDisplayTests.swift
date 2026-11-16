@@ -192,7 +192,8 @@ struct AnalysisDisplayTests {
     /// lookups, and a time shown before stays during the wait.
     @Test func appleWaitIsNotMeasured() {
         var e = ProgressEstimator()
-        e.setWorkload(Self.owner)
+        // Images and texts done already: the places step's own speed is enough for a time.
+        e.setWorkload(AnalysisWorkload(photos: 5_683, located: 1_600, screenshots: 1_040, contentLeft: 0, textLeft: 0))
         let done = Self.feed(&e, .places, total: 1_600, perSecond: 5, from: 0, to: 40)
         let shown = e.finish(at: Self.at(40), wall: Self.wall(40))
         #expect(shown != nil)
@@ -205,6 +206,56 @@ struct AnalysisDisplayTests {
         #expect(e.finish(at: Self.at(72), wall: Self.wall(72)) == shown)
         Self.feed(&e, .places, total: 1_600, startAt: done, perSecond: 5, from: 72.5, to: 110)
         #expect(abs((e.rate ?? 0) - (rate ?? -1)) < 0.5, "the wait did not lower the speed: \(String(describing: e.rate))")
+    }
+
+    /// Review I4: no finish time before this device's speed is known (an image or text step
+    /// measured). The places step's speed says nothing about it; the usual times are a guess.
+    @Test func noFinishTimeBeforeTheDeviceIsMeasured() {
+        var e = ProgressEstimator()
+        e.setWorkload(Self.owner)
+        Self.feed(&e, .places, total: 1_600, perSecond: 5, from: 0, to: 60)
+        #expect(e.rate != nil)
+        #expect(e.stepRemaining != nil, "the step's own time is known (Details)")
+        #expect(e.finish(at: Self.at(60), wall: Self.wall(60)) == nil)
+        #expect(!e.deviceKnown)
+        // Once the image step is measured, there is one.
+        Self.feed(&e, .content, total: 5_683, perSecond: 10, from: 61, to: 100)
+        #expect(e.deviceKnown)
+        #expect(e.finish(at: Self.at(100), wall: Self.wall(100)) != nil)
+        // Nothing left that depends on the device: the step's own speed is enough.
+        var rest = ProgressEstimator()
+        rest.setWorkload(AnalysisWorkload(photos: 5_683, located: 1_600, screenshots: 0, contentLeft: 0, textLeft: 0))
+        Self.feed(&rest, .places, total: 1_600, perSecond: 5, from: 0, to: 60)
+        #expect(rest.finish(at: Self.at(60), wall: Self.wall(60)) != nil)
+    }
+
+    /// Review minor: once the time shown has passed while the run goes on, it is not kept for
+    /// the refresh or the hysteresis; without a new one, "Gleich fertig" lasts a minute at most.
+    @Test func gleichFertigDoesNotLinger() {
+        var e = ProgressEstimator()
+        e.setWorkload(AnalysisWorkload(photos: 600, located: 0, screenshots: 0, contentLeft: 600, textLeft: 0))
+        // 10/s: 400 done at 40 s, the time shown is about 64 s. Then 2/s: the real end is
+        // about 144 s, so the time shown passes while the run goes on, and the new ones are
+        // within the 2 min hysteresis of it. A time is shown all the way, not a "Gleich
+        // fertig" kept from the passed one (which would end after a minute, with none).
+        Self.feed(&e, .content, total: 600, perSecond: 10, from: 0, to: 40)
+        #expect(e.finish(at: Self.at(40), wall: Self.wall(40)) != nil)
+        var t = 40.5
+        while t < 139 {
+            e.record(step: .content, completed: 400 + Int((t - 40) * 2), total: 600, at: Self.at(t))
+            #expect(e.finish(at: Self.at(t), wall: Self.wall(t)) != nil, "no time at \(t) s")
+            t += 0.5
+        }
+        // A step without a count after the time passed: "Gleich fertig" for a minute, then none.
+        var s = ProgressEstimator()
+        s.setWorkload(AnalysisWorkload(photos: 600, located: 0, screenshots: 0, contentLeft: 600, textLeft: 0))
+        Self.feed(&s, .content, total: 600, perSecond: 10, from: 0, to: 59)
+        #expect(s.finish(at: Self.at(59), wall: Self.wall(59)) != nil)
+        s.record(step: .proposals, completed: 0, total: 0, at: Self.at(60))
+        for t in stride(from: 60.5, through: 300, by: 0.5) {
+            s.record(step: .proposals, completed: 0, total: 0, at: Self.at(t))
+        }
+        #expect(s.finish(at: Self.at(300), wall: Self.wall(300)) == nil)
     }
 
     @Test func roundingAndSoon() {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct SortlyApp: App {
@@ -27,6 +28,9 @@ struct SortlyApp: App {
                     if model.phase == .ready && model.access.canRead && (!UITestSupport.isRunning || UITestSupport.rebuildsDatabase) {
                         model.startAnalysis()
                     }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+                    model.timeChanged()
                 }
                 .onChange(of: scenePhase) { _, phase in
                     ContinuedAnalysis.sceneChanged(onScreen: phase == .active)

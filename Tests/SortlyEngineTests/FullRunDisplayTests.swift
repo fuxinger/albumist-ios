@@ -42,6 +42,13 @@ struct FullRunDisplayTests {
         // The online budget of a run in the app was used, then the rest waits for later.
         #expect(run.report?.onlineRequests == 60)
         #expect((run.report?.placesPendingOnline ?? 0) > 0)
+        // Review I4: on a device 30 % slower than the usual times, every clock time shown is
+        // within 2 min (or a tenth of the time left, when more) of the real end. Clock times
+        // are rounded to the minute, and to 5 min above 30 min left.
+        let errors = sim.finishErrors("a")
+        #expect(!errors.isEmpty)
+        let bad = errors.filter { abs($0.off) > max(120, $0.left / 10) }
+        #expect(bad.isEmpty, "\(bad.count) of \(errors.count) off, worst \(bad.map { Int($0.off) }.max() ?? 0) s")
         sim.finish()
     }
 
@@ -367,8 +374,11 @@ extension Duration {
 /// lanes side by side; the simulated clock adds up the work, so each value is the time per
 /// photo with all lanes busy (4 lanes à 0.4 s, 2 lanes à 1 s).
 enum SimCost {
-    static let content: Duration = .milliseconds(100)
-    static let text: Duration = .milliseconds(500)
+    /// 30 % slower than the usual times the finish time starts from (`AnalysisStep
+    /// .secondsPerItem`: 0.1 s and 0.5 s), so the accuracy checks measure the device's speed
+    /// being found, not constants that happen to match (review I4).
+    static let content: Duration = .milliseconds(130)
+    static let text: Duration = .milliseconds(650)
     static let geocode: Duration = .milliseconds(300)
     /// One photo's own time in a lane: what Pause may still wait for.
     static func item(_ stage: Stage?) -> Duration {
@@ -832,12 +842,7 @@ final class Sim: @unchecked Sendable {
         if let longestCPU { print("SIM longest stretch without simulated time (CPU on Linux): \(String(format: "%.3f", longestCPU.0)) s, \(longestCPU.1)") }
         // How far the finish times were off, for complete runs (minutes, by time left).
         for run in runs where run.report?.isComplete == true {
-            let mine = finishTimes.filter { $0.run == run.label }
-            let errors = mine.compactMap { entry -> (left: Double, off: Double)? in
-                guard case .at(let date) = entry.shown else { return nil }
-                let realEnd = SimClock.base.addingTimeInterval(entry.end.seconds)
-                return ((entry.end - entry.t).seconds, date.timeIntervalSince(realEnd))
-            }
+            let errors = finishErrors(run.label)
             if let worst = errors.max(by: { abs($0.off) < abs($1.off) }) {
                 print("SIM \(run.label) finish times: \(errors.count) shown, worst \(Int(worst.off)) s off with \(Int(worst.left)) s left, first with \(Int(errors.first!.left)) s left")
             }
@@ -996,6 +1001,16 @@ final class Sim: @unchecked Sendable {
     ///     Apple's wait, or the gliding bar (limit set by the product owner, 15.11.).
     /// 9.  No finish time while the run waits or after Pause; "Gleich fertig" only in the last
     ///     3 minutes (checked against the real end in `finish`).
+    /// Each clock time the card showed in the run `label`: seconds left then, and how far it
+    /// was off the real end (positive: too late). "Gleich fertig" is not a clock time.
+    func finishErrors(_ label: String) -> [(left: Double, off: Double)] {
+        finishTimes.filter { $0.run == label }.compactMap { entry in
+            guard case .at(let date) = entry.shown else { return nil }
+            let realEnd = SimClock.base.addingTimeInterval(entry.end.seconds)
+            return ((entry.end - entry.t).seconds, date.timeIntervalSince(realEnd))
+        }
+    }
+
     private func checkCard(_ run: RunLog) {
         let base = ContinuousClock.now
         func instant(_ t: Duration) -> ContinuousClock.Instant { base.advanced(by: t) }
@@ -1078,6 +1093,11 @@ final class Sim: @unchecked Sendable {
                 lastText = text
                 lastFinishShown = display
                 if let finish {
+                    // Review I4: before an image or text step was measured, the time would
+                    // rest on the usual times only.
+                    if s < .content, let wl = estimator.workload, wl.itemsLeft(.content) + wl.itemsLeft(.text) > 0 {
+                        fail(run, 9, "finish time shown in \(s) before the device was measured", at: event.t)
+                    }
                     if waiting || paused { fail(run, 9, "finish time shown while \(waiting ? "waiting" : "paused")", at: event.t) }
                     if let until = suspendedUntil, event.t - until < .seconds(30) {
                         fail(run, 9, "finish time shown \(Int((event.t - until).seconds)) s after the app came back from the background (settles 30 s first)", at: event.t)

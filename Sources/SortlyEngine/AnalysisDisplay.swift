@@ -376,9 +376,20 @@ public struct ProgressEstimator: Sendable {
         return .seconds(Double(max(0, r.total - r.completed)) / rate)
     }
 
-    /// Time left for the whole analysis, once trustworthy.
+    /// This device's speed is measured (an image or text step ran long enough), or no work
+    /// is left whose time depends on it. Before that a whole-analysis time would rest on the
+    /// usual times only, which are a guess for this device (review I4).
+    public var deviceKnown: Bool {
+        if measured.keys.contains(where: \.measuresDevice) { return true }
+        if let r = running, r.step.measuresDevice, rate != nil { return true }
+        guard let r = running, let workload else { return false }
+        return !AnalysisStep.allCases.contains { $0 > r.step && $0.measuresDevice && workload.itemsLeft($0) > 0 }
+    }
+
+    /// Time left for the whole analysis, once trustworthy: the running step measured, and the
+    /// device measured (`deviceKnown`).
     public var remaining: Duration? {
-        guard let r = running, let step = stepRemaining, let workload else { return nil }
+        guard let r = running, let step = stepRemaining, let workload, deviceKnown else { return nil }
         let factor = deviceFactor
         let later = AnalysisStep.allCases.filter { $0 > r.step }.reduce(0.0) { sum, s in
             sum + (Double(workload.itemsLeft(s)) * s.secondsPerItem + s.fixedSeconds) * (s.measuresDevice ? factor : 1)
@@ -389,17 +400,23 @@ public struct ProgressEstimator: Sendable {
     /// The finish time to show now, or `nil` while there is none to trust.
     public mutating func finish(at now: Instant, wall: Date) -> FinishEstimate? {
         guard let r = running, r.lastAt != nil else { return nil }
+        // The time shown has passed and the run goes on: a new one at once, without waiting
+        // for the refresh or the hysteresis (review minor: "Gleich fertig" stayed for up to
+        // 2 min after the end time).
+        let passed = accepted.map { $0 <= wall } ?? false
         // Steps without a count (trips, suggestions) are short: the time shown stays.
-        if r.total > 1, lastCheck.map({ now - $0 >= rules.refresh }) ?? true {
+        if r.total > 1, passed || (lastCheck.map({ now - $0 >= rules.refresh }) ?? true) {
             if let remaining {
                 lastCheck = now
                 let candidate = wall.addingTimeInterval(remaining.seconds)
-                if accepted.map({ abs(candidate.timeIntervalSince($0)) >= rules.hysteresis }) ?? true {
+                if passed || (accepted.map({ abs(candidate.timeIntervalSince($0)) >= rules.hysteresis }) ?? true) {
                     accepted = candidate
                 }
             }
         }
         guard let accepted else { return nil }
+        // No new time to show: "Gleich fertig" for at most a minute past the time, then none.
+        if wall.timeIntervalSince(accepted) > rules.soon { return nil }
         return Self.display(accepted, wall: wall, rules: rules)
     }
 

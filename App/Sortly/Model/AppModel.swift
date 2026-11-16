@@ -135,9 +135,11 @@ final class AppModel {
     /// The check mark and haptic of the finished card play once, not on every return.
     @ObservationIgnored private var finishMomentPlayed = false
 
-    /// True the first time the finished card appears for this run.
+    /// True the first time the finished card is seen for this run: on screen only, so a run
+    /// that ended while the app was in the background plays it when the user comes back
+    /// (review minor: it was not shown at all then).
     func claimFinishMoment() -> Bool {
-        guard analysisFinished != nil, !finishMomentPlayed else { return false }
+        guard analysisFinished != nil, isOnScreen, !finishMomentPlayed else { return false }
         finishMomentPlayed = true
         return true
     }
@@ -790,11 +792,12 @@ final class AppModel {
             saveSafetyBackup()
             // "Analyse fertig" only when it really finished (not paused, stopped or failed), and
             // not for a quick check (point 4): in the app the card, outside it the notification.
+            // Outside the app also the notification; the card shows the moment once the app
+            // is on screen again.
             if celebrate, !Task.isCancelled {
-                if UIApplication.shared.applicationState == .active {
-                    analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
-                    updateCard()
-                } else {
+                analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
+                updateCard()
+                if UIApplication.shared.applicationState != .active {
                     ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
                 }
             }
@@ -1010,6 +1013,14 @@ final class AppModel {
         guard analysis.kind == .check else { return false }
         if let stage = analysis.stage, [.content, .text].contains(stage), analysis.remaining >= 50 { return false }
         return true
+    }
+
+    /// The clock or the time zone was changed (`significantTimeChangeNotification`): the
+    /// finish time is a clock time, so it is measured anew (review minor).
+    func timeChanged() {
+        guard analysis.isRunning else { return }
+        estimator.idle()
+        analysisFinish = nil
     }
 
     /// Scene changes (`SortlyApp`): gliding, thumbnails and announcements only on screen.

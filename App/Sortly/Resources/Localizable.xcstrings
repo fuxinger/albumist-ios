@@ -851,6 +851,46 @@
         }
       }
     },
+    "%lld Vorschläge neu geprüft: bitte noch einmal ansehen." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Vorschlag neu geprüft: bitte noch einmal ansehen."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Vorschläge neu geprüft: bitte noch einmal ansehen."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld suggestion rechecked: please take another look."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld suggestions rechecked: please take another look."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld Vorschläge prüfen" : {
       "localizations" : {
         "en" : {
@@ -1131,6 +1171,16 @@
         }
       }
     },
+    "Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist now adds to your own albums only when they surely fit. These suggestions are open again; nothing changed in your albums."
+          }
+        }
+      }
+    },
     "Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst." : {
       "localizations" : {
         "en" : {
@@ -1187,6 +1237,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist sticks to your changes, in every new analysis too."
+          }
+        }
+      }
+    },
+    "Albumist legt ein neues Album an und ändert „%@“ nicht. Unter „Anpassen“ kannst du stattdessen „%@“ ergänzen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist creates a new album and leaves “%1$@” unchanged. Under “Adjust” you can add to “%2$@” instead."
+          }
+        }
+      }
+    },
+    "Albumist legt ohnehin ein neues Album an und bietet dieses unter „Anpassen“ nicht mehr an. Am Album selbst ändert sich nichts." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist creates a new album anyway and no longer offers this one under “Adjust”. The album itself stays unchanged."
           }
         }
       }
@@ -1737,6 +1807,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The purchase isn’t available right now. Please try again later."
+          }
+        }
+      }
+    },
+    "Der Speicher deines iPhone ist voll, darum konnte Albumist gerade nichts sichern. Gib etwas Speicher frei, dann geht es dort weiter, wo es aufgehört hat." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your iPhone's storage is full, so Albumist could not save just now. Free up some space and it continues where it stopped."
           }
         }
       }
@@ -3781,6 +3861,16 @@
         }
       }
     },
+    "Vorschläge neu geprüft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggestions rechecked"
+          }
+        }
+      }
+    },
     "Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist." : {
       "localizations" : {
         "en" : {
@@ -3917,16 +4007,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add to existing album"
-          }
-        }
-      }
-    },
-    "Vorhandenes Album passt vermutlich" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "An existing album probably fits"
           }
         }
       }
@@ -4131,6 +4211,16 @@
         }
       }
     },
+    "Ähnliches Album gefunden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Similar album found"
+          }
+        }
+      }
+    },
     "Änderungen rückgängig machen?" : {
       "localizations" : {
         "en" : {
@@ -4207,6 +4297,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@” can’t be edited."
+          }
+        }
+      }
+    },
+    "„%@“ nicht mehr anbieten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop offering “%@”"
           }
         }
       }
@@ -9839,6 +9939,646 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Also not counted: %@."
+          }
+        }
+      }
+    },
+    "Sucht neue Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Looking for new photos"
+          }
+        }
+      }
+    },
+    "Städtenamen kommen von Apple, das braucht etwas Zeit. Was jetzt nicht fertig wird, holt Albumist nach, wenn dein iPhone das nächste Mal lädt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Town names come from Apple, which takes a while. Whatever isn't done now, Albumist catches up on the next time your iPhone charges."
+          }
+        }
+      }
+    },
+    "Details" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Details"
+          }
+        }
+      }
+    },
+    "Analyse fortsetzen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resume analysis"
+          }
+        }
+      }
+    },
+    "Apple antwortet gleich" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple will answer shortly"
+          }
+        }
+      }
+    },
+    "Langsamer, weil dein iPhone warm ist" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slower because your iPhone is warm"
+          }
+        }
+      }
+    },
+    "Langsamer, weil der Stromsparmodus an ist" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slower because Low Power Mode is on"
+          }
+        }
+      }
+    },
+    "Geht von selbst weiter. Du musst nichts tun." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continues by itself. You don't need to do anything."
+          }
+        }
+      }
+    },
+    "Unter %lld %% Akku. Geht weiter, sobald dein iPhone lädt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Battery below %lld %%. Continues once your iPhone is charging."
+          }
+        }
+      }
+    },
+    "Macht noch fertig, was gerade läuft." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finishing what is in progress."
+          }
+        }
+      }
+    },
+    "Dauert noch einen Moment." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Just a moment longer."
+          }
+        }
+      }
+    },
+    "Bei %@. Sie macht genau dort weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "At %@. It will continue right there."
+          }
+        }
+      }
+    },
+    "Analyse zu %lld %% fertig" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis %lld %% done"
+          }
+        }
+      }
+    },
+    "Schon fertig: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Already done: %@"
+          }
+        }
+      }
+    },
+    "Ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View"
+          }
+        }
+      }
+    },
+    "Gerade angesehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Just looked at"
+          }
+        }
+      }
+    },
+    "Vorschläge prüfen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Review suggestions"
+          }
+        }
+      }
+    },
+    "Alles passiert auf deinem iPhone. Nur für Städtenamen fragt Albumist bei Apple nach." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Everything happens on your iPhone. Albumist only asks Apple for town names."
+          }
+        }
+      }
+    },
+    "So läuft die Analyse" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "How the analysis works"
+          }
+        }
+      }
+    },
+    "bisher %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ so far"
+          }
+        }
+      }
+    },
+    "noch etwa %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "about %@ left"
+          }
+        }
+      }
+    },
+    "fertig" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "done"
+          }
+        }
+      }
+    },
+    "Gleich fertig" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Almost done"
+          }
+        }
+      }
+    },
+    "Fertig gegen %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done around %@"
+          }
+        }
+      }
+    },
+    "Fertig morgen gegen %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done tomorrow around %@"
+          }
+        }
+      }
+    },
+    "Fertig %@ gegen %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done %1$@ around %2$@"
+          }
+        }
+      }
+    },
+    "%@ · gleich fertig" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · almost done"
+          }
+        }
+      }
+    },
+    "%@ · fertig gegen %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · done around %2$@"
+          }
+        }
+      }
+    },
+    "%@ · fertig morgen gegen %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · done tomorrow around %2$@"
+          }
+        }
+      }
+    },
+    "Läuft auch im Hintergrund" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Also runs in the background"
+          }
+        }
+      }
+    },
+    "Läuft, solange Albumist offen ist" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Runs while Albumist is open"
+          }
+        }
+      }
+    },
+    "Mediathek lesen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read the library"
+          }
+        }
+      }
+    },
+    "Reisen erkennen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Find trips"
+          }
+        }
+      }
+    },
+    "Orte bestimmen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Determine places"
+          }
+        }
+      }
+    },
+    "Bildinhalte erkennen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recognize image contents"
+          }
+        }
+      }
+    },
+    "Text auf Screenshots lesen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read text in screenshots"
+          }
+        }
+      }
+    },
+    "Vorschläge erstellen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create suggestions"
+          }
+        }
+      }
+    },
+    "Welche Fotos es gibt, mit Datum und Ort." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Which photos there are, with date and place."
+          }
+        }
+      }
+    },
+    "Aus Datum und Ort deiner Fotos." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "From the date and place of your photos."
+          }
+        }
+      }
+    },
+    "Länder auf dem iPhone, Städtenamen von Apple." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Countries on your iPhone, town names from Apple."
+          }
+        }
+      }
+    },
+    "Was auf den Fotos zu sehen ist. Der längste Schritt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What the photos show. The longest step."
+          }
+        }
+      }
+    },
+    "Nur Screenshots und Dokumente." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only screenshots and documents."
+          }
+        }
+      }
+    },
+    "Alben, die zu deinen Fotos passen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albums that fit your photos."
+          }
+        }
+      }
+    },
+    "Öffne Albumist, dann geht es bei %@ weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Albumist and it continues at %@."
+          }
+        }
+      }
+    },
+    "von %lld Fotos" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "von %lld Foto"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "von %lld Fotos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "of %lld photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "of %lld photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "von %lld Orten" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "von %lld Ort"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "von %lld Orten"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "of %lld place"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "of %lld places"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "von %lld Screenshots" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "von %lld Screenshot"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "von %lld Screenshots"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "of %lld screenshot"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "of %lld screenshots"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Orte" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Ort"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Orte"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld place"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld places"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos angesehen." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto angesehen."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos angesehen."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Looked at %lld photo."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Looked at %lld photos."
+                }
+              }
+            }
           }
         }
       }

@@ -136,6 +136,8 @@ jobs:
       # not change are reused. The key only picks the starting point; every input is still
       # checked and changed files always recompile. Signing happens in the export, not here.
       - name: Build cache
+        # Off since 16.11.: a restored cache hid a change in SortlyCore (CI 43796841063: 'AlbumMatcher has no member tiedWithBest' although Linux built it). Back on only with a proven fix.
+        if: ${{ false }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Developer/Xcode/DerivedData
@@ -197,6 +199,7 @@ jobs:
         if: always()
         run: rm -rf "$(dirname "$KEY_PATH")"
       - name: Keep the build cache small
+        if: ${{ false }}
         run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
 
   notes:

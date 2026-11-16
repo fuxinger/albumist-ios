@@ -69,6 +69,40 @@ struct PurchaseStoreKitTests {
         return (Purchases(defaults: defaults, productID: productID), defaults)
     }
 
+    /// Like `waitUntil`, without an issue when the time is up.
+    func waitQuietly(timeout: TimeInterval, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { return false }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return true
+    }
+
+    /// A second listener on `Transaction.updates`, independent of the app's code: it shows
+    /// whether StoreKit delivered an update at all, so a missing unlock is put down to the
+    /// app's listener only when StoreKit did deliver.
+    @MainActor final class UpdateObserver {
+        var heard: [String] = []
+        var sawUnlock = false
+        private var task: Task<Void, Never>?
+
+        static func start() -> UpdateObserver {
+            let observer = UpdateObserver()
+            observer.task = Task { @MainActor [weak observer] in
+                for await result in Transaction.updates {
+                    guard let observer else { return }
+                    let update = result.unsafePayloadValue
+                    observer.heard.append("#\(update.id) \(update.productID) revoked \(update.revocationDate != nil)")
+                    if update.productID == Purchases.unlockProductID && update.revocationDate == nil { observer.sawUnlock = true }
+                }
+            }
+            return observer
+        }
+
+        func stop() { task?.cancel() }
+    }
+
     func waitUntil(_ what: @autoclosure () -> String, timeout: TimeInterval = 20, _ condition: () -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
@@ -293,6 +327,8 @@ struct PurchaseStoreKitTests {
         let (running, _) = freshInstall()
         running.start()
         defer { running.stop() }
+        let observer = UpdateObserver.start()
+        defer { observer.stop() }
         try await within("read the entitlements at the start") { await running.refreshEntitlements() }
         #expect(!running.isUnlocked)
         // A running app has listened since its launch. A purchase made right after `start()`
@@ -305,9 +341,19 @@ struct PurchaseStoreKitTests {
         try await within("buy in the session (another device)") { try store.session.buyProduct(productIdentifier: unlock) }
         let bought = try await transactions(store)
         #expect(bought.count == 1)
-        let heard = await waitUntil("running app unlocked by its transaction listener") { running.isUnlocked }
-        storeKitTrace("purchase on another device: listener unlocked \(heard)")
-        #expect(heard)
+        let heard = await waitQuietly(timeout: 20) { running.isUnlocked }
+        storeKitTrace("purchase on another device: app unlocked \(heard); app's listener heard \(running.heardUpdates); independent listener heard \(observer.heard)")
+        // The app's listener acts on every update StoreKit delivers ...
+        #expect(heard || !observer.sawUnlock, "StoreKit delivered the purchase, the app's listener did not unlock")
+        // ... and when StoreKit delivers none, the app shows the purchase when it is back on
+        // screen (a re-read of StoreKit's list), without a restart.
+        if !heard {
+            for _ in 0..<20 where !running.isUnlocked {
+                try await within("back on screen") { await running.becameActive() }
+                if !running.isUnlocked { try await Task.sleep(for: .milliseconds(500)) }
+            }
+        }
+        #expect(running.isUnlocked)
 
         let (secondDevice, _) = freshInstall()
         #expect(!secondDevice.isUnlocked)
@@ -363,6 +409,7 @@ struct PurchaseStoreKitTests {
         defer { clearAfterwards(store) }
         try await requireTestEnvironment()
         let (purchases, _) = freshInstall()
+        defer { purchases.stop() }
         #expect(purchases.product == nil)
         let seen = Seen()
         purchases.confirmPurchase = { product in
@@ -426,6 +473,85 @@ struct PurchaseStoreKitTests {
         #expect(!purchases.isUnlocked)
     }
 
+    /// StoreKit's answers for the re-read tests below, set by the test.
+    @MainActor final class ListAnswers {
+        var list: [PurchaseRules.Entitlement] = []
+        var latest: PurchaseRules.Entitlement?
+    }
+
+    /// The re-read back on screen may only unlock: one empty or lagging list never locks a
+    /// paying user. A refund the listener missed still locks: StoreKit's latest transaction
+    /// carries it, also while the list still shows the purchase.
+    @Test func reReadOnScreenNeverLocksButARefundStillDoes() async {
+        typealias E = PurchaseRules.Entitlement
+        let unlock = Purchases.unlockProductID
+        let (purchases, _) = freshInstall()
+        let answers = ListAnswers()
+        purchases.entitlementsReader = { answers.list }
+        purchases.latestReader = { answers.latest }
+        answers.list = [E(productID: unlock, transactionID: 5)]
+        await purchases.refreshEntitlements()
+        #expect(purchases.isUnlocked, "the launch read finds the purchase")
+
+        answers.list = []
+        await purchases.becameActive()
+        #expect(purchases.isUnlocked, "an empty list back on screen locked a paying user")
+        await purchases.refreshEntitlements(mayLock: false)
+        #expect(purchases.isUnlocked, "a read after a redeemed code locked a paying user")
+
+        answers.list = [E(productID: unlock, transactionID: 5)]
+        answers.latest = E(productID: unlock, isRevoked: true, transactionID: 5)
+        await purchases.becameActive()
+        #expect(!purchases.isUnlocked, "the refund in StoreKit's latest transaction did not lock")
+        answers.latest = nil
+        await purchases.becameActive()
+        #expect(!purchases.isUnlocked, "a later read brought the refunded purchase back")
+
+        answers.list = [E(productID: unlock, transactionID: 5), E(productID: unlock, transactionID: 9)]
+        await purchases.becameActive()
+        #expect(purchases.isUnlocked, "bought again after the refund")
+    }
+
+    /// The re-reads while a purchase is pending: they find the approval and stop then, they
+    /// stop with `stop()`, and they stop after their number of passes.
+    @Test func pendingReReadsUnlockAndStopInTime() async throws {
+        typealias E = PurchaseRules.Entitlement
+        let (purchases, _) = freshInstall()
+        defer { purchases.stop() }
+        let answers = ListAnswers()
+        purchases.entitlementsReader = { answers.list }
+        purchases.pendingCheckInterval = .milliseconds(100)
+        await purchases.handle(.pending)
+        _ = await waitUntil("re-read twice while pending") { purchases.entitlementReads >= 2 }
+        #expect(!purchases.isUnlocked)
+        answers.list = [E(productID: Purchases.unlockProductID, transactionID: 3)]
+        _ = await waitUntil("approval found by a re-read") { purchases.isUnlocked }
+        #expect(purchases.lastError == nil)
+        let afterUnlock = purchases.entitlementReads
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(purchases.entitlementReads == afterUnlock, "re-reads went on after the unlock")
+
+        let (stopped, _) = freshInstall()
+        stopped.entitlementsReader = { [] }
+        stopped.pendingCheckInterval = .milliseconds(100)
+        await stopped.handle(.pending)
+        _ = await waitUntil("re-read while pending") { stopped.entitlementReads >= 1 }
+        stopped.stop()
+        let afterStop = stopped.entitlementReads
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(stopped.entitlementReads == afterStop, "re-reads went on after stop()")
+
+        let (limited, _) = freshInstall()
+        defer { limited.stop() }
+        limited.entitlementsReader = { [] }
+        limited.pendingCheckInterval = .milliseconds(50)
+        limited.pendingCheckCount = 3
+        await limited.handle(.pending)
+        try await Task.sleep(for: .milliseconds(1500))
+        #expect(limited.entitlementReads == 3, "reads: \(limited.entitlementReads)")
+        #expect(!limited.isUnlocked)
+    }
+
     /// Ask to Buy: StoreKit answers the purchase with `.pending` while the parent decides; the
     /// app says so. An approval arrives as the completed purchase: the app's own transaction
     /// listener unlocks, also after a restart. (The session's `buyProduct` ignores
@@ -437,6 +563,9 @@ struct PurchaseStoreKitTests {
         defer { clearAfterwards(store) }
         try await requireTestEnvironment()
         let (purchases, defaults) = freshInstall()
+        // The re-reads while pending are tested on their own (pendingReReadsUnlockAndStopInTime);
+        // here only the listener, or the re-read back on screen, may unlock.
+        purchases.pendingCheckInterval = .seconds(3600)
         purchases.start()
         defer { purchases.stop() }
         let seen = Seen()
@@ -445,6 +574,8 @@ struct PurchaseStoreKitTests {
             seen.products.append(product.id)
             return try seen.answer()
         }
+        let observer = UpdateObserver.start()
+        defer { observer.stop() }
         try await purchaseStep(purchases, "purchase with Ask to Buy")
         #expect(seen.products == [Purchases.unlockProductID])
         #expect(!purchases.isUnlocked)
@@ -452,8 +583,17 @@ struct PurchaseStoreKitTests {
 
         let unlock = Purchases.unlockProductID
         try await within("approval: the purchase completes in the session") { try store.session.buyProduct(productIdentifier: unlock) }
-        let unlocked = await waitUntil("unlocked by the transaction listener after approval") { purchases.isUnlocked }
-        storeKitTrace("Ask to Buy approved: listener unlocked \(unlocked), message \(purchases.lastError ?? "none")")
+        let heard = await waitQuietly(timeout: 20) { purchases.isUnlocked }
+        storeKitTrace("Ask to Buy approved: app unlocked \(heard); app's listener heard \(purchases.heardUpdates); independent listener heard \(observer.heard)")
+        // The app's listener acts on every approval StoreKit delivers ...
+        #expect(heard || !observer.sawUnlock, "StoreKit delivered the approval, the app's listener did not unlock")
+        // ... and when StoreKit delivers none, the app shows it when it is back on screen.
+        if !heard {
+            for _ in 0..<20 where !purchases.isUnlocked {
+                try await within("back on screen") { await purchases.becameActive() }
+                if !purchases.isUnlocked { try await Task.sleep(for: .milliseconds(500)) }
+            }
+        }
         #expect(purchases.isUnlocked)
         #expect(purchases.lastError == nil)
         // A read of StoreKit's list right after the approval (launch, restore, offer code)
@@ -462,7 +602,7 @@ struct PurchaseStoreKitTests {
         #expect(purchases.isUnlocked)
 
         let relaunched = Purchases(defaults: defaults)
-        try await within("read the entitlements after a restart") { await relaunched.refreshEntitlements() }
+        try await readEntitlements(relaunched, until: true, "read the entitlements after a restart")
         #expect(relaunched.isUnlocked)
     }
 

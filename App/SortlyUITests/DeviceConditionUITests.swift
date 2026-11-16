@@ -127,15 +127,22 @@ final class DeviceConditionUITests: XCTestCase {
 
     private var analysisRunning: Bool { app.buttons["Pause"].exists }
 
-    /// "Schritt 4 von 7 · 120 von 412" on the overview, as (step, done, total). Read from one
-    /// snapshot: the element can go away between an `exists` and reading its label, and that
-    /// read would fail the test (test6, run 43743310212).
+    /// The card's progress element (one element since rc-1): value "120 von 412 Fotos, fertig
+    /// gegen 23:40, Schritt 4 von 6, …", as (step, done, total). Read from one snapshot: the
+    /// element can go away between an `exists` and reading it, and that read would fail the
+    /// test (test6, run 43743310212).
     private func analysisCount() -> (step: Int, done: Int, total: Int)? {
-        guard let snapshot = try? app.descendants(matching: .any)["analysis.progress"].firstMatch.snapshot() else { return nil }
-        let digits = snapshot.label.replacingOccurrences(of: ".", with: "")
-        guard let m = digits.firstMatch(of: #/Schritt (\d+) von \d+ · (\d+) von (\d+)/#),
-              let step = Int(m.1), let done = Int(m.2), let total = Int(m.3) else { return nil }
+        guard let text = progressText() else { return nil }
+        let digits = text.replacingOccurrences(of: ".", with: "")
+        guard let s = digits.firstMatch(of: #/Schritt (\d+) von \d+/#), let step = Int(s.1),
+              let m = digits.firstMatch(of: #/(\d+) von (\d+) /#), let done = Int(m.1), let total = Int(m.2) else { return nil }
         return (step, done, total)
+    }
+
+    /// Label and value of the card's progress element, from one snapshot.
+    private func progressText() -> String? {
+        guard let snapshot = try? app.descendants(matching: .any)["analysis.progress"].firstMatch.snapshot() else { return nil }
+        return snapshot.label + " " + ((snapshot.value as? String) ?? "")
     }
 
     /// The overview headline after a run: "Alle 246 Fotos analysiert" or "239 von 246 Fotos
@@ -1147,7 +1154,7 @@ final class DeviceConditionUITests: XCTestCase {
             }
             let asked = Date()
             let progress = analysisCount()
-            let line = (try? app.descendants(matching: .any)["analysis.progress"].firstMatch.snapshot().label) ?? ""
+            let line = progressText() ?? ""
             let answer = Date().timeIntervalSince(asked)
             slowestAnswer = max(slowestAnswer, answer)
             if answer > 10 { print("UI_FACT stress app answered after \(Int(answer)) s at '\(line)'") }

@@ -181,7 +181,7 @@ jobs:
             done ) &
           # Steps as they happen (screenshots at the end), so a shard that runs out of time
           # still shows how far it got; it is stopped before the job's own limit for that.
-          tail -n +1 -f ui-log.txt | grep --line-buffered -aE "error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed" | grep --line-buffered -v "/SourcePackages/" &
+          tail -n +1 -f ui-log.txt | grep --line-buffered -aE "error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_HOST|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error" | grep --line-buffered -v "/SourcePackages/" &
           ( sleep 3900; echo "::error::UI shard ${{ matrix.shard }} stopped after 65 minutes"; kill -INT $XCB ) &
           WATCHDOG=$!
           wait $XCB
@@ -206,6 +206,17 @@ jobs:
             fi
           fi
           grep -aE "A11Y_|PREVIEW_JPEG" ui-log.txt | head -8000
+          # A test runner that ends inside a test leaves no "passed"/"failed" line (run 43816787321:
+          # test 1 vanished after the trial step). XCTest's own step log before the restart and
+          # the crash reports of the runner or the app say where and why.
+          grep -anB60 "Restarting after" ui-log.txt | grep -av "PREVIEW_JPEG" | cut -c 1-300 | head -400 | sed 's/^/UI_RESTART_CONTEXT /'
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips 2>/dev/null | head -30); do
+            case "$(basename "$f")" in
+              *Sortly*|*Runner*|*testmanagerd*|*XCTest*)
+                echo "UI_CRASH_REPORT $f"
+                head -c 4000 "$f" | sed 's/^/UI_CRASH_REPORT /' ;;
+            esac
+          done
           # Unique runtime warnings from the app (timestamps cut off; scene setup and view dumps are noise).
           grep -avE "^Filtering|^Timestamp|SwiftUI:Scenes|_UIHostingView|renderbox" swiftui-log.txt | cut -c 25- | sort | uniq -c | sort -rn | head -40 | sed 's/^/UI_RUNTIME_WARNING /'
           if grep -aqiE "no matching navigationDestination|NavigationLink is presenting|cannot be activated" swiftui-log.txt; then
@@ -393,7 +404,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO > ../a11y-contrast-log.txt 2>&1
           contrast=$?
           for log in ../a11y-log.txt ../a11y-contrast-log.txt; do
-            grep -aE "error:|UI_STEP|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed" "$log" | grep -v "/SourcePackages/" | head -12000
+            grep -aE "error:|UI_STEP|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error" "$log" | grep -v "/SourcePackages/" | head -12000
           done
           # A pass that fails before any test runs leaves nothing for the filter above.
           if [ $contrast -ne 0 ] && ! grep -aq "Test Case" ../a11y-contrast-log.txt; then

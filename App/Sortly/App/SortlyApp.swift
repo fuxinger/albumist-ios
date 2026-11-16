@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct SortlyApp: App {
@@ -9,6 +10,8 @@ struct SortlyApp: App {
     init() {
         BackgroundWork.register()
         UITestSupport.prepareLaunch()
+        // Before launch ends, so the tap on "Analyse fertig" that opened the app arrives.
+        NotificationRouter.register()
     }
 
     var body: some Scene {
@@ -29,11 +32,19 @@ struct SortlyApp: App {
                     }
                     await UITestSupport.didLaunch(model)
                 }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+                    model.timeChanged()
+                }
                 .onChange(of: scenePhase) { _, phase in
                     ContinuedAnalysis.sceneChanged(onScreen: phase == .active)
+                    model.sceneChanged(onScreen: phase == .active)
                     // Back on screen: an analysis that iOS ended goes on by itself, a running
                     // one asks for background time again.
-                    if phase == .active { model.sceneBecameActive() }
+                    if phase == .active {
+                        model.sceneBecameActive()
+                        // An approval or a purchase elsewhere whose update did not arrive.
+                        Task { await purchases.becameActive() }
+                    }
                     // The copy of the decisions for the iPhone backup is current before iOS may
                     // end the app (a background task keeps the app awake for the short write).
                     guard phase == .background else { return }

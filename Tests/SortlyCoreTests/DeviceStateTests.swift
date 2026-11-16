@@ -68,4 +68,24 @@ struct DeviceStateTests {
         #expect(DeviceState(thermal: .critical, batteryLevel: 0.05, isCharging: true).appPace == .wait(.thermal))
         #expect(DeviceState(thermal: .serious, isCharging: true).refinementPauseReason == .thermal)
     }
+
+    /// The card's "Langsamer, weil …" line (progress display T13, P5–P7): only while the run
+    /// does not wait; warm before Low Power Mode; over the whole table.
+    @Test func slowerReasonForEveryCombination() {
+        for s in Self.all {
+            let expected: SlowReason?
+            if case .wait = Self.expectedPace(s) {
+                expected = nil
+            } else if s.thermal == .serious {
+                expected = .warm
+            } else if s.isLowPowerMode {
+                expected = .lowPower
+            } else {
+                expected = nil
+            }
+            #expect(s.slowerReason == expected, "\(s)")
+        }
+        #expect(DeviceState(thermal: .critical, isLowPowerMode: true).slowerReason == nil)
+        #expect(DeviceState(batteryLevel: 0.05, isLowPowerMode: true).slowerReason == nil)
+    }
 }

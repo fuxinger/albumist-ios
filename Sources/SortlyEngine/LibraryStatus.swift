@@ -94,11 +94,11 @@ public enum LibraryStatus {
             proposedIn[area, default: []].formUnion(p.assetIDs)
             albumIn[area, default: []].formUnion(p.assetIDs)
             if isUncertain(p) { uncertainIn[area, default: []].formUnion(p.assetIDs) }
-            note(fittingAlbums(snapshot?.matches[p.id], kind: p.kind), .own, area, p.assetIDs)
+            note(fittingAlbums(snapshot?.matches[p.id], kind: p.kind, title: p.title), .own, area, p.assetIDs)
         }
         for p in dismissed {
             albumIn[p.kind.area, default: []].formUnion(p.assetIDs)
-            note(fittingAlbums(snapshot?.matches[p.id], kind: p.kind), .dismissed, p.kind.area, p.assetIDs)
+            note(fittingAlbums(snapshot?.matches[p.id], kind: p.kind, title: p.title), .dismissed, p.kind.area, p.assetIDs)
         }
         let openIDs = Set(open.map(\.id))
         let byID = Dictionary((open + dismissed).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -107,7 +107,7 @@ public enum LibraryStatus {
             albumIn[s.area, default: []].formUnion(s.assetIDs)
             if openIDs.contains(by.id) { proposedIn[s.area, default: []].formUnion(s.assetIDs) }
             if isUncertain(by) { uncertainIn[s.area, default: []].formUnion(s.assetIDs) }
-            note(fittingAlbums(snapshot?.matches[by.id], kind: by.kind), .standIn, s.area, s.assetIDs)
+            note(fittingAlbums(snapshot?.matches[by.id], kind: by.kind, title: by.title), .standIn, s.area, s.assetIDs)
         }
 
         let resolver = OrganizationStatusResolver(primaryAreas: settings.primaryAreas)
@@ -199,14 +199,11 @@ public enum LibraryStatus {
         return (result, reasons)
     }
 
-    /// The albums that make a suggestion's photos count as sorted: the best match when it fits
-    /// (complete, can be extended, probably fits), and when several albums fit, also every one
-    /// that fits exactly as well (`AlbumMatcher.tiedWithBest`). A read-only album (a smart album
-    /// such as Favourites) never counts.
-    static func fittingAlbums(_ match: MatchResult?, kind: ProposalKind) -> Set<CollectionID> {
-        guard let match, let best = match.best, best.isEditable,
-              [.alreadyComplete, .extendable, .possibleMatch, .multipleMatches].contains(match.status) else { return [] }
-        return Set([best.albumID] + AlbumMatcher().tiedWithBest(match, kind: kind).map(\.albumID))
+    /// The albums that make a suggestion's photos count as sorted (`AlbumMatcher.sortingAlbums`):
+    /// a certain match, or with several matching albums those that are mostly this suggestion.
+    /// A possible match and a read-only album (a smart album such as Favourites) never count.
+    static func fittingAlbums(_ match: MatchResult?, kind: ProposalKind, title: String? = nil) -> Set<CollectionID> {
+        AlbumMatcher().sortingAlbums(match, kind: kind, title: title)
     }
 
     /// Photos with a place or a trip that the ring leaves out (the line under the ring).

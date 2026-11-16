@@ -253,6 +253,24 @@ public struct DeviceState: Sendable, Equatable {
         if thermal == .serious { return .gentle }
         return .normal
     }
+
+    /// Why a run in the app goes slower than usual, said on the card under the count, so a
+    /// finish time that moves later is explained (progress display T13). Only while the run
+    /// does not wait (`appPace` is not `.wait`).
+    public var slowerReason: SlowReason? {
+        if case .wait = appPace { return nil }
+        if thermal == .serious { return .warm }
+        if isLowPowerMode { return .lowPower }
+        return nil
+    }
+}
+
+/// See `DeviceState.slowerReason`.
+public enum SlowReason: String, Sendable, Codable {
+    /// "Langsamer, weil dein iPhone warm ist"
+    case warm
+    /// "Langsamer, weil der Stromsparmodus an ist"
+    case lowPower
 }
 
 /// Device conditions (thermal state, power, network). Implemented with ProcessInfo,

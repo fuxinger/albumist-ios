@@ -305,6 +305,93 @@ struct DecisionLifecycleTests {
         for album in before.albums { #expect(restored[album.id] == album, "seed \(seed): \(album.title) not restored") }
         #expect(Set(restored.albums.map(\.id)) == Set(before.albums.map(\.id)))
     }
+
+    /// Second review 16.11. (8): results saved by an older matching version are matched again
+    /// once at launch, so the fixed rules hold at once and not only after the next analysis.
+    @Test func outdatedMatchesAreMatchedAgainAtLaunch() async throws {
+        let w = try await world()
+        _ = try await w.pipeline.run()
+        var stored = try #require(try await w.pipeline.latestProposals())
+        #expect(stored.matcherVersion == AlbumMatcher.version)
+        #expect(!stored.matches.isEmpty)
+
+        // Saved before the version stamp: the key is missing, it reads as version 0.
+        let json = try JSONEncoder().encode(stored)
+        var object = try #require(try JSONSerialization.jsonObject(with: json) as? [String: Any])
+        object["matcherVersion"] = nil
+        let old = try JSONDecoder().decode(ProposalSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(old.matcherVersion == 0)
+
+        // Current version: left as it is (here: no matches at all).
+        stored.matches = [:]
+        try await w.store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)
+        #expect(try await w.pipeline.refreshMatchesIfOutdated().snapshot?.matches.isEmpty == true)
+        // Older version: matched again and stamped.
+        stored.matcherVersion = 1
+        try await w.store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)
+        let refreshed = try #require(try await w.pipeline.refreshMatchesIfOutdated().snapshot)
+        #expect(refreshed.matcherVersion == AlbumMatcher.version)
+        #expect(!refreshed.matches.isEmpty)
+        #expect(try await w.pipeline.latestProposals()?.matcherVersion == AlbumMatcher.version)
+    }
+
+    /// Re-check 16.11. (3): a decision accepted under the old rules that would extend an album
+    /// without a certain match any more is reported after the launch re-match, so the app sets
+    /// it back to open. Other decisions stay; nothing is reported without a re-match.
+    @Test func oldExtendDecisionsAreReopenedAfterTheRematch() async throws {
+        let w = try await world()
+        _ = try await w.pipeline.run()
+        var stored = try #require(try await w.pipeline.latestProposals())
+        let ps = stored.proposals.filter { !$0.isSensitive && !$0.requiresUserName }
+        #expect(ps.count >= 2)
+        // Accepted earlier: "ergänzen" into "Sommer in Rom" for a suggestion it is no certain
+        // match of, and a new album for another.
+        let decisions: [SortlyID: ProposalDecision] = [ps[0].id: .extendExisting("sommer-rom"),
+                                                       ps[1].id: .createNew(title: nil, folderPath: nil)]
+        #expect(!AlbumMatcher().sortingAlbums(stored.matches[ps[0].id], kind: ps[0].kind, title: ps[0].title).contains("sommer-rom"))
+        try await w.store.setValue(decisions, forKey: AnalysisPipeline.Key.decisions)
+        #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened.isEmpty)
+        stored.matcherVersion = 1
+        try await w.store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)
+
+        // Final check 16.11.: the app ends half way through saving (here: right after the new
+        // matches with their version stamp). Nothing may be saved, or the old "ergänzen" stays.
+        struct Ended: Error {}
+        await #expect(throws: Ended.self) {
+            _ = try await w.pipeline.refreshMatchesIfOutdated(afterEachWrite: { key in
+                if key == AnalysisPipeline.Key.proposals { throw Ended() }
+            })
+        }
+        #expect(try await w.pipeline.latestProposals()?.matcherVersion == 1)
+        #expect(try await w.store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions) == decisions)
+        #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == nil)
+
+        // The next launch does it: decision open again, stamp and count saved with it.
+        #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened == [ps[0].id])
+        let saved = try await w.store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions)
+        #expect(saved == [ps[1].id: .createNew(title: nil, folderPath: nil)])
+        #expect(try await w.pipeline.latestProposals()?.matcherVersion == AlbumMatcher.version)
+        #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == 1)
+        // Once: the results carry the new version now.
+        #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened.isEmpty)
+        #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == 1)
+    }
+
+    /// Review 16.11. (A10): the user dismissed the trip ("Nicht jetzt"), whose own album
+    /// "Italien" already holds it completely. The shown country must not extend that album with
+    /// the photos of other years.
+    @Test func completeAlbumOfADismissedSuggestionIsNotExtended() throws {
+        let y19 = Set((0..<150).map { AssetID("it19-\($0)") }), y23 = Set((0..<150).map { AssetID("it23-\($0)") })
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: y19)
+        let trip = AlbumProposal(id: SortlyID("t19"), kind: .trip, title: "Italien · Mai 2019", assetIDs: y19)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
+                                    folderPath: ["Länder"], assetIDs: y19.union(y23))
+        let matches = AnalysisPipeline.match([country], dismissed: [trip], against: CollectionInventory([album]),
+                                             overrides: OverrideSet(), assignments: [:])
+        #expect(matches[trip.id]?.status == .alreadyComplete)
+        let decision = ProposalDecision.recommended(for: country, match: matches[country.id])
+        #expect(decision == .createNew(title: nil, folderPath: nil), "\(String(describing: matches[country.id]?.status))")
+    }
 }
 
 /// Small deterministic generator for the randomized cases.
@@ -317,5 +404,40 @@ struct SplitMix {
         z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
         z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
         return z ^ (z >> 31)
+    }
+}
+
+/// Speed of the matching with many places and trips (re-check 16.11.: the one-trip rule
+/// counted trips per suggestion and doubled the time). Shown and dismissed suggestions, as
+/// the pipeline matches them.
+@Suite("Matching speed with places and trips")
+struct PlaceMatchingSpeedTests {
+    @Test func placeHeavyLibraryMatchesQuickly() {
+        func ids(_ range: Range<Int>) -> Set<AssetID> { Set(range.map { AssetID("x-\($0)") }) }
+        // 400 trips of 100 photos, 10,000 photos at home.
+        let trips = (0..<400).map { ids(($0 * 100)..<($0 * 100 + 100)) }
+        var albums = [CollectionSnapshot(id: "alle", title: "Alle", assetIDs: ids(0..<50_000))]
+        for i in 0..<400 { albums.append(CollectionSnapshot(id: CollectionID("t\(i)"), title: "Reise \(i)", assetIDs: trips[i])) }
+        for i in 0..<300 { albums.append(CollectionSnapshot(id: CollectionID("p\(i)"), title: "Land \(i % 60)", assetIDs: ids((i * 100)..<(i * 100 + 60)))) }
+        // Every photo in about 15 more albums ("Auswahl", "Beste", exports).
+        for i in 0..<400 { albums.append(CollectionSnapshot(id: CollectionID("s-\(i)"), title: "Auswahl \(i)", assetIDs: ids((i * 100)..<min(50_000, i * 100 + 1500)))) }
+        var open: [AlbumProposal] = [], dismissed: [AlbumProposal] = []
+        // 60 countries of 6–7 trips, 200 cities of 2 trips each.
+        for c in 0..<60 {
+            let members = (0..<400).filter { $0 % 60 == c }.reduce(into: Set<AssetID>()) { $0.formUnion(trips[$1]) }
+            open.append(AlbumProposal(id: SortlyID("c\(c)"), kind: .placeCollection(.country), title: "Land \(c)", assetIDs: members))
+        }
+        for c in 0..<200 {
+            let p = AlbumProposal(id: SortlyID("s\(c)"), kind: .placeCollection(.locality), title: "Stadt \(c)",
+                                  assetIDs: trips[c].union(trips[c + 200]))
+            if c % 4 == 0 { dismissed.append(p) } else { open.append(p) }
+        }
+        let start = Date()
+        let matches = AnalysisPipeline.match(open, dismissed: dismissed, against: CollectionInventory(albums), overrides: OverrideSet(),
+                                             assignments: [:], trips: trips)
+        let seconds = Date().timeIntervalSince(start)
+        print("PLACE-PROBE seconds=\(seconds)")
+        #expect(matches.count == open.count + dismissed.count)
+        #expect(seconds < 5)
     }
 }

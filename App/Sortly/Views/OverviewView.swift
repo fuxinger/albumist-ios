@@ -8,6 +8,7 @@ import SortlyEngine
 struct OverviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The ring grows with the text size, so "100 %" still fits inside at the largest sizes.
     @ScaledMetric(relativeTo: .title3) private var ringSide: CGFloat = 84
     @State private var showSettings = false
@@ -25,6 +26,9 @@ struct OverviewView: View {
                 if let restore = model.restoredFromBackup {
                     RestoredFromBackupCard(restore: restore)
                 }
+                if model.recheckedSuggestions > 0 {
+                    RecheckedSuggestionsCard(count: model.recheckedSuggestions)
+                }
                 if model.access == .limited { LimitedAccessCard() }
                 statusCard
                 analysisCard
@@ -34,7 +38,9 @@ struct OverviewView: View {
                         showStarterPlan = true
                     }
                 }
-                if !model.openProposals.isEmpty {
+                // While the analysis runs, "Schon fertig … Ansehen" on its card leads there; when it
+                // has just finished, its card has "Vorschläge prüfen" (point 3, 4: not twice).
+                if !model.openProposals.isEmpty, !model.analysis.isRunning, model.analysisFinished == nil {
                     NavigationLink {
                         ProposalListView(area: nil)
                     } label: {
@@ -115,7 +121,7 @@ struct OverviewView: View {
                             // Photos already in a matching album for one main area but not yet for the
                             // other count as partly sorted; without this line the ring looked too low
                             // (device test 15.11.: 157 sorted, 1,199 partly).
-                            Text("Dazu \(model.progress.partially, format: .number) teilweise sortiert")
+                            Text("Dazu \(model.progress.partially) teilweise sortiert")
                                 .font(.subheadline)
                                 .monospacedDigit()
                         }
@@ -156,10 +162,10 @@ struct OverviewView: View {
     private var leftOutText: String? {
         var parts: [String] = []
         if model.leftOut.home > 0 {
-            parts.append(String(localized: "\(model.leftOut.home, format: .number) Fotos von zu Hause"))
+            parts.append(String(localized: "\(model.leftOut.home) Fotos von zu Hause"))
         }
         if model.leftOut.noAlbum > 0 {
-            parts.append(String(localized: "\(model.leftOut.noAlbum, format: .number) Fotos, für die sich kein eigenes Album lohnt"))
+            parts.append(String(localized: "\(model.leftOut.noAlbum) Fotos, für die sich kein eigenes Album lohnt"))
         }
         guard !parts.isEmpty else { return nil }
         return String(localized: "Außerdem nicht mitgezählt: \(parts.formatted(.list(type: .and))).")
@@ -168,9 +174,17 @@ struct OverviewView: View {
     @ViewBuilder
     private var analysisCard: some View {
         Card {
-            if model.analysis.isRunning {
-                runningAnalysis
+            if let state = model.analysisCard {
+                // Running, waiting, pausing, paused by the user, just finished, quick check.
+                AnalysisProgressCard(state: state)
+                // The finish moment sits on top of the plain card, which still says what is
+                // analysed and offers "Neu prüfen" (UI run 43796538247, test6: after a long run
+                // the card had neither "Alle 246 Fotos analysiert" nor "Neu prüfen").
+                if case .finished = state { finishedAnalysis }
+                // The photo mosaic: first analysis only (Fuchs 16.11., `ScanShowRule`).
+                if model.showsScanShow { ScanShow() }
             } else if let reason = model.analysis.lastReport?.pausedBecause {
+                // Ended by the device, iOS or the photo access: the reason and the way on.
                 Text(reason.label).font(.headline)
                 Text("Die Analyse setzt genau dort fort, wo sie aufgehört hat.").font(.subheadline).foregroundStyle(.secondary)
                 Button("Fortsetzen") { model.startAnalysis(userInitiated: true) }.buttonStyle(SecondaryButtonStyle())
@@ -181,91 +195,8 @@ struct OverviewView: View {
                 trialNote(year)
             }
         }
-    }
-
-    /// A check for new photos after everything was analysed once: no stage numbers and no bar
-    /// that starts at zero again, only a spinner, unless there is real work to show.
-    private var isQuickCheck: Bool {
-        let analysis = model.analysis
-        guard analysis.kind == .check else { return false }
-        if let stage = analysis.stage, [.content, .text].contains(stage), analysis.remaining >= 50 { return false }
-        return true
-    }
-
-    private var runningTitle: LocalizedStringKey {
-        let analysis = model.analysis
-        if analysis.isCatchingUp { return "Macht da weiter, wo sie aufgehört hat" }
-        if isQuickCheck { return "Prüft auf neue Fotos" }
-        return analysis.stage?.label ?? "Analyse läuft"
-    }
-
-    /// Pause, or right after the tap what happens now: the photos in work are finished first.
-    @ViewBuilder
-    private var pauseControl: some View {
-        if model.analysis.pausing {
-            HStack(spacing: Theme.Spacing.xs) {
-                ProgressView().controlSize(.small)
-                Text("Wird angehalten …").font(.subheadline).foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .combine)
-        } else {
-            Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
-        }
-    }
-
-    @ViewBuilder
-    private var runningAnalysis: some View {
-        let analysis = model.analysis
-        ViewThatFits(in: .horizontal) {
-            HStack {
-                Text(runningTitle).font(.headline)
-                if isQuickCheck { ProgressView().controlSize(.small) }
-                Spacer()
-                pauseControl
-            }
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Text(runningTitle).font(.headline)
-                pauseControl
-            }
-        }
-        // Every full analysis (the first one, after "Analyse neu aufbauen" or another part of
-        // the library), not the short check for new photos (Fuchs 15.11.: "wo sind die
-        // Animationen?" after a rebuild with albums already made).
-        if model.analysis.kind != .check {
-            ScanShow()
-        }
-        if !isQuickCheck {
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                ProgressView(value: analysis.shownOverall)
-                    .tint(Theme.accent)
-                    .animation(.smooth, value: analysis.shownOverall)
-                let steps = AnalysisPipeline.Stage.allCases.count
-                Group {
-                    if let resume = analysis.resumeFrom, analysis.isCatchingUp {
-                        Text("Gleich wieder bei Schritt \(resume.stage) von \(steps)")
-                    } else if let stage = analysis.stage {
-                        if analysis.total > 0 {
-                            Text("Schritt \(stage.number) von \(steps) · \(analysis.completed.formatted()) von \(analysis.total.formatted())")
-                        } else {
-                            Text("Schritt \(stage.number) von \(steps)")
-                        }
-                    }
-                }
-                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-            }
-            .accessibilityElement(children: .combine) // one element: bar plus "150 von 240"
-            .accessibilityIdentifier("analysis.progress")
-        }
-        if let waiting = analysis.waiting {
-            Label(waiting == .batteryLow ? "Wartet, bis der Akku lädt. Geht dann von selbst weiter." : "Kurze Pause, das iPhone ist sehr warm. Geht von selbst weiter.",
-                  systemImage: waiting == .batteryLow ? "battery.25percent" : "thermometer.medium")
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        } else if !isQuickCheck {
-            Text("Du kannst Albumist verlassen. Die Analyse geht danach genau hier weiter.")
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        // A crossfade between states (running, paused, finished …), not with every count.
+        .animation(reduceMotion ? nil : .smooth, value: model.analysisCard?.phase)
     }
 
     @ViewBuilder
@@ -373,7 +304,9 @@ struct OverviewView: View {
     private func areaRow(_ area: OrganizationArea, proposals: [AlbumProposal]) -> some View {
         let open = proposals.filter { model.decisions[$0.id] == nil && model.match(for: $0)?.status != .alreadyComplete }.count
         let existing = proposals.filter { p in
-            model.match(for: p).map { [MatchStatus.alreadyComplete, .extendable, .possibleMatch].contains($0.status) } ?? false
+            // The same albums as the ring (`AlbumMatcher.sortingAlbums`): a possible match gets
+            // an album of its own, several matching albums count only when mostly this suggestion.
+            !AlbumMatcher().sortingAlbums(model.match(for: p), kind: p.kind, title: p.title).isEmpty
         }.count
         // "0 Alben gefunden" read like an error: only mention albums that exist.
         var parts = [String(localized: "\(proposals.count) Vorschläge")]
@@ -479,6 +412,29 @@ struct RestoredFromBackupCard: View {
             Button("OK") { model.restoredFromBackup = nil }
                 .buttonStyle(SecondaryButtonStyle())
                 .accessibilityIdentifier("overview.restoredFromBackup.ok")
+        }
+    }
+}
+
+/// Shown once after an update made the rules for the user's own albums stricter (re-check
+/// 16.11.): suggestions whose "ergänzen" was chosen under the old rules are open again, so
+/// nothing changes in an album without the user looking again.
+struct RecheckedSuggestionsCard: View {
+    @Environment(AppModel.self) private var model
+    var count: Int
+
+    var body: some View {
+        Card {
+            Label("Vorschläge neu geprüft", systemImage: "checklist").font(.headline)
+            Text("\(count) Vorschläge neu geprüft: bitte noch einmal ansehen.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("OK") { model.dismissRecheckNotice() }
+                .buttonStyle(SecondaryButtonStyle())
+                .accessibilityIdentifier("overview.rechecked.ok")
         }
     }
 }

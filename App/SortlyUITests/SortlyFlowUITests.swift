@@ -30,6 +30,12 @@ final class SortlyFlowUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
+    /// "16 Vorschläge prüfen", or "1 Vorschlag prüfen" once a single suggestion is left open
+    /// (UI run 43796844064: the locked run after a complete flow found only the singular).
+    private func reviewSuggestionsButton() -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9.]+ Vorschl(ag|äge) prüfen.*")).firstMatch
+    }
+
     /// The search tab (`Tab(role: .search)`) carries the system's own label.
     private func searchTabButton() -> XCUIElement {
         for label in ["Suchen", "Suche", "Search"] where app.tabBars.buttons[label].exists {
@@ -115,6 +121,16 @@ final class SortlyFlowUITests: XCTestCase {
     }
 
     private func audit(_ screen: String) {
+        // The screen first comes to rest (a ring or count still moving after an analysis):
+        // an audit of a screen in motion ends the whole test (see `UITestOnboarding`).
+        // One snapshot per check (labels and frames); element addresses differ every time.
+        var last = ""
+        for _ in 0..<6 {
+            let tree = app.debugDescription.replacing(#/0x[0-9a-f]+/#, with: "")
+            if tree == last { break }
+            last = tree
+            sleep(1)
+        }
         // An element that changes while the audit reads the screen (a progress bar finishing)
         // makes XCTest record "Failed to get matching snapshot". That says nothing about the app,
         // so only that internal error is expected; every other failure still counts.
@@ -186,20 +202,23 @@ final class SortlyFlowUITests: XCTestCase {
         return false
     }
 
-    /// The overview says the analysis is done ("Alle 412 Fotos analysiert") and nothing runs
-    /// (no "Pause").
+    /// The overview says the analysis is done ("Alle 412 Fotos analysiert", or "Analyse fertig"
+    /// right after a long run) and nothing runs (no "Pause").
     private var analysisIdle: Bool {
-        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists) && !app.buttons["Pause"].exists
+        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
+            && !app.buttons["Pause"].exists
     }
 
-    /// "Schritt 4 von 7 · 120 von 412" on the overview, as (step, done, total).
-    /// Read from one snapshot: the element can go away between an `exists` and reading its
-    /// label, and that read failed test6 (run 43743310212).
+    /// The card's progress element (one element, B1): value "120 von 412 Fotos, fertig gegen
+    /// 23:40, Schritt 4 von 6, …", as (step, done, total). Read from one snapshot: the element
+    /// can go away between an `exists` and reading it, and that read failed test6 (run
+    /// 43743310212).
     private func analysisCount() -> (step: Int, done: Int, total: Int)? {
         guard let snapshot = try? app.descendants(matching: .any)["analysis.progress"].firstMatch.snapshot() else { return nil }
-        let digits = snapshot.label.replacingOccurrences(of: ".", with: "")
-        guard let m = digits.firstMatch(of: #/Schritt (\d+) von \d+ · (\d+) von (\d+)/#),
-              let step = Int(m.1), let done = Int(m.2), let total = Int(m.3) else { return nil }
+        let text = ((snapshot.value as? String) ?? "") + " " + snapshot.label
+        let digits = text.replacingOccurrences(of: ".", with: "")
+        guard let s = digits.firstMatch(of: #/Schritt (\d+) von \d+/#), let step = Int(s.1),
+              let m = digits.firstMatch(of: #/(\d+) von (\d+) /#), let done = Int(m.1), let total = Int(m.2) else { return nil }
         return (step, done, total)
     }
 
@@ -311,10 +330,20 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertFalse(unreadable.exists, "Demo photos unreadable \(when): \(unreadable.label)", file: file, line: line)
     }
 
+    /// Set by test 1 at its start and its end; the runner keeps them for the later tests.
+    /// An audit that meets a screen in motion makes XCTest record "Failed to get matching
+    /// snapshot" (expected in `audit`), and that issue ends the test method: test 1 then
+    /// "passed" after the overview audit having done nothing more (runs 43773339053 and
+    /// 43804947107: no "A11Y_AUDIT_DONE overview", no plan applied, so test 4's backup had
+    /// no history to bring back). Test 2 reports such a cut-off test 1 as a failure. The
+    /// markers are files (`UITestOnboarding`): run 43816787321 lost the test runner inside
+    /// test 1, and the restarted runner began with fresh static flags.
+
     /// The first start as a user sees it: onboarding (notifications declined), demo library,
     /// analysis, overview, starter set, suggestions, the trip list, applying and the receipt.
     func test1_FullFlow() {
         continueAfterFailure = true
+        UITestOnboarding.fullFlowStarts()
         launch()
 
         // Onboarding
@@ -410,7 +439,7 @@ final class SortlyFlowUITests: XCTestCase {
         }
 
         // Suggestions
-        if tap(button("Vorschläge prüfen"), "open suggestions", timeout: 20) {
+        if tap(reviewSuggestionsButton(), "open suggestions", timeout: 20) {
             sleep(1)
             shot("07-suggestions"); audit("suggestions")
             // Rows live in a List (collection view), not a scroll view. The first cell can be
@@ -738,6 +767,8 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Fertig"), "close settings after trip reset")
             _ = waitStable("analysis after trip reset", timeout: 180) { analysisIdle }
         }
+        UITestOnboarding.fullFlowFinished()
+        print("UI_STEP_OK full flow reached its end")
     }
 
     /// Design review D4 (15.11.): "Ignorieren" can be taken back, right after the action
@@ -789,7 +820,14 @@ final class SortlyFlowUITests: XCTestCase {
             if photos.count > 0, tap(photos.element(boundBy: 0), "open ignored photo") {
                 sleep(1)
                 openPhotoInfo()
-                if tap(app.buttons["detail.unignore"], "unignore in detail") {
+                // The info sheet opens at half height and its List builds rows only on
+                // screen: the action at the end is not in the tree until the sheet is pulled
+                // up (UI run 43779950348).
+                let unignore = app.buttons["detail.unignore"]
+                var pulls = 0
+                let sheet = app.collectionViews["detail.list"]
+                while !(unignore.exists && unignore.isHittable) && pulls < 4 { (sheet.exists ? sheet : app).swipeUp(); pulls += 1; sleep(1) }
+                if tap(unignore, "unignore in detail") {
                     sleep(2)
                     closeViewerIfOpen()
                     let empty = anything("Keine Fotos").waitForExistence(timeout: 5)
@@ -814,8 +852,11 @@ final class SortlyFlowUITests: XCTestCase {
 
     /// Reise-Werkstatt (I07), from the trip list. The demo library's Iceland trip is
     /// Reykjavík (1.–4. August) and Vík (5.–7. August) in one: split it at 5 August, then
-    /// merge the two parts again, so the rest of the run sees the trips as before. Trip rows
-    /// are named by place and month ("Island, August 2023"), so the parts are found by month.
+    /// merge the two parts again, so the rest of the run sees the trips as before.
+    /// Found by month and year, the one part of a title that does not depend on where the
+    /// place names come from: with Apple's towns the trip is "Island, August 2023", with the
+    /// offline map alone "Reykjavík, August 2023" (UI run 43779950348 looked for "Island" and
+    /// scrolled past it); after the split the parts may carry two different places.
     private func tripWorkshop() {
         let iceland = "August 2023"
         func tripRows(_ text: String) -> XCUIElementQuery {
@@ -890,9 +931,48 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(whole, "After the merge the trip is not one again")
     }
 
+    /// Test 1 did not reach its end (or did not run): the app may still be at its welcome
+    /// screen. One plain start finishes the onboarding and the demo library first, so a
+    /// cut-off test 1 does not fail every later test (run 43816787321: 13 failures).
+    private func completeOnboardingIfCutOff(_ test: String) {
+        guard !UITestOnboarding.fullFlowReachedItsEnd else { return }
+        launch()
+        if UITestOnboarding.completeIfNeeded(app, in: test) { shot("x-onboarded-again-\(test)") }
+    }
+
+    /// Creates albums once if "Verlauf und Rückgängig" is empty: the starter set, else the
+    /// suggestions already selected.
+    private func ensureHistory() {
+        guard tap(app.buttons["Einstellungen"], "settings before backup"),
+              tap(app.buttons["settings.history"], "history before backup", timeout: 5) else { return }
+        sleep(1)
+        let empty = app.staticTexts["Noch keine Änderungen"].exists
+        print("UI_FACT history empty before backup \(empty)")
+        back(); sleep(1)
+        tap(button("Fertig"), "close settings before backup")
+        sleep(1)
+        guard empty else { return }
+        let starter = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ Alben (kostenlos )?anlegen")).firstMatch
+        let selected = button("ausgewählte Alben anlegen")
+        let open = starter.waitForExistence(timeout: 10) ? starter : selected
+        guard tap(open, "open a plan for the backup", timeout: 10),
+              app.navigationBars["Vorschau"].waitForExistence(timeout: 20),
+              tap(app.buttons["plan.apply"], "apply a plan for the backup", timeout: 30) else { return }
+        let done = button("Rückgängig machen").waitForExistence(timeout: 900)
+        print(done ? "UI_STEP_OK plan for the backup applied" : "UI_STEP_MISSING plan for the backup applied")
+        XCTAssertTrue(done, "The plan for the backup did not finish")
+        back(); sleep(2)
+        _ = waitStable("analysis before backup", timeout: 180) { analysisIdle }
+    }
+
     /// Same app state, but with the largest accessibility text size in dark mode.
     func test2_LargeTextDarkMode() {
         continueAfterFailure = true
+        if UITestOnboarding.fullFlowWasCutOff {
+            print("UI_STEP_MISSING full flow reached its end")
+            XCTFail("test1_FullFlow stopped before its end (an accessibility audit cut off, or the test runner restarted)")
+        }
+        completeOnboardingIfCutOff("test2")
         prepare()
         XCUIDevice.shared.appearance = .dark
         launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-SortlyUITestDark"])
@@ -983,6 +1063,7 @@ final class SortlyFlowUITests: XCTestCase {
     /// Third run: every tab, every row, one level deep.
     func test3_TapThroughSweep() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test3")
         prepare()
         sleep(5)
         sweep("Übersicht", depth: 0)
@@ -994,7 +1075,7 @@ final class SortlyFlowUITests: XCTestCase {
         }
         // Suggestions list, the screen that had dead rows.
         tabButton("Übersicht").tap(); sleep(1)
-        let suggestions = button("Vorschläge prüfen")
+        let suggestions = reviewSuggestionsButton()
         if suggestions.waitForExistence(timeout: 5) {
             suggestions.tap(); sleep(2)
             sweep("Vorschläge", depth: 0, strict: true)
@@ -1010,11 +1091,16 @@ final class SortlyFlowUITests: XCTestCase {
     /// must bring the decisions and the history back and say so.
     func test4_DecisionsComeBackAfterRebuild() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test4")
         prepare()
         // Decisions and a plan in the history, made in a run that keeps the backup copy.
         launch(["-SortlyUITestBackup"])
         applyRecommended("backup", relaunchWith: ["-SortlyUITestBackup"])
         sleep(5)
+        // The copy must hold a history to bring back: when the earlier tests left none (test 1
+        // cut off before its plan), this test creates one first instead of testing a backup
+        // that has nothing to restore.
+        ensureHistory()
         // Going to the background writes the copy.
         XCUIDevice.shared.press(.home)
         sleep(4)
@@ -1063,6 +1149,7 @@ final class SortlyFlowUITests: XCTestCase {
     /// (Fortsetzen and Rückgängig: DeviceConditionUITests.test07.)
     func test5_InterruptedPlanCanBeLeftAndRetried() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test5")
         prepare()
         // The first change in Photos goes through at once, every later one waits 30 s, so the
         // app is always closed half way.
@@ -1070,7 +1157,7 @@ final class SortlyFlowUITests: XCTestCase {
         _ = waitStable("analysis idle before interruption", timeout: 120) { analysisIdle }
         // Select something to apply: the selection of earlier runs, else the recommended ones.
         var apply = button("ausgewählte Alben anlegen")
-        if !apply.waitForExistence(timeout: 5), tap(button("Vorschläge prüfen"), "open suggestions for interruption", timeout: 20) {
+        if !apply.waitForExistence(timeout: 5), tap(reviewSuggestionsButton(), "open suggestions for interruption", timeout: 20) {
             sleep(1)
             if button("empfohlene auswählen").waitForExistence(timeout: 5) { button("empfohlene auswählen").tap(); sleep(1) }
             back(); sleep(1)
@@ -1144,6 +1231,7 @@ final class SortlyFlowUITests: XCTestCase {
     /// year: choosing one shows it on the overview, "Alle Jahre" takes it back.
     func test6_AnalysisKeepsGoingThroughBackgroundAndTabs() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test6")
         prepare()
         launch(["-SortlyUITestSlowAnalysis"])
         _ = waitStable("analysis idle before rebuild", timeout: 300) { analysisIdle }
@@ -1199,7 +1287,7 @@ final class SortlyFlowUITests: XCTestCase {
         let running = app.buttons["Pause"].exists || analysisIdle
         print(running ? "UI_STEP_OK analysis still there after background" : "UI_STEP_MISSING analysis still there after background")
         XCTAssertTrue(running, "After coming back the analysis neither runs nor is done")
-        XCTAssertFalse(app.buttons["Fortsetzen"].exists, "Coming back from the background paused the analysis")
+        XCTAssertFalse(app.buttons["analysis.resume"].exists, "Coming back from the background paused the analysis")
         record("after background")
         shot("61-after-background")
 

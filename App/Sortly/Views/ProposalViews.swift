@@ -41,12 +41,12 @@ struct ProposalListView: View {
         }
     }
 
-    /// Open suggestions that may be accepted in one go: at least "likely", no name needed,
-    /// a clear recommended action, never sensitive ones (prompt §8).
+    /// Open suggestions that may be accepted in one go: the same safe list as "Dein Startpaket"
+    /// (`ProposalDecision.isSafeToAcceptUnseen`; never sensitive ones, prompt §8, and no
+    /// possible match, review 16.11.).
     private var recommendable: [AlbumProposal] {
         proposals.filter { p in
-            model.decisions[p.id] == nil && p.reliability >= .likely && !p.isSensitive && !p.requiresUserName
-                && model.recommendedDecision(for: p).isAccepted
+            model.decisions[p.id] == nil && ProposalDecision.isSafeToAcceptUnseen(p, match: model.match(for: p))
         }
     }
 
@@ -211,11 +211,22 @@ struct ProposalDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("Alle \(model.members(of: proposal).count) Fotos ansehen"))
+                // The cover's colours glow behind the photos and end just below them, so the
+                // text under them sits on the plain background. Behind the text, XCTest's
+                // contrast audit kept failing clearly readable lines (8.9:1 measured in the
+                // screenshot) whatever the wash's colours were: "31 photos in Italien.",
+                // "LÄNDER UND ORTE · SICHER" (UI runs 2-4, 43773339053, 43779950348).
+                .background(alignment: .top) {
+                    PhotoGlow(id: model.previewIDs(for: proposal, count: 1).first ?? proposal.coverAssetID)
+                        .padding(.horizontal, -Theme.Spacing.l)
+                        .padding(.top, -240)
+                        .padding(.bottom, -Theme.Spacing.s)
+                }
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     // Tapping the label explains what "Sicher" or "Wahrscheinlich" means.
                     Button { explainReliability = true } label: {
-                        // On the photo wash only the measured grey is sure to keep 4.5:1; the
+                        // The measured grey keeps 4.5:1 on any background; the
                         // symbol alone carries the accent (design review W18). 44 pt to tap (W9).
                         HStack(spacing: 4) {
                             Text("\(Text(proposal.kind.area.title)) · \(Text(proposal.reliability.label))")
@@ -261,7 +272,7 @@ struct ProposalDetailView: View {
                         }
                     }
                     ForEach(Array(proposal.reasons.enumerated()), id: \.offset) { _, reason in
-                        Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(Theme.secondaryText) // sits on the photo wash
+                        Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(Theme.secondaryText) // below the photo glow, on the plain background
                     }
                 }
 
@@ -320,15 +331,8 @@ struct ProposalDetailView: View {
             }
             .padding(Theme.Spacing.l)
         }
-        .background(alignment: .top) {
-            // Each suggestion gets its own soft colours from its cover photo.
-            ZStack(alignment: .top) {
-                Theme.background
-                PhotoGlow(id: model.previewIDs(for: proposal, count: 1).first ?? proposal.coverAssetID)
-                    .frame(height: 440)
-            }
-            .ignoresSafeArea()
-        }
+        // Each suggestion gets its own soft colours from its cover photo: behind the photos above.
+        .background(Theme.background.ignoresSafeArea())
         .navigationTitle("Vorschlag")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { name = model.userTitles[proposal.id] ?? "" }
@@ -400,10 +404,11 @@ struct ProposalDetailView: View {
                 Label {
                     Text(match.status.label).font(.headline)
                 } icon: {
-                    Image(systemName: match.status == .newAlbumRequired ? "plus.rectangle.on.folder" : "checkmark.circle.fill")
+                    // A possible match gets a new album too: no check mark that reads as "done".
+                    Image(systemName: [.newAlbumRequired, .possibleMatch].contains(match.status) ? "plus.rectangle.on.folder" : "checkmark.circle.fill")
                         .foregroundStyle(match.status.tint)
                 }
-                ForEach(Array(match.reasons.enumerated()), id: \.offset) { _, reason in
+                ForEach(Array(shownReasons(match).enumerated()), id: \.offset) { _, reason in
                     Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(.secondary)
                 }
                 if let choice = chosenAlbumText {
@@ -412,8 +417,16 @@ struct ProposalDetailView: View {
                 }
                 // "Passt nicht" names one album; with several albums the choice happens under "Album auswählen".
                 if let best = match.best, best.isEditable, ![.newAlbumRequired, .multipleMatches].contains(match.status) {
+                    // A possible match already gets a new album: the button only stops offering it.
+                    let onlyOffered = match.status == .possibleMatch
                     Button { rejectingMatch = true } label: {
-                        Text("„\(best.albumTitle)“ passt nicht")
+                        Group {
+                            if onlyOffered {
+                                Text("„\(best.albumTitle)“ nicht mehr anbieten")
+                            } else {
+                                Text("„\(best.albumTitle)“ passt nicht")
+                            }
+                        }
                             .font(.subheadline.weight(.semibold))
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())
@@ -423,7 +436,11 @@ struct ProposalDetailView: View {
                                 Task { await model.rejectMatch(best.albumID, for: proposal) }
                             }
                         } message: {
-                            Text("Albumist merkt sich das und schlägt stattdessen ein neues oder ein anderes passendes Album vor. Am Album selbst ändert sich nichts.")
+                            if onlyOffered {
+                                Text("Albumist legt ohnehin ein neues Album an und bietet dieses unter „Anpassen“ nicht mehr an. Am Album selbst ändert sich nichts.")
+                            } else {
+                                Text("Albumist merkt sich das und schlägt stattdessen ein neues oder ein anderes passendes Album vor. Am Album selbst ändert sich nichts.")
+                            }
                         }
                 }
             }
@@ -436,9 +453,17 @@ struct ProposalDetailView: View {
         return false
     }
 
-    /// The user's pick from "Anpassen", shown where Albumist could not decide alone.
+    /// "Albumist legt ein neues Album an" is not true any more once the user picked the
+    /// album under "Anpassen"; "Deine Wahl" says what happens instead.
+    private func shownReasons(_ match: MatchResult) -> [MatchReason] {
+        guard case .extendExisting = model.decision(for: proposal) else { return match.reasons }
+        return match.reasons.filter { if case .keptUnchangedUntilChosen = $0 { false } else { true } }
+    }
+
+    /// The user's pick from "Anpassen", shown where Albumist could not decide alone (several
+    /// albums, none clearly, or only a possible match).
     private var chosenAlbumText: String? {
-        guard let match, [.multipleMatches, .ambiguous].contains(match.status) else { return nil }
+        guard let match, [.multipleMatches, .ambiguous, .possibleMatch].contains(match.status) else { return nil }
         switch model.decision(for: proposal) {
         case .extendExisting(let id):
             let title = model.inventory[id]?.title ?? ""

@@ -4,7 +4,9 @@ import Testing
 import SortlyTestSupport
 
 /// Re-review of "Dein Zuhause" (16.11.): the home places taken from the photos around each
-/// chosen home stay linear on a library of about 50,000 photos.
+/// chosen home stay linear. Measured in a release build on about 50,000 photos with three homes:
+/// 0.03 s (3.0 s before), the search index 0.8 s (4.8 s before). The test counts instead of
+/// timing, on a smaller library: a timed test on CI slows the other timed tests running beside it.
 @Suite("Re-review: Dein Zuhause timing")
 struct ReReviewHomeTimingTests {
     static let hamburg = GeoCoordinate(latitude: 53.5511, longitude: 9.9937)
@@ -21,13 +23,13 @@ struct ReReviewHomeTimingTests {
             (Fixture.Places.gardaLake, PlaceComponents(isoCountryCode: "IT", country: "Italien", administrativeArea: "Venetien", subAdministrativeArea: "Verona", locality: "Malcesine")),
         ]
         var lib = LibraryBuilder()
-        lib.daily(from: "2010-01-01", to: "2014-12-31", at: cologne, perDay: 5, hour: 19)
-        lib.daily(from: "2015-01-01", to: "2018-12-31", at: hamburg, perDay: 5, hour: 19)
-        lib.daily(from: "2019-01-01", to: "2026-10-31", at: Fixture.Places.munichHome, perDay: 6, hour: 19)
+        lib.daily(from: "2010-01-01", to: "2014-12-31", at: cologne, perDay: 1, hour: 19)
+        lib.daily(from: "2015-01-01", to: "2018-12-31", at: hamburg, perDay: 1, hour: 19)
+        lib.daily(from: "2019-01-01", to: "2026-10-31", at: Fixture.Places.munichHome, perDay: 1, hour: 19)
         for year in 2010...2026 {
-            lib.daily(from: "\(year)-05-10", to: "\(year)-05-17", at: Fixture.Places.rome, perDay: 40, hour: 10)
-            lib.daily(from: "\(year)-08-01", to: "\(year)-08-10", at: Fixture.Places.gardaLake, perDay: 30, hour: 10)
-            lib.daily(from: "\(year)-10-01", to: "\(year)-10-04", at: vienna, perDay: 30, hour: 10)
+            lib.daily(from: "\(year)-05-10", to: "\(year)-05-17", at: Fixture.Places.rome, perDay: 8, hour: 10)
+            lib.daily(from: "\(year)-08-01", to: "\(year)-08-10", at: Fixture.Places.gardaLake, perDay: 6, hour: 10)
+            lib.daily(from: "\(year)-10-01", to: "\(year)-10-04", at: vienna, perDay: 6, hour: 10)
         }
         return lib.assets.map { a in
             let c = a.usableLocation!
@@ -36,12 +38,11 @@ struct ReReviewHomeTimingTests {
         }
     }
 
-    /// Three chosen homes on about 50,000 photos: the places' keys are worked out once per
-    /// distinct place of the library (six here), not once per photo and home; per home only the
-    /// distance is measured. (Before: 3.0 s with three homes, the search index 2.1 → 4.8 s.)
-    @Test func homePlacesOnFiftyThousandPhotos() throws {
+    /// Three chosen homes: the places' keys are worked out once per distinct place of the
+    /// library (six here), not once per photo and home; per home only the distance is measured.
+    @Test func homePlacesAreWorkedOutOncePerPlace() throws {
         let facts = Self.library()
-        #expect(facts.count > 45_000)
+        #expect(facts.count > 7_000)
         let now = Fixture.date("2026-11-16")
         let chosen = HomeSettings()
             .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), from: nil, date: now)

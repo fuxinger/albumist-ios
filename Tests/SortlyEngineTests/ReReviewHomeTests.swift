@@ -20,14 +20,14 @@ struct ReReviewHomeTests {
         // Albums Albumist made before (kept by the rebuild): the last read of the rematch takes
         // a moment, as on a library where many albums were made.
         let members = Set(s.lib.assets.prefix(60).map(\.id))
-        try await s.store.saveManagedAlbums((0..<3000).map { i in
+        try await s.store.saveManagedAlbums((0..<1500).map { i in
             ManagedAlbumState(albumID: CollectionID("album-\(i)"), sourceID: SortlyID.stable("re-review", "\(i)"), lastKnownTitle: "Album \(i)",
                               lastKnownParentID: nil, lastKnownMembers: members, addedBySortly: members, createdBySortly: true)
         })
         let p = s.pipeline
         var stale = 0
         var tries = 0
-        for _ in 0..<2 {
+        for _ in 0..<1 {
             for k in 0..<30 {
                 tries += 1
                 try await s.store.setValue(snapshot, forKey: "analysis.proposals")

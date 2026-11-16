@@ -8,12 +8,15 @@ name: TestFlight feedback
 #
 # The schedule and the default are "counts": the job summary shows only how many feedback and
 # crash submissions each build has. No comment, device data, screenshot or crash log is fetched,
-# written or uploaded. "full" (comments, screenshots, crash logs; summary plus an artifact kept
-# 7 days) is refused by the script itself unless the GitHub API reports this repository as
-# private: while it is public, anyone can read job summaries and any signed-in GitHub user can
-# download artifacts, and screenshots of a photo app may show the testers' own photos. The
-# artifact is only uploaded when the script says it ran full (step output mode=full), never
-# because of the input alone.
+# written or uploaded. "full" (comments, screenshots, crash logs in report.md inside an artifact
+# kept 7 days; the job summary, kept ~90 days, still shows only the counts) is refused by the
+# script itself unless the GitHub API reports this repository as private: while it is public,
+# anyone can read job summaries and any signed-in GitHub user can download artifacts, and
+# screenshots of a photo app may show the testers' own photos. The artifact is only uploaded
+# when the script says it ran full (step output mode=full), never because of the input alone.
+# API calls never follow redirects (asc_feedback.py).
+# GitHub turns the schedule off after 60 days without activity in a public repository; then
+# Actions > TestFlight feedback > "Enable workflow".
 #
 # Everything testers send is untrusted text. It only ever travels in files: never in ${{ }}
 # expressions, shell commands or the log (a log line starting with "::" would be a command).
@@ -41,7 +44,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - id: secrets
+      - name: App Store Connect secrets present
+        id: secrets
         env:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -63,6 +67,7 @@ jobs:
         env:
           KEY_P8: ${{ secrets.ASC_KEY_P8 }}
         run: |
+          umask 077
           mkdir -p "$RUNNER_TEMP/asc"
           printf '%s\n' "$KEY_P8" > "$RUNNER_TEMP/asc/AuthKey.p8"
           chmod 600 "$RUNNER_TEMP/asc/AuthKey.p8"

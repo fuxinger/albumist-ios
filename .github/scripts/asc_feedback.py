@@ -26,8 +26,18 @@ Everything testers send is untrusted text: it is only written into files (Markdo
 logs in code fences), never printed to the log, where a line starting with "::" would be read as
 a workflow command. Tester e-mail addresses and names are never requested (public repository).
 
-Exit codes: 0 all fetched, 1 a section failed (report written with what worked), 2 the key is
-not accepted or lacks the role, 3 no app with that bundle id, 4 full refused (public repository).
+The job summary only ever shows the counts table, also in mode full (summaries are kept about
+90 days); tester content is only in report.md inside the 7-day artifact.
+API calls never follow redirects (a 3xx is an error), so the JWT and the GitHub token cannot be
+passed on to another URL; network errors, 429 and 5xx are retried.
+
+Exit codes:
+  0  everything fetched
+  1  a section or a single item failed (summary and report still written with what worked)
+  2  KEY_ID, ISSUER_ID or KEY_PATH missing; or the key is not accepted (401); or its role may not
+     read TestFlight feedback (403: needs Admin, App Manager or Developer)
+  3  no app with that bundle id
+  4  mode full refused: the repository is public, or its visibility could not be read
 """
 import argparse
 import html
@@ -87,14 +97,36 @@ def make_token(key_id, issuer_id, key_path, now=None):
 
 # ---------------------------------------------------------------- HTTP
 
-def urllib_transport(method, url, headers):
-    """Returns (status, headers, body). HTTP errors are returned, not raised."""
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follows a redirect: a 3xx comes back as an error, so a request carrying the App Store
+    Connect JWT or the GitHub token can never be passed on to another URL."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+NO_REDIRECT = urllib.request.build_opener(NoRedirect)
+FOLLOW_REDIRECTS = urllib.request.build_opener()
+
+
+def urllib_transport(method, url, headers, opener=None):
+    """Returns (status, headers, body). HTTP errors (and every 3xx) are returned, not raised.
+    No redirects unless an opener that follows them is passed (screenshots only, no token)."""
     request = urllib.request.Request(url, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with (opener or NO_REDIRECT).open(request, timeout=60) as response:
             return response.status, dict(response.headers), response.read(MAX_DOWNLOAD + 1)
     except urllib.error.HTTPError as error:
-        return error.code, dict(error.headers or {}), error.read(64 * 1024)
+        try:
+            body = error.read(64 * 1024)
+        except (OSError, AttributeError):
+            body = b""
+        return error.code, dict(error.headers or {}), body
+
+
+def download_transport(method, url, headers):
+    """For the signed screenshot URLs: no token is sent, so following the CDN's redirects is safe."""
+    return urllib_transport(method, url, headers, opener=FOLLOW_REDIRECTS)
 
 
 def apple_error(body):
@@ -115,24 +147,31 @@ def one_line(text, limit):
     return text[:limit]
 
 
+def github_mask(token):
+    """Hides a derived secret (the JWT) in the Actions log; does nothing outside Actions."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::add-mask::{token}", flush=True)
+
+
 class Client:
-    def __init__(self, token_factory, transport=urllib_transport, sleep=time.sleep, clock=time.monotonic,
-                 retries=4):
+    def __init__(self, token_factory, transport=None, sleep=time.sleep, clock=time.monotonic,
+                 retries=4, mask=None):
         self.token_factory = token_factory
-        self.transport = transport
+        self.mask = mask or github_mask
+        self.transport = transport or urllib_transport
         self.sleep = sleep
         self.clock = clock
         self.retries = retries
         self._token = None
         self._token_at = 0.0
         self.rate_limit = ""
+        self.last_total = None
 
     def token(self):
         if self._token is None or self.clock() - self._token_at > TOKEN_LIFETIME - 5 * 60:
             self._token = self.token_factory()
             self._token_at = self.clock()
-            if os.environ.get("GITHUB_ACTIONS") == "true":
-                print(f"::add-mask::{self._token}", flush=True)
+            self.mask(self._token)
         return self._token
 
     def get(self, path_or_url, params=None, what="App Store Connect"):
@@ -142,8 +181,16 @@ class Client:
         if params:
             url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params, safe="[],")
         for attempt in range(self.retries + 1):
-            status, headers, body = self.transport("GET", url, {"Authorization": f"Bearer {self.token()}",
-                                                               "Accept": "application/json"})
+            try:
+                status, headers, body = self.transport("GET", url, {"Authorization": f"Bearer {self.token()}",
+                                                                   "Accept": "application/json"})
+            except (urllib.error.URLError, OSError) as error:     # timeouts, resets, DNS: like a 5xx
+                if attempt >= self.retries:
+                    raise RuntimeError(f"{what}: no connection ({one_line(error, 200)})") from None
+                wait = retry_after({}, attempt)
+                print(f"ASC {what}: no connection, retrying in {wait:.0f} s", flush=True)
+                self.sleep(wait)
+                continue
             self.rate_limit = {k.lower(): v for k, v in headers.items()}.get("x-rate-limit", self.rate_limit)
             if status == 200:
                 return json.loads(body)
@@ -158,6 +205,8 @@ class Client:
                     f"TestFlight feedback and crash logs need a team key with the role {ROLES}. {ROLE_FIX}")
             if status == 404:
                 raise LookupError(f"{what}: HTTP 404 ({apple_error(body)})")
+            if 300 <= status < 400:
+                raise RuntimeError(f"{what}: HTTP {status}, redirects are not followed with the API token")
             if (status == 429 or status >= 500) and attempt < self.retries:
                 wait = retry_after(headers, attempt)
                 print(f"ASC {what}: HTTP {status}, retrying in {wait:.0f} s", flush=True)
@@ -170,8 +219,12 @@ class Client:
         """All items of a paged list (follows links.next), with the included resources by (type, id)."""
         items, included, seen = [], {}, set()
         url, query, visited = path, dict(params), set()
+        self.last_total = None
         while url and len(items) < max_items:
             page = self.get(url, query, what)
+            if self.last_total is None:
+                total = ((page.get("meta") or {}).get("paging") or {}).get("total")
+                self.last_total = total if isinstance(total, int) and total >= 0 else None
             for resource in page.get("included", []) or []:
                 included[(resource.get("type"), resource.get("id"))] = resource
             for item in page.get("data", []) or []:
@@ -197,7 +250,7 @@ def retry_after(headers, attempt):
         return min(5.0 * (2 ** attempt), 120.0)
 
 
-def download(url, transport=urllib_transport):
+def download(url, transport=download_transport):
     """A screenshot from its signed URL (no API token: it is another host)."""
     if not url.startswith("https://"):
         raise ValueError("screenshot URL is not https")
@@ -333,13 +386,26 @@ def describe(item, included):
     ]
     if a.get("batteryPercentage") is not None:
         rows.append(("Akku", md_inline(f"{a.get('batteryPercentage')} %")))
-    if a.get("appUptimeInMilliseconds") is not None:
+    try:
         rows.append(("App lief", md_inline(f"{int(a['appUptimeInMilliseconds']) // 1000} s")))
+    except (KeyError, TypeError, ValueError):
+        pass
     return "\n".join(f"- {key}: {value}" for key, value in rows)
 
 
-def render_counts(app, screenshots, crashes, errors, generated):
-    """Counts per build only: no tester text, no device details, no crash frames (public repository)."""
+def shown_count(fetched, total, max_items):
+    """The number to show: Apple's total when it sent one, else what was fetched, "200+" at the cap."""
+    if isinstance(total, int) and total >= fetched:
+        return str(total)
+    if max_items and fetched >= max_items:
+        return f"{fetched}+"
+    return str(fetched)
+
+
+def render_counts(app, screenshots, crashes, errors, generated, totals=None, max_items=None, details=False):
+    """Counts per build only: no tester text, no device details, no crash frames. This is all a job
+    summary ever shows (summaries are kept ~90 days); with details=True it points to the artifact."""
+    totals = totals or {}
     per_build = {}
     for kind, entries in (("feedback", screenshots), ("crashes", crashes)):
         for entry in entries:
@@ -348,11 +414,15 @@ def render_counts(app, screenshots, crashes, errors, generated):
             row[kind] += 1
             created = str((entry["item"].get("attributes") or {}).get("createdDate") or "")
             row["newest"] = max(row["newest"], created)
+    feedback_count = shown_count(len(screenshots), totals.get("screenshots"), max_items)
+    crash_count = shown_count(len(crashes), totals.get("crashes"), max_items)
     out = [f"# TestFlight-Feedback {md_inline(app)}", "",
-           f"Abgeholt: {md_inline(generated)} · {len(screenshots)} Feedback mit Screenshot · "
-           f"{len(crashes)} Absturzberichte", ""]
+           f"Abgeholt: {md_inline(generated)} · {feedback_count} Feedback mit Screenshot · "
+           f"{crash_count} Absturzberichte", ""]
     for message in errors:
         out += [f"**Fehler:** {md_inline(message, 600)}", ""]
+    if max_items and (len(screenshots) >= max_items or len(crashes) >= max_items):
+        out += [f"Tabelle: nur die neuesten {max_items} je Art.", ""]
     if per_build:
         out += ["| Build | Feedback | Abstürze | Neuestes |", "|---|---|---|---|"]
         def order(key):
@@ -362,8 +432,12 @@ def render_counts(app, screenshots, crashes, errors, generated):
             out.append(f"| {md_inline(build, 20)} | {row['feedback']} | {row['crashes']} | "
                        f"{md_inline(row['newest'][:10], 20)} |")
         out.append("")
-    out += ["Nur Anzahlen: solange das Repository öffentlich ist, stehen Kommentare, Screenshots und "
-            "Absturzprotokolle nur in App Store Connect (TestFlight > Feedback, Abstürze).", ""]
+    if details:
+        out += ["Details im Artefakt **testflight-feedback** (`report.md`, Screenshots, Absturzprotokolle; "
+                "7 Tage).", ""]
+    else:
+        out += ["Nur Anzahlen: solange das Repository öffentlich ist, stehen Kommentare, Screenshots und "
+                "Absturzprotokolle nur in App Store Connect (TestFlight > Feedback, Abstürze).", ""]
     return "\n".join(out)
 
 
@@ -418,7 +492,8 @@ def repo_is_private(repo, token, transport=None):
 
 
 def fetch(client, bundle_id, out_dir, max_items, download_fn=download, full=False):
-    """Fetches both sections; returns (app name, screenshots, crashes, errors, access_denied).
+    """Fetches both sections; returns (app name, screenshots, crashes, errors, access_denied, totals),
+    totals being Apple's meta.paging.total per section when it sent one.
     Without full only the build and date of each submission are requested; nothing is downloaded
     and nothing is written."""
     apps = client.get("/v1/apps", {"filter[bundleId]": bundle_id, "fields[apps]": "bundleId,name"}, "apps")["data"]
@@ -427,8 +502,10 @@ def fetch(client, bundle_id, out_dir, max_items, download_fn=download, full=Fals
         raise AppMissing(f"no app with bundle id {bundle_id} visible to this key")
     app = apps[0]
     name = f"{(app.get('attributes') or {}).get('name') or bundle_id} ({bundle_id})"
-    errors, denied = [], False
+    errors, denied, totals = [], False, {}
     screenshots, crashes = [], []
+    # A failing token renewal (openssl) ends one section, not the run.
+    failures = (LookupError, RuntimeError, ValueError, OSError, subprocess.CalledProcessError)
     if full:
         os.makedirs(os.path.join(out_dir, "screenshots"), exist_ok=True)
         os.makedirs(os.path.join(out_dir, "crashlogs"), exist_ok=True)
@@ -440,6 +517,7 @@ def fetch(client, bundle_id, out_dir, max_items, download_fn=download, full=Fals
                                        dict(common, **{"fields[betaFeedbackScreenshotSubmissions]":
                                                        SCREENSHOT_FIELDS if full else COUNT_FIELDS}),
                                        "betaFeedbackScreenshotSubmissions", max_items)
+        totals["screenshots"] = client.last_total
         for item in items:
             entry = {"item": item, "included": included, "files": [], "problems": []}
             images = ((item.get("attributes") or {}).get("screenshots") or []) if full else []
@@ -456,14 +534,15 @@ def fetch(client, bundle_id, out_dir, max_items, download_fn=download, full=Fals
     except AccessError as error:
         errors.append(str(error))
         denied = True
-    except (LookupError, RuntimeError, ValueError, OSError) as error:
-        errors.append(f"betaFeedbackScreenshotSubmissions: {error}")
+    except failures as error:
+        errors.append(f"betaFeedbackScreenshotSubmissions: {one_line(error, 400)}")
 
     try:
         items, included = client.pages(f"/v1/apps/{app['id']}/betaFeedbackCrashSubmissions",
                                        dict(common, **{"fields[betaFeedbackCrashSubmissions]":
                                                        CRASH_FIELDS if full else COUNT_FIELDS}),
                                        "betaFeedbackCrashSubmissions", max_items)
+        totals["crashes"] = client.last_total
         for item in items:
             entry = {"item": item, "included": included, "file": "", "excerpt": "", "problems": []}
             if full:
@@ -477,15 +556,15 @@ def fetch(client, bundle_id, out_dir, max_items, download_fn=download, full=Fals
                     entry["excerpt"] = top_frames(text)
                 except AccessError:
                     raise
-                except (LookupError, RuntimeError, ValueError, OSError) as error:
-                    entry["problems"].append(f"Absturzprotokoll: {error}")
+                except failures as error:
+                    entry["problems"].append(f"Absturzprotokoll: {one_line(error, 300)}")
             crashes.append(entry)
     except AccessError as error:
         errors.append(str(error))
         denied = True
-    except (LookupError, RuntimeError, ValueError, OSError) as error:
-        errors.append(f"betaFeedbackCrashSubmissions: {error}")
-    return name, screenshots, crashes, errors, denied
+    except failures as error:
+        errors.append(f"betaFeedbackCrashSubmissions: {one_line(error, 400)}")
+    return name, screenshots, crashes, errors, denied, totals
 
 
 def main(argv=None):
@@ -514,8 +593,10 @@ def main(argv=None):
         os.makedirs(args.out, exist_ok=True)
     client = Client(lambda: make_token(os.environ["KEY_ID"], os.environ["ISSUER_ID"], os.environ["KEY_PATH"]))
     generated = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
+    totals = {}
     try:
-        app, screenshots, crashes, errors, denied = fetch(client, args.bundle_id, args.out, args.max_items, full=full)
+        app, screenshots, crashes, errors, denied, totals = fetch(client, args.bundle_id, args.out, args.max_items,
+                                                                  full=full)
     except AccessError as error:
         app, screenshots, crashes, errors, denied = args.bundle_id, [], [], [str(error)], True
     except AppMissing as error:
@@ -523,19 +604,20 @@ def main(argv=None):
         return 3
     except (LookupError, RuntimeError, ValueError, OSError, subprocess.CalledProcessError) as error:
         app, screenshots, crashes, errors, denied = args.bundle_id, [], [], [one_line(error, 400)], False
+    # The job summary only ever gets the counts table (summaries are kept ~90 days); tester content
+    # goes only into report.md inside the 7-day artifact (full, private repository).
+    summary = render_counts(app, screenshots, crashes, errors, generated, totals, args.max_items, details=full)
     if full:
-        report = render(app, screenshots, crashes, errors, generated)
+        try:
+            report = render(app, screenshots, crashes, errors, generated)
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            report = summary + f"\n\n**Fehler:** Bericht nicht erstellt ({md_inline(error, 300)}).\n"
+            errors.append(f"report.md: {one_line(error, 300)}")
         with open(os.path.join(args.out, "report.md"), "w", encoding="utf-8") as handle:
             handle.write(report)
-    else:
-        report = render_counts(app, screenshots, crashes, errors, generated)
     if args.summary:
-        summary = report
-        if len(summary.encode()) > SUMMARY_LIMIT:
-            summary = summary.encode()[:SUMMARY_LIMIT].decode(errors="ignore") + \
-                "\n\n(gekürzt, vollständig in report.md im Artefakt)\n"
         with open(args.summary, "a", encoding="utf-8") as handle:
-            handle.write(summary + "\n")
+            handle.write(summary[:SUMMARY_LIMIT] + "\n")
     if full and os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
             handle.write("mode=full\n")      # the only signal that lets the workflow upload the artifact

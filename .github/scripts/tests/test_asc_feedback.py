@@ -1,18 +1,33 @@
 """Unit tests for .github/scripts/asc_feedback.py with faked App Store Connect answers."""
 import base64
+import contextlib
+import io
+import http.server
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.error
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import asc_feedback  # noqa: E402
 
 API = asc_feedback.API
+_ENV = mock.patch.dict(os.environ, {"GITHUB_ACTIONS": ""})
+
+
+def setUpModule():
+    # No real "::add-mask::" lines in the CI log of these tests.
+    _ENV.start()
+
+
+def tearDownModule():
+    _ENV.stop()
 
 
 def unb64(part):
@@ -49,7 +64,7 @@ class FakeAPI:
 
 
 def client(fake, sleeps=None):
-    return asc_feedback.Client(lambda: "TOKEN", transport=fake,
+    return asc_feedback.Client(lambda: "TOKEN", transport=fake, mask=lambda token: None,
                                sleep=(sleeps.append if sleeps is not None else lambda s: None))
 
 
@@ -102,12 +117,23 @@ class TokenTests(unittest.TestCase):
 
     def test_token_is_reused_and_renewed_before_it_expires(self):
         made, now = [], [0.0]
-        c = asc_feedback.Client(lambda: made.append(1) or f"T{len(made)}", transport=None, clock=lambda: now[0])
+        masked = []
+        c = asc_feedback.Client(lambda: made.append(1) or f"T{len(made)}", transport=None, clock=lambda: now[0],
+                                mask=masked.append)
         self.assertEqual(c.token(), "T1")
         now[0] = 9 * 60
         self.assertEqual(c.token(), "T1")
         now[0] = 11 * 60
         self.assertEqual(c.token(), "T2")
+        self.assertEqual(masked, ["T1", "T2"])          # every new token is masked once
+
+    def test_mask_line_only_inside_actions(self):
+        with mock.patch("builtins.print") as printed:
+            asc_feedback.github_mask("JWT")
+            self.assertFalse(printed.called)
+            with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
+                asc_feedback.github_mask("JWT")
+            printed.assert_called_once_with("::add-mask::JWT", flush=True)
 
 
 class HTTPTests(unittest.TestCase):
@@ -167,12 +193,92 @@ class HTTPTests(unittest.TestCase):
         self.assertIn("429", str(caught.exception))
         self.assertEqual(len(fake.calls), 5)
 
+    def test_network_errors_are_retried_like_5xx(self):
+        sleeps, answers = [], [urllib.error.URLError("reset"), TimeoutError("timed out"), (200, {}, b'{"data": []}')]
+
+        def flaky(method, url, headers):
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        self.assertEqual(client(flaky, sleeps).get("/v1/apps"), {"data": []})
+        self.assertEqual(len(sleeps), 2)
+
+        def down(method, url, headers):
+            raise urllib.error.URLError("no route")
+        with self.assertRaises(RuntimeError) as caught:
+            client(down, []).get("/v1/apps")
+        self.assertIn("no connection", str(caught.exception))
+
+    def test_a_redirect_is_an_error_not_followed(self):
+        fake = FakeAPI([(API, [(302, b"", {"Location": "https://evil.example/"})])])
+        with self.assertRaises(RuntimeError) as caught:
+            client(fake, []).get("/v1/apps")
+        self.assertIn("HTTP 302", str(caught.exception))
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_pages_keep_apples_total(self):
+        page = {"data": [submission("a")], "links": {}, "meta": {"paging": {"total": 345, "limit": 1}}}
+        c = client(FakeAPI([(API, [(200, page)])]))
+        c.pages("/v1/list", {}, "x", 1)
+        self.assertEqual(c.last_total, 345)
+        c = client(FakeAPI([(API, [(200, {"data": [], "links": {}})])]))
+        c.pages("/v1/list", {}, "x", 1)
+        self.assertIsNone(c.last_total)
+
     def test_token_is_never_sent_to_another_host(self):
         with self.assertRaises(ValueError):
             client(FakeAPI([])).get("https://evil.example/v1/apps")
         loop = {"data": [submission("a")], "links": {"next": "https://evil.example/steal"}}
         with self.assertRaises(ValueError):
             client(FakeAPI([(API, [(200, loop)])])).pages("/v1/list", {}, "x", 10)
+
+
+class RedirectServerTests(unittest.TestCase):
+    """urllib_transport against a real local server: a redirect is returned, never followed."""
+
+    def setUp(self):
+        hits = self.hits = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append((self.path, self.headers.get("Authorization")))
+                if self.path == "/start":
+                    self.send_response(302)
+                    self.send_header("Location", "/stolen")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Length", "2")
+                    self.end_headers()
+                    self.wfile.write(b"ok")
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def test_api_transport_returns_the_redirect_and_never_follows_it(self):
+        with mock.patch.dict(os.environ, {"no_proxy": "*", "NO_PROXY": "*"}):
+            status, headers, _ = asc_feedback.urllib_transport("GET", f"{self.base}/start",
+                                                               {"Authorization": "Bearer JWT"})
+        self.assertEqual(status, 302)
+        self.assertEqual({k.lower(): v for k, v in headers.items()}["location"], "/stolen")
+        self.assertEqual(self.hits, [("/start", "Bearer JWT")])          # /stolen never reached
+
+    def test_screenshot_transport_may_follow_it(self):
+        with mock.patch.dict(os.environ, {"no_proxy": "*", "NO_PROXY": "*"}):
+            status, _, body = asc_feedback.download_transport("GET", f"{self.base}/start", {})
+        self.assertEqual((status, body), (200, b"ok"))
+        self.assertEqual([path for path, _ in self.hits], ["/start", "/stolen"])
 
 
 HOSTILE = ('<img src=x onerror=alert(1)> <script>alert(1)</script> [klick](javascript:alert(1)) '
@@ -216,6 +322,22 @@ class MarkdownTests(unittest.TestCase):
         self.assertIn("- Build: 42", report)
         self.assertIn("iPhone16,2", asc_feedback.render("A", [{"item": submission("z"), "included": {},
                                                                "files": [], "problems": []}], [], [], "now"))
+
+    def test_counts_show_apples_total_or_a_plus_at_the_cap(self):
+        self.assertEqual(asc_feedback.shown_count(200, 345, 200), "345")
+        self.assertEqual(asc_feedback.shown_count(200, None, 200), "200+")
+        self.assertEqual(asc_feedback.shown_count(3, None, 200), "3")
+        entries = [{"item": submission(str(i)), "included": {}} for i in range(2)]
+        text = asc_feedback.render_counts("A", entries, [], [], "now", {}, 2)
+        self.assertIn("2+ Feedback mit Screenshot", text)
+        self.assertIn("nur die neuesten 2 je Art", text)
+
+    def test_odd_uptime_does_not_break_the_report(self):
+        item = submission("s1")
+        item["attributes"]["appUptimeInMilliseconds"] = "lange"
+        self.assertNotIn("App lief", asc_feedback.describe(item, {}))
+        item["attributes"]["appUptimeInMilliseconds"] = 61_500
+        self.assertIn("App lief: 61 s", asc_feedback.describe(item, {}))
 
     def test_counts_report_has_numbers_per_build_and_no_tester_text(self):
         item = submission("s1", comment=HOSTILE)
@@ -302,7 +424,7 @@ class FetchTests(unittest.TestCase):
             downloads.append(url)
             return asc_feedback.download(url, transport=lambda m, u, h: (200, {"Content-Type": "image/png"}, b"PNG"))
 
-        name, screenshots, crash_entries, errors, denied = asc_feedback.fetch(
+        name, screenshots, crash_entries, errors, denied, _ = asc_feedback.fetch(
             client(fake), "app.albumist.ios", self.out, 50, download_fn=fake_download, full=True)
         self.assertEqual(name, "Albumist (app.albumist.ios)")
         self.assertEqual(errors, [])
@@ -332,7 +454,7 @@ class FetchTests(unittest.TestCase):
         def no_download(url):
             raise AssertionError("counts mode must not download screenshots")
 
-        _, screenshots, crash_entries, errors, _ = asc_feedback.fetch(
+        _, screenshots, crash_entries, errors, _, _ = asc_feedback.fetch(
             client(fake), "app.albumist.ios", self.out, 50, download_fn=no_download)
         self.assertEqual((len(screenshots), len(crash_entries), errors), (1, 1, []))
         self.assertEqual(os.listdir(self.out), [])
@@ -350,11 +472,30 @@ class FetchTests(unittest.TestCase):
             (f"{API}/v1/apps/123/betaFeedbackScreenshotSubmissions", [(403, {"errors": [{"code": "FORBIDDEN_ERROR"}]})]),
             (f"{API}/v1/apps/123/betaFeedbackCrashSubmissions", [(200, crashes)]),
         ])
-        _, screenshots, crash_entries, errors, denied = asc_feedback.fetch(client(fake), "app.albumist.ios", self.out, 50)
+        _, screenshots, crash_entries, errors, denied, _ = asc_feedback.fetch(client(fake), "app.albumist.ios", self.out, 50)
         self.assertTrue(denied)
         self.assertEqual(len(errors), 1)
         self.assertIn("Admin, App Manager or Developer", errors[0])
         self.assertEqual(crash_entries, [])
+
+    def test_a_failing_token_renewal_ends_only_that_section(self):
+        made = []
+
+        def factory():
+            made.append(1)
+            if len(made) > 1:
+                raise subprocess.CalledProcessError(1, ["openssl", "dgst"])
+            return "T1"
+
+        fake = FakeAPI([(f"{API}/v1/apps?", [(200, APP)])])
+        # The first token at t=0 serves the app lookup; every later call is past the renewal point.
+        c = asc_feedback.Client(factory, transport=fake, clock=mock.Mock(side_effect=[0.0] + [10_000.0] * 20),
+                                mask=lambda t: None, sleep=lambda s: None)
+        _, screenshots, crashes, errors, denied, _ = asc_feedback.fetch(c, "app.albumist.ios", self.out, 50)
+        self.assertEqual((screenshots, crashes, denied), ([], [], False))
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(all("openssl" in e for e in errors), errors)
+        self.assertEqual(len(fake.calls), 1)          # nothing was sent without a token
 
     def test_missing_app_is_reported(self):
         fake = FakeAPI([(f"{API}/v1/apps?", [(200, {"data": []})])])
@@ -393,15 +534,23 @@ class PrivacyGateTests(unittest.TestCase):
         env = {"GITHUB_REPOSITORY": "fuxinger/sortly-ios", "GH_TOKEN": "t", "KEY_ID": "k", "ISSUER_ID": "i",
                "KEY_PATH": os.path.join(out, "missing.p8"), "GITHUB_OUTPUT": os.path.join(out, "output")}
         with mock.patch.dict(os.environ, env), mock.patch.object(asc_feedback, "urllib_transport", transport), \
-                mock.patch.object(asc_feedback.Client, "get", side_effect=AssertionError("App Store Connect called")):
+                mock.patch.object(asc_feedback.Client, "get", side_effect=AssertionError("App Store Connect called")), \
+                contextlib.redirect_stdout(io.StringIO()) as log:     # no real ::error:: annotations in CI
             code = asc_feedback.main(args + ["--out", os.path.join(out, "feedback"), "--summary", summary])
         written = sorted(os.listdir(out))
+        self.log = log.getvalue()
+        self.files = {}
+        for name in ("output", "summary.md", os.path.join("feedback", "report.md")):
+            if os.path.exists(os.path.join(out, name)):
+                with open(os.path.join(out, name), encoding="utf-8") as handle:
+                    self.files[name] = handle.read()
         shutil.rmtree(out)
         return code, calls, written
 
     def test_full_is_refused_on_a_public_repository_before_anything_is_fetched(self):
         code, calls, written = self.run_main(["--mode", "full"], (200, {"private": False}))
         self.assertEqual(code, 4)
+        self.assertIn("Mode full is refused: the repository is public", self.log)
         self.assertEqual(len(calls), 1)                    # only GitHub was asked
         self.assertEqual(written, [])                      # no summary, no folder, no mode=full output
 
@@ -409,7 +558,7 @@ class PrivacyGateTests(unittest.TestCase):
         self.assertEqual(self.run_main(["--mode", "full"], (403, {"message": "denied"}))[0], 4)
 
     def test_counts_is_the_default_and_needs_no_visibility_check(self):
-        with mock.patch.object(asc_feedback, "fetch", return_value=("Albumist", [], [], [], False)) as fetch:
+        with mock.patch.object(asc_feedback, "fetch", return_value=("Albumist", [], [], [], False, {})) as fetch:
             code, calls, written = self.run_main([], (200, {"private": False}))
         self.assertEqual(code, 0)
         self.assertEqual(calls, [])
@@ -417,11 +566,30 @@ class PrivacyGateTests(unittest.TestCase):
         self.assertEqual(written, ["summary.md"])          # no feedback folder, no mode=full output
 
     def test_full_runs_on_a_private_repository_and_signals_the_upload(self):
-        with mock.patch.object(asc_feedback, "fetch", return_value=("Albumist", [], [], [], False)) as fetch:
+        with mock.patch.object(asc_feedback, "fetch", return_value=("Albumist", [], [], [], False, {})) as fetch:
             code, calls, written = self.run_main(["--mode", "full"], (200, {"private": True}))
         self.assertEqual(code, 0)
         self.assertTrue(fetch.call_args.kwargs["full"])
         self.assertEqual(written, ["feedback", "output", "summary.md"])
+        self.assertIn("mode=full", self.files["output"].splitlines())
+
+    def test_full_keeps_tester_content_out_of_the_job_summary(self):
+        item = submission("s1", comment="Mein Urlaubsfoto <b>privat</b>")
+        crash = submission("c1", comment="Absturz beim Teilen")
+        result = ("Albumist", [{"item": item, "included": {("builds", "b1"): BUILD}, "files": ["screenshots/s1-1.png"],
+                                "problems": []}],
+                  [{"item": crash, "included": {}, "file": "crashlogs/c1.txt", "excerpt": "Thread 0 Crashed:",
+                    "problems": []}], [], False, {"screenshots": 1, "crashes": 1})
+        with mock.patch.object(asc_feedback, "fetch", return_value=result):
+            code, _, _ = self.run_main(["--mode", "full"], (200, {"private": True}))
+        self.assertEqual(code, 0)
+        summary, report = self.files["summary.md"], self.files[os.path.join("feedback", "report.md")]
+        self.assertIn("| 42 | 1 | 0 |", summary)
+        self.assertIn("Details im Artefakt", summary)
+        for private in ("Urlaubsfoto", "Teilen", "s1-1.png", "Thread 0", "iPhone"):
+            self.assertNotIn(private, summary)
+        self.assertIn("Urlaubsfoto", report)
+        self.assertIn("Absturz beim Teilen", report)
 
 
 class WorkflowTests(unittest.TestCase):
@@ -442,7 +610,9 @@ class MainTests(unittest.TestCase):
         saved = {k: os.environ.pop(k, None) for k in ("KEY_ID", "ISSUER_ID", "KEY_PATH")}
         try:
             out = tempfile.mkdtemp()
-            self.assertEqual(asc_feedback.main(["--out", out]), 2)
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                self.assertEqual(asc_feedback.main(["--out", out]), 2)
+            self.assertIn("KEY_ID is not set", log.getvalue())
             shutil.rmtree(out)
         finally:
             for k, v in saved.items():

@@ -73,4 +73,5 @@ Produkt-ID `app.albumist.ios.unlock`.
 - Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,
   daneben die Build-Nummer `CFBundleVersion`). Vor dem Hochladen prüft der Lauf beides und dass die
   App-Datei Byte für Byte die archivierte ist. Gebaut wird mit dem festgelegten Xcode aus
-  `.github/toolchain.json`, nie mit einer Beta.
+  `.github/toolchain.json`, nie mit einer Beta. Nach dem Hochladen trägt der Commit das Git-Tag
+  `build-<Nummer>` (`git show build-41` zeigt den Code von Build 41).

@@ -19,9 +19,11 @@ name: TestFlight
 # this run's build number and the pinned Xcode: build-info.txt, the app's own Info.plist
 # (AlbumistCommit, CFBundleVersion) and the SHA-256 of the app's executable as the archive job
 # recorded it (.github/scripts/archive_check.py). The export only signs that app; nothing is
-# rebuilt between the gate and the upload. Waiting for CI rather than starting at once keeps a push at four
-# Mac jobs at a time (CI's iOS job and the three UI groups; the archive takes the place of
-# CI's job when that is done), and a commit whose Linux or iOS tests fail never starts it.
+# rebuilt between the gate and the upload. After a successful upload the commit gets the git tag
+# build-<number> (job "tag", the only one with contents: write).
+# Waiting for CI rather than starting at once keeps a push at four Mac jobs at a time (CI's
+# iOS job and the three UI groups; the archive takes the place of CI's job when that is done),
+# and a commit whose Linux or iOS tests fail never starts it.
 # (`ci_gate.py --linux` would start it after CI's Linux jobs instead, ~15 min earlier, at the
 # cost of a fifth Mac job beside CI and UI; not needed while the UI run is the long part.)
 # The archive artifact is deleted at the end of the run. It holds the unsigned app with the
@@ -324,6 +326,34 @@ jobs:
       - name: Remove key
         if: always()
         run: rm -rf "$(dirname "$KEY_PATH")"
+
+  tag:
+    # Every uploaded build has a git tag build-<number> on exactly the commit it was built from,
+    # so "which code is TestFlight build 41?" is `git show build-41`. The only job of this
+    # workflow that may write to the repository, and it can only create a tag: an existing tag
+    # is left alone when it is on the same commit (a re-run) and fails the job otherwise.
+    name: Tag the TestFlight build
+    needs: upload
+    if: needs.upload.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Tag build-${{ github.run_number }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: build-${{ github.run_number }}
+        run: |
+          if existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null); then
+            [ "$existing" = "$GITHUB_SHA" ] \
+              || { echo "::error::$TAG already points at $existing, not at $GITHUB_SHA; left as it is"; exit 1; }
+            echo "$TAG is already on ${GITHUB_SHA:0:7}"
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
+            echo "Tagged ${GITHUB_SHA:0:7} as $TAG"
+          fi
+          echo "Git tag \`$TAG\` on ${GITHUB_SHA:0:7}" >> "$GITHUB_STEP_SUMMARY"
 
   cleanup:
     # The archive artifact (unsigned build with the team id in it) does not outlive the run.

@@ -352,6 +352,28 @@ struct StatusBadge: View {
     }
 }
 
+/// An error in words with a red symbol in front (design review D2). The text keeps the
+/// primary colour: system red text was 3.6:1 on a white card (WCAG 1.4.3 asks 4.5:1), and the
+/// colour alone said "error" (WCAG 1.4.1). The filled symbol says it without colour and as a
+/// graphic only needs 3:1; VoiceOver hears "Fehler" first. Same pattern as the
+/// "Nicht alles hat geklappt" card of the preview.
+struct ErrorNote: View {
+    var text: String
+
+    var body: some View {
+        Label {
+            Text(text).fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
+        }
+        .font(.footnote)
+        .foregroundStyle(.primary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Fehler: \(text)"))
+        .accessibilityIdentifier("error.note")
+    }
+}
+
 /// The visible choice of a menu at the largest text sizes: wraps instead of being cut,
 /// with the up-down chevron of a system pop-up menu.
 struct MenuChoiceLabel: View {

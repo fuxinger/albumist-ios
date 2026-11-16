@@ -9,6 +9,9 @@ struct AlbumsView: View {
     @Environment(\.openURL) private var openURL
     @State private var mergePlan: ChangePlan?
     @State private var showMerge = false
+    /// The suggestion whose merge plan is being prepared: its row shows a spinner and the
+    /// rows do not take a second tap meanwhile (design review N13).
+    @State private var preparing: [CollectionID]?
 
     private var topLevel: [CollectionSnapshot] {
         model.inventory.collections.values
@@ -29,18 +32,29 @@ struct AlbumsView: View {
                 Section {
                     ForEach(suggestions, id: \.albumIDs) { suggestion in
                         Button {
+                            preparing = suggestion.albumIDs
                             Task {
                                 mergePlan = await model.mergePlan(suggestion)
+                                preparing = nil
                                 showMerge = mergePlan != nil
                             }
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(suggestion.albumIDs.compactMap { model.inventory[$0]?.title }.formatted(.list(type: .and)))
-                                    .font(.body.weight(.medium)).foregroundStyle(.primary)
-                                Text("\(suggestion.albumIDs.count) Alben mit vielen gleichen Fotos · \(suggestion.distinctAssetCount) Fotos insgesamt")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(suggestion.albumIDs.compactMap { model.inventory[$0]?.title }.formatted(.list(type: .and)))
+                                        .font(.body.weight(.medium)).foregroundStyle(.primary)
+                                    Text("\(suggestion.albumIDs.count) Alben mit vielen gleichen Fotos · \(suggestion.distinctAssetCount) Fotos insgesamt")
+                                        .font(.footnote).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                if preparing == suggestion.albumIDs {
+                                    ProgressView()
+                                        .accessibilityLabel(Text("Vorschau wird vorbereitet"))
+                                        .accessibilityIdentifier("merge.preparing")
+                                }
                             }
                         }
+                        .disabled(preparing != nil)
                     }
                 } header: {
                     Text("Ähnliche Alben")
@@ -123,7 +137,8 @@ struct CollectionRow: View {
             if collection.kind == .folder {
                 IconTile(systemName: symbol, tint: Theme.tint(for: .neutral))
             } else {
-                AssetThumbnail(id: collection.assetIDs.min() ?? AssetID(""), side: 44)
+                // The newest photo, as Photos shows albums (design review N4).
+                AssetThumbnail(id: PreviewPicker.newest(collection.assetIDs, dates: model.creationDates) ?? AssetID(""), side: 44)
                     .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
             }
@@ -149,22 +164,47 @@ struct FolderView: View {
     }
 }
 
+/// Every photo of an album, oldest first like an album in Photos; a tap opens it large
+/// (design review W12: only 200 photos with "+N" and taps did nothing).
 struct AlbumDetailView: View {
+    @Environment(AppModel.self) private var model
     var album: CollectionSnapshot
+    @State private var viewing: PhotoViewer.Start?
+    @Namespace private var zoom
 
     var body: some View {
+        let ids = PreviewPicker.chronological(album.assetIDs, dates: model.creationDates)
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 if !album.isEditableAlbum {
                     Label("Dieses Album kann Albumist nicht verändern.", systemImage: "lock")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                ThumbnailGrid(ids: album.assetIDs.sorted(), columns: 4, limit: 200)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
+                    ForEach(ids, id: \.self) { id in
+                        Button {
+                            viewing = PhotoViewer.Start(id: id, ids: ids)
+                        } label: {
+                            AssetThumbnail(id: id, side: 110)
+                                .aspectRatio(1, contentMode: .fill)
+                                .matchedTransitionSource(id: id, in: zoom)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text(model.creationDates[id]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+                        .accessibilityIdentifier("album.photo")
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
             }
             .padding(Theme.Spacing.l)
         }
         .background(Theme.background)
         .navigationTitle(album.title)
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
+                .navigationTransition(.zoom(sourceID: start.id, in: zoom))
+        }
     }
 }

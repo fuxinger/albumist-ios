@@ -28,7 +28,8 @@ struct ManagedAlbumsView: View {
                 }
             }
         }
-        .navigationTitle("Von Albumist angelegt")
+        // Also albums Albumist only added to (design review N9).
+        .navigationTitle("Alben von Albumist")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             pending.map { Text("„\($0.lastKnownTitle)“ zurücknehmen?") } ?? Text(""),

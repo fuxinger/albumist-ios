@@ -18,9 +18,9 @@ final class SortlyFlowUITests: XCTestCase {
         app.launch()
     }
 
-    /// The first suggestion row of a list ("57 Aufnahmen" is in every row, never in a button).
+    /// The first suggestion row of a list ("57 Fotos" is in every row, never in a button).
     private func suggestionRow() -> XCUIElement {
-        app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "Aufnahmen")).element(boundBy: 0)
+        app.collectionViews.cells.containing(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Fotos?")).element(boundBy: 0)
     }
 
     private func button(_ text: String) -> XCUIElement {
@@ -196,6 +196,24 @@ final class SortlyFlowUITests: XCTestCase {
 
     // MARK: Tests
 
+    /// The demo library is fully readable: the analysis card says "Alle N Fotos analysiert"
+    /// and no photo counts as unreadable. UI runs reported "0 von 246 Fotos analysiert" and
+    /// "246 Fotos konnten noch nicht gelesen werden" for weeks without failing.
+    private func assertEveryPhotoAnalysed(_ when: String, file: StaticString = #filePath, line: UInt = #line) {
+        let card = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Alle ", "Fotos analysiert")).firstMatch
+        _ = card.waitForExistence(timeout: 10)
+        // Any other analysis line (e.g. "0 von 246 Fotos analysiert") is printed for the log.
+        let other = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fotos analysiert")).firstMatch
+        print("UI_FACT analysis card \(when): \(card.exists ? card.label : "not found (\(other.exists ? other.label : "-"))") | \(card.exists ? (card.value as? String ?? "-") : "-")")
+        let unreadable = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "konnten noch nicht gelesen")).firstMatch
+        if unreadable.exists { print("UI_FACT unreadable \(when): \(unreadable.label)") }
+        let all = card.exists && card.label.hasPrefix("Alle ")
+        print(all && !unreadable.exists ? "UI_STEP_OK every photo analysed \(when)" : "UI_STEP_MISSING every photo analysed \(when)")
+        XCTAssertTrue(card.exists, "No analysis card \(when)", file: file, line: line)
+        XCTAssertTrue(all, "Not every demo photo analysed \(when): \(card.label)", file: file, line: line)
+        XCTAssertFalse(unreadable.exists, "Demo photos unreadable \(when): \(unreadable.label)", file: file, line: line)
+    }
+
     func test1_FullFlow() {
         continueAfterFailure = true
         launch()
@@ -210,6 +228,17 @@ final class SortlyFlowUITests: XCTestCase {
             print(cities.waitForExistence(timeout: 3) ? "UI_STEP_OK cities switch in onboarding" : "UI_STEP_MISSING cities switch in onboarding")
             tap(button("Weiter"), "areas")
             shot("03-access")
+            // Design review W13: every step after the welcome screen has the system way back.
+            if app.navigationBars.buttons.firstMatch.waitForExistence(timeout: 5) {
+                back()
+                let areasAgain = app.staticTexts["Was soll Albumist sortieren?"].waitForExistence(timeout: 5)
+                print(areasAgain ? "UI_STEP_OK onboarding back to areas" : "UI_STEP_MISSING onboarding back to areas")
+                XCTAssertTrue(areasAgain, "Back from the access step did not return to the areas")
+                tap(button("Weiter"), "areas again")
+            } else {
+                print("UI_STEP_MISSING onboarding back button")
+                XCTFail("The access step has no back button")
+            }
             if app.buttons["access.continue"].waitForExistence(timeout: 5) {
                 app.buttons["access.continue"].tap()
                 allowPhotosIfAsked()
@@ -244,6 +273,15 @@ final class SortlyFlowUITests: XCTestCase {
         // Seeding starts a fresh analysis; wait until it ran and the overview stays idle.
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
         print("UI_TIMING analysis \(Int(Date().timeIntervalSince(analysed))) s")
+        assertEveryPhotoAnalysed("after seeding")
+        // With every photo readable the suggestions reach the overview a little after the
+        // analysis card says done (run 43774578089: the overview changed during its audit,
+        // which ended test1 there). The audit waits for them.
+        let offers = Date()
+        let ready = waitStable("suggestions on the overview", timeout: 180) {
+            app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ (Vorschläge|Vorschlag) prüfen|[0-9]+ Alben (kostenlos )?anlegen")).firstMatch.exists
+        }
+        print("UI_FACT suggestions on the overview \(ready) after \(Int(Date().timeIntervalSince(offers))) s")
         // The demo library holds 12 trips; "1 Reisen" was a real detection bug.
         let teaser = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Dein Reise-Atlas")).firstMatch
         if teaser.waitForExistence(timeout: 10) {
@@ -260,7 +298,7 @@ final class SortlyFlowUITests: XCTestCase {
         let starter = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ Alben (kostenlos )?anlegen")).firstMatch
         if starter.waitForExistence(timeout: 5) {
             tap(starter, "open starter set")
-            let preview = app.navigationBars["Umsetzen"].waitForExistence(timeout: 20)
+            let preview = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
             print(preview ? "UI_STEP_OK starter preview opened" : "UI_STEP_MISSING starter preview opened")
             sleep(2); shot("06c-starter-plan")
             back(); sleep(2)
@@ -285,11 +323,27 @@ final class SortlyFlowUITests: XCTestCase {
                 print(opened ? "UI_STEP_OK suggestion detail opened" : "UI_STEP_MISSING suggestion detail opened")
                 XCTAssertTrue(opened, "Tapping a suggestion did not open its detail")
                 shot("08-suggestion-detail"); audit("suggestion detail")
+                // Design review D3: every photo of a suggestion is a named button (its date),
+                // so VoiceOver and Voice Control can pick photos to take out.
+                let all = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Alle ")).firstMatch
+                if tap(all, "open all photos of the suggestion", timeout: 5) {
+                    let photo = app.buttons["proposalPhotos.photo"].firstMatch
+                    let named = photo.waitForExistence(timeout: 5) && photo.label.range(of: "20[0-9][0-9]", options: .regularExpression) != nil
+                    print(named ? "UI_STEP_OK suggestion photos are named buttons (\(photo.label))" : "UI_STEP_MISSING suggestion photos are named buttons")
+                    XCTAssertTrue(named, "The photos of a suggestion are not buttons named by their date")
+                    if tap(button("Auswählen"), "select photos of the suggestion", timeout: 5) {
+                        photo.tap()
+                        XCTAssertTrue(photo.isSelected, "A selected photo does not report the selected trait")
+                        shot("08a-suggestion-photos"); audit("suggestion photos")
+                        tap(button("Fertig"), "end photo selection")
+                    }
+                    back(); sleep(1)
+                }
                 // "Album anlegen" opens a preview; back without creating selects nothing.
                 let create = app.buttons["Album anlegen"]
                 if create.exists {
                     create.tap()
-                    if app.navigationBars["Umsetzen"].waitForExistence(timeout: 20) { sleep(1); back(); sleep(1) }
+                    if app.navigationBars["Vorschau"].waitForExistence(timeout: 20) { sleep(1); back(); sleep(1) }
                 }
                 back(); sleep(1)
                 let selected = suggestionRow().label.contains("Ausgewählt")
@@ -335,7 +389,7 @@ final class SortlyFlowUITests: XCTestCase {
                 shot("10a-plan-albums")
                 app.swipeDown(); sleep(1)
             }
-            if tap(button("Jetzt umsetzen"), "apply plan", timeout: 30) {
+            if tap(app.buttons["plan.apply"], "apply plan", timeout: 30) {
                 let applied = Date()
                 // Mid-show frames of "photos fly into albums".
                 usleep(1_100_000); shot("10b-show")
@@ -349,7 +403,7 @@ final class SortlyFlowUITests: XCTestCase {
                 if !receipt.isHittable { app.swipeUp(); sleep(1) }
                 if tap(receipt, "open change receipt", timeout: 10) {
                     sleep(2)
-                    let checked = anything("0 Originale gelöscht").waitForExistence(timeout: 5)
+                    let checked = anything("Kein Original gelöscht").waitForExistence(timeout: 5)
                     print(checked ? "UI_STEP_OK receipt shows originals untouched" : "UI_STEP_MISSING receipt shows originals untouched")
                     shot("11a-receipt"); audit("receipt")
                     app.swipeUp(); sleep(1)
@@ -398,10 +452,23 @@ final class SortlyFlowUITests: XCTestCase {
                 sleep(2)
                 shot("14b-library-sorted")
             }
+            // Design review W11/W12: a tap opens the photo large, its details behind "i",
+            // and a pull down closes it, as in Photos.
             if tap(photo, "open photo") {
                 sleep(2)
-                shot("15-photo-detail"); audit("photo detail")
-                tap(button("Fertig"), "close photo")
+                shot("15-photo-viewer"); audit("photo viewer")
+                if tap(app.buttons["viewer.info"], "photo info") {
+                    sleep(1)
+                    shot("15a-photo-detail"); audit("photo detail")
+                    tap(app.buttons["detail.close"], "close photo info")
+                    sleep(1)
+                }
+                let close = app.buttons["viewer.close"]
+                app.swipeDown(velocity: .slow)
+                let closed = waitGone(close, timeout: 5)
+                print(closed ? "UI_STEP_OK pull down closes the photo" : "UI_STEP_MISSING pull down closes the photo")
+                XCTAssertTrue(closed, "Pulling the photo down did not close it")
+                if !closed { closeViewerIfOpen() }
             }
             if tap(button("Auswählen"), "select mode") {
                 let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
@@ -415,12 +482,26 @@ final class SortlyFlowUITests: XCTestCase {
                 }
                 tap(button("Fertig"), "end selection")
             }
+            ignoreAndUndo()
         }
 
         // Albums
         if tap(tabButton("Alben"), "albums tab") {
             sleep(2)
             shot("18-albums"); audit("albums")
+            // Design review W12: an album shows all its photos, and each opens large.
+            let album = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9] Fotos?")).firstMatch
+            if tap(album, "open an album", timeout: 5) {
+                let photo = app.buttons["album.photo"].firstMatch
+                if tap(photo, "open a photo of the album", timeout: 10) {
+                    let viewer = app.buttons["viewer.close"].waitForExistence(timeout: 5)
+                    print(viewer ? "UI_STEP_OK album photo opens large" : "UI_STEP_MISSING album photo opens large")
+                    XCTAssertTrue(viewer, "A photo of an album does not open")
+                    shot("18a-album-photo")
+                    closeViewerIfOpen()
+                }
+                back(); sleep(1)
+            }
         }
 
         // Search (the system names the search tab itself)
@@ -444,16 +525,12 @@ final class SortlyFlowUITests: XCTestCase {
             if tap(app.buttons["Einstellungen"], "settings") {
                 sleep(1)
                 shot("21-settings"); audit("settings")
-                // The history sits far down in a lazy list: its rows exist only once scrolled to.
+                // Design review W16: history and undo are the first row, on their own screen.
+                let history = tap(app.buttons["settings.history"], "open history and undo", timeout: 5)
+                if history { sleep(1); shot("21h-history"); audit("history") }
                 let row = app.buttons["history.row"].firstMatch
-                let list = app.collectionViews.firstMatch
-                var swipes = 0
-                while !(row.exists && row.isHittable) && swipes < 10 {
-                    (list.exists ? list : app).swipeUp()
-                    swipes += 1
-                }
                 // A history row opens the plan's change receipt; undo lives there.
-                let opened = tap(row, "history row opens receipt", timeout: 10)
+                let opened = history && tap(row, "history row opens receipt", timeout: 10)
                 if opened { sleep(2); shot("21a-history-receipt") }
                 let undo = app.buttons["receipt.undo"]
                 if opened && !undo.exists {
@@ -511,6 +588,7 @@ final class SortlyFlowUITests: XCTestCase {
                     XCTAssertTrue(removedRow, "Undo removed no albums or folders")
                 }
                 if opened { back(); sleep(1) }
+                if history { back(); sleep(1) }
                 tap(button("Fertig"), "close settings")
             }
         }
@@ -537,6 +615,78 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Fertig"), "close settings after trip reset")
             _ = waitStable("analysis after trip reset", timeout: 180) { analysisIdle }
         }
+    }
+
+    /// Design review D4 (15.11.): "Ignorieren" can be taken back, right after the action
+    /// ("Widerrufen") and later in "Ignoriert" ("Nicht mehr ignorieren"). Runs in the library.
+    private func ignoreAndUndo() {
+        let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
+        func ignoreTwo(_ step: String) -> Bool {
+            guard tap(button("Auswählen"), "select mode for \(step)") else { return false }
+            guard photos.count >= 2 else { print("UI_STEP_MISSING two photos for \(step)"); return false }
+            photos.element(boundBy: 0).tap(); photos.element(boundBy: 1).tap()
+            return tap(app.buttons["selection.ignore"], "ignore two photos (\(step))")
+        }
+        // 1. Ignore, then "Widerrufen" in the note right after.
+        if ignoreTwo("undo") {
+            let note = anything("2 Fotos ignoriert")
+            let shown = note.waitForExistence(timeout: 5)
+            print(shown ? "UI_STEP_OK ignore note" : "UI_STEP_MISSING ignore note")
+            XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring")
+            shot("16a-ignore-note"); audit("ignore note")
+            if tap(app.buttons["ignore.undo"], "undo ignore") {
+                XCTAssertTrue(waitGone(note, timeout: 5), "The ignore note stayed after Widerrufen")
+                tap(app.buttons["Ignoriert"], "ignored area after undo")
+                sleep(2)
+                let empty = anything("Keine Fotos").waitForExistence(timeout: 5)
+                print(empty ? "UI_STEP_OK undo restored the photos" : "UI_STEP_MISSING undo restored the photos")
+                XCTAssertTrue(empty, "Widerrufen left photos in Ignoriert")
+                tap(app.buttons["Alle"], "all photos")
+                sleep(1)
+            }
+        }
+        // 2. Ignore again, then bring one back from "Ignoriert".
+        if ignoreTwo("unignore") {
+            sleep(2)
+            tap(app.buttons["Ignoriert"], "ignored area")
+            sleep(2)
+            shot("16b-ignored")
+            if tap(button("Auswählen"), "select in ignored") {
+                let ignored = photos.count
+                print("UI_FACT ignored photos \(ignored)")
+                XCTAssertEqual(ignored, 2, "Ignoriert should hold the two photos")
+                if ignored > 0 { photos.element(boundBy: 0).tap() }
+                // No red, destructive look for a step that can be taken back.
+                if tap(app.buttons["selection.unignore"], "unignore one photo") {
+                    sleep(2)
+                    XCTAssertEqual(photos.count, max(0, ignored - 1), "Nicht mehr ignorieren did not bring the photo back")
+                }
+            }
+            // The other one through the photo's own detail.
+            if photos.count > 0, tap(photos.element(boundBy: 0), "open ignored photo") {
+                sleep(1)
+                openPhotoInfo()
+                if tap(app.buttons["detail.unignore"], "unignore in detail") {
+                    sleep(2)
+                    closeViewerIfOpen()
+                    let empty = anything("Keine Fotos").waitForExistence(timeout: 5)
+                    print(empty ? "UI_STEP_OK ignored area empty again" : "UI_STEP_MISSING ignored area empty again")
+                    XCTAssertTrue(empty, "Nicht mehr ignorieren in the detail did not bring the photo back")
+                }
+            }
+            tap(app.buttons["Alle"], "all photos after unignore")
+        }
+    }
+
+    /// A photo opens large; its details sit behind the "i" button (design review W12).
+    private func openPhotoInfo() {
+        let info = app.buttons["viewer.info"]
+        if info.waitForExistence(timeout: 5) { info.tap(); sleep(1) }
+    }
+
+    private func closeViewerIfOpen() {
+        let close = app.buttons["viewer.close"]
+        if close.waitForExistence(timeout: 2) { close.tap(); sleep(1) }
     }
 
     /// Reise-Werkstatt (I07), from the trip list. The demo library's Iceland trip is
@@ -636,7 +786,8 @@ final class SortlyFlowUITests: XCTestCase {
     // MARK: Tap-through sweep
 
     /// Labels the sweep never taps: anything that changes the library or the analysis.
-    private let sweepSkip = ["Pause", "Neu prüfen", "Jetzt umsetzen", "Rückgängig", "Fotos-App öffnen", "Alle Jahre", "Ganze Mediathek dazunehmen", "arbeitet mit", "Nur 20", "Löschen", "Entfernen", "Anlegen",
+    private let sweepSkip = ["Pause", "Neu prüfen", "jetzt anlegen", "jetzt einsortieren", "jetzt ausführen", "zurücknehmen", "Rest anlegen",
+                             "Erledigtes behalten", "ignorieren", "Widerrufen", "Rückgängig", "Fotos-App öffnen", "Alle Jahre", "Ganze Mediathek dazunehmen", "arbeitet mit", "Nur 20", "Löschen", "Entfernen", "Anlegen",
                              "Übernehmen", "Nicht jetzt", "ergänzen", "so lassen", "Fortsetzen", "Beispiel", "Ignorieren", "Auswählen",
                              "aufheben"]
 
@@ -750,7 +901,8 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(withHistory, "Album records and history were not restored into the same library")
 
         // The history is back and the settings say when the copy was made.
-        if tap(app.buttons["Einstellungen"], "settings after restore") {
+        if tap(app.buttons["Einstellungen"], "settings after restore"),
+           tap(app.buttons["settings.history"], "history after restore", timeout: 5) {
             sleep(1)
             let list = app.collectionViews.firstMatch
             let saved = anything("Zuletzt gesichert")
@@ -764,6 +916,7 @@ final class SortlyFlowUITests: XCTestCase {
             print("UI_FACT history empty after restore \(empty)")
             XCTAssertFalse(empty, "The history is empty after the restore")
             shot("41-settings-backup")
+            back(); sleep(1)
             tap(button("Fertig"), "close settings after restore")
         }
         if tap(app.buttons["overview.restoredFromBackup.ok"], "dismiss restored card") {
@@ -775,7 +928,7 @@ final class SortlyFlowUITests: XCTestCase {
     }
 
     /// Fifth run: the app is closed while a plan runs. The next start offers to continue,
-    /// undo or leave it; "So lassen" keeps what was done, the change receipt says so and
+    /// undo or leave it; "Nur Erledigtes behalten" keeps what was done, the change list says so and
     /// "Fehlendes erneut versuchen" makes a plan with only the missing steps.
     func test5_InterruptedPlanCanBeLeftAndRetried() {
         continueAfterFailure = true
@@ -791,13 +944,13 @@ final class SortlyFlowUITests: XCTestCase {
         }
         guard tap(apply, "open plan for interruption", timeout: 20) else { return }
         sleep(3)
-        guard tap(button("Jetzt umsetzen"), "start plan for interruption", timeout: 30) else { return }
+        guard tap(app.buttons["plan.apply"], "start plan for interruption", timeout: 30) else { return }
         // The run takes about 16 s; closing the app after 3 s leaves it half done.
         sleep(3)
         app.terminate()
         sleep(2)
         launch()
-        let card = anything("Umsetzen wurde unterbrochen")
+        let card = anything("Anlegen wurde unterbrochen")
         guard card.waitForExistence(timeout: 30) else {
             // The plan finished before the app was closed: nothing to repair in this run.
             print("UI_FACT no interruption card (plan finished before the app was closed)")
@@ -811,20 +964,16 @@ final class SortlyFlowUITests: XCTestCase {
         guard tap(keep, "leave interrupted plan as it is") else { return }
         let gone = waitGone(card, timeout: 30)
         print(gone ? "UI_STEP_OK interruption card gone after keep" : "UI_STEP_MISSING interruption card gone after keep")
-        XCTAssertTrue(gone, "The interruption card stayed after \"So lassen\"")
+        XCTAssertTrue(gone, "The interruption card stayed after \"Nur Erledigtes behalten\"")
         sleep(2)
         shot("50b-after-keep")
 
         // The kept plan is the newest history row; its receipt says what is missing.
         guard tap(app.buttons["Einstellungen"], "settings after keep") else { return }
         sleep(1)
+        guard tap(app.buttons["settings.history"], "history after keep", timeout: 5) else { return }
+        sleep(1)
         let row = app.buttons["history.row"].firstMatch
-        let list = app.collectionViews.firstMatch
-        var swipes = 0
-        while !(row.exists && row.isHittable) && swipes < 10 {
-            (list.exists ? list : app).swipeUp()
-            swipes += 1
-        }
         guard tap(row, "kept plan in history", timeout: 10) else { return }
         sleep(2)
         let partial = anything("Teilweise umgesetzt").waitForExistence(timeout: 5)
@@ -837,12 +986,12 @@ final class SortlyFlowUITests: XCTestCase {
         sleep(1)
         shot("52-receipt-repair")
         guard tap(retry, "retry missing steps", timeout: 10) else { return }
-        let plan = app.navigationBars["Umsetzen"].waitForExistence(timeout: 20)
+        let plan = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
         print(plan ? "UI_STEP_OK retry plan opened" : "UI_STEP_MISSING retry plan opened")
         XCTAssertTrue(plan, "\"Fehlendes erneut versuchen\" did not open a plan")
         sleep(2)
         shot("53-retry-plan"); audit("retry plan")
-        if tap(button("Jetzt umsetzen"), "apply retry plan", timeout: 30) {
+        if tap(app.buttons["plan.apply"], "apply retry plan", timeout: 30) {
             let done = button("Rückgängig machen").waitForExistence(timeout: 300)
             print(done ? "UI_STEP_OK retry plan finished" : "UI_STEP_MISSING retry plan finished")
             XCTAssertTrue(done, "The retry plan did not finish")
@@ -923,9 +1072,7 @@ final class SortlyFlowUITests: XCTestCase {
         }
         let done = waitStable("analysis finished after background and tabs", timeout: 60) { analysisIdle }
         XCTAssertTrue(done, "The analysis did not finish after background and tabs")
-        let all = anything("Alle ").exists && anything("Fotos analysiert").exists
-        print(all ? "UI_STEP_OK every photo analysed" : "UI_STEP_MISSING every photo analysed")
-        print("UI_FACT analysis card \(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "analysiert")).firstMatch.label)")
+        assertEveryPhotoAnalysed("after background and tabs")
         shot("63-analysis-done"); audit("analysis done")
 
         // "Neu prüfen" finds nothing new and says so.

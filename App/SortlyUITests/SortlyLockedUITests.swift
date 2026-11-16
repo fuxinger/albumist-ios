@@ -3,7 +3,7 @@ import XCTest
 /// The locked path of the one-time purchase, end to end (runs after SortlyFlowUITests, on the
 /// library and suggestions that run left behind). The app starts with `-SortlyUITestLocked`
 /// and one free album left: a plan with more albums shows the unlock card instead of
-/// "Jetzt umsetzen", "Die ersten 1 jetzt kostenlos anlegen" shrinks the plan to the free
+/// "Alben jetzt anlegen", "Die ersten 1 jetzt kostenlos anlegen" shrinks the plan to the free
 /// album, it runs, and afterwards no free album is left. The purchase sheet itself is not
 /// opened here (no App Store account on the CI simulator); buying, restoring, Ask to Buy,
 /// failures and refunds are tested with StoreKit in PurchaseStoreKitTests.
@@ -68,7 +68,7 @@ final class SortlyLockedUITests: XCTestCase {
         let unlock = app.staticTexts["Albumist freischalten"]
         if unlock.waitForExistence(timeout: 10) {
             print("UI_STEP_OK unlock card")
-            XCTAssertFalse(button("Jetzt umsetzen").exists, "A plan over the free albums offered \"Jetzt umsetzen\"")
+            XCTAssertFalse(app.buttons["plan.apply"].exists, "A plan over the free albums offered \"Alben jetzt anlegen\"")
             XCTAssertTrue(button("Freischalten").exists, "No unlock button")
             XCTAssertTrue(button("Kauf wiederherstellen").exists, "No restore button")
             guard tap(button("jetzt kostenlos anlegen"), "keep the free albums only") else { return }
@@ -76,7 +76,7 @@ final class SortlyLockedUITests: XCTestCase {
         } else {
             print("UI_FACT locked: the plan has a single album, it fits the free one")
         }
-        let start = button("Jetzt umsetzen")
+        let start = app.buttons["plan.apply"]
         XCTAssertTrue(start.waitForExistence(timeout: 20), "The plan within the free albums cannot be applied")
         let rest = anything("noch 0 von 10 Gratis-Alben").exists
         print(rest ? "UI_STEP_OK free albums left after this plan" : "UI_STEP_MISSING free albums left after this plan")

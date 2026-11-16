@@ -87,15 +87,15 @@ final class AccessibilityUITests: XCTestCase {
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: "Vorschläge prüfen",
-                                  suggestionTitle: "Vorschlag", rowMarker: "Aufnahmen",
-                                  starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Umsetzen",
-                                  applyNow: "Jetzt umsetzen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
+                                  suggestionTitle: "Vorschlag", rowMarker: "Fotos",
+                                  starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
+                                  applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
                                   shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom", country: "Italien")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: "Review",
-                                   suggestionTitle: "Suggestion", rowMarker: "item",
-                                   starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Apply",
-                                   applyNow: "Apply now", undo: "Undo", atlas: "Travel Atlas",
+                                   suggestionTitle: "Suggestion", rowMarker: "photo",
+                                   starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
+                                   applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
                                    shareAtlas: "Share Travel Atlas", searchQuery: "Rome", country: "Italy")
     }
 
@@ -280,6 +280,20 @@ final class AccessibilityUITests: XCTestCase {
         if tap(tabButton(w.libraryTab), "\(tag) library tab") {
             sleep(2)
             check("\(tag) library", english: english)
+            // Design review W11/W12: the photo viewer (system toolbar) and its info sheet.
+            let photo = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*")).firstMatch
+            if !short, photo.waitForExistence(timeout: 5), tap(photo, "\(tag) open photo", timeout: 5) {
+                sleep(2)
+                check("\(tag) photo viewer", english: english)
+                if tap(app.buttons["viewer.info"], "\(tag) photo info", timeout: 5) {
+                    sleep(1)
+                    check("\(tag) photo info", english: english)
+                    tap(app.buttons["detail.close"], "\(tag) close photo info")
+                    sleep(1)
+                }
+                tap(app.buttons["viewer.close"], "\(tag) close photo", timeout: 5)
+                sleep(1)
+            }
         }
         if tap(tabButton(w.albumsTab), "\(tag) albums tab") {
             sleep(2)
@@ -290,6 +304,14 @@ final class AccessibilityUITests: XCTestCase {
             sleep(2)
             check("\(tag) settings", english: english)
             if !short {
+                // Design review W16: history and undo on their own screen. Opened first, from
+                // the top of the list: after scrolling down and back the first row was not in
+                // the tree again (UI run 43773339053, "history" missing).
+                if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
+                    sleep(1)
+                    check("\(tag) history", english: english)
+                    back(); sleep(1)
+                }
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
                 check("\(tag) settings lower", english: english)

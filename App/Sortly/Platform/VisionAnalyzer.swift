@@ -1,3 +1,4 @@
+import CoreImage
 import Foundation
 import ImageIO
 import Photos
@@ -49,34 +50,83 @@ enum PreviewCache {
     }
 }
 
+/// What the image requests of this launch ended with, counted per outcome: in the diagnostic
+/// report and, in UI runs, on the analysis card (UI runs reported every demo photo unreadable
+/// and nothing said why).
+enum ImageLoadStats {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var counts: [String: Int] = [:]
+
+    static func note(_ outcome: String) {
+        lock.lock()
+        counts[outcome, default: 0] += 1
+        lock.unlock()
+    }
+
+    static var summary: String {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !counts.isEmpty else { return "none" }
+        return counts.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+    }
+
+    /// Why PhotoKit handed back no image, from the info it gave.
+    static func reason(_ info: [AnyHashable: Any]?) -> String {
+        var parts: [String] = []
+        if let error = info?[PHImageErrorKey] as? NSError { parts.append("error \(error.domain) \(error.code)") }
+        if (info?[PHImageResultIsInCloudKey] as? Bool) == true { parts.append("in cloud") }
+        if (info?[PHImageResultIsDegradedKey] as? Bool) == true { parts.append("degraded") }
+        return parts.isEmpty ? "no info" : parts.joined(separator: " ")
+    }
+}
+
 /// Loads images from PhotoKit for analysis.
 enum ImageLoader {
     static func image(for id: AssetID, quality: ImageQuality, allowNetwork: Bool) async throws -> LoadedImage? {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject else {
+            ImageLoadStats.note("asset missing")
             throw AnalysisError.unreadable
         }
-        let options: PHImageRequestOptions
-        let target: CGSize
-        let manager: PHImageManager
         switch quality {
         case .localPreview:
-            options = PreviewCache.options()
-            target = PreviewCache.size
-            manager = PreviewCache.manager
+            defer { PreviewCache.stop(asset) }
+            do {
+                if let image = try await load(asset, manager: PreviewCache.manager, target: PreviewCache.size,
+                                              options: PreviewCache.options(), waitsForFinal: false, stat: "preview") {
+                    return image
+                }
+            } catch AnalysisError.originalNotAvailable {
+                // Asked below like an empty answer.
+            }
+            // No small preview: the image is made from the original on the device instead,
+            // never from iCloud. The fast format has no preview of a photo Photos has not made
+            // thumbnails for yet (every photo the simulator's demo library had just created).
+            let options = PHImageRequestOptions()
+            options.isSynchronous = false
+            options.isNetworkAccessAllowed = false
+            options.version = .current
+            options.deliveryMode = .highQualityFormat
+            // .exact: .fast may hand back a larger stored copy (1–2k px, up to ~16 MB each).
+            options.resizeMode = .exact
+            return try await load(asset, manager: PHImageManager.default(), target: PreviewCache.size,
+                                  options: options, waitsForFinal: true, stat: "local original")
         case .original:
-            options = PHImageRequestOptions()
+            let options = PHImageRequestOptions()
             options.isSynchronous = false
             options.isNetworkAccessAllowed = allowNetwork
             options.version = .current
             options.deliveryMode = .highQualityFormat
             options.resizeMode = .exact
-            target = CGSize(width: 2_400, height: 2_400)
-            manager = PHImageManager.default()
+            return try await load(asset, manager: PHImageManager.default(), target: CGSize(width: 2_400, height: 2_400),
+                                  options: options, waitsForFinal: true, stat: "original")
         }
-        defer { if quality == .localPreview { PreviewCache.stop(asset) } }
-        // One request resumes the caller exactly once: with the final image, with an error, or
-        // with CancellationError when the analysis stops (the PhotoKit request, maybe an
-        // iCloud download, is cancelled with it instead of running on).
+    }
+
+    /// One request resumes the caller exactly once: with the final image, with an error, or
+    /// with CancellationError when the analysis stops (the PhotoKit request, maybe an iCloud
+    /// download, is cancelled with it instead of running on).
+    private static func load(_ asset: PHAsset, manager: PHImageManager, target: CGSize, options: PHImageRequestOptions,
+                             waitsForFinal: Bool, stat: String) async throws -> LoadedImage? {
         let request = ImageRequest(manager: manager)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LoadedImage?, Error>) in
@@ -87,19 +137,47 @@ enum ImageLoader {
                         return
                     }
                     let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                    if isDegraded && quality == .original { return } // wait for the final image
-                    if let image, let cg = image.cgImage {
-                        request.finish(.success(LoadedImage(cgImage: cg, orientation: CGImagePropertyOrientation(image.imageOrientation))))
+                    if isDegraded && waitsForFinal { return } // wait for the final image
+                    if let image, let loaded = LoadedImage(image) {
+                        ImageLoadStats.note("\(stat) ok")
+                        request.finish(.success(loaded))
+                    } else if image != nil {
+                        ImageLoadStats.note("\(stat) not drawable")
+                        request.finish(.success(nil))
                     } else if (info?[PHImageResultIsInCloudKey] as? Bool) == true {
+                        ImageLoadStats.note("\(stat) in cloud")
                         request.finish(.failure(AnalysisError.originalNotAvailable))
                     } else {
+                        ImageLoadStats.note("\(stat) none (\(ImageLoadStats.reason(info)))")
                         request.finish(.success(nil))
                     }
                 }
                 request.attach(id)
+                // PhotoKit may never call back (assetsd stalled): the lane gives up after a while
+                // instead of hanging the analysis. A download from iCloud gets longer.
+                let limit: Double = options.isNetworkAccessAllowed ? 180 : 30
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + limit) {
+                    if request.timeOut() { ImageLoadStats.note("\(stat) timed out") }
+                }
             }
         } onCancel: {
             request.cancel()
+        }
+    }
+}
+
+extension LoadedImage {
+    /// One Core Image context for all images (creating one per photo is costly).
+    nonisolated(unsafe) static let sharedContext = CIContext()
+
+    /// The bitmap of a PhotoKit image; one backed by Core Image is rendered once.
+    init?(_ image: UIImage) {
+        if let cg = image.cgImage {
+            self.init(cgImage: cg, orientation: CGImagePropertyOrientation(image.imageOrientation))
+        } else if let ci = image.ciImage, let cg = LoadedImage.sharedContext.createCGImage(ci, from: ci.extent) {
+            self.init(cgImage: cg, orientation: CGImagePropertyOrientation(image.imageOrientation))
+        } else {
+            return nil
         }
     }
 }
@@ -147,6 +225,20 @@ private final class ImageRequest: @unchecked Sendable {
         continuation = nil
         lock.unlock()
         pending?.resume(with: result)
+    }
+
+    /// Gives up on a request PhotoKit never answered: resumes with no image and cancels it in
+    /// PhotoKit. True if the request was still waiting.
+    func timeOut() -> Bool {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        let id = requestID
+        lock.unlock()
+        guard let pending else { return false }
+        if let id { manager.cancelImageRequest(id) }
+        pending.resume(returning: nil)
+        return true
     }
 
     func cancel() {

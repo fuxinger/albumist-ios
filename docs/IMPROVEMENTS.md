@@ -47,6 +47,8 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | ✅ | „Flugbuchungen“ falsch erkannt: Stichworte wurden als Wortteile gesucht („Flug“ in „Flugmodus“ und „Ausflug“, „gate“ in „Navigate“, „boarding“ in „Snowboarding“). Jetzt nur mit Flugnummer, Strecke wie „MUC → BCN“ oder „Bordkarte“ plus Flugwort, oder mehreren ganzen Flugwörtern. | S | Fuchs 15.11. (iPhone) |
 | ✅ | „In Fotos ansehen“ führte nicht zu den Alben (iOS erlaubt Apps nicht, ein bestimmtes Album zu öffnen). Knopf heißt jetzt „Fotos-App öffnen“, darunter steht der Weg zu den Alben. | S | Fuchs 15.11. (iPhone) |
 | ✅ | Ordner „Albumist“ über allen Alben: Neue Alben liegen jetzt ohne ihn direkt bei den eigenen Alben (Entscheidung Fuchs). Wer schon Alben im Ordner hat, behält ihn, bis er ihn in den Einstellungen leert. | S | Fuchs 15.11. |
+| ✅ | Ring fiel von „811 von 5.683 sortiert“ auf 141 und 157: Seit dem Kuratieren der Vorschläge (Build 28) steht eine Reise für ein Land, das nur auf ihr vorkam, und der Status las nur die offenen Vorschläge. Eigene Reise-Alben zählen jetzt auch für das Land. Fotos von zu Hause und Fotos, für die kein Album vorgeschlagen wird, zählen nicht mit, und unter dem Ring steht, wie viele das sind. Fotos von einer Reise nach der letzten Analyse zählen bis zur nächsten als unsortiert. | M | Fuchs 15.11. (iPhone) |
+| 💡 | **Produktfrage:** Fotos aus abgelehnten Vorschlägen („Nicht jetzt“) ohne eigenes passendes Album zählen im Ring weiter als unsortiert. Wer ablehnt, erreicht nie 100 %, und die Arbeit bleibt, obwohl entschieden ist. Vorschlag: Ablehnen ist eine Entscheidung. Diese Fotos verlassen den Ring wie Fotos von zu Hause und stehen in der Zeile darunter („… und 40 aus abgelehnten Vorschlägen“); „Abgelehnte Vorschläge wieder zeigen“ holt sie zurück. Dagegen spricht, dass Ablehnen den Ring dann voller macht. Alternative: weiter als Arbeit zählen, aber die Zeile unter dem Ring nennt sie mit dem Weg zurück. Entscheidung Fuchs. | S | Review 16.11. |
 | 🔜 | Alben ganz ohne Ordner („Länder“, „Reisen“) als Schalter, falls gewünscht. | S | Fuchs 15.11. |
 | 💡 | Bereits im Ordner „Albumist“ angelegte Alben auf Wunsch herausholen (Ordner auflösen). | M | Fuchs 15.11. |
 | 💡 | Bedienungshilfen-Prüfung meldet zu wenig Kontrast bei den großen Glas-Knöpfen. Gemessen: Weiß auf Petrol 6:1, also bestanden; vermutlich misst die Prüfung den Glas-Effekt mit. Auf echtem Gerät nachprüfen. | S | T 14.11. |
@@ -129,6 +131,10 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | ✅ | Einheitliche Wörter: überall „sortiert“ statt „organisiert“. „Umsetzen“ bleibt für das Anlegen eines ganzen Plans. | S | E1 Oberfläche |
 | 💡 | iPad: Inhalte nicht über die ganze Breite ziehen, Liste und Detail nebeneinander. | M | E1 Oberfläche |
 | 💡 | Erhöhter Kontrast: eigene Farbvarianten. | S | E1 Oberfläche |
+| 💡 | Design-Prüfung 15.11., N7: Fußnote im Startschritt der Einführung kürzen. Zurückgestellt, weil sie zur neuen Fortschrittsanzeige auf `claude/pro-progress` passen muss. | S | Design-Prüfung |
+| 💡 | Design-Prüfung 15.11., W4-Rest: „%lld Aufnahmen“ in der Scan-Show und „Fortsetzen“ in der Analysekarte; der Satz „Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.“ in der Statuskarte. Zurückgestellt, weil diese Bereiche auf `claude/pro-progress` neu gebaut werden. | S | Design-Prüfung |
+| 💡 | Atlas: „Land/Länder“, „Stadt/Städte“, „Reise/Reisen“ und „Tag/Tage“ werden im Code gewählt statt über Mehrzahl im Katalog. Für Deutsch und Englisch richtig; für weitere Sprachen auf Katalog-Mehrzahl umstellen (Zahl und Wort sind getrennt gestaltet). | S | Design-Prüfung |
+| 💡 | Teaser „Dein Reise-Atlas“ hat keine Überschrift-Eigenschaft, weil er ein Link ist; prüfen, ob VoiceOver-Nutzer ihn im Rotor vermissen. | S | Design-Prüfung |
 
 ## Produkt und App Store
 

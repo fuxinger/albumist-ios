@@ -54,7 +54,7 @@ extension OrganizationArea {
         case .trips: "Erkennt Reisen und Ausflüge und trennt sie vom Alltag zu Hause."
         case .frequentPlaces: "Orte, an denen du oft fotografierst. Du gibst ihnen selbst einen Namen."
         case .peopleAndPets: "Haustiere und – nur wenn du es einschaltest – Gesichter."
-        case .messenger: "Bilder aus WhatsApp, Signal und Co., nur mit klaren Hinweisen."
+        case .messenger: "Fotos aus WhatsApp, Signal und Co., nur mit klaren Hinweisen."
         case .screenshots: "Screenshots nach Inhalt: Bestellungen, Tickets, Rezepte …"
         case .imageCategories: "Themen wie Hunde, Strand, Essen oder Autos."
         case .documents: "Rechnungen, Verträge und Kassenbons. Sensible Dokumente nur auf Wunsch."
@@ -154,23 +154,23 @@ enum ReasonText {
         let dates = Date.FormatStyle(date: .numeric, time: .omitted)
         switch reason {
         case .photosInPlaceDuringPeriod(let count, let place, let start, let end):
-            return String(localized: "\(count) Aufnahmen zwischen \(start.formatted(dates)) und \(end.formatted(dates)) in \(place).")
+            return String(localized: "\(count) Fotos zwischen \(start.formatted(dates)) und \(end.formatted(dates)) in \(place).")
         case .photosInPlace(let count, let place):
-            return String(localized: "\(count) Aufnahmen in \(place).")
+            return String(localized: "\(count) Fotos in \(place).")
         case .photosInPeriod(let count, let start, let end):
-            return String(localized: "\(count) Aufnahmen zwischen \(start.formatted(dates)) und \(end.formatted(dates)).")
+            return String(localized: "\(count) Fotos zwischen \(start.formatted(dates)) und \(end.formatted(dates)).")
         case .recurringPlace(let count, let days):
-            return String(localized: "\(count) Aufnahmen an \(days) verschiedenen Tagen am selben Ort.")
+            return String(localized: "\(count) Fotos an \(days) verschiedenen Tagen am selben Ort.")
         case .recognizedContent(let count, let label):
-            return String(localized: "\(count) Bilder zeigen „\(label)“.")
+            return String(localized: "\(count) Fotos zeigen „\(label)“.")
         case .recognizedText(let count, let label):
-            return String(localized: "\(count) Bilder enthalten Text zu „\(label)“.")
+            return String(localized: "\(count) Fotos enthalten Text zu „\(label)“.")
         case .mediaType(let count, let label):
-            return String(localized: "\(count) Medien: \(label).")
+            return String(localized: "\(count) Fotos und Videos: \(label).")
         case .confirmedGroup(let count, let name):
-            return String(localized: "\(count) Bilder von \(name).")
+            return String(localized: "\(count) Fotos von \(name).")
         case .ruleMatched(let count, let rule):
-            return String(localized: "\(count) Bilder passen zur Regel „\(rule)“.")
+            return String(localized: "\(count) Fotos passen zur Regel „\(rule)“.")
         case .inferredWithoutLocation(let count):
             return String(localized: "\(count) Fotos ohne Ort passen zeitlich dazu und sind nur vorgeschlagen.")
         }
@@ -179,21 +179,21 @@ enum ReasonText {
     static func text(_ reason: MatchReason) -> String {
         switch reason {
         case .albumContains(let album, let contained, let total):
-            return String(localized: "Dein Album „\(album)“ enthält schon \(contained) von \(total) Aufnahmen.")
+            return String(localized: "Dein Album „\(album)“ enthält schon \(contained) von \(total) Fotos.")
         case .missingItems(let count):
-            return String(localized: "\(count) passende Aufnahmen fehlen noch und werden ergänzt.")
+            return String(localized: "\(count) passende Fotos fehlen noch und werden ergänzt.")
         case .albumHasOtherItems(let album, let count):
-            return String(localized: "„\(album)“ enthält \(count) weitere Aufnahmen, die nicht dazugehören. Sie bleiben unverändert.")
+            return String(localized: "„\(album)“ enthält \(count) weitere Fotos, die nicht dazugehören. Sie bleiben unverändert.")
         case .albumIsBroaderCollection(let album, let siblings):
             return String(localized: "„\(album)“ ist eine größere Sammlung über \(siblings) Ereignisse und wird nicht als Reisealbum verwendet.")
         case .sameNameDifferentContent(let album, let shared):
-            return String(localized: "Es gibt schon ein Album „\(album)“, aber mit anderem Inhalt (\(shared) gemeinsame Aufnahmen).")
+            return String(localized: "Es gibt schon ein Album „\(album)“, aber mit anderem Inhalt (\(shared) gemeinsame Fotos).")
         case .albumNotEditable(let album):
             return String(localized: "„\(album)“ kann nicht bearbeitet werden (z. B. geteiltes Album).")
         case .severalAlbumsMatch(let count):
             return String(localized: "\(count) Alben passen ähnlich gut. Albumist ergänzt erst, wenn du eines ausgewählt hast.")
         case .weakOverlapOnly(let album, let shared):
-            return String(localized: "„\(album)“ hat nur \(shared) gemeinsame Aufnahmen.")
+            return String(localized: "„\(album)“ hat nur \(shared) gemeinsame Fotos.")
         case .noExistingAlbum:
             return String(localized: "Es gibt noch kein passendes Album.")
         }

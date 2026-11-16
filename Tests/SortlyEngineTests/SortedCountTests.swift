@@ -30,6 +30,8 @@ struct SortedCountTests {
     static let home = spot("home", 48.1371, 11.5754, "DE", "Deutschland", "Bayern", "München")
     static let parents = spot("Augsburg", 48.3705, 10.8978, "DE", "Deutschland", "Bayern", "Augsburg")
     static let salzburg = spot("Salzburg", 47.8095, 13.0550, "AT", "Österreich", "Salzburg", "Salzburg")
+    /// A trip after the last analysis (`World.later`).
+    static let lisbon = spot("Lissabon", 38.7223, -9.1393, "PT", "Portugal", "Lissabon", "Lissabon")
     /// Trips with the album the user made by hand before Albumist (nil: none).
     static let trips: [(spot: Spot, from: String, to: String, album: String?)] = [
         (spot("Island", 64.1466, -21.9426, "IS", "Island", "Höfuðborgarsvæðið", "Reykjavík"), "2023-07-10", "2023-07-16", "Island 2023"),
@@ -52,6 +54,8 @@ struct SortedCountTests {
         var pipeline: AnalysisPipeline
         var settings: OrganizationSettings
         var groups: [String: [AssetID]]
+        /// The whole library once the photos of the trip to Lisbon (5.–7.11.2026) arrived.
+        var later: [AssetSnapshot]
         func ids(_ name: String) -> [AssetID] { groups[name] ?? [] }
     }
 
@@ -59,8 +63,9 @@ struct SortedCountTests {
     ///   - visible: with limited access, the photos the user picked (PhotoKit shows albums with
     ///     these photos only).
     ///   - moroccoOwn: how many Morocco photos the user's own album holds.
+    ///   - now: the pipeline's clock (the real time when nil).
     func world(empty: Bool = false, access: LibraryAccess = .full, visible: ((AssetID) -> Bool)? = nil,
-               moroccoOwn: Int? = nil) async throws -> World {
+               moroccoOwn: Int? = nil, now: Date? = nil) async throws -> World {
         var lib = LibraryBuilder()
         var groups: [String: [AssetID]] = [:]
         if !empty {
@@ -79,6 +84,11 @@ struct SortedCountTests {
             // One afternoon in Salzburg: six photos, a trip too small for an album.
             groups["Salzburg"] = lib.daily(from: "2026-03-14", to: "2026-03-14", at: Self.salzburg.at, perDay: 6, hour: 13)
         }
+        if !empty {
+            // Back from Lisbon after the last analysis: these photos arrive later.
+            groups["Lissabon"] = lib.daily(from: "2026-11-05", to: "2026-11-07", at: Self.lisbon.at, perDay: 20, hour: 9)
+        }
+        let lisbon = Set(groups["Lissabon"] ?? []), later = lib.assets
         var albums: [CollectionSnapshot] = []
         for t in Self.trips {
             guard let title = t.album else { continue }
@@ -93,7 +103,7 @@ struct SortedCountTests {
             albums.append(CollectionSnapshot(id: "smart-fav", title: "Favoriten", kind: .smartAlbum, capabilities: [],
                                              assetIDs: Set((groups["Paris"] ?? []).prefix(60))))
         }
-        var assets = lib.assets
+        var assets = lib.assets.filter { !lisbon.contains($0.id) }
         if let visible {
             assets = assets.filter { visible($0.id) }
             albums = albums.map { album in
@@ -106,15 +116,15 @@ struct SortedCountTests {
         settings.titleLanguage = .german
         let store = try SortlyStore(url: nil)
         let reader = InMemoryLibraryReader(assets: assets, inventory: CollectionInventory(albums), access: access)
-        let answers = [Self.home, Self.parents, Self.salzburg] + Self.trips.map(\.spot)
+        let answers = [Self.home, Self.parents, Self.salzburg, Self.lisbon] + Self.trips.map(\.spot)
         let pipeline = AnalysisPipeline(
             store: store, reader: reader, analyzer: FakeContentAnalyzer(),
             geocoder: FakeGeocoder(answers: answers.map { ($0.at, $0.place) }), map: Self.map,
             conditions: FakeConditions(pauseAfterChecks: nil), settings: settings, calendar: Fixture.calendar,
-            time: ManualTime().source, batchSize: 50
+            time: ManualTime().source, batchSize: 50, now: { now ?? Date() }
         )
         let library = InMemoryPhotoLibrary(assets: Set(assets.map(\.id)), collections: albums)
-        return World(store: store, reader: reader, library: library, pipeline: pipeline, settings: settings, groups: groups)
+        return World(store: store, reader: reader, library: library, pipeline: pipeline, settings: settings, groups: groups, later: later)
     }
 
     struct Ring {
@@ -370,6 +380,29 @@ struct SortedCountTests {
         #expect(decoded == snapshot)
     }
 
+    /// Back from a trip, while the analysis reads the new photos and before it has made their
+    /// suggestions: the photos count as unsorted (the total grows by them). They do not leave
+    /// the ring as photos without an album on purpose, which is only for photos the suggestions
+    /// already knew.
+    @Test func newPhotosAfterATripStayUnsorted() async throws {
+        let w = try await world(now: Fixture.date("2026-11-01"))
+        _ = try await w.pipeline.run()
+        let before = try await ring(w)
+        let known = try #require(try await w.pipeline.latestProposals())
+        await w.reader.set(assets: w.later)
+        _ = try await w.pipeline.run()
+        try await w.store.setValue(known, forKey: AnalysisPipeline.Key.proposals)
+        let back = try await ring(w)
+        let lisbon = w.ids("Lissabon")
+        #expect(back.overall(lisbon) == ["unorganized"], "\(back.overall(lisbon))")
+        #expect(back.progress.total == before.progress.total + lisbon.count)
+        #expect(back.progress.fully == before.progress.fully)
+        // With the new suggestions, Lisbon is a trip to sort.
+        _ = try await w.pipeline.run()
+        #expect(try await ring(w).overall(lisbon) == ["unorganized"])
+        #expect(try await w.pipeline.latestProposals()?.proposals.contains { $0.kind == .trip && $0.assetIDs == Set(lisbon) } == true)
+    }
+
     /// The fitting album of a suggestion: also when several albums fit; never a smart album.
     @Test func multipleMatchesCountWhenTheBestAlbumFits() {
         func result(_ status: MatchStatus, editable: Bool = true) -> MatchResult {
@@ -378,10 +411,50 @@ struct SortedCountTests {
                                              relation: .partOfProposal, nameSimilarity: 0.5, score: 0.9, isEditable: editable),
                         alternatives: [], sameNameAlbums: [], reasons: [])
         }
-        #expect(LibraryStatus.fittingAlbums(result(.multipleMatches)) == ["a"])
-        #expect(LibraryStatus.fittingAlbums(result(.possibleMatch)) == ["a"])
-        #expect(LibraryStatus.fittingAlbums(result(.notEditable, editable: false)).isEmpty)
-        #expect(LibraryStatus.fittingAlbums(result(.nameConflict)).isEmpty)
+        #expect(LibraryStatus.fittingAlbums(result(.multipleMatches), kind: .trip) == ["a"])
+        #expect(LibraryStatus.fittingAlbums(result(.possibleMatch), kind: .trip) == ["a"])
+        #expect(LibraryStatus.fittingAlbums(result(.notEditable, editable: false), kind: .trip).isEmpty)
+        #expect(LibraryStatus.fittingAlbums(result(.nameConflict), kind: .trip).isEmpty)
+    }
+
+    /// A trip split by hand into two albums of the same size: both fit equally well, and both
+    /// halves count as sorted, not only the photos of the album the matcher happens to list first.
+    /// A smaller album, a smart album and a part of a place do not count.
+    @Test func everyAlbumThatFitsAsWellAsTheBestCounts() throws {
+        let trip = (0..<40).map { AssetID("is-\($0)") }
+        let proposal = AlbumProposal(id: SortlyID("island"), kind: .trip, title: "Island", assetIDs: Set(trip))
+        let inventory = CollectionInventory([
+            CollectionSnapshot(id: "own-1", title: "Island", assetIDs: Set(trip.prefix(20))),
+            CollectionSnapshot(id: "own-2", title: "Island", assetIDs: Set(trip.suffix(20))),
+            CollectionSnapshot(id: "own-3", title: "Island", assetIDs: Set(trip.prefix(16))),
+            CollectionSnapshot(id: "smart", title: "Island", kind: .smartAlbum, capabilities: [], assetIDs: Set(trip.suffix(20))),
+        ])
+        let match = try #require(AlbumMatcher().match([proposal], against: inventory)[proposal.id])
+        #expect(match.status == .multipleMatches)
+        #expect(LibraryStatus.fittingAlbums(match, kind: .trip) == ["own-1", "own-2"])
+
+        let facts = trip.map { id in
+            AssetFacts(asset: AssetSnapshot(id: id, kind: .image, creationDate: Fixture.date("2023-07-12"), location: Self.trips[0].spot.at),
+                       place: Self.trips[0].spot.place, placeSource: .gpsReverseGeocoded, tripID: SortlyID("t"),
+                       albumIDs: Set(inventory.albums.filter { $0.assetIDs.contains(id) }.map(\.id)))
+        }
+        var settings = OrganizationSettings()
+        settings.primaryAreas = [.trips]
+        let snapshot = ProposalSnapshot(generatedAt: Fixture.date("2026-11-01"), scope: .all, proposals: [proposal],
+                                        matches: [proposal.id: match])
+        let states = LibraryStatus.compute(facts: facts, snapshot: snapshot, settings: settings, contentAnalyzed: Set(trip))
+        #expect(trip.allSatisfy { states[$0]?.areas[.trips] == .preExisting })
+
+        // A place: "Rom" holds half of Italien but is a part of it, not its album.
+        let italy = AlbumProposal(id: SortlyID("it"), kind: .placeCollection(.country), title: "Italien", assetIDs: Set(trip))
+        let parts = AlbumMatcher().match([italy], against: CollectionInventory([
+            CollectionSnapshot(id: "it-1", title: "Italien", assetIDs: Set(trip.prefix(20))),
+            CollectionSnapshot(id: "it-2", title: "Italien", assetIDs: Set(trip.suffix(20))),
+            CollectionSnapshot(id: "rom", title: "Rom", assetIDs: Set(trip.prefix(20))),
+        ]))
+        let italyMatch = try #require(parts[italy.id])
+        #expect(italyMatch.status == .multipleMatches)
+        #expect(LibraryStatus.fittingAlbums(italyMatch, kind: italy.kind) == ["it-1", "it-2"])
     }
 
     /// What the app does after a plan ran: Albumist's albums recorded, the analysis sees the

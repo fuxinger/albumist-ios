@@ -52,20 +52,21 @@ struct PhotoGlow: View {
             // Text sits on the wash (category, title, count). Reduce Transparency and Increase
             // Contrast both ask for a plain background behind text, so the wash stays off.
             if colors.count == 4 && !reduceTransparency && contrast != .increased {
-                // The 30 % sits in the colours, not in a layer opacity: XCTest's contrast
-                // audit appears to measure text on this wash as if the gradient were opaque
-                // (clearly readable titles "failed" only on these two screens, UI runs 2-4).
-                // On screen both are the same: one layer, nothing overlapping inside it.
-                // The wash fades out above the text (country screen: "Rom und Florenz");
-                // white keeps 9:1 and Theme.secondaryText 5.4:1 on any photo colour.
+                // Opaque colours, already mixed with the screen background: XCTest's contrast
+                // audit measured text on the see-through wash as if the photo colour were
+                // solid, and failed readable text even where the wash had faded to almost
+                // nothing ("31 Fotos in Italien.", "Rom und Florenz", UI runs 2-4 and
+                // 43773339053). Mixed in advance, what it measures is what is on screen;
+                // the bottom row is the background itself, so the wash still fades out.
+                // White keeps 9:1 and Theme.secondaryText 4.7:1 on any photo colour.
                 MeshGradient(width: 2, height: 3, points: [
                     [0, 0], [1, 0],
                     [0, 0.5], [1, 0.5],
                     [0, 1], [1, 1],
                 ], colors: [
-                    colors[0].opacity(0.3), colors[1].opacity(0.3),
-                    colors[2].opacity(0.09), colors[3].opacity(0.09),
-                    .clear, .clear,
+                    Theme.background.mix(with: colors[0], by: 0.3), Theme.background.mix(with: colors[1], by: 0.3),
+                    Theme.background.mix(with: colors[2], by: 0.09), Theme.background.mix(with: colors[3], by: 0.09),
+                    Theme.background, Theme.background,
                 ])
                 .transition(.opacity)
             }

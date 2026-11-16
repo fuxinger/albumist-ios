@@ -14,7 +14,7 @@ class DecideTests(unittest.TestCase):
         self.assertIn("build-40", reason)
 
     def test_docs_and_markdown_only_start_nothing(self):
-        self.assertFalse(app_changed.decide("build-40", ["docs/IMPROVEMENTS.md", "README.md", "App/notes.md"])[0])
+        self.assertFalse(app_changed.decide("build-40", ["docs/IMPROVEMENTS.md", "README.md", "docs/launch/APP_REVIEW_NOTES.md"])[0])
 
     def test_any_app_file_counts(self):
         self.assertTrue(app_changed.decide("build-40", ["website/a.html", "App/Sortly/Model/AppModel.swift"])[0])
@@ -28,6 +28,17 @@ class DecideTests(unittest.TestCase):
 
     def test_nothing_changed_since_the_tag_starts_nothing(self):
         self.assertFalse(app_changed.decide("build-40", [])[0])
+
+    def test_markdown_inside_the_app_counts(self):
+        self.assertTrue(app_changed.decide("build-40", ["App/Sortly/Resources/help.md"])[0])
+        self.assertTrue(app_changed.decide("build-40", ["Sources/SortlyCore/Resources/notes.md"])[0])
+
+    def test_top_level_markdown_and_templates_start_nothing(self):
+        self.assertFalse(app_changed.decide("build-40", ["README.md", ".github/pull_request_template.md"])[0])
+
+    def test_a_file_moved_out_of_the_app_counts(self):
+        # git diff --no-renames lists both paths of a move
+        self.assertTrue(app_changed.decide("build-40", ["App/keep.swift", "docs/keep.swift"])[0])
 
 
 if __name__ == "__main__":

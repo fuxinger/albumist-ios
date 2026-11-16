@@ -44,7 +44,8 @@ on:
     # (16.11.: merging the website into main started a build of an old app state); main is
     # released by a manual run once its UI run is green. No paths filter: the "check" job asks
     # app_changed.py instead, which compares with the last uploaded build (tag build-<n>), so a
-    # website- or docs-only push starts nothing, while code pushed before such a push still ships.
+    # website- or docs-only push starts nothing (code pushed before such a push is still new;
+    # the test gate then decides whether it ships).
     branches: [claude/sortly-app]
   workflow_dispatch:
     inputs:

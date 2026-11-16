@@ -390,5 +390,55 @@ class SelectionTests(unittest.TestCase):
         self.assertTrue(context[2].startswith("5:Restarting after"))
 
 
+class FlakyTests(unittest.TestCase):
+    """Every repeat and every test that passed only on it is recorded; nothing is repeated silently."""
+
+    RETRY_LOG = ("Test Case '-[SortlyUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' passed (300.0 seconds).\n"
+                 "Test Case '-[SortlyUITests.AccessibilityUITests test2_EnglishMainScreens]' failed (12.0 seconds).\n")
+
+    def test_no_repeat_no_record(self):
+        record = ui_tests.flaky_record("flow-full", RESTART, [], None, None)
+        self.assertEqual((record["retries"], record["flaky"]), ([], []))
+        self.assertEqual(ui_tests.flaky_lines(record), [])
+
+    def test_tests_that_passed_only_on_the_repeat(self):
+        record = ui_tests.flaky_record("accessibility", RESTART, ["simulator not booted"], self.RETRY_LOG, "fail")
+        self.assertEqual(record["retries"], [{"reasons": ["simulator not booted"], "result": "fail"}])
+        self.assertEqual(record["flaky"], [{"test": "AccessibilityUITests/test1_OnboardingAtLargestTextInDarkMode",
+                                            "first": "not started", "reason": "simulator not booted"}])
+        lines = ui_tests.flaky_lines(record)
+        self.assertEqual(lines[0], "FLAKY_RETRY accessibility fail (simulator not booted)")
+        self.assertTrue(lines[1].startswith("FLAKY AccessibilityUITests/test1_OnboardingAtLargestTextInDarkMode simulator not booted"))
+
+    def test_a_repeat_that_could_not_start_is_recorded(self):
+        record = ui_tests.flaky_record("flow-other", AX_TIMEOUT, ["AX loaded notification timed out"], None,
+                                       "not started (simulator did not come back)")
+        self.assertEqual(len(record["retries"]), 1)
+        self.assertEqual(record["flaky"], [])
+
+    def test_boot_retries_are_recorded(self):
+        record = ui_tests.flaky_record("flow-full", "", [], None, None, ["bootstatus failed (attempt 1 of 3)"])
+        self.assertEqual(ui_tests.flaky_lines(record), ["FLAKY_BOOT flow-full bootstatus failed (attempt 1 of 3)"])
+
+    def test_run_summary_counts_every_group(self):
+        records = [ui_tests.flaky_record("accessibility", RESTART, ["simulator not booted"], self.RETRY_LOG, "fail"),
+                   ui_tests.flaky_record("flow-full", RESTART, [], None, None, ["bootstatus failed (attempt 1 of 3)"]),
+                   ui_tests.flaky_record("flow-other", "", [], None, None)]
+        markdown, lines = ui_tests.flaky_summary(records)
+        self.assertIn("1 repeat(s) after a simulator failure, 1 test(s) passed only on the repeat, 1 failed boot attempt(s), "
+                      "over 3 pass record(s)", markdown)
+        self.assertIn("| accessibility | flaky | AccessibilityUITests/test1_OnboardingAtLargestTextInDarkMode | not started |", markdown)
+        self.assertEqual(len(lines), 3)
+
+    def test_summary_command_reads_the_records(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "flaky-accessibility.json")
+            with open(path, "w") as f:
+                json.dump(ui_tests.flaky_record("accessibility", RESTART, ["simulator not booted"], self.RETRY_LOG, "pass"), f)
+            self.assertEqual(ui_tests.main(["flaky-summary", path, os.path.join(folder, "missing.json")]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

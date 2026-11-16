@@ -27,7 +27,9 @@ name: UI flow
 # erased and newly prepared simulator, for the tests that did not pass only. A failed test,
 # an error line, an accessibility finding, a crash, a timeout or a bare runner restart is
 # never repeated, and a pass that ran no test fails. Result bundles and logs are uploaded
-# when a group fails.
+# when a group fails. Nothing is repeated silently: every repeat, every test that passed only
+# on it and every failed boot attempt is a FLAKY... line in the group's log and job summary
+# and goes into build/flaky-GROUP.json; 4. "UI summary" (Linux) counts them over all groups.
 on:
   pull_request:
     paths-ignore: ['**.md']
@@ -219,3 +221,37 @@ jobs:
             sim-boot.log
           retention-days: 7
           if-no-files-found: ignore
+      - name: Keep the retry record for the run summary
+        # build/flaky-*.json: repeats after a simulator failure and the tests that passed only
+        # on them (ui_tests.py); the summary job below counts them over all groups.
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-flaky-${{ matrix.group }}
+          path: build/flaky-*.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+  summary:
+    name: UI summary (retries and flaky tests)
+    # Linux only; reads the records of all groups, also of failed ones. It never fails the run:
+    # the groups decide that. Nothing that was repeated stays hidden in a single job's log.
+    needs: ui
+    if: ${{ always() && needs.ui.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github
+          persist-credentials: false
+      - name: Retry records of the groups
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ui-flaky-*
+          path: flaky
+          merge-multiple: true
+      - name: Count repeats and flaky tests
+        run: |
+          shopt -s nullglob
+          python3 .github/scripts/ui_tests.py flaky-summary flaky/*.json >> "$GITHUB_STEP_SUMMARY"

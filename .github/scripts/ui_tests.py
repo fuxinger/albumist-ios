@@ -259,6 +259,51 @@ def restart_context(log: str, before: int = 60, limit: int = 400) -> list[str]:
 # Simulator
 
 
+def flaky_record(name: str, first_log: str, retry_reasons: list[str], retry_log: str | None,
+                 retry_result: str | None, boot_retries: list[str] | None = None) -> dict:
+    """What a group's run says about flakiness, for build/flaky-NAME.json and the FLAKY lines.
+
+    retries: every repeat after a simulator failure (also one that failed, and one that could
+    not start); flaky: every test that passed only in that repeat, with the reason and what
+    the first pass made of it ("failed" or "not started"); boot: failed boot attempts."""
+    record = {"group": name, "boot": list(boot_retries or []), "retries": [], "flaky": []}
+    if retry_result is None and not retry_reasons:
+        return record
+    record["retries"].append({"reasons": retry_reasons, "result": retry_result or "not started"})
+    first = finished_tests(first_log)
+    for test, state in finished_tests(retry_log or "").items():
+        if state == "passed":
+            record["flaky"].append({"test": test, "first": first.get(test, "not started"),
+                                    "reason": "; ".join(retry_reasons)})
+    return record
+
+
+def flaky_lines(record: dict) -> list[str]:
+    lines = [f"FLAKY_BOOT {record['group']} {reason}" for reason in record.get("boot", [])]
+    lines += [f"FLAKY_RETRY {record['group']} {r['result']} ({'; '.join(r['reasons'])})" for r in record.get("retries", [])]
+    lines += [f"FLAKY {f['test']} {f['reason']} (first pass: {f['first']}; passed on the repeat)"
+              for f in record.get("flaky", [])]
+    return lines
+
+
+def flaky_summary(records: list[dict]) -> tuple[str, list[str]]:
+    """(Markdown for the run summary, FLAKY lines) over every group's record."""
+    boots = sum(len(r.get("boot", [])) for r in records)
+    retries = sum(len(r.get("retries", [])) for r in records)
+    flaky = [f for r in records for f in r.get("flaky", [])]
+    lines = [line for r in records for line in flaky_lines(r)]
+    md = ["### UI tests: simulator retries and flaky tests", "",
+          f"{retries} repeat(s) after a simulator failure, {len(flaky)} test(s) passed only on the repeat, "
+          f"{boots} failed boot attempt(s), over {len(records)} pass record(s). A real test failure is never repeated.", ""]
+    if lines:
+        md += ["| Group | Kind | Test | First pass | Reason / result |", "|---|---|---|---|---|"]
+        for r in records:
+            md += [f"| {r['group']} | boot | | | {b} |" for b in r.get("boot", [])]
+            md += [f"| {r['group']} | repeat | | | {x['result']}: {'; '.join(x['reasons'])} |" for x in r.get("retries", [])]
+            md += [f"| {r['group']} | flaky | {f['test']} | {f['first']} | {f['reason']} |" for f in r.get("flaky", [])]
+    return "\n".join(md) + "\n", lines
+
+
 def sh(command: list[str], timeout: float = 300, quiet: bool = False) -> tuple[int, str]:
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
@@ -298,13 +343,17 @@ def pick(device: str) -> str:
     return done.stdout.strip()
 
 
+BOOT_RETRIES: list[str] = []
+
+
 def boot(udid: str) -> bool:
     for attempt in (1, 2, 3):
         sh(["xcrun", "simctl", "boot", udid], timeout=600, quiet=True)
         code, _ = sh(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=900)
         if code == 0:
             return True
-        print(f"bootstatus failed (attempt {attempt}), retrying", flush=True)
+        BOOT_RETRIES.append(f"bootstatus failed (attempt {attempt} of 3)")
+        print(f"FLAKY_BOOT {udid} bootstatus failed (attempt {attempt} of 3), retrying", flush=True)
         time.sleep(15)
     return False
 
@@ -526,7 +575,9 @@ def command_run(args) -> int:
     print(f"UI_VERDICT {args.name} first: {verdict}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
     print_crash_reports(crashes + other_crash_reports(started) if status else [], "first")
     passes = [("first", 0 if verdict == "pass" else (status or 1), verdict, reasons, text)]
+    first_log, retry_reasons, retry_log, retry_result = text, [], None, None
     if verdict == "retry":
+        retry_reasons = reasons
         retry = retry_arguments(args.only, args.skip, text)
         if retry is None:
             print(f"UI_VERDICT {args.name}: every selected test passed, nothing to repeat; the failed pass stays red")
@@ -542,8 +593,13 @@ def command_run(args) -> int:
                 print(f"UI_VERDICT {args.name} retry: {final}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
                 print_crash_reports(crashes + other_crash_reports(started) if status else [], "retry")
                 passes.append(("retry", 0 if final == "pass" else (status or 1), final, reasons, text))
+                retry_log, retry_result = text, final
             else:
                 print("UI_VERDICT retry impossible: the simulator did not come back after the erase")
+                retry_result = "not started (simulator did not come back)"
+        if retry is None:
+            retry_reasons = []
+    write_flaky(args, flaky_record(args.name, first_log, retry_reasons, retry_log, retry_result, boot_retries(args.out)))
     # The result is the last pass: the first one when nothing was repeated, else the repeat
     # (which ran every test that had not passed in the first one).
     failed = passes[-1][1] != 0
@@ -603,6 +659,36 @@ def video_to_log(video: str) -> None:
             print(f"UI_VIDEO_B64 {index // 60000 + 1} {data[index:index + 60000]}")
 
 
+def boot_retries(out: str) -> list[str]:
+    """Failed boot attempts of this job: the background boot (boot --out) and any reset here."""
+    found = []
+    path = os.path.join(out, "boot-retries.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            found = json.load(f)
+        os.remove(path)  # counted once, by the first run of the job
+    except (OSError, ValueError):
+        pass
+    return [str(x) for x in found if isinstance(x, str)] + BOOT_RETRIES
+
+
+def write_flaky(args, record: dict) -> None:
+    """build/flaky-NAME.json (collected by the UI summary job), FLAKY lines in the log and,
+    when anything was repeated, rows in the job summary. Nothing is repeated silently."""
+    with open(os.path.join(args.out, f"flaky-{args.name}.json"), "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=1)
+    lines = flaky_lines(record)
+    for line in lines:
+        print(line, flush=True)
+    if record["flaky"]:
+        print(f"::warning title=UI {args.name} flaky::{len(record['flaky'])} test(s) passed only on the repeat: "
+              + ", ".join(f["test"] for f in record["flaky"]), flush=True)
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if path and lines:
+        with open(path, "a", encoding="utf-8") as out:
+            out.write("\n" + flaky_summary([record])[0])
+
+
 def write_summary(name: str, passes) -> None:
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
@@ -630,6 +716,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--udid", required=True)
     b.add_argument("--reduce-motion", action="store_true")
     b.add_argument("--ready-file")
+    b.add_argument("--out", default="build")
+    f = sub.add_parser("flaky-summary")
+    f.add_argument("records", nargs="*")
     r = sub.add_parser("run")
     r.add_argument("--udid", required=True)
     r.add_argument("--name", required=True)
@@ -663,6 +752,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "boot":
         ok = boot(args.udid)
+        if BOOT_RETRIES:
+            os.makedirs(args.out, exist_ok=True)
+            with open(os.path.join(args.out, "boot-retries.json"), "w", encoding="utf-8") as f:
+                json.dump(BOOT_RETRIES, f)
         if ok:
             prepare(args.udid, reduce_motion=args.reduce_motion)
         else:
@@ -674,6 +767,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run" and args.xctestrun is not None and not os.path.isfile(args.xctestrun):
         print(f"::error::--xctestrun '{args.xctestrun}' is not a file (no .xctestrun in the build products?)")
         return 2
+    if args.command == "flaky-summary":
+        records = []
+        for path in args.records:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    records.append(json.load(f))
+            except (OSError, ValueError) as error:
+                print(f"::warning title=UI summary::{path} not readable ({error})")
+        markdown, lines = flaky_summary(records)
+        for line in lines:
+            print(line, file=sys.stderr)
+        flaky = sum(len(r.get("flaky", [])) for r in records)
+        retries = sum(len(r.get("retries", [])) for r in records)
+        if flaky or retries:
+            print(f"::notice title=UI flaky tests::{retries} repeat(s) after a simulator failure, "
+                  f"{flaky} test(s) passed only on the repeat", file=sys.stderr)
+        print(markdown)
+        return 0
     if args.command == "classify":
         with open(args.log, encoding="utf-8", errors="replace") as log:
             text = log.read()

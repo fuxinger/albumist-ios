@@ -71,9 +71,9 @@ Produkt-ID `app.albumist.ios.unlock`.
   Release): der UI-Lauf startet nur für Pull Requests, auf deren letztem Commit. Wird auf `main`
   ein Merge-Commit gepusht, den es in keinem Pull Request gab, dann unter Actions > **UI flow** >
   Run workflow den Lauf für `main` starten und danach den TestFlight-Lauf mit **Re-run all jobs**
-  neu starten; die Prüfung
-  wartet nach grünem CI 15 Minuten auf einen UI-Lauf und meldet dann „no UI flow run“. Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl, den Lauf
-  mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
+  neu starten; die Prüfung wartet nach grünem CI 15 Minuten auf einen UI-Lauf und meldet dann
+  „no UI flow run“. Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl,
+  den Lauf mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
   Archiv nicht mehr und schlägt absichtlich fehl.
 - Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,
   daneben die Build-Nummer `CFBundleVersion` und das Xcode `DTXcodeBuild`). Vor dem Hochladen prüft

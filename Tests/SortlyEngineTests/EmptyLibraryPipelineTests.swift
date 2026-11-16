@@ -75,3 +75,33 @@ struct EmptyLibraryPipelineTests {
         #expect(state == nil)
     }
 }
+
+/// The sample photos make a library Albumist can show itself with (K6, option 1): an App
+/// Review device that adds them sees trips and countries, and the empty state goes away.
+@Suite("Sample photos through the analysis")
+struct SamplePhotosPipelineTests {
+    @Test func samplePhotosOnANearlyEmptyLibraryGiveSuggestions() async throws {
+        var lib = LibraryBuilder()
+        lib.daily(from: "2026-03-01", to: "2026-03-06", at: nil, perDay: 1) // the device's own few photos
+        let samples = SampleLibrary.specs().map {
+            AssetSnapshot(id: AssetID("sample-\($0.index)"), kind: .image, subtypes: [], creationDate: $0.date, location: $0.location,
+                          pixelWidth: 1600, pixelHeight: 1200, originalFilename: $0.filename)
+        }
+        var settings = OrganizationSettings()
+        settings.titleLanguage = .german
+        let pipeline = AnalysisPipeline(
+            store: try SortlyStore(url: nil), reader: InMemoryLibraryReader(assets: lib.assets + samples), analyzer: FakeContentAnalyzer(),
+            geocoder: FakeGeocoder(), map: EmptyLibraryPipelineTests.map, conditions: FakeConditions(), settings: settings,
+            calendar: Fixture.calendar, time: ManualTime().source
+        )
+        let report = try await pipeline.run()
+        #expect(report.isComplete)
+        let proposals = try #require(try await pipeline.latestProposals()).proposals
+        let trips = proposals.filter { $0.kind == .trip }
+        #expect(trips.count >= 3, "\(proposals.map(\.title))")
+        let all = lib.assets + samples
+        let state = EmptyLibraryState.evaluate(.init(photos: all.count, photosWithPlace: samples.count, proposals: proposals.count,
+                                                     analysisRunning: false, analysedOnce: true))
+        #expect(state == nil)
+    }
+}

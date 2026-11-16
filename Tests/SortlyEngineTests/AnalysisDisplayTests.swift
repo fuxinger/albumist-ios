@@ -776,14 +776,21 @@ struct AnalysisDisplayTests {
         var again = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, newWork: .moreNewPhotos)
         let againStarts = again.workload(much, remaining: 300)
         #expect(againStarts && again.newWork == .newPhotos)
-        // An update phase that cannot move: a new-photos phase may follow it, another update
-        // phase may not (no other title for it): it goes on from its value.
+        // An update phase that cannot move: a new-photos phase may follow it, and another
+        // update alternates the update titles (review of ee36188, 3).
         var update = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, updated: false, newWork: .afterUpdate)
         let updateStarts = update.workload(much, remaining: 300)
         #expect(updateStarts && update.newWork == .newPhotos)
         var twice = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, updated: true, newWork: .afterUpdate)
         let twiceStarts = twice.workload(much, remaining: 300)
-        #expect(!twiceStarts && twice.newWork == .afterUpdate)
+        #expect(twiceStarts && twice.newWork == .afterUpdateAgain)
+        var thrice = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, updated: true, newWork: .afterUpdateAgain)
+        let thriceStarts = thrice.workload(much, remaining: 300)
+        #expect(thriceStarts && thrice.newWork == .afterUpdate)
+        // An update that adds no work starts nothing, also near the cap (review of ee36188, 2).
+        var noWork = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 1_600, photos: 50_800, updated: true)
+        let noWorkStarts = noWork.workload(much, remaining: 300)
+        #expect(!noWorkStarts && noWork.newWork == nil)
     }
 
     /// Review of c772325 (4): a marker of an older version without the time left moves the
@@ -808,6 +815,11 @@ struct AnalysisDisplayTests {
         var bare = ResumedRun(stage: 4, shown: 0.37)
         #expect(bare.secondsThen == nil)
         #expect(firstMove(&bare, photosAt: 1) <= 10)
+        // Review of ee36188 (4): each step at its own usual rate: screenshots in the text step
+        // at 0.5 s, photos before it at the image rate plus their texts' usual share.
+        #expect(abs(ResumedRun.usualSeconds(left: 1_000, stage: 5) - (1_000 * 0.5 + 3)) < 1e-9)
+        #expect(abs(ResumedRun.usualSeconds(left: 1_000, stage: 4) - (1_000 * 0.1 * 1.2 + 3)) < 1e-9)
+        #expect(ResumedRun.usualSeconds(left: 1_000, stage: 7) == 3)
         // A marker that carries the time left keeps it.
         var stamped = ResumedRun(stage: 4, shown: 0.37, left: 6_000, seconds: 900)
         stamped.library(photos: 10_000)

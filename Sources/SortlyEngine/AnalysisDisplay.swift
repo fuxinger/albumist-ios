@@ -86,13 +86,18 @@ public struct AnalysisWorkload: Sendable, Hashable, Codable {
     public var contentLeft: Int
     /// Screenshots whose text is still to be read.
     public var textLeft: Int
+    /// Photos with a location whose place is not resolved yet (the places step's work left;
+    /// review of ee36188: counting every located photo made the time left far too long).
+    /// `nil`: not known, all located photos count.
+    public var placesLeft: Int?
 
-    public init(photos: Int, located: Int, screenshots: Int, contentLeft: Int, textLeft: Int) {
+    public init(photos: Int, located: Int, screenshots: Int, contentLeft: Int, textLeft: Int, placesLeft: Int? = nil) {
         self.photos = photos
         self.located = located
         self.screenshots = screenshots
         self.contentLeft = contentLeft
         self.textLeft = textLeft
+        self.placesLeft = placesLeft.map { min(located, max(0, $0)) }
     }
 
     /// All items of a step (for the widths: the counts are over the whole library too).
@@ -108,7 +113,7 @@ public struct AnalysisWorkload: Sendable, Hashable, Codable {
     public func itemsLeft(_ step: AnalysisStep) -> Int {
         switch step {
         case .library, .trips, .proposals: photos
-        case .places: located
+        case .places: placesLeft ?? located
         case .content: contentLeft
         case .text: textLeft
         }
@@ -587,8 +592,8 @@ public enum AnalysisPercent {
 /// - **A phase of its own**: the work left is much larger than when it stopped
 ///   (`isMuchMore`: more than 1.5 times and at least 500 photos more, as the workload counts
 ///   them, in the run's part of the library and only what the analysis looks at), or there
-///   is new work and the number could only move slower than the visible pace from where it
-///   stands to 99 % (`movesTooSlowly`, review of c772325). The floor does not hold: the run
+///   is new work and, near the cap, the number could only move slower than the visible pace
+///   from where it stands to 99 % (`movesTooSlowly`, reviews of c772325 and ee36188). The floor does not hold: the run
 ///   shows its own honest value from its own start, under a label that says why ("Neue Fotos
 ///   werden analysiert", "Analyse nach Update"). The label and the phase's own number come
 ///   together, with the workload; within the phase the number never goes back. A phase that
@@ -609,6 +614,9 @@ public struct ResumedRun: Sendable, Equatable {
         /// could no longer move visibly ("Weitere neue Fotos werden analysiert", review of
         /// c772325: a second phase never starts again under the title already shown).
         case moreNewPhotos
+        /// The app's analysis changed again during a phase "Analyse nach Update" whose number
+        /// could no longer move visibly ("Analyse nach erneutem Update", review of ee36188).
+        case afterUpdateAgain
     }
 
     /// "Much more work": more than this times the work left when the run stopped …
@@ -621,12 +629,12 @@ public struct ResumedRun: Sendable, Equatable {
     /// it stands to 99 % by the time left starts a phase of its own (`workload`); a run that
     /// re-reads what the runs before it already re-read moves no faster (`spend`).
     public static let visiblePace = 0.0025 / 10
-    /// Usual time per photo or screenshot still to look at, and per photo of the library, for
-    /// markers that carry no time left (`init`, `library(photos:)`): the image step's time,
-    /// and the library read, trips and image step together.
-    static let usualSecondsPerItemLeft = AnalysisStep.content.secondsPerItem
-    static let usualSecondsPerPhoto = AnalysisStep.library.secondsPerItem + AnalysisStep.trips.secondsPerItem
-        + AnalysisStep.content.secondsPerItem
+    /// The pace rule applies only near the cap: with at most this much room above the value
+    /// shown (5 points). Further down, a long run's honest pace is often below the visible
+    /// one (50,000 photos at 37 %: 0.62 over 4,900 s, 0.13 % per 10 s); it goes on from its
+    /// value by its time share, at the honest pace of the work, with the count moving (review
+    /// of ee36188: one new photo made "Neue Fotos werden analysiert" and 37 % -> 4 %).
+    public static let nearCapRoom = 0.05
 
     /// Pipeline stage number (1…7) the earlier run stopped in.
     public let stage: Int
@@ -678,7 +686,7 @@ public struct ResumedRun: Sendable, Equatable {
         self.leftThen = left
         self.photosThen = photos
         self.secondsThen = seconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
-            ?? left.map { Self.usualSeconds(left: $0) }
+            ?? left.map { Self.usualSeconds(left: $0, stage: stage) }
         self.spread = self.floor
         self.updated = updated
         self.newWork = newWork
@@ -687,17 +695,35 @@ public struct ResumedRun: Sendable, Equatable {
         self.caughtUp = before
     }
 
-    /// The usual time for `left` photos and screenshots still to look at.
-    static func usualSeconds(left: Int) -> Double {
-        Double(max(0, left)) * usualSecondsPerItemLeft + AnalysisStep.proposals.fixedSeconds
+    /// The usual time for `left` photos and screenshots still to look at, from a run that
+    /// stopped in `stage`, at each step's usual rate (review of ee36188, 4): in the text step
+    /// they are screenshots (0.5 s each); before it, photos for the image step (0.1 s each)
+    /// plus the texts after it, at the usual ratio of the two steps (the standard widths:
+    /// 12 % text to 60 % image, so another fifth). Then the suggestions' fixed time.
+    static func usualSeconds(left: Int, stage: Int) -> Double {
+        let n = Double(max(0, left))
+        let standard = StepWidths.standard
+        let fixed = AnalysisStep.proposals.fixedSeconds
+        let text = AnalysisPipeline.Stage.text.number
+        switch stage {
+        case text:
+            return n * AnalysisStep.text.secondsPerItem + fixed
+        case (text + 1)...:
+            return fixed
+        default:
+            return n * AnalysisStep.content.secondsPerItem * (1 + standard.width(of: .text) / standard.width(of: .content)) + fixed
+        }
     }
 
     /// The library read counted the library's `photos`: a marker of an older version without
     /// the time nor the work left then gets the usual time for the photos not yet behind the
     /// value shown (review of c772325, 4: such a marker held the number until the workload).
+    /// The usual time of a whole analysis comes from the image step's rate and its usual
+    /// share of the time (the standard widths: 60 %), so every step counts at its own rate.
     public mutating func library(photos: Int) {
         guard secondsThen == nil, photos > 0 else { return }
-        secondsThen = Double(photos) * Self.usualSecondsPerPhoto * max(0.01, 1 - floor) + AnalysisStep.proposals.fixedSeconds
+        let whole = Double(photos) * AnalysisStep.content.secondsPerItem / StepWidths.standard.width(of: .content)
+        secondsThen = whole * max(0.01, 1 - floor) + AnalysisStep.proposals.fixedSeconds
     }
 
     /// The run has worked `active` seconds since it went on, and `remaining` seconds are left
@@ -750,12 +776,14 @@ public struct ResumedRun: Sendable, Equatable {
         Double(now) > Double(then) * muchMoreFactor && now - then >= muchMoreAtLeast
     }
 
-    /// From `value`, the number could only move slower than the visible pace to 99 % in the
-    /// `remaining` seconds (review of c772325: stopped at the end of the text step, 450 new
-    /// photos, the number stood at 98-99 % for 85 s).
+    /// Near the cap (`nearCapRoom`), the number could only move slower than the visible pace
+    /// from `value` to 99 % in the `remaining` seconds: the room is the reason it would stand
+    /// still (review of c772325: stopped at the end of the text step, 450 new photos, 98-99 %
+    /// for 85 s). Further down the honest pace decides, not the room (review of ee36188).
     public static func movesTooSlowly(from value: Double, remaining: Double) -> Bool {
         guard remaining.isFinite, remaining > 0 else { return false }
-        return (AnalysisPercent.cap - value) / remaining < visiblePace
+        let room = AnalysisPercent.cap - value
+        return room <= nearCapRoom + 1e-9 && room / remaining < visiblePace
     }
 
     /// The report (`current` stage, `completed` of `total`) is at or past where the run
@@ -780,24 +808,25 @@ public struct ResumedRun: Sendable, Equatable {
     /// now (`remaining`). A phase of its own starts, "Analyse nach Update" when the app's
     /// analysis changed since, otherwise "Neue Fotos werden analysiert",
     /// - with much more work left than when the run stopped (`isMuchMore`), or
-    /// - with more work than then (or after an update) when the number could only move slower
-    ///   than the visible pace from where it stands to 99 % (`movesTooSlowly`, review of
-    ///   c772325), whatever the amount.
+    /// - with more work than then, near the cap, when the number could only move slower than
+    ///   the visible pace from where it stands to 99 % (`movesTooSlowly`, reviews of c772325
+    ///   and ee36188), whatever the amount. An update that adds no work starts nothing.
     /// A run that already shows a phase's label goes on from its value under it: only the
     /// second rule starts a phase again, and only under another title ("Weitere neue Fotos
-    /// werden analysiert"; review of c772325: never again under the title already shown).
+    /// werden analysiert", "Analyse nach erneutem Update"; review of c772325: never again under
+    /// the title already shown), alternating with the first.
     /// The label appears only now, together with the phase's own number (review of 0305d20).
     /// `true`: the phase starts now.
     public mutating func workload(_ workload: AnalysisWorkload, remaining: Double? = nil) -> Bool {
         guard !ownStart, let leftThen else { return false }
         let work = workload.contentLeft + workload.textLeft
-        let tooSlow = (updated || work > leftThen) && remaining.map { Self.movesTooSlowly(from: spread, remaining: $0) } == true
+        let tooSlow = work > leftThen && remaining.map { Self.movesTooSlowly(from: spread, remaining: $0) } == true
         let cause: NewWork = updated ? .afterUpdate : .newPhotos
         let label: NewWork
         if let shownLabel = newWork {
             guard tooSlow else { return false }
             switch (cause, shownLabel) {
-            case (.afterUpdate, .afterUpdate): return false  // no other title for it
+            case (.afterUpdate, .afterUpdate): label = .afterUpdateAgain
             case (.afterUpdate, _): label = .afterUpdate
             case (_, .newPhotos): label = .moreNewPhotos
             default: label = .newPhotos

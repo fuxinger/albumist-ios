@@ -721,12 +721,22 @@ public actor AnalysisPipeline {
         let photos = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
         let screenshots = scoped.filter(\.isScreenshotLike)
         let read = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
+        let located = scoped.filter { $0.usableLocation != nil }
+        // Places still to resolve, as the places step asks for them (`resolvePlaces`, not
+        // refining): no place yet, or a town still pending (review of ee36188).
+        let places = try await store.places()
+        let wantsTown = PlaceResolutionPolicy(settings: settings).deepestLevel >= .locality
+        let placesLeft = located.filter { asset in
+            guard let place = places[asset.id] else { return true }
+            return wantsTown && place.precisionMeters == nil
+        }.count
         return AnalysisWorkload(
             photos: photos,
-            located: scoped.filter { $0.usableLocation != nil }.count,
+            located: located.count,
             screenshots: screenshots.count,
             contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, within: range),
-            textLeft: screenshots.filter { read[$0.id] == nil }.count
+            textLeft: screenshots.filter { read[$0.id] == nil }.count,
+            placesLeft: placesLeft
         )
     }
 

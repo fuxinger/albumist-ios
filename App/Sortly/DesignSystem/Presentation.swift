@@ -292,6 +292,7 @@ enum AnalysisText {
         case .newPhotos: String(localized: "Neue Fotos werden analysiert")
         case .afterUpdate: String(localized: "Analyse nach Update")
         case .moreNewPhotos: String(localized: "Weitere neue Fotos werden analysiert")
+        case .afterUpdateAgain: String(localized: "Analyse nach erneutem Update")
         }
     }
 

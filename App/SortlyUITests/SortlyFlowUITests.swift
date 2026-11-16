@@ -1085,6 +1085,7 @@ final class SortlyFlowUITests: XCTestCase {
             back()
         } else {
             print("UI_STEP_MISSING sweep suggestions")
+            shot("x-missing-sweep-suggestions") // what was on screen instead (UI runs 43930277920, 43945035122)
             XCTFail("No \"Vorschläge prüfen\" on the overview for the sweep")
         }
         print("UI_SWEEP_DONE")

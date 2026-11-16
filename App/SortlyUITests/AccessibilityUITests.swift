@@ -745,13 +745,16 @@ final class AccessibilityUITests: XCTestCase {
         }
         // Content under the tab bar also counts as hittable, but a tap there lands on the bar
         // (contrast run 43918684247: the atlas teaser sat under the tab bar on a fresh simulator,
-        // the tap opened nothing, and `back()` then tapped the overview's settings button).
+        // the tap opened nothing, and `back()` then tapped the overview's settings button). The
+        // bar takes taps a little above its frame too: run 43945035122 tapped the teaser 6 pt
+        // above it (centre y 578, bar from 584) and the atlas did not open, so the centre has
+        // to be clear of the bar by the scroll edge it softens (see `chromeFrames`) and more.
         let bar = app.navigationBars.firstMatch
         let tabs = app.tabBars.firstMatch
         var swipes = 0
         while swipes < 10 {
             let underBar = bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY
-            let underTabs = tabs.exists && !tabs.frame.contains(element.frame) && element.frame.midY > tabs.frame.minY
+            let underTabs = tabs.exists && !tabs.frame.contains(element.frame) && element.frame.midY > tabs.frame.minY - 24
             if underBar { app.swipeDown() } else if underTabs || !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }

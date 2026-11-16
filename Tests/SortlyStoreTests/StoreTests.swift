@@ -311,6 +311,34 @@ struct StoreTests {
         #expect(try await s.value([String: Int].self, forKey: "user.decisions") == ["x": 1])
     }
 
+    /// Plugin review N7: the comparison with Photos is slow; a plan that finished meanwhile
+    /// stored its new album, and the reconciliation must not write the older list over it.
+    @Test func staleReconciliationDoesNotOverwriteAFreshPlan() async throws {
+        let s = try store()
+        let old = ManagedAlbumState(albumID: "a", sourceID: SortlyID("p"), lastKnownTitle: "Rom", lastKnownParentID: nil, lastKnownMembers: ["1"], addedBySortly: ["1"], createdBySortly: true)
+        try await s.saveManagedAlbums([old])
+        // The reconciliation starts from what is stored now …
+        let startedFrom = try await s.managedAlbums()
+        var seen = old
+        seen.lastKnownMembers = ["1", "9"]
+        // … a plan finishes meanwhile and stores its new album …
+        let fresh = ManagedAlbumState(albumID: "b", sourceID: SortlyID("q"), lastKnownTitle: "Paris", lastKnownParentID: nil, lastKnownMembers: ["2"], addedBySortly: ["2"], createdBySortly: true)
+        var plan = OrganizationPlanner().makePlan(from: [], inventory: CollectionInventory())
+        plan.status = .completed
+        try await s.finalize(plan, managedAlbums: [old, fresh], values: [:])
+        // … and the late reconciliation is refused: Paris stays, no override is written.
+        let o = UserOverride(scope: .assetInAlbum("1", "a"), decision: .neverAdd)
+        let applied = try await s.applyReconciliation(overrides: [o], managedAlbums: [seen], expected: startedFrom)
+        #expect(!applied)
+        #expect(try await s.managedAlbums().map(\.albumID) == ["a", "b"])
+        #expect(try await s.overrides().isEmpty)
+        // Started again from the fresh list, it goes through.
+        let now = try await s.managedAlbums()
+        #expect(try await s.applyReconciliation(overrides: [o], managedAlbums: [seen, fresh], expected: now))
+        #expect(try await s.managedAlbums() == [seen, fresh])
+        #expect(try await s.overrides() == [o])
+    }
+
     @Test func storeWorksAsExecutorJournal() async throws {
         let s = try store()
         let library = InMemoryPhotoLibrary(assets: ["1", "2"])

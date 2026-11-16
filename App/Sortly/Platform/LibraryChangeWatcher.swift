@@ -58,6 +58,8 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
         // 43833158673: 33 min for 50,000 photos, and a run cut off at step 4 by the app's end).
         if UITestSupport.createsOnly { return false }
         #endif
+        // The sample photos start one analysis after the last chunk, and after a removal.
+        if SamplePhotos.shared.isAdding || SamplePhotos.shared.isRemoving { return false }
         return model.phase == .ready && model.access.canRead && !model.execution.isRunning && !model.analysis.isRunning
     }
 }

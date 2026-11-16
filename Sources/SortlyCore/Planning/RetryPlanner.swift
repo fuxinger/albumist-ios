@@ -13,6 +13,21 @@ extension StepState {
     /// Photos took the deletion without an error, but the albums or folders were still there
     /// afterwards (seen on an iPhone right after creating a large album, 15.11.).
     public static let deletionNotAppliedReason = "deletion not applied by Photos"
+    /// Photos took the deletion, but the album list afterwards could not show whether the
+    /// album is gone (plugin review N6). What it held stays written down for an undo.
+    public static let deletionUnverifiedReason = "deletion could not be verified"
+    /// An undo was to bring back a deleted album, but the album is still there.
+    public static let stillThereReason = "album is still there"
+
+    /// A deletion that happened, or may have happened: an undo brings the album back if it
+    /// is gone by then.
+    var deletionMayHaveHappened: Bool {
+        switch self {
+        case .succeeded: true
+        case .failed(let reason): reason == Self.deletionUnverifiedReason
+        default: false
+        }
+    }
 
     /// Reasons of steps that were skipped only because an earlier step of the same plan
     /// failed; they can run once that step works.
@@ -137,8 +152,10 @@ public struct RetryPlanner: Sendable {
             resolvedKeys: [:]
         )
         plan.retries = executed.id
-        // Albums the first run made were counted against the free albums with it.
-        plan.albumsFromRetriedPlan = Set(executed.resolvedKeys.values)
+        // Albums the first run made or verifiably extended were counted against the free
+        // albums with it; filling them up now uses no further one (plugin review N4: an
+        // existing album the first run had partly filled was counted a second time).
+        plan.albumsFromRetriedPlan = Set(executed.resolvedKeys.values).union(executed.extendedAlbums)
         if let guards = executed.deleteGuards {
             let deleting = Set(steps.compactMap { if case .deleteCollection(let cid, _) = $0.operation { return cid }; return nil })
             plan.deleteGuards = guards.filter { deleting.contains($0.key) }

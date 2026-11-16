@@ -107,12 +107,25 @@ final class AccessibilityUITests: XCTestCase {
     /// then the demo library and its analysis, which the later tests use.
     func test1_OnboardingAtLargestTextInDarkMode() {
         continueAfterFailure = true
+        UITestOnboarding.accessibilityOnboarding.starts()
         launch(textSize: Self.largestText, dark: true)
         if !onboardAndSeed(checking: true) {
             print("UI_STEP_MISSING onboarding (already done on this simulator?)")
         }
         check("overview after first analysis")
+        UITestOnboarding.accessibilityOnboarding.ends()
         finish("onboarding")
+    }
+
+    /// Test 1 did not reach its end (or did not run): onboarding, demo library and analysis
+    /// first, without audits, so one cut-off test 1 does not fail every later test (run
+    /// 43823834271: a timed-out query ended test 1 while the demo library was being created,
+    /// and tests 2 to 4 found no suggestions).
+    private func completeOnboardingIfCutOff(_ test: String) {
+        guard !UITestOnboarding.accessibilityOnboarding.reachedItsEnd else { return }
+        print("UI_FACT \(test): test 1 did not reach its end, onboarding and demo library first")
+        launch()
+        onboardAndSeed(checking: false)
     }
 
     /// Onboarding, demo library and its analysis, when the app is at its first start. Test 1
@@ -144,10 +157,7 @@ final class AccessibilityUITests: XCTestCase {
         let demo = button("Beispiel-Mediathek anlegen")
         if demo.waitForExistence(timeout: welcome ? 30 : 5) {
             tap(demo, "seed demo library")
-            let seeded = waitStable("demo library created", timeout: 600) {
-                !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists
-            }
-            XCTAssertTrue(seeded, "Demo library not created")
+            XCTAssertTrue(UITestOnboarding.demoLibraryCreated(app), "Demo library not created")
         }
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
         return welcome
@@ -158,6 +168,7 @@ final class AccessibilityUITests: XCTestCase {
     /// no album names from a German run are on screen.
     func test2_EnglishMainScreens() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test2")
         launch(english: true)
         walk("en", .english, english: true)
         finish("english")
@@ -168,6 +179,7 @@ final class AccessibilityUITests: XCTestCase {
     /// the result and the change receipt are checked too.
     func test3_LargestTextDarkModeReduceMotion() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test3")
         launch(textSize: Self.largestText, dark: true)
         walk("xxxl", .german, applyStarter: true)
         finish("largest text")
@@ -176,6 +188,7 @@ final class AccessibilityUITests: XCTestCase {
     /// Landscape on the small iPhone (the app allows it): 375 pt of height for everything.
     func test4_Landscape() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test4")
         launch()
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }

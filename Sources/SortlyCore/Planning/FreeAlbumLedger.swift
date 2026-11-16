@@ -1,7 +1,8 @@
 import Foundation
 
-/// The free-album count, per plan (the app keeps it in UserDefaults, outside the database, so
-/// rebuilding the analysis does not hand out new free albums). Every change is idempotent per
+/// The free-album count, per plan (the app keeps it in UserDefaults and a copy in the
+/// keychain, outside the database, so rebuilding the analysis or installing again does not
+/// hand out new free albums). Every change is idempotent per
 /// plan id, because the finalization that calls it runs again after a crash:
 /// - a plan is counted once, from what it really changed;
 /// - a completed undo gives that plan's albums back once (audit 2, 6.3);
@@ -59,6 +60,18 @@ public struct FreeAlbumLedger: Hashable, Sendable, Codable {
             legacyUsed = max(0, legacyUsed - albums)
         }
         return true
+    }
+
+    /// The two copies of the count put together (plugin review N4: the count lived only in the
+    /// user defaults, so deleting and installing Albumist again handed out new free albums;
+    /// the app now keeps a second copy in the keychain, which survives that). Nothing used is
+    /// ever lost: every plan either copy counted stays counted, a plan given back in either
+    /// copy stays given back, and the old total is the larger one.
+    public func merged(with other: FreeAlbumLedger) -> FreeAlbumLedger {
+        let returned = returned.union(other.returned)
+        var byPlan = byPlan.merging(other.byPlan) { max($0, $1) }
+        for plan in returned { byPlan[plan] = nil }
+        return FreeAlbumLedger(legacyUsed: max(legacyUsed, other.legacyUsed), byPlan: byPlan, returned: returned)
     }
 
     /// Plans the store shows as taken back never count, even if the app ended between the

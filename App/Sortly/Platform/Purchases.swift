@@ -21,7 +21,7 @@ final class Purchases {
             }
             return purchases
         }
-        return Purchases()
+        return Purchases(keepsCopyInKeychain: true)
     }()
 
     /// Albums Albumist may create or extend before the unlock is needed. Change here only.
@@ -36,6 +36,9 @@ final class Purchases {
 
     let productID: String
     private let defaults: UserDefaults
+    /// The shipped app keeps a second copy in the keychain, which survives deleting and
+    /// installing Albumist again (plugin review N4). Tests and UI runs keep only their defaults.
+    private let keepsCopyInKeychain: Bool
 
     private(set) var isUnlocked = false
     private(set) var product: Product?
@@ -50,10 +53,18 @@ final class Purchases {
     private(set) var reserved: [SortlyID: Int] = [:]
 
     /// `defaults` and `productID` are for tests; the app uses the standard ones.
-    init(defaults: UserDefaults = .standard, productID: String = Purchases.unlockProductID) {
+    init(defaults: UserDefaults = .standard, productID: String = Purchases.unlockProductID, keepsCopyInKeychain: Bool = false) {
         self.defaults = defaults
         self.productID = productID
-        ledger = Self.loadLedger(from: defaults)
+        self.keepsCopyInKeychain = keepsCopyInKeychain
+        let stored = Self.loadLedger(from: defaults)
+        ledger = stored
+        if keepsCopyInKeychain {
+            // After a new install the defaults are empty and the keychain still knows the count.
+            let saved = LedgerKeychain.load()
+            ledger = stored.merged(with: saved ?? FreeAlbumLedger())
+            if ledger != stored || saved != ledger { saveLedger() }
+        }
     }
 
     /// Albums created or extended so far. A completed undo gives its albums back.
@@ -113,6 +124,7 @@ final class Purchases {
     private func saveLedger() {
         guard let data = try? JSONEncoder().encode(ledger) else { return }
         defaults.set(data, forKey: Self.ledgerKey)
+        if keepsCopyInKeychain { LedgerKeychain.save(ledger) }
     }
 
     // MARK: StoreKit

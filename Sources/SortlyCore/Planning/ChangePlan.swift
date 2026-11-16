@@ -140,15 +140,17 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
 
     /// Albums this plan uses from the free allowance: new albums and extended existing ones,
     /// except albums an earlier run of the same changes created (counted with that run).
-    /// `applied` counts what really happened, otherwise what is planned.
+    /// `applied` counts what really happened, otherwise what is planned. An album Photos made
+    /// whose check failed afterwards (its id is written down) counts as made: it is in Photos,
+    /// and undo removes it like any other (plugin review N4: it was never counted).
     public func freeAlbumUse(applied: Bool) -> Int {
         var newAlbums = 0
         var extended = Set<CollectionID>()
         for step in steps {
             let succeeded: Bool = if case .succeeded = step.state { true } else { false }
             switch step.operation {
-            case .createAlbum:
-                if !applied || succeeded { newAlbums += 1 }
+            case .createAlbum(let key, _, _):
+                if !applied || succeeded || resolvedKeys[key] != nil { newAlbums += 1 }
             case .addAssets(.existing(let id), let assets):
                 let added = applied ? confirmedMedia(of: step) : assets
                 if !added.isEmpty { extended.insert(id) }
@@ -157,6 +159,16 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
             }
         }
         return newAlbums + extended.subtracting(albumsFromRetriedPlan ?? []).count
+    }
+
+    /// Existing albums this plan verifiably added media to (the ones `freeAlbumUse(applied:
+    /// true)` counts as extended).
+    public var extendedAlbums: Set<CollectionID> {
+        var extended = Set<CollectionID>()
+        for step in steps {
+            if case .addAssets(.existing(let id), _) = step.operation, !confirmedMedia(of: step).isEmpty { extended.insert(id) }
+        }
+        return extended
     }
     /// What really happened (planned counts for plans from older versions).
     public var appliedSummary: PlanSummary { PlanSummary(applied: self) }

@@ -328,9 +328,35 @@ extension ProposalDecision {
     /// Whether a suggestion may be accepted without the user looking at it ("Dein Startpaket",
     /// "Empfohlene auswählen"): at least likely, nothing sensitive, no name needed, a clear
     /// action, and no similar album of the user that only possibly fits (review 16.11.).
+    /// An album that already holds everything is no action: "15 empfohlene auswählen" turned
+    /// 15 complete suggestions into "Ausgewählt" without anything to create (UI run
+    /// 43823834271), and once their albums were taken back they stayed that way.
     public static func isSafeToAcceptUnseen(_ proposal: AlbumProposal, match: MatchResult?) -> Bool {
-        proposal.reliability >= .likely && !proposal.isSensitive && !proposal.requiresUserName
-            && match?.status != .possibleMatch && recommended(for: proposal, match: match).isAccepted
+        let recommended = recommended(for: proposal, match: match)
+        return proposal.reliability >= .likely && !proposal.isSensitive && !proposal.requiresUserName
+            && match?.status != .possibleMatch && recommended.isAccepted && !recommended.isKeepExisting
+    }
+
+    /// "So lassen" decisions for albums an undo deleted: such a decision changes nothing and
+    /// is not counted as open either, so its suggestion could never be created again (UI run
+    /// 43823834271: two plans taken back, their 15 suggestions stayed "Ausgewählt" with "Neues
+    /// Album" and nothing to create). They go back to open.
+    ///
+    /// Only albums the undo's own deletion steps removed (verified by the executor), never an
+    /// album that an album list lacks: with limited access or during an iCloud sync the list can
+    /// hold few or no albums, and a deliberate "So lassen" must not be lost to that (review of
+    /// 697852f: the Startpaket could then extend that album).
+    public static func keepsOfAlbumsDeleted(by plan: ChangePlan, in decisions: [SortlyID: ProposalDecision]) -> Set<SortlyID> {
+        guard plan.reverts != nil else { return [] }
+        let deleted = Set(plan.steps.compactMap { step -> CollectionID? in
+            guard case .deleteCollection(let id, _) = step.operation, case .succeeded = step.state else { return nil }
+            return id
+        })
+        guard !deleted.isEmpty else { return [] }
+        return Set(decisions.compactMap { id, decision in
+            if case .keepExisting(let album) = decision, deleted.contains(album) { return id }
+            return nil
+        })
     }
 
     /// The existing album an accepted decision adds photos to: "ergänzen", or renaming or

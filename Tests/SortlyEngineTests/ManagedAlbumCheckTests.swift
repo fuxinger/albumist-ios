@@ -181,4 +181,73 @@ struct ManagedAlbumCheckTests {
         func deleteCollection(_ id: CollectionID) async throws { try await inner.deleteCollection(id) }
         func deleteCollections(_ ids: [CollectionID]) async throws { try await inner.deleteCollections(ids) }
     }
+
+    // MARK: N7 A plan finishes while the check runs
+
+    /// The album list lacks "Paris", so the check looks it up on its own; while it waits, a
+    /// plan finishes and stores its new album "Wien". The check started from the older records
+    /// and must not write them over Wien (plugin review N7): it compares once more.
+    @Test func checkOvertakenByAPlanDoesNotOverwriteItsAlbums() async throws {
+        let store = try SortlyStore(url: nil)
+        let library = InMemoryPhotoLibrary(assets: photos(0..<100))
+        _ = try await parisAndRomeRecorded(store, library)
+        let records = try await store.managedAlbums()
+        let paris = try #require(records.first { $0.lastKnownTitle == "Paris" }).albumID
+        let rome = try #require(records.first { $0.lastKnownTitle == "Rom" }).albumID
+        // The user took a photo out of Rom: a change the check stores.
+        await library.userEdit { inv in
+            var r = inv[rome]!
+            r.assetIDs.remove(AssetID("a-0"))
+            inv.upsert(r)
+            inv.upsert(CollectionSnapshot(id: "wien", title: "Wien", assetIDs: [AssetID("a-50")]))
+        }
+        let wien = ManagedAlbumState(albumID: "wien", sourceID: SortlyID("w"), lastKnownTitle: "Wien", lastKnownParentID: nil,
+                                     lastKnownMembers: [AssetID("a-50")], addedBySortly: [AssetID("a-50")], createdBySortly: true)
+        let overtaking = OvertakingLibrary(inner: library, hidden: [paris]) {
+            try? await store.saveManagedAlbums(try await store.managedAlbums() + [wien])
+        }
+        let outcome = try await ManagedAlbumCheck(store: store, library: overtaking, pause: .milliseconds(1)).run(access: .full)
+        #expect(outcome.foundChanges)
+        #expect(outcome.managedAlbums.contains { $0.albumID == "wien" })
+        #expect(try await store.managedAlbums().contains(wien))
+        #expect(try await store.managedAlbums().first { $0.albumID == rome }?.lastKnownMembers.contains(AssetID("a-0")) == false)
+        #expect(try await store.overrides().contains { $0.scope == .assetInAlbum(AssetID("a-0"), rome) })
+    }
+}
+
+/// Lacks some albums in the list (they are there when asked for on their own); the first such
+/// lookup runs `meanwhile` (a plan that finishes while the check waits for Photos).
+struct OvertakingLibrary: PhotoLibraryWriting {
+    let inner: InMemoryPhotoLibrary
+    let hidden: Set<CollectionID>
+    let meanwhile: @Sendable () async -> Void
+    let once = Once()
+
+    final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var used = false
+        func take() -> Bool { lock.withLock { defer { used = true }; return !used } }
+    }
+
+    func canWrite() async -> Bool { await inner.canWrite() }
+    func currentInventory() async throws -> CollectionInventory {
+        var inventory = try await inner.currentInventory()
+        for id in hidden { inventory.remove(id) }
+        return inventory
+    }
+    func availableAssets(_ ids: [AssetID]) async throws -> Set<AssetID> { try await inner.availableAssets(ids) }
+    func collection(_ id: CollectionID) async throws -> CollectionSnapshot? {
+        if hidden.contains(id), once.take() { await meanwhile() }
+        return try await inner.collection(id)
+    }
+    func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID { try await inner.createFolder(title: title, parent: parent) }
+    func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID { try await inner.createAlbum(title: title, parent: parent) }
+    func addAssets(_ assets: [AssetID], to album: CollectionID) async throws { try await inner.addAssets(assets, to: album) }
+    func removeAssets(_ assets: [AssetID], from album: CollectionID) async throws { try await inner.removeAssets(assets, from: album) }
+    func renameCollection(_ id: CollectionID, to title: String) async throws { try await inner.renameCollection(id, to: title) }
+    func moveCollection(_ id: CollectionID, from oldParent: CollectionID?, to newParent: CollectionID?) async throws {
+        try await inner.moveCollection(id, from: oldParent, to: newParent)
+    }
+    func deleteCollection(_ id: CollectionID) async throws { try await inner.deleteCollection(id) }
+    func deleteCollections(_ ids: [CollectionID]) async throws { try await inner.deleteCollections(ids) }
 }

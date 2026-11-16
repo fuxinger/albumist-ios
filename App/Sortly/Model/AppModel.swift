@@ -1799,6 +1799,12 @@ final class AppModel {
                 }
                 undone = original
             }
+            // "So lassen" for an album this plan took away (an undo of the plan that created
+            // it) leaves nothing to keep: the suggestion is open again (UI run 43823834271).
+            for id in ProposalDecision.keepsWithoutAlbum(newDecisions, inventory: after) {
+                newDecisions[id] = nil
+                previewOnly[id] = nil
+            }
             var done = result
             done.finalizedAt = Date()
             let pending = (try await store.value([SortlyID].self, forKey: Key.pendingFinalization) ?? []).filter { $0 != result.id }

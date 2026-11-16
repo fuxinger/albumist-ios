@@ -328,9 +328,25 @@ extension ProposalDecision {
     /// Whether a suggestion may be accepted without the user looking at it ("Dein Startpaket",
     /// "Empfohlene auswählen"): at least likely, nothing sensitive, no name needed, a clear
     /// action, and no similar album of the user that only possibly fits (review 16.11.).
+    /// An album that already holds everything is no action: "15 empfohlene auswählen" turned
+    /// 15 complete suggestions into "Ausgewählt" without anything to create (UI run
+    /// 43823834271), and once their albums were taken back they stayed that way.
     public static func isSafeToAcceptUnseen(_ proposal: AlbumProposal, match: MatchResult?) -> Bool {
-        proposal.reliability >= .likely && !proposal.isSensitive && !proposal.requiresUserName
-            && match?.status != .possibleMatch && recommended(for: proposal, match: match).isAccepted
+        let recommended = recommended(for: proposal, match: match)
+        return proposal.reliability >= .likely && !proposal.isSensitive && !proposal.requiresUserName
+            && match?.status != .possibleMatch && recommended.isAccepted && !recommended.isKeepExisting
+    }
+
+    /// "So lassen" decisions whose album is gone: taken back by an undo or deleted in Photos.
+    /// Such a decision changes nothing and is not counted as open either, so its suggestion
+    /// could never be created again (UI run 43823834271: two plans taken back, their 15
+    /// suggestions stayed "Ausgewählt" with "Neues Album" and nothing to create). They go back
+    /// to open.
+    public static func keepsWithoutAlbum(_ decisions: [SortlyID: ProposalDecision], inventory: CollectionInventory) -> Set<SortlyID> {
+        Set(decisions.compactMap { id, decision in
+            if case .keepExisting(let album) = decision, inventory[album] == nil { return id }
+            return nil
+        })
     }
 
     /// The existing album an accepted decision adds photos to: "ergänzen", or renaming or

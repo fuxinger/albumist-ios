@@ -119,6 +119,10 @@ jobs:
               if xcrun simctl bootstatus "$0" -b; then
                 xcrun simctl privacy "$0" grant photos app.albumist.ios || echo "privacy grant failed"
                 xcrun simctl status_bar "$0" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
+                # One app launched and closed before the tests: the first test of a shard on a
+                # just-booted simulator failed to launch the app (runs 43795445305, 43827092443).
+                xcrun simctl launch "$0" com.apple.Preferences > /dev/null 2>&1; sleep 8
+                xcrun simctl terminate "$0" com.apple.Preferences > /dev/null 2>&1
                 echo ok > sim-ready; exit 0
               fi
               echo "bootstatus failed (attempt $attempt), retrying"; sleep 15

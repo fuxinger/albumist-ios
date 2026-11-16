@@ -118,11 +118,13 @@ final class DeviceConditionUITests: XCTestCase {
         return false
     }
 
-    /// The overview says the analysis is done and nothing runs (no "Pause").
-    /// (Static texts only: a query over every element timed out while the app was busy.)
+    /// The overview says the analysis is done and nothing runs (no "Pause"): "Alle 246 Fotos
+    /// analysiert", "Analyse aktuell", or the card's "Analyse fertig" right after a long run.
+    /// (No query over every element: one timed out while the app was busy.)
     private var analysisIdle: Bool {
+        guard !app.buttons["Pause"].exists else { return false }
         let headline = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ OR label == %@", "Fotos analysiert", "Analyse aktuell")).firstMatch
-        return headline.exists && !app.buttons["Pause"].exists
+        return headline.exists || (progressText()?.hasPrefix("Analyse fertig") ?? false)
     }
 
     private var analysisRunning: Bool { app.buttons["Pause"].exists }
@@ -567,7 +569,8 @@ final class DeviceConditionUITests: XCTestCase {
         // 40 checks normal, 40 warm, 10 hot (about 20 s of waiting), then the real device.
         start(["-SortlyUITestPace", "normal:40,gentle:40,hot:10,normal"])
         guard rebuildAnalysis() else { return }
-        let heat = anything("das iPhone ist sehr warm")
+        // The card's title (its accessibility label since rc-1's one-element card).
+        let heat = anything("Wartet, bis dein iPhone abkühlt")
         let waited = heat.waitForExistence(timeout: 300)
         print(waited ? "UI_STEP_OK hot iPhone shows waiting" : "UI_STEP_MISSING hot iPhone shows waiting")
         XCTAssertTrue(waited, "A hot iPhone did not show that the analysis waits")
@@ -583,7 +586,7 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(finished, "The analysis did not finish after the heat")
         print("UI_FACT after heat \(String(describing: analysedPhotos()))")
         XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after the heat")
-        XCTAssertFalse(anything("Pausiert, weil das Gerät warm ist").exists, "The analysis stopped for heat")
+        XCTAssertFalse(anything("Analyse pausiert").exists, "The analysis stopped for heat")
         shot("02-after-heat")
     }
 
@@ -594,18 +597,18 @@ final class DeviceConditionUITests: XCTestCase {
         prepare()
         start(["-SortlyUITestPace", "normal:30,battery:8,lowpower"])
         guard rebuildAnalysis() else { return }
-        let battery = anything("Wartet, bis der Akku lädt")
+        let battery = anything("Wartet aufs Laden")
         let waited = battery.waitForExistence(timeout: 300)
         print(waited ? "UI_STEP_OK low battery shows waiting" : "UI_STEP_MISSING low battery shows waiting")
         XCTAssertTrue(waited, "A nearly empty battery did not show that the analysis waits")
         if waited {
             shot("03-battery-waiting")
-            XCTAssertFalse(text("sehr warm").exists, "Low battery was worded as heat")
+            XCTAssertFalse((progressText() ?? "").contains("abkühlt"), "Low battery was worded as heat")
             XCTAssertTrue(analysisRunning, "Low battery ended the analysis")
         }
         var pausedForLowPower = false
         let finished = waitStable("analysis finished in Low Power Mode", timeout: 900) {
-            if text("Stromsparmodus").exists { pausedForLowPower = true }
+            if text("Pausiert im Stromsparmodus").exists || (progressText() ?? "").contains("pausiert") { pausedForLowPower = true }
             return analysisIdle
         }
         XCTAssertTrue(finished, "The analysis did not finish in Low Power Mode")

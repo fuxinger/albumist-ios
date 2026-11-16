@@ -264,7 +264,7 @@ struct HomePipelineTests {
         // "Stimmt", the way the settings do it: the detected home with its name from the photos.
         let confirmed = HomePlace(center: detected.center, components: HomeName.components(near: detected.center, facts: facts))
         #expect(HomeName(confirmed.components).town == "München")
-        try await s.pipeline.setHomeSettings(HomeSettings().choosing(confirmed, date: now))
+        try await s.pipeline.setHomeSettings(HomeSettings().choosing(confirmed, from: nil, date: now))
         _ = try await s.pipeline.resuggest()
         #expect(try await homeCount() == automatic)
 
@@ -275,7 +275,7 @@ struct HomePipelineTests {
         // Rome as home (made up, to see the rule): the Rome photos are the home photos now.
         let rome = facts.filter { $0.asset.usableLocation.map { GeoMath.distance($0, Fixture.Places.rome) < 30_000 } ?? false }
         let romeHome = HomePlace(center: Fixture.Places.rome, components: HomeName.components(near: Fixture.Places.rome, facts: facts))
-        try await s.pipeline.setHomeSettings(HomeSettings().choosing(romeHome, date: now))
+        try await s.pipeline.setHomeSettings(HomeSettings().choosing(romeHome, from: nil, date: now))
         _ = try await s.pipeline.resuggest()
         #expect(try await homeCount() == rome.count)
     }

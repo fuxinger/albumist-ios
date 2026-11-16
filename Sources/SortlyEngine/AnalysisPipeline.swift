@@ -492,7 +492,8 @@ public actor AnalysisPipeline {
         if contentTotal > 0, try await latestProposals() == nil {
             if let fresh = try await patternsAfterAHomeChange(since: &patternsGeneration, all: all) { (trips, frequent) = fresh }
             let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
-            _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope, early: true)
+            _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope,
+                                        early: true, homeChange: patternsGeneration)
             report.earlyProposals = true
             onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal,
                                 earlyProposals: true))
@@ -657,7 +658,8 @@ public actor AnalysisPipeline {
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
         onProgress(Progress(stage: .proposals, completed: 0, total: 0))
         if let fresh = try await patternsAfterAHomeChange(since: &patternsGeneration, all: all) { (trips, frequent) = fresh }
-        let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope)
+        let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope,
+                                               homeChange: patternsGeneration)
         report.proposals = snapshot.proposals.count
         report.completedStages.append(.proposals)
         onProgress(Progress(stage: .proposals, completed: snapshot.proposals.count, total: snapshot.proposals.count))
@@ -1047,12 +1049,12 @@ public actor AnalysisPipeline {
     /// (`PendingHomeChange`), whichever step makes them (`resuggest()`, a run, the early set):
     /// the suggestions the user chose before the change keep their content (`HeldSuggestions`),
     /// and the overview is told (`HomeChangeNotice`), in the same transaction as the suggestions.
+    /// `homeChange`: `homeGeneration` as it was before `trips` were detected. A change stored
+    /// after that (the trips or the settings read here may be older than it) stays pending.
     private func makeProposals(
         all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
-        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false
+        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false, homeChange: Int
     ) async throws -> ProposalSnapshot {
-        // Read before the settings: a change stored after this stays pending.
-        let homeChange = homeGeneration
         let pending = try await pendingHomeChange()
         // The albums are read again: a plan applied while this run was busy (minutes or hours
         // on a large library) created albums the matching must see, or it would suggest them
@@ -1213,8 +1215,10 @@ public actor AnalysisPipeline {
             values[Key.pendingHomeChange] = PendingHomeChange(before: current, date: now())
         }
         try await store.setValues(values)
-        // After the write: suggestions made from what was read before stay pending (see makeProposals).
-        homeGeneration += 1
+        // After the write, and only when something the suggestions are made from changed ("Nein,
+        // das sind Reisen" changes nothing): suggestions made from what was read before stay
+        // pending (see makeProposals).
+        if changes { homeGeneration += 1 }
     }
 
     /// The change in "Dein Zuhause" that no suggestions were made for yet.
@@ -1255,12 +1259,14 @@ public actor AnalysisPipeline {
         defer { endRun() }
         guard let previous = try await latestProposals() else { return nil }
         guard try await pendingHomeChange() != nil else { return try await homeChangeNotice() }
+        // Before the trips are detected: a change stored while they are stays pending.
+        let homeChange = homeGeneration
         let all = try await store.allAssets()
         var (trips, frequent) = try await detectPatterns(all: all)
         trips = try await inDestinationTime(trips, all: all)
         let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
         _ = try await makeProposals(all: all, inventory: try await store.loadInventory(), trips: trips, frequent: frequent,
-                                    groups: groups, scope: previous.scope, early: previous.isEarly)
+                                    groups: groups, scope: previous.scope, early: previous.isEarly, homeChange: homeChange)
         return try await homeChangeNotice()
     }
 
@@ -1270,8 +1276,10 @@ public actor AnalysisPipeline {
     public func resetAnalysis() async throws {
         await beginRun()
         defer { endRun() }
-        try await store.resetAnalysis(includingDecisions: false)
+        // Before the reset is sent: a `rematch()` that read the old suggestions matches again
+        // (and finds none) instead of writing them into the fresh store.
         proposalsGeneration += 1
+        try await store.resetAnalysis(includingDecisions: false)
         lastForegroundOnlineLookup = nil
     }
 

@@ -13,10 +13,9 @@ struct HomeReviewPipelineTests {
     let now = Fixture.date("2026-11-16")
 
     /// The new settings are stored before `resuggest()` gets the run lock. A run that gets it
-    /// first (a catch-up after a Photos change: `startAnalysis` does not look at
-    /// `homeChangeRunning`), or the next launch after the app was closed or `resuggest` threw
-    /// half way, applies the change through `run()`: the chosen trip should still be held and
-    /// the overview told, as with `resuggest()` alone.
+    /// first, or the next launch after the app was closed or `resuggest` threw half way, applies
+    /// the change through `run()` (the pending mark): the chosen trip is still held and the
+    /// overview told, as with `resuggest()` alone.
     @Test func homeChangeAppliedByARunKeepsTheChosenSuggestion() async throws {
         let s = try base.setup { lib in _ = HomePipelineTests.gardaEveryMonth(&lib) }
         _ = try await s.pipeline.run()
@@ -38,7 +37,7 @@ struct HomeReviewPipelineTests {
 
     /// A held suggestion loses the photos that are no longer in the library; with none left
     /// it is let go.
-    @Test func heldSuggestionKeepsDeletedPhotos() async throws {
+    @Test func heldSuggestionDropsDeletedPhotos() async throws {
         let s = try base.setup { lib in _ = HomePipelineTests.gardaEveryMonth(&lib) }
         _ = try await s.pipeline.run()
         let before = try #require(try await s.pipeline.latestProposals())
@@ -99,7 +98,7 @@ struct HomeReviewStoreTests {
     /// "Analyse neu aufbauen" while `resuggest()` is busy: the app resets through the pipeline
     /// (`AnalysisPipeline.resetAnalysis`), which waits for the run lock, so the fresh store gets
     /// no suggestions of the old one.
-    @Test func rebuildDuringResuggestLeavesOldSuggestionsInTheFreshStore() async throws {
+    @Test func rebuildWaitsForResuggestAndLeavesAFreshStore() async throws {
         var lib = LibraryBuilder()
         HomePipelineTests.munichAndRome(&lib)
         let store = try SortlyStore(url: nil)
@@ -120,10 +119,10 @@ struct HomeReviewStoreTests {
         #expect(proposals == nil)
     }
 
-    /// A value this build cannot read (a later version's shape, or damage) in `user.home` or
-    /// `user.heldSuggestions`: both are kept by "Analyse neu aufbauen" and come back from the
-    /// backup copy, so the user has no way out of it.
-    @Test func unreadableHomeValuesStopEveryAnalysis() async throws {
+    /// A value this build cannot read (a later version's shape, or damage) in `user.home`,
+    /// `user.heldSuggestions` or a place answer: both are kept by "Analyse neu aufbauen" and come
+    /// back from the backup copy, so they are read as not stored and the analysis runs.
+    @Test func unreadableHomeValuesDoNotStopTheAnalysis() async throws {
         var lib = LibraryBuilder()
         HomePipelineTests.munichAndRome(&lib)
         let store = try SortlyStore(url: nil)
@@ -174,7 +173,7 @@ final class HookedAnalyzer: ContentAnalyzing, @unchecked Sendable {
 struct HomeReviewDuringRunTests {
     let now = Fixture.date("2026-11-16")
 
-    @Test func runFollowsTheChangeButDropsHoldAndNotice() async throws {
+    @Test func runDuringAHomeChangeHoldsTheChoiceAndTellsTheOverview() async throws {
         var lib = LibraryBuilder()
         _ = HomePipelineTests.gardaEveryMonth(&lib)
         let store = try SortlyStore(url: nil)
@@ -205,9 +204,9 @@ struct HomeReviewDuringRunTests {
         // The settings screen's resuggest, queued behind the run.
         let notice = try await p.resuggest()
         let after = try #require(try await p.latestProposals())
-        // The run follows the change (f96082a): the nine other trips are gone.
+        // The run follows the change: the nine other trips are gone.
         #expect(tripsLeft <= 1)
-        // But what the user chose is not held, and the overview is not told.
+        // What the user chose is held, and the overview is told.
         #expect(after.proposals.first { $0.id == chosen.id } == chosen)
         #expect(notice?.isEmpty == false)
     }

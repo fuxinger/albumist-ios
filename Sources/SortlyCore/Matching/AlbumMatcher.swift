@@ -126,7 +126,8 @@ public struct AlbumMatcher: Sendable {
     /// Version of the matching rules. Stored with the results; results of an older version
     /// are matched again at launch, so a changed rule never waits for the next analysis.
     /// 2: review 16.11. (possible matches never change or count, parts, one album per run).
-    public static let version = 2
+    /// 3: "Gleicher Name gewinnt" (Fuchs 16.11.): an accepted trip "ergänzen Italien" is reopened.
+    public static let version = 3
 
     /// Matches all proposals in one pass using an inverted membership index.
     /// - Parameters:

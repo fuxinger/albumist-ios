@@ -333,6 +333,35 @@ extension ProposalDecision {
             && match?.status != .possibleMatch && recommended(for: proposal, match: match).isAccepted
     }
 
+    /// The existing album an accepted decision adds photos to: "ergänzen", or renaming or
+    /// moving with extending. nil when it adds nothing to an album of the user.
+    public var extendedAlbum: CollectionID? {
+        switch self {
+        case .extendExisting(let id): id
+        case .renameExisting(let id, _, true), .moveExisting(let id, _, true): id
+        default: nil
+        }
+    }
+
+    /// After the matching rules changed (a new `AlbumMatcher.version`): the suggestions whose
+    /// accepted, not yet applied decision still adds photos to an album that is no longer a
+    /// certain match for it (`AlbumMatcher.sortingAlbums`). They go back to open, so the user
+    /// decides again (re-check 16.11.: a Startpaket "ergänzen" on what is now only a possible
+    /// match must not run). Applied suggestions have no decision any more; `protected` are the
+    /// suggestions of a plan that already started (an interrupted one): never touched.
+    public static func uncertainExtensions(_ decisions: [SortlyID: ProposalDecision], proposals: [AlbumProposal],
+                                           matches: [SortlyID: MatchResult], protected: Set<SortlyID> = []) -> Set<SortlyID> {
+        let matcher = AlbumMatcher()
+        var result = Set<SortlyID>()
+        for proposal in proposals where !protected.contains(proposal.id) {
+            guard let decision = decisions[proposal.id], decision.isAccepted, let album = decision.extendedAlbum else { continue }
+            if !matcher.sortingAlbums(matches[proposal.id], kind: proposal.kind, title: proposal.title).contains(album) {
+                result.insert(proposal.id)
+            }
+        }
+        return result
+    }
+
     public var isAccepted: Bool {
         switch self {
         case .undecided, .reject: false

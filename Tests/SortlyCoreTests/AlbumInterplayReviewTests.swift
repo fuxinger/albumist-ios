@@ -477,3 +477,31 @@ struct AlbumInterplayRecheckTests {
         #expect(matcher.match([country], against: CollectionInventory([other]), trips: [t19, t21, t23])[country.id]?.status == .newAlbumRequired)
     }
 }
+
+extension AlbumInterplayRecheckTests {
+    /// 3: a decision accepted under the old rules (Startpaket "ergänzen" on "Beste Hundefotos",
+    /// now only a possible match) goes back to open after the re-match. Certain ones, other
+    /// kinds of decisions and the suggestions of a started plan stay.
+    @Test func uncertainExtendDecisionsGoBackToOpen() throws {
+        let dogs = AlbumProposal(id: SortlyID("c-dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: set("d", 0..<400))
+        let trip = AlbumProposal(id: SortlyID("t"), kind: .trip, title: "Island", assetIDs: set("t", 0..<100))
+        let cats = AlbumProposal(id: SortlyID("c-cats"), kind: .imageCategory("cat"), title: "Katzen", assetIDs: set("k", 0..<50))
+        let moved = AlbumProposal(id: SortlyID("c-birds"), kind: .imageCategory("bird"), title: "Vögel", assetIDs: set("v", 0..<400))
+        let inventory = CollectionInventory([
+            CollectionSnapshot(id: "best", title: "Beste Hundefotos", assetIDs: set("d", 0..<10)),
+            CollectionSnapshot(id: "island", title: "Island", assetIDs: set("t", 0..<60)),
+            CollectionSnapshot(id: "birds", title: "Lieblinge", assetIDs: set("v", 0..<10)),
+        ])
+        let all = [dogs, trip, cats, moved]
+        let matches = matcher.match(all, against: inventory)
+        let decisions: [SortlyID: ProposalDecision] = [
+            dogs.id: .extendExisting("best"),                  // now a possible match: reopened
+            trip.id: .extendExisting("island"),                // still certain: stays
+            cats.id: .createNew(title: nil, folderPath: nil),  // adds to no album: stays
+            moved.id: .moveExisting("birds", folderPath: ["Tiere"], extend: true), // reopened
+        ]
+        #expect(ProposalDecision.uncertainExtensions(decisions, proposals: all, matches: matches) == [dogs.id, moved.id])
+        // A plan that already started keeps its suggestions.
+        #expect(ProposalDecision.uncertainExtensions(decisions, proposals: all, matches: matches, protected: [dogs.id]) == [moved.id])
+    }
+}

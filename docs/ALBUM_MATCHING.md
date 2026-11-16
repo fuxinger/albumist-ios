@@ -58,7 +58,11 @@ Name nötig, klare Aktion, kein „Ähnliches Album gefunden“.
 stark wächst („2026“ im Januar angelegt): Es wird ergänzt, nie ein zweites angelegt.
 
 **Gespeicherte Ergebnisse** tragen die Version der Regeln (`AlbumMatcher.version`). Sind sie
-älter, gleicht die App beim Start einmal neu ab.
+älter, gleicht die App beim Start einmal neu ab. Eine ausgewählte, noch nicht ausgeführte
+Entscheidung, die ein Album ergänzen würde, das nach den neuen Regeln nicht mehr sicher passt
+(z. B. „ergänzen“ aus dem Startpaket auf jetzt nur „Ähnliches Album gefunden“), ist danach
+wieder offen. Die Übersicht sagt es: „N Vorschläge neu geprüft: bitte noch einmal ansehen“.
+Ausgeführte und angefangene Pläne bleiben unberührt.
 
 ## Konfliktstrategien
 - Fotos, die der Nutzer selbst aus einem Album entfernt hat, werden nie wieder hinzugefügt.

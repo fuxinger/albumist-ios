@@ -26,6 +26,9 @@ struct OverviewView: View {
                 if let restore = model.restoredFromBackup {
                     RestoredFromBackupCard(restore: restore)
                 }
+                if model.recheckedSuggestions > 0 {
+                    RecheckedSuggestionsCard(count: model.recheckedSuggestions)
+                }
                 if model.access == .limited { LimitedAccessCard() }
                 statusCard
                 analysisCard
@@ -409,6 +412,29 @@ struct RestoredFromBackupCard: View {
             Button("OK") { model.restoredFromBackup = nil }
                 .buttonStyle(SecondaryButtonStyle())
                 .accessibilityIdentifier("overview.restoredFromBackup.ok")
+        }
+    }
+}
+
+/// Shown once after an update made the rules for the user's own albums stricter (re-check
+/// 16.11.): suggestions whose "ergänzen" was chosen under the old rules are open again, so
+/// nothing changes in an album without the user looking again.
+struct RecheckedSuggestionsCard: View {
+    @Environment(AppModel.self) private var model
+    var count: Int
+
+    var body: some View {
+        Card {
+            Label("Vorschläge neu geprüft", systemImage: "checklist").font(.headline)
+            Text("\(count) Vorschläge neu geprüft: bitte noch einmal ansehen.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("OK") { model.recheckedSuggestions = 0 }
+                .buttonStyle(SecondaryButtonStyle())
+                .accessibilityIdentifier("overview.rechecked.ok")
         }
     }
 }

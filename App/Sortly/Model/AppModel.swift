@@ -348,6 +348,8 @@ final class AppModel {
         static let decisions = "user.decisions"
         static let titles = "user.titles"
         static let onboardingDone = "onboarding.done"
+        /// How many suggestions the last rule update set back to open, until the user tapped OK.
+        static let recheckedSuggestions = "user.recheckedSuggestions"
         /// Plans that started and whose results are not stored yet (finished at the next launch).
         static let pendingFinalization = SortlyStore.pendingFinalizationKey
     }
@@ -466,6 +468,12 @@ final class AppModel {
     private(set) var lastSafetyBackup: Date?
     /// Set when this start restored the decisions from the copy; the overview says so once.
     var restoredFromBackup: BackupRestore?
+    /// Suggestions an update of the matching rules set back to open (re-check 16.11.): their
+    /// "ergänzen" was accepted under the old rules and is no longer a certain match. The
+    /// overview says so until the user taps OK; kept across launches until then.
+    var recheckedSuggestions = UserDefaults.standard.integer(forKey: Key.recheckedSuggestions) {
+        didSet { UserDefaults.standard.set(recheckedSuggestions, forKey: Key.recheckedSuggestions) }
+    }
 
     struct BackupRestore: Equatable {
         /// When the copy was made.
@@ -1156,7 +1164,9 @@ final class AppModel {
         await reconcileManagedAlbums(quiet: true)
         do {
             // Results of an older matching version are matched again once (review 16.11.).
-            snapshot = try await pipeline.refreshMatchesIfOutdated()
+            let refresh = try await pipeline.refreshMatchesIfOutdated()
+            snapshot = refresh.snapshot
+            reopenAfterRecheck(refresh.reopened)
             recurringPlaceReport = try await pipeline.recurringPlaceReport()
             facts = try await pipeline.currentFacts()
             inventory = try await store.loadInventory()
@@ -1544,6 +1554,20 @@ final class AppModel {
         } catch {
             message = .failure(error.localizedDescription)
         }
+    }
+
+    /// Accepted decisions that would extend an album without a certain match under the new
+    /// rules go back to open, never silently: the overview shows how many. Applied
+    /// suggestions have no decision any more; started plans are left out by the pipeline.
+    private func reopenAfterRecheck(_ ids: Set<SortlyID>) {
+        let reopened = ids.filter { decisions[$0]?.isAccepted == true }
+        guard !reopened.isEmpty else { return }
+        for id in reopened {
+            decisions[id] = nil
+            previewOnly[id] = nil
+        }
+        persistDecisions()
+        recheckedSuggestions += reopened.count
     }
 
     func setUserTitle(_ title: String, for proposal: AlbumProposal) {

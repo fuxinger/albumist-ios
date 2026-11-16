@@ -1159,12 +1159,29 @@ public actor AnalysisPipeline {
         return snapshot
     }
 
+    /// What `refreshMatchesIfOutdated` found.
+    public struct MatchRefresh: Sendable {
+        /// The suggestions with their matches (nil: there are none).
+        public var snapshot: ProposalSnapshot?
+        /// Suggestions whose accepted "extend this album" decision is no longer a certain
+        /// match under the new rules (`ProposalDecision.uncertainExtensions`). The app sets them
+        /// back to open and says so; the decisions themselves are written by the app only.
+        public var reopened: Set<SortlyID> = []
+    }
+
     /// At launch: suggestions matched by an older version of the rules are matched again, so
     /// a fixed rule (review 16.11.: possible matches never change albums) holds at once and not
-    /// only after the next analysis. Returns nil when there are no suggestions.
-    public func refreshMatchesIfOutdated() async throws -> ProposalSnapshot? {
-        guard let snapshot = try await latestProposals() else { return nil }
-        guard snapshot.matcherVersion < AlbumMatcher.version else { return snapshot }
-        return try await rematch()
+    /// only after the next analysis. Decisions accepted under the old rules that would now
+    /// extend an album without a certain match are reported in `reopened`; suggestions of a
+    /// plan that already started (not finished) are never among them.
+    public func refreshMatchesIfOutdated() async throws -> MatchRefresh {
+        guard let snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
+        guard snapshot.matcherVersion < AlbumMatcher.version else { return MatchRefresh(snapshot: snapshot) }
+        guard let rematched = try await rematch() else { return MatchRefresh(snapshot: nil) }
+        let decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
+        let started = Set(try await store.unfinishedPlans().flatMap { $0.steps.compactMap(\.sourceID) })
+        let reopened = ProposalDecision.uncertainExtensions(decisions, proposals: rematched.proposals + rematched.dismissed,
+                                                            matches: rematched.matches, protected: started)
+        return MatchRefresh(snapshot: rematched, reopened: reopened)
     }
 }

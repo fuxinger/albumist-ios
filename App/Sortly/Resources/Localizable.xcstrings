@@ -851,6 +851,46 @@
         }
       }
     },
+    "%lld Vorschläge neu geprüft: bitte noch einmal ansehen." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Vorschlag neu geprüft: bitte noch einmal ansehen."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Vorschläge neu geprüft: bitte noch einmal ansehen."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld suggestion rechecked: please take another look."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld suggestions rechecked: please take another look."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld Vorschläge prüfen" : {
       "localizations" : {
         "en" : {
@@ -1127,6 +1167,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist then starts fresh and restores your decisions from the copy. Your photos, albums and purchase stay as they are."
+          }
+        }
+      }
+    },
+    "Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist now adds to your own albums only when they surely fit. These suggestions are open again; nothing changed in your albums."
           }
         }
       }
@@ -3797,6 +3847,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fully Applied"
+          }
+        }
+      }
+    },
+    "Vorschläge neu geprüft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggestions rechecked"
           }
         }
       }

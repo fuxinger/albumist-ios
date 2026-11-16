@@ -48,6 +48,8 @@ jobs:
     timeout-minutes: 170
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode --runtime
       - name: Boot simulator (in the background)
@@ -137,10 +139,12 @@ jobs:
           exit $status
       - name: Job summary
         if: always()
+        env:
+          PHOTOS: ${{ inputs.photos }}
         run: |
           args=()
           for log in build/*-log.txt; do [ -f "$log" ] && args+=(--swift-log "$log"); done
-          python3 .github/scripts/test_summary.py summary --title "UI stress ${{ inputs.photos }} photos" "${args[@]}" >> "$GITHUB_STEP_SUMMARY" || true
+          python3 .github/scripts/test_summary.py summary --title "UI stress $PHOTOS photos" "${args[@]}" >> "$GITHUB_STEP_SUMMARY" || true
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

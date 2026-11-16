@@ -27,7 +27,12 @@ struct OverviewView: View {
                     RestoredFromBackupCard(restore: restore)
                 }
                 if model.access == .limited { LimitedAccessCard() }
-                statusCard
+                // Nothing to sort or suggest: say why and how to go on instead of "0 von 0" (K6).
+                if let empty = EmptyLibraryCard.state(for: model) {
+                    EmptyLibraryCard(state: empty)
+                } else {
+                    statusCard
+                }
                 analysisCard
                 if model.history.isEmpty && model.acceptedProposals.isEmpty {
                     StarterSetCard { set in

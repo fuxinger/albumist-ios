@@ -265,6 +265,7 @@ struct ResultCard: View {
     var plan: ChangePlan
     @State private var confirmUndo = false
     @State private var appeared = false
+    @State private var photosDidNotOpen = false
     @Environment(\.openURL) private var openURL
     private static let reviewKey = "review.askedAfterFirstAlbums"
 
@@ -315,8 +316,18 @@ struct ResultCard: View {
                 // iOS lets apps open Fotos, but not a particular album (first device test 15.11.:
                 // "Ich springe nicht zu meinen Alben"). So the button says what it does, and the
                 // way to the albums is written next to it.
-                Button("Fotos-App öffnen") { openURL(photos) }
-                    .buttonStyle(PrimaryButtonStyle())
+                // "photos-redirect://" is not documented by Apple (plugin review N8). Should iOS
+                // one day not open it, the button says so instead of staying silent.
+                Button("Fotos-App öffnen") {
+                    openURL(photos) { accepted in photosDidNotOpen = !accepted }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                if photosDidNotOpen {
+                    Text("Die Fotos-App ließ sich nicht öffnen. Öffne sie bitte selbst vom Home-Bildschirm.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
                 if !isUndo {
                     Group {
                         let root = model.settings.rootFolderTitle.trimmingCharacters(in: .whitespaces)
@@ -424,19 +435,8 @@ struct UnlockCard: View {
             Label("Albumist freischalten", systemImage: "lock.open").font(.headline)
             Text("Für diese Auswahl brauchst du \(albumsInPlan) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums). Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.")
                 .font(.subheadline).foregroundStyle(.secondary)
-            Button {
-                Task { await purchases.purchase() }
-            } label: {
-                if purchases.isPurchasing {
-                    ProgressView().tint(Theme.onAccent)
-                } else if let product = purchases.product {
-                    Text("Freischalten für \(product.displayPrice)")
-                } else {
-                    Text("Freischalten")
-                }
-            }
-            .buttonStyle(PrimaryButtonStyle())
-            .disabled(purchases.isPurchasing)
+            // Without a price: "Preis wird geladen …", not tappable (plugin review W7).
+            UnlockButton(prominent: true)
             // Text buttons with a 44 pt tap area (design review W9: the bare text was ~20 pt).
             HStack {
                 Button { Task { await purchases.restore() } } label: {

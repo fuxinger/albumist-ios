@@ -51,8 +51,9 @@ public struct SearchIndex: Sendable {
     /// Sorted folded words of the recognized text and the photos they occur in.
     let terms: [String]
     let termPostings: [[Int32]]
-    /// The country with the most photos ("Ausland" means anywhere else).
-    let homeCountry: String?
+    /// Photos taken in a country that was not home at their date ("Ausland"), by the same
+    /// source of truth as trips and suggestions (`HomeSettings.home(at:)` through `HomeContext`).
+    let abroad: Bitset
     let vocabulary: SearchVocabulary
     /// Autocomplete candidates with their photo counts.
     private(set) var suggestionPool: [SuggestionCandidate] = []
@@ -73,7 +74,7 @@ public struct SearchIndex: Sendable {
     }
 
     public init(facts: [AssetFacts], inventory: CollectionInventory = CollectionInventory(), groups: [ObservationGroup] = [],
-                frequentPlaces: [FrequentPlace] = [], calendar: Calendar = .sortlyDefault) {
+                frequentPlaces: [FrequentPlace] = [], home: HomeSettings = HomeSettings(), calendar: Calendar = .sortlyDefault) {
         self.calendar = calendar
         // Newest first, like the photo grid; equal dates by id so the order is stable.
         let sorted = facts.sorted {
@@ -186,9 +187,35 @@ public struct SearchIndex: Sendable {
         strongCategories = strong
         terms = termSets.keys.sorted()
         termPostings = terms.map { termSets[$0]! }
-        homeCountry = countryNames.max { a, b in
+        // "Ausland": the home country of each photo's date. Where the detection decides, its
+        // everyday countries (as for the suggestions, from the photos outside trips); with none
+        // known, or with "Kein Zuhause", the country with the most photos, as before.
+        let mostPhotos = countryNames.max { a, b in
             (postings[.country(a.key)]?.count ?? 0, b.key) < (postings[.country(b.key)]?.count ?? 0, a.key)
         }?.key
+        let homeContext = HomeContext(settings: home, profile: LibraryProfile(facts: facts.filter { $0.tripID == nil }, trips: []), facts: facts)
+        var abroad = Bitset(count: sorted.count)
+        var countryKeys: [String: PlaceKey] = [:]
+        for (i, f) in sorted.enumerated() {
+            guard let place = f.gpsPlace, let code = place.isoCountryCode else { continue }
+            let key: PlaceKey
+            if let known = countryKeys[code] {
+                key = known
+            } else {
+                guard let made = place.key(at: .country) else { continue }
+                key = made
+                countryKeys[code] = made
+            }
+            let date = f.asset.creationDate
+            let atHome: Bool
+            switch home.home(at: date) {
+            case .chosen: atHome = homeContext.isHome(key, at: date)
+            case .detected where !homeContext.profile.everydayPlaces.isEmpty: atHome = homeContext.isHome(key, at: date)
+            case .detected, .none: atHome = code == mostPhotos
+            }
+            if !atHome { abroad.insert(i) }
+        }
+        self.abroad = abroad
 
         // MARK: Vocabulary
         func photos(_ key: Key) -> Int { postings[key]?.count ?? 0 }
@@ -365,13 +392,8 @@ public struct SearchIndex: Sendable {
             case .country(let code): return same(bits(.country(code)))
             case .countries(let codes): return union(codes.map { same(bits(.country($0))) })
             case .outsideHome:
-                var abroad = index.located
-                if let home = index.homeCountry { abroad.subtract(bits(.country(home))) } else { abroad = Bitset(count: index.count) }
                 // Photos with GPS but no country yet are not known to be abroad.
-                var withCountry = Bitset(count: index.count)
-                for (key, list) in index.postings { if case .country = key { for p in list { withCountry.insert(Int(p)) } } }
-                abroad.formIntersection(withCountry)
-                return same(abroad)
+                return same(index.abroad)
             case .place(let key): return same(bits(.place(key)))
             case .year(let y): return same(scan { Int(index.years[$0]) == y })
             case .month(let m): return same(scan { Int(index.months[$0]) == m })

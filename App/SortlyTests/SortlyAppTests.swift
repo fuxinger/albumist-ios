@@ -201,6 +201,68 @@ struct LocalizationTests {
     }
 }
 
+/// "Dein Zuhause": how homes and places are called (`HomeText`), and the English of its texts.
+@Suite("Dein Zuhause texts")
+struct HomeTextTests {
+    static let munich = PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Bayern", locality: "München")
+    static let offline = PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Bayern")
+
+    @Test func areaNamesTheTownOrOfflineTheRegion() {
+        #expect(HomeText.area(Self.munich).contains("München"))
+        #expect(!HomeText.area(Self.munich).contains("Bayern"))
+        #expect(HomeText.area(Self.offline).contains("Bayern"))
+        #expect(!HomeText.area(nil).isEmpty)
+        #expect(HomeText.short(Self.munich) == "München")
+        #expect(HomeText.short(Self.offline) == "Bayern")
+    }
+
+    @Test func summaryFollowsTheSettings() {
+        let place = HomePlace(center: GeoCoordinate(latitude: 48.137, longitude: 11.575), components: Self.munich)
+        #expect(HomeText.summary(HomeSettings(), detected: place) == "München")
+        #expect(HomeText.summary(HomeSettings().confirming(place, date: .now), detected: nil) == "München")
+        let none = HomeText.summary(HomeSettings().withoutHome(date: .now), detected: place)
+        #expect(none != "München" && !none.isEmpty)
+        #expect(!HomeText.summary(HomeSettings(), detected: nil).isEmpty)
+    }
+
+    /// The last day lived there is shown, not the day after.
+    @Test func formerHomeShowsTheLastMonth() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let until = calendar.date(from: DateComponents(year: 2019, month: 1, day: 1))!
+        let home = FormerHome(place: HomePlace(center: GeoCoordinate(latitude: 53.55, longitude: 9.99), components: .init(locality: "Hamburg")), until: until)
+        let line = HomeText.former(home)
+        #expect(line.contains("Hamburg"))
+        #expect(line.contains("2018"))
+    }
+
+    /// The user's own name first, then what the place is, then the place's name.
+    @Test func placeTitles() {
+        let base = PlaceAnswer(id: SortlyID("a"), center: GeoCoordinate(latitude: 45.6, longitude: 10.7), oftenHere: true, name: "Malcesine", answeredAt: .now)
+        #expect(HomeText.title(base, placeName: "Gardasee") == "Gardasee")
+        var parents = base
+        parents.kind = .parents
+        #expect(HomeText.title(parents, placeName: "Gardasee") == HomeText.kind(.parents))
+        var own = parents
+        own.label = "Oma"
+        #expect(HomeText.title(own, placeName: "Gardasee") == "Oma")
+        #expect(Set(PersonalPlaceKind.allCases.map(HomeText.kind)).count == PersonalPlaceKind.allCases.count)
+        #expect(Set(PersonalPlaceKind.allCases.map(HomeText.symbol)).count == PersonalPlaceKind.allCases.count)
+    }
+
+    @Test func englishTexts() throws {
+        let path = try #require(Bundle.main.path(forResource: "en", ofType: "lproj"))
+        let bundle = try #require(Bundle(path: path))
+        #expect(bundle.localizedString(forKey: "Dein Zuhause", value: nil, table: nil) == "Your home")
+        #expect(bundle.localizedString(forKey: "Kein Zuhause festlegen", value: nil, table: nil) == "Don't set a home")
+        let area = bundle.localizedString(forKey: "%@ und Umgebung", value: nil, table: nil)
+        #expect(String(format: area, "Munich") == "Munich and surroundings")
+        let removed = bundle.localizedString(forKey: "%lld Vorschläge passen nicht mehr und sind weggefallen.", value: nil, table: nil)
+        #expect(String.localizedStringWithFormat(removed, 1) == "1 suggestion no longer fits and was removed.")
+        #expect(String.localizedStringWithFormat(removed, 3) == "3 suggestions no longer fit and were removed.")
+    }
+}
+
 @Suite("Siri, Shortcuts and Spotlight")
 @MainActor
 struct IntentDataTests {

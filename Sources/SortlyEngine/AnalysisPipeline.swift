@@ -186,11 +186,21 @@ public actor AnalysisPipeline {
         static let proposals = "analysis.proposals"
         /// Photos taken where the user lives (`TripAnalysis.atHome`), from the last analysis.
         static let home = "analysis.home"
+        /// What the user set in "Dein Zuhause" (part of the decisions copy in the backup, kept
+        /// by "Analyse neu aufbauen").
+        static let homeSettings = "user.home"
+        /// The home Albumist found by itself, from the last analysis (`DetectedHome`).
+        static let detectedHome = "analysis.detectedHome"
         /// The trial run's year chosen at the start (kept by "Analyse neu aufbauen").
         static let scope = "user.analysisScope"
         /// The user's decisions on suggestions (written by the app; here only to set decisions
         /// back to open after a rule update, together with the new matches).
         static let decisions = "user.decisions"
+        /// Suggestions the user chose before a change in "Dein Zuhause" would have changed or
+        /// dropped them: kept as chosen (`HeldSuggestions`).
+        static let heldSuggestions = "user.heldSuggestions"
+        /// A change in "Dein Zuhause" no suggestions were made for yet (`PendingHomeChange`).
+        static let pendingHomeChange = "analysis.pendingHomeChange"
     }
 
     private let store: SortlyStore
@@ -206,6 +216,21 @@ public actor AnalysisPipeline {
     /// Bumped whenever the albums changed outside a run (a plan was applied): a run that
     /// computed its matches before that matches again before it saves them.
     private var albumGeneration = 0
+    /// Bumped whenever "Dein Zuhause" or the places the user is often at changed (after the
+    /// change is stored): a run that detected its trips before that detects them again before it
+    /// makes suggestions, so its suggestions never undo the change; and suggestions made from the
+    /// settings before it leave the change pending (`PendingHomeChange`).
+    private var homeGeneration = 0
+    /// Bumped whenever the stored suggestions are replaced: `rematch()` matches again when new
+    /// suggestions came while it matched, instead of writing older ones back.
+    private var proposalsGeneration = 0
+    /// Changes in "Dein Zuhause" between checking for a `PendingHomeChange` and storing
+    /// themselves: while one is, suggestions that finish keep the mark (they could remove the one
+    /// the change saw and leave it unmarked).
+    private var homeChangesBeingStored = 0
+    /// Tests only: runs after `setHomeChange` checked for a pending change, before it stores.
+    var afterPendingCheck: (@Sendable () async -> Void)?
+    func setAfterPendingCheck(_ hook: (@Sendable () async -> Void)?) { afterPendingCheck = hook }
     /// Online place lookups per normal run; the rest waits for the overnight refinement run.
     /// Keeps the first analysis from spending up to an hour on town names before photos are
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
@@ -424,25 +449,8 @@ public actor AnalysisPipeline {
         // N von N" meanwhile (simulated full run: step 2 was first shown when it was done).
         onProgress(Progress(stage: .patterns, completed: 0, total: 1))
         let all = try await store.allAssets()
-        let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
-        let answers = try await recurringPlaceAnswers()
-        let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar).analyse(in: all, corrections: corrections, places: answers)
-        let detected = tripAnalysis.trips
-        // Trips keep their identity when their photos change a little (an older photo
-        // imported, the first one deleted): decisions and deleted albums stay attached.
-        var known = try await store.value([TripIdentity].self, forKey: Key.tripIdentities) ?? []
-        if known.isEmpty {
-            // First run with identities: the trips of the last analysis are the starting point.
-            known = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map(TripIdentity.init)
-        }
-        var trips = TripIdentity.carryOver(detected, from: known)
-        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
-        try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
-        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar).detect(in: all)
-        for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
-        try await store.setValue(trips, forKey: Key.trips)
-        try await store.setValue(frequent, forKey: Key.frequentPlaces)
-        try await store.setValue(tripAnalysis.atHome, forKey: Key.home)
+        var patternsGeneration = homeGeneration
+        var (trips, frequent) = try await detectPatterns(all: all)
         report.completedStages.append(.patterns)
 
         // The photos this run analyses: all of them, or one year and the trips that touch it.
@@ -464,17 +472,7 @@ public actor AnalysisPipeline {
         report.placesPendingOnline = placeOutcome.pendingOnline.count
         report.onlineRequests = placeOutcome.onlineRequests
         report.placesThrottled = placeOutcome.stoppedBecauseThrottled
-        // Day trip or weekend is decided in the destination's days, once places know its time
-        // zone (an evening in New York is already the next day in Munich).
-        let zones = try await store.places().compactMapValues(\.components.timeZoneIdentifier)
-        if !zones.isEmpty {
-            let localTrips = TripDetector.inDestinationTime(trips, assets: Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) }),
-                                                            timeZones: zones, calendar: calendar)
-            if localTrips != trips {
-                trips = localTrips
-                try await store.setValue(trips, forKey: Key.trips)
-            }
-        }
+        trips = try await inDestinationTime(trips, all: all)
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
         report.completedStages.append(.places)
 
@@ -499,8 +497,10 @@ public actor AnalysisPipeline {
         // analysis, which takes hours on a large library. The full set replaces them later;
         // suggestion ids are stable, so decisions made in between stay valid.
         if contentTotal > 0, try await latestProposals() == nil {
+            if let fresh = try await patternsAfterAHomeChange(since: &patternsGeneration, all: all) { (trips, frequent) = fresh }
             let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
-            _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope, early: true)
+            _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope,
+                                        early: true, homeChange: patternsGeneration)
             report.earlyProposals = true
             onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal,
                                 earlyProposals: true))
@@ -664,7 +664,9 @@ public actor AnalysisPipeline {
         // 7. Proposals
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
         onProgress(Progress(stage: .proposals, completed: 0, total: 0))
-        let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope)
+        if let fresh = try await patternsAfterAHomeChange(since: &patternsGeneration, all: all) { (trips, frequent) = fresh }
+        let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope,
+                                               homeChange: patternsGeneration)
         report.proposals = snapshot.proposals.count
         report.completedStages.append(.proposals)
         onProgress(Progress(stage: .proposals, completed: snapshot.proposals.count, total: snapshot.proposals.count))
@@ -672,6 +674,58 @@ public actor AnalysisPipeline {
     }
 
     // MARK: Stages
+
+    /// Step 2: trips, the places the user is often at, frequent places and the home, from time
+    /// and GPS alone (no network, seconds even for a large library). Stored as it goes.
+    /// Trips and places detected again when "Dein Zuhause" or the places the user is often at
+    /// changed since `generation` (a run that was busy meanwhile follows the change); `nil` when
+    /// nothing changed.
+    private func patternsAfterAHomeChange(since generation: inout Int, all: [AssetSnapshot]) async throws -> (trips: [Trip], frequent: [FrequentPlace])? {
+        guard generation != homeGeneration else { return nil }
+        generation = homeGeneration
+        let (trips, frequent) = try await detectPatterns(all: all)
+        return (try await inDestinationTime(trips, all: all), frequent)
+    }
+
+    private func detectPatterns(all: [AssetSnapshot]) async throws -> (trips: [Trip], frequent: [FrequentPlace]) {
+        let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
+        let answers = try await recurringPlaceAnswers()
+        let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar)
+            .analyse(in: all, corrections: corrections, places: answers, home: try await homeSettings())
+        let detected = tripAnalysis.trips
+        // Trips keep their identity when their photos change a little (an older photo
+        // imported, the first one deleted): decisions and deleted albums stay attached.
+        var known = try await store.value([TripIdentity].self, forKey: Key.tripIdentities) ?? []
+        if known.isEmpty {
+            // First run with identities: the trips of the last analysis are the starting point.
+            known = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map(TripIdentity.init)
+        }
+        let trips = TripIdentity.carryOver(detected, from: known)
+        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
+        try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
+        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar).detect(in: all)
+        for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
+        try await store.setValue(trips, forKey: Key.trips)
+        try await store.setValue(frequent, forKey: Key.frequentPlaces)
+        try await store.setValue(tripAnalysis.atHome, forKey: Key.home)
+        if let home = tripAnalysis.detectedHome {
+            try await store.setValue(home, forKey: Key.detectedHome)
+        } else {
+            try await store.removeValue(forKey: Key.detectedHome)
+        }
+        return (trips, frequent)
+    }
+
+    /// Day trip or weekend is decided in the destination's days, once places know its time
+    /// zone (an evening in New York is already the next day in Munich). Stored when it changed.
+    private func inDestinationTime(_ trips: [Trip], all: [AssetSnapshot]) async throws -> [Trip] {
+        let zones = try await store.places().compactMapValues(\.components.timeZoneIdentifier)
+        guard !zones.isEmpty else { return trips }
+        let localTrips = TripDetector.inDestinationTime(trips, assets: Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) }),
+                                                        timeZones: zones, calendar: calendar)
+        if localTrips != trips { try await store.setValue(localTrips, forKey: Key.trips) }
+        return localTrips
+    }
 
     /// How much work this run has (see `AnalysisWorkload`): the amounts over the part of the
     /// library the run works on, and what is still to do in the image and text steps.
@@ -998,10 +1052,17 @@ public actor AnalysisPipeline {
         return groups
     }
 
+    /// After a change in "Dein Zuhause" that no suggestions were made for yet
+    /// (`PendingHomeChange`), whichever step makes them (`resuggest()`, a run, the early set):
+    /// the suggestions the user chose before the change keep their content (`HeldSuggestions`),
+    /// and the overview is told (`HomeChangeNotice`), in the same transaction as the suggestions.
+    /// `homeChange`: `homeGeneration` as it was before `trips` were detected. A change stored
+    /// after that (the trips or the settings read here may be older than it) stays pending.
     private func makeProposals(
         all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
-        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false
+        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false, homeChange: Int
     ) async throws -> ProposalSnapshot {
+        let pending = try await pendingHomeChange()
         // The albums are read again: a plan applied while this run was busy (minutes or hours
         // on a large library) created albums the matching must see, or it would suggest them
         // a second time.
@@ -1022,9 +1083,16 @@ public actor AnalysisPipeline {
             frequentPlaces: scope == .all ? frequent : [],
             groups: groups,
             // Like trips: a place with photos in the trial year comes with all its photos.
-            recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) }
+            recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) },
+            home: try await homeSettings()
         )
         var suggestions = ProposalEngine(settings: settings, calendar: calendar).suggestions(for: analysis, overrides: overrides)
+        // Chosen before a change in "Dein Zuhause": stays as the user chose it, in this and
+        // every later run, until it is created or deselected.
+        let decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
+        var held = try await heldSuggestions()
+        if let pending { held = HeldSuggestions.adding(pending.before.proposals, to: held, decisions: decisions, new: suggestions) }
+        held = HeldSuggestions.apply(held, decisions: decisions, library: Set(all.map(\.id)), to: &suggestions)
         // The full set after an early one: a suggestion of the early set the user already
         // decided on stays, even when the full analysis would not make it any more (review
         // minor: a decision must not lose its suggestion).
@@ -1050,7 +1118,20 @@ public actor AnalysisPipeline {
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
         let snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
                                         dismissed: suggestions.dismissed, standIns: suggestions.standIns, isEarly: early)
-        try await store.setValue(snapshot, forKey: Key.proposals)
+        var values: [String: any Encodable & Sendable] = [Key.proposals: snapshot, Key.heldSuggestions: held]
+        var removing: Set<String> = []
+        if let pending {
+            let heldIDs = Set(held.map(\.id))
+            let notice = try await homeChangeNotice()?.followed(by: snapshot, held: heldIDs, date: now())
+                ?? HomeChangeNotice(before: pending.before, after: snapshot, held: heldIDs, date: now())
+            // A change stored while these suggestions were made stays pending for the next step.
+            if homeChange == homeGeneration, homeChangesBeingStored == 0 {
+                if notice.isEmpty { removing.insert(Self.homeChangeNoticeKey) } else { values[Self.homeChangeNoticeKey] = notice }
+                removing.insert(Key.pendingHomeChange)
+            }
+        }
+        proposalsGeneration += 1
+        try await store.setValues(values, removing: removing)
         return snapshot
     }
 
@@ -1089,16 +1170,138 @@ public actor AnalysisPipeline {
     /// The user's answers to "Bist du hier öfter?". Kept by position, so they hold for every
     /// later analysis; the next run applies them.
     public func recurringPlaceAnswers() async throws -> RecurringPlaceAnswers {
-        try await store.value(RecurringPlaceAnswers.self, forKey: Key.recurringPlaces, defaults: RecurringPlaceAnswers()) ?? RecurringPlaceAnswers()
+        try await readable { try await store.value(RecurringPlaceAnswers.self, forKey: Key.recurringPlaces, defaults: RecurringPlaceAnswers()) } ?? RecurringPlaceAnswers()
     }
 
+    /// Stores the answers; a change of the places the user is often at is applied like a change
+    /// in "Dein Zuhause" (`setHomeChange`).
     public func setRecurringPlaceAnswers(_ answers: RecurringPlaceAnswers) async throws {
-        try await store.setValue(answers, forKey: Key.recurringPlaces)
+        try await setHomeChange(places: answers)
     }
 
     /// What the last analysis found about places visited again and again.
     public func recurringPlaceReport() async throws -> RecurringPlaceReport? {
         try await store.value(RecurringPlaceReport.self, forKey: Key.recurringPlaceReport)
+    }
+
+    // MARK: Dein Zuhause
+
+    /// What the user set in "Dein Zuhause". Nothing stored (every version before this one):
+    /// automatic, as before.
+    /// A value this build cannot read (a later version's shape, or damage) is read as automatic,
+    /// so it never stops an analysis.
+    public func homeSettings() async throws -> HomeSettings {
+        try await readable { try await store.value(HomeSettings.self, forKey: Key.homeSettings, defaults: HomeSettings()) } ?? HomeSettings()
+    }
+
+    public func setHomeSettings(_ home: HomeSettings) async throws {
+        try await setHomeChange(home: home)
+    }
+
+    /// Stores a change in "Dein Zuhause" (`home`) and of the places the user is often at
+    /// (`places`), with a `PendingHomeChange` when it changes what the suggestions are made
+    /// from, all in one transaction. `resuggest()` applies it; if a run gets there first, or the
+    /// app is ended before, that run applies it the same way.
+    public func setHomeChange(home: HomeSettings? = nil, places: RecurringPlaceAnswers? = nil) async throws {
+        var values: [String: any Encodable & Sendable] = [:]
+        var changes = false
+        if let home {
+            values[Key.homeSettings] = home
+            var old = try await homeSettings(), new = home
+            old.changedAt = nil
+            new.changedAt = nil
+            changes = changes || old != new
+        }
+        if let places {
+            values[Key.recurringPlaces] = places
+            let old = try await recurringPlaceAnswers()
+            changes = changes || old.oftenHere != places.oftenHere
+        }
+        guard !values.isEmpty else { return }
+        // From the check for a pending change to the bump after the write, suggestions that
+        // finish keep the mark (see makeProposals): the check, the write and the bump act as one.
+        if changes { homeChangesBeingStored += 1 }
+        defer { if changes { homeChangesBeingStored -= 1 } }
+        if changes, try await pendingHomeChange() == nil, let current = try await latestProposals() {
+            values[Key.pendingHomeChange] = PendingHomeChange(before: current, date: now())
+        }
+        if changes, let afterPendingCheck { await afterPendingCheck() }
+        try await store.setValues(values)
+        // After the write, and only when something the suggestions are made from changed ("Nein,
+        // das sind Reisen" changes nothing): suggestions made from what was read before stay
+        // pending (see makeProposals).
+        if changes { homeGeneration += 1 }
+    }
+
+    /// The change in "Dein Zuhause" that no suggestions were made for yet.
+    func pendingHomeChange() async throws -> PendingHomeChange? {
+        try await readable { try await store.value(PendingHomeChange.self, forKey: Key.pendingHomeChange) }
+    }
+
+    /// Suggestions held as the user chose them; one this build cannot read is left out.
+    func heldSuggestions() async throws -> [AlbumProposal] {
+        (try await readable { try await store.value([Lenient<AlbumProposal>].self, forKey: Key.heldSuggestions) } ?? []).compactMap(\.value)
+    }
+
+    /// `read`, with a stored value this build cannot decode read as not stored. For values the
+    /// user set or that only add to what is shown: they must never stop an analysis, and
+    /// "Analyse neu aufbauen" keeps the `user.*` ones, so nothing else would clear them.
+    private func readable<T>(_ read: () async throws -> T?) async throws -> T? {
+        do { return try await read() } catch is DecodingError { return nil }
+    }
+
+    /// The home Albumist found by itself in the last analysis.
+    public func detectedHome() async throws -> DetectedHome? {
+        try await store.value(DetectedHome.self, forKey: Key.detectedHome)
+    }
+
+    /// What the overview says after a change in "Dein Zuhause", until the user taps OK.
+    public static let homeChangeNoticeKey = "user.homeChangeNotice"
+
+    /// After a change in "Dein Zuhause": only the suggestion step runs again, on what the
+    /// analysis already knows (trips, places and the home from the stored dates and places,
+    /// then the suggestions). No photo is read again and nothing changes in Photos. Suggestions
+    /// the user already chose stay as they were (`HeldSuggestions`); what changed is stored
+    /// for the overview in the same transaction as the new suggestions (`makeProposals`).
+    /// Returns what the overview says (nil: nothing); nothing is made when there are no
+    /// suggestions yet (the next analysis applies the settings) or a run already applied the
+    /// change. Waits for a run in progress, like a run does.
+    public func resuggest() async throws -> HomeChangeNotice? {
+        await beginRun()
+        defer { endRun() }
+        guard let previous = try await latestProposals() else { return nil }
+        guard try await pendingHomeChange() != nil else { return try await homeChangeNotice() }
+        // Before the trips are detected: a change stored while they are stays pending.
+        let homeChange = homeGeneration
+        let all = try await store.allAssets()
+        var (trips, frequent) = try await detectPatterns(all: all)
+        trips = try await inDestinationTime(trips, all: all)
+        let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
+        _ = try await makeProposals(all: all, inventory: try await store.loadInventory(), trips: trips, frequent: frequent,
+                                    groups: groups, scope: previous.scope, early: previous.isEarly, homeChange: homeChange)
+        return try await homeChangeNotice()
+    }
+
+    /// "Analyse neu aufbauen": the stored analysis is deleted (`SortlyStore.resetAnalysis`)
+    /// between runs, never while a run or `resuggest()` is writing (they would write old results
+    /// into the fresh tables). Waits for one in progress.
+    public func resetAnalysis() async throws {
+        await beginRun()
+        defer { endRun() }
+        // Before the reset is sent: a `rematch()` that read the old suggestions matches again
+        // (and finds none) instead of writing them into the fresh store.
+        proposalsGeneration += 1
+        try await store.resetAnalysis(includingDecisions: false)
+        lastForegroundOnlineLookup = nil
+    }
+
+    /// "OK" on the overview card.
+    public func dismissHomeChangeNotice() async throws {
+        try await store.removeValue(forKey: Self.homeChangeNoticeKey)
+    }
+
+    public func homeChangeNotice() async throws -> HomeChangeNotice? {
+        try await readable { try await store.value(HomeChangeNotice.self, forKey: Self.homeChangeNoticeKey) }
     }
 
     public func currentFacts() async throws -> [AssetFacts] {
@@ -1147,10 +1350,17 @@ public actor AnalysisPipeline {
     /// Re-runs only the album matching against the stored inventory and overrides, after
     /// albums were created or the user said an album does not fit. The suggestions then show
     /// the right state at once instead of after the next analysis.
+    /// New suggestions written while it matched (`resuggest()` or a run) are matched again
+    /// instead of being overwritten with the older ones.
     public func rematch() async throws -> ProposalSnapshot? {
-        guard let snapshot = try await rematched() else { return nil }
-        try await store.setValue(snapshot, forKey: Key.proposals)
-        return snapshot
+        while true {
+            let generation = proposalsGeneration
+            guard let snapshot = try await rematched() else { return nil }
+            guard generation == proposalsGeneration else { continue }
+            proposalsGeneration += 1
+            try await store.setValue(snapshot, forKey: Key.proposals)
+            return snapshot
+        }
     }
 
     /// The stored suggestions matched again with the current rules, not saved yet.
@@ -1211,6 +1421,7 @@ public actor AnalysisPipeline {
             values[Key.decisions] = decisions
             values[Self.recheckedSuggestionsKey] = shown + reopened.count
         }
+        proposalsGeneration += 1
         try await store.setValues(values, afterEach: afterEachWrite)
         return MatchRefresh(snapshot: rematched, reopened: reopened)
     }

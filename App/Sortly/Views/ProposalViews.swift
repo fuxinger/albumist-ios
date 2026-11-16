@@ -263,6 +263,7 @@ struct ProposalDetailView: View {
                             } label: {
                                 if suggesting {
                                     ProgressView().controlSize(.small)
+                                        .accessibilityLabel(Text("Name wird vorgeschlagen"))
                                 } else {
                                     Label("Namen vorschlagen", systemImage: "apple.intelligence")
                                 }
@@ -320,12 +321,18 @@ struct ProposalDetailView: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .contentShape(Rectangle())
                     }
-                    .disabled(model.analysis.isRunning || model.execution.isRunning)
+                    .disabled(!model.canChangeHome)
                     .accessibilityIdentifier("proposal.oftenHere")
                     .confirmationDialog("Keine Reise?", isPresented: $confirmOftenHere, titleVisibility: .visible) {
                         Button("Keine Reise, hier bin ich öfter") { answerOftenHere(true) }
                     } message: {
                         Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen.")
+                    }
+                    // Why it waits, as on the question card.
+                    if let reason = oftenHereWaitReason(askedOnTheCard: false) {
+                        Text(reason)
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -373,24 +380,51 @@ struct ProposalDetailView: View {
             }
             Button("Ja, hier bin ich öfter") { answerOftenHere(true) }
                 .buttonStyle(SecondaryButtonStyle())
-                .disabled(model.analysis.isRunning || model.execution.isRunning)
+                .disabled(!model.canChangeHome)
                 .accessibilityIdentifier("proposal.oftenHere.yes")
             Button("Nein, das sind Reisen") { answerOftenHere(false) }
                 .buttonStyle(SecondaryButtonStyle())
+                // While a change in "Dein Zuhause" is applied, like "Ja": the answer would be
+                // stored beside it and the question come back until the suggestions are new.
+                .disabled(model.homeChangeRunning)
                 .accessibilityIdentifier("proposal.oftenHere.no")
-            // Only "Ja" waits: it plans the trips anew, "Nein" changes nothing (design review
-            // N8 found the two buttons behaving differently without a word why).
-            if model.analysis.isRunning || model.execution.isRunning {
-                Text(model.execution.isRunning
-                     ? LocalizedStringKey("„Ja“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
-                     : LocalizedStringKey("„Ja“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu."))
+            // Why a button waits (design review N8 found the two buttons behaving differently
+            // without a word why): "Ja" plans the trips anew, "Nein" changes nothing.
+            if let reason = oftenHereWaitReason(askedOnTheCard: true) {
+                Text(reason)
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    /// A "Ja" makes this suggestion go away with the analysis it starts: back to the list.
+    /// Why "Ja, hier bin ich öfter" on the question card (and during a change in "Dein
+    /// Zuhause" also "Nein"), or "Keine Reise, hier bin ich öfter" on a trip, waits; nil when it
+    /// can be tapped.
+    private func oftenHereWaitReason(askedOnTheCard: Bool) -> LocalizedStringKey? {
+        if model.homeChangeRunning {
+            return LocalizedStringKey("Gleich wieder möglich: Albumist passt gerade die Vorschläge an deine Änderung in „Dein Zuhause“ an.")
+        }
+        if model.analysisResetting {
+            return askedOnTheCard
+                ? LocalizedStringKey("„Ja“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu.")
+                : LocalizedStringKey("„Keine Reise“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu.")
+        }
+        if model.execution.isRunning {
+            return askedOnTheCard
+                ? LocalizedStringKey("„Ja“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
+                : LocalizedStringKey("„Keine Reise“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
+        }
+        if model.analysis.isRunning {
+            return askedOnTheCard
+                ? LocalizedStringKey("„Ja“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu.")
+                : LocalizedStringKey("„Keine Reise“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu.")
+        }
+        return nil
+    }
+
+    /// A "Ja" makes this suggestion go away when the suggestions are made again (like every
+    /// change in "Dein Zuhause"): back to the list.
     private func answerOftenHere(_ oftenHere: Bool) {
         Task {
             if await model.answerRecurringPlace(oftenHere, for: proposal), oftenHere { dismiss() }
@@ -486,6 +520,7 @@ struct ProposalDetailView: View {
             } label: {
                 if preparing {
                     ProgressView().frame(maxWidth: .infinity)
+                        .accessibilityLabel(Text("Wird vorbereitet"))
                 } else {
                     Text(primaryTitle)
                 }

@@ -249,6 +249,7 @@ extension AtlasView {
             } label: {
                 if writing {
                     ProgressView().frame(maxWidth: .infinity)
+                        .accessibilityLabel(Text("Geschichte wird erzählt"))
                 } else {
                     Label(story == nil ? "Erzähl meine Geschichte" : "Neu erzählen", systemImage: "apple.intelligence")
                         .frame(maxWidth: .infinity)

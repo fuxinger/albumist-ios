@@ -29,6 +29,9 @@ struct OverviewView: View {
                 if model.recheckedSuggestions > 0 {
                     RecheckedSuggestionsCard(count: model.recheckedSuggestions)
                 }
+                if let notice = model.homeChangeNotice {
+                    HomeChangeCard(notice: notice)
+                }
                 if model.access == .limited { LimitedAccessCard() }
                 // Nothing to sort or suggest: say why and how to go on instead of "0 von 0" (K6).
                 if let empty = EmptyLibraryCard.state(for: model) {
@@ -106,6 +109,7 @@ struct OverviewView: View {
                     ProgressView()
                         .controlSize(.large)
                         .frame(width: min(ringSide, 150), height: min(ringSide, 150))
+                        .accessibilityHidden(true) // "Wird neu gezählt" beside it says it
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                         Text("Wird neu gezählt")
                             .font(.headline)

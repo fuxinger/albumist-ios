@@ -33,6 +33,7 @@ struct TripWorkshopView: View {
                 Section {
                     HStack(spacing: Theme.Spacing.s) {
                         ProgressView()
+                            .accessibilityHidden(true) // the text beside it says what runs
                         Text(working == .split ? "Albumist teilt die Reise und plant die Vorschläge neu …" : "Albumist plant deine Reisen und Vorschläge neu …")
                             .foregroundStyle(.secondary)
                     }

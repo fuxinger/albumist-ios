@@ -870,9 +870,17 @@ enum StoreKitEnvironment {
             done.append("session \(elapsed()) ms")
             // StoreKit answers from the configuration file only when it knows the test host (see
             // `requireTestEnvironment`); until the environment is up the list may come back empty.
-            while try await within("load the product", seconds: left(), { (try? await Product.products(for: [unlock]).count) ?? 0 }) == 0 {
+            // StoreKit's own error is kept, so a signing or bundle-id problem says what it is
+            // instead of only "no product" after the whole budget (second review 16.11.).
+            var lastError = "none"
+            while true {
+                let load = try await within("load the product", seconds: left()) { () async -> ProductLoad in
+                    do { return ProductLoad(count: try await Product.products(for: [unlock]).count, error: nil) } catch { return ProductLoad(count: 0, error: "\(error)") }
+                }
+                if load.count > 0 { break }
+                if let error = load.error { lastError = error }
                 if Date().timeIntervalSince(started) > StoreKitEnvironment.budget {
-                    throw StoreKitStepTimedOut(description: "no product from the test session (is the test host signed with its bundle id?)")
+                    throw StoreKitStepTimedOut(description: "no product from the test session (is the test host signed with its bundle id?); last StoreKit error: \(lastError)")
                 }
                 try await Task.sleep(for: .milliseconds(500))
             }
@@ -966,6 +974,12 @@ func startOnSessionQueue(_ step: String, _ call: @escaping @Sendable () -> Void)
 /// test with the step's name instead of stopping the whole test run. The step counts as
 /// running (`StoreKitSteps`) until it really ends. Blocking calls of the test session go
 /// through `onSessionQueue` instead.
+/// One attempt to load the unlock product during the bring-up.
+private struct ProductLoad: Sendable {
+    let count: Int
+    let error: String?
+}
+
 func within<T: Sendable>(_ step: String, seconds: Double = 30, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
     let token = StoreKitSteps.shared.begin(step)
     return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in

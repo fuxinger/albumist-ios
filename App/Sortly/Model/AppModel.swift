@@ -169,7 +169,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { bucketCache = [:]; atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; resetSearchIndex() } }
+    var facts: [AssetFacts] = [] { didSet { bucketCache = [:]; atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { bucketCache = [:] } }
     /// Filtered and sorted library buckets; rebuilt only when facts or states change, not on
     /// every redraw of the library (a selection tap redraws it).
@@ -308,6 +308,24 @@ final class AppModel {
     private(set) var recurringPlaces = RecurringPlaceAnswers()
     /// What the latest analysis asks about recurring places, and where each trip mostly was.
     private(set) var recurringPlaceReport: RecurringPlaceReport?
+    /// What the user set in "Dein Zuhause".
+    private(set) var homeSettings = HomeSettings() { didSet { if homeSettings != oldValue { resetSearchIndex() } } }
+    /// The home Albumist found by itself in the latest analysis.
+    private(set) var detectedHome: DetectedHome?
+    /// What the last change in "Dein Zuhause" did to the suggestions, until OK on the overview.
+    private(set) var homeChangeNotice: HomeChangeNotice?
+    /// A change in "Dein Zuhause" is being applied (the suggestions are made again).
+    private(set) var homeChangeRunning = false
+    /// An analysis was asked for while a change in "Dein Zuhause" was applied: it starts after,
+    /// with what was asked for.
+    @ObservationIgnored private var analysisAfterHomeChange: QueuedAnalysis?
+    struct QueuedAnalysis {
+        var scope: OrganizationScope?
+        var mode: AnalysisPipeline.Mode
+        var userInitiated: Bool
+    }
+    @ObservationIgnored private var homeCandidatesCache: [HomeCandidate]?
+    @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
     var execution = ExecutionState()
     var message: AppMessage?
     /// Where Siri, Shortcuts or a Spotlight result wants to go; the overview opens it.
@@ -334,8 +352,9 @@ final class AppModel {
     /// Runs in a row that ended early by themselves (an error, Vision failing): tried again
     /// a little later instead of only at the next start of the app.
     @ObservationIgnored private var unattendedRetries = 0
-    /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile.
-    @ObservationIgnored private var analysisResetting = false
+    /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile. Observed: the
+    /// suggestion's "Ja, hier bin ich öfter" says why it waits.
+    private(set) var analysisResetting = false
     /// One plan at a time (apply, resume, undo, take back): claimed before the first await of
     /// every entry point, released when it ends.
     @ObservationIgnored private var executionClaimed = false
@@ -409,6 +428,7 @@ final class AppModel {
             )
             tripCorrections = (try? await pipeline?.tripCorrections()) ?? TripCorrections()
             recurringPlaces = (try? await pipeline?.recurringPlaceAnswers()) ?? RecurringPlaceAnswers()
+            homeSettings = (try? await pipeline?.homeSettings()) ?? HomeSettings()
             analysisScope = (try? await pipeline?.storedScope()) ?? .all
             // A plan that finished right before the app was closed stores its results now,
             // before the album check in `refreshDerived` compares: what the plan changed is not
@@ -713,6 +733,16 @@ final class AppModel {
     /// `scope`: a new part of the library to work on; `nil` keeps the stored one.
     func startAnalysis(scope: OrganizationScope? = nil, mode: AnalysisPipeline.Mode = .incremental, userInitiated: Bool = false) {
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
+        // A change in "Dein Zuhause" is being applied: the run starts right after it, so it
+        // never takes the run lock in the middle of the change. Several requests meanwhile are
+        // one run; one started by a tap keeps what a tap gets (background time, retries reset).
+        if homeChangeRunning {
+            let queued = analysisAfterHomeChange
+            analysisAfterHomeChange = QueuedAnalysis(scope: scope ?? queued?.scope,
+                                                     mode: mode == .incremental ? (queued?.mode ?? mode) : mode,
+                                                     userInitiated: userInitiated || (queued?.userInitiated ?? false))
+            return
+        }
         analysis.isRunning = true
         analysis.needsResume = false
         analysis.pausing = false
@@ -1172,6 +1202,8 @@ final class AppModel {
             reopenAfterRecheck(refresh.reopened)
             recheckedSuggestions = try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0
             recurringPlaceReport = try await pipeline.recurringPlaceReport()
+            detectedHome = try await pipeline.detectedHome()
+            homeChangeNotice = try await pipeline.homeChangeNotice()
             facts = try await pipeline.currentFacts()
             inventory = try await store.loadInventory()
             let inventory = inventory
@@ -1492,7 +1524,12 @@ final class AppModel {
             default: nil
             }
         }.first ?? (proposal.kind == .trip ? nil : proposal.title)
-        return await changeRecurringPlaces(rerun: oftenHere) { $0.answering(oftenHere, at: center, name: name, date: .now) }
+        // "Ja" changes the trips: applied like every change in "Dein Zuhause" (only the
+        // suggestions are made again, what the user chose stays, the overview is told).
+        if oftenHere {
+            return await changeHome(places: { $0.answering(true, at: center, name: name, date: .now) })
+        }
+        return await changeRecurringPlaces(rerun: false) { $0.answering(false, at: center, name: name, date: .now) }
     }
 
     /// The album suggestion of a place the user is often at, for its name in the settings.
@@ -1501,10 +1538,11 @@ final class AppModel {
         return proposals.first { $0.id == id }
     }
 
-    /// "Wieder als Reisen zeigen" in the settings: the stays there are trips again. Remembered
-    /// as "Nein", so the question does not come right back.
+    /// "Wieder als Reisen zeigen" in "Dein Zuhause": the stays there are trips again. Remembered
+    /// as "Nein", so the question does not come right back. Like every change there, only the
+    /// suggestions are made again.
     func withdrawRecurringPlace(_ answer: PlaceAnswer) async -> Bool {
-        await changeRecurringPlaces(rerun: true) { $0.withdrawing(answer.id, date: .now) }
+        await changeHome(places: { $0.withdrawing(answer.id, date: .now) })
     }
 
     /// Like `changeTrips`: an answer that changes the trips is not stored while an analysis
@@ -1520,6 +1558,143 @@ final class AppModel {
             return true
         } catch {
             message = .failure(error.localizedDescription)
+            return false
+        }
+    }
+
+    // MARK: Dein Zuhause
+
+    /// Changes in "Dein Zuhause" wait while an analysis or a plan runs: the analysis already
+    /// read the old settings, and a plan must not see its suggestions change under it.
+    var canChangeHome: Bool {
+        pipeline != nil && !analysis.isRunning && !execution.isRunning && !executionClaimed && !homeChangeRunning && !analysisResetting
+    }
+
+    /// The detected home with its name from the user's own photos (town, or offline the region).
+    /// Named once per analysis result, not on every redraw of the settings.
+    var detectedHomePlace: HomePlace? {
+        access(keyPath: \.facts)
+        guard let detectedHome else { return nil }
+        if let cached = detectedHomePlaceCache, cached.center == detectedHome.center { return cached }
+        let place = HomePlace(center: detectedHome.center, components: HomeName.components(near: detectedHome.center, facts: facts))
+        detectedHomePlaceCache = place
+        return place
+    }
+
+    /// The places of the library the user can choose from, most photo days first.
+    var homeCandidates: [HomeCandidate] {
+        access(keyPath: \.facts)
+        if let homeCandidatesCache { return homeCandidatesCache }
+        let candidates = HomeCandidates.make(facts: facts)
+        homeCandidatesCache = candidates
+        return candidates
+    }
+
+    /// The places the user is often at ("Eltern", "Zweitwohnung", answers to "Bist du hier öfter?").
+    var personalPlaces: [PlaceAnswer] { recurringPlaces.oftenHere }
+
+    /// "Stimmt" on the detected home: from now on; the past stays as the detection sees it
+    /// (`HomeSettings.confirmedFrom`). Not offered while the home has no name yet.
+    func confirmDetectedHome() async {
+        guard let place = detectedHomePlace, place.components != nil else { return }
+        _ = await changeHome(home: { $0.confirming(place, date: .now) })
+    }
+
+    /// A place the user chose under "Ändern", their home since `since` ("Seit wann wohnst du
+    /// dort?"). Before that day the detection decides, as after "Stimmt", so the years in the old
+    /// town never become a trip; former homes the user entered win for their periods.
+    func chooseHome(_ candidate: HomeCandidate, since: Date) async {
+        let from = Calendar.current.startOfDay(for: since)
+        _ = await changeHome(home: { $0.choosing(candidate.homePlace, from: from, date: .now) })
+    }
+
+    /// The proposed answer to "Seit wann wohnst du dort?": the first day of the latest stay near
+    /// the place in the user's photos (`HomeCandidates.stayStart`); today without one.
+    func homeStayStart(_ candidate: HomeCandidate) -> Date {
+        HomeCandidates.stayStart(near: candidate.center, assets: facts.lazy.map(\.asset)) ?? Calendar.current.startOfDay(for: .now)
+    }
+
+    /// "Kein Zuhause festlegen".
+    func chooseNoHome() async {
+        _ = await changeHome(home: { $0.withoutHome(date: .now) })
+    }
+
+    /// "Automatisch erkennen": Albumist's detection decides again (former homes stay).
+    func chooseAutomaticHome() async {
+        _ = await changeHome(home: { $0.automatic(date: .now) })
+    }
+
+    /// "Früheres Zuhause hinzufügen": the user lived at `candidate` up to and including the day `until`.
+    func addFormerHome(_ candidate: HomeCandidate, until: Date) async -> Bool {
+        let day = Calendar.current.startOfDay(for: until)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? day
+        return await changeHome(home: { $0.addingFormer(FormerHome(place: candidate.homePlace, until: end), date: .now) })
+    }
+
+    /// Several at once (a multiple delete in the list) is one change.
+    func removeFormerHomes(_ ids: Set<SortlyID>) async {
+        _ = await changeHome(home: { $0.removingFormer(ids, date: .now) })
+    }
+
+    /// "Ort hinzufügen": a place of the user's where stays are not trips.
+    func addPersonalPlace(_ candidate: HomeCandidate, kind: PersonalPlaceKind, label: String?) async -> Bool {
+        let name = candidate.components.locality ?? candidate.components.administrativeArea
+        return await changeHome(places: { $0.addingPersonalPlace(at: candidate.center, name: name, kind: kind, label: label, date: .now) })
+    }
+
+    /// "OK" on the overview card.
+    func dismissHomeChangeNotice() {
+        homeChangeNotice = nil
+        Task { try? await pipeline?.dismissHomeChangeNotice() }
+    }
+
+    /// Stores the change (part of the decisions copy in the backup) and makes the suggestions
+    /// again from what the analysis already knows (`AnalysisPipeline.resuggest`): no photo is
+    /// analysed again, no album changes, and suggestions the user already chose stay as they
+    /// were. What changed shows on the overview.
+    ///
+    /// The change is stored with a pending mark (`PendingHomeChange`) in one transaction: if the
+    /// app is ended before the suggestions are made, or making them fails, the next analysis
+    /// makes them the same way. No analysis, plan or rebuild starts while this runs; one asked
+    /// for meanwhile starts after it.
+    /// While it cannot run (an analysis or a plan is busy) the user is told, nothing is stored.
+    private func changeHome(home: (HomeSettings) -> HomeSettings = { $0 },
+                            places: (RecurringPlaceAnswers) -> RecurringPlaceAnswers = { $0 }) async -> Bool {
+        guard let pipeline else { return false }
+        guard canChangeHome else {
+            message = .busy
+            return false
+        }
+        homeChangeRunning = true
+        // A little time in the background, so leaving the app does not cut the change short
+        // (if it does, the next analysis finishes it).
+        let assertion = BackgroundAssertion(name: "Dein Zuhause")
+        defer {
+            assertion.end()
+            homeChangeRunning = false
+            if let queued = analysisAfterHomeChange {
+                analysisAfterHomeChange = nil
+                startAnalysis(scope: queued.scope, mode: queued.mode, userInitiated: queued.userInitiated)
+            }
+        }
+        do {
+            // The choices as they are now, before the change: a suggestion chosen a moment ago is
+            // held like the others, whichever step makes the suggestions.
+            try await store?.setValue(storedDecisions(decisions), forKey: Key.decisions)
+            let updatedHome = home(try await pipeline.homeSettings())
+            let updatedPlaces = places(try await pipeline.recurringPlaceAnswers())
+            try await pipeline.setHomeChange(home: updatedHome, places: updatedPlaces)
+            homeSettings = updatedHome
+            recurringPlaces = updatedPlaces
+            saveSafetyBackup()
+            _ = try await pipeline.resuggest()
+            await refreshDerived()
+            saveSafetyBackup()
+            return true
+        } catch {
+            message = .failure(error.localizedDescription)
+            // What was stored stays; the next analysis makes the suggestions for it.
+            await refreshDerived()
             return false
         }
     }
@@ -1644,6 +1819,12 @@ final class AppModel {
     }
 
     private func claimExecution() -> Bool {
+        // Not while a change in "Dein Zuhause" makes the suggestions again: a plan must not see
+        // its suggestions change under it. Said, not silently ignored (apply, undo, resume).
+        if homeChangeRunning {
+            message = .busy
+            return false
+        }
         guard !executionClaimed, !execution.isRunning else { return false }
         executionClaimed = true
         return true
@@ -2264,7 +2445,8 @@ final class AppModel {
         if let searchIndexCache { return searchIndexCache }
         if let searchIndexTask { return await searchIndexTask.value }
         let facts = facts, inventory = inventory, generation = searchIndexGeneration
-        let task = Task.detached(priority: .userInitiated) { SearchIndex(facts: facts, inventory: inventory) }
+        let home = homeSettings
+        let task = Task.detached(priority: .userInitiated) { SearchIndex(facts: facts, inventory: inventory, home: home) }
         searchIndexTask = task
         let index = await task.value
         // Facts that changed meanwhile start a new index on the next search.
@@ -2320,7 +2502,16 @@ final class AppModel {
 
     /// "Analyse neu aufbauen": a running analysis stops first and is waited for, so it cannot
     /// write old results into the fresh tables; Spotlight forgets the old results too.
-    func resetAnalysis() async {
+    /// Clears the analysis for "Analyse neu aufbauen". false when it was refused (a change in
+    /// "Dein Zuhause" is being applied; the busy message is shown): the caller starts no run.
+    @discardableResult
+    func resetAnalysis() async -> Bool {
+        // Not while a change in "Dein Zuhause" makes the suggestions again (the pipeline would
+        // wait for it; the settings screen and the overview would show it half done).
+        if homeChangeRunning {
+            message = .busy
+            return false
+        }
         // No new run starts while the tables are cleared.
         analysisResetting = true
         defer { analysisResetting = false }
@@ -2336,14 +2527,16 @@ final class AppModel {
             recount = RecountState(fully: progress.fully, total: progress.total)
         }
         do {
-            try await store?.resetAnalysis(includingDecisions: false)
-            await pipeline?.forgetRecentOnlineLookups()
+            // Through the pipeline: it waits for a run or a change in "Dein Zuhause" that is
+            // still writing, so nothing old lands in the fresh tables.
+            try await pipeline?.resetAnalysis()
         } catch {
             message = .failure(error.localizedDescription)
         }
         snapshot = nil
         SpotlightIndex.clear()
         await refreshDerived()
+        return true
     }
 }
 
@@ -2377,5 +2570,12 @@ struct AppMessage: Equatable {
     /// Something did not work.
     static func failure(_ text: String) -> AppMessage {
         AppMessage(title: String(localized: "Das hat nicht geklappt"), text: text)
+    }
+
+    /// Asked for while Albumist cannot do it (a change in "Dein Zuhause", an analysis or a plan
+    /// is busy): try again in a moment.
+    static var busy: AppMessage {
+        AppMessage(title: String(localized: "Gerade nicht möglich"),
+                   text: String(localized: "Albumist ist gerade beschäftigt. Versuch es gleich noch einmal."))
     }
 }

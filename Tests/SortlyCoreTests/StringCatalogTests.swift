@@ -56,6 +56,11 @@ struct StringCatalogTests {
         "Vorschlag mit %lld Fotos",
         "%lld gemeinsame Fotos",
         "Für diese Auswahl brauchst du %lld Alben. Kostenlos sind noch %lld. Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.",
+        // "Dein Zuhause".
+        "%lld Vorschläge passen nicht mehr und sind weggefallen.",
+        "%lld neue Vorschläge.",
+        "%lld ausgewählte Vorschläge bleiben, wie du sie gewählt hast.",
+        "%lld Tage mit Fotos",
     ]
 
     @Test(arguments: countStrings)

@@ -5,6 +5,14 @@ import Foundation
 // keep going to the same place and asks once per place. Only the user's answer turns a place
 // into one where stays are no longer trips; Albumist never decides that by itself and never
 // calls a place "home" or anything else. The place's album is named after the place.
+// In "Dein Zuhause" the user can also add such a place themselves and say what it is to them
+// ("Eltern", "Zweitwohnung", "Arbeit" or a name of their own): the settings call it that; the
+// album keeps the place's name.
+
+/// What a place the user is often at is to them, as they said in "Dein Zuhause".
+public enum PersonalPlaceKind: String, Hashable, Sendable, Codable, CaseIterable {
+    case parents, secondHome, work, other
+}
 
 /// The user's answer for one place, kept by position (like trip corrections are kept in
 /// time): it holds for every later analysis and for photos added later.
@@ -17,13 +25,36 @@ public struct PlaceAnswer: Hashable, Sendable, Codable, Identifiable {
     /// The place's name when the user answered (from the trip), shown in the settings only.
     public var name: String?
     public var answeredAt: Date
+    /// What the place is to the user, when they said so in "Dein Zuhause" (nil: not said; read
+    /// as nil from answers stored before).
+    public var kind: PersonalPlaceKind?
+    /// The user's own name for it ("Oma", "Segelclub"), for `.other` or instead of the kind's name.
+    public var label: String?
 
-    public init(id: SortlyID, center: GeoCoordinate, oftenHere: Bool, name: String?, answeredAt: Date) {
+    public init(id: SortlyID, center: GeoCoordinate, oftenHere: Bool, name: String?, answeredAt: Date,
+                kind: PersonalPlaceKind? = nil, label: String? = nil) {
         self.id = id
         self.center = center
         self.oftenHere = oftenHere
         self.name = name
         self.answeredAt = answeredAt
+        self.kind = kind
+        self.label = label
+    }
+
+    enum CodingKeys: String, CodingKey { case id, center, oftenHere, name, answeredAt, kind, label }
+
+    /// `kind` and `label` are read leniently: a kind a later version added ("Schule") is read
+    /// as not said, so one answer never makes all of them unreadable.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(SortlyID.self, forKey: .id)
+        center = try c.decode(GeoCoordinate.self, forKey: .center)
+        oftenHere = try c.decode(Bool.self, forKey: .oftenHere)
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? nil
+        answeredAt = try c.decode(Date.self, forKey: .answeredAt)
+        kind = (try? c.decodeIfPresent(PersonalPlaceKind.self, forKey: .kind)) ?? nil
+        label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? nil
     }
 }
 
@@ -33,6 +64,14 @@ public struct RecurringPlaceAnswers: Hashable, Sendable, Codable {
 
     public init(places: [PlaceAnswer] = []) {
         self.places = places
+    }
+
+    enum CodingKeys: String, CodingKey { case places }
+
+    /// An answer this build cannot read is left out; the others stay.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        places = ((try? c.decodeIfPresent([Lenient<PlaceAnswer>].self, forKey: .places)) ?? nil)?.compactMap(\.value) ?? []
     }
 
     /// One answer covers everything within this distance of its center. Half the radius the
@@ -62,6 +101,17 @@ public struct RecurringPlaceAnswers: Hashable, Sendable, Codable {
             let id = SortlyID.stable("place-answer", String(format: "%.4f,%.4f", center.latitude, center.longitude))
             copy.places.append(PlaceAnswer(id: id, center: center, oftenHere: oftenHere, name: name, answeredAt: date))
         }
+        return copy
+    }
+
+    /// "Ort hinzufügen" in "Dein Zuhause": the place at `center` is one the user is often at,
+    /// and what it is to them. An answer for the same place is updated and keeps its id.
+    public func addingPersonalPlace(at center: GeoCoordinate, name: String?, kind: PersonalPlaceKind, label: String?, date: Date) -> RecurringPlaceAnswers {
+        var copy = answering(true, at: center, name: name, date: date)
+        guard let id = copy.answer(near: center)?.id, let index = copy.places.firstIndex(where: { $0.id == id }) else { return copy }
+        copy.places[index].kind = kind
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        copy.places[index].label = (trimmed?.isEmpty ?? true) ? nil : trimmed
         return copy
     }
 
@@ -101,6 +151,8 @@ public struct RecurringPlace: Hashable, Sendable, Codable, Identifiable {
     public var distinctDays: Int
     public var firstDate: Date
     public var lastDate: Date
+    /// What the place is to the user ("Eltern", "Arbeit"), when they said so.
+    public var kind: PersonalPlaceKind? = nil
 }
 
 /// One separate time away (every stretch the trip detection found, also those too small for a
@@ -124,6 +176,8 @@ public struct TripAnalysis: Sendable {
     /// Photos taken where the user lives: the home town and its surroundings (within the home
     /// radius of the habitual area of their time). Places the user is often at are not home.
     public var atHome: Set<AssetID> = []
+    /// The home Albumist found by itself at the end of the library, for "Dein Zuhause".
+    public var detectedHome: DetectedHome?
 }
 
 /// What the app needs to ask about recurring places and to offer "Keine Reise, hier bin ich
@@ -186,6 +240,14 @@ public struct RecurringPlaceReport: Hashable, Sendable, Codable {
 }
 
 public enum RecurringPlaces {
+    /// Whether a place the user is often at gets its album ("Häufige Orte"), by what it is to
+    /// them. The one rule for it: every place does for now, the places from "Dein Zuhause"
+    /// ("Eltern", "Zweitwohnung", "Arbeit", own name) like the answers on a trip card. To leave
+    /// out work, say `kind != .work` here (open question for the owner, 16.11.).
+    public static func getsAnAlbum(_ kind: PersonalPlaceKind?) -> Bool {
+        true
+    }
+
     /// The suggestion id of the album of the place the user answered `answer` for: the same for
     /// as long as the answer exists, so decisions on the album stay attached.
     public static func proposalID(for answer: SortlyID) -> SortlyID {
@@ -272,6 +334,7 @@ extension ProposalEngine {
         let labels = Labels(settings.titleLanguage)
         let byID = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return places.compactMap { place -> AlbumProposal? in
+            guard RecurringPlaces.getsAnAlbum(place.kind) else { return nil }
             // `facts` are the usable ones: photos the user excluded or ignored stay out.
             let members = place.assetIDs.filter { byID[$0] != nil }
             guard members.count >= settings.trips.minPhotos else { return nil }

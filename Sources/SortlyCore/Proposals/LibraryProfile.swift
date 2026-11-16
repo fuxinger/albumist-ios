@@ -9,7 +9,8 @@ import Foundation
 /// - How big the library is. A theme of 15 photos stands out among 2,000, not among 50,000,
 ///   so the minimum sizes of themes, screenshot and document albums grow with it.
 ///
-/// Internal to the suggestions. Like `HabitualArea`, it is never shown or called "home".
+/// Internal to the suggestions and never shown. It decides for the dates the user left to the
+/// detection in "Dein Zuhause"; a home the user chose decides for its dates (`HomeContext`).
 public struct LibraryProfile: Sendable, Hashable {
     /// Countries, regions and towns (as place keys at their level) of the everyday photos.
     public var everydayPlaces: Set<PlaceKey>
@@ -45,13 +46,18 @@ public struct LibraryProfile: Sendable, Hashable {
         var everyday = 0
         var photos = 0, screenshots = 0
         var bursts: [AssetID: String] = [:]
+        // Keys once per distinct place: working them out normalizes names, slow per photo.
+        var placeCounts: [PlaceComponents: Int] = [:]
         for f in facts {
             if f.asset.isScreenshotLike { screenshots += 1 } else { photos += 1 }
             if let burst = f.asset.burstIdentifier { bursts[f.id] = burst }
             guard !onTrip.contains(f.id), let place = f.gpsPlace else { continue }
             everyday += 1
+            placeCounts[place, default: 0] += 1
+        }
+        for (place, n) in placeCounts {
             for level in [PlaceLevel.country, .administrativeArea, .subAdministrativeArea, .locality] {
-                if let key = place.key(at: level) { counts[key, default: 0] += 1 }
+                if let key = place.key(at: level) { counts[key, default: 0] += n }
             }
         }
         let needed = Double(everyday) * Self.everydayShare

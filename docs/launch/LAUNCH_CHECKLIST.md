@@ -50,3 +50,6 @@ Was vor dem Verkaufsstart erledigt sein muss. Wird bei jeder Entscheidung ergän
 - [ ] Vor dem Einreichen auf einem Gerät mit leerer Mediathek prüfen: Übersicht zeigt „Noch keine Fotos“
       mit „Mit Beispielfotos ausprobieren“; Beispielfotos anlegen, Alben anlegen, Beispielfotos wieder
       entfernen (nur die Beispielfotos und ihre Alben verschwinden).
+- [ ] Ab dem ersten Update: „Phasenweise Veröffentlichung für automatische Updates“ einschalten, täglich
+      Abstürze und Rezensionen ansehen, bei Problemen pausieren (`docs/launch/PHASED_RELEASE.md`). Die
+      Bewertungsbitte kommt nur nach neuen Alben ohne Fehler, einmal je Version (`ReviewPromptPolicy`).

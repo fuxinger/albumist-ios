@@ -73,6 +73,9 @@ struct EmptyLibraryCard: View {
         }
         .frame(maxWidth: .infinity)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        // A container of its own: an identifier on a plain container is handed down to every
+        // element inside, so the sample-photos button lost its "samples.add" (run 43885771117).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("overview.libraryHint")
         .confirmationDialog("Beispielfotos anlegen?", isPresented: $confirmAdd, titleVisibility: .visible) {
             Button("\(samples.count) Beispielfotos anlegen") { Task { await samples.add(model: model) } }

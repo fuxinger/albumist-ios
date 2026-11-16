@@ -9,7 +9,8 @@ import Foundation
 /// - How big the library is. A theme of 15 photos stands out among 2,000, not among 50,000,
 ///   so the minimum sizes of themes, screenshot and document albums grow with it.
 ///
-/// Internal to the suggestions. Like `HabitualArea`, it is never shown or called "home".
+/// Internal to the suggestions and never shown. It decides for the dates the user left to the
+/// detection in "Dein Zuhause"; a home the user chose decides for its dates (`HomeContext`).
 public struct LibraryProfile: Sendable, Hashable {
     /// Countries, regions and towns (as place keys at their level) of the everyday photos.
     public var everydayPlaces: Set<PlaceKey>

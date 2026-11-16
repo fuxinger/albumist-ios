@@ -5,6 +5,14 @@ import Foundation
 // keep going to the same place and asks once per place. Only the user's answer turns a place
 // into one where stays are no longer trips; Albumist never decides that by itself and never
 // calls a place "home" or anything else. The place's album is named after the place.
+// In "Dein Zuhause" the user can also add such a place themselves and say what it is to them
+// ("Eltern", "Zweitwohnung", "Arbeit" or a name of their own): the settings call it that; the
+// album keeps the place's name.
+
+/// What a place the user is often at is to them, as they said in "Dein Zuhause".
+public enum PersonalPlaceKind: String, Hashable, Sendable, Codable, CaseIterable {
+    case parents, secondHome, work, other
+}
 
 /// The user's answer for one place, kept by position (like trip corrections are kept in
 /// time): it holds for every later analysis and for photos added later.
@@ -17,13 +25,21 @@ public struct PlaceAnswer: Hashable, Sendable, Codable, Identifiable {
     /// The place's name when the user answered (from the trip), shown in the settings only.
     public var name: String?
     public var answeredAt: Date
+    /// What the place is to the user, when they said so in "Dein Zuhause" (nil: not said; read
+    /// as nil from answers stored before).
+    public var kind: PersonalPlaceKind?
+    /// The user's own name for it ("Oma", "Segelclub"), for `.other` or instead of the kind's name.
+    public var label: String?
 
-    public init(id: SortlyID, center: GeoCoordinate, oftenHere: Bool, name: String?, answeredAt: Date) {
+    public init(id: SortlyID, center: GeoCoordinate, oftenHere: Bool, name: String?, answeredAt: Date,
+                kind: PersonalPlaceKind? = nil, label: String? = nil) {
         self.id = id
         self.center = center
         self.oftenHere = oftenHere
         self.name = name
         self.answeredAt = answeredAt
+        self.kind = kind
+        self.label = label
     }
 }
 
@@ -62,6 +78,17 @@ public struct RecurringPlaceAnswers: Hashable, Sendable, Codable {
             let id = SortlyID.stable("place-answer", String(format: "%.4f,%.4f", center.latitude, center.longitude))
             copy.places.append(PlaceAnswer(id: id, center: center, oftenHere: oftenHere, name: name, answeredAt: date))
         }
+        return copy
+    }
+
+    /// "Ort hinzufügen" in "Dein Zuhause": the place at `center` is one the user is often at,
+    /// and what it is to them. An answer for the same place is updated and keeps its id.
+    public func addingPersonalPlace(at center: GeoCoordinate, name: String?, kind: PersonalPlaceKind, label: String?, date: Date) -> RecurringPlaceAnswers {
+        var copy = answering(true, at: center, name: name, date: date)
+        guard let id = copy.answer(near: center)?.id, let index = copy.places.firstIndex(where: { $0.id == id }) else { return copy }
+        copy.places[index].kind = kind
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        copy.places[index].label = (trimmed?.isEmpty ?? true) ? nil : trimmed
         return copy
     }
 
@@ -124,6 +151,8 @@ public struct TripAnalysis: Sendable {
     /// Photos taken where the user lives: the home town and its surroundings (within the home
     /// radius of the habitual area of their time). Places the user is often at are not home.
     public var atHome: Set<AssetID> = []
+    /// The home Albumist found by itself at the end of the library, for "Dein Zuhause".
+    public var detectedHome: DetectedHome?
 }
 
 /// What the app needs to ask about recurring places and to offer "Keine Reise, hier bin ich

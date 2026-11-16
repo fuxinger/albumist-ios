@@ -717,6 +717,10 @@ public actor SortlyStore: PlanJournal {
         try db.execute("INSERT OR REPLACE INTO settings (key, payload) VALUES (?, ?)", [.text(key), try json(value)])
     }
 
+    public func removeValue(forKey key: String) throws {
+        try db.execute("DELETE FROM settings WHERE key = ?", [.text(key)])
+    }
+
     public func value<T: Decodable>(_ type: T.Type, forKey key: String) throws -> T? {
         try decode(T.self, db.query("SELECT payload FROM settings WHERE key = ?", [.text(key)]).first?["payload"])
     }

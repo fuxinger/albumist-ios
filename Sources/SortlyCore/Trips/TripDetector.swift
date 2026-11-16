@@ -73,15 +73,17 @@ public struct TripDetector: Sendable {
     ///   - assets: all assets (with and without GPS).
     ///   - corrections: persisted user corrections.
     ///   - places: the user's answers to "Bist du hier öfter?".
+    ///   - home: what the user set in "Dein Zuhause" (`HomeSettings.home(at:)`).
     ///   - excludeFromInference: returns true for assets that must never be added to a trip
     ///     purely by time (screenshots, messenger media, downloads – prompt §4.2).
     public func detect(
         in assets: [AssetSnapshot],
         corrections: TripCorrections = .init(),
         places: RecurringPlaceAnswers = .init(),
+        home homeSettings: HomeSettings = .init(),
         excludeFromInference: (AssetSnapshot) -> Bool = { _ in false }
     ) -> [Trip] {
-        analyse(in: assets, corrections: corrections, places: places, excludeFromInference: excludeFromInference).trips
+        analyse(in: assets, corrections: corrections, places: places, home: homeSettings, excludeFromInference: excludeFromInference).trips
     }
 
     /// The trips, every stay away (also those too small for a trip, to notice places the user
@@ -90,6 +92,7 @@ public struct TripDetector: Sendable {
         in assets: [AssetSnapshot],
         corrections: TripCorrections = .init(),
         places: RecurringPlaceAnswers = .init(),
+        home homeSettings: HomeSettings = .init(),
         excludeFromInference: (AssetSnapshot) -> Bool = { _ in false }
     ) -> TripAnalysis {
         let geotagged = assets
@@ -100,8 +103,11 @@ public struct TripDetector: Sendable {
         // A place the user is often at counts like the habitual area, at every time: its stays
         // are not trips, and an excursion from there starts there.
         let oftenHere = places.oftenHere
-        let home = HabitualArea(assets: geotagged, calendar: calendar, windowDays: configuration.homeWindowDays,
-                                homeRadius: configuration.homeRadiusMeters, extraHomes: oftenHere.map(\.center))
+        let detection = HabitualArea(assets: geotagged, calendar: calendar, windowDays: configuration.homeWindowDays,
+                                     homeRadius: configuration.homeRadiusMeters, extraHomes: oftenHere.map(\.center))
+        // The home the user chose wins over the detection, date by date (`HomeSettings.home(at:)`).
+        let home = HomeReference(detection: detection, settings: homeSettings, radius: configuration.homeRadiusMeters,
+                                 extraHomes: oftenHere.map(\.center))
 
         struct Segment {
             var members: [AssetSnapshot] = []
@@ -211,11 +217,10 @@ public struct TripDetector: Sendable {
         // Where the user lives: never a place album of its own, so these photos do not count
         // for "Länder und Orte" (decision Fuchs 15.11.: the home town and its surroundings, not
         // the whole home country).
-        let atHome = geotagged.filter { asset in
-            home.distanceToUsualHome(asset.usableLocation!, at: asset.creationDate!) <= configuration.homeRadiusMeters
-        }
+        let atHome = geotagged.filter { asset in home.isAtHome(asset.usableLocation!, at: asset.creationDate!) }
         return TripAnalysis(trips: trips, stays: stays, places: placesOftenVisited(oftenHere, photos: geotagged, home: home),
-                            atHome: Set(atHome.map(\.id)))
+                            atHome: Set(atHome.map(\.id)),
+                            detectedHome: detection.mainHome(at: geotagged.last!.creationDate!))
     }
 
     /// Within a day trip of the habitual area: a place the user can go to and come back from
@@ -234,7 +239,7 @@ public struct TripDetector: Sendable {
     ///   habitual area.
     /// Stops of one journey far from home (a road trip, a semester's weekends) are never split
     /// this way: home is not on their way and they are out of day-trip reach.
-    private func wentHomeUnseen(from a: GeoCoordinate, at aDate: Date, to b: GeoCoordinate, at bDate: Date, home: HabitualArea) -> Bool {
+    private func wentHomeUnseen(from a: GeoCoordinate, at aDate: Date, to b: GeoCoordinate, at bDate: Date, home: HomeReference) -> Bool {
         let apart = GeoMath.distance(a, b)
         guard apart > configuration.homeRadiusMeters else { return false }
         let gap = bDate.timeIntervalSince(aDate)
@@ -250,7 +255,7 @@ public struct TripDetector: Sendable {
     /// that time (a place near the usual one does not take everyday photos away from it), and
     /// not from a time the place was part of the habitual area itself (the town the user
     /// lived in before moving away and now visits).
-    private func placesOftenVisited(_ answers: [PlaceAnswer], photos: [AssetSnapshot], home: HabitualArea) -> [RecurringPlace] {
+    private func placesOftenVisited(_ answers: [PlaceAnswer], photos: [AssetSnapshot], home: HomeReference) -> [RecurringPlace] {
         guard !answers.isEmpty else { return [] }
         var members = [[AssetSnapshot]](repeating: [], count: answers.count)
         for asset in photos {
@@ -277,7 +282,7 @@ public struct TripDetector: Sendable {
         }
     }
 
-    private func makeTrip(_ members: [AssetSnapshot], home: HabitualArea, nonGeo: [AssetSnapshot], breaks: [Date]) -> Trip {
+    private func makeTrip(_ members: [AssetSnapshot], home: HomeReference, nonGeo: [AssetSnapshot], breaks: [Date]) -> Trip {
         let start = members.first!.creationDate!
         let end = members.last!.creationDate!
         let coordinates = members.map { $0.usableLocation! }
@@ -404,7 +409,9 @@ private extension ClosedRange where Bound == Date {
 
 /// The user's habitual area ("gewöhnlicher Aufenthaltsbereich"), computed time-locally
 /// so that moving house does not turn the old or new home into a "trip".
-/// It is an internal reference only and is never shown or labelled as "home".
+/// Its place at the end of the library is shown in the settings as the detected home ("Dein
+/// Zuhause"), where the user can confirm or correct it (`HomeSettings`); trips and the ring
+/// ask it only for the dates the user left to the detection (`HomeReference`).
 ///
 /// A place is habitual around a date when it holds a quarter of the photo days of the
 /// surrounding months, spread over three weeks or more. Two things refine that:
@@ -598,6 +605,26 @@ struct HabitualArea: Sendable {
         return points.map { GeoMath.distance(a, $0) + GeoMath.distance($0, b) }.min() ?? .infinity
     }
 
+    /// The centres of the habitual area at `date` (several near a border or during a long stay away).
+    func centers(at date: Date) -> [GeoCoordinate] {
+        homeClusters(at: date).map { clusterCentroids[$0] }
+    }
+
+    /// The home at `date` as the settings show it: the habitual place with the most photo days,
+    /// and since when it has been habitual without a break (the move there).
+    func mainHome(at date: Date) -> DetectedHome? {
+        let homes = homeClusters(at: date)
+        guard let best = homes.max(by: { (clusterDays[$0].count, -$0) < (clusterDays[$1].count, -$1) }) else { return nil }
+        let end = calendar.startOfDay(for: date)
+        var since: Date?
+        var always = true
+        for d in days.reversed() where d.day <= end {
+            guard homesByDay[d.day]?.contains(best) == true else { always = false; break }
+            since = d.day
+        }
+        return DetectedHome(center: clusterCentroids[best], since: always ? nil : since, photoDays: clusterDays[best].count)
+    }
+
     /// Distance to the habitual area alone, without the places the user is often at.
     func distanceToUsualHome(_ coordinate: GeoCoordinate, at date: Date) -> Double {
         let homes = homeClusters(at: date)
@@ -692,5 +719,50 @@ struct HabitualArea: Sendable {
             result.append(next)
         }
         return result
+    }
+}
+
+/// What trips and the ring are judged against, date by date: the home the user chose for the
+/// date (`HomeSettings.home(at:)`), otherwise the habitual area. "Kein Zuhause" means no photo
+/// is at home; trips are still told from everyday life by where the user usually is at the
+/// time, or every everyday photo would be on one long trip.
+struct HomeReference: Sendable {
+    let detection: HabitualArea
+    let settings: HomeSettings
+    let radius: Double
+    /// Places the user is often at: stays there are not trips.
+    let extraHomes: [GeoCoordinate]
+
+    var movedOn: [Date] { detection.movedOn }
+
+    /// Where trips start from at `date`.
+    func referenceCenters(at date: Date) -> [GeoCoordinate] {
+        if case .chosen(let place) = settings.home(at: date) { return [place.center] }
+        return detection.centers(at: date)
+    }
+
+    /// Distance to the home of `date` alone, without the places the user is often at.
+    func distanceToUsualHome(_ coordinate: GeoCoordinate, at date: Date) -> Double {
+        referenceCenters(at: date).map { GeoMath.distance($0, coordinate) }.min() ?? .infinity
+    }
+
+    /// Distance to the home of `date` or a place the user is often at, whichever is closer.
+    func distanceToHome(_ coordinate: GeoCoordinate, at date: Date) -> Double {
+        extraHomes.reduce(distanceToUsualHome(coordinate, at: date)) { min($0, GeoMath.distance($1, coordinate)) }
+    }
+
+    /// The shortest way from `a` to `b` through the home of `date` (or a place the user is often at).
+    func wayViaHome(_ a: GeoCoordinate, _ b: GeoCoordinate, at date: Date) -> Double {
+        (referenceCenters(at: date) + extraHomes).map { GeoMath.distance(a, $0) + GeoMath.distance($0, b) }.min() ?? .infinity
+    }
+
+    /// Taken at home: within the home radius of the home of its date. Places the user is often
+    /// at are not home; with "Kein Zuhause" nothing is.
+    func isAtHome(_ coordinate: GeoCoordinate, at date: Date) -> Bool {
+        switch settings.home(at: date) {
+        case .chosen(let place): GeoMath.distance(place.center, coordinate) <= radius
+        case .none: false
+        case .detected: detection.distanceToUsualHome(coordinate, at: date) <= radius
+        }
     }
 }

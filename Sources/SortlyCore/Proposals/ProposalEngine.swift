@@ -9,14 +9,17 @@ public struct AnalysisSnapshot: Sendable {
     public var groups: [ObservationGroup]
     /// Places the user said they are often at (Trips/RecurringPlaces.swift).
     public var recurringPlaces: [RecurringPlace]
+    /// What the user set in "Dein Zuhause": the home of each date for trip names and place albums.
+    public var home: HomeSettings
 
     public init(facts: [AssetFacts], trips: [Trip] = [], frequentPlaces: [FrequentPlace] = [], groups: [ObservationGroup] = [],
-                recurringPlaces: [RecurringPlace] = []) {
+                recurringPlaces: [RecurringPlace] = [], home: HomeSettings = HomeSettings()) {
         self.facts = facts
         self.trips = trips
         self.frequentPlaces = frequentPlaces
         self.groups = groups
         self.recurringPlaces = recurringPlaces
+        self.home = home
     }
 }
 
@@ -43,11 +46,12 @@ public struct ProposalEngine: Sendable {
     public func suggestions(for analysis: AnalysisSnapshot, overrides: OverrideSet = OverrideSet()) -> Suggestions {
         let usable = analysis.facts.filter { !overrides.isExcluded($0.id) && !overrides.isIgnored($0.id) }
         let profile = LibraryProfile(facts: usable, trips: analysis.trips)
+        let home = HomeContext(settings: analysis.home, profile: profile)
         var result: [AlbumProposal] = []
         var standIns: [StandIn] = []
         let areas = settings.enabledAreas
         if areas.contains(.places) { result += placeProposals(usable, profile: profile) }
-        if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile, routineVisits: &standIns) }
+        if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile, home: home, routineVisits: &standIns) }
         if areas.contains(.frequentPlaces) { result += frequentPlaceProposals(analysis.frequentPlaces, facts: analysis.facts) }
         // A place the user is often at gets one album instead of its trips, so it comes with
         // either area (Trips/RecurringPlaces.swift).
@@ -61,7 +65,7 @@ public struct ProposalEngine: Sendable {
         if areas.contains(.peopleAndPets) { result += groupProposals(analysis.groups) }
         // Curated before rejections are taken out: a trip the user said no to still stands for
         // its country, which would otherwise come back as the same photos under another name.
-        let kept = curated(result, profile: profile, standIns: &standIns)
+        let kept = curated(result, home: home, standIns: &standIns)
         if areas.contains(.places) { standIns += placesOfTrips(kept, standIns: standIns) }
         let dismissed = { (p: AlbumProposal) in overrides.isRejected(p.id) || overrides.mustNotRecreate(p.id) }
         return Suggestions(open: kept.filter { !dismissed($0) }, dismissed: kept.filter(dismissed),
@@ -155,12 +159,15 @@ public struct ProposalEngine: Sendable {
 
     func tripProposals(_ trips: [Trip], facts: [AssetFacts], profile: LibraryProfile = LibraryProfile()) -> [AlbumProposal] {
         var routineVisits: [StandIn] = []
-        return tripProposals(trips, facts: facts, profile: profile, routineVisits: &routineVisits)
+        return tripProposals(trips, facts: facts, profile: profile, home: HomeContext(profile: profile), routineVisits: &routineVisits)
     }
 
-    /// - Parameter routineVisits: gets, per routine visit, the album of the place visited
-    ///   that stands for it (a routine visit is not a trip of its own).
-    func tripProposals(_ trips: [Trip], facts: [AssetFacts], profile: LibraryProfile, routineVisits: inout [StandIn]) -> [AlbumProposal] {
+    /// - Parameters:
+    ///   - home: whether a region or country is home at the trip's date (no trip is named after it).
+    ///   - routineVisits: gets, per routine visit, the album of the place visited that stands
+    ///     for it (a routine visit is not a trip of its own).
+    func tripProposals(_ trips: [Trip], facts: [AssetFacts], profile: LibraryProfile, home: HomeContext,
+                       routineVisits: inout [StandIn]) -> [AlbumProposal] {
         let byID = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let collections = settings.trips.placeCollectionForRepeatedTrips
         let regular = collections ? regularDestinations(trips, facts: byID) : RegularDestinations()
@@ -182,7 +189,8 @@ public struct ProposalEngine: Sendable {
             // its own: its photos go to the one album of that destination below.
             if regular.outings.contains(trip.id) { continue }
             let places = trip.geotaggedAssetIDs.compactMap { byID[$0]?.gpsPlace }
-            let (name, key, country) = Self.primaryPlaceName(places, kind: trip.kind, labels: labels, profile: profile)
+            let (name, key, country) = Self.primaryPlaceName(places, kind: trip.kind, labels: labels,
+                                                             isHome: { home.isHome($0, at: trip.start) })
             // The first day where the first photo was taken, the last day where the last one was
             // (the photos are in time order): Munich – New York – Tokyo ends on Tokyo's date.
             let zones = places.compactMap(\.timeZoneIdentifier)
@@ -233,7 +241,9 @@ public struct ProposalEngine: Sendable {
         let tripsByID = Dictionary(trips.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for destination in regular.destinations {
             let places = destination.members.compactMap { byID[$0]?.gpsPlace }
-            let (name, key, _) = Self.primaryPlaceName(places, kind: .shortTrip, labels: labels, profile: profile)
+            let firstVisit = destination.members.compactMap { byID[$0]?.asset.creationDate }.min()
+            let (name, key, _) = Self.primaryPlaceName(places, kind: .shortTrip, labels: labels,
+                                                       isHome: { home.isHome($0, at: firstVisit) })
             guard profile.shots(in: destination.members) >= settings.trips.minPhotos, let name else { continue }
             let id = SortlyID.stable("trip-place", key?.description ?? destination.anchor)
             guard made.insert(id).inserted else { continue }
@@ -393,6 +403,13 @@ public struct ProposalEngine: Sendable {
     /// Regions and countries (3, 4) only name a trip that stayed (almost) in one country.
     static func primaryPlaceName(_ places: [PlaceComponents], kind: TripKind, labels: Labels,
                                  profile: LibraryProfile = LibraryProfile()) -> (String?, PlaceKey?, String?) {
+        primaryPlaceName(places, kind: kind, labels: labels, isHome: profile.isEveryday)
+    }
+
+    /// - Parameter isHome: whether a country or region is home at the trip's time
+    ///   (`HomeContext.isHome(_:at:)`).
+    static func primaryPlaceName(_ places: [PlaceComponents], kind: TripKind, labels: Labels,
+                                 isHome: (PlaceKey) -> Bool) -> (String?, PlaceKey?, String?) {
         guard !places.isEmpty else { return (nil, nil, nil) }
         func dominant(_ level: PlaceLevel) -> (String, PlaceKey)? {
             var counts: [PlaceKey: (String, Int)] = [:]
@@ -404,7 +421,7 @@ public struct ProposalEngine: Sendable {
             return Double(best.value.1) / Double(places.count) >= 0.6 ? (best.value.0, best.key) : nil
         }
         let country = dominant(.country)
-        let atHome = country.map { profile.isEveryday($0.1) } ?? false
+        let atHome = country.map { isHome($0.1) } ?? false
         // Photos on the lake itself name the trip after the lake: "Gardasee", not "Malcesine".
         if let area = places.compactMap(\.inlandWater).first, kind != .roadTrip,
            Double(places.filter { $0.inlandWater == area }.count) / Double(places.count) >= 0.6 {
@@ -417,7 +434,7 @@ public struct ProposalEngine: Sendable {
         let oneCountry = country.map { c in
             Double(places.filter { $0.key(at: .country) == c.1 }.count) >= Double(places.count) * Self.oneCountryShare
         } ?? true
-        if oneCountry, let region = dominant(.administrativeArea), !profile.isEveryday(region.1),
+        if oneCountry, let region = dominant(.administrativeArea), !isHome(region.1),
            country == nil || atHome || !region.0.contains("-") {
             return (kind == .roadTrip ? "\(region.0)-\(labels.roadTripSuffix)" : region.0, region.1, country?.0)
         }

@@ -1,4 +1,4 @@
-"""Unit tests for the Linux stage of .github/scripts/ci_gate.py (no network: the API is faked).
+"""Unit tests for the early stages (--ci, --linux) of .github/scripts/ci_gate.py (no network: the API is faked).
 
 Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
@@ -59,6 +59,40 @@ class LinuxStageTests(unittest.TestCase):
     def test_no_ci_run_yet(self):
         ci_gate.api = lambda path, **params: {"workflow_runs": []}
         self.assertEqual(ci_gate.check_linux()[:2], (False, False))
+
+
+class CiStageTests(unittest.TestCase):
+    """--ci: CI green with its iOS job, the UI run is not looked at."""
+
+    def setUp(self):
+        self.original = ci_gate.api
+
+    def tearDown(self):
+        ci_gate.api = self.original
+
+    def fake(self, conclusion, ios):
+        run = {"id": 7, "run_number": 12, "name": "CI", "event": "pull_request", "html_url": "https://example/7",
+               "status": "completed", "conclusion": conclusion}
+
+        def api(path, **params):
+            if path == "actions/workflows/ci.yml/runs":
+                return {"workflow_runs": [run]}
+            if path == "actions/workflows/ui.yml/runs":
+                raise AssertionError("--ci must not wait for the UI run")
+            return {"jobs": [{"name": "iOS build and tests (macOS)", "status": "completed", "conclusion": ios}]}
+        return api
+
+    def test_green_ci_is_enough(self):
+        ci_gate.api = self.fake("success", "success")
+        self.assertEqual(ci_gate.check(ui_too=False)[:2], (True, True))
+
+    def test_red_ci_stops(self):
+        ci_gate.api = self.fake("failure", "failure")
+        self.assertEqual(ci_gate.check(ui_too=False)[:2], (True, False))
+
+    def test_skipped_ios_job_is_not_green(self):
+        ci_gate.api = self.fake("success", "skipped")
+        self.assertEqual(ci_gate.check(ui_too=False)[:2], (True, False))
 
 
 if __name__ == "__main__":

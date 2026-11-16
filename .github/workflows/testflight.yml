@@ -10,14 +10,18 @@ name: TestFlight
 # both passed and CI's iOS job really ran. A docs-only commit (iOS job skipped) is not uploaded.
 # A manual run with "force" skips the wait for emergencies.
 #
-# The release archive is built while the tests run, not after them: as soon as CI's Linux jobs
-# for this commit passed (core tests, app rules; "Wait for Linux tests"), "Build release
-# archive" archives exactly this commit on a Mac and keeps it as an artifact of this run. Only
-# when the full gate is green does "Upload to TestFlight" sign that archive for the App Store
-# and upload it (about 3 min after the gate instead of a whole build). It checks that the
-# archive was built from the gated commit with this run's build number. A commit whose Linux
-# tests fail never starts a Mac job; one whose UI or iOS tests fail is archived but never
-# uploaded, and the archive artifact is deleted at the end of the run either way.
+# The release archive is built while the UI tests still run, not after them: as soon as the
+# CI run of this commit is green ("Wait for CI", ~20 min, Linux first, then its iOS job),
+# "Build release archive" archives exactly this commit on a Mac and keeps it as an artifact of
+# this run. Only when the full gate is green (the UI run too, ~45 min) does "Upload to
+# TestFlight" sign that archive for the App Store and upload it (about 3 min after the gate
+# instead of a whole build). It checks that the archive was built from the gated commit with
+# this run's build number. Waiting for CI rather than starting at once keeps a push at four
+# Mac jobs at a time (CI's iOS job and the three UI groups; the archive takes the place of
+# CI's job when that is done), and a commit whose Linux or iOS tests fail never starts it.
+# (`ci_gate.py --linux` would start it after CI's Linux jobs instead, ~15 min earlier, at the
+# cost of a fifth Mac job beside CI and UI; not needed while the UI run is the long part.)
+# The archive artifact is deleted at the end of the run.
 #
 # Why not `workflow_run`: that trigger only works from the workflow file on the default branch
 # (main), which lags behind the release branch, and it would run fork-PR code with these
@@ -66,21 +70,21 @@ jobs:
             echo "::notice::TestFlight skipped: the App Store Connect secrets are not set yet (docs/TESTFLIGHT.md)."
           fi
 
-  linux:
-    name: Wait for Linux tests
+  ci:
+    name: Wait for CI
     needs: check
     if: needs.check.outputs.ready == 'true'
     runs-on: ubuntu-24.04
-    # CI's Linux jobs take ~4-6 min; the archive starts right after them.
-    timeout-minutes: 60
+    # CI takes ~17-23 min plus queueing; the archive starts right after it.
+    timeout-minutes: 130
     permissions:
       contents: read
       actions: read
     concurrency:
-      group: testflight-linux-${{ github.ref }}
+      group: testflight-ci-${{ github.ref }}
       cancel-in-progress: true
     outputs:
-      ok: ${{ steps.force.outputs.ok || steps.linux.outputs.ok }}
+      ok: ${{ steps.force.outputs.ok || steps.ci.outputs.ok }}
     steps:
       - name: Forced upload
         id: force
@@ -90,14 +94,14 @@ jobs:
         if: ${{ !inputs.force }}
         with:
           sparse-checkout: .github/scripts
-      - name: Wait for CI's Linux jobs of this commit
-        id: linux
+      - name: Wait for the CI run of this commit
+        id: ci
         if: ${{ !inputs.force }}
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
-          WAIT_MINUTES: 55
-        run: python3 .github/scripts/ci_gate.py --linux
+          WAIT_MINUTES: 120
+        run: python3 .github/scripts/ci_gate.py --ci
 
   gate:
     name: Wait for green tests
@@ -138,8 +142,8 @@ jobs:
 
   archive:
     name: Build release archive
-    needs: [check, linux]
-    if: needs.linux.outputs.ok == 'true' && (github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main')
+    needs: [check, ci]
+    if: needs.ci.outputs.ok == 'true' && (github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main')
     runs-on: xcode-27
     timeout-minutes: 45
     # A newer push replaces an archive that is still being built (its gate is replaced too).

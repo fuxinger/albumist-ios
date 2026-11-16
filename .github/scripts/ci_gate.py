@@ -8,10 +8,12 @@ Used before a TestFlight upload and before a release tag. Green means:
   2. If a UI flow run (ui.yml) exists for this commit (it runs for pull requests), its newest
      run succeeded too. Pushes to main have no UI flow run; there CI alone decides.
 
-With --linux it waits only for the Linux part of that CI run ("Core tests (Linux)" and "App
-rules and strings"): the TestFlight workflow starts building the release archive on a Mac once
-they passed, while this script (without --linux) still waits for everything; the upload needs
-both.
+Earlier stages, for starting work that may run before the whole gate is green:
+  --ci     only point 1 (the CI run, with its iOS job). TestFlight builds the release archive
+           on a Mac once CI is green, while the full gate still waits for the UI run; the
+           upload needs both.
+  --linux  only CI's Linux jobs ("Core tests (Linux)" and "App rules and strings"), for
+           starting even earlier (one more Mac job at the same time as CI's).
 
 Writes `ok=true|false` and `reason=...` to $GITHUB_OUTPUT and a line to the job summary.
 Never fails itself (exit 0) unless --fail is given, so a red test run shows up as a skipped
@@ -69,8 +71,8 @@ def describe(run):
     return f"{run['name']} #{run['run_number']} ({run['event']}, {run['html_url']})"
 
 
-def check():
-    """(done, ok, reason) for the current state of the runs."""
+def check(ui_too=True):
+    """(done, ok, reason) for the current state of the runs (CI alone when not ui_too)."""
     ci = newest_run(CI)
     if ci is None:
         return False, False, f"no CI run for {SHA[:7]} yet"
@@ -95,6 +97,8 @@ def check():
         return True, False, (f"the iOS tests did not run for this commit ({state}); only documentation "
                              "changed since the last tested commit, so there is nothing new to ship (to test this exact "
                              "commit anyway, start CI by hand on it)")
+    if not ui_too:
+        return True, True, f"{describe(ci)} passed"
     ui = newest_run(UI)
     if ui is None:
         return True, True, f"{describe(ci)} passed (no UI flow run for this commit)"
@@ -126,10 +130,10 @@ def check_linux():
 
 def main():
     started = time.monotonic()
-    linux = "--linux" in sys.argv
+    linux, ci_only = "--linux" in sys.argv, "--ci" in sys.argv
     while True:
         try:
-            done, ok, reason = check_linux() if linux else check()
+            done, ok, reason = check_linux() if linux else check(ui_too=not ci_only)
         except RuntimeError as error:
             done, ok, reason = False, False, str(error)
         waited = time.monotonic() - started
@@ -149,7 +153,7 @@ def main():
     with open(os.environ.get("GITHUB_OUTPUT", os.devnull), "a", encoding="utf-8") as out:
         out.write(f"ok={'true' if ok else 'false'}\nreason={reason}\n")
     with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:
-        part = "Linux tests" if linux else "Test gate"
+        part = "Linux tests" if linux else ("CI" if ci_only else "Test gate")
         out.write(f"### {part} for {SHA[:7]}: {'✅ green' if ok else '⛔ not green'}\n\n{reason}\n")
     return 1 if ("--fail" in sys.argv and not ok) else 0
 

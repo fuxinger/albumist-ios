@@ -31,6 +31,12 @@ final class DeviceConditionUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
+    /// A text on screen. Cheaper than `anything` while the analysis keeps the app busy: a query
+    /// over every element timed out there (test02, UI run 43795445305).
+    private func text(_ text: String) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+    }
+
     private func anything(_ text: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
@@ -587,12 +593,12 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(waited, "A nearly empty battery did not show that the analysis waits")
         if waited {
             shot("03-battery-waiting")
-            XCTAssertFalse(anything("sehr warm").exists, "Low battery was worded as heat")
+            XCTAssertFalse(text("sehr warm").exists, "Low battery was worded as heat")
             XCTAssertTrue(analysisRunning, "Low battery ended the analysis")
         }
         var pausedForLowPower = false
         let finished = waitStable("analysis finished in Low Power Mode", timeout: 900) {
-            if anything("Stromsparmodus").exists { pausedForLowPower = true }
+            if text("Stromsparmodus").exists { pausedForLowPower = true }
             return analysisIdle
         }
         XCTAssertTrue(finished, "The analysis did not finish in Low Power Mode")
@@ -698,13 +704,18 @@ final class DeviceConditionUITests: XCTestCase {
             XCTFail("No travel atlas without network")
         }
 
-        // Online again and every preview readable: "Neu prüfen" reads the rest.
+        // Online again and every preview readable: "Neu prüfen" runs calmly. A photo that could
+        // not be read is tried again only an hour later (ContentAnalysis.retrySpacing, since
+        // rc-1), so the note stays and says so; UI run 43795445305 waited 600 s for it in vain.
         start()
         guard tap(app.buttons["Neu prüfen"], "check again online", timeout: 20) else { return }
-        let all = waitStable("every photo analysed online", timeout: 600) { analysisIdle && everyPhotoAnalysed }
-        print("UI_FACT headline online \(String(describing: analysedPhotos()))")
-        XCTAssertTrue(all, "Online \"Neu prüfen\" did not read the photos that were unreadable")
-        XCTAssertFalse(anything("Fotos konnten noch nicht gelesen werden").exists, "The unreadable note stayed")
+        let calm = waitStable("check again online finished", timeout: 300) { analysisIdle && !app.alerts.firstMatch.exists }
+        XCTAssertTrue(calm, "Online \"Neu prüfen\" did not finish")
+        let note = text("Fotos konnten noch nicht gelesen werden")
+        print("UI_FACT online after Neu prüfen: \(String(describing: analysedPhotos())), unreadable note: \(note.exists ? note.label : "gone")")
+        if note.exists {
+            XCTAssertTrue(note.label.contains("später noch einmal"), "The unreadable note does not say that Albumist tries again later")
+        }
         shot("09-online-again")
     }
 

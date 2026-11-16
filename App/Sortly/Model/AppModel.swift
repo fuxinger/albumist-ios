@@ -1247,17 +1247,13 @@ final class AppModel {
             let facts = facts, snapshot = snapshot, settings = settings
             // Photos Albumist put into albums count as sorted in the area of their suggestion,
             // also once that suggestion is no longer shown.
-            let byAlbumist = MainThreadStallWatch.shared.section("refresh: sorted by Albumist") {
-                LibraryStatus.organizedBySortly(managedAlbums, inventory: inventory, snapshot: snapshot)
-            }
+            let byAlbumist = LibraryStatus.organizedBySortly(managedAlbums, inventory: inventory, snapshot: snapshot)
             let (computed, reasons) = await Task.detached(priority: .userInitiated) {
                 LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
                                                  contentAnalyzed: analyzed, organizedBySortly: byAlbumist)
             }.value
-            MainThreadStallWatch.shared.section("refresh: states") {
-                states = computed
-                statusReasons = reasons
-            }
+            states = computed
+            statusReasons = reasons
             // The trial year counts only its own photos (the ring said "839 von 5.683" over
             // the whole library while the suggestions were for 2026).
             let scope = analysisScope, calendar = Calendar.sortlyDefault

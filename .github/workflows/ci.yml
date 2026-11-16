@@ -47,6 +47,8 @@ jobs:
           fi
       - name: Every UI string has English
         run: python3 .github/scripts/check_strings.py .
+      - name: Code map lists every Swift file
+        run: python3 scripts/gen_codemap.py --check
       - name: Test-plan map names real tests
         # Warnings only: a stale name in docs/TEST_COVERAGE_MAP.txt makes a case look untested
         # in the job summary, it does not make the app worse.
@@ -125,9 +127,11 @@ jobs:
 
   ios:
     name: iOS build and tests (macOS)
-    needs: changes
-    # Runs unless the changes job positively found a docs-only change (also when it failed).
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    # Fast first, then expensive (Fuchs 15.11.): the Mac job starts only when the Linux core
+    # tests and the app rules passed. It still runs unless the changes job positively found a
+    # docs-only change (also when that job failed).
+    needs: [changes, lint, core-linux]
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' }}
     runs-on: xcode-27
     timeout-minutes: 45
     steps:

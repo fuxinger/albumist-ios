@@ -25,55 +25,77 @@ import UniformTypeIdentifiers
 final class SamplePhotos {
     static let shared = SamplePhotos()
 
-    private static let idsKey = "samples.localIdentifiers"
+    /// The written-down record (`SampleLibrary.Record`), one value in the user defaults. Also
+    /// written from PhotoKit's queue inside the change that creates the photos.
+    nonisolated private static let recordKey = "samples.record"
 
     private(set) var isAdding = false
     private(set) var isRemoving = false
     private(set) var added = 0
     private(set) var total = 0
-    /// Identifiers of the sample photos Albumist added (and has not removed yet).
-    private(set) var storedIDs: Set<String> = Set(UserDefaults.standard.stringArray(forKey: SamplePhotos.idsKey) ?? [])
+    /// What Albumist added (and has not removed yet).
+    private(set) var record = SamplePhotos.loadRecord()
 
-    var arePresent: Bool { !storedIDs.isEmpty }
+    var arePresent: Bool { record.hasSamples }
     var count: Int { SampleLibrary.specs().count }
 
-    private func remember(_ ids: Set<String>) {
-        storedIDs = ids
-        if ids.isEmpty {
-            UserDefaults.standard.removeObject(forKey: Self.idsKey)
-        } else {
-            UserDefaults.standard.set(ids.sorted(), forKey: Self.idsKey)
+    nonisolated static func loadRecord() -> SampleLibrary.Record {
+        UserDefaults.standard.data(forKey: recordKey).flatMap { try? JSONDecoder().decode(SampleLibrary.Record.self, from: $0) }
+            ?? SampleLibrary.Record()
+    }
+
+    nonisolated static func saveRecord(_ record: SampleLibrary.Record) {
+        if record == SampleLibrary.Record() {
+            UserDefaults.standard.removeObject(forKey: recordKey)
+        } else if let data = try? JSONEncoder().encode(record) {
+            UserDefaults.standard.set(data, forKey: recordKey)
         }
+    }
+
+    private func update(_ change: (inout SampleLibrary.Record) -> Void) {
+        var current = Self.loadRecord()
+        change(&current)
+        Self.saveRecord(current)
+        record = current
     }
 
     // MARK: Adding
 
-    /// Draws the sample photos and adds them to Photos in small chunks, then starts the analysis.
+    /// Draws the sample photos (off the main actor) and adds them to Photos in small chunks;
+    /// one analysis starts after the last chunk (the change watcher waits while they are added).
     func add(model: AppModel) async {
-        guard !isAdding, !isRemoving else { return }
+        guard !isAdding, !isRemoving, !record.hasSamples else { return }
         isAdding = true
         defer { isAdding = false }
+        // Marked before the first photo: an app ended half way never offers them a second time.
+        update { $0.begin() }
         let specs = SampleLibrary.specs()
         total = specs.count
         added = 0
         for start in stride(from: 0, to: specs.count, by: 13) {
-            let chunk = specs[start..<min(start + 13, specs.count)].map { spec in
-                Item(data: Self.draw(spec).jpegData(compressionQuality: 0.82) ?? Data(), name: spec.filename, date: spec.date,
-                     location: CLLocation(coordinate: CLLocationCoordinate2D(latitude: spec.location.latitude, longitude: spec.location.longitude),
-                                          altitude: 0, horizontalAccuracy: 10, verticalAccuracy: 10, timestamp: spec.date))
-            }
+            let part = Array(specs[start..<min(start + 13, specs.count)])
+            let chunk = await Task.detached(priority: .userInitiated) { Self.items(part) }.value
             do {
-                let ids = try await Self.save(chunk)
-                // Written down after every chunk: an app that ends half way still removes them.
-                remember(storedIDs.union(ids))
+                try await Self.save(chunk)
+                record = Self.loadRecord()
                 added += chunk.count
             } catch {
                 model.message = .failure(String(localized: "Die Beispielfotos konnten nicht angelegt werden. Bitte versuche es noch einmal."))
                 break
             }
-            await Task.yield()
         }
+        record = Self.loadRecord()
+        if record.ids.isEmpty { update { $0.keepOnly([]) } } // nothing went in: the offer may come back
         if added > 0 { model.startAnalysis(userInitiated: true) }
+    }
+
+    /// The JPEGs of `specs` (drawing 1600 × 1200 pictures takes a moment: never on the main actor).
+    nonisolated static func items(_ specs: [SampleLibrary.Spec]) -> [Item] {
+        specs.map { spec in
+            Item(data: draw(spec).jpegData(compressionQuality: 0.82) ?? Data(), name: spec.filename, date: spec.date,
+                 location: CLLocation(coordinate: CLLocationCoordinate2D(latitude: spec.location.latitude, longitude: spec.location.longitude),
+                                      altitude: 0, horizontalAccuracy: 10, verticalAccuracy: 10, timestamp: spec.date))
+        }
     }
 
     struct Item: @unchecked Sendable {
@@ -84,9 +106,10 @@ final class SamplePhotos {
     }
 
     /// Nonisolated: PhotoKit runs the change block on its own queue (a main-actor closure there
-    /// traps at runtime under Swift 6). Returns the identifiers of the new photos.
-    nonisolated static func save(_ items: [Item]) async throws -> Set<String> {
-        let ids = LockedBox<[String]>([])
+    /// traps at runtime under Swift 6). The identifiers are written down inside the change
+    /// itself, before Photos stores it: an app ended right after the change still knows every
+    /// photo it made (an identifier of a change that did not go through is simply not found).
+    nonisolated static func save(_ items: [Item]) async throws {
         try await PHPhotoLibrary.shared().performChanges {
             var made: [String] = []
             for item in items {
@@ -99,9 +122,10 @@ final class SamplePhotos {
                 request.location = item.location
                 if let id = request.placeholderForCreatedAsset?.localIdentifier { made.append(id) }
             }
-            ids.value = made
+            var record = loadRecord()
+            record.record(Set(made))
+            saveRecord(record)
         }
-        return Set(ids.value)
     }
 
     // MARK: Removing
@@ -109,10 +133,25 @@ final class SamplePhotos {
     /// Deletes Albumist's own sample photos (only the written-down identifiers) and the albums
     /// it made of nothing but them, with one iOS question. "Nicht erlauben" changes nothing.
     func remove(model: AppModel) async {
-        // Not while a plan changes albums: the albums to delete are decided from a settled state.
-        guard !isAdding, !isRemoving, !model.execution.isRunning, model.interruptedPlan == nil, let store = model.store else { return }
+        guard !isAdding, !isRemoving, let store = model.store else { return }
+        // Only with full access (a selection would hide sample photos that are still there, and
+        // they would be forgotten), and not while a plan changes albums. Says why, never silent.
+        switch SampleLibrary.removalBlock(access: model.access, planRunning: model.execution.isRunning,
+                                          planInterrupted: model.interruptedPlan != nil) {
+        case .needsFullAccess:
+            model.message = AppMessage(title: String(localized: "Voller Zugriff nötig"),
+                                       text: String(localized: "Albumist kann seine Beispielfotos nur entfernen, wenn es alle Fotos sehen darf. Erlaube den vollen Zugriff in den Einstellungen und versuche es dann noch einmal."))
+            return
+        case .planInProgress:
+            model.message = AppMessage(title: String(localized: "Gerade nicht möglich"),
+                                       text: String(localized: "Albumist ändert gerade Alben oder ein Umsetzen wurde unterbrochen. Schließe das zuerst ab, dann kannst du die Beispielfotos entfernen."))
+            return
+        case nil:
+            break
+        }
         isRemoving = true
         defer { isRemoving = false }
+        let storedIDs = record.ids
         do {
             let present = Self.existing(storedIDs)
             let inventory = try await model.library.currentInventory()
@@ -133,7 +172,8 @@ final class SamplePhotos {
             }
             // Whatever is still there (the user deleted some in Photos already) is forgotten
             // only once it is really gone.
-            remember(Self.existing(storedIDs))
+            let still = Self.existing(storedIDs)
+            update { $0.keepOnly(still) }
             model.inventory = try await model.library.currentInventory()
             model.startAnalysis(userInitiated: true)
         } catch {
@@ -162,8 +202,23 @@ final class SamplePhotos {
             if !collections.isEmpty {
                 let albums = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: collections, options: nil)
                 if albums.count > 0 { PHAssetCollectionChangeRequest.deleteAssetCollections(albums) }
-                let folders = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: collections, options: nil)
-                if folders.count > 0 { PHCollectionListChangeRequest.deleteCollectionLists(folders) }
+                // Deleting a folder deletes everything in it. What is inside is read again here,
+                // in the change itself: a folder goes only while all of it goes too (an album the
+                // user put in after the list was read keeps it, and the folders above it).
+                var albumIDs = Set<String>()
+                albums.enumerateObjects { album, _, _ in albumIDs.insert(album.localIdentifier) }
+                let lists = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: collections, options: nil)
+                var children: [String: [String]] = [:]
+                var byID: [String: PHCollectionList] = [:]
+                lists.enumerateObjects { list, _, _ in
+                    byID[list.localIdentifier] = list
+                    var inside: [String] = []
+                    PHCollection.fetchCollections(in: list, options: nil).enumerateObjects { child, _, _ in inside.append(child.localIdentifier) }
+                    children[list.localIdentifier] = inside
+                }
+                let safe = SampleLibrary.foldersSafeToDelete(children, deletingAlbums: albumIDs)
+                let folders = safe.compactMap { byID[$0] }
+                if !folders.isEmpty { PHCollectionListChangeRequest.deleteCollectionLists(folders as NSArray) }
             }
         }
     }

@@ -18,6 +18,7 @@ struct UnlockButton: View {
         }
     }
 
+    @ViewBuilder
     private var button: some View {
         let state = PurchaseRules.unlockButton(hasPrice: purchases.product != nil, isPurchasing: purchases.isPurchasing)
         Button {

@@ -119,3 +119,45 @@ struct SampleLibraryTests {
         #expect(SampleLibrary.removal(sampleIDs: [], libraryAssets: ["mine"], managedAlbums: [state], inventory: inventory, history: []).isEmpty)
     }
 }
+
+/// Review of 3022ca8: a cut-off add, removal only with full access and no plan in progress,
+/// and folders checked again against what Photos has inside them right then.
+@Suite("Sample photos: review fixes")
+struct SampleLibraryReviewTests {
+    @Test func cutOffAddKeepsTheOfferAwayAndRemovesWhatWasWrittenDown() {
+        var record = SampleLibrary.Record()
+        #expect(!record.hasSamples)
+        record.begin()
+        // The app ends before the first chunk is written down: no second offer (no duplicates).
+        #expect(record.hasSamples)
+        #expect(!SampleLibrary.isOffered(photos: 3, access: .full, samplesPresent: record.hasSamples))
+        record.record(["s1", "s2"])
+        // Removal: what is gone is forgotten; with nothing left the offer may come back.
+        var partly = record
+        partly.keepOnly(["s2"])
+        #expect(partly.ids == ["s2"] && partly.hasSamples)
+        record.keepOnly([])
+        #expect(record == SampleLibrary.Record())
+        #expect(SampleLibrary.isOffered(photos: 3, access: .full, samplesPresent: record.hasSamples))
+    }
+
+    @Test func removalNeedsFullAccessAndNoPlanInProgress() {
+        #expect(SampleLibrary.removalBlock(access: .full, planRunning: false, planInterrupted: false) == nil)
+        #expect(SampleLibrary.removalBlock(access: .limited, planRunning: false, planInterrupted: false) == .needsFullAccess)
+        #expect(SampleLibrary.removalBlock(access: .denied, planRunning: false, planInterrupted: false) == .needsFullAccess)
+        #expect(SampleLibrary.removalBlock(access: .full, planRunning: true, planInterrupted: false) == .planInProgress)
+        #expect(SampleLibrary.removalBlock(access: .full, planRunning: false, planInterrupted: true) == .planInProgress)
+    }
+
+    @Test func folderGoesOnlyWhileEverythingInsideItGoes() {
+        // "Reisen" holds two sample albums; "Albumist" holds "Reisen".
+        let folders = ["reisen": ["rom", "lis"], "albumist": ["reisen"]]
+        #expect(SampleLibrary.foldersSafeToDelete(folders, deletingAlbums: ["rom", "lis"]) == ["reisen", "albumist"])
+        // The user put an own album into "Reisen" after the list was read: neither folder goes.
+        let now = ["reisen": ["rom", "lis", "mine"], "albumist": ["reisen"]]
+        #expect(SampleLibrary.foldersSafeToDelete(now, deletingAlbums: ["rom", "lis"]).isEmpty)
+        // A second folder next to it keeps "Albumist".
+        let side = ["reisen": ["rom"], "albumist": ["reisen", "familie"]]
+        #expect(SampleLibrary.foldersSafeToDelete(side, deletingAlbums: ["rom"]) == ["reisen"])
+    }
+}

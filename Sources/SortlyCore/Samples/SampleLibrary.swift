@@ -144,4 +144,72 @@ public enum SampleLibrary {
         let folders = going.subtracting(albums).sorted()
         return Removal(assets: assets, albums: albums.sorted() + folders, plansToGiveBack: plans.map(\.id))
     }
+
+    // MARK: What Albumist wrote down
+
+    /// The sample photos Albumist added, kept in the user defaults. The identifiers are written
+    /// inside the same PhotoKit change that creates the photos (review of 3022ca8: an app ended
+    /// between saving a chunk and writing it down left photos nobody could remove), and the
+    /// start is marked before the first photo, so a cut-off add never brings the offer back.
+    public struct Record: Hashable, Sendable, Codable {
+        public var ids: Set<String> = []
+        /// Set before the first photo is written; cleared only once nothing is left.
+        public var addingStarted = false
+
+        public init(ids: Set<String> = [], addingStarted: Bool = false) {
+            self.ids = ids
+            self.addingStarted = addingStarted
+        }
+
+        /// Sample photos are (or may be) in the library: no offer, "entfernen" is shown.
+        public var hasSamples: Bool { addingStarted || !ids.isEmpty }
+
+        public mutating func begin() { addingStarted = true }
+
+        public mutating func record(_ new: Set<String>) { ids.formUnion(new) }
+
+        /// After a removal: only what is still there stays written down. With nothing left the
+        /// record is cleared, and the offer may come back.
+        public mutating func keepOnly(_ existing: Set<String>) {
+            ids = ids.intersection(existing)
+            if ids.isEmpty { addingStarted = false }
+        }
+    }
+
+    /// Why "Beispielfotos wieder entfernen" cannot run now (it says so instead of doing nothing).
+    public enum RemovalBlock: Hashable, Sendable {
+        /// With a selection of photos Albumist sees only part of them, and would forget the
+        /// identifiers of sample photos that are still there.
+        case needsFullAccess
+        /// A plan is changing albums, or one was cut off: the albums to delete are decided
+        /// from a settled state.
+        case planInProgress
+    }
+
+    public static func removalBlock(access: LibraryAccess, planRunning: Bool, planInterrupted: Bool) -> RemovalBlock? {
+        if access != .full { return .needsFullAccess }
+        if planRunning || planInterrupted { return .planInProgress }
+        return nil
+    }
+
+    /// Of the folders asked to be deleted, the ones that may go: deleting a folder in Photos
+    /// deletes everything in it, so a folder goes only while everything inside it goes too.
+    /// Checked again inside the change itself, against the children Photos has right then.
+    /// - Parameters:
+    ///   - folders: folder id → ids of what is inside it now.
+    ///   - albums: the albums being deleted.
+    public static func foldersSafeToDelete(_ folders: [String: [String]], deletingAlbums albums: Set<String>) -> Set<String> {
+        var safe = Set<String>()
+        var changed = true
+        while changed {
+            changed = false
+            for (folder, children) in folders where !safe.contains(folder) {
+                if children.allSatisfy({ albums.contains($0) || safe.contains($0) }) {
+                    safe.insert(folder)
+                    changed = true
+                }
+            }
+        }
+        return safe
+    }
 }

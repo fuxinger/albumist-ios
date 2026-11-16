@@ -10543,16 +10543,6 @@
         }
       }
     },
-    "Albumist löscht nur seine eigenen Beispielfotos und die Alben, die es nur aus ihnen gemacht hat. iOS fragt vorher noch einmal. Deine eigenen Fotos und Alben bleiben, wie sie sind." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist deletes only its own sample photos and the albums it made only of them. iOS asks once more first. Your own photos and albums stay as they are."
-          }
-        }
-      }
-    },
     "Die Beispielfotos hat Albumist zum Ausprobieren in deiner Mediathek angelegt." : {
       "localizations" : {
         "en" : {
@@ -10819,6 +10809,36 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Albumist löscht seine Beispielfotos, auch wenn du eines bearbeitet oder in ein eigenes Album gelegt hast, und die Alben, die es nur aus ihnen gemacht hat. iOS fragt vorher noch einmal; die Fotos liegen danach 30 Tage unter „Zuletzt gelöscht“. Deine eigenen Fotos und Alben bleiben, wie sie sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist deletes its sample photos, even one you edited or put into an album of your own, and the albums it made only of them. iOS asks once more first; the photos then stay in “Recently Deleted” for 30 days. Your own photos and albums stay as they are."
+          }
+        }
+      }
+    },
+    "Albumist kann seine Beispielfotos nur entfernen, wenn es alle Fotos sehen darf. Erlaube den vollen Zugriff in den Einstellungen und versuche es dann noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist can only remove its sample photos when it may see all photos. Allow full access in Settings, then try again."
+          }
+        }
+      }
+    },
+    "Albumist ändert gerade Alben oder ein Umsetzen wurde unterbrochen. Schließe das zuerst ab, dann kannst du die Beispielfotos entfernen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is changing albums right now, or a run was interrupted. Finish that first, then you can remove the sample photos."
           }
         }
       }

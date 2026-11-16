@@ -82,7 +82,7 @@ struct EmptyLibraryCard: View {
         .confirmationDialog("Beispielfotos entfernen?", isPresented: $confirmRemove, titleVisibility: .visible) {
             Button("Beispielfotos entfernen", role: .destructive) { Task { await samples.remove(model: model) } }
         } message: {
-            Text("Albumist löscht nur seine eigenen Beispielfotos und die Alben, die es nur aus ihnen gemacht hat. iOS fragt vorher noch einmal. Deine eigenen Fotos und Alben bleiben, wie sie sind.")
+            Text("Albumist löscht seine Beispielfotos, auch wenn du eines bearbeitet oder in ein eigenes Album gelegt hast, und die Alben, die es nur aus ihnen gemacht hat. iOS fragt vorher noch einmal; die Fotos liegen danach 30 Tage unter „Zuletzt gelöscht“. Deine eigenen Fotos und Alben bleiben, wie sie sind.")
         }
     }
 
@@ -138,7 +138,7 @@ struct SamplePhotosSection: View {
                     .confirmationDialog("Beispielfotos entfernen?", isPresented: $confirmRemove, titleVisibility: .visible) {
                         Button("Beispielfotos entfernen", role: .destructive) { Task { await samples.remove(model: model) } }
                     } message: {
-                        Text("Albumist löscht nur seine eigenen Beispielfotos und die Alben, die es nur aus ihnen gemacht hat. iOS fragt vorher noch einmal. Deine eigenen Fotos und Alben bleiben, wie sie sind.")
+                        Text("Albumist löscht seine Beispielfotos, auch wenn du eines bearbeitet oder in ein eigenes Album gelegt hast, und die Alben, die es nur aus ihnen gemacht hat. iOS fragt vorher noch einmal; die Fotos liegen danach 30 Tage unter „Zuletzt gelöscht“. Deine eigenen Fotos und Alben bleiben, wie sie sind.")
                     }
             } footer: {
                 Text("Die Beispielfotos hat Albumist zum Ausprobieren in deiner Mediathek angelegt.")

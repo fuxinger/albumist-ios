@@ -23,9 +23,11 @@ the device; there is no account and no server.
    starter set "Create … albums for free", look at the preview (nothing changes before you confirm)
    and tap "Create Albums Now". The albums appear in Photos under Collections › Albums.
 4. "Undo" on the result card takes everything back. The change receipt lists exactly what was done.
-5. Settings › "Remove Sample Photos" deletes only the sample photos the app added (by their stored
-   identifiers, with the system's own delete confirmation) and the albums it made of nothing but
-   them. The reviewer's own photos and albums are never touched.
+5. Settings › "Remove Sample Photos" deletes the sample photos the app added (by their stored
+   identifiers, with the system's own delete confirmation; they then stay in "Recently Deleted" for
+   30 days) and the albums it made of nothing but them. A sample photo that was edited or put into
+   an album of one's own is deleted too; the reviewer's own photos and albums are never touched.
+   Removing needs full photo access and no plan in progress (the app says so otherwise).
 
 **Purchase:** the first 10 albums are free. A one-time, non-consumable in-app purchase
 ("Unlock Albumist") removes the limit; it is submitted together with this version. Restore and offer
@@ -56,9 +58,11 @@ es gibt kein Konto und keinen Server.
    sich nichts) und „Alben jetzt anlegen“. Die Alben stehen in Fotos unter Sammlungen › Alben.
 4. „Rückgängig machen“ auf der Ergebniskarte nimmt alles zurück; der Änderungsbeleg zeigt genau, was
    passiert ist.
-5. Einstellungen › „Beispielfotos wieder entfernen“ löscht nur die Beispielfotos, die die App angelegt
-   hat (anhand der gespeicherten Kennungen, mit der Löschabfrage von iOS), und die Alben, die sie nur
-   aus ihnen gemacht hat. Eigene Fotos und Alben bleiben unberührt.
+5. Einstellungen › „Beispielfotos wieder entfernen“ löscht die Beispielfotos, die die App angelegt
+   hat (anhand der gespeicherten Kennungen, mit der Löschabfrage von iOS; danach liegen sie 30 Tage
+   unter „Zuletzt gelöscht“), und die Alben, die sie nur aus ihnen gemacht hat. Auch ein bearbeitetes
+   oder in ein eigenes Album gelegtes Beispielfoto wird gelöscht; eigene Fotos und Alben bleiben
+   unberührt. Entfernen braucht vollen Fotozugriff und kein laufendes Umsetzen (sonst sagt die App das).
 
 **Kauf:** Die ersten 10 Alben sind kostenlos. Ein einmaliger Kauf („Albumist freischalten“,
 Nicht-Verbrauchsartikel) hebt die Grenze auf; er wird mit dieser Version eingereicht. Wiederherstellen

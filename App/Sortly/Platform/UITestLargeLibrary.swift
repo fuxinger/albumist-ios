@@ -22,26 +22,51 @@ enum LargeLibrary {
         (-37.8136, 144.9631), (1.3521, 103.8198), (13.7563, 100.5018), (22.3193, 114.1694), (35.6762, 139.6503),
     ]
 
-    /// Creates what is missing of `count` photos; true when photos were added.
+    /// Creates what is missing of `count` photos; true when photos were added. `marker`: a
+    /// file the stress test reads (`created N of M`, then `done N`): the test runner did not
+    /// see the create-only launch end (stress run 43833158673 waited 3 h for an app that had
+    /// ended after about 33 min).
     @MainActor
-    static func createIfNeeded(count: Int) async -> Bool {
+    static func createIfNeeded(count: Int, marker: String? = nil) async -> Bool {
         let created = UserDefaults.standard.integer(forKey: createdKey)
-        guard created < count else { return false }
-        for start in stride(from: created, to: count, by: 100) {
-            let range = start..<min(start + 100, count)
-            let items = await Task.detached(priority: .userInitiated) { range.map { LargeLibrary.item($0) } }.value
+        guard created < count else {
+            report("done \(created)", to: marker)
+            return false
+        }
+        report("created \(created) of \(count)", to: marker)
+        // Batches of 250, the next one drawn while this one is saved: drawing and saving no
+        // longer wait for each other.
+        let batch = 250
+        func items(from start: Int) -> Task<[DemoLibrary.Item], Never> {
+            Task.detached(priority: .userInitiated) { (start..<min(start + batch, count)).map { LargeLibrary.item($0) } }
+        }
+        var next = items(from: created)
+        for start in stride(from: created, to: count, by: batch) {
+            let upper = min(start + batch, count)
+            let current = await next.value
+            if upper < count { next = items(from: upper) }
             do {
-                try await DemoLibrary.save(items)
+                try await DemoLibrary.save(current)
             } catch {
                 // In the system log, where the stress run's workflow looks for it (the 50 000
                 // photo run stopped at about 37 300 photos without saying why).
                 NSLog("UITEST_LARGE_LIBRARY stopped at %d of %d: %@", start, count, String(describing: error))
+                report("stopped \(start) of \(count)", to: marker)
                 return start > created
             }
-            UserDefaults.standard.set(range.upperBound, forKey: createdKey)
-            if range.upperBound % 5_000 == 0 { NSLog("UITEST_LARGE_LIBRARY %d of %d created", range.upperBound, count) }
+            UserDefaults.standard.set(upper, forKey: createdKey)
+            if upper % 5_000 == 0 || upper == count {
+                NSLog("UITEST_LARGE_LIBRARY %d of %d created", upper, count)
+                report("created \(upper) of \(count)", to: marker)
+            }
         }
+        report("done \(count)", to: marker)
         return true
+    }
+
+    private static func report(_ line: String, to marker: String?) {
+        guard let marker else { return }
+        try? Data((line + "\n").utf8).write(to: URL(fileURLWithPath: marker), options: .atomic)
     }
 
     /// Photo number `index`: 25 photos per trip over five days; every fifth trip is a stretch of

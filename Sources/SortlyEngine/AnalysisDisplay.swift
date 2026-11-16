@@ -169,6 +169,29 @@ public struct StepWidths: Sendable, Hashable, Codable {
         return min(1, start(of: step) + width(of: step) * within)
     }
 
+    /// A run that goes on with an earlier analysis is back at its step (`step`, `completed` of
+    /// `total`), but these widths put it below `held`, the value the card showed when the
+    /// earlier run stopped: photos came in since, or the database was rebuilt. Stress run
+    /// 43833158673 (50,000 photos added): the card held "64 %" while catching up, then fell to
+    /// "38 %" when the image step began, and the bar stood still until the real value passed
+    /// 64 % again. The new widths start the running step's rest exactly at `held` and spread
+    /// the rest of the way (the running step's rest and the steps after it) over the rest of
+    /// the bar, in their old proportions; the steps before shrink or grow to fill the start.
+    /// So the number never goes back and moves on with the real work. `nil`: nothing to
+    /// change (the real value is not below `held`).
+    public func continuing(held: Double, step: AnalysisStep, completed: Int, total: Int) -> StepWidths? {
+        let base = overall(step: step, completed: completed, total: total)
+        guard held.isFinite, held < 1, base < held - 1e-9 else { return nil }
+        // base…1 is drawn over held…1.
+        let k = (1 - held) / (1 - base)
+        let stepStart = start(of: step)
+        let newStepStart = held - (base - stepStart) * k
+        guard newStepStart > 0, stepStart > 0 else { return nil }
+        let j = newStepStart / stepStart
+        let scaled = AnalysisStep.allCases.map { s in s < step ? width(of: s) * j : width(of: s) * k }
+        return StepWidths(shares: scaled)
+    }
+
     /// How far each segment is filled for a value of the bar (0…1 per step).
     public func fills(for overall: Double) -> [Double] {
         AnalysisStep.allCases.map { step in

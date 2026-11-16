@@ -53,6 +53,10 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
         #if targetEnvironment(simulator)
         // The demo library starts its own analysis once every photo is there.
         if DemoLibrary.shared.isSeeding { return false }
+        // A UI test launch that only creates photos: every batch it saves is a change, and the
+        // analyses they started re-read the growing library while it was created (stress run
+        // 43833158673: 33 min for 50,000 photos, and a run cut off at step 4 by the app's end).
+        if UITestSupport.createsOnly { return false }
         #endif
         return model.phase == .ready && model.access.canRead && !model.execution.isRunning && !model.analysis.isRunning
     }

@@ -50,6 +50,31 @@ struct PlaceResolutionTests {
         #expect(munich?.needsRefinement(to: 1_000) == true)
     }
 
+    /// Stress run 43833158673: 50,000 photos stood at "0 von 50.233 Orten" for a minute, then
+    /// jumped. Places from the map are now saved and counted in parts; each count is reported
+    /// only after its places are saved, and it never goes down.
+    @Test func manyOfflinePlacesAreSavedAndCountedInParts() async throws {
+        actor Log {
+            var saved = 0
+            var events: [(saved: Int, counted: Int)] = []
+            func save(_ n: Int) { saved += n }
+            func count(_ n: Int) { events.append((saved, n)) }
+        }
+        let log = Log()
+        let n = 2 * PlaceResolutionService.offlineChunk + 500
+        let all = requests(Fixture.Places.rome, count: n, prefix: "r")
+        let outcome = try await service(level: .country, geocoder: FakeGeocoder())
+            .resolve(all, progress: { await log.count($0) }) { await log.save($0.count) }
+        #expect(outcome.resolved == n)
+        let events = await log.events
+        #expect(events.count >= 3, "counted only \(events.count) times")
+        #expect(events.last?.counted == n)
+        for (i, e) in events.enumerated() {
+            #expect(e.counted <= e.saved, "counted before saved")
+            if i > 0 { #expect(e.counted >= events[i - 1].counted) }
+        }
+    }
+
     @Test func cachedCellsAreNotRequestedAgain() async throws {
         let cache = MemoryPlaceCache()
         let first = FakeGeocoder()

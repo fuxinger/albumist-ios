@@ -409,8 +409,12 @@ public actor AnalysisPipeline {
             report.pausedBecause = .accessRevoked
             return report
         }
+        // Said while reading (the count moves on a large first read) and once more when the
+        // photos are stored.
         let assets = try await reader.fetchAssets(includeHidden: settings.privacy.includeHiddenAssets,
-                                                  knownDetails: try await store.assetsWithFileDetails())
+                                                  knownDetails: try await store.assetsWithFileDetails()) { read, total in
+            onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
+        }
         report.newOrChanged = try await store.upsertAssets(assets).count
         report.removed = try await store.removeAssets(notIn: Set(assets.map(\.id)))
         let inventory = try await reader.currentInventory()

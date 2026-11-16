@@ -54,6 +54,11 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     // MARK: Reading
 
     func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date]) async throws -> [AssetSnapshot] {
+        try await fetchAssets(includeHidden: includeHidden, knownDetails: knownDetails) { _, _ in }
+    }
+
+    func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
+                     progress: @escaping @Sendable (Int, Int) -> Void) async throws -> [AssetSnapshot] {
         let options = PHFetchOptions()
         options.includeHiddenAssets = includeHidden
         options.includeAssetSourceTypes = [.typeUserLibrary, .typeiTunesSynced]
@@ -65,8 +70,10 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         // (new, imported with an old date, or a rebuilt database) and for changed ones; the
         // store keeps the earlier values for the rest.
         var snapshots: [AssetSnapshot] = []
-        snapshots.reserveCapacity(result.count)
-        result.enumerateObjects { asset, _, stop in
+        let total = result.count
+        snapshots.reserveCapacity(total)
+        progress(0, total)
+        result.enumerateObjects { asset, index, stop in
             // Ended (the app's time ran out, "Analyse neu aufbauen"): stop reading. The
             // partial list is never returned, it would count the rest as deleted.
             if Task.isCancelled {
@@ -81,7 +88,11 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                 } ?? true
                 snapshots.append(Self.snapshot(asset, withResources: needsResources))
             }
+            // Every 250 photos: a few a second while the file details are read, so the count
+            // moves (stress run 43833158673: minutes without a change on a first read).
+            if (index + 1) % 250 == 0 { progress(index + 1, total) }
         }
+        progress(snapshots.count, total)
         try Task.checkCancellation()
         return snapshots
     }

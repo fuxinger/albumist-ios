@@ -74,6 +74,16 @@ extension UITestSupport {
     /// catch-up runs analysed them made both phases unreadable (stress run 43823462215).
     static let createsOnly = flag("-SortlyUITestCreateOnly")
 
+    /// `-SortlyUITestCreateMarker <path>`: where the create-only launch writes how far it is
+    /// and `done` at the end (a file in the test runner's own folder; on the simulator both
+    /// processes see the Mac's file system). The runner did not notice the app end on its own.
+    static let createMarker = value("-SortlyUITestCreateMarker")
+
+    /// `-SortlyUITestWatchMain`: the system log gets a line whenever the main thread did not
+    /// answer for more than a second (`UITEST_MAIN_BLOCKED`), so a stress run shows whether a
+    /// slow tap or a still card was the app's main thread or the UI test's own snapshot.
+    static let watchesMain = flag("-SortlyUITestWatchMain")
+
     // MARK: Writing
 
     /// `-SortlyUITestDeletionFault declined|ignored`: the first deletion of albums in this
@@ -139,6 +149,7 @@ extension UITestSupport {
     static func prepareLaunch() {
         #if DEBUG
         if fastStart { AppModel.shared.onboardingDone = true }
+        if watchesMain { MainThreadWatch.start() }
         #endif
     }
 
@@ -151,7 +162,7 @@ extension UITestSupport {
             await DemoLibrary.shared.seed(then: model)
         }
         if largeLibrary > 0, createsOnly {
-            let added = await LargeLibrary.createIfNeeded(count: largeLibrary)
+            let added = await LargeLibrary.createIfNeeded(count: largeLibrary, marker: createMarker)
             NSLog("UITEST_LARGE_LIBRARY create-only launch done (added: %@)", added ? "yes" : "no")
             exit(0)
         }
@@ -161,3 +172,30 @@ extension UITestSupport {
         #endif
     }
 }
+
+#if DEBUG
+/// `-SortlyUITestWatchMain`: a background thread asks the main thread every 250 ms to answer
+/// and logs every time it took longer than a second, with the longest so far.
+enum MainThreadWatch {
+    static func start() {
+        let thread = Thread {
+            var longest = 0.0
+            while true {
+                let asked = Date()
+                let answered = DispatchSemaphore(value: 0)
+                DispatchQueue.main.async { answered.signal() }
+                answered.wait()
+                let blocked = Date().timeIntervalSince(asked)
+                if blocked > 1 {
+                    longest = max(longest, blocked)
+                    NSLog("UITEST_MAIN_BLOCKED %d ms (longest %d ms)", Int(blocked * 1000), Int(longest * 1000))
+                }
+                Thread.sleep(forTimeInterval: 0.25)
+            }
+        }
+        thread.name = "UITest main-thread watch"
+        thread.qualityOfService = .userInitiated
+        thread.start()
+    }
+}
+#endif

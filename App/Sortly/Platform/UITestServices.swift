@@ -55,6 +55,12 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         return try await base.fetchAssets(includeHidden: includeHidden, knownDetails: knownDetails)
     }
 
+    func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
+                     progress: @escaping @Sendable (Int, Int) -> Void) async throws -> [AssetSnapshot] {
+        if UITestSupport.emptyLibrary { return [] }
+        return try await base.fetchAssets(includeHidden: includeHidden, knownDetails: knownDetails, progress: progress)
+    }
+
     func currentInventory() async throws -> CollectionInventory {
         if UITestSupport.emptyLibrary { return CollectionInventory() }
         return try await base.currentInventory()

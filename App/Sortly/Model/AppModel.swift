@@ -68,12 +68,19 @@ final class AppModel {
         }
         /// Still on the quick first steps of a run that goes on from further ahead.
         var isCatchingUp: Bool {
-            guard let resumeFrom else { return false }
+            guard isRunning, let resumeFrom else { return false }
             return (stage?.number ?? 0) < resumeFrom.stage
         }
-        /// The bar: never below where the interrupted run had got to.
+        /// The bar: never below where the interrupted run had got to. Back at its step, the
+        /// widths continue from there (`StepWidths.continuing`). A run that ended shows where
+        /// it stopped: the paused card read "64 %" (the value the run had started from) after
+        /// running at 44 % (stress run 43833158673).
         var shownOverall: Double {
-            isCatchingUp ? max(overall, resumeFrom?.overall ?? 0) : overall
+            if isCatchingUp { return max(overall, resumeFrom?.overall ?? 0) }
+            if !isRunning, step == nil, let stoppedAt {
+                return widths.overall(step: stoppedAt.step, completed: stoppedAt.completed, total: stoppedAt.total)
+            }
+            return overall
         }
         /// Photos still to look at in the current stage (images or texts).
         var remaining: Int { max(0, total - completed) }
@@ -874,6 +881,15 @@ final class AppModel {
         analysis.total = progress.total
         analysis.waiting = nil
         analysis.appleWait = progress.waitLeft != nil
+        // Back at the step it went on from, below what the card showed before (photos came in,
+        // the database was rebuilt): the widths continue from the value shown, so the number
+        // never goes back and moves on with the work (stress run 43833158673: 64 % to 38 %).
+        if let held = analysis.resumeFrom?.overall, !analysis.isCatchingUp, let step = analysis.step,
+           let continued = analysis.widths.continuing(held: max(held, analysisBar), step: step,
+                                                      completed: analysis.completed, total: analysis.total) {
+            analysis.widths = continued
+            widthsFixed = true
+        }
         // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`).
         if !analysis.isCatchingUp {
             AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.overall,

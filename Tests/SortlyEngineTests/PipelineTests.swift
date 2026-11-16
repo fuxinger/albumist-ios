@@ -106,6 +106,41 @@ struct PipelineTests {
         #expect(try await s.store.loadInventory()["rom"] != nil)
     }
 
+    /// Reads its photos in parts and says so after each, like PhotoKit while it reads file
+    /// details on a first run.
+    actor ReaderInParts: PhotoLibraryReading {
+        let assets: [AssetSnapshot]
+        init(assets: [AssetSnapshot]) { self.assets = assets }
+        func access() async -> LibraryAccess { .full }
+        func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date]) async throws -> [AssetSnapshot] { assets }
+        func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
+                         progress: @escaping @Sendable (Int, Int) -> Void) async throws -> [AssetSnapshot] {
+            for read in stride(from: 50, to: assets.count, by: 50) { progress(read, assets.count) }
+            return assets
+        }
+        func currentInventory() async throws -> CollectionInventory { CollectionInventory() }
+    }
+
+    /// Stress run 43833158673: reading 50,000 photos took minutes with nothing moving on the
+    /// card. The reader's progress reaches the card as the library step's count, rising, and
+    /// the step ends with every photo counted.
+    @Test func readingTheLibraryIsCountedAsItGoes() async throws {
+        let s = try setup()
+        let assets = try await s.reader.fetchAssets(includeHidden: false, knownDetails: [:])
+        let pipeline = AnalysisPipeline(
+            store: s.store, reader: ReaderInParts(assets: assets), analyzer: s.analyzer, geocoder: s.geocoder, map: Self.map,
+            conditions: s.conditions, settings: OrganizationSettings(), calendar: Fixture.calendar, time: ManualTime().source
+        )
+        let seen = Mutex<[Int]>([])
+        _ = try await pipeline.run(onProgress: { p in
+            if p.stage == .inventory { seen.withLock { $0.append(p.completed) } }
+        })
+        let counts = seen.withLock { $0 }
+        #expect(counts.count >= assets.count / 50, "only \(counts.count) reports while reading")
+        #expect(counts == counts.sorted())
+        #expect(counts.last == assets.count)
+    }
+
     @Test func secondRunIsIncremental() async throws {
         let s = try setup()
         _ = try await s.pipeline.run()

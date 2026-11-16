@@ -379,6 +379,54 @@ struct AnalysisDisplayTests {
         #expect(next.value(at: Self.at(21), gliding: true) == 0.04)
     }
 
+    /// Stress run 43833158673: an analysis stopped at 64 % (step 4) went on after 50,000 photos
+    /// had come in. Back at step 4 the real value was 38 % ("0 von 50.246"): the card fell from
+    /// 64 % to 38 %, and the bar stood still until the real value passed 64 %. With the widths
+    /// that continue it, the value starts at 64 % and moves with every photo up to 100 %.
+    @Test func resumedAnalysisNeverGoesBackAndMovesOn() throws {
+        let w = StepWidths.standard
+        let held = 0.64
+        let total = 50_246
+        #expect(w.overall(step: .content, completed: 0, total: total) < held)
+        let c = try #require(w.continuing(held: held, step: .content, completed: 0, total: total))
+        #expect(abs(c.shares.reduce(0, +) - 1) < 1e-9)
+        #expect(c.shares.allSatisfy { $0 > 0 })
+        // Starts where the earlier run stood: not back, not ahead.
+        #expect(abs(c.overall(step: .content, completed: 0, total: total) - held) < 1e-9)
+        // Every photo moves it; never down; 100 % at the end.
+        var last = held - 1e-9
+        for done in stride(from: 0, through: total, by: 997) {
+            let v = c.overall(step: .content, completed: done, total: total)
+            #expect(v >= last, "back at \(done)")
+            last = v
+        }
+        let tenth = c.overall(step: .content, completed: total / 10, total: total)
+        #expect(tenth > held + 0.005, "the bar stands still")
+        #expect(abs(c.overall(step: .proposals, completed: 1, total: 1) - 1) < 1e-9)
+        // The later steps keep their proportions to each other.
+        #expect(abs(c.width(of: .text) / c.width(of: .proposals) - w.width(of: .text) / w.width(of: .proposals)) < 1e-9)
+        // Nothing to change when the real value is not below what was shown.
+        #expect(c.continuing(held: held, step: .content, completed: 0, total: total) == nil)
+        #expect(w.continuing(held: 0.15, step: .content, completed: 0, total: total) == nil)
+        #expect(w.continuing(held: 1, step: .content, completed: 0, total: total) == nil)
+    }
+
+    /// The same in the middle of a step, and twice in a row (paused again, more photos again):
+    /// each time the value goes on from where it stood.
+    @Test func resumedTwiceStillNeverGoesBack() throws {
+        var w = StepWidths(workload: Self.owner)
+        var shown = w.overall(step: .content, completed: 4_000, total: 5_683)
+        // 10,000 photos more, run goes on at 4,000 of 15,683.
+        w = try #require(w.continuing(held: shown, step: .content, completed: 4_000, total: 15_683))
+        #expect(abs(w.overall(step: .content, completed: 4_000, total: 15_683) - shown) < 1e-9)
+        shown = w.overall(step: .content, completed: 6_000, total: 15_683)
+        // Paused at 6,000; 30,000 more photos came in.
+        w = try #require(w.continuing(held: shown, step: .content, completed: 6_000, total: 45_683))
+        #expect(abs(w.overall(step: .content, completed: 6_000, total: 45_683) - shown) < 1e-9)
+        #expect(w.overall(step: .content, completed: 6_500, total: 45_683) > shown)
+        #expect(w.shares.allSatisfy { $0 > 0 })
+    }
+
     // MARK: Card states (P1, P5–P7, P10–P12, P17)
 
     static func running(_ configure: (inout AnalysisCardState.Inputs) -> Void) -> AnalysisCardState? {

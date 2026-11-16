@@ -114,6 +114,8 @@ public actor PlaceResolutionService {
     /// Longest single sleep between two checks of `shouldStop`: Pause, heat or the end of the
     /// app's time interrupt a wait for the geocoder within seconds, not after minutes.
     static let waitSlice: Duration = .seconds(2)
+    /// Places worked out from the map are saved and counted in parts of this size.
+    static let offlineChunk = 2_000
 
     public init(
         map: OfflineWorldMap?,
@@ -173,7 +175,17 @@ public actor PlaceResolutionService {
         var needsOnline: [Request] = []
         var offlineCache: [GeoCell: OfflineWorldMap.Match] = [:]
 
-        for r in requests where r.coordinate.isPlausible {
+        // Saved and counted every `offlineChunk` requests: 50,000 photos at once stood at
+        // "0 von 50.233 Orten" for a minute on the simulator (stress run 43833158673). What is
+        // counted is saved first, so a run that ends in between never shows less afterwards.
+        for (index, r) in requests.enumerated() {
+            if index > 0, index % Self.offlineChunk == 0, !offlineOnly.isEmpty {
+                try await sink(offlineOnly)
+                outcome.resolved += offlineOnly.count
+                offlineOnly.removeAll(keepingCapacity: true)
+                await progress?(index - needsOnline.count)
+            }
+            guard r.coordinate.isPlausible else { continue }
             let match = offlineMatch(r.coordinate, memo: &offlineCache)
             if !requiresOnline(match) {
                 if let components = match?.components(language: policy.language) {

@@ -242,12 +242,13 @@ jobs:
   stress:
     # Only when dispatched with stress_photos: one long test on one runner. The app's memory
     # (resident size of the simulator's app process on the Mac) is sampled every 5 s; the
-    # test prints speed, Pause reaction and how long a display stood still.
+    # test prints speed, Pause reaction and how long a display stood still. Kept under 2 h:
+    # creating 50,000 photos (about 30 min) and SORTLY_STRESS_MINUTES of analysis.
     name: UI stress ${{ inputs.stress_photos }} photos
     needs: build
     if: inputs.stress_photos != '' && inputs.stress_photos != null
     runs-on: xcode-27
-    timeout-minutes: 355
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v5
       - name: Select newest Xcode
@@ -276,6 +277,9 @@ jobs:
         env:
           # xcodebuild hands TEST_RUNNER_* variables to the tests without the prefix.
           TEST_RUNNER_SORTLY_STRESS_PHOTOS: ${{ inputs.stress_photos }}
+          # Minutes of analysis measured after the photos are created (the simulator's Vision
+          # needs about 8 h for 50,000 photos; a device is faster).
+          TEST_RUNNER_SORTLY_STRESS_MINUTES: 45
         run: |
           set +e
           UDID="${{ steps.sim.outputs.udid }}"
@@ -306,7 +310,7 @@ jobs:
           ( while kill -0 $XCB 2>/dev/null; do sleep 60
               tail -1 memory.txt 2>/dev/null | awk -v s=$started -v now=$(date +%s) '{ if (now-$1 > 30) printf "STRESS_MEMORY %d min no app (last %d MB, %s)\n", (now-s)/60, $2/1024, $3; else printf "STRESS_MEMORY %d min %d MB %s\n", (now-s)/60, $2/1024, $3 }'
             done ) &
-          ( sleep 20400; echo "::error::Stress run stopped after 340 minutes"; kill -INT $XCB ) &
+          ( sleep 7800; echo "::error::Stress run stopped after 130 minutes"; kill -INT $XCB ) &
           WATCHDOG=$!
           wait $XCB
           status=$?
@@ -320,8 +324,12 @@ jobs:
           tail -1 memory.txt | awk '{printf "STRESS_MEMORY_END %d MB (%s)\n", $2/1024, $3}'
           # Why the app ended, if it did: creating progress, iOS's reason (RunningBoard, jetsam),
           # crash reports of the app on the Mac and in the simulator, and the result bundle.
-          xcrun simctl spawn "$UDID" log show --last 6h --style compact --predicate 'eventMessage CONTAINS "UITEST_LARGE_LIBRARY"' 2>/dev/null | cut -c 1-300 | tail -20 | sed 's/^/STRESS_LOG /'
-          xcrun simctl spawn "$UDID" log show --last 6h --style compact \
+          xcrun simctl spawn "$UDID" log show --last 3h --style compact --predicate 'eventMessage CONTAINS "UITEST_"' 2>/dev/null | grep -av UITEST_MAIN_BLOCKED | cut -c 1-300 | tail -80 | sed 's/^/STRESS_LOG /'
+          # The main thread's stalls (-SortlyUITestWatchMain): how many, and the 20 longest.
+          xcrun simctl spawn "$UDID" log show --last 3h --style compact --predicate 'eventMessage CONTAINS "UITEST_MAIN_BLOCKED"' 2>/dev/null | grep -a "UITEST_MAIN_BLOCKED" > main-blocked.txt
+          echo "STRESS_MAIN_BLOCKED $(wc -l < main-blocked.txt) times over 1 s"
+          sed -E 's/.*UITEST_MAIN_BLOCKED ([0-9]+) ms.*/\1 &/' main-blocked.txt | sort -rn | head -20 | cut -d' ' -f2- | cut -c 1-200 | sed 's/^/STRESS_MAIN_BLOCKED /'
+          xcrun simctl spawn "$UDID" log show --last 3h --style compact \
             --predicate '(subsystem == "com.apple.runningboard" OR process == "SpringBoard" OR process == "launchd_sim" OR eventMessage CONTAINS[c] "jetsam") AND eventMessage CONTAINS "albumist"' 2>/dev/null \
             | grep -aiE "termin|exit|kill|jetsam|crash|memory|limit|watchdog|signal" | cut -c 1-300 | tail -60 | sed 's/^/STRESS_END_REASON /'
           for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips ~/Library/Logs/DiagnosticReports/*.crash ~/Library/Logs/CoreSimulator/*/*.ips 2>/dev/null | head -40); do

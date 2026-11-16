@@ -364,3 +364,68 @@ struct SplitMix {
         return z ^ (z >> 31)
     }
 }
+
+/// Speed of the matching with many places and trips (re-check 16.11.: the one-trip rule
+/// counted trips per suggestion and doubled the time). Shown and dismissed suggestions, as
+/// the pipeline matches them.
+@Suite("Matching speed with places and trips")
+struct PlaceMatchingSpeedTests {
+    @Test func placeHeavyLibraryMatchesQuickly() {
+        func ids(_ range: Range<Int>) -> Set<AssetID> { Set(range.map { AssetID("x-\($0)") }) }
+        // 400 trips of 100 photos, 10,000 photos at home.
+        let trips = (0..<400).map { ids(($0 * 100)..<($0 * 100 + 100)) }
+        var albums = [CollectionSnapshot(id: "alle", title: "Alle", assetIDs: ids(0..<50_000))]
+        for i in 0..<400 { albums.append(CollectionSnapshot(id: CollectionID("t\(i)"), title: "Reise \(i)", assetIDs: trips[i])) }
+        for i in 0..<300 { albums.append(CollectionSnapshot(id: CollectionID("p\(i)"), title: "Land \(i % 60)", assetIDs: ids((i * 100)..<(i * 100 + 60)))) }
+        // Every photo in about 15 more albums ("Auswahl", "Beste", exports).
+        for i in 0..<400 { albums.append(CollectionSnapshot(id: CollectionID("s-\(i)"), title: "Auswahl \(i)", assetIDs: ids((i * 100)..<min(50_000, i * 100 + 1500)))) }
+        var open: [AlbumProposal] = [], dismissed: [AlbumProposal] = []
+        // 60 countries of 6–7 trips, 200 cities of 2 trips each.
+        for c in 0..<60 {
+            let members = (0..<400).filter { $0 % 60 == c }.reduce(into: Set<AssetID>()) { $0.formUnion(trips[$1]) }
+            open.append(AlbumProposal(id: SortlyID("c\(c)"), kind: .placeCollection(.country), title: "Land \(c)", assetIDs: members))
+        }
+        for c in 0..<200 {
+            let p = AlbumProposal(id: SortlyID("s\(c)"), kind: .placeCollection(.locality), title: "Stadt \(c)",
+                                  assetIDs: trips[c].union(trips[c + 200]))
+            if c % 4 == 0 { dismissed.append(p) } else { open.append(p) }
+        }
+        let start = Date()
+        let matches = AnalysisPipeline.match(open, dismissed: dismissed, against: CollectionInventory(albums), overrides: OverrideSet(),
+                                             assignments: [:], trips: trips)
+        let seconds = Date().timeIntervalSince(start)
+        print("PLACE-PROBE seconds=\(seconds)")
+        #expect(matches.count == open.count + dismissed.count)
+        #expect(seconds < 5)
+    }
+
+    /// Countries, regions and towns over the same 50,000 photos, every photo in about 30
+    /// albums: the work per photo and album dominates. The one-trip rule must not add to it
+    /// (re-check 16.11.: it counted per photo and album for every place, 2.4x in a probe).
+    /// Best of three runs with and without the detected trips.
+    @Test func oneTripRuleAddsNoWorkPerPhoto() {
+        func ids(_ range: Range<Int>) -> Set<AssetID> { Set(range.map { AssetID("y-\($0)") }) }
+        let trips = (0..<500).map { ids(($0 * 100)..<($0 * 100 + 100)) }
+        var albums: [CollectionSnapshot] = []
+        for i in 0..<300 { albums.append(CollectionSnapshot(id: CollectionID("a\(i)"), title: "Album \(i)", assetIDs: ids((i * 160)..<min(50_000, i * 160 + 5000)))) }
+        let inventory = CollectionInventory(albums)
+        var open: [AlbumProposal] = [], dismissed: [AlbumProposal] = []
+        for (level, size) in [(PlaceLevel.country, 5000), (PlaceLevel.administrativeArea, 1000), (PlaceLevel.locality, 200)] as [(PlaceLevel, Int)] {
+            for c in 0..<(50_000 / size) {
+                let p = AlbumProposal(id: SortlyID("\(level)-\(c)"), kind: .placeCollection(level), title: "Ort \(level) \(c)",
+                                      assetIDs: ids((c * size)..<(c * size + size)))
+                if c % 4 == 0 { dismissed.append(p) } else { open.append(p) }
+            }
+        }
+        func seconds(_ trips: [Set<AssetID>]) -> Double {
+            (0..<3).map { _ in
+                let start = Date()
+                _ = AnalysisPipeline.match(open, dismissed: dismissed, against: inventory, overrides: OverrideSet(), assignments: [:], trips: trips)
+                return Date().timeIntervalSince(start)
+            }.min()!
+        }
+        let without = seconds([]), with = seconds(trips)
+        print("PAIR-PROBE without trips \(without) s, with trips \(with) s, ratio \(with / without)")
+        #expect(with / without < 1.2)
+    }
+}

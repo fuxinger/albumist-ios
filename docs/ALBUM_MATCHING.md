@@ -90,10 +90,13 @@ mit Fotos aus ganz Italien zu ergänzen. Ergänzt wird nur ein Album, das ein Wo
 Ort teilt („Urlaub in Italien“). Ein Album, das schon den ganzen Ort enthält, zählt weiter
 als vollständig. Unter „Anpassen“ kann man ein Teil-Album trotzdem wählen.
 
-**Eine Reise** (BEFUNDE #3): Liegen alle Fotos eines Albums, die zum Ort gehören, in einer
-einzigen erkannten Reise (auch einer, die zu klein für einen eigenen Vorschlag ist), und hat
-diese Reise weniger als 80 % der Fotos des Orts, ist das Album diese Reise, ein Teil – auch
-ohne Jahr im Namen. Hat man das Land nur auf dieser Reise besucht, bleibt es sein Album.
+**Eine Reise** (BEFUNDE #3): Liegen alle Fotos eines Albums in einer einzigen erkannten Reise
+(auch einer, die zu klein für einen eigenen Vorschlag ist), und hat diese Reise weniger als
+80 % der Fotos des Orts, ist das Album diese Reise, ein Teil – auch ohne Jahr im Namen
+(„Urlaub in Italien“). Hat man das Land nur auf dieser Reise besucht, bleibt es sein Album.
+**Ausnahme:** Ein Album, das nur nach dem Ort heißt („Italien“, nach der ersten Reise
+angelegt), bleibt das Album des Orts wie ohne Reisen. Die Reise wird pro Album nur einmal je
+Abgleich bestimmt.
 
 **Jahr im Namen** (Prüfung 16.11.2026, A2/A9): Steht im Albumnamen ein Jahr, das nicht im
 Namen des Vorschlags steht („Italien 2019“, „Italien '19“, „Urlaub2019“, Albumists eigenes

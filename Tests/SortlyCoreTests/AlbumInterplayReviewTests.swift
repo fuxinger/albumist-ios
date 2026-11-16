@@ -449,3 +449,31 @@ struct AlbumInterplaySecondReviewTests {
         #expect(!ProposalDecision.isSafeToAcceptUnseen(sensitive, match: nil))
     }
 }
+
+/// Re-check of claude/pro-albums (16.11.): what was left after the second review.
+@Suite("Review 16.11.: Nachprüfung")
+struct AlbumInterplayRecheckTests {
+    let matcher = AlbumMatcher()
+
+    func set(_ prefix: String, _ range: Range<Int>) -> Set<AssetID> {
+        Set(range.map { AssetID("\(prefix)-\($0)") })
+    }
+
+    /// 1: "Italien", made after the first of three trips, stays the country's album. The
+    /// one-trip rule made it a part, and the country got a second "Italien" with "Gleicher
+    /// Name, anderer Inhalt".
+    @Test func albumNamedOnlyAfterThePlaceIsNotOneTrip() throws {
+        let t19 = set("it19", 0..<100), t21 = set("it21", 0..<100), t23 = set("it23", 0..<100)
+        let country = AlbumProposal(id: SortlyID("it"), kind: .placeCollection(.country), title: "Italien",
+                                    folderPath: ["Länder"], assetIDs: t19.union(t21).union(t23))
+        let album = CollectionSnapshot(id: "u-it", title: "Italien", assetIDs: t19)
+        let r = try #require(matcher.match([country], against: CollectionInventory([album]), trips: [t19, t21, t23])[country.id])
+        #expect(r.status == .extendable)
+        #expect(ProposalDecision.recommended(for: country, match: r) == .extendExisting("u-it"))
+        // The same as without the trips.
+        #expect(matcher.match([country], against: CollectionInventory([album]))[country.id]?.status == r.status)
+        // Another name: still the trip, a part.
+        let other = CollectionSnapshot(id: "u-it", title: "Urlaub in Italien", assetIDs: t19)
+        #expect(matcher.match([country], against: CollectionInventory([other]), trips: [t19, t21, t23])[country.id]?.status == .newAlbumRequired)
+    }
+}

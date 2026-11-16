@@ -104,7 +104,8 @@ public struct AlbumMatcher: Sendable {
         /// holds this much of it; below, it is only a possible match (review 16.11.).
         public var unnamedCollectionCoverage = 0.8
         /// A place album whose photos all lie in one trip is that trip, not the place, when the
-        /// trip holds less than this share of the place (review 16.11., BEFUNDE #3).
+        /// trip holds less than this share of the place (review 16.11., BEFUNDE #3). Not an
+        /// album named only after the place ("Italien").
         public var oneTripShareOfPlace = 0.8
         /// Share of an album that lies in *other* sibling proposals before it is
         /// treated as a broader collection (Scenario C).
@@ -185,6 +186,8 @@ public struct AlbumMatcher: Sendable {
         // Counted once per album instead of once per suggestion, so a big album shared by
         // many suggestions (all favourites, a camera roll export) is read only once.
         var siblingCounts: [String: [CollectionID: [SortlyID: Int]]] = [:]
+        // Per album, once per run: the one trip all its photos lie in (inner nil: none).
+        var albumTrips: [CollectionID: Int?] = [:]
         var taken: [SortlyID: Set<CollectionID>] = [:]
         func run(_ proposal: AlbumProposal) {
             let claimed = Set(owners.compactMap { albumID, ids in ids.contains(proposal.id) ? nil : albumID })
@@ -198,6 +201,8 @@ public struct AlbumMatcher: Sendable {
                 claimedByOthers: claimed,
                 taken: taken[proposal.id] ?? [],
                 tripOf: tripOf,
+                trips: trips,
+                albumTrips: &albumTrips,
                 membership: membership,
                 siblings: siblingOf[family] ?? [:],
                 siblingCounts: &counts,
@@ -254,34 +259,44 @@ public struct AlbumMatcher: Sendable {
         claimedByOthers: Set<CollectionID>,
         taken: Set<CollectionID>,
         tripOf: [AssetID: Int],
+        trips: [Set<AssetID>],
+        albumTrips: inout [CollectionID: Int?],
         membership: [AssetID: [CollectionID]],
         siblings: [AssetID: SortlyID],
         siblingCounts: inout [CollectionID: [SortlyID: Int]],
         titleIndex: [String: [CollectionID]]
     ) -> MatchResult {
         var intersections: [CollectionID: Int] = [:]
-        // Places only: the one trip all of an album's shared photos lie in (nil: none or several).
-        var albumTrip: [CollectionID: Int?] = [:]
-        var tripCount: [Int: Int] = [:]
+        for asset in proposal.assetIDs {
+            for album in membership[asset] ?? [] { intersections[album, default: 0] += 1 }
+        }
         let tracksTrips: Bool
         if case .placeCollection = proposal.kind { tracksTrips = !tripOf.isEmpty } else { tracksTrips = false }
-        for asset in proposal.assetIDs {
-            let trip = tracksTrips ? tripOf[asset] : nil
-            if let trip { tripCount[trip, default: 0] += 1 }
-            for album in membership[asset] ?? [] {
-                intersections[album, default: 0] += 1
-                if tracksTrips {
-                    if let seen = albumTrip[album] {
-                        if seen != trip { albumTrip[album] = .some(nil) }
-                    } else {
-                        albumTrip[album] = .some(trip)
-                    }
+        var tripCounts: [Int: Int] = [:]
+        /// All the album's photos lie in one trip, and the place is much more than that trip.
+        /// The trip of an album is found once per run (`albumTrips`), only for albums asked about.
+        func isOneTripOfPlace(_ album: CollectionSnapshot) -> Bool {
+            guard tracksTrips else { return false }
+            let trip: Int?
+            if let known = albumTrips[album.id] {
+                trip = known
+            } else {
+                var found: Int?
+                for asset in album.assetIDs {
+                    guard let t = tripOf[asset], found == nil || found == t else { found = nil; break }
+                    found = t
                 }
+                albumTrips[album.id] = .some(found)
+                trip = found
             }
-        }
-        /// The album's photos of this place all lie in one trip, and the place is much more than it.
-        func isOneTripOfPlace(_ albumID: CollectionID) -> Bool {
-            guard let trip = albumTrip[albumID] ?? nil, let count = tripCount[trip] else { return false }
+            guard let trip else { return false }
+            let count: Int
+            if let known = tripCounts[trip] {
+                count = known
+            } else {
+                count = trips[trip].reduce(0) { $0 + (proposal.assetIDs.contains($1) ? 1 : 0) }
+                tripCounts[trip] = count
+            }
             return Double(count) < thresholds.oneTripShareOfPlace * Double(proposal.assetIDs.count)
         }
 
@@ -350,7 +365,10 @@ public struct AlbumMatcher: Sendable {
                 isEditable: album.isEditableAlbum
             )
             // In this run the album is another suggestion's: offered under "Anpassen" only.
-            let oneTrip = relation != .equivalent && metrics.coverage < thresholds.completeCoverage && isOneTripOfPlace(albumID)
+            // An album named only after the place ("Italien" made after the first trip) stays the
+            // place's album, as without trips (re-check 16.11.).
+            let oneTrip = relation != .equivalent && metrics.coverage < thresholds.completeCoverage
+                && tracksTrips && isOneTripOfPlace(album) && !Self.nameAddsNothing(album: album.title, proposal: proposal.title)
             if isTaken && !holdsAll || oneTrip || isPart(candidate, of: proposal) {
                 parts.append(candidate)
                 continue
@@ -556,14 +574,18 @@ public struct AlbumMatcher: Sendable {
     }
 
     static func nameSaysCollection(album: String, proposal: String) -> Bool {
+        if nameAddsNothing(album: album, proposal: proposal) { return true }
+        return AlbumTitle.tokens(album).intersection(AlbumTitle.tokens(proposal)).contains { !isDateWord($0) }
+    }
+
+    /// Nothing in the album's name beyond the suggestion's: "Italien" for Italien, "2019" for
+    /// 2019, "Winter 2025/2026" for "Winter 2025/26". An empty name says nothing.
+    static func nameAddsNothing(album: String, proposal: String) -> Bool {
         func words(_ title: String) -> Set<String> { AlbumTitle.tokens(title).filter { !$0.allSatisfy { $0.isASCII && $0.isNumber } } }
-        let a = words(album), p = words(proposal)
+        let a = words(album)
         let albumYears = years(in: album)
         guard !a.isEmpty || !albumYears.isEmpty else { return false }
-        // Nothing in the album's name beyond the suggestion's ("Italien", "2019",
-        // "Winter 2025/2026" for "Winter 2025/26").
-        if a.isSubset(of: p) && albumYears.isSubset(of: years(in: proposal)) { return true }
-        return a.intersection(p).contains { !isDateWord($0) }
+        return a.isSubset(of: words(proposal)) && albumYears.isSubset(of: years(in: proposal))
     }
 
     /// The other albums that fit a suggestion exactly as well as its best album when several

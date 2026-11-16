@@ -48,6 +48,14 @@ final class AppModel {
         /// The same as rules for the card: catching up, the value never shown lower, the
         /// widths that continue once (`ResumedRun`, tested in SortlyEngine).
         var resumed: ResumedRun?
+        /// This run's workload, once said (after the trips step): the marker keeps the work
+        /// left from it (`AnalysisWorkload.heavyLeft`).
+        var workload: AnalysisWorkload?
+        /// Photos in the library, from the library read (kept with the marker).
+        var libraryPhotos: Int?
+        /// The measured work up to the step a run goes on from (`ResumedRun.secondsUntilBack`):
+        /// catching up only while it is quick.
+        var untilBack: Double?
         /// The places step's pass over the offline map: photos checked so far, of how many
         /// (the count of places only rises with the towns, review of d612bc0).
         var mapPass: AnalysisPipeline.MapPass?
@@ -74,17 +82,24 @@ final class AppModel {
         }
         /// Still on the quick first steps of a run that goes on from further ahead.
         var isCatchingUp: Bool {
-            resumed?.isCatchingUp(running: isRunning, at: stage?.number) ?? false
+            resumed?.isCatchingUp(running: isRunning, at: stage?.number, secondsLeft: untilBack) ?? false
         }
-        /// The bar's value: never below where the interrupted run had got to (`ResumedRun`).
-        /// A run that ended shows where it stopped (the paused card said "0 %" or the value the
-        /// run started from, stress run 43833158673).
+        /// The last run finished the whole analysis: only then does the card say 100 %.
+        var isComplete: Bool { !isRunning && lastReport?.isComplete == true }
+        /// The label of a phase of its own ("Neue Fotos werden analysiert", "Analyse nach
+        /// Update"): much more work than when the run it goes on from stopped (`ResumedRun`).
+        var newWork: ResumedRun.NewWork? { resumed?.newWork }
+        /// The widths the segments are drawn with and the glide is capped by (`ResumedRun.drawnWidths`).
+        var barWidths: StepWidths { resumed?.drawnWidths(widths) ?? widths }
+        /// The bar's value: never below where the interrupted run had got to, unless a phase
+        /// of its own started (`ResumedRun`). A run that ended shows where it stopped (the
+        /// paused card said "0 %" or the value the run started from, stress run 43833158673).
+        /// Never 100 % before the analysis is complete (`AnalysisPercent`).
         var shownOverall: Double {
             let stopped = isRunning ? nil : stoppedAt.map { widths.overall(step: $0.step, completed: $0.completed, total: $0.total) }
-            if let resumed {
-                return resumed.shown(running: isRunning, catchingUp: isCatchingUp, overall: overall, stopped: stopped)
-            }
-            return stopped ?? overall
+            let value = resumed.map { $0.shown(running: isRunning, catchingUp: isCatchingUp, overall: overall, stopped: stopped) }
+                ?? stopped ?? overall
+            return AnalysisPercent.value(value, isComplete: isComplete)
         }
         /// Photos still to look at in the current stage (images or texts).
         var remaining: Int { max(0, total - completed) }
@@ -757,7 +772,14 @@ final class AppModel {
         analysis.appleWait = false
         analysis.stoppedAt = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
-        analysis.resumed = analysis.resumeFrom.map { ResumedRun(stage: $0.stage, shown: $0.overall) }
+        analysis.resumed = analysis.resumeFrom.map {
+            ResumedRun(stage: $0.stage, shown: $0.overall, left: $0.left, photos: $0.photos,
+                       updated: $0.version.map { $0 != AnalysisPipeline.analysisVersion } ?? false,
+                       newWork: $0.newWork)
+        }
+        analysis.workload = nil
+        analysis.libraryPhotos = nil
+        analysis.untilBack = nil
         analysis.mapPass = nil
         HeatLog.reset()
         analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
@@ -912,28 +934,50 @@ final class AppModel {
         analysis.waiting = nil
         analysis.appleWait = progress.waitLeft != nil
         analysis.mapPass = progress.stage == .places ? progress.mapPass : nil
-        // Back at the step it went on from, once (`ResumedRun.back`): below the value shown
-        // before (more work than then), the rest of the work is spread over the rest of the
-        // bar from that value. Nothing here ever draws the bar lower.
-        if var resumed = analysis.resumed {
-            if let continued = resumed.back(at: progress.stage.number, step: AnalysisStep(progress.stage),
-                                            completed: progress.completed, total: progress.total, widths: analysis.widths) {
-                analysis.widths = continued
-                widthsFixed = true
-            }
-            analysis.resumed = resumed
-        }
-        // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`).
-        if !analysis.isCatchingUp {
-            AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.shownOverall,
-                                              widths: widthsFixed ? analysis.widths : nil, database: databaseID)
-        }
         let step = AnalysisStep(progress.stage)
         if !analysis.pausing {
             estimator.record(step: step, completed: progress.completed, total: progress.total, at: now,
                              appleWait: progress.waitLeft != nil)
         }
-        glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
+        if progress.stage == .inventory, progress.total > 0 { analysis.libraryPhotos = progress.total }
+        // A run that goes on (`ResumedRun`, review of 83db832):
+        // - many more photos than when it stopped: a phase of its own starts at once, with its
+        //   own label and its own honest value from its own start (the bar starts again too);
+        // - catching up only while the measured work up to the step it stopped in is quick;
+        // - on the first report that is not catching up, once: below the value shown before,
+        //   the rest of the work is spread over the rest of the bar from that value.
+        if var resumed = analysis.resumed {
+            if progress.stage == .inventory, progress.total > 0, resumed.library(photos: progress.total) {
+                analysis.widths = .standard
+                widthsFixed = false
+                glide.reset()
+            }
+            analysis.untilBack = ResumedRun.secondsUntilBack(stage: resumed.stage, step: step, completed: progress.completed,
+                                                             total: progress.total, itemsPerSecond: estimator.rate,
+                                                             workload: analysis.workload)
+            if !resumed.isCatchingUp(running: true, at: progress.stage.number, secondsLeft: analysis.untilBack),
+               let continued = resumed.back(at: progress.stage.number, step: step, completed: progress.completed,
+                                            total: progress.total, widths: analysis.widths) {
+                analysis.widths = continued
+                widthsFixed = true
+            }
+            analysis.resumed = resumed
+        }
+        // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`), with
+        // the work left then. Before this run's workload is known, the work left and the
+        // library of the run it goes on from are kept with it.
+        if !analysis.isCatchingUp {
+            let carried = analysis.workload == nil ? analysis.resumeFrom : nil
+            AnalysisMarker.unfinished = .init(
+                stage: progress.stage.number, overall: analysis.shownOverall,
+                widths: widthsFixed ? analysis.widths : nil, database: databaseID,
+                left: analysis.workload.map { $0.heavyLeft(at: step, completed: progress.completed, total: progress.total) }
+                    ?? carried?.left,
+                photos: carried?.photos ?? analysis.libraryPhotos,
+                version: carried?.version ?? AnalysisPipeline.analysisVersion,
+                newWork: analysis.newWork)
+        }
+        glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.barWidths,
                      itemsPerSecond: estimator.rate, total: progress.total)
         keepRunningInBackgroundIfLong()
     }
@@ -997,7 +1041,24 @@ final class AppModel {
         lastTickClock = (now, Date())
         if let workload = taken.workload {
             estimator.setWorkload(workload)
-            if !widthsFixed {
+            analysis.workload = workload
+            // Much more work left than when the run it goes on from stopped: a phase of its own
+            // ("Analyse nach Update" or "Neue Fotos werden analysiert") with this workload's
+            // widths, from its own start (`ResumedRun.workload`).
+            var startsPhase = false
+            if var resumed = analysis.resumed {
+                startsPhase = resumed.workload(workload)
+                analysis.resumed = resumed
+            }
+            if startsPhase {
+                analysis.widths = StepWidths(workload: workload)
+                widthsFixed = true
+                glide.reset()
+                if let step = analysis.step {
+                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.barWidths,
+                                 itemsPerSecond: nil, total: analysis.total)
+                }
+            } else if !widthsFixed {
                 // Before this the first two steps used the standard widths. The bar goes on
                 // under the new widths (review I3: holding the old value made it stand still
                 // well into the places step). Where the new widths put the end of the trips
@@ -1015,7 +1076,7 @@ final class AppModel {
                 widthsFixed = true
                 glide.reset(keeping: analysisBar)
                 if let step = analysis.step {
-                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
+                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.barWidths,
                                  itemsPerSecond: nil, total: analysis.total)
                 }
             }

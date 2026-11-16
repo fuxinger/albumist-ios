@@ -70,7 +70,11 @@ public struct SafetyBackup: Codable, Sendable, Equatable {
     /// next launch still finishes them (audit 2, 3.1). Missing in copies of older versions.
     public var pendingFinalization: [String]? = nil
 
-    public var isEmpty: Bool { overrides.isEmpty && rules.isEmpty && managedAlbums.isEmpty && plans.isEmpty && values.isEmpty }
+    /// Values that are not the database's own stamp count (copies made by 83db832 carried it).
+    public var isEmpty: Bool {
+        overrides.isEmpty && rules.isEmpty && managedAlbums.isEmpty && plans.isEmpty
+            && values.allSatisfy { !SortlyStore.isSafetyValue($0.key) }
+    }
 
     /// The managed-album records in this copy (to check that it belongs to this library).
     public func managedAlbumStates() -> [ManagedAlbumState] {
@@ -198,7 +202,16 @@ extension SortlyStore {
         return false
     }
 
-    private static let keptValues = "key NOT LIKE 'analysis.%' AND key NOT LIKE 'execution.%'"
+    /// Settings rows a copy keeps. Not the analysis results, not in-flight execution markers,
+    /// and never the database's own stamp (`identity.%`; `database.identity` in 83db832):
+    /// counted as safety data it made a fresh database refuse the restore, and its copy
+    /// replace a good one (third review of the switches branch).
+    private static let keptValues = "key NOT LIKE 'analysis.%' AND key NOT LIKE 'execution.%' AND key NOT LIKE 'identity.%' AND key <> 'database.identity'"
+
+    /// The same rule for one key (a copy's rows on restore, `SafetyBackup.isEmpty`).
+    public static func isSafetyValue(_ key: String) -> Bool {
+        !key.hasPrefix("analysis.") && !key.hasPrefix("execution.") && !key.hasPrefix("identity.") && key != "database.identity"
+    }
     /// Plans that finished but are not finalized yet (written by the app).
     public static let pendingFinalizationKey = "execution.pendingFinalization"
 
@@ -249,7 +262,8 @@ extension SortlyStore {
                     try db.execute("INSERT OR REPLACE INTO rules (id, version, payload, updated_at) VALUES (?, ?, ?, NULL)",
                                    [.text(r.key), .integer(Int64(r.number ?? 1)), .blob(r.payload)])
                 }
-                for r in backup.values {
+                // Never the old database's stamp: the new one keeps its own.
+                for r in backup.values where Self.isSafetyValue(r.key) {
                     try db.execute("INSERT OR REPLACE INTO settings (key, payload) VALUES (?, ?)", [.text(r.key), .blob(r.payload)])
                 }
                 if includingLibraryState { try insertLibraryState(backup) }

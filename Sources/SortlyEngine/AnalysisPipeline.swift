@@ -174,6 +174,9 @@ public actor AnalysisPipeline {
     /// 2: screenshot categories with whole-word flight rules and short keywords as whole words
     /// (first device test 15.11.); every stored screenshot is read once more.
     public static let textVersion = 2
+    /// Both versions together: a marker that kept another one was written before an update
+    /// that changed the analysis ("Analyse nach Update", `ResumedRun`).
+    public static var analysisVersion: String { "\(contentVersion).\(textVersion)" }
     /// Analyzer errors in a row after which a run stops instead of going through every photo:
     /// when Vision itself fails, each further photo would fail the same way.
     static let analyzerFailureLimit = 5

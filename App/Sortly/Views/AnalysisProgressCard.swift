@@ -49,6 +49,8 @@ struct AnalysisProgressCard: View {
         switch state {
         case .running(let p, _, _, let catchingUp):
             if catchingUp != nil { return String(localized: "Macht da weiter, wo sie aufgehört hat") }
+            // A phase of its own after a stop: why the number started again (review of 83db832).
+            if let newWork = model.analysis.newWork { return AnalysisText.newWork(newWork) }
             return p?.step.labelText ?? String(localized: "Analyse läuft")
         case .waiting(.cooling, _): return String(localized: "Wartet, bis dein iPhone abkühlt")
         case .waiting(.charging, _): return String(localized: "Wartet aufs Laden")
@@ -159,7 +161,7 @@ struct AnalysisProgressCard: View {
                 count(position)
             }
             statusLines
-            AnalysisBar(widths: model.analysis.widths, grey: state.isGrey, working: state.isWorking,
+            AnalysisBar(widths: model.analysis.barWidths, grey: state.isGrey, working: state.isWorking,
                         runningStep: position?.step)
             Text(stepLine)
                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
@@ -269,7 +271,7 @@ struct AnalysisProgressCard: View {
         }
         if case .running = state, let finish = model.analysisFinish { parts.append(AnalysisText.finish(finish)) }
         parts.append(stepLine)
-        parts.append(String(localized: "Analyse zu \(Int((model.analysis.shownOverall * 100).rounded())) % fertig"))
+        parts.append(String(localized: "Analyse zu \(AnalysisPercent.percent(model.analysis.shownOverall, isComplete: model.analysis.isComplete)) % fertig"))
         return parts.joined(separator: ", ")
     }
 
@@ -593,7 +595,9 @@ struct AnalysisDetailsSheet: View {
     private func summary(now: Date) -> String {
         var parts: [String] = []
         if let finish = model.analysisFinish, model.analysis.isRunning { parts.append(AnalysisText.finish(finish)) }
-        parts.append(model.analysisBar.formatted(.percent.precision(.fractionLength(0))))
+        // Never 100 % before the end (`AnalysisPercent`).
+        parts.append(AnalysisPercent.value(model.analysisBar, isComplete: model.analysis.isComplete)
+            .formatted(.percent.precision(.fractionLength(0))))
         if let start = model.analysisStartedAt, model.analysis.isRunning {
             let elapsed = Duration.seconds(max(60, now.timeIntervalSince(start)))
             parts.append(String(localized: "bisher \(elapsed.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))"))
@@ -613,7 +617,7 @@ struct AnalysisDetailsSheet: View {
 
     private func row(_ step: AnalysisStep) -> some View {
         let standing = standing(step)
-        let fraction = model.analysis.widths.fills(for: model.analysisBar)[step.rawValue]
+        let fraction = model.analysis.barWidths.fills(for: model.analysisBar)[step.rawValue]
         return HStack(alignment: .top, spacing: 14) {
             Group {
                 switch standing {

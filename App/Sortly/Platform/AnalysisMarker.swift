@@ -16,6 +16,15 @@ enum AnalysisMarker {
         /// The database it was written for (`SortlyStore.identity`): a device backup brings
         /// the marker back but not the database. `nil` in markers of older versions.
         var database: String? = nil
+        /// Photos still to look at and screenshots still to read (`AnalysisWorkload.heavyLeft`),
+        /// the library's photos, and the analysis version when the run was last seen: on return,
+        /// much more work than then starts a phase of its own instead of holding the value
+        /// (`ResumedRun`, review of 83db832). `nil` in markers of older versions.
+        var left: Int? = nil
+        var photos: Int? = nil
+        var version: String? = nil
+        /// The label of the phase the run was in, kept when it goes on.
+        var newWork: ResumedRun.NewWork? = nil
     }
 
     private static let unfinishedKey = "analysis.unfinished"

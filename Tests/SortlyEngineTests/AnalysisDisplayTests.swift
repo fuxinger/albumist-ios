@@ -505,6 +505,205 @@ struct AnalysisDisplayTests {
         #expect(ahead.shown(running: true, catchingUp: false, overall: 0.7, stopped: nil) == 0.7)
     }
 
+    // MARK: New work after a stop (review of 83db832, IMPORTANT 2)
+
+    /// "Much more work": more than 1.5 times the work left when the run stopped, and at least
+    /// 500 photos more. Both have to hold.
+    @Test func muchMoreWorkHasAClearThreshold() {
+        #expect(ResumedRun.isMuchMore(3_001, than: 2_000))
+        #expect(!ResumedRun.isMuchMore(3_000, than: 2_000))      // exactly 1.5 times
+        #expect(!ResumedRun.isMuchMore(700, than: 300))          // 2.3 times, but only 400 more
+        #expect(ResumedRun.isMuchMore(800, than: 300))
+        #expect(ResumedRun.isMuchMore(500, than: 0))             // stopped with nothing left
+        #expect(!ResumedRun.isMuchMore(499, than: 0))
+    }
+
+    /// The work a marker keeps: photos still to look at and screenshots still to read.
+    @Test func markerKeepsTheWorkLeft() {
+        let w = AnalysisWorkload(photos: 50_000, located: 30_000, screenshots: 2_000, contentLeft: 40_000, textLeft: 1_500)
+        #expect(w.heavyLeft(at: .places, completed: 10, total: 30_000) == 41_500)
+        #expect(w.heavyLeft(at: .content, completed: 30_000, total: 40_000) == 11_500)
+        #expect(w.heavyLeft(at: .text, completed: 1_000, total: 1_500) == 500)
+        #expect(w.heavyLeft(at: .proposals, completed: 0, total: 0) == 0)
+    }
+
+    /// Label "Neue Fotos werden analysiert": stopped in the text step at 90 % with 2,000
+    /// screenshots left; 10,000 photos came in. The library read says so, and the run starts a
+    /// phase of its own at once: its own honest value from its own start, never back within
+    /// the phase, never 100 % before the end. A few new photos do not start one.
+    @Test func newPhotosStartTheirOwnPhase() {
+        var few = ResumedRun(stage: 5, shown: 0.90, left: 2_000, photos: 50_000)
+        let r1 = few.library(photos: 50_300)
+        #expect(!r1)
+        #expect(few.newWork == nil)
+        #expect(few.isCatchingUp(running: true, at: 1))
+
+        let w = StepWidths.standard
+        var run = ResumedRun(stage: 5, shown: 0.90, left: 2_000, photos: 50_000)
+        let r2 = run.library(photos: 60_000)
+        #expect(r2)
+        #expect(run.newWork == .newPhotos)
+        #expect(!run.isCatchingUp(running: true, at: 1))
+        let r3 = run.back(at: 1, step: .library, completed: 0, total: 60_000, widths: w)
+        #expect(r3 == nil)
+        // Decided once: the workload later changes nothing.
+        let more = AnalysisWorkload(photos: 60_000, located: 30_000, screenshots: 2_100, contentLeft: 10_000, textLeft: 2_100)
+        let r4 = run.workload(more)
+        #expect(!r4)
+        #expect(run.newWork == .newPhotos)
+        var last = -1.0
+        var path: [(AnalysisStep, Int)] = [(.library, 60_000), (.trips, 1), (.places, 30_000), (.content, 10_000), (.text, 2_100)]
+        path.append((.proposals, 1))
+        for (step, total) in path {
+            for done in stride(from: 0, through: total, by: max(1, total / 20)) {
+                let v = run.shown(running: true, catchingUp: false, overall: w.overall(step: step, completed: done, total: total), stopped: nil)
+                #expect(v >= last, "\(step) \(done): \(v) after \(last)")
+                #expect(v <= AnalysisPercent.cap)
+                last = v
+            }
+        }
+        // Its own start: the number begins at the phase's real value, not at the floor.
+        #expect(run.shown(running: true, catchingUp: false, overall: 0, stopped: nil) == 0)
+        // Paused inside the phase: where it stood, not the old floor.
+        #expect(run.shown(running: false, catchingUp: false, overall: 0, stopped: 0.2) == 0.2)
+    }
+
+    /// Label "Analyse nach Update": stopped near the end (99.6 %, nothing left), then an update
+    /// changed the analysis and asks for every image again. The library is the same, so the
+    /// phase starts with the workload, under the update's label.
+    @Test func updateStartsItsOwnPhase() {
+        var run = ResumedRun(stage: 7, shown: 0.996, left: 0, photos: 50_000, updated: true)
+        let r5 = run.library(photos: 50_000)
+        #expect(!r5)
+        #expect(run.isCatchingUp(running: true, at: 1))
+        let update = AnalysisWorkload(photos: 50_000, located: 30_000, screenshots: 2_000, contentLeft: 50_000, textLeft: 0)
+        let r6 = run.workload(update)
+        #expect(r6)
+        #expect(run.newWork == .afterUpdate)
+        let widths = StepWidths(workload: update)
+        let atStart = run.shown(running: true, catchingUp: run.isCatchingUp(running: true, at: 2),
+                                overall: widths.overall(step: .trips, completed: 1, total: 1), stopped: nil)
+        #expect(atStart < 0.1, "its own start: \(atStart)")
+        // The same new work without an update says "Neue Fotos".
+        var same = ResumedRun(stage: 7, shown: 0.996, left: 0, photos: 50_000)
+        let r7 = same.workload(update)
+        #expect(r7)
+        #expect(same.newWork == .newPhotos)
+        // A marker of an older version kept no work left: no phase (it goes on from the floor).
+        var old = ResumedRun(stage: 7, shown: 0.996)
+        let r8 = old.workload(update)
+        #expect(!r8)
+    }
+
+    /// Catching up (holding the floor) is decided by the measured work up to the stopped step,
+    /// not by the step: the same image step is quick with 100 photos left and not with 50,000.
+    @Test func catchingUpOnlyWhileTheWorkIsQuick() {
+        let run = ResumedRun(stage: 5, shown: 0.90, left: 2_000, photos: 50_000)
+        let few = AnalysisWorkload(photos: 50_000, located: 30_000, screenshots: 2_000, contentLeft: 100, textLeft: 2_000)
+        let many = AnalysisWorkload(photos: 50_000, located: 30_000, screenshots: 2_000, contentLeft: 50_000, textLeft: 2_000)
+        // Not measured yet (the step's first seconds): nothing decided, still catching up.
+        let unmeasured = ResumedRun.secondsUntilBack(stage: 5, step: .library, completed: 0, total: 50_000, itemsPerSecond: nil, workload: nil)
+        #expect(unmeasured == nil)
+        #expect(run.isCatchingUp(running: true, at: 1, secondsLeft: unmeasured))
+        // Reading known photos fast: quick.
+        let read = ResumedRun.secondsUntilBack(stage: 5, step: .library, completed: 0, total: 50_000, itemsPerSecond: 10_000, workload: nil)
+        #expect(run.isCatchingUp(running: true, at: 1, secondsLeft: read))
+        // Places done, 100 images to look at: quick. 50,000: not.
+        let quick = ResumedRun.secondsUntilBack(stage: 5, step: .places, completed: 30_000, total: 30_000, itemsPerSecond: 50, workload: few)
+        let slow = ResumedRun.secondsUntilBack(stage: 5, step: .places, completed: 30_000, total: 30_000, itemsPerSecond: 50, workload: many)
+        #expect(run.isCatchingUp(running: true, at: 3, secondsLeft: quick))
+        #expect(!run.isCatchingUp(running: true, at: 3, secondsLeft: slow))
+        let inStep = ResumedRun.secondsUntilBack(stage: 5, step: .content, completed: 0, total: 100, itemsPerSecond: 10, workload: few)
+        #expect(run.isCatchingUp(running: true, at: 4, secondsLeft: inStep))
+        let inBigStep = ResumedRun.secondsUntilBack(stage: 5, step: .content, completed: 0, total: 50_000, itemsPerSecond: 10, workload: many)
+        #expect(!run.isCatchingUp(running: true, at: 4, secondsLeft: inBigStep))
+        // At or after the stopped step: nothing to catch up.
+        #expect(ResumedRun.secondsUntilBack(stage: 5, step: .text, completed: 0, total: 2_000, itemsPerSecond: nil, workload: many) == 0)
+    }
+
+    /// More work before the stopped step, but not much more (or an older marker that kept no
+    /// work left): not quick, so the run goes on from the floor on its first report there,
+    /// and the number moves with the work instead of standing at the floor.
+    @Test func moreWorkBeforeTheStoppedStepGoesOnFromTheFloor() throws {
+        let w = StepWidths.standard
+        for left in [Int?.some(2_000), nil] {
+            var run = ResumedRun(stage: 5, shown: 0.90, left: left, photos: 50_000)
+            let work = AnalysisWorkload(photos: 51_000, located: 30_000, screenshots: 2_000, contentLeft: 1_000, textLeft: 2_000)
+            let r9 = run.workload(work)
+            #expect(!r9)
+            let secondsLeft = ResumedRun.secondsUntilBack(stage: 5, step: .content, completed: 0, total: 1_000, itemsPerSecond: 8, workload: work)
+            #expect(!run.isCatchingUp(running: true, at: 4, secondsLeft: secondsLeft))
+            let continued = run.back(at: 4, step: .content, completed: 0, total: 1_000, widths: w)
+            let widths = try #require(continued)
+            var values: Set<Int> = []
+            var last = 0.0
+            for done in stride(from: 0, through: 1_000, by: 50) {
+                let v = run.shown(running: true, catchingUp: false, overall: widths.overall(step: .content, completed: done, total: 1_000), stopped: nil)
+                #expect(v >= max(last, 0.90 - 1e-9))
+                last = v
+                values.insert(Int((v * 1_000).rounded()))
+            }
+            #expect(values.count > 10, "stands still: \(values.sorted())")
+        }
+    }
+
+    /// A run that goes on inside a phase keeps the phase's label; its floor is the phase's
+    /// value, held as usual.
+    @Test func aPhaseKeepsItsLabelWhenItGoesOn() {
+        let run = ResumedRun(stage: 4, shown: 0.35, left: 30_000, photos: 60_000, newWork: .newPhotos)
+        #expect(run.newWork == .newPhotos)
+        #expect(!run.ownStart)
+        #expect(run.shown(running: true, catchingUp: true, overall: 0.02, stopped: nil) == 0.35)
+    }
+
+    /// Never 100 % while work is left: the number, the glide and a floor from 99.6 % stop at
+    /// 99 %; 100 % only once the analysis is complete.
+    @Test func neverReads100BeforeTheEnd() {
+        #expect(AnalysisPercent.percent(0.996, isComplete: false) == 99)
+        #expect(AnalysisPercent.percent(1, isComplete: false) == 99)
+        #expect(AnalysisPercent.percent(0.42, isComplete: true) == 100)
+        let run = ResumedRun(stage: 7, shown: 0.996)
+        #expect(run.shown(running: true, catchingUp: true, overall: 0.2, stopped: nil) == AnalysisPercent.cap)
+        #expect(run.shown(running: false, catchingUp: false, overall: 0, stopped: nil) == AnalysisPercent.cap)
+        let w = StepWidths.standard
+        var glide = BarGlide()
+        let t0 = ContinuousClock.now
+        glide.update(real: w.overall(step: .proposals, completed: 9, total: 10), at: t0, step: .proposals, widths: w,
+                     itemsPerSecond: 1, total: 10)
+        #expect(glide.value(at: t0 + .seconds(60), gliding: true) <= AnalysisPercent.cap)
+        glide.update(real: 1, at: t0 + .seconds(61), step: .proposals, widths: w, itemsPerSecond: 1, total: 10)
+        #expect(glide.value(at: t0 + .seconds(62), gliding: true) <= AnalysisPercent.cap)
+    }
+
+    /// Minor 3: back in the first step (no earlier steps to shrink), the value is drawn from
+    /// the floor; the segments and the glide's cap use widths that match it, so the running
+    /// segment holds the drawn value and the cap is never below it.
+    @Test func backInTheFirstStepDrawsConsistentSegments() {
+        let w = StepWidths.standard
+        let floor = w.overall(step: .library, completed: 40_000, total: 50_000)
+        var run = ResumedRun(stage: 1, shown: floor)
+        let r10 = run.back(at: 1, step: .library, completed: 0, total: 50_000, widths: w)
+        #expect(r10 == nil)
+        let drawnWidths = run.drawnWidths(w)
+        #expect(drawnWidths != w)
+        let t0 = ContinuousClock.now
+        for done in stride(from: 0, through: 50_000, by: 5_000) {
+            let real = w.overall(step: .library, completed: done, total: 50_000)
+            let v = run.shown(running: true, catchingUp: false, overall: real, stopped: nil)
+            let fills = drawnWidths.fills(for: v)
+            #expect(fills[0] > 0 && fills[0] <= 1)
+            #expect(fills.dropFirst().allSatisfy { $0 == 0 }, "\(done): \(fills)")
+            #expect(v <= drawnWidths.end(of: .library) + 1e-9)
+            var glide = BarGlide()
+            glide.update(real: v, at: t0, step: .library, widths: drawnWidths, itemsPerSecond: 1_000, total: 50_000)
+            #expect(glide.value(at: t0 + .seconds(1), gliding: true) >= v)
+        }
+        // Past the first step the drawn value and the drawn widths agree exactly.
+        let real = w.overall(step: .content, completed: 1_000, total: 4_000)
+        let v = run.shown(running: true, catchingUp: false, overall: real, stopped: nil)
+        #expect(abs(drawnWidths.overall(step: .content, completed: 1_000, total: 4_000) - v) < 1e-9)
+    }
+
     // MARK: Card states (P1, P5–P7, P10–P12, P17)
 
     static func running(_ configure: (inout AnalysisCardState.Inputs) -> Void) -> AnalysisCardState? {

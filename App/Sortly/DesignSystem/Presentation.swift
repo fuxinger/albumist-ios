@@ -285,6 +285,15 @@ enum AnalysisText {
         }
     }
 
+    /// The label of a phase of its own after a stop (`ResumedRun.NewWork`): the number starts
+    /// again from this phase's own start, and the label says why.
+    static func newWork(_ cause: ResumedRun.NewWork) -> String {
+        switch cause {
+        case .newPhotos: String(localized: "Neue Fotos werden analysiert")
+        case .afterUpdate: String(localized: "Analyse nach Update")
+        }
+    }
+
     /// "12.000 von 50.233 mit der Karte geprüft": the places step's pass over the offline map.
     static func mapChecked(_ pass: AnalysisPipeline.MapPass) -> String {
         String(localized: "\(pass.checked.formatted()) von \(pass.of.formatted()) mit der Karte geprüft")

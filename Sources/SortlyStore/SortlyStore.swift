@@ -730,7 +730,8 @@ public actor SortlyStore: PlanJournal {
 
     // MARK: - Identity
 
-    static let identityKey = "database.identity"
+    /// Not part of the safety copy (`keptValues`), not removed by a reset of the analysis.
+    static let identityKey = "identity.database"
 
     /// A stamp made the first time this database is asked for it. What is kept outside the
     /// database belongs to it only with the same stamp: the analysis marker lives in
@@ -759,9 +760,11 @@ public actor SortlyStore: PlanJournal {
             // otherwise the app would keep showing them until the next run finished.
             try db.execute("DELETE FROM settings WHERE key LIKE 'analysis.%'")
             if includingDecisions {
-                for table in ["overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media", "settings"] {
+                for table in ["overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media"] {
                     try db.execute("DELETE FROM \(table)")
                 }
+                // The database stays the same database: its stamp stays.
+                try db.execute("DELETE FROM settings WHERE key NOT LIKE 'identity.%'")
                 journalCache = [:]
             }
         }

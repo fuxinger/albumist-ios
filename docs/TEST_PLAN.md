@@ -122,7 +122,7 @@ Zahl, solange noch gearbeitet wird.
 | P3 App mitten im Lauf beendet und neu gestartet | AnalysisDisplayTests: widthsSurviveAsStored; FullRunDisplay (c): Balken mit festgehaltenen Breiten geht nie zurück | — |
 | P4 App-Wechsel (nicht aktiv) | AnalysisDisplayTests: glideStopsWhenNotGliding | — |
 | P5 Wärme: warm (langsamer), sehr warm (wartet), kritisch | DeviceStateTests: slowerReason…; AnalysisDisplayTests: waitingHasNoFinishTimeAndSettlesAgain, speedChangeMovesTheTimeOnlyPastTheHysteresis; FullRunDisplay (e) | echte Wärme 📱 |
-| P6 Akku unter 10 % | DeviceStateTests: slowerReason…; AnalysisDisplayTests: cardStates | — |
+| P6 Akku unter 10 % (und Hitze: „Wartet …“ bleibt stehen, auch wenn die letzte Meldung davor erst nach Beginn des Wartens gelesen wird, UI-Lauf 43930271358) | DeviceStateTests: slowerReason…; AnalysisDisplayTests: cardStates, mailboxKeepsAWaitThatBeganAfterTheLastReport | DeviceConditionUITests test01, test02 |
 | P7 Stromsparmodus | DeviceStateTests: slowerReason… | — |
 | P8 Leere Mediathek | AnalysisDisplayTests: emptyLibraryWidths; FullRunDisplay: emptyLibraryShowsNoTime | — |
 | P9 Riesige Mediathek (50.000) | AnalysisDisplayTests: fiftyThousandPhotosStayBoundedAndAccurate | Zeit am Gerät 📱 |

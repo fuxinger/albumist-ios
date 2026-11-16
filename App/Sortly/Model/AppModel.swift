@@ -855,11 +855,9 @@ final class AppModel {
                 let report = try await pipeline.run(mode: mode, control: control, onProgress: { progress in
                     mailbox.post(progress)
                 }, onWaiting: { reason in
-                    Task { @MainActor in
-                        let model = AppModel.shared
-                        guard model.analysisGeneration == generation, model.analysis.isRunning else { return }
-                        model.analysis.waiting = reason
-                    }
+                    // Into the same mailbox as the progress, so the tick applies both in the
+                    // order the pipeline said them (see `ProgressMailbox.wait`).
+                    mailbox.wait(reason)
                 })
                 analysis.lastReport = report
                 analysis.lastRun = Date()
@@ -967,7 +965,9 @@ final class AppModel {
         analysis.stage = progress.stage
         analysis.completed = progress.completed
         analysis.total = progress.total
-        analysis.waiting = nil
+        // Not cleared here: a report sent just before a wait for the device began can be taken
+        // after it (the tick runs every 250 ms); the wait comes and goes with the pipeline's
+        // own word, taken in order from the mailbox (`tick`).
         analysis.appleWait = progress.waitLeft != nil
         analysis.mapPass = progress.stage == .places ? progress.mapPass : nil
         let step = AnalysisStep(progress.stage)
@@ -1126,6 +1126,8 @@ final class AppModel {
             }
         }
         if let progress = taken.progress { receive(progress, at: now) }
+        // Hot iPhone, battery nearly empty: as the pipeline said last, after its reports.
+        if taken.waiting != analysis.waiting { analysis.waiting = taken.waiting }
         // "Schon fertig": the early suggestions are read once they are saved (the report that
         // starts the image step comes before that, review I2). Should that read miss them,
         // it is tried again during the image step (the only step they are made in; refreshDerived

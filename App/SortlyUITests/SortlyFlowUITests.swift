@@ -1288,16 +1288,16 @@ final class SortlyFlowUITests: XCTestCase {
         // app is always closed half way.
         launch(["-SortlyUITestSlowPlan"])
         _ = waitStable("analysis idle before interruption", timeout: 120) { analysisIdle }
-        // Select something to apply: the selection of earlier runs, else the recommended ones.
-        var apply = button("ausgewählte Alben anlegen")
-        if !apply.waitForExistence(timeout: 5), tap(reviewSuggestionsButton(), "open suggestions for interruption", timeout: 20) {
-            sleep(1)
-            if button("empfohlene auswählen").waitForExistence(timeout: 5) { button("empfohlene auswählen").tap(); sleep(1) }
-            back(); sleep(1)
-            apply = button("ausgewählte Alben anlegen")
+        // Something to apply: the selection of earlier runs, else the recommended ones, else a
+        // new album of two photos. Tests 1c and 4 apply the recommended suggestions on this
+        // simulator first, so often only one that is not recommended is left (UI run
+        // 43930271358: "1 Vorschlag prüfen", nothing to select, "Missing: open plan for
+        // interruption"). Any plan of two or more changes is cut off by the slow plan.
+        guard openRecommendedPlan("interruption") else {
+            print("UI_STEP_MISSING plan for interruption")
+            XCTFail("No plan to interrupt could be opened")
+            return
         }
-        guard tap(apply, "open plan for interruption", timeout: 20) else { return }
-        sleep(3)
         guard tap(app.buttons["plan.apply"], "start plan for interruption", timeout: 30) else { return }
         sleep(5)
         print("UI_FACT plan running when the app was closed: \(anything("Alben werden angelegt").exists)")

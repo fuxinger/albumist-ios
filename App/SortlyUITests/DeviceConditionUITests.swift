@@ -850,7 +850,11 @@ final class DeviceConditionUITests: XCTestCase {
         continueAfterFailure = true
         prepare()
         let card = anything("wurde unterbrochen")
-        let continued = "Testalbum Fortsetzen"
+        // Album titles stay clear of the words the tap-through sweep never taps ("Fortsetzen",
+        // "Entfernen", …, SortlyFlowUITests.sweepSkip): the albums stay in Photos, and test3
+        // runs on the same simulator after these tests (UI run 43930271358: "The sweep reached
+        // no screen from Alben", both album rows were skipped by their titles).
+        let continued = "Testalbum Vollendet"
         if interruptManualPlan(continued), tap(app.buttons["Rest anlegen"], "continue interrupted plan") {
             let done = waitGone(card, timeout: 120)
             print(done ? "UI_STEP_OK interrupted plan continued" : "UI_STEP_MISSING interrupted plan continued")
@@ -876,7 +880,7 @@ final class DeviceConditionUITests: XCTestCase {
     func test08_RemoveManagedAlbumAndUndo() {
         continueAfterFailure = true
         prepare()
-        let title = "Testalbum Entfernen"
+        let title = "Testalbum Wiederhergestellt" // no sweep-skip word in it (see test07)
         start()
         guard applyManualPlan(title) else { return }
         start()
@@ -1021,9 +1025,18 @@ final class DeviceConditionUITests: XCTestCase {
         sleep(1)
         shot("21-empty-overview")
         XCTAssertTrue(idle, "The analysis of an empty library did not end")
-        let status = anything("0 von 0 sortiert").exists
+        // Since K6 (EmptyLibraryCard, merged from rc-2) the overview says why there is nothing
+        // to sort instead of "0 von 0 sortiert": the card for an empty library, with its title
+        // and explanation inside it (the card contains its elements, id overview.libraryHint).
+        let hint = app.descendants(matching: .any)["overview.libraryHint"]
+        func inHint(_ text: String) -> Bool {
+            hint.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
+        }
+        let status = hint.waitForExistence(timeout: 10) && inHint("Noch keine Fotos") && inHint("Deine Mediathek ist leer")
         print(status ? "UI_STEP_OK empty status" : "UI_STEP_MISSING empty status")
+        if !status { print("UI_FACT empty overview: \(allLabels(app.scrollViews.firstMatch))") }
         XCTAssertTrue(status, "The overview does not say that there is nothing to sort")
+        XCTAssertFalse(anything("0 von 0 sortiert").exists, "An empty library shows the sorted ring instead of saying why")
         XCTAssertTrue(anything("Analyse aktuell").exists, "The analysis card of an empty library is not calm")
         XCTAssertFalse(button("Vorschläge prüfen").exists, "An empty library offers suggestions")
         XCTAssertFalse(app.alerts.firstMatch.exists, "An empty library shows an error")

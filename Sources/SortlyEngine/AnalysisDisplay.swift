@@ -1064,6 +1064,10 @@ public final class ProgressMailbox: Sendable {
         public var recent: [AssetID]
         /// The early suggestions were saved (kept until taken, like the workload).
         public var earlyProposals = false
+        /// What the run waits for (hot iPhone, battery nearly empty), as the pipeline said it
+        /// last (`onWaiting`); `nil` while it works. A state, not a report: it stays until the
+        /// pipeline says otherwise, and every take carries it.
+        public var waiting: PauseReason?
     }
 
     private let state = Mutex(Taken(progress: nil, workload: nil, recent: []))
@@ -1077,6 +1081,15 @@ public final class ProgressMailbox: Sendable {
             if progress.earlyProposals { $0.earlyProposals = true }
             $0.progress = progress
         }
+    }
+
+    /// The run begins or ends a wait for the device (`AnalysisPipeline.run`'s `onWaiting`).
+    /// Kept in the same box as the progress, so the order the pipeline said them in holds: a
+    /// report sent just before the wait began, and taken by the next tick after it, no longer
+    /// hides the wait (UI run 43930271358: the last report of the places step was taken after
+    /// "Wartet aufs Laden" was set, cleared it, and the card said "running" for the whole wait).
+    public func wait(_ reason: PauseReason?) {
+        state.withLock { $0.waiting = reason }
     }
 
     /// The newest progress since the last call (`nil` if none came), and the rest.

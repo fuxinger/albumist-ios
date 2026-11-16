@@ -988,4 +988,30 @@ struct AnalysisDisplayTests {
         let again = box.take()
         #expect(again.progress == nil && again.workload == nil && again.recent.isEmpty)
     }
+
+    /// UI run 43930271358 (DeviceConditionUITests test02): the last report of the places step
+    /// was posted, the wait for the battery began, and the tick took the report after that and
+    /// cleared the wait, so "Wartet aufs Laden" never showed. The wait is now a state in the
+    /// same box: a report sent before it never hides it, and it stays until the pipeline ends it.
+    @Test func mailboxKeepsAWaitThatBeganAfterTheLastReport() {
+        let box = ProgressMailbox()
+        box.post(.init(stage: .places, completed: 40, total: 120))
+        box.wait(.batteryLow)
+        let first = box.take()
+        #expect(first.progress?.stage == .places)
+        #expect(first.waiting == .batteryLow)
+        // Ticks during the wait: no reports, the wait is still said.
+        #expect(box.take().waiting == .batteryLow)
+        #expect(box.take().progress == nil)
+        // The wait ends (admission's defer), then the next step reports.
+        box.wait(nil)
+        box.post(.init(stage: .content, completed: 0, total: 246))
+        let after = box.take()
+        #expect(after.waiting == nil)
+        #expect(after.progress?.stage == .content)
+        // A new wait, then a report of the same step (in-flight photos): the wait holds.
+        box.wait(.thermal)
+        box.post(.init(stage: .content, completed: 3, total: 246))
+        #expect(box.take().waiting == .thermal)
+    }
 }

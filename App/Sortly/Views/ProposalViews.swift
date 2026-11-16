@@ -327,6 +327,12 @@ struct ProposalDetailView: View {
                     } message: {
                         Text("Aufenthalte an diesem Ort werden keine Reisen mehr, auch bei jeder neuen Analyse. Albumist schlägt stattdessen ein Album für den Ort vor. Zurücknehmen kannst du das in den Einstellungen.")
                     }
+                    // Why it waits, as on the question card.
+                    if let reason = oftenHereWaitReason(askedOnTheCard: false) {
+                        Text(reason)
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .padding(Theme.Spacing.l)
@@ -383,7 +389,7 @@ struct ProposalDetailView: View {
                 .accessibilityIdentifier("proposal.oftenHere.no")
             // Why a button waits (design review N8 found the two buttons behaving differently
             // without a word why): "Ja" plans the trips anew, "Nein" changes nothing.
-            if let reason = oftenHereWaitReason {
+            if let reason = oftenHereWaitReason(askedOnTheCard: true) {
                 Text(reason)
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -391,20 +397,27 @@ struct ProposalDetailView: View {
         }
     }
 
-    /// Why "Ja, hier bin ich öfter" (and during a change in "Dein Zuhause" also "Nein") waits;
-    /// nil when both can be tapped.
-    private var oftenHereWaitReason: LocalizedStringKey? {
+    /// Why "Ja, hier bin ich öfter" on the question card (and during a change in "Dein
+    /// Zuhause" also "Nein"), or "Keine Reise, hier bin ich öfter" on a trip, waits; nil when it
+    /// can be tapped.
+    private func oftenHereWaitReason(askedOnTheCard: Bool) -> LocalizedStringKey? {
         if model.homeChangeRunning {
             return LocalizedStringKey("Gleich wieder möglich: Albumist passt gerade die Vorschläge an deine Änderung in „Dein Zuhause“ an.")
         }
         if model.analysisResetting {
-            return LocalizedStringKey("„Ja“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu.")
+            return askedOnTheCard
+                ? LocalizedStringKey("„Ja“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu.")
+                : LocalizedStringKey("„Keine Reise“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu.")
         }
         if model.execution.isRunning {
-            return LocalizedStringKey("„Ja“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
+            return askedOnTheCard
+                ? LocalizedStringKey("„Ja“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
+                : LocalizedStringKey("„Keine Reise“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
         }
         if model.analysis.isRunning {
-            return LocalizedStringKey("„Ja“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu.")
+            return askedOnTheCard
+                ? LocalizedStringKey("„Ja“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu.")
+                : LocalizedStringKey("„Keine Reise“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu.")
         }
         return nil
     }

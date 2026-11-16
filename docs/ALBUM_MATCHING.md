@@ -164,15 +164,18 @@ Regeln, wann ein gewähltes Zuhause gilt:
   nur für spätere Fotos fest. Ohne Namen (noch kein Ort bekannt) wird „Stimmt“ nicht angeboten.
 - **Ein Ort unter „Ändern“** gilt ab dem Tag, seit dem der Nutzer dort wohnt, nie für alle Zeit
   (Produktregel, Re-Review 16.11.). Nach der Wahl fragt die App „Seit wann wohnst du dort?“,
-  vorgeschlagen ist der Beginn des letzten Aufenthalts dort (`HomeCandidates.stayStart`, Runde 3).
+  vorgeschlagen ist der Beginn des letzten Aufenthalts dort (`HomeCandidates.stayStart`, Runde 4).
   Gezählt werden nur Tage mit Fotos, jeder im Umkreis (30 km) oder woanders, je nachdem, wo die
   meisten seiner Fotos liegen; Tage ohne Fotos sagen nichts. Vom neuesten Tag im Umkreis zurück
-  endet der Aufenthalt an der ersten Strecke von 28 Fototagen, von denen mindestens vier von fünf
-  woanders sind („deutlich mehr“, `moveStretchDays`, `moveShareElsewhere`); er beginnt am ersten Tag
-  im Umkreis nach dem letzten Tag woanders in dieser Strecke. So ziehen Besuche alle zwei oder drei
-  Wochen vor einem Umzug (2 von 14 oder 21 Tagen) das Datum nicht zurück, und Wochen ohne Fotos
-  zu Hause oder drei Wochen Urlaub (21 von 28) beenden keinen Aufenthalt; ein Monat woanders tut
-  es. Der Nutzer kann das Datum ändern.
+  endet der Aufenthalt an der ersten Strecke von 28 Fototagen, von denen mehr als die Hälfte
+  woanders sind (`moveStretchDays`, `moveShareElsewhere`). Er beginnt an dem Tag im Umkreis, ab
+  dem (bis heute) die Tage im Umkreis am weitesten vor den Tagen woanders liegen, ein Tag woanders
+  zählt doppelt; bei Gleichstand der neuere. So ziehen Besuche vor einem Umzug, auch jedes
+  Wochenende (2 von 7 Tagen), das Datum nicht zurück, eine kurze Reise in den Wochen nach dem
+  Umzug schiebt es nicht dahinter, und eine Woche woanders jeden Monat (ein Viertel) beendet
+  keinen Aufenthalt. Ab etwa zwei Wochen Urlaub mit Fotos jeden Tag (oder seltenen Fotos zu Hause)
+  liegt das Datum nach dem Urlaub: das ist harmlos, denn davor entscheidet die Erkennung, und die
+  Reisen bleiben, wie sie waren (getestet). Der Nutzer kann das Datum ändern.
   Davor entscheidet die Erkennung wie nach „Stimmt“ (derselbe `confirmedFrom`). So werden die
   Jahre am alten Wohnort keine Reise, auch nicht, wenn dort vorher ein Zuhause bestätigt war.
 - **Frühere Zuhause** gelten bis zu ihrem Datum (Kette, siehe `HomeSettings.home(at:)`).

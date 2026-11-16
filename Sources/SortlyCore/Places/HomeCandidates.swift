@@ -69,19 +69,20 @@ public enum HomeCandidates {
 
     /// A stay ends at a stretch of this many photo days (days without photos are not counted)…
     public static let moveStretchDays = 28
-    /// …of which at least this share are elsewhere: four of five, so a stretch elsewhere clearly
-    /// outnumbers the days near the place. Visits every two or three weeks before a move (two
-    /// days in 14 or 21) do not stop it; a holiday of three weeks among a month of photo days
-    /// (21 of 28) does not end the stay at home.
-    public static let moveShareElsewhere = 0.8
+    /// …of which more than this share are elsewhere: more than half (round 4). Visits before a
+    /// move, even every weekend (two days in seven), do not pull the date back; a week elsewhere
+    /// each month (a quarter) does not end the stay. A holiday of three weeks or more may end it:
+    /// the date is then later than the move, which changes nothing, since before it the
+    /// detection decides as before.
+    public static let moveShareElsewhere = 0.5
 
     /// When the user's current stay at `center` began, for "Seit wann wohnst du dort?" under
     /// "Ändern". Each day with photos counts near the place (within `radius`) or elsewhere, by
     /// where most of its photos are; days without photos say nothing. Going back from the newest
     /// day near the place, the stay ends at the first stretch of `moveStretchDays` photo days of
-    /// which at least `moveShareElsewhere` are elsewhere; it starts on the first day near the
-    /// place after the last day elsewhere in that stretch. Without such a stretch: the first day
-    /// near the place. Too late a date does little harm (before it the detection decides, and
+    /// which more than `moveShareElsewhere` are elsewhere. It starts on the day near the place from
+    /// which on the days near it lead the most over the days elsewhere, one elsewhere counting as
+    /// two (the newest on a tie). Without such a stretch: the first day near the place. Too late a date does little harm (before it the detection decides, and
     /// the user can change it), too early would make the time in the old town a trip.
     public static func stayStart(near center: GeoCoordinate, assets: some Sequence<AssetSnapshot>,
                                  radius: Double = TripDetector.Configuration().homeRadiusMeters,
@@ -98,15 +99,21 @@ public enum HomeCandidates {
         let days = byDay.keys.filter { $0 <= newest }.sorted(by: >)
         let isNear = days.map { byDay[$0]! }
         let window = moveStretchDays
-        let limit = Int((Double(window) * (1 - moveShareElsewhere)).rounded(.down))
         var nearInWindow = 0
         for i in days.indices {
             if isNear[i] { nearInWindow += 1 }
             if i >= window, isNear[i - window] { nearInWindow -= 1 }
-            guard i + 1 >= window, nearInWindow <= limit else { continue }
-            // The stretch is days[i - window + 1 ... i]; its newest day elsewhere ends it.
-            let lastElsewhere = (i - window + 1 ... i).first { !isNear[$0] }!
-            return days[(0..<lastElsewhere).last { isNear[$0] }!]
+            guard i + 1 >= window, Double(window - nearInWindow) > Double(window) * moveShareElsewhere else { continue }
+            // The stretch ends at days[i]. The stay starts on the day near the place from which
+            // on (to the newest) the days near it lead the most, a day elsewhere counting as two:
+            // a short trip in the first weeks after a move does not push the date past it, a
+            // visit just before the move does not pull it back. The newest such day on a tie.
+            var lead = 0, best = Int.min, start = 0
+            for k in 0...i {
+                lead += isNear[k] ? 1 : -2
+                if isNear[k], lead > best { best = lead; start = k }
+            }
+            return days[start]
         }
         return isNear.lastIndex(of: true).map { days[$0] }
     }

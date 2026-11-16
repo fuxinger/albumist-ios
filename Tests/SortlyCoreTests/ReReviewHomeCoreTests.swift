@@ -108,28 +108,45 @@ struct ReReviewChangeAfterAMoveTests {
     }
 
     /// "Seit wann wohnst du dort?" is proposed from the photos: the first day of the latest stay
-    /// near the place. Trips do not end a stay; a stretch of four weeks elsewhere does.
+    /// near the place. Trips of one or ten days do not end a stay; years elsewhere do.
     @Test func theStayStartsAfterTheLastLongStretchElsewhere() throws {
         var lib = LibraryBuilder()
         let hamburg = GeoCoordinate(latitude: 53.5511, longitude: 9.9937)
         lib.daily(from: "2015-01-01", to: "2018-12-31", at: hamburg, perDay: 1, hour: 19)
         lib.daily(from: "2019-01-01", to: "2026-10-31", at: Fixture.Places.munichHome, perDay: 1, hour: 19,
-                  skipping: [("2024-05-10", "2024-05-24"), ("2025-08-01", "2025-08-20")])
-        lib.daily(from: "2024-05-10", to: "2024-05-24", at: Fixture.Places.rome, perDay: 5, hour: 10)
-        lib.daily(from: "2025-08-01", to: "2025-08-20", at: Fixture.Places.gardaLake, perDay: 5, hour: 10)
+                  skipping: [("2024-05-10", "2024-05-16"), ("2025-08-01", "2025-08-10")])
+        lib.daily(from: "2024-05-10", to: "2024-05-16", at: Fixture.Places.rome, perDay: 5, hour: 10)
+        lib.daily(from: "2025-08-01", to: "2025-08-10", at: Fixture.Places.gardaLake, perDay: 5, hour: 10)
         #expect(HomeCandidates.stayStart(near: Fixture.Places.munichHome, assets: lib.assets, calendar: Fixture.calendar) == Fixture.date("2019-01-01"))
         #expect(HomeCandidates.stayStart(near: hamburg, assets: lib.assets, calendar: Fixture.calendar) == Fixture.date("2015-01-01"))
         #expect(HomeCandidates.stayStart(near: Fixture.Places.sydney, assets: lib.assets, calendar: Fixture.calendar) == nil)
     }
 }
 
-/// Round 3: the stay starts after the latest stretch of about four weeks of photo days in which
-/// the days elsewhere clearly outnumber the days near the place (`HomeCandidates.moveStretchDays`,
-/// `moveShareElsewhere`); days without photos are not counted.
-@Suite("Stay start: visits before a move, sparse photos at home")
+/// The stay starts after the latest stretch of 28 photo days of which more than half are
+/// elsewhere (`HomeCandidates.moveStretchDays`, `moveShareElsewhere`, round 4); days without
+/// photos are not counted. A later date than the move is harmless: before it the detection
+/// decides, so the trips stay as they were.
+@Suite("Stay start: visits before a move, holidays, sparse photos")
 struct StayStartTests {
     static let berlin = GeoCoordinate(latitude: 52.5200, longitude: 13.4050)
+    static let hamburg = GeoCoordinate(latitude: 53.5511, longitude: 9.9937)
+    static let cologne = GeoCoordinate(latitude: 50.9375, longitude: 6.9603)
+    static let london = GeoCoordinate(latitude: 51.5072, longitude: -0.1276)
     let now = Fixture.date("2026-11-16")
+    let detector = TripDetector(calendar: Fixture.calendar)
+
+    func start(_ lib: LibraryBuilder, _ center: GeoCoordinate) -> Date? {
+        HomeCandidates.stayStart(near: center, assets: lib.assets, calendar: Fixture.calendar)
+    }
+
+    func picking(_ center: GeoCoordinate, from since: Date?) -> HomeSettings {
+        HomeSettings().choosing(HomePlace(center: center, components: nil), from: since, date: now)
+    }
+
+    func onTrips(_ analysis: TripAnalysis, _ ids: [AssetID]) -> Int {
+        Set(analysis.trips.flatMap(\.geotaggedAssetIDs)).intersection(ids).count
+    }
 
     /// Lived in Munich, visited the partner in Berlin every two or three weeks for 2.5 years,
     /// moved to Berlin on 1.9.2026 and picks it under "Ändern" with the proposed date: the
@@ -141,31 +158,128 @@ struct StayStartTests {
         lib.daily(from: "2024-01-06", to: "2026-08-29", at: Self.berlin, perDay: 6, everyNthDay: everyNthDay, hour: 11)
         lib.daily(from: "2024-01-07", to: "2026-08-30", at: Self.berlin, perDay: 6, everyNthDay: everyNthDay, hour: 11)
         lib.daily(from: "2026-09-01", to: "2026-11-15", at: Self.berlin, perDay: 2, hour: 19)
-        let detector = TripDetector(calendar: Fixture.calendar)
-        let since = try #require(HomeCandidates.stayStart(near: Self.berlin, assets: lib.assets, calendar: Fixture.calendar))
+        let since = try #require(start(lib, Self.berlin))
         #expect(since == Fixture.date("2026-09-01"))
-        let picked = detector.analyse(in: lib.assets, home: HomeSettings().choosing(HomePlace(center: Self.berlin, components: nil), from: since, date: now))
-        #expect(Set(picked.trips.flatMap(\.geotaggedAssetIDs)).isDisjoint(with: munich))
+        #expect(onTrips(detector.analyse(in: lib.assets, home: picking(Self.berlin, from: since)), munich) == 0)
     }
 
-    /// Photos at home once a week, none for seven weeks in the summer around two trips: the
-    /// weeks without photos say nothing, so the stay at home still began in 2019.
-    @Test func sparsePhotosAtHomeKeepTheStayFromItsStart() throws {
+    /// Berlin every Saturday and Sunday since 2024 (two of seven photo days, no Munich photos
+    /// on them), moved there on 1.9.2026: the date is the move, no Munich photo becomes a trip.
+    @Test func weekendVisitsEveryWeekBeforeTheMoveDoNotPullTheStayStartBack() throws {
         var lib = LibraryBuilder()
-        lib.daily(from: "2019-01-01", to: "2026-11-10", at: Fixture.Places.munichHome, perDay: 1, everyNthDay: 7, hour: 19,
-                  skipping: [("2025-06-25", "2025-08-12")])
+        let calendar = Fixture.calendar
+        let format = DateFormatter()
+        format.calendar = calendar
+        format.timeZone = calendar.timeZone
+        format.dateFormat = "yyyy-MM-dd"
+        var weekends: [(String, String)] = []
+        var day = Fixture.date("2024-01-06")
+        while day < Fixture.date("2026-08-31") {
+            weekends.append((format.string(from: day), format.string(from: calendar.date(byAdding: .day, value: 1, to: day)!)))
+            day = calendar.date(byAdding: .day, value: 7, to: day)!
+        }
+        let munich = lib.daily(from: "2019-01-01", to: "2026-08-31", at: Fixture.Places.munichHome, perDay: 2, hour: 19, skipping: weekends)
+        for weekend in weekends { lib.daily(from: weekend.0, to: weekend.1, at: Self.berlin, perDay: 4, hour: 11) }
+        lib.daily(from: "2026-09-01", to: "2026-11-15", at: Self.berlin, perDay: 2, hour: 19)
+        let since = try #require(start(lib, Self.berlin))
+        #expect(since == Fixture.date("2026-09-01"))
+        #expect(onTrips(detector.analyse(in: lib.assets, home: picking(Self.berlin, from: since)), munich) == 0)
+    }
+
+    /// A trip of two days in the second week after the move does not push the date past it.
+    @Test func aShortTripAfterTheMoveKeepsTheDateOfTheMove() throws {
+        var lib = LibraryBuilder()
+        lib.daily(from: "2019-01-01", to: "2026-08-31", at: Fixture.Places.munichHome, perDay: 2, hour: 19)
+        lib.daily(from: "2026-09-01", to: "2026-11-15", at: Self.berlin, perDay: 3, hour: 19, skipping: [("2026-09-08", "2026-09-09")])
+        lib.daily(from: "2026-09-08", to: "2026-09-09", at: Fixture.Places.rome, perDay: 10, hour: 10)
+        #expect(start(lib, Self.berlin) == Fixture.date("2026-09-01"))
+    }
+
+    /// Works in London one week each month (a quarter of the photo days), lives in Munich since
+    /// 2019: the stay goes back to 2019.
+    @Test func aWeekAbroadEachMonthKeepsTheStay() {
+        var lib = LibraryBuilder()
+        var weeks: [(String, String)] = []
+        for y in 2019...2026 {
+            for m in 1...12 where !(y == 2026 && m > 10) {
+                weeks.append((String(format: "%04d-%02d-08", y, m), String(format: "%04d-%02d-14", y, m)))
+            }
+        }
+        lib.daily(from: "2019-01-01", to: "2026-11-10", at: Fixture.Places.munichHome, perDay: 2, hour: 19, skipping: weeks)
+        for week in weeks { lib.daily(from: week.0, to: week.1, at: Self.london, perDay: 2, hour: 12) }
+        #expect(start(lib, Fixture.Places.munichHome) == Fixture.date("2019-01-01"))
+    }
+
+    /// A holiday of three or six weeks with photos every day ends the proposed stay: the date is
+    /// after it, and the trips are the same as without a choice.
+    @Test(arguments: [("2025-07-01", "2025-07-21", "2025-07-22"), ("2025-07-01", "2025-08-15", "2025-08-16")])
+    func aLongHolidayEndsTheProposedStayButChangesNoTrip(holiday: (String, String, String)) throws {
+        var lib = LibraryBuilder()
+        let home = lib.daily(from: "2019-01-01", to: "2026-11-10", at: Fixture.Places.munichHome, perDay: 2, hour: 19,
+                             skipping: [(holiday.0, holiday.1)])
+        lib.daily(from: holiday.0, to: holiday.1, at: Fixture.Places.sydney, perDay: 5, hour: 10)
+        let since = try #require(start(lib, Fixture.Places.munichHome))
+        #expect(since == Fixture.date(holiday.2))
+        let picked = detector.analyse(in: lib.assets, home: picking(Fixture.Places.munichHome, from: since))
+        let automatic = detector.analyse(in: lib.assets)
+        #expect(onTrips(picked, home) == 0)
+        #expect(picked.trips.map(\.allAssetIDs) == automatic.trips.map(\.allAssetIDs))
+    }
+
+    /// Photos at home once a week, none for seven weeks in the summer around two trips (15 photo
+    /// days elsewhere in a row): the proposed date is after the trips, and nothing changes.
+    @Test func sparsePhotosAtHomeWithTripsChangeNoTrip() throws {
+        var lib = LibraryBuilder()
+        let home = lib.daily(from: "2019-01-01", to: "2026-11-10", at: Fixture.Places.munichHome, perDay: 1, everyNthDay: 7, hour: 19,
+                             skipping: [("2025-06-25", "2025-08-12")])
         lib.daily(from: "2025-07-01", to: "2025-07-12", at: Fixture.Places.rome, perDay: 10, hour: 10)
         lib.daily(from: "2025-08-02", to: "2025-08-04", at: Fixture.Places.gardaLake, perDay: 10, hour: 10)
-        #expect(HomeCandidates.stayStart(near: Fixture.Places.munichHome, assets: lib.assets, calendar: Fixture.calendar) == Fixture.date("2019-01-01"))
+        let since = try #require(start(lib, Fixture.Places.munichHome))
+        #expect(since > Fixture.date("2025-08-04"))
+        let picked = detector.analyse(in: lib.assets, home: picking(Fixture.Places.munichHome, from: since))
+        let automatic = detector.analyse(in: lib.assets)
+        #expect(onTrips(picked, home) == 0)
+        #expect(picked.trips.map(\.allAssetIDs) == automatic.trips.map(\.allAssetIDs))
     }
 
-    /// A holiday of three weeks with photos every day does not end the stay; a month away does.
-    @Test func threeWeeksAwayKeepTheStayAMonthEndsIt() throws {
+    /// Few photos, mostly on trips (one day at home a month, three trips of ten days a year):
+    /// from the proposed date the home photos are on no more trips than with the home for all
+    /// time.
+    @Test func fewPhotosMostlyOnTripsPutNoHomePhotoOnATrip() {
         var lib = LibraryBuilder()
-        lib.daily(from: "2019-01-01", to: "2026-11-10", at: Fixture.Places.munichHome, perDay: 1, hour: 19,
-                  skipping: [("2023-07-01", "2023-07-21"), ("2025-03-01", "2025-03-31")])
-        lib.daily(from: "2023-07-01", to: "2023-07-21", at: Fixture.Places.rome, perDay: 5, hour: 10)
-        lib.daily(from: "2025-03-01", to: "2025-03-31", at: Fixture.Places.sydney, perDay: 5, hour: 10)
-        #expect(HomeCandidates.stayStart(near: Fixture.Places.munichHome, assets: lib.assets, calendar: Fixture.calendar) == Fixture.date("2025-04-01"))
+        let home = lib.daily(from: "2019-01-15", to: "2026-11-10", at: Fixture.Places.munichHome, perDay: 3, everyNthDay: 30, hour: 19)
+        for y in 2019...2026 {
+            lib.daily(from: "\(y)-03-01", to: "\(y)-03-10", at: Fixture.Places.rome, perDay: 10, hour: 10)
+            lib.daily(from: "\(y)-06-01", to: "\(y)-06-10", at: Fixture.Places.gardaLake, perDay: 10, hour: 10)
+            lib.daily(from: "\(y)-09-01", to: "\(y)-09-10", at: Self.london, perDay: 10, hour: 10)
+        }
+        let since = start(lib, Fixture.Places.munichHome)
+        let picked = detector.analyse(in: lib.assets, home: picking(Fixture.Places.munichHome, from: since))
+        let forAllTime = detector.analyse(in: lib.assets, home: picking(Fixture.Places.munichHome, from: nil))
+        #expect(onTrips(picked, home) == onTrips(forAllTime, home))
+    }
+
+    /// Moved twice (Cologne, Hamburg, Munich since 2025), or back to Munich after years in
+    /// Hamburg: the stay starts at the last move.
+    @Test func movingTwiceOrBackStartsTheStayAtTheLastMove() {
+        var twice = LibraryBuilder()
+        twice.daily(from: "2015-01-01", to: "2018-12-31", at: Self.cologne, perDay: 2, hour: 19)
+        twice.daily(from: "2019-01-01", to: "2024-12-31", at: Self.hamburg, perDay: 2, hour: 19)
+        twice.daily(from: "2025-01-01", to: "2026-11-10", at: Fixture.Places.munichHome, perDay: 2, hour: 19)
+        #expect(start(twice, Fixture.Places.munichHome) == Fixture.date("2025-01-01"))
+        var back = LibraryBuilder()
+        back.daily(from: "2015-01-01", to: "2018-12-31", at: Fixture.Places.munichHome, perDay: 2, hour: 19)
+        back.daily(from: "2019-01-01", to: "2024-12-31", at: Self.hamburg, perDay: 2, hour: 19)
+        back.daily(from: "2025-01-01", to: "2026-11-10", at: Fixture.Places.munichHome, perDay: 2, hour: 19)
+        #expect(start(back, Fixture.Places.munichHome) == Fixture.date("2025-01-01"))
+    }
+
+    /// Fewer than 28 photo days in all: no stretch can be found, the stay starts on the first
+    /// day near the place.
+    @Test func withFewerThan28PhotoDaysTheStayStartsOnTheFirstDayThere() {
+        var lib = LibraryBuilder()
+        lib.daily(from: "2026-01-01", to: "2026-01-10", at: Self.hamburg, perDay: 1, hour: 19)
+        lib.daily(from: "2026-10-01", to: "2026-10-05", at: Fixture.Places.munichHome, perDay: 1, hour: 19)
+        #expect(start(lib, Fixture.Places.munichHome) == Fixture.date("2026-10-01"))
     }
 }

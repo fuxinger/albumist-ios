@@ -11722,6 +11722,36 @@
           }
         }
       }
+    },
+    "„Keine Reise“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Not a trip” is available once the analysis has been rebuilt, because Albumist then plans your trips again."
+          }
+        }
+      }
+    },
+    "„Keine Reise“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Not a trip” is available once creating is finished, because Albumist then plans your trips again."
+          }
+        }
+      }
+    },
+    "„Keine Reise“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Not a trip” is available once the analysis is finished, because Albumist then plans your trips again."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

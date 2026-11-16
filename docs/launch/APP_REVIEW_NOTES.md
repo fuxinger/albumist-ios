@@ -35,7 +35,9 @@ codes are in Settings › Full version.
 
 **Privacy:** photos and analysis stay on the device. If "Refine places online" is
 on, coordinates are sent to Apple's MapKit to name towns; nothing is sent to us. Original photos are
-never modified; the app only creates, fills and (on undo) removes its own albums.
+never modified; the app only creates, fills and (on undo) removes its own albums. The only photos it
+ever deletes are its own sample photos, when the user taps "Remove sample photos" and confirms in the
+iOS dialog (they stay 30 days in Recently Deleted).
 
 **Video:** a 60-second recording of the flow with a real photo library: <link>
 
@@ -70,7 +72,9 @@ und Code einlösen unter Einstellungen › Vollversion.
 
 **Datenschutz:** Fotos und Analyse bleiben auf dem Gerät. Ist „Orte online genauer bestimmen“ an,
 gehen Koordinaten an Apples MapKit, um Orte zu benennen; an uns geht nichts. Originalfotos werden nie
-verändert; die App legt nur eigene Alben an, füllt sie und entfernt sie beim Rückgängigmachen.
+verändert; die App legt nur eigene Alben an, füllt sie und entfernt sie beim Rückgängigmachen. Fotos löscht
+sie nur, wenn es ihre eigenen Beispielfotos sind: nach „Beispielfotos wieder entfernen“ und der Bestätigung im
+iOS-Dialog (sie liegen dann 30 Tage unter „Zuletzt gelöscht“).
 
 **Video:** 60 Sekunden Ablauf mit echter Mediathek: <Link>
 

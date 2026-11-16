@@ -50,13 +50,14 @@ Jede spätere Änderung in `website/` wird automatisch neu veröffentlicht.
 
 ## App-Namen ändern
 
-Der Name „SORTLY“ ist im App Store schon vergeben. Wenn der neue Name
-feststeht, änderst du nur die Zeile `APP_NAME=` in `EINSTELLUNGEN.txt`.
+Die App heißt jetzt **Albumist**. Das steht schon in `EINSTELLUNGEN.txt`.
+Sollte sich der Name noch einmal ändern, änderst du nur die Zeile `APP_NAME=`.
 Alle Seiten übernehmen ihn.
 
-Tipp: Die Adresse enthält den Namen des Repositorys (`sortly-ios`).
-Wenn dich das stört, gibt es zwei Wege:
-- Repository umbenennen (Settings › General). Die Adresse ändert sich mit.
+Die Adresse enthält noch den alten Namen des Repositorys (`sortly-ios`).
+Das lässt sich auf zwei Wegen ändern:
+- Repository umbenennen, zum Beispiel in `albumist` (Settings › General).
+  Dann lautet die Adresse `https://fuxinger.github.io/albumist/`.
 - Eine eigene Domain kaufen (etwa 1 € im Monat) und unter Settings › Pages
   bei *Custom domain* eintragen.
 

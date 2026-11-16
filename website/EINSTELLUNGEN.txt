@@ -9,9 +9,8 @@
 # Leer lassen = die Zeile wird auf der Website weggelassen.
 # ------------------------------------------------------------
 
-# Name der App. "SORTLY" ist im App Store schon vergeben,
-# also hier später den neuen Namen eintragen.
-APP_NAME=SORTLY
+# Name der App. Wenn er sich ändert, nur hier anpassen.
+APP_NAME=Albumist
 
 # Für Impressum und Datenschutz (Pflicht in Deutschland).
 # Deine echte Anschrift, kein Postfach.

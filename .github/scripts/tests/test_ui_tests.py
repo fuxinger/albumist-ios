@@ -440,5 +440,76 @@ class FlakyTests(unittest.TestCase):
             self.assertEqual(ui_tests.main(["flaky-summary", path, os.path.join(folder, "missing.json")]), 0)
 
 
+class WatchdogTests(unittest.TestCase):
+    """The watchdog stops a pass only before its first test, and only for a simulator that left "Booted"."""
+
+    STARTED_LOG = "Test Case '-[SortlyUITests.AccessibilityUITests test1_OnboardingAtLargestTextInDarkMode]' started.\n"
+    STOPPED = ("2026-11-16 15:24:03.524929+0000 SortlyUITests-Runner[6264:25895] [Default] Running tests...\n"
+               "UI_WATCHDOG simulator 900A5BAA-B5B5-4706-B7C3-D0C89A4F6B80 left Booted (state Shutdown) before the first test; "
+               "pass stopped\n")
+
+    def test_stops_only_after_two_checks_without_booted(self):
+        self.assertFalse(ui_tests.watchdog_should_stop("", ["Booted", "Booted"]))
+        self.assertFalse(ui_tests.watchdog_should_stop("", ["Shutdown"]))
+        self.assertFalse(ui_tests.watchdog_should_stop("", ["Booted", "Shutdown"]))
+        self.assertTrue(ui_tests.watchdog_should_stop("", ["Booted", "Shutdown", "Shutdown"]))
+        self.assertTrue(ui_tests.watchdog_should_stop("", ["Shutting Down", "Shutdown"]))
+
+    def test_unknown_state_never_stops(self):
+        self.assertFalse(ui_tests.watchdog_should_stop("", ["", ""]))
+        self.assertFalse(ui_tests.watchdog_should_stop("", ["Shutdown", ""]))
+
+    def test_never_stops_once_a_test_started(self):
+        self.assertFalse(ui_tests.watchdog_should_stop(self.STARTED_LOG, ["Shutdown", "Shutdown"]))
+
+    def test_a_stopped_pass_is_repeated(self):
+        self.assertEqual(ui_tests.decide(-15, self.STOPPED),
+                         ("retry", ["simulator shut down before the tests (watchdog)"]))
+
+    def test_a_quoted_watchdog_line_is_not_infrastructure(self):
+        line = "SortlyFlowUITests.swift:60: error: -[SortlyUITests.SortlyFlowUITests test1_FullFlow] : UI_WATCHDOG simulator X left Booted"
+        self.assertEqual(ui_tests.is_infra(line), [])
+
+    def test_a_stopped_pass_with_a_real_line_is_not_repeated(self):
+        self.assertEqual(ui_tests.decide(-15, self.STOPPED + "A11Y_FAIL en overview | x\n")[0], "fail")
+
+    def test_bundle_of_a_stopped_pass(self):
+        self.assertEqual(ui_tests.watchdog_bundle(["result bundle not readable (no such file)"]), [])
+        self.assertEqual(ui_tests.watchdog_bundle(["result bundle: Crash: Sortly (4242)"]), ["result bundle: Crash: Sortly (4242)"])
+        verdict, _ = ui_tests.decide(-15, self.STOPPED, bundle=ui_tests.watchdog_bundle(["result bundle not readable (x)"]))
+        self.assertEqual(verdict, "retry")
+
+    def run_watchdog(self, log_text, states):
+        import subprocess
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as log:
+            log.write(log_text)
+        process = subprocess.Popen(["sleep", "30"])
+        answers = iter(states)
+        original = ui_tests.device_state
+        ui_tests.device_state = lambda udid: next(answers, states[-1])
+        try:
+            dog = ui_tests.Watchdog("U", log.name, process, interval=0.05)
+            dog.start()
+            dog.join(timeout=5)
+            if dog.is_alive():
+                dog.stop()
+                dog.join(timeout=5)
+            stopped = process.poll() is not None
+        finally:
+            ui_tests.device_state = original
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            os.remove(log.name)
+        return dog.fired, stopped
+
+    def test_watchdog_thread_stops_the_process(self):
+        self.assertEqual(self.run_watchdog("", ["Booted", "Shutdown", "Shutdown"]), ("Shutdown", True))
+
+    def test_watchdog_thread_leaves_a_started_pass_alone(self):
+        self.assertEqual(self.run_watchdog(self.STARTED_LOG, ["Shutdown", "Shutdown"]), ("", False))
+
+
 if __name__ == "__main__":
     unittest.main()

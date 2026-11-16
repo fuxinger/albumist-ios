@@ -42,6 +42,10 @@ new one, and only for the tests that did not pass (-only-testing as before, plus
   - the result bundle agrees: no test case failed with a message other than the
     infrastructure ones above, no issue outside a test, and it can be read at all (a JSON
     object with a list "testNodes").
+A watchdog (class Watchdog) stops a pass early when the simulator leaves "Booted" before
+the first test started (two checks 20 s apart); the UI_WATCHDOG line it leaves in the log is
+one of the infrastructure failures above, and the stop counts as FLAKY_BOOT. It never stops a
+pass in which a test has started.
 Anything else is never repeated: a real failure stays red. A pass that ran no test at all
 fails (a renamed test would otherwise make an empty, green selection), and a repeat whose
 selection would be empty is not started (only possible when every --only entry is a single
@@ -86,6 +90,9 @@ INFRA = [
     # SIGTERM to a runner that had not started a test yet (the simulator was going away).
     (re.compile(r"Test crashed with signal term (?:before establishing connection|while preparing to run tests)"),
      "test runner stopped before the tests"),
+    # Written by this script's watchdog (run_pass): the simulator left "Booted" before the first
+    # test started, so the pass was stopped instead of waiting for xcodebuild to notice.
+    (re.compile(r"^UI_WATCHDOG simulator \S+ left Booted"), "simulator shut down before the tests (watchdog)"),
 ]
 
 # Anything here is about the app or the tests: never repeated. Matched per line, on lines
@@ -117,6 +124,7 @@ STRONG_REAL = [
 DATA_LINE = re.compile(r"PREVIEW_JPEG|UI_VIDEO_B64")
 
 CASE = re.compile(r"Test Case '-\[(?:[\w]+)\.(\w+) (\w+)\]' (passed|failed|skipped)")
+STARTED = re.compile(r"Test Case '-\[\w+\.\w+ \w+\]' started")
 PASSED = ("Passed", "Skipped", "Expected Failure")
 
 
@@ -257,6 +265,23 @@ def restart_context(log: str, before: int = 60, limit: int = 400) -> list[str]:
 
 # ---------------------------------------------------------------------------------------------
 # Simulator
+
+
+def watchdog_should_stop(log: str, states: list[str]) -> bool:
+    """True when a pass is to be stopped: no test has started yet and the last two checks of the
+    simulator (20 s apart) both found it known and not "Booted". A pass in which any test
+    started is never stopped: whatever happens then is for the tests and `decide` to judge."""
+    if STARTED.search(log):
+        return False
+    last = states[-2:]
+    return len(last) == 2 and all(state and state != "Booted" for state in last)
+
+
+def watchdog_bundle(findings: list[str]) -> list[str]:
+    """Result bundle findings of a pass the watchdog stopped before any test: a bundle that
+    xcodebuild could not finish is expected then and is no finding; anything it does say still
+    counts (and blocks the repeat)."""
+    return [f for f in findings if not f.startswith("result bundle not readable")]
 
 
 def flaky_record(name: str, first_log: str, retry_reasons: list[str], retry_log: str | None,
@@ -495,8 +520,64 @@ class Recorder(threading.Thread):
         self.join(timeout=60)
 
 
-def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str, str, float]:
-    """One xcodebuild run; returns (status, log text, result bundle path, start time)."""
+def device_state(udid: str) -> str:
+    """"Booted", "Shutdown", ... of a simulator, or "" when simctl does not say (then unknown)."""
+    code, listing = sh(["xcrun", "simctl", "list", "devices", "-j"], timeout=30, quiet=True)
+    if code != 0:
+        return ""
+    try:
+        for entries in json.loads(listing).get("devices", {}).values():
+            for d in entries:
+                if d.get("udid") == udid:
+                    return str(d.get("state", ""))
+    except (ValueError, AttributeError):
+        pass
+    return ""
+
+
+class Watchdog(threading.Thread):
+    """Stops xcodebuild when the simulator leaves "Booted" before the first test started.
+
+    Hosted Macs sometimes lose the simulator 1-5 min into a pass ("Test crashed with signal term
+    while preparing to run tests", then "device is not booted"; UI run 43893790053 lost 4-5 min
+    per group waiting for xcodebuild to give up). The stop is written to the log as a
+    UI_WATCHDOG line (an infrastructure line for `decide`) and counted as FLAKY_BOOT; the pass is
+    then repeated once on an erased simulator like any other simulator failure."""
+
+    def __init__(self, udid: str, log_path: str, process: subprocess.Popen, interval: float = 20):
+        super().__init__(daemon=True)
+        self.udid, self.log_path, self.process, self.interval = udid, log_path, process, interval
+        self.stopped = threading.Event()
+        self.fired = ""
+
+    def run(self) -> None:
+        states: list[str] = []
+        while not self.stopped.wait(self.interval):
+            try:
+                with open(self.log_path, encoding="utf-8", errors="replace") as log:
+                    text = log.read()
+            except OSError:
+                text = ""
+            if STARTED.search(text):
+                return
+            states.append(device_state(self.udid))
+            if watchdog_should_stop(text, states):
+                self.fired = states[-1]
+                print(f"UI_WATCHDOG simulator {self.udid} is {self.fired} before the first test; stopping the pass", flush=True)
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=60)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                return
+
+    def stop(self) -> None:
+        self.stopped.set()
+
+
+def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str, str, float, bool]:
+    """One xcodebuild run; returns (status, log text, result bundle path, start time, whether
+    the watchdog stopped it)."""
     suffix = "" if label == "first" else "-retry"
     log_path = os.path.join(args.out, f"{args.name}{suffix}-log.txt")
     result = os.path.join(args.out, f"{args.name}{suffix}.xcresult")
@@ -521,14 +602,26 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         recorder.start()
     started = time.time()
     with open(log_path, "w") as log:
-        status = subprocess.call(command, stdout=log, stderr=subprocess.STDOUT)
+        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        watchdog = Watchdog(args.udid, log_path, process)
+        watchdog.start()
+        status = process.wait()
+        watchdog.stop()
+        watchdog.join(timeout=90)
+    if watchdog.fired:
+        with open(log_path, "a") as log:
+            log.write(f"\nUI_WATCHDOG simulator {args.udid} left Booted (state {watchdog.fired}) before the first test; "
+                      "pass stopped\n")
+        BOOT_RETRIES.append(f"simulator left Booted (state {watchdog.fired}) before the first test of the {label} pass; "
+                            "stopped by the watchdog")
+        status = status or 1
     stream.terminate()
     if recorder:
         recorder.stop()
     print(f"UI_PASS_TIME {args.name} {label} {int(time.time() - started)} s (exit {status})", flush=True)
     with open(log_path, encoding="utf-8", errors="replace") as log:
         text = log.read()
-    return status, text, result, started
+    return status, text, result, started, bool(watchdog.fired)
 
 
 def report(text: str, status: int, label: str) -> None:
@@ -565,12 +658,14 @@ def command_run(args) -> int:
     chosen = selection(args.only, args.skip)
     if args.increase_contrast:
         prepare(args.udid, increase_contrast=True, basics=False)
-    status, text, bundle_path, started = run_pass(args, "first", chosen, build=True)
+    status, text, bundle_path, started, stopped = run_pass(args, "first", chosen, build=True)
     report(text, status, "first")
     crashes = crash_reports(started) if status else []
     # Whether the simulator is still there after a failed pass ("device is not booted").
     probe = sh(["xcrun", "simctl", "spawn", args.udid, "launchctl", "getenv", "HOME"], timeout=60, quiet=True)[1] if status else ""
     bundle = read_bundle(bundle_path) if status else []
+    if stopped:
+        bundle = watchdog_bundle(bundle)
     verdict, reasons = decide(status, text, crashes, probe[:4000], bundle)
     print(f"UI_VERDICT {args.name} first: {verdict}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
     print_crash_reports(crashes + other_crash_reports(started) if status else [], "first")
@@ -585,10 +680,11 @@ def command_run(args) -> int:
             print(f"::warning title=UI {args.name}::The simulator failed ({'; '.join(reasons)}); no test found a problem. "
                   "The tests that did not pass run once more on an erased simulator.")
             if reset(args.udid, args.reduce_motion, args.increase_contrast):
-                status, text, bundle_path, started = run_pass(args, "retry", retry, build=False)
+                status, text, bundle_path, started, stopped = run_pass(args, "retry", retry, build=False)
                 report(text, status, "retry")
                 crashes = crash_reports(started) if status else []
-                verdict, reasons = decide(status, text, crashes, bundle=read_bundle(bundle_path) if status else [])
+                bundle = read_bundle(bundle_path) if status else []
+                verdict, reasons = decide(status, text, crashes, bundle=watchdog_bundle(bundle) if stopped else bundle)
                 final = "pass" if verdict == "pass" else "fail"
                 print(f"UI_VERDICT {args.name} retry: {final}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
                 print_crash_reports(crashes + other_crash_reports(started) if status else [], "retry")

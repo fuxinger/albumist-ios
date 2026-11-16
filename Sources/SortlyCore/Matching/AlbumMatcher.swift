@@ -144,11 +144,17 @@ public struct AlbumMatcher: Sendable {
     ///     trip only is a part of the place (`isPart`), whatever its name.
     ///
     /// Within one run an album of the user is changed for one suggestion at most (review 16.11.,
-    /// A5 and A10): an album that already holds all of one suggestion ("schon vollständig",
-    /// whether or not the user tapped "Album so lassen") is that suggestion's album, and no
-    /// other suggestion extends it. When several suggestions would extend the same album, the
-    /// one it fits best (Jaccard, then score) keeps it; the others get an album of their own and
-    /// see it only under "Anpassen".
+    /// A5 and A10):
+    /// - an album named exactly like a suggestion (normalised: "Italien" for the country
+    ///   Italien) belongs to that suggestion when it would extend it, even if a trip of the run
+    ///   wants it or already is complete in it (decision Fuchs 16.11.). That trip gets an album
+    ///   of its own and sees this one only under "Anpassen";
+    /// - otherwise an album that already holds all of one suggestion ("schon vollständig",
+    ///   whether or not the user tapped "Album so lassen") is that suggestion's album, and no
+    ///   other suggestion extends it;
+    /// - when several suggestions would extend the same album, the one it fits best (Jaccard,
+    ///   then score) gets it; the others get an album of their own and see it only under
+    ///   "Anpassen".
     public func match(_ proposals: [AlbumProposal], against inventory: CollectionInventory,
                       overrides: OverrideSet = OverrideSet(),
                       assignments: [SortlyID: CollectionID] = [:],
@@ -204,6 +210,9 @@ public struct AlbumMatcher: Sendable {
         // Per album, once per run: the one trip all its photos lie in (inner nil: none).
         var albumTrips: [CollectionID: Int?] = [:]
         var taken: [SortlyID: Set<CollectionID>] = [:]
+        // Albums a suggestion gave up to the suggestion named exactly like the album: never its
+        // album in this run, not even as complete (offered under "Anpassen" only).
+        var ceded: [SortlyID: Set<CollectionID>] = [:]
         func run(_ proposal: AlbumProposal) {
             let claimed = Set(owners.compactMap { albumID, ids in ids.contains(proposal.id) ? nil : albumID })
             let family = proposal.kind.familyKey
@@ -215,6 +224,7 @@ public struct AlbumMatcher: Sendable {
                 assigned: assignments[proposal.id],
                 claimedByOthers: claimed,
                 taken: taken[proposal.id] ?? [],
+                ceded: ceded[proposal.id] ?? [],
                 tripOf: tripOf,
                 trips: trips,
                 albumTrips: &albumTrips,
@@ -227,41 +237,63 @@ public struct AlbumMatcher: Sendable {
             siblingCounts[family] = counts
         }
         for proposal in proposals { run(proposal) }
+        let byID = Dictionary(proposals.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         // One album, one suggestion per run. Every round takes at least one album away from
         // one suggestion for good, so this ends; in practice after one or two rounds.
         while true {
-            var kept = reserved
+            var keeping: [CollectionID: [AlbumProposal]] = [:]
             var extending: [CollectionID: [AlbumProposal]] = [:]
             for p in proposals {
                 guard let r = results[p.id], let best = r.best, best.isEditable else { continue }
                 switch r.status {
-                case .alreadyComplete: kept.insert(best.albumID)
+                case .alreadyComplete: keeping[best.albumID, default: []].append(p)
                 case .extendable: extending[best.albumID, default: []].append(p)
                 default: break
                 }
             }
+            func rank(_ p: AlbumProposal) -> (Double, Double, String) {
+                let best = results[p.id]?.best
+                return (best?.metrics.jaccard ?? 0, best?.score ?? 0, p.id.rawValue)
+            }
             var losers: [(AlbumProposal, CollectionID)] = []
+            var cedes: [(AlbumProposal, CollectionID)] = []
             for (albumID, ps) in extending {
-                // The suggestion the album was applied to keeps it (`assignments`), and so does
-                // one it is already complete for.
+                // The suggestion the album was applied to keeps it (`assignments`).
                 let contenders = ps.filter { assignments[$0.id] != albumID }
-                if contenders.count < ps.count || kept.contains(albumID) {
+                if contenders.count < ps.count {
+                    losers += contenders.map { ($0, albumID) }
+                    continue
+                }
+                let keepers = keeping[albumID] ?? []
+                // Same name wins (decision Fuchs 16.11., ENTWURF-BEDIENUNG Q8): the user's
+                // "Italien" belongs to the suggestion "Italien", also when a trip in this run
+                // wants it or already is complete in it. That trip gets an album of its own.
+                // Not when a suggestion complete in the album has that name itself.
+                let name = AlbumTitle.normalized(inventory[albumID]?.title ?? "")
+                func named(_ p: AlbumProposal) -> Bool { !name.isEmpty && AlbumTitle.normalized(p.title) == name }
+                let namedContenders = contenders.filter(named)
+                if !namedContenders.isEmpty && !keepers.contains(where: named) {
+                    let winner = namedContenders.max { rank($0) < rank($1) }
+                    losers += contenders.filter { $0.id != winner?.id }.map { ($0, albumID) }
+                    cedes += keepers.map { ($0, albumID) }
+                    continue
+                }
+                // Otherwise a suggestion it is already complete for keeps it (also one outside
+                // this run, `reserved`), and among several the most similar one gets it.
+                if !keepers.isEmpty || reserved.contains(albumID) {
                     losers += contenders.map { ($0, albumID) }
                     continue
                 }
                 guard contenders.count > 1 else { continue }
-                func rank(_ p: AlbumProposal) -> (Double, Double, String) {
-                    let best = results[p.id]?.best
-                    return (best?.metrics.jaccard ?? 0, best?.score ?? 0, p.id.rawValue)
-                }
                 let winner = contenders.max { rank($0) < rank($1) }
                 losers += contenders.filter { $0.id != winner?.id }.map { ($0, albumID) }
             }
-            if losers.isEmpty { break }
-            for (p, albumID) in losers.sorted(by: { $0.0.id.rawValue < $1.0.id.rawValue }) {
-                taken[p.id, default: []].insert(albumID)
-                run(p)
+            if losers.isEmpty && cedes.isEmpty { break }
+            for (p, albumID) in losers { taken[p.id, default: []].insert(albumID) }
+            for (p, albumID) in cedes { ceded[p.id, default: []].insert(albumID) }
+            for id in Set((losers + cedes).map(\.0.id)).sorted(by: { $0.rawValue < $1.rawValue }) {
+                if let p = byID[id] { run(p) }
             }
         }
         return results
@@ -274,6 +306,7 @@ public struct AlbumMatcher: Sendable {
         assigned: CollectionID?,
         claimedByOthers: Set<CollectionID>,
         taken: Set<CollectionID>,
+        ceded: Set<CollectionID>,
         tripOf: [AssetID: Int],
         trips: [Set<AssetID>],
         albumTrips: inout [CollectionID: Int?],
@@ -387,7 +420,7 @@ public struct AlbumMatcher: Sendable {
             // place's album, as without trips (re-check 16.11.).
             let oneTrip = relation != .equivalent && metrics.coverage < thresholds.completeCoverage
                 && tracksTrips && isOneTripOfPlace(album) && !Self.nameAddsNothing(album: album.title, proposal: proposal.title)
-            if isTaken && !holdsAll || oneTrip || isPart(candidate, of: proposal) {
+            if ceded.contains(albumID) || isTaken && !holdsAll || oneTrip || isPart(candidate, of: proposal) {
                 parts.append(candidate)
                 continue
             }

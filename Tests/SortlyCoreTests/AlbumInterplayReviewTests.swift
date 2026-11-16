@@ -271,12 +271,15 @@ struct AlbumInterplayFixTests {
         #expect(matcher.tiedWithBest(renamed, kind: country.kind, title: country.title).isEmpty)
     }
 
-    /// A5 without the year in the name: the trip and the country both want "Italien". The trip
-    /// (the album is most like it) keeps it; the country gets an album of its own and is offered
-    /// "Italien" only under "Anpassen".
+    /// A5 without the year in the name: the trip and the country both want "Urlaub in Italien".
+    /// The trip (the album is most like it) keeps it; the country gets an album of its own and
+    /// is offered the album only under "Anpassen".
     @Test func oneAlbumPerRunForOneSuggestion() throws {
         let y19 = set("it19", 0..<150), y23 = set("it23", 0..<150)
-        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it19", 0..<100))
+        // Not named exactly like the country: since the decision of 16.11. (ENTWURF Q8,
+        // "Gleicher Name gewinnt") an album called "Italien" goes to the country
+        // (sameNameWinsTheAlbum). Here the content decides.
+        let album = CollectionSnapshot(id: "it", title: "Urlaub in Italien", assetIDs: set("it19", 0..<100))
         let trip = AlbumProposal(id: SortlyID("t19"), kind: .trip, title: "Italien · Mai 2019", assetIDs: y19)
         let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
                                     folderPath: ["Länder"], assetIDs: y19.union(y23))
@@ -295,11 +298,13 @@ struct AlbumInterplayFixTests {
     /// it; another suggestion of the same run does not extend it.
     @Test func completeAlbumIsNotExtendedByAnotherSuggestion() throws {
         let y19 = set("it19", 0..<150), y23 = set("it23", 0..<150)
-        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: y19)
+        // Not named exactly like the country: an album called "Italien" goes to the country
+        // since the decision of 16.11. (ENTWURF Q8, sameNameWinsTheAlbum).
+        let album = CollectionSnapshot(id: "it", title: "Urlaub in Italien", assetIDs: y19)
         let trip = AlbumProposal(id: SortlyID("t19"), kind: .trip, title: "Italien · Mai 2019", assetIDs: y19)
         let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
                                     folderPath: ["Länder"], assetIDs: y19.union(y23))
-        // Alone, the country would extend it (the album is named after it).
+        // Alone, the country would extend it (the name shares "Italien").
         #expect(matcher.match([country], against: CollectionInventory([album]))[country.id]?.status == .extendable)
 
         let results = matcher.match([trip, country], against: CollectionInventory([album]))
@@ -313,6 +318,7 @@ struct AlbumInterplayFixTests {
 
         // A suggestion that the album holds completely may still keep it as well.
         let same = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", assetIDs: y19)
+        #expect(matcher.match([trip, same], against: CollectionInventory([album]))[trip.id]?.status == .alreadyComplete)
         #expect(matcher.match([trip, same], against: CollectionInventory([album]))[same.id]?.status == .alreadyComplete)
     }
 
@@ -535,3 +541,73 @@ extension AlbumInterplayRecheckTests {
         #expect(stats.albumTripScans.values.allSatisfy { $0 == 1 }, "\(stats.albumTripScans.filter { $0.value > 1 })")
     }
 }
+
+/// Decision Fuchs 16.11. (ENTWURF-BEDIENUNG Q8, "Gleicher Name gewinnt"): an album of the user
+/// named exactly like a suggestion belongs to that suggestion, also when a trip of the same run
+/// wants it. The country extends "Italien" (shown in the preview, undoable); the trip gets its
+/// own album. Albums with a year ("Italien 2019") stay parts.
+@Suite("Gleicher Name gewinnt")
+struct SameNameWinsTests {
+    let matcher = AlbumMatcher()
+
+    func set(_ prefix: String, _ range: Range<Int>) -> Set<AssetID> {
+        Set(range.map { AssetID("\(prefix)-\($0)") })
+    }
+
+    // One declaration each: with both in one `let a = …, b = …`, Swift 6.2.3 on Linux gave
+    // b the value of a (both closures read "it19").
+    let y19 = Set((0..<150).map { AssetID("it19-\($0)") })
+    let y23 = Set((0..<150).map { AssetID("it23-\($0)") })
+    var trip: AlbumProposal { AlbumProposal(id: SortlyID("t19"), kind: .trip, title: "Italien · Mai 2019", assetIDs: y19) }
+    var country: AlbumProposal {
+        AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"], assetIDs: y19.union(y23))
+    }
+
+    @Test func sameNameWinsTheAlbum() throws {
+        // "Italien" holds part of the 2019 trip: both would extend it; before, the trip got it
+        // (more similar) and the country a second "Italien".
+        let part = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it19", 0..<100))
+        // "Italien" holds the whole 2019 trip: before, the trip kept it ("Album so lassen").
+        let whole = CollectionSnapshot(id: "it", title: "Italien", assetIDs: y19)
+        for album in [part, whole] {
+            for ps in [[trip, country], [country, trip]] {
+                let results = matcher.match(ps, against: CollectionInventory([album]), trips: [y19, y23])
+                let c = try #require(results[country.id])
+                #expect(ProposalDecision.recommended(for: country, match: c) == .extendExisting("it"), "\(album.assetIDs.count): \(c.status)")
+                let t = try #require(results[trip.id])
+                #expect(ProposalDecision.recommended(for: trip, match: t) == .createNew(title: nil, folderPath: nil), "\(t.status)")
+                // Still offered to the trip under "Anpassen".
+                #expect(t.alternatives.contains { $0.albumID == "it" })
+            }
+        }
+    }
+
+    /// Normalised: case and accents do not matter.
+    @Test func sameNameIsNormalised() throws {
+        let album = CollectionSnapshot(id: "it", title: "ITALIEN", assetIDs: y19)
+        let results = matcher.match([trip, country], against: CollectionInventory([album]))
+        #expect(ProposalDecision.recommended(for: country, match: results[country.id]) == .extendExisting("it"))
+    }
+
+    /// The same when the trip is outside the run (dismissed, `reserved`).
+    @Test func sameNameWinsOverADismissedTrip() throws {
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: y19)
+        let r = matcher.match([country], against: CollectionInventory([album]), reserved: ["it"])
+        #expect(ProposalDecision.recommended(for: country, match: r[country.id]) == .extendExisting("it"))
+    }
+
+    /// A year in the name stays a part: the trip keeps "Italien 2019", the country does not
+    /// grow it. Another name: the content decides, as before.
+    @Test func yearOrOtherNameDoNotWin() throws {
+        let dated = CollectionSnapshot(id: "it", title: "Italien 2019", assetIDs: y19)
+        let r = matcher.match([trip, country], against: CollectionInventory([dated]))
+        #expect(r[trip.id]?.status == .alreadyComplete)
+        #expect(ProposalDecision.recommended(for: country, match: r[country.id]) == .createNew(title: nil, folderPath: nil))
+
+        let other = CollectionSnapshot(id: "it", title: "Urlaub in Italien", assetIDs: y19)
+        let o = matcher.match([trip, country], against: CollectionInventory([other]))
+        #expect(o[trip.id]?.status == .alreadyComplete)
+        #expect(ProposalDecision.recommended(for: country, match: o[country.id]) == .createNew(title: nil, folderPath: nil))
+    }
+}
+

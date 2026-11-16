@@ -152,6 +152,8 @@ final class AppModel {
     @ObservationIgnored private var lastStepRemainingCheck: ContinuousClock.Instant?
     /// The widths came from a workload (this analysis), not the standard ones.
     @ObservationIgnored private var widthsFixed = false
+    /// When the overview last looked for the early suggestions without finding them.
+    @ObservationIgnored private var lastEarlyLook: ContinuousClock.Instant?
     /// The card showed this run as a full analysis at least once (not only the quick check).
     @ObservationIgnored private var runShowedBar = false
     var snapshot: ProposalSnapshot?
@@ -874,6 +876,7 @@ final class AppModel {
         pausingSince = nil
         lastRecentChange = nil
         lastStepRemainingCheck = nil
+        lastEarlyLook = nil
         runShowedBar = false
         analysisBar = analysis.shownOverall
         analysisFinish = nil
@@ -922,6 +925,17 @@ final class AppModel {
             }
         }
         if let progress = taken.progress { receive(progress, at: now) }
+        // "Schon fertig": the early suggestions are read once they are saved (the report that
+        // starts the image step comes before that, review I2). Should that read miss them,
+        // it is tried again every 10 s while the image step or a later one runs.
+        if taken.earlyProposals {
+            lastEarlyLook = now
+            Task { await refreshDerived() }
+        } else if snapshot == nil, (analysis.stage?.number ?? 0) >= AnalysisPipeline.Stage.content.number,
+                  lastEarlyLook.map({ now - $0 >= .seconds(10) }) ?? true {
+            lastEarlyLook = now
+            Task { await refreshDerived() }
+        }
         // Thumbnails at most once a second, and only while someone can see them (S9).
         if isOnScreen, !taken.recent.isEmpty, analysis.stage == .content,
            lastRecentChange.map({ now - $0 >= .seconds(1) }) ?? true, taken.recent != analysisRecent {
@@ -1123,7 +1137,10 @@ final class AppModel {
             let inScope = scope == .all ? facts : facts.filter { scope.includes($0, calendar: calendar) }
             let scopedIDs = Set(inScope.map(\.id))
             progress = resolver.progress(scope == .all ? Array(computed.values) : computed.filter { scopedIDs.contains($0.key) }.map(\.value))
-            if recount != nil, !proposals.isEmpty || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
+            // Not with the early set of a first run (trips and places only): the count would
+            // be shown as final hours before the image analysis is done (review minor).
+            if recount != nil, (snapshot?.isEarly == false && !proposals.isEmpty)
+                || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
                 recount = nil
             }
             analysisCounts = AnalysisCounts(

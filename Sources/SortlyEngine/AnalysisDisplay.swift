@@ -597,6 +597,8 @@ public final class ProgressMailbox: Sendable {
         public var progress: AnalysisPipeline.Progress?
         public var workload: AnalysisWorkload?
         public var recent: [AssetID]
+        /// The early suggestions were saved (kept until taken, like the workload).
+        public var earlyProposals = false
     }
 
     private let state = Mutex(Taken(progress: nil, workload: nil, recent: []))
@@ -607,6 +609,7 @@ public final class ProgressMailbox: Sendable {
         state.withLock {
             if let workload = progress.workload { $0.workload = workload }
             if !progress.recent.isEmpty { $0.recent = progress.recent }
+            if progress.earlyProposals { $0.earlyProposals = true }
             $0.progress = progress
         }
     }
@@ -618,6 +621,7 @@ public final class ProgressMailbox: Sendable {
             $0.progress = nil
             $0.workload = nil
             $0.recent = []
+            $0.earlyProposals = false
             return taken
         }
     }

@@ -25,18 +25,22 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
     public var dismissed: [AlbumProposal] = []
     /// Albums that stand for photos without an album of their own (`StandIn`).
     public var standIns: [StandIn] = []
+    /// The early set of a first run (trips and places, before the image analysis). The full
+    /// set that replaces it keeps every suggestion of it the user already decided on.
+    public var isEarly = false
 
     public init(generatedAt: Date, scope: OrganizationScope, proposals: [AlbumProposal], matches: [SortlyID: MatchResult],
-                dismissed: [AlbumProposal] = [], standIns: [StandIn] = []) {
+                dismissed: [AlbumProposal] = [], standIns: [StandIn] = [], isEarly: Bool = false) {
         self.generatedAt = generatedAt
         self.scope = scope
         self.proposals = proposals
         self.matches = matches
         self.dismissed = dismissed
         self.standIns = standIns
+        self.isEarly = isEarly
     }
 
-    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns }
+    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly }
 
     /// Snapshots stored before dismissed suggestions and stand-ins were kept still load.
     public init(from decoder: any Decoder) throws {
@@ -47,6 +51,7 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         matches = try c.decode([SortlyID: MatchResult].self, forKey: .matches)
         dismissed = try c.decodeIfPresent([AlbumProposal].self, forKey: .dismissed) ?? []
         standIns = try c.decodeIfPresent([StandIn].self, forKey: .standIns) ?? []
+        isEarly = try c.decodeIfPresent(Bool.self, forKey: .isEarly) ?? false
     }
 }
 
@@ -106,6 +111,10 @@ public actor AnalysisPipeline {
         /// The image step: the last photos looked at (never screenshots: B4), for the card's
         /// "Gerade angesehen".
         public var recent: [AssetID] = []
+        /// Said once, right after the first run saved its early suggestions (trips, places):
+        /// the overview reads them now for "Schon fertig". The report that starts the image
+        /// step comes before they are saved, so reading at that report found nothing (review I2).
+        public var earlyProposals = false
 
         /// One value for the whole run (0…1), so a bar never jumps back when the next stage starts.
         public static func overall(stage: Stage, completed: Int, total: Int) -> Double {
@@ -173,6 +182,8 @@ public actor AnalysisPipeline {
         static let home = "analysis.home"
         /// The trial run's year chosen at the start (kept by "Analyse neu aufbauen").
         static let scope = "user.analysisScope"
+        /// The user's decisions on suggestions (written by the app, read here only).
+        static let decisions = "user.decisions"
     }
 
     private let store: SortlyStore
@@ -475,8 +486,10 @@ public actor AnalysisPipeline {
         // suggestion ids are stable, so decisions made in between stay valid.
         if contentTotal > 0, try await latestProposals() == nil {
             let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
-            _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope)
+            _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope, early: true)
             report.earlyProposals = true
+            onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal,
+                                earlyProposals: true))
         }
         // Photos still to analyse that have a result of this version already: their labels
         // were saved by a run that ended before it marked them (or only their place or date
@@ -967,7 +980,7 @@ public actor AnalysisPipeline {
 
     private func makeProposals(
         all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
-        groups: [ObservationGroup], scope: OrganizationScope
+        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false
     ) async throws -> ProposalSnapshot {
         // The albums are read again: a plan applied while this run was busy (minutes or hours
         // on a large library) created albums the matching must see, or it would suggest them
@@ -991,7 +1004,19 @@ public actor AnalysisPipeline {
             // Like trips: a place with photos in the trial year comes with all its photos.
             recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) }
         )
-        let suggestions = ProposalEngine(settings: settings, calendar: calendar).suggestions(for: analysis, overrides: overrides)
+        var suggestions = ProposalEngine(settings: settings, calendar: calendar).suggestions(for: analysis, overrides: overrides)
+        // The full set after an early one: a suggestion of the early set the user already
+        // decided on stays, even when the full analysis would not make it any more (review
+        // minor: a decision must not lose its suggestion).
+        var keptMatches: [SortlyID: MatchResult] = [:]
+        if !early, let previous = try await latestProposals(), previous.isEarly,
+           let decided = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) {
+            let present = Set(suggestions.open.map(\.id)).union(suggestions.dismissed.map(\.id))
+            for p in previous.proposals where !present.contains(p.id) && (decided[p.id] ?? .undecided) != .undecided {
+                suggestions.open.append(p)
+                keptMatches[p.id] = previous.matches[p.id]
+            }
+        }
         var matches = Self.match(suggestions.open, dismissed: suggestions.dismissed, against: inventory, overrides: overrides,
                                  assignments: Self.assignments(try await store.managedAlbums()))
         if generation != albumGeneration {
@@ -1000,8 +1025,9 @@ public actor AnalysisPipeline {
             matches = Self.match(suggestions.open, dismissed: suggestions.dismissed, against: try await store.loadInventory(),
                                  overrides: OverrideSet(try await store.overrides()), assignments: Self.assignments(try await store.managedAlbums()))
         }
+        for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
         let snapshot = ProposalSnapshot(generatedAt: Date(), scope: scope, proposals: suggestions.open, matches: matches,
-                                        dismissed: suggestions.dismissed, standIns: suggestions.standIns)
+                                        dismissed: suggestions.dismissed, standIns: suggestions.standIns, isEarly: early)
         try await store.setValue(snapshot, forKey: Key.proposals)
         return snapshot
     }

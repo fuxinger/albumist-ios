@@ -225,6 +225,59 @@ struct FullRunDisplayTests {
         sim.finish()
     }
 
+    /// Review I2: "Schon fertig" read the suggestions at the report that starts the image
+    /// step, before the early ones were saved, and never again. Now one more report says when
+    /// they are saved; at that report they are in the store. Only the first run says it.
+    @Test func earlySuggestionsAreSaidOnceSaved() async throws {
+        let sim = try Sim(scale: 0.2)
+        let saidAt = Mutex<[Int]>([])
+        let paused = await sim.run("early", pause: .when(stage: .content, atLeast: 0.2))
+        let events = paused.events.withLock { $0 }.compactMap { e -> PipelineProgress? in
+            if case .progress(let p) = e.kind { return p } else { return nil }
+        }
+        for (i, p) in events.enumerated() where p.earlyProposals { saidAt.withLock { $0.append(i) } }
+        let at = saidAt.withLock { $0 }
+        #expect(at.count == 1, "said \(at.count) times")
+        // After the report that starts the image step, before the first photo is counted.
+        let begin = try #require(events.firstIndex { $0.stage == .content })
+        if let i = at.first {
+            #expect(i > begin)
+            #expect(events[i].stage == .content && events[i].completed == events[begin].completed)
+        }
+        let early = try #require(try await sim.pipeline.latestProposals())
+        #expect(early.isEarly)
+        let rest = await sim.run("final")
+        sim.expectComplete(rest)
+        let laterSaid = rest.events.withLock { $0 }.contains { if case .progress(let p) = $0.kind { p.earlyProposals } else { false } }
+        #expect(!laterSaid)
+        #expect(try await sim.pipeline.latestProposals()?.isEarly == false)
+        sim.finish()
+    }
+
+    /// Review minor: an early suggestion the full analysis no longer makes stays when the user
+    /// already decided on it; one nobody decided on goes.
+    @Test func decidedEarlySuggestionsStay() async throws {
+        let sim = try Sim(scale: 0.2)
+        _ = await sim.run("early", pause: .when(stage: .content, atLeast: 0.2))
+        var early = try #require(try await sim.pipeline.latestProposals())
+        let model = try #require(early.proposals.first { $0.kind.area == .trips })
+        // Two suggestions the full set will not make (ids no engine gives).
+        var decided = model; decided.id = SortlyID("gone-decided")
+        var open = model; open.id = SortlyID("gone-open")
+        early.proposals += [decided, open]
+        try await sim.store.setValue(early, forKey: "analysis.proposals")
+        let decisions: [SortlyID: ProposalDecision] = [decided.id: .createNew(title: nil, folderPath: nil), open.id: .undecided]
+        try await sim.store.setValue(decisions, forKey: "user.decisions")
+        let rest = await sim.run("final")
+        sim.expectComplete(rest)
+        let final = try #require(try await sim.pipeline.latestProposals())
+        let ids = Set(final.proposals.map(\.id))
+        #expect(ids.contains(decided.id))
+        #expect(!ids.contains(open.id))
+        #expect(!final.isEarly)
+        sim.finish()
+    }
+
     // MARK: Focused checks of the engine fixes
 
     /// A wait for Apple's geocoder (its limit of about 40 lookups a minute, or a refusal) is

@@ -305,13 +305,17 @@ extension ProposalDecision {
     /// What "Übernehmen" does for a proposal (prompt §5.4): keep a complete album, extend a
     /// matching one, otherwise create a new album. Ambiguous cases and unnamed personal
     /// places/groups stay undecided until the user chooses.
+    ///
+    /// Only a certain match (`extendable`) changes an album of the user. A possible match
+    /// (`possibleMatch`) gets an album of its own; the user can still pick the existing album
+    /// under "Anpassen" (review 16.11., A1–A4: "Unklar heißt nicht erledigt").
     public static func recommended(for proposal: AlbumProposal, match: MatchResult?, userTitle: String? = nil) -> ProposalDecision {
         let title = userTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         if proposal.requiresUserName && (title ?? "").isEmpty { return .undecided }
         switch match?.status {
         case .alreadyComplete:
             if let id = match?.best?.albumID { return .keepExisting(id) }
-        case .extendable, .possibleMatch:
+        case .extendable:
             if let best = match?.best, best.isEditable { return .extendExisting(best.albumID) }
         case .multipleMatches, .ambiguous:
             return .undecided

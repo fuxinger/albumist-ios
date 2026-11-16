@@ -1191,6 +1191,16 @@
         }
       }
     },
+    "Albumist legt ein neues Album an und ändert „%@“ nicht. Unter „Anpassen“ kannst du stattdessen „%@“ ergänzen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist creates a new album and leaves “%1$@” unchanged. Under “Adjust” you can add to “%2$@” instead."
+          }
+        }
+      }
+    },
     "Albumist ordnet Fotos nur Alben zu. Löschen, Bearbeiten oder Kopieren von Fotos gibt es in Albumist nicht. Ein Album verweist nur auf deine Fotos." : {
       "localizations" : {
         "en" : {
@@ -3921,16 +3931,6 @@
         }
       }
     },
-    "Vorhandenes Album passt vermutlich" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "An existing album probably fits"
-          }
-        }
-      }
-    },
     "Vorhandenes Album wird ergänzt" : {
       "localizations" : {
         "en" : {
@@ -4127,6 +4127,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Similar albums"
+          }
+        }
+      }
+    },
+    "Ähnliches Album gefunden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Similar album found"
           }
         }
       }

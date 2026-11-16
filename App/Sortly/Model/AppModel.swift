@@ -1241,6 +1241,8 @@ final class AppModel {
     /// The best suggestions for a first round ("Dein Startpaket"): safe ones only (at least
     /// likely, nothing sensitive, no name needed, a clear action), trips and places first,
     /// then the biggest. Returned in display order, the order the preview lists them in.
+    /// A possible match is no clear action: a similar album of the user exists, so the user
+    /// looks at it first (review 16.11.).
     func starterSet(limit: Int) -> [AlbumProposal] {
         func rank(_ p: AlbumProposal) -> Int {
             switch p.kind.area {
@@ -1250,7 +1252,8 @@ final class AppModel {
             }
         }
         return Array(openProposals
-            .filter { $0.reliability >= .likely && !$0.isSensitive && !$0.requiresUserName && recommendedDecision(for: $0).isAccepted }
+            .filter { $0.reliability >= .likely && !$0.isSensitive && !$0.requiresUserName && recommendedDecision(for: $0).isAccepted
+                && match(for: $0)?.status != .possibleMatch }
             .sorted { (rank($0), $0.assetIDs.count, $1.title) > (rank($1), $1.assetIDs.count, $0.title) }
             .prefix(limit)).inDisplayOrder()
     }

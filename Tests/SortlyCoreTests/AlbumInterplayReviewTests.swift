@@ -1,0 +1,193 @@
+import Foundation
+import Testing
+@testable import SortlyCore
+import SortlyTestSupport
+
+/// Review 16.11.2026 (Zusammenspiel bestehender Alben mit Vorschlägen).
+/// Each test states the behaviour a user expects. A failing test reproduces a finding;
+/// the finding id (A1 …) is in the test name and in
+/// sortly-review/alben-und-bedienung-2026-11-16/BEFUNDE.md.
+@Suite("Review 16.11.: bestehende Alben und Vorschläge")
+struct AlbumInterplayReviewTests {
+    let matcher = AlbumMatcher()
+
+    func set(_ prefix: String, _ range: Range<Int>) -> Set<AssetID> {
+        Set(range.map { AssetID("\(prefix)-\($0)") })
+    }
+
+    func trip(_ id: String, _ assets: Set<AssetID>, _ title: String) -> AlbumProposal {
+        AlbumProposal(id: SortlyID(id), kind: .trip, title: title, assetIDs: assets)
+    }
+
+    func isTouching(_ d: ProposalDecision, _ album: CollectionID) -> Bool {
+        switch d {
+        case .extendExisting(let id), .keepExisting(let id): id == album
+        default: false
+        }
+    }
+
+    // A1: a big catch-all album ("iPhone-Export", "Familie", "Instagram") holds a whole trip
+    // among thousands of other photos. It is not the trip's album.
+    @Test("A1 Sammelalbum mit 5.000 Fotos ist nicht das Album einer Reise")
+    func a1_catchAllAlbumSwallowsTrip() throws {
+        let garda = set("garda", 0..<120)
+        let other = set("home", 0..<4880)
+        let export = CollectionSnapshot(id: "export", title: "iPhone-Export", assetIDs: garda.union(other))
+        let p = trip("t-garda", garda, "Gardasee · Aug. 2026")
+        let result = try #require(matcher.match([p], against: CollectionInventory([export]))[p.id])
+        let decision = ProposalDecision.recommended(for: p, match: result)
+        print("A1 status=\(result.status) decision=\(decision) purity=\(result.best?.metrics.purity ?? -1)")
+        #expect(!isTouching(decision, "export"), "Reise wird vom Sammelalbum geschluckt: \(result.status)")
+    }
+
+    // A1b: the same for a category: dog photos partly in "Familie".
+    @Test("A1b Kategorie Hunde wird nicht ins Album Familie gekippt")
+    func a1b_categoryIntoFamilyAlbum() throws {
+        let dogs = set("dog", 0..<200)
+        let family = CollectionSnapshot(id: "familie", title: "Familie", assetIDs: set("dog", 0..<120).union(set("fam", 0..<880)))
+        let p = AlbumProposal(id: SortlyID("c-dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: dogs)
+        let result = try #require(matcher.match([p], against: CollectionInventory([family]))[p.id])
+        let decision = ProposalDecision.recommended(for: p, match: result)
+        print("A1b status=\(result.status) decision=\(decision)")
+        #expect(!isTouching(decision, "familie"), "80 Hundefotos würden in „Familie“ gelegt: \(result.status)")
+    }
+
+    // A3: a city suggestion fully inside a country album is not "done" through that album.
+    @Test("A3 Stadt Rom wird nicht vom Länderalbum „Italien“ geschluckt")
+    func a3_cityInsideCountryAlbum() throws {
+        let rome = set("rome", 0..<80)
+        let italy = CollectionSnapshot(id: "italien", title: "Italien", assetIDs: rome.union(set("it", 0..<400)))
+        let city = AlbumProposal(id: SortlyID("city-rom"), kind: .placeCollection(.locality), title: "Rom",
+                                 folderPath: ["Orte", "Italien"], assetIDs: rome)
+        let result = try #require(matcher.match([city], against: CollectionInventory([italy]))[city.id])
+        let decision = ProposalDecision.recommended(for: city, match: result)
+        print("A3 status=\(result.status) decision=\(decision)")
+        #expect(!isTouching(decision, "italien"), "Rom gilt als sortiert in „Italien“, kein Rom-Album: \(result.status)")
+    }
+
+    // A3b: same for a single trip inside an "Italien" album without other trips there.
+    @Test("A3b Einzige Italienreise wird nicht vom Album „Italien“ geschluckt")
+    func a3b_tripInsideCountryAlbum() throws {
+        let t = set("rome24", 0..<80)
+        let italy = CollectionSnapshot(id: "italien", title: "Italien", assetIDs: t.union(set("it", 0..<400)))
+        let p = trip("t-rome", t, "Rom · Mai 2024")
+        let result = try #require(matcher.match([p], against: CollectionInventory([italy]))[p.id])
+        let decision = ProposalDecision.recommended(for: p, match: result)
+        print("A3b status=\(result.status) decision=\(decision)")
+        #expect(!isTouching(decision, "italien"), "Reise gilt als in „Italien“ sortiert: \(result.status)")
+    }
+
+    // A4: a small curated album ("Beste Hundefotos", 10 photos) must not get 390 more.
+    @Test("A4 Kleines Auswahl-Album wird nicht mit hunderten Fotos aufgefüllt")
+    func a4_curatedSubsetFlooded() throws {
+        let dogs = set("dog", 0..<400)
+        let best = CollectionSnapshot(id: "best", title: "Beste Hundefotos", assetIDs: set("dog", 0..<10))
+        let p = AlbumProposal(id: SortlyID("c-dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: dogs)
+        let result = try #require(matcher.match([p], against: CollectionInventory([best]))[p.id])
+        let decision = ProposalDecision.recommended(for: p, match: result)
+        print("A4 status=\(result.status) decision=\(decision) coverage=\(result.best?.metrics.coverage ?? -1)")
+        #expect(!isTouching(decision, "best"), "390 Fotos würden in ein 10-Fotos-Auswahlalbum gelegt: \(result.status)")
+    }
+
+    // A6: an album the user created as a shared album is read-only. Albumist must say so
+    // and create a new one, never pretend it fits.
+    @Test("A6 Geteiltes Album zählt nicht als sortiert")
+    func a6_sharedAlbumOnly() throws {
+        let t = set("t", 0..<50)
+        let shared = CollectionSnapshot(id: "shared", title: "Urlaub", capabilities: [], assetIDs: t)
+        let p = trip("t1", t, "Urlaub 2026")
+        let result = try #require(matcher.match([p], against: CollectionInventory([shared]))[p.id])
+        #expect(result.status == .notEditable)
+        if case .createNew = ProposalDecision.recommended(for: p, match: result) {} else { Issue.record("kein neues Album") }
+    }
+
+    // A7: speed for huge libraries: 50,000 photos, 300 albums incl. one 50,000 "Alle" album.
+    @Test("A7 Abgleich bei 50.000 Fotos und 300 Alben unter 2 Sekunden")
+    func a7_hugeLibrary() throws {
+        var albums: [CollectionSnapshot] = [CollectionSnapshot(id: "alle", title: "Alle", assetIDs: set("x", 0..<50_000))]
+        for i in 0..<299 { albums.append(CollectionSnapshot(id: CollectionID("a\(i)"), title: "Album \(i)", assetIDs: set("x", (i * 150)..<(i * 150 + 300)))) }
+        var proposals: [AlbumProposal] = []
+        for i in 0..<400 { proposals.append(trip("p\(i)", set("x", (i * 120)..<(i * 120 + 120)), "Reise \(i)")) }
+        proposals.append(AlbumProposal(id: SortlyID("big"), kind: .imageCategory("x"), title: "Natur", assetIDs: set("x", 0..<20_000)))
+        let start = Date()
+        _ = matcher.match(proposals, against: CollectionInventory(albums))
+        let seconds = Date().timeIntervalSince(start)
+        print("A7 seconds=\(seconds)")
+        #expect(seconds < 2)
+    }
+    // A8: app deleted and installed again, no backup restored. Albumist's albums are still
+    // in Photos ("Albumist/Länder/Italien", "Albumist/Reisen/…"); the new analysis has no
+    // records. Nothing may be created twice.
+    @Test("A8 Nach Neuinstallation: eigene Alben werden wiedererkannt, keine Duplikate")
+    func a8_reinstallRecognizesOwnAlbums() throws {
+        let t24 = set("it24", 0..<120), t25 = set("it25", 0..<80), y = set("it-other", 0..<50)
+        let root = CollectionSnapshot(id: "f-root", title: "Albumist", kind: .folder, childIDs: ["f-l", "f-r"])
+        let countries = CollectionSnapshot(id: "f-l", title: "Länder", kind: .folder, parentID: "f-root", childIDs: ["a-it"])
+        let trips = CollectionSnapshot(id: "f-r", title: "Reisen", kind: .folder, parentID: "f-root", childIDs: ["a-t24", "a-t25"])
+        let itAlbum = CollectionSnapshot(id: "a-it", title: "Italien", parentID: "f-l", assetIDs: t24.union(t25).union(y))
+        let t24Album = CollectionSnapshot(id: "a-t24", title: "Italien · Mai 2024", parentID: "f-r", assetIDs: t24)
+        let t25Album = CollectionSnapshot(id: "a-t25", title: "Rom · Juni 2025", parentID: "f-r", assetIDs: t25)
+        let inventory = CollectionInventory([root, countries, trips, itAlbum, t24Album, t25Album])
+        let ps = [trip("n-t24", t24, "Italien · Mai 2024"), trip("n-t25", t25, "Rom · Juni 2025"),
+                  AlbumProposal(id: SortlyID("n-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                assetIDs: t24.union(t25).union(y))]
+        let results = matcher.match(ps, against: inventory)
+        for p in ps {
+            let r = try #require(results[p.id])
+            print("A8 \(p.title): \(r.status) best=\(r.best?.albumTitle ?? "-")")
+            #expect(ProposalDecision.recommended(for: p, match: r).isKeepExisting, "\(p.title): \(r.status)")
+        }
+        let merges = AlbumOverlapAnalyzer().suggestions(in: inventory)
+        print("A8 merge suggestions: \(merges.map(\.albumIDs))")
+        #expect(merges.isEmpty, "Albumists eigene Alben werden zum Zusammenführen angeboten")
+    }
+}
+
+/// Regression tests for the fixes of the review 16.11. beyond the review's own tests: what the
+/// user sees and what counts as sorted must follow the same rule ("Unklar heißt nicht erledigt").
+@Suite("Review 16.11.: Behebung")
+struct AlbumInterplayFixTests {
+    let matcher = AlbumMatcher()
+
+    func set(_ prefix: String, _ range: Range<Int>) -> Set<AssetID> {
+        Set(range.map { AssetID("\(prefix)-\($0)") })
+    }
+
+    /// A1: an album that holds the trip among thousands of other photos is not a match at all:
+    /// "Neues Album" (so the trip may go into "Dein Startpaket"), the album only offered.
+    @Test func catchAllAlbumIsOnlyOffered() throws {
+        let garda = set("garda", 0..<120)
+        let export = CollectionSnapshot(id: "export", title: "iPhone-Export", assetIDs: garda.union(set("home", 0..<4880)))
+        let p = AlbumProposal(id: SortlyID("t"), kind: .trip, title: "Gardasee · Aug. 2026", assetIDs: garda)
+        let result = try #require(matcher.match([p], against: CollectionInventory([export]))[p.id])
+        #expect(result.status == .newAlbumRequired)
+        #expect(result.best == nil)
+        #expect(result.alternatives.map(\.albumID) == ["export"])
+        #expect(ProposalDecision.recommended(for: p, match: result) == .createNew(title: nil, folderPath: nil))
+    }
+
+    /// A4: a possible match says that nothing is added, and no longer "werden ergänzt".
+    @Test func possibleMatchPromisesNoChange() throws {
+        let dogs = set("dog", 0..<400)
+        let best = CollectionSnapshot(id: "best", title: "Beste Hundefotos", assetIDs: set("dog", 0..<10))
+        let p = AlbumProposal(id: SortlyID("c-dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: dogs)
+        let result = try #require(matcher.match([p], against: CollectionInventory([best]))[p.id])
+        #expect(result.status == .possibleMatch)
+        #expect(!result.reasons.contains { if case .missingItems = $0 { true } else { false } })
+        #expect(result.reasons.contains(.keptUnchangedUntilChosen(album: "Beste Hundefotos")))
+        #expect(ProposalDecision.recommended(for: p, match: result) == .createNew(title: nil, folderPath: nil))
+        // Still a choice under "Anpassen".
+        #expect(result.best?.albumID == "best")
+    }
+
+    /// The area overview counts a possible match as a new album, not as "in deinen Alben".
+    @Test func possibleMatchIsANewAlbumInTheAreaOverview() throws {
+        let dogs = set("dog", 0..<400)
+        let best = CollectionSnapshot(id: "best", title: "Beste Hundefotos", assetIDs: set("dog", 0..<10))
+        let p = AlbumProposal(id: SortlyID("c-dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: dogs)
+        let results = matcher.match([p], against: CollectionInventory([best]))
+        let overview = try #require(AreaOverview.make(proposals: [p], matches: results).first)
+        #expect(overview.existingMatches == 0)
+        #expect(overview.newAlbumsNeeded == 1)
+    }
+}

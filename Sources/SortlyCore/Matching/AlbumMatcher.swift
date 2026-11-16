@@ -59,6 +59,9 @@ public enum MatchReason: Hashable, Sendable, Codable {
     case severalAlbumsMatch(count: Int)
     case weakOverlapOnly(album: String, shared: Int)
     case noExistingAlbum
+    /// Only a possible match (`possibleMatch`): Albumist makes an album of its own and leaves
+    /// this one alone; the user can still choose it under "Anpassen" (review 16.11., A1–A4).
+    case keptUnchangedUntilChosen(album: String)
 }
 
 public struct MatchCandidate: Hashable, Sendable, Codable {
@@ -250,8 +253,16 @@ public struct AlbumMatcher: Sendable {
                 parts.append(candidate)
                 continue
             }
-            let qualifies = relation != .broaderCollection
-                && (metrics.purity >= thresholds.candidatePurity || metrics.coverage >= thresholds.candidateCoverage)
+            // An album that holds this suggestion among many other photos ("iPhone-Export" with a
+            // whole trip, "Familie" with the dog photos, "Italien" with the city Rom) is not its
+            // album: it is never recommended and never makes the photos count as sorted, but
+            // the user may still pick it under "Anpassen" (review 16.11., A1 and A3).
+            if relation != .broaderCollection, metrics.purity < thresholds.candidatePurity,
+               metrics.coverage >= thresholds.candidateCoverage {
+                parts.append(candidate)
+                continue
+            }
+            let qualifies = relation != .broaderCollection && metrics.purity >= thresholds.candidatePurity
             if qualifies { candidates.append(candidate) } else { weak.append(candidate) }
         }
 
@@ -321,10 +332,6 @@ public struct AlbumMatcher: Sendable {
             return MatchResult(proposalID: proposal.id, status: .multipleMatches, best: best, alternatives: alternatives, sameNameAlbums: sameName, reasons: reasons)
         }
 
-        reasons.append(.albumContains(album: best.albumTitle, contained: best.metrics.intersection, total: best.metrics.proposalCount))
-        if addable > 0 { reasons.append(.missingItems(count: addable)) }
-        if best.metrics.extra > 0 { reasons.append(.albumHasOtherItems(album: best.albumTitle, count: best.metrics.extra)) }
-
         let status: MatchStatus
         switch best.relation {
         case _ where bestIsComplete:
@@ -338,6 +345,11 @@ public struct AlbumMatcher: Sendable {
         default:
             status = .possibleMatch
         }
+        reasons.append(.albumContains(album: best.albumTitle, contained: best.metrics.intersection, total: best.metrics.proposalCount))
+        // "werden ergänzt" only where Albumist really adds them by default.
+        if addable > 0 && status == .extendable { reasons.append(.missingItems(count: addable)) }
+        if best.metrics.extra > 0 { reasons.append(.albumHasOtherItems(album: best.albumTitle, count: best.metrics.extra)) }
+        if status == .possibleMatch { reasons.append(.keptUnchangedUntilChosen(album: best.albumTitle)) }
         return MatchResult(proposalID: proposal.id, status: status, best: best, alternatives: alternatives, sameNameAlbums: sameName, reasons: reasons)
     }
 

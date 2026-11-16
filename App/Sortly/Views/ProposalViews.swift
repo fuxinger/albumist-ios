@@ -404,7 +404,8 @@ struct ProposalDetailView: View {
                 Label {
                     Text(match.status.label).font(.headline)
                 } icon: {
-                    Image(systemName: match.status == .newAlbumRequired ? "plus.rectangle.on.folder" : "checkmark.circle.fill")
+                    // A possible match gets a new album too: no check mark that reads as "done".
+                    Image(systemName: [.newAlbumRequired, .possibleMatch].contains(match.status) ? "plus.rectangle.on.folder" : "checkmark.circle.fill")
                         .foregroundStyle(match.status.tint)
                 }
                 ForEach(Array(match.reasons.enumerated()), id: \.offset) { _, reason in

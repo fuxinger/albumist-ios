@@ -746,9 +746,10 @@ public struct AreaOverview: Hashable, Sendable, Identifiable {
                 assets.formUnion(p.assetIDs)
                 let status = matches[p.id]?.status
                 switch status {
-                case .alreadyComplete, .possibleMatch, .multipleMatches: existing += 1
+                case .alreadyComplete, .multipleMatches: existing += 1
                 case .extendable: existing += 1; extendable += 1
-                case .newAlbumRequired, .nameConflict, .notEditable, .none: new += 1
+                // A possible match gets an album of its own (review 16.11.).
+                case .possibleMatch, .newAlbumRequired, .nameConflict, .notEditable, .none: new += 1
                 case .ambiguous: break
                 }
                 // One count per suggestion, whatever makes it uncertain.

@@ -18,7 +18,10 @@ Namenskonflikten.
 | zusätzlich | \|A \ P\| | Fotos im Album, die bleiben, aber nicht dazugehören |
 
 ## Schwellen (Standard)
-Kandidat ab Reinheit oder Abdeckung ≥ 0,5 und mindestens 3 gemeinsamen Fotos.
+Kandidat ab Reinheit ≥ 0,5 und mindestens 3 gemeinsamen Fotos. Ein Album, das den Vorschlag
+zwar enthält (Abdeckung ≥ 0,5), aber zum größten Teil aus anderen Fotos besteht (Reinheit
+< 0,5, z. B. „iPhone-Export“ mit einer ganzen Reise, „Familie“ mit den Hundefotos, „Italien“
+mit der Stadt Rom), ist **kein** Kandidat: Es wird nur unter „Anpassen“ angeboten.
 **Vollständig**: Abdeckung ≥ 0,98 und Reinheit ≥ 0,9. **Ergänzbar**: Reinheit ≥ 0,8 und
 Abdeckung ≥ 0,25. **Größere Sammlung**: ≥ 20 % des Albums gehören zu Geschwister-Vorschlägen
 derselben Familie (z. B. ein Album „Italien“ über mehrere Italienreisen). Liegen zwei Kandidaten
@@ -29,12 +32,16 @@ weniger als 0,15 Punkte auseinander, gilt „mehrere passende Alben“.
 |---|---|
 | Schon vollständig vorhanden | Album so lassen (zählt als sortiert) |
 | Vorhandenes Album wird ergänzt | fehlende Fotos hinzufügen |
-| Vorhandenes Album passt vermutlich | ergänzen, Nutzer sieht die Begründung |
+| Ähnliches Album gefunden (passt vermutlich) | **neues Album**; das vorhandene bleibt unverändert und wird unter „Anpassen“ angeboten; zählt nicht als sortiert, nicht im Startpaket |
 | Mehrere passende Alben | Nutzer wählt unter „Anpassen“ |
 | Gleicher Name, anderer Inhalt | neues Album, Konflikt wird angezeigt |
 | Neues Album | anlegen im Ordner unter dem Hauptordner |
 | Nicht eindeutig | Nutzer entscheidet |
 | Album nicht bearbeitbar | (z. B. geteiltes Album) neues Album |
+
+Grundsatz (Prüfung 16.11.2026): Albumist ändert ein Album des Nutzers nur, wenn der Abgleich
+sicher ist („wird ergänzt“). „Passt vermutlich“ ändert nie etwas von selbst und zählt im Ring
+nicht als sortiert. Unklar heißt nicht erledigt.
 
 ## Konfliktstrategien
 - Fotos, die der Nutzer selbst aus einem Album entfernt hat, werden nie wieder hinzugefügt.

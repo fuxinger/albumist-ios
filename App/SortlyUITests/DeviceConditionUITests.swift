@@ -850,8 +850,8 @@ final class DeviceConditionUITests: XCTestCase {
         }
     }
 
-    /// C9: an album Albumist made is removed through Albumist (Einstellungen › Von Albumist
-    /// angelegt), and that removal is undone: the album is back.
+    /// C9: an album Albumist made is removed through Albumist (Einstellungen › Alben von
+    /// Albumist), and that removal is undone: the album is back.
     func test08_RemoveManagedAlbumAndUndo() {
         continueAfterFailure = true
         prepare()
@@ -860,7 +860,7 @@ final class DeviceConditionUITests: XCTestCase {
         guard applyManualPlan(title) else { return }
         start()
         guard tap(app.buttons["Einstellungen"], "settings for managed albums", timeout: 20) else { return }
-        let managed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Von Albumist angelegt")).firstMatch
+        let managed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Alben von Albumist")).firstMatch
         let list = app.collectionViews.firstMatch
         var swipes = 0
         while !(managed.exists && managed.isHittable) && swipes < 10 { (list.exists ? list : app).swipeUp(); swipes += 1 }

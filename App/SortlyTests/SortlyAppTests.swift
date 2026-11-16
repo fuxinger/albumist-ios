@@ -391,3 +391,22 @@ struct CountFormattingTests {
         #expect(plural.contains("Fotos") || plural.contains("photos"))
     }
 }
+
+/// Fuchs 16.11. ("Ja"): after "Analyse neu aufbauen" or another part of the library, the photo
+/// mosaic comes back, because the next run counts as a first analysis again.
+@MainActor
+struct MosaicAfterRebuildTests {
+    @Test func rebuildMakesTheNextRunAFirstAnalysisAgain() {
+        let key = "analysis.completedOnce"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+
+        AnalysisMarker.finished()
+        #expect(AnalysisMarker.completedOnce)
+        #expect(!ScanShowRule.shows(isRunning: true, firstAnalysis: !AnalysisMarker.completedOnce, isQuickCheck: false))
+
+        AnalysisMarker.reset()   // what "Analyse neu aufbauen" and another library part call
+        #expect(!AnalysisMarker.completedOnce)
+        #expect(ScanShowRule.shows(isRunning: true, firstAnalysis: !AnalysisMarker.completedOnce, isQuickCheck: false))
+    }
+}

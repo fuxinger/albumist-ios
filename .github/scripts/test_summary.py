@@ -57,7 +57,9 @@ def suite_files():
     for path in glob.glob(f"{ROOT}/Tests/**/*Tests.swift", recursive=True) + glob.glob(f"{ROOT}/App/SortlyTests/*.swift"):
         stem = os.path.basename(path)[:-len(".swift")]
         source = open(path, encoding="utf-8").read()
-        tests = re.findall(r"@Test\b[^\n]*\n?\s*(?:@\w+[^\n]*\n\s*)*func\s+(\w+)", source)
+        # One line per loop step (a line is blank or holds one attribute), so the match stays linear
+        # (CodeQL flagged the older pattern for exponential backtracking).
+        tests = re.findall(r"@Test\b[^\n]*\n(?:[ \t]*(?:@\w+[^\n]*)?\n)*[ \t]*func\s+(\w+)", source)
         tests += re.findall(r"@Test\b[^\n]*?func\s+(\w+)", source)
         result[stem.removesuffix("Tests")] = sorted(set(tests))
     return result

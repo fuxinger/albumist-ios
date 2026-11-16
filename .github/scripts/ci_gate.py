@@ -8,6 +8,11 @@ Used before a TestFlight upload and before a release tag. Green means:
   2. If a UI flow run (ui.yml) exists for this commit (it runs for pull requests), its newest
      run succeeded too. Pushes to main have no UI flow run; there CI alone decides.
 
+With --linux it waits only for the Linux part of that CI run ("Core tests (Linux)" and "App
+rules and strings"): the TestFlight workflow starts building the release archive on a Mac once
+they passed, while this script (without --linux) still waits for everything; the upload needs
+both.
+
 Writes `ok=true|false` and `reason=...` to $GITHUB_OUTPUT and a line to the job summary.
 Never fails itself (exit 0) unless --fail is given, so a red test run shows up as a skipped
 upload with the reason, not as a second red workflow.
@@ -30,6 +35,7 @@ WAIT = float(os.environ.get("WAIT_MINUTES", "180")) * 60
 NO_RUN = float(os.environ.get("NO_RUN_MINUTES", "15")) * 60
 POLL = 60
 CI, CI_JOB = "ci.yml", "iOS build and tests"
+LINUX_JOBS = ("Core tests (Linux)", "App rules and strings")
 UI = "ui.yml"
 
 
@@ -99,11 +105,31 @@ def check():
     return True, True, f"{describe(ci)} and {describe(ui)} passed"
 
 
+def check_linux():
+    """(done, ok, reason): the Linux jobs of the newest CI run for this commit."""
+    ci = newest_run(CI)
+    if ci is None:
+        return False, False, f"no CI run for {SHA[:7]} yet"
+    jobs = {j["name"]: j for j in api(f"actions/runs/{ci['id']}/jobs", per_page=100).get("jobs", [])}
+    states = []
+    for name in LINUX_JOBS:
+        job = jobs.get(name)
+        if job is None or job.get("status") != "completed":
+            if ci["status"] == "completed":
+                return True, False, f"{describe(ci)} ended without '{name}'"
+            return False, False, f"waiting for '{name}' in {describe(ci)}"
+        if job.get("conclusion") != "success":
+            return True, False, f"'{name}' ended with '{job.get('conclusion')}' in {describe(ci)}"
+        states.append(name)
+    return True, True, f"{' and '.join(states)} passed in {describe(ci)}"
+
+
 def main():
     started = time.monotonic()
+    linux = "--linux" in sys.argv
     while True:
         try:
-            done, ok, reason = check()
+            done, ok, reason = check_linux() if linux else check()
         except RuntimeError as error:
             done, ok, reason = False, False, str(error)
         waited = time.monotonic() - started
@@ -123,7 +149,8 @@ def main():
     with open(os.environ.get("GITHUB_OUTPUT", os.devnull), "a", encoding="utf-8") as out:
         out.write(f"ok={'true' if ok else 'false'}\nreason={reason}\n")
     with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:
-        out.write(f"### Test gate for {SHA[:7]}: {'✅ green' if ok else '⛔ not green'}\n\n{reason}\n")
+        part = "Linux tests" if linux else "Test gate"
+        out.write(f"### {part} for {SHA[:7]}: {'✅ green' if ok else '⛔ not green'}\n\n{reason}\n")
     return 1 if ("--fail" in sys.argv and not ok) else 0
 
 

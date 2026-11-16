@@ -115,6 +115,12 @@ struct HomePipelineTests {
         let storedInventory = try await s.store.loadInventory()
         let homeBefore = try #require(try await s.store.value(Set<AssetID>.self, forKey: "analysis.home"))
         #expect(!homeBefore.isEmpty)
+        // An album Albumist made before ("Rom", from the first trip): its record must not change.
+        let romeTrip = try #require(before.proposals.first { $0.kind == .trip })
+        let managed = ManagedAlbumState(albumID: album.id, sourceID: romeTrip.id, lastKnownTitle: "Rom", lastKnownParentID: nil,
+                                        lastKnownMembers: romeTrip.assetIDs, addedBySortly: romeTrip.assetIDs, createdBySortly: true)
+        try await s.store.saveManagedAlbums([managed])
+        let albumsInPhotos = try await s.reader.currentInventory()
 
         var later = s.lib
         later.daily(from: "2026-07-01", to: "2026-07-03", at: Fixture.Places.florence, perDay: 6)
@@ -128,7 +134,11 @@ struct HomePipelineTests {
         #expect(s.geocoder.calls.count == lookups)
         #expect(try await s.store.allAssets() == assets)
         #expect(try await s.store.loadInventory() == storedInventory)
-        #expect(try await s.store.managedAlbums().isEmpty)
+        // Nothing in Photos and no record of an album changed; no plan was made or run.
+        #expect(try await s.reader.currentInventory() == albumsInPhotos)
+        #expect(try await s.store.managedAlbums() == [managed])
+        #expect(try await s.store.planHistory().isEmpty)
+        #expect(try await s.store.unfinishedPlans().isEmpty)
         #expect(try await s.store.value(Set<AssetID>.self, forKey: "analysis.home") == [])
         let after = try #require(try await s.pipeline.latestProposals())
         #expect(after.generatedAt == now)
@@ -209,9 +219,10 @@ struct HomePipelineTests {
         try await s.pipeline.setRecurringPlaceAnswers(parents)
         #expect(try await s.pipeline.resuggest()?.removed == 11)
         try await s.pipeline.setRecurringPlaceAnswers(parents.withdrawing(try #require(parents.places.first?.id), date: now))
-        let back = try #require(try await s.pipeline.resuggest())
-        #expect(back.isEmpty)
+        // Nothing to say: no notice, and none stored.
+        #expect(try await s.pipeline.resuggest() == nil)
         #expect(try await s.pipeline.homeChangeNotice() == nil)
+        #expect(try await s.pipeline.latestProposals()?.proposals.filter { $0.kind == .trip }.count == 10)
     }
 
     /// "Bis 2019: Hamburg": the weekend in Munich before the move becomes the trip it was.
@@ -253,7 +264,7 @@ struct HomePipelineTests {
         // "Stimmt", the way the settings do it: the detected home with its name from the photos.
         let confirmed = HomePlace(center: detected.center, components: HomeName.components(near: detected.center, facts: facts))
         #expect(HomeName(confirmed.components).town == "München")
-        try await s.pipeline.setHomeSettings(HomeSettings().confirming(confirmed, date: now))
+        try await s.pipeline.setHomeSettings(HomeSettings().choosing(confirmed, date: now))
         _ = try await s.pipeline.resuggest()
         #expect(try await homeCount() == automatic)
 
@@ -264,7 +275,7 @@ struct HomePipelineTests {
         // Rome as home (made up, to see the rule): the Rome photos are the home photos now.
         let rome = facts.filter { $0.asset.usableLocation.map { GeoMath.distance($0, Fixture.Places.rome) < 30_000 } ?? false }
         let romeHome = HomePlace(center: Fixture.Places.rome, components: HomeName.components(near: Fixture.Places.rome, facts: facts))
-        try await s.pipeline.setHomeSettings(HomeSettings().confirming(romeHome, date: now))
+        try await s.pipeline.setHomeSettings(HomeSettings().choosing(romeHome, date: now))
         _ = try await s.pipeline.resuggest()
         #expect(try await homeCount() == rome.count)
     }

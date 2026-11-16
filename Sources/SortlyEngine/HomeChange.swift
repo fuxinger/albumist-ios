@@ -24,10 +24,18 @@ public enum HeldSuggestions {
     /// Puts the held suggestions that are still chosen into `suggestions` in place of their new
     /// version (or back, when they are gone). Returns those still held: one that is no longer
     /// chosen, or that the suggestions now make exactly as it was chosen, is let go.
-    public static func apply(_ held: [AlbumProposal], decisions: [SortlyID: ProposalDecision],
+    /// Photos no longer in `library` (deleted in Photos, or a backup restored on another
+    /// iPhone) leave a held suggestion; one with none of its photos left is let go.
+    public static func apply(_ held: [AlbumProposal], decisions: [SortlyID: ProposalDecision], library: Set<AssetID>,
                              to suggestions: inout Suggestions) -> [AlbumProposal] {
         var still: [AlbumProposal] = []
-        for p in held where decisions[p.id]?.isAccepted == true {
+        for var p in held where decisions[p.id]?.isAccepted == true {
+            p.assetIDs.formIntersection(library)
+            p.optionalAssetIDs.formIntersection(library)
+            guard !p.assetIDs.isEmpty else { continue }
+            if let cover = p.coverAssetID, !p.assetIDs.contains(cover), !p.optionalAssetIDs.contains(cover) {
+                p.coverAssetID = p.assetIDs.min()
+            }
             if let i = suggestions.open.firstIndex(where: { $0.id == p.id }) {
                 if suggestions.open[i] == p { continue }
                 suggestions.open[i] = p
@@ -38,6 +46,24 @@ public enum HeldSuggestions {
             still.append(p)
         }
         return still
+    }
+}
+
+/// A change in "Dein Zuhause" (or of the places the user is often at) that no suggestions were
+/// made for yet (store key `analysis.pendingHomeChange`). Stored in the same transaction as the
+/// change itself, and removed in the same transaction as the first suggestions made after it,
+/// whichever step makes them: `AnalysisPipeline.resuggest()`, a run that got the lock first, or
+/// the next launch's run when the app was ended in between. Each of them holds what the user
+/// chose (`HeldSuggestions`) and tells the overview (`HomeChangeNotice`) against `before`.
+/// Under `analysis.*`: "Analyse neu aufbauen" starts over and has nothing to compare with.
+public struct PendingHomeChange: Sendable, Codable {
+    /// The suggestions before the first change that is not applied yet.
+    public var before: ProposalSnapshot
+    public var date: Date
+
+    public init(before: ProposalSnapshot, date: Date) {
+        self.before = before
+        self.date = date
     }
 }
 

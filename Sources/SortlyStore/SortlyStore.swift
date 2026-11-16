@@ -700,14 +700,19 @@ public actor SortlyStore: PlanJournal {
     }
 
     /// Several values in one transaction: a crash or an error leaves all of them or none.
-    /// `afterEach` (tests only) runs inside the transaction after each value, in key order;
-    /// throwing there rolls everything back, like the app being ended half way.
-    public func setValues(_ values: [String: any Encodable & Sendable], afterEach: (@Sendable (String) throws -> Void)? = nil) throws {
+    /// `removing`: keys deleted in the same transaction. `afterEach` (tests only) runs inside
+    /// the transaction after each value, in key order; throwing there rolls everything back,
+    /// like the app being ended half way.
+    public func setValues(_ values: [String: any Encodable & Sendable], removing: Set<String> = [],
+                          afterEach: (@Sendable (String) throws -> Void)? = nil) throws {
         try db.durably {
             try db.transaction {
                 for (key, value) in values.sorted(by: { $0.key < $1.key }) {
                     try db.execute("INSERT OR REPLACE INTO settings (key, payload) VALUES (?, ?)", [.text(key), try json(value)])
                     try afterEach?(key)
+                }
+                for key in removing.sorted() where values[key] == nil {
+                    try db.execute("DELETE FROM settings WHERE key = ?", [.text(key)])
                 }
             }
         }

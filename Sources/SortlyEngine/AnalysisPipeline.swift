@@ -199,6 +199,8 @@ public actor AnalysisPipeline {
         /// Suggestions the user chose before a change in "Dein Zuhause" would have changed or
         /// dropped them: kept as chosen (`HeldSuggestions`).
         static let heldSuggestions = "user.heldSuggestions"
+        /// A change in "Dein Zuhause" no suggestions were made for yet (`PendingHomeChange`).
+        static let pendingHomeChange = "analysis.pendingHomeChange"
     }
 
     private let store: SortlyStore
@@ -214,10 +216,14 @@ public actor AnalysisPipeline {
     /// Bumped whenever the albums changed outside a run (a plan was applied): a run that
     /// computed its matches before that matches again before it saves them.
     private var albumGeneration = 0
-    /// Bumped whenever "Dein Zuhause" or the places the user is often at changed: a run that
-    /// detected its trips before that detects them again before it makes suggestions, so its
-    /// suggestions never undo the change.
+    /// Bumped whenever "Dein Zuhause" or the places the user is often at changed (after the
+    /// change is stored): a run that detected its trips before that detects them again before it
+    /// makes suggestions, so its suggestions never undo the change; and suggestions made from the
+    /// settings before it leave the change pending (`PendingHomeChange`).
     private var homeGeneration = 0
+    /// Bumped whenever the stored suggestions are replaced: `rematch()` matches again when new
+    /// suggestions came while it matched, instead of writing older ones back.
+    private var proposalsGeneration = 0
     /// Online place lookups per normal run; the rest waits for the overnight refinement run.
     /// Keeps the first analysis from spending up to an hour on town names before photos are
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
@@ -651,7 +657,7 @@ public actor AnalysisPipeline {
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
         onProgress(Progress(stage: .proposals, completed: 0, total: 0))
         if let fresh = try await patternsAfterAHomeChange(since: &patternsGeneration, all: all) { (trips, frequent) = fresh }
-        let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope).snapshot
+        let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope)
         report.proposals = snapshot.proposals.count
         report.completedStages.append(.proposals)
         onProgress(Progress(stage: .proposals, completed: snapshot.proposals.count, total: snapshot.proposals.count))
@@ -1037,15 +1043,17 @@ public actor AnalysisPipeline {
         return groups
     }
 
-    /// - Parameters:
-    ///   - holdFrom: after a change in "Dein Zuhause", the suggestions shown before it: the
-    ///     ones the user chose keep their content (`HeldSuggestions`).
-    ///   - save: false leaves storing the snapshot (and the held suggestions) to the caller.
+    /// After a change in "Dein Zuhause" that no suggestions were made for yet
+    /// (`PendingHomeChange`), whichever step makes them (`resuggest()`, a run, the early set):
+    /// the suggestions the user chose before the change keep their content (`HeldSuggestions`),
+    /// and the overview is told (`HomeChangeNotice`), in the same transaction as the suggestions.
     private func makeProposals(
         all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
-        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false,
-        holdFrom: ProposalSnapshot? = nil, save: Bool = true
-    ) async throws -> (snapshot: ProposalSnapshot, held: [AlbumProposal]) {
+        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false
+    ) async throws -> ProposalSnapshot {
+        // Read before the settings: a change stored after this stays pending.
+        let homeChange = homeGeneration
+        let pending = try await pendingHomeChange()
         // The albums are read again: a plan applied while this run was busy (minutes or hours
         // on a large library) created albums the matching must see, or it would suggest them
         // a second time.
@@ -1073,9 +1081,9 @@ public actor AnalysisPipeline {
         // Chosen before a change in "Dein Zuhause": stays as the user chose it, in this and
         // every later run, until it is created or deselected.
         let decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
-        var held = try await store.value([AlbumProposal].self, forKey: Key.heldSuggestions) ?? []
-        if let holdFrom { held = HeldSuggestions.adding(holdFrom.proposals, to: held, decisions: decisions, new: suggestions) }
-        held = HeldSuggestions.apply(held, decisions: decisions, to: &suggestions)
+        var held = try await heldSuggestions()
+        if let pending { held = HeldSuggestions.adding(pending.before.proposals, to: held, decisions: decisions, new: suggestions) }
+        held = HeldSuggestions.apply(held, decisions: decisions, library: Set(all.map(\.id)), to: &suggestions)
         // The full set after an early one: a suggestion of the early set the user already
         // decided on stays, even when the full analysis would not make it any more (review
         // minor: a decision must not lose its suggestion).
@@ -1101,8 +1109,21 @@ public actor AnalysisPipeline {
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
         let snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
                                         dismissed: suggestions.dismissed, standIns: suggestions.standIns, isEarly: early)
-        if save { try await store.setValues([Key.proposals: snapshot, Key.heldSuggestions: held]) }
-        return (snapshot, held)
+        var values: [String: any Encodable & Sendable] = [Key.proposals: snapshot, Key.heldSuggestions: held]
+        var removing: Set<String> = []
+        if let pending {
+            let heldIDs = Set(held.map(\.id))
+            let notice = try await homeChangeNotice()?.followed(by: snapshot, held: heldIDs, date: now())
+                ?? HomeChangeNotice(before: pending.before, after: snapshot, held: heldIDs, date: now())
+            // A change stored while these suggestions were made stays pending for the next step.
+            if homeChange == homeGeneration {
+                if notice.isEmpty { removing.insert(Self.homeChangeNoticeKey) } else { values[Self.homeChangeNoticeKey] = notice }
+                removing.insert(Key.pendingHomeChange)
+            }
+        }
+        proposalsGeneration += 1
+        try await store.setValues(values, removing: removing)
+        return snapshot
     }
 
     /// The shown suggestions are matched on their own, as always. The dismissed ones are
@@ -1140,12 +1161,13 @@ public actor AnalysisPipeline {
     /// The user's answers to "Bist du hier öfter?". Kept by position, so they hold for every
     /// later analysis; the next run applies them.
     public func recurringPlaceAnswers() async throws -> RecurringPlaceAnswers {
-        try await store.value(RecurringPlaceAnswers.self, forKey: Key.recurringPlaces, defaults: RecurringPlaceAnswers()) ?? RecurringPlaceAnswers()
+        try await readable { try await store.value(RecurringPlaceAnswers.self, forKey: Key.recurringPlaces, defaults: RecurringPlaceAnswers()) } ?? RecurringPlaceAnswers()
     }
 
+    /// Stores the answers; a change of the places the user is often at is applied like a change
+    /// in "Dein Zuhause" (`setHomeChange`).
     public func setRecurringPlaceAnswers(_ answers: RecurringPlaceAnswers) async throws {
-        try await store.setValue(answers, forKey: Key.recurringPlaces)
-        homeGeneration += 1
+        try await setHomeChange(places: answers)
     }
 
     /// What the last analysis found about places visited again and again.
@@ -1157,14 +1179,59 @@ public actor AnalysisPipeline {
 
     /// What the user set in "Dein Zuhause". Nothing stored (every version before this one):
     /// automatic, as before.
+    /// A value this build cannot read (a later version's shape, or damage) is read as automatic,
+    /// so it never stops an analysis.
     public func homeSettings() async throws -> HomeSettings {
-        try await store.value(HomeSettings.self, forKey: Key.homeSettings, defaults: HomeSettings()) ?? HomeSettings()
+        try await readable { try await store.value(HomeSettings.self, forKey: Key.homeSettings, defaults: HomeSettings()) } ?? HomeSettings()
     }
 
-    /// Stores the settings; `resuggest()` applies them.
     public func setHomeSettings(_ home: HomeSettings) async throws {
-        try await store.setValue(home, forKey: Key.homeSettings)
+        try await setHomeChange(home: home)
+    }
+
+    /// Stores a change in "Dein Zuhause" (`home`) and of the places the user is often at
+    /// (`places`), with a `PendingHomeChange` when it changes what the suggestions are made
+    /// from, all in one transaction. `resuggest()` applies it; if a run gets there first, or the
+    /// app is ended before, that run applies it the same way.
+    public func setHomeChange(home: HomeSettings? = nil, places: RecurringPlaceAnswers? = nil) async throws {
+        var values: [String: any Encodable & Sendable] = [:]
+        var changes = false
+        if let home {
+            values[Key.homeSettings] = home
+            var old = try await homeSettings(), new = home
+            old.changedAt = nil
+            new.changedAt = nil
+            changes = changes || old != new
+        }
+        if let places {
+            values[Key.recurringPlaces] = places
+            let old = try await recurringPlaceAnswers()
+            changes = changes || old.oftenHere != places.oftenHere
+        }
+        guard !values.isEmpty else { return }
+        if changes, try await pendingHomeChange() == nil, let current = try await latestProposals() {
+            values[Key.pendingHomeChange] = PendingHomeChange(before: current, date: now())
+        }
+        try await store.setValues(values)
+        // After the write: suggestions made from what was read before stay pending (see makeProposals).
         homeGeneration += 1
+    }
+
+    /// The change in "Dein Zuhause" that no suggestions were made for yet.
+    func pendingHomeChange() async throws -> PendingHomeChange? {
+        try await readable { try await store.value(PendingHomeChange.self, forKey: Key.pendingHomeChange) }
+    }
+
+    /// Suggestions held as the user chose them; one this build cannot read is left out.
+    func heldSuggestions() async throws -> [AlbumProposal] {
+        (try await readable { try await store.value([Lenient<AlbumProposal>].self, forKey: Key.heldSuggestions) } ?? []).compactMap(\.value)
+    }
+
+    /// `read`, with a stored value this build cannot decode read as not stored. For values the
+    /// user set or that only add to what is shown: they must never stop an analysis, and
+    /// "Analyse neu aufbauen" keeps the `user.*` ones, so nothing else would clear them.
+    private func readable<T>(_ read: () async throws -> T?) async throws -> T? {
+        do { return try await read() } catch is DecodingError { return nil }
     }
 
     /// The home Albumist found by itself in the last analysis.
@@ -1179,32 +1246,33 @@ public actor AnalysisPipeline {
     /// analysis already knows (trips, places and the home from the stored dates and places,
     /// then the suggestions). No photo is read again and nothing changes in Photos. Suggestions
     /// the user already chose stay as they were (`HeldSuggestions`); what changed is stored
-    /// for the overview in the same transaction as the new suggestions.
-    /// Returns nil when there are no suggestions yet: the next analysis applies the settings.
-    /// Waits for a run in progress, like a run does.
+    /// for the overview in the same transaction as the new suggestions (`makeProposals`).
+    /// Returns what the overview says (nil: nothing); nothing is made when there are no
+    /// suggestions yet (the next analysis applies the settings) or a run already applied the
+    /// change. Waits for a run in progress, like a run does.
     public func resuggest() async throws -> HomeChangeNotice? {
         await beginRun()
         defer { endRun() }
         guard let previous = try await latestProposals() else { return nil }
+        guard try await pendingHomeChange() != nil else { return try await homeChangeNotice() }
         let all = try await store.allAssets()
         var (trips, frequent) = try await detectPatterns(all: all)
         trips = try await inDestinationTime(trips, all: all)
         let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
-        let made = try await makeProposals(all: all, inventory: try await store.loadInventory(), trips: trips, frequent: frequent,
-                                           groups: groups, scope: previous.scope, early: previous.isEarly,
-                                           holdFrom: previous, save: false)
-        let held = Set(made.held.map(\.id))
-        let notice = try await homeChangeNotice()?.followed(by: made.snapshot, held: held, date: now())
-            ?? HomeChangeNotice(before: previous, after: made.snapshot, held: held, date: now())
-        var values: [String: any Encodable & Sendable] = [Key.proposals: made.snapshot, Key.heldSuggestions: made.held]
-        if notice.isEmpty {
-            // Changed back before OK, or nothing changed: nothing to say on the overview.
-            try await store.removeValue(forKey: Self.homeChangeNoticeKey)
-        } else {
-            values[Self.homeChangeNoticeKey] = notice
-        }
-        try await store.setValues(values)
-        return notice
+        _ = try await makeProposals(all: all, inventory: try await store.loadInventory(), trips: trips, frequent: frequent,
+                                    groups: groups, scope: previous.scope, early: previous.isEarly)
+        return try await homeChangeNotice()
+    }
+
+    /// "Analyse neu aufbauen": the stored analysis is deleted (`SortlyStore.resetAnalysis`)
+    /// between runs, never while a run or `resuggest()` is writing (they would write old results
+    /// into the fresh tables). Waits for one in progress.
+    public func resetAnalysis() async throws {
+        await beginRun()
+        defer { endRun() }
+        try await store.resetAnalysis(includingDecisions: false)
+        proposalsGeneration += 1
+        lastForegroundOnlineLookup = nil
     }
 
     /// "OK" on the overview card.
@@ -1213,7 +1281,7 @@ public actor AnalysisPipeline {
     }
 
     public func homeChangeNotice() async throws -> HomeChangeNotice? {
-        try await store.value(HomeChangeNotice.self, forKey: Self.homeChangeNoticeKey)
+        try await readable { try await store.value(HomeChangeNotice.self, forKey: Self.homeChangeNoticeKey) }
     }
 
     public func currentFacts() async throws -> [AssetFacts] {
@@ -1262,10 +1330,17 @@ public actor AnalysisPipeline {
     /// Re-runs only the album matching against the stored inventory and overrides, after
     /// albums were created or the user said an album does not fit. The suggestions then show
     /// the right state at once instead of after the next analysis.
+    /// New suggestions written while it matched (`resuggest()` or a run) are matched again
+    /// instead of being overwritten with the older ones.
     public func rematch() async throws -> ProposalSnapshot? {
-        guard let snapshot = try await rematched() else { return nil }
-        try await store.setValue(snapshot, forKey: Key.proposals)
-        return snapshot
+        while true {
+            let generation = proposalsGeneration
+            guard let snapshot = try await rematched() else { return nil }
+            guard generation == proposalsGeneration else { continue }
+            proposalsGeneration += 1
+            try await store.setValue(snapshot, forKey: Key.proposals)
+            return snapshot
+        }
     }
 
     /// The stored suggestions matched again with the current rules, not saved yet.
@@ -1326,6 +1401,7 @@ public actor AnalysisPipeline {
             values[Key.decisions] = decisions
             values[Self.recheckedSuggestionsKey] = shown + reopened.count
         }
+        proposalsGeneration += 1
         try await store.setValues(values, afterEach: afterEachWrite)
         return MatchRefresh(snapshot: rematched, reopened: reopened)
     }

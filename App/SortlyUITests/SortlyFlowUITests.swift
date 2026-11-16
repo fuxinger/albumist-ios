@@ -893,7 +893,7 @@ final class SortlyFlowUITests: XCTestCase {
     private let sweepSkip = ["Pause", "Neu prüfen", "jetzt anlegen", "jetzt einsortieren", "jetzt ausführen", "zurücknehmen", "Rest anlegen",
                              "Erledigtes behalten", "ignorieren", "Widerrufen", "Rückgängig", "Fotos-App öffnen", "Alle Jahre", "Ganze Mediathek dazunehmen", "arbeitet mit", "Nur 20", "Löschen", "Entfernen", "Anlegen",
                              "Übernehmen", "Nicht jetzt", "ergänzen", "so lassen", "Fortsetzen", "Beispiel", "Ignorieren", "Auswählen",
-                             "aufheben"]
+                             "aufheben", "gleichen Fotos"]
 
     private func isSafe(_ label: String) -> Bool {
         !label.isEmpty && !sweepSkip.contains { label.localizedCaseInsensitiveContains($0) }
@@ -914,9 +914,29 @@ final class SortlyFlowUITests: XCTestCase {
         return false
     }
 
+    /// What a row says: its own label, or for a list cell (whose own label is usually empty,
+    /// UI run 43842312131: no row of "Vorschläge" or "Alben" was ever tapped) its first text.
+    private func rowLabel(_ element: XCUIElement) -> String {
+        if !element.label.isEmpty { return element.label }
+        let text = element.staticTexts.firstMatch
+        return text.exists ? text.label : ""
+    }
+
+    /// A row is tapped only when its label is not on the skip list, and a cell found by its
+    /// text only when nothing in it is: a tap on the middle of such a cell can land on a
+    /// button inside it. (Rows with their own label are tapped as before.)
+    private func rowIsSafe(_ element: XCUIElement, label: String) -> Bool {
+        guard isSafe(label) else { return false }
+        guard element.label.isEmpty else { return true }
+        let inside = element.buttons.allElementsBoundByIndex.prefix(8).map(\.label)
+            + element.staticTexts.allElementsBoundByIndex.prefix(8).map(\.label)
+        return !inside.contains { !$0.isEmpty && !isSafe($0) }
+    }
+
     /// Taps every row (and on top-level screens every button in the content) and checks
     /// that each tap leads somewhere and back works: no dead rows, no crash, no lost screen.
-    /// Returns how many taps led somewhere (this screen and the screens below it).
+    /// Returns how many taps led somewhere (this screen and the screens below it). Rows it
+    /// leaves out are printed (UI_SWEEP_SKIP), so a sweep that taps nothing says why.
     @discardableResult
     private func sweep(_ screen: String, depth: Int, strict: Bool = false) -> Int {
         var reached = 0
@@ -924,16 +944,25 @@ final class SortlyFlowUITests: XCTestCase {
         let useCells = app.collectionViews.cells.count > 0
         if depth > 0 && !useCells { return 0 } // detail screens hold actions, not navigation
         let query = useCells ? app.collectionViews.cells : app.scrollViews.firstMatch.buttons
-        var labels: [String] = []
+        // Rows by what they say; a cell whose own label is empty is found again by its text.
+        var rows: [(label: String, own: Bool)] = []
         for i in 0..<min(query.count, 8) {
-            let label = query.element(boundBy: i).label
-            if isSafe(label) && !labels.contains(label) { labels.append(label) }
+            let element = query.element(boundBy: i)
+            let label = rowLabel(element)
+            if label.isEmpty {
+                print("UI_SWEEP_SKIP \(screen) row \(i) (no label, no text)")
+            } else if !rowIsSafe(element, label: label) {
+                print("UI_SWEEP_SKIP \(screen) › \(label) (changes the library)")
+            } else if !rows.contains(where: { $0.label == label }) {
+                rows.append((label, !element.label.isEmpty))
+            }
         }
-        for label in labels.prefix(6) {
-            let element = query.matching(NSPredicate(format: "label == %@", label)).firstMatch
-            guard element.exists else { continue }
+        for (label, own) in rows.prefix(6) {
+            let match = NSPredicate(format: "label == %@", label)
+            let element = own ? query.matching(match).firstMatch : query.containing(match).firstMatch
+            guard element.exists else { print("UI_SWEEP_SKIP \(screen) › \(label) (gone)"); continue }
             if !element.isHittable { app.swipeUp(); sleep(1) }
-            guard element.isHittable else { continue }
+            guard element.isHittable else { print("UI_SWEEP_SKIP \(screen) › \(label) (not hittable)"); continue }
             element.tap(); sleep(2)
             guard app.state == .runningForeground else {
                 print("UI_SWEEP_CRASH \(screen) › \(label)")
@@ -963,21 +992,56 @@ final class SortlyFlowUITests: XCTestCase {
         return reached
     }
 
+    /// The search tab has no rows to open: a starting point must find photos, and a found
+    /// photo must open large. Starting points from the library carry their photo count
+    /// ("12 Fotos") and are taken first; before the analysis the fixed examples show, of which
+    /// "Italien" matches the demo library.
+    private func sweepSearch() -> Int {
+        let chips = app.descendants(matching: .any).matching(identifier: "search.example")
+        guard chips.firstMatch.waitForExistence(timeout: 10) else {
+            print("UI_SWEEP_NOOP Suchen › no example")
+            return 0
+        }
+        let counted = chips.matching(NSPredicate(format: "value MATCHES %@", "[1-9][0-9]* Fotos?")).firstMatch
+        let italy = chips.matching(NSPredicate(format: "label == %@", "Italien")).firstMatch
+        let chip = counted.exists ? counted : italy.exists ? italy : chips.firstMatch
+        let label = chip.label
+        chip.tap()
+        let result = app.descendants(matching: .any).matching(identifier: "search.result").firstMatch
+        guard result.waitForExistence(timeout: 20) else {
+            print("UI_SWEEP_NOOP Suchen › \(label) (no results)")
+            return 0
+        }
+        print("UI_SWEEP_OK Suchen › \(label) → results")
+        var reached = 1
+        // The keyboard can cover the grid; the first photo is above it.
+        if !result.isHittable, app.keyboards.firstMatch.exists { app.swipeDown(); sleep(1) }
+        if result.isHittable {
+            result.tap()
+            let viewer = app.buttons["viewer.close"].waitForExistence(timeout: 5)
+            print(viewer ? "UI_SWEEP_OK Suchen › \(label) › photo → viewer" : "UI_SWEEP_NOOP Suchen › \(label) › photo")
+            XCTAssertTrue(viewer, "A photo found by the search example '\(label)' did not open")
+            if viewer { reached += 1 }
+            closeViewerIfOpen()
+        } else {
+            print("UI_SWEEP_SKIP Suchen › \(label) › photo (not hittable)")
+        }
+        if app.buttons["Abbrechen"].exists { app.buttons["Abbrechen"].tap(); sleep(1) }
+        return reached
+    }
+
     /// Third run: every tab, every row, one level deep.
     func test3_TapThroughSweep() {
         continueAfterFailure = true
         completeOnboardingIfCutOff("test3")
         launch()
         sleep(5)
-        // A sweep that reaches nothing proves nothing: the tabs whose rows always led somewhere
-        // in the CI runs must do so again. Albums and search reached no row in any run so far
-        // (docs/IMPROVEMENTS.md, open); their counts are printed until the sweep handles them.
-        let required: Set<String> = ["Übersicht", "Mediathek"]
+        // A sweep that reaches nothing proves nothing: every tab and the suggestions list must
+        // lead somewhere. The albums tab is the exception only while the library really has no
+        // album (a fresh simulator before any plan): then it must say so.
         func check(_ tab: String, _ reached: Int) {
             print("UI_SWEEP_TAB \(tab) \(reached)")
-            if required.contains(tab) && reached == 0 {
-                XCTFail("The sweep reached no screen from the tab \(tab)")
-            }
+            if reached == 0 { XCTFail("The sweep reached no screen from \(tab)") }
         }
         check("Übersicht", sweep("Übersicht", depth: 0))
         for tab in ["Mediathek", "Alben", "Suchen"] {
@@ -988,15 +1052,28 @@ final class SortlyFlowUITests: XCTestCase {
                 continue
             }
             button.tap(); sleep(2)
-            check(tab, sweep(tab, depth: 0))
+            if tab == "Suchen" {
+                check(tab, sweepSearch())
+            } else if tab == "Alben" && app.staticTexts["Noch keine Alben"].exists {
+                // An album row shows its photo count ("12 Fotos"), alone or in the row's label.
+                let album = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label MATCHES %@", "(.*, )?[0-9]+ Fotos?")).firstMatch
+                print("UI_SWEEP_TAB Alben not checked (empty)")
+                XCTAssertFalse(album.exists, "\"Noch keine Alben\" while an album is listed")
+            } else {
+                check(tab, sweep(tab, depth: 0))
+            }
         }
         // Suggestions list, the screen that had dead rows.
         tabButton("Übersicht").tap(); sleep(1)
         let suggestions = reviewSuggestionsButton()
         if suggestions.waitForExistence(timeout: 5) {
             suggestions.tap(); sleep(2)
-            sweep("Vorschläge", depth: 0, strict: true)
+            check("Vorschläge", sweep("Vorschläge", depth: 0, strict: true))
             back()
+        } else {
+            print("UI_STEP_MISSING sweep suggestions")
+            XCTFail("No \"Vorschläge prüfen\" on the overview for the sweep")
         }
         print("UI_SWEEP_DONE")
     }

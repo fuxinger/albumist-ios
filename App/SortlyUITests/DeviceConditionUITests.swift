@@ -1101,25 +1101,31 @@ final class DeviceConditionUITests: XCTestCase {
         func elapsed(_ since: Date) -> Int { Int(Date().timeIntervalSince(since)) }
         start(arguments)
 
-        // Creating the photos: no display of its own; the analysis starts when all are there.
+        // Creating the photos: no display of its own; the analysis starts when all are there,
+        // or when creating stopped early (the first 50 000 run stopped at 37 546 and then
+        // waited for the rest for hours). So: all there, or the same total for 5 minutes.
         // A crash (out of memory) is counted and the app opened again: it adds what is missing.
         var relaunches = 0
         var lastReport = Date.distantPast
-        let created = waitStable("\(count) photos created", timeout: 3 * 3600, stableChecks: 1) {
+        var shown = 0
+        var shownSince = Date()
+        let created = waitStable("\(count) photos created", timeout: 2 * 3600, stableChecks: 1) {
             if app.state != .runningForeground {
                 relaunches += 1
                 print("UI_FACT stress app ended while creating photos (\(relaunches)) after \(elapsed(began)) s")
                 start(arguments)
             }
             let total = analysisCount()?.total ?? analysedPhotos()?.total ?? 0
+            if total != shown { shown = total; shownSince = Date() }
             if Date().timeIntervalSince(lastReport) >= 60 {
                 lastReport = Date()
                 print("UI_FACT stress creating: \(elapsed(began)) s, library total shown \(total)")
             }
-            return total >= count
+            return total >= count || (total > 300 && Date().timeIntervalSince(shownSince) > 300)
         }
-        print("UI_TIMING stress create \(count) photos \(elapsed(began)) s (relaunches \(relaunches))")
-        XCTAssertTrue(created, "The \(count) photos were not created")
+        print("UI_TIMING stress create \(shown) photos shown \(elapsed(began)) s (asked for \(count), relaunches \(relaunches))")
+        XCTAssertTrue(created, "The photos were not created")
+        XCTAssertGreaterThanOrEqual(shown, count, "Only \(shown) photos were created of \(count)")
         guard created else { return }
 
         // The analysis, sampled every second: the progress line, how long one snapshot takes

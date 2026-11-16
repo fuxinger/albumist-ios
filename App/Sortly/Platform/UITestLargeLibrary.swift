@@ -33,6 +33,9 @@ enum LargeLibrary {
             do {
                 try await DemoLibrary.save(items)
             } catch {
+                // In the system log, where the stress run's workflow looks for it (the 50 000
+                // photo run stopped at about 37 300 photos without saying why).
+                NSLog("UITEST_LARGE_LIBRARY stopped at %d of %d: %@", start, count, String(describing: error))
                 return start > created
             }
             UserDefaults.standard.set(range.upperBound, forKey: createdKey)

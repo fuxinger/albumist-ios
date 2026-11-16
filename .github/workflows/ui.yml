@@ -294,6 +294,7 @@ jobs:
           sleep 2
           pkill -f "tail -n \+1 -f ui-log.txt" 2>/dev/null
           echo "STRESS_TIME $(( $(date +%s) - started )) s"
+          xcrun simctl spawn "$UDID" log show --last 6h --style compact --predicate 'eventMessage CONTAINS "UITEST_LARGE_LIBRARY"' 2>/dev/null | tail -5
           sort -k2 -n memory.txt | tail -1 | awk '{printf "STRESS_MEMORY_MAX %d MB\n", $2/1024}'
           tail -1 memory.txt | awk '{printf "STRESS_MEMORY_END %d MB\n", $2/1024}'
           grep -aE "PREVIEW_JPEG" ui-log.txt | head -2000

@@ -70,3 +70,7 @@ Produkt-ID `app.albumist.ios.unlock`.
   Commits. Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl, den Lauf
   mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
   Archiv nicht mehr und schlägt absichtlich fehl.
+- Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,
+  daneben die Build-Nummer `CFBundleVersion`). Vor dem Hochladen prüft der Lauf beides und dass die
+  App-Datei Byte für Byte die archivierte ist. Gebaut wird mit dem festgelegten Xcode aus
+  `.github/toolchain.json`, nie mit einer Beta.

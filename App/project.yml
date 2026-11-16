@@ -40,6 +40,9 @@ targets:
         CFBundleName: Albumist
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The commit an App Store archive was built from (testflight.yml sets it, "local"
+        # otherwise). The upload checks it before it signs and ships the archive.
+        AlbumistCommit: $(ALBUMIST_COMMIT)
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -64,6 +67,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
+        ALBUMIST_COMMIT: local
   SortlyTests:
     type: bundle.unit-test
     platform: iOS

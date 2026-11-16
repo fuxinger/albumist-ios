@@ -16,7 +16,10 @@ name: TestFlight
 # this run. Only when the full gate is green (the UI run too, ~45 min) does "Upload to
 # TestFlight" sign that archive for the App Store and upload it (about 3 min after the gate
 # instead of a whole build). It checks that the archive was built from the gated commit with
-# this run's build number. Waiting for CI rather than starting at once keeps a push at four
+# this run's build number and the pinned Xcode: build-info.txt, the app's own Info.plist
+# (AlbumistCommit, CFBundleVersion) and the SHA-256 of the app's executable as the archive job
+# recorded it (.github/scripts/archive_check.py). The export only signs that app; nothing is
+# rebuilt between the gate and the upload. Waiting for CI rather than starting at once keeps a push at four
 # Mac jobs at a time (CI's iOS job and the three UI groups; the archive takes the place of
 # CI's job when that is done), and a commit whose Linux or iOS tests fail never starts it.
 # (`ci_gate.py --linux` would start it after CI's Linux jobs instead, ~15 min earlier, at the
@@ -205,16 +208,23 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            ALBUMIST_COMMIT="$GITHUB_SHA" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" > ../archive-log.txt 2>&1
           status=$?
           grep -E "error:|\*\* ARCHIVE" ../archive-log.txt | head -80
           exit $status
       - name: Pack archive
         # tar keeps file modes and links (an artifact alone would drop the executable bit).
-        # build-info.txt says which commit and build number the archive is; the upload checks it.
+        # build-info.txt says which commit, build number and Xcode the archive is and the
+        # SHA-256 of the app's executable; the app's Info.plist carries the commit and build
+        # number itself. The upload checks all of it before it signs and ships the archive.
         run: |
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ] || { echo "::error::checkout is not $GITHUB_SHA"; exit 1; }
-          printf 'sha=%s\nbuild=%s\nxcode=%s\n' "$GITHUB_SHA" "${{ github.run_number }}" "${{ steps.xcode.outputs.id }}" > "$RUNNER_TEMP/build-info.txt"
+          python3 .github/scripts/archive_check.py "$ARCHIVE" --sha "$GITHUB_SHA" --build "${{ github.run_number }}"
+          {
+            printf 'sha=%s\nbuild=%s\nxcode=%s\n' "$GITHUB_SHA" "${{ github.run_number }}" "${{ steps.xcode.outputs.id }}"
+            python3 .github/scripts/archive_check.py "$ARCHIVE" --print-binary-hash
+          } > "$RUNNER_TEMP/build-info.txt"
           tar -czf release-archive.tgz -C "$RUNNER_TEMP" Albumist.xcarchive build-info.txt
           ls -la release-archive.tgz
           cat "$RUNNER_TEMP/build-info.txt"
@@ -274,6 +284,10 @@ jobs:
           version=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" "$ARCHIVE/Info.plist")
           [ "$version" = "${{ github.run_number }}" ] \
             || { echo "::error::The archive has build number $version, not ${{ github.run_number }}"; exit 1; }
+          # The app inside: its Info.plist names this commit and build, and its executable is
+          # byte for byte the one the archive job hashed.
+          python3 .github/scripts/archive_check.py "$ARCHIVE" --sha "$GITHUB_SHA" --build "${{ github.run_number }}" \
+            --build-info "$RUNNER_TEMP/release/build-info.txt"
           echo "Archive of ${GITHUB_SHA:0:7}, build $version"
           xcode="$(python3 .github/scripts/toolchain.py id)"
           grep -qx "xcode=$xcode" "$RUNNER_TEMP/release/build-info.txt" \

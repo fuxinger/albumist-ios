@@ -197,9 +197,11 @@ final class SortlyFlowUITests: XCTestCase {
     /// and no photo counts as unreadable. UI runs reported "0 von 246 Fotos analysiert" and
     /// "246 Fotos konnten noch nicht gelesen werden" for weeks without failing.
     private func assertEveryPhotoAnalysed(_ when: String, file: StaticString = #filePath, line: UInt = #line) {
-        let card = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fotos analysiert")).firstMatch
+        let card = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Alle ", "Fotos analysiert")).firstMatch
         _ = card.waitForExistence(timeout: 10)
-        print("UI_FACT analysis card \(when): \(card.exists ? card.label : "not found") | \(card.exists ? (card.value as? String ?? "-") : "-")")
+        // Any other analysis line (e.g. "0 von 246 Fotos analysiert") is printed for the log.
+        let other = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fotos analysiert")).firstMatch
+        print("UI_FACT analysis card \(when): \(card.exists ? card.label : "not found (\(other.exists ? other.label : "-"))") | \(card.exists ? (card.value as? String ?? "-") : "-")")
         let unreadable = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "konnten noch nicht gelesen")).firstMatch
         if unreadable.exists { print("UI_FACT unreadable \(when): \(unreadable.label)") }
         let all = card.exists && card.label.hasPrefix("Alle ")

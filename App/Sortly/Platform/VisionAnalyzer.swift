@@ -106,7 +106,8 @@ enum ImageLoader {
             options.isNetworkAccessAllowed = false
             options.version = .current
             options.deliveryMode = .highQualityFormat
-            options.resizeMode = .fast
+            // .exact: .fast may hand back a larger stored copy (1–2k px, up to ~16 MB each).
+            options.resizeMode = .exact
             return try await load(asset, manager: PHImageManager.default(), target: PreviewCache.size,
                                   options: options, waitsForFinal: true, stat: "local original")
         case .original:
@@ -152,6 +153,12 @@ enum ImageLoader {
                     }
                 }
                 request.attach(id)
+                // PhotoKit may never call back (assetsd stalled): the lane gives up after a while
+                // instead of hanging the analysis. A download from iCloud gets longer.
+                let limit: Double = options.isNetworkAccessAllowed ? 180 : 30
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + limit) {
+                    if request.timeOut() { ImageLoadStats.note("\(stat) timed out") }
+                }
             }
         } onCancel: {
             request.cancel()
@@ -160,11 +167,14 @@ enum ImageLoader {
 }
 
 extension LoadedImage {
+    /// One Core Image context for all images (creating one per photo is costly).
+    nonisolated(unsafe) static let sharedContext = CIContext()
+
     /// The bitmap of a PhotoKit image; one backed by Core Image is rendered once.
     init?(_ image: UIImage) {
         if let cg = image.cgImage {
             self.init(cgImage: cg, orientation: CGImagePropertyOrientation(image.imageOrientation))
-        } else if let ci = image.ciImage, let cg = CIContext().createCGImage(ci, from: ci.extent) {
+        } else if let ci = image.ciImage, let cg = LoadedImage.sharedContext.createCGImage(ci, from: ci.extent) {
             self.init(cgImage: cg, orientation: CGImagePropertyOrientation(image.imageOrientation))
         } else {
             return nil
@@ -215,6 +225,20 @@ private final class ImageRequest: @unchecked Sendable {
         continuation = nil
         lock.unlock()
         pending?.resume(with: result)
+    }
+
+    /// Gives up on a request PhotoKit never answered: resumes with no image and cancels it in
+    /// PhotoKit. True if the request was still waiting.
+    func timeOut() -> Bool {
+        lock.lock()
+        let pending = continuation
+        continuation = nil
+        let id = requestID
+        lock.unlock()
+        guard let pending else { return false }
+        if let id { manager.cancelImageRequest(id) }
+        pending.resume(returning: nil)
+        return true
     }
 
     func cancel() {

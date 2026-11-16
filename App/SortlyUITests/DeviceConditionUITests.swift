@@ -215,7 +215,7 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// The introduction (fresh install) or the "Kein Zugriff" screen (access taken away after
     /// it), if one of them shows; afterwards the app has full access. A denied access cannot be
-    /// given back inside the app: it is given back in the Settings app, as a user would.
+    /// given back inside the app: the workflow gives it back from the Mac (`grantFromHost`).
     private func onboardIfNeeded(attempt: Int = 1) {
         let welcome = button("Los geht")
         _ = waitStable("first screen", timeout: 20, stableChecks: 1) {
@@ -227,12 +227,11 @@ final class DeviceConditionUITests: XCTestCase {
         } else if askAgain.exists {
             asked = grantOnNoAccessScreen(.full)
         }
-        // In UI run 43766407272 iOS answered for the user after a reset (no question, access
-        // denied), and every later test of the shard then ran without photos.
+        // In UI runs 43766407272 and 43795445305 iOS answered for the user after a reset (no
+        // question, access denied), and every later test of the shard ran without photos.
         if attempt < 3, !app.tabBars.firstMatch.exists, toSettings.waitForExistence(timeout: 3) {
-            print("UI_FACT photo access denied: given back in the Settings app")
-            allowInSettings(.full)
-            start()
+            print("UI_FACT photo access denied: given back from the Mac")
+            grantFromHost()
             onboardIfNeeded(attempt: attempt + 1)
         } else if asked {
             // Opened once more, so the fast start runs as with access (demo library, if missing).
@@ -240,47 +239,27 @@ final class DeviceConditionUITests: XCTestCase {
         }
     }
 
-    /// "Einstellungen öffnen" leads to Albumist's page in the Settings app; there Photos ›
-    /// Full Access (or Limited Access) is chosen. iOS ends Albumist when its access changes,
-    /// so the caller starts it again. Returns false when a step was not found.
+    /// Full photo access given back from outside: the simulator in CI shows no iOS question
+    /// after a reset (the answer is "denied" at once), and "Einstellungen öffnen" lands on the
+    /// Settings app's first page, not on Albumist's. The test asks with a log line; the
+    /// workflow, which follows the log, grants the access with `simctl privacy` and the app is
+    /// opened again. (Run in Xcode without the workflow, nobody answers and this returns false.)
     @discardableResult
-    private func allowInSettings(_ choice: PhotoChoice) -> Bool {
-        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
-        guard tap(toSettings, "open Settings for photo access", timeout: 5),
-              settings.wait(for: .runningForeground, timeout: 15) else { return false }
-        sleep(2)
-        let names = ["Photos", "Fotos"]
-        let row = settings.cells.containing(NSPredicate(format: "label IN %@", names)).firstMatch
-        let text = settings.staticTexts.matching(NSPredicate(format: "label IN %@", names)).firstMatch
-        let photos = row.waitForExistence(timeout: 10) ? row : text
-        guard photos.exists else {
-            print("UI_STEP_MISSING Photos in Settings")
-            print("UI_FACT Settings shows: \(allLabels(settings).prefix(500))")
-            shot("x-settings-no-photos")
-            settings.terminate()
-            return false
+    private func grantFromHost() -> Bool {
+        print("UI_HOST_GRANT_PHOTOS")
+        for _ in 0..<12 {
+            sleep(5)
+            start()
+            _ = waitStable("first screen after the grant", timeout: 15, stableChecks: 1) {
+                app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists || button("Los geht").exists
+            }
+            if !askAgain.exists && !toSettings.exists {
+                print("UI_STEP_OK photo access given back from the Mac")
+                return true
+            }
         }
-        photos.tap()
-        sleep(1)
-        let options = choice == .limited
-            ? ["Limited Access", "Beschränkter Zugriff", "Selected Photos", "Ausgewählte Fotos"]
-            : ["Full Access", "Voller Zugriff", "All Photos", "Alle Fotos"]
-        let option = settings.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", options))
-            .allElementsBoundByIndex.first(where: { $0.isHittable })
-        guard let option else {
-            print("UI_STEP_MISSING \(choice) access in Settings")
-            print("UI_FACT Settings shows: \(allLabels(settings).prefix(500))")
-            shot("x-settings-no-option")
-            settings.terminate()
-            return false
-        }
-        option.tap()
-        sleep(2)
-        shot("settings-photos-\(choice)")
-        if choice == .limited { finishLimitedPicker(in: settings) }
-        print("UI_STEP_OK \(choice) access chosen in Settings")
-        settings.terminate()
-        return true
+        print("UI_STEP_MISSING photo access given back from the Mac")
+        return false
     }
 
     /// "Weiter" on the "Kein Zugriff" screen, then the iOS question answered with `choice`.
@@ -385,12 +364,11 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// After "Limit Access" iOS shows its picker; it is closed as it is (limited to what was
     /// picked, possibly nothing).
-    /// In the Settings app (`in:`) a picker may not come at all, so it is waited for briefly.
-    private func finishLimitedPicker(in other: XCUIApplication? = nil) {
+    private func finishLimitedPicker() {
         let done = NSPredicate(format: "label IN %@", ["Done", "Fertig", "Continue", "Fortfahren"])
-        let deadline = Date().addingTimeInterval(other == nil ? 15 : 5)
+        let deadline = Date().addingTimeInterval(15)
         while Date() < deadline {
-            for source in [other ?? app, springboard] {
+            for source in [app, springboard] {
                 if let close = source.buttons.matching(done).allElementsBoundByIndex.last(where: { $0.exists && $0.isHittable }) {
                     shot("limited-picker")
                     print("UI_FACT limited picker closed with '\(close.label)'")
@@ -960,12 +938,6 @@ final class DeviceConditionUITests: XCTestCase {
             limited = anything("Nur ausgewählte Fotos").waitForExistence(timeout: 30)
         }
         print(limited ? "UI_STEP_OK limited access through the system question" : "UI_STEP_MISSING limited access through the system question")
-        if !limited, toSettings.waitForExistence(timeout: 3), allowInSettings(.limited) {
-            // The other way a user limits the access: Settings › Albumist › Photos.
-            start()
-            limited = anything("Nur ausgewählte Fotos").waitForExistence(timeout: 30)
-            print(limited ? "UI_STEP_OK limited access through Settings" : "UI_STEP_MISSING limited access through Settings")
-        }
         if !limited {
             restoreFullAccess()
             start(["-SortlyUITestLimitedAccess"])
@@ -993,6 +965,8 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(asks, "After access was taken away the app does not ask for it again")
         XCTAssertEqual(app.state, .runningForeground, "The app ended after access was taken away")
         if asks { grantOnNoAccessScreen(.full) }
+        // Without the iOS question in CI the answer is "denied": given back from the Mac.
+        if !app.tabBars.firstMatch.waitForExistence(timeout: 10) { grantFromHost() }
         let back = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         print(back ? "UI_STEP_OK overview after access came back" : "UI_STEP_MISSING overview after access came back")
         XCTAssertTrue(back, "The app does not go on after access came back")
@@ -1009,12 +983,7 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// Full photo access again through the onboarding.
     private func restoreFullAccess() {
-        if toSettings.exists {
-            allowInSettings(.full)
-        } else {
-            app.resetAuthorizationStatus(for: .photos)
-        }
-        start()
+        grantFromHost()
         onboardIfNeeded()
         let ready = waitStable("full access again", timeout: 60, stableChecks: 1) { app.tabBars.firstMatch.exists && !anything("Nur ausgewählte Fotos").exists }
         print(ready ? "UI_STEP_OK full access again" : "UI_STEP_MISSING full access again")

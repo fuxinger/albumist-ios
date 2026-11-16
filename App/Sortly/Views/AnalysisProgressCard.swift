@@ -215,6 +215,11 @@ struct AnalysisProgressCard: View {
                     Text(AnalysisText.finish(finish))
                         .accessibilityIdentifier("analysis.finishTime")
                 }
+                // The places step's pass over the map: towns only count after their lookup, so
+                // this is what moves meanwhile (review of d612bc0: "0 von 50.233 Orten" for 60 s).
+                if let pass = model.analysis.mapPass, pass.checked < pass.of {
+                    Text(AnalysisText.mapChecked(pass))
+                }
                 if slower == .warm {
                     Text("Langsamer, weil dein iPhone warm ist")
                 } else if slower == .lowPower {
@@ -259,6 +264,9 @@ struct AnalysisProgressCard: View {
     private var accessibilityValue: String {
         var parts: [String] = []
         if let position, position.hasCount { parts.append(AnalysisText.count(position)) }
+        if case .running = state, let pass = model.analysis.mapPass, pass.checked < pass.of {
+            parts.append(AnalysisText.mapChecked(pass))
+        }
         if case .running = state, let finish = model.analysisFinish { parts.append(AnalysisText.finish(finish)) }
         parts.append(stepLine)
         parts.append(String(localized: "Analyse zu \(Int((model.analysis.shownOverall * 100).rounded())) % fertig"))

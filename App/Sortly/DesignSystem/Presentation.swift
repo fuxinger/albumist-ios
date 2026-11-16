@@ -285,6 +285,11 @@ enum AnalysisText {
         }
     }
 
+    /// "12.000 von 50.233 mit der Karte geprüft": the places step's pass over the offline map.
+    static func mapChecked(_ pass: AnalysisPipeline.MapPass) -> String {
+        String(localized: "\(pass.checked.formatted()) von \(pass.of.formatted()) mit der Karte geprüft")
+    }
+
     /// "2.431 von 5.683 Fotos", number first.
     static func count(_ position: AnalysisCardState.Position) -> String {
         position.completed.formatted() + " " + ofTotal(position.total, position.step.unit)

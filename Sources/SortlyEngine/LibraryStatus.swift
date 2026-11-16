@@ -254,3 +254,70 @@ public enum LibraryStatus {
         return result
     }
 }
+
+// MARK: Everything the overview derives from the analysis, in one pass off the main actor
+
+/// What `AppModel.refreshDerived` shows: the photo states, the ring's progress, what it leaves
+/// out, and how many photos are analysed. All of it is O(photos); it used to be computed on
+/// the main actor (only the states were detached), which with 50,000 photos was seconds of
+/// main-thread work each time (review of d612bc0: refreshDerived runs at every early look and
+/// at the start of the image step). Now the app only assigns the result.
+public struct DerivedLibraryStatus: Sendable {
+    public var states: [AssetID: AssetOrganizationState] = [:]
+    public var reasons = LibraryStatus.Reasons()
+    public var progress = OrganizationStatusResolver.Progress()
+    public var leftOut = LibraryStatus.LeftOut()
+    /// Photos in the chosen part of the library; of them analysed, and not readable yet.
+    public var photos = 0
+    public var analyzed = 0
+    public var unreadable = 0
+
+    public init() {}
+
+    public static func derive(
+        facts: [AssetFacts],
+        snapshot: ProposalSnapshot?,
+        settings: OrganizationSettings,
+        overrides: OverrideSet,
+        contents: [AssetID: ContentAnalysis],
+        managed: [ManagedAlbumState],
+        inventory: CollectionInventory,
+        scope: OrganizationScope,
+        calendar: Calendar = .sortlyDefault
+    ) -> DerivedLibraryStatus {
+        var result = DerivedLibraryStatus()
+        // Photos that could not be read yet (failed attempts) do not count as looked at.
+        var analyzed = Set<AssetID>()
+        var unreadable = Set<AssetID>()
+        analyzed.reserveCapacity(contents.count)
+        for (id, content) in contents {
+            if content.failedAttempts == nil { analyzed.insert(id) } else { unreadable.insert(id) }
+        }
+        // Photos Albumist put into albums count as sorted in the area of their suggestion,
+        // also once that suggestion is no longer shown.
+        let byAlbumist = LibraryStatus.organizedBySortly(managed, inventory: inventory, snapshot: snapshot)
+        let (states, reasons) = LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
+                                                                  contentAnalyzed: analyzed, organizedBySortly: byAlbumist, calendar: calendar)
+        result.states = states
+        result.reasons = reasons
+        // The trial year counts only its own photos (the ring said "839 von 5.683" over the
+        // whole library while the suggestions were for 2026).
+        let resolver = OrganizationStatusResolver(primaryAreas: settings.primaryAreas)
+        if scope == .all {
+            result.progress = resolver.progress(states.values)
+            result.leftOut = LibraryStatus.leftOut(states.values, reasons: reasons, resolver: resolver)
+            result.photos = facts.count
+            result.analyzed = analyzed.count
+            result.unreadable = unreadable.count
+        } else {
+            let scopedIDs = Set(facts.lazy.filter { scope.includes($0, calendar: calendar) }.map(\.id))
+            let counted = states.filter { scopedIDs.contains($0.key) }.map(\.value)
+            result.progress = resolver.progress(counted)
+            result.leftOut = LibraryStatus.leftOut(counted, reasons: reasons, resolver: resolver)
+            result.photos = scopedIDs.count
+            result.analyzed = analyzed.intersection(scopedIDs).count
+            result.unreadable = unreadable.intersection(scopedIDs).count
+        }
+        return result
+    }
+}

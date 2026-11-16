@@ -45,6 +45,12 @@ final class AppModel {
         /// Where an unfinished earlier run got to. A run that goes on shows this instead of
         /// "Schritt 1" again until it is back there (first device test 15.11.).
         var resumeFrom: AnalysisMarker.Point?
+        /// The same as rules for the card: catching up, the value never shown lower, the
+        /// widths that continue once (`ResumedRun`, tested in SortlyEngine).
+        var resumed: ResumedRun?
+        /// The places step's pass over the offline map: photos checked so far, of how many
+        /// (the count of places only rises with the towns, review of d612bc0).
+        var mapPass: AnalysisPipeline.MapPass?
         /// The last run ended before it was done without the user pausing it: opening the
         /// app again goes on by itself.
         var needsResume = false
@@ -68,19 +74,17 @@ final class AppModel {
         }
         /// Still on the quick first steps of a run that goes on from further ahead.
         var isCatchingUp: Bool {
-            guard isRunning, let resumeFrom else { return false }
-            return (stage?.number ?? 0) < resumeFrom.stage
+            resumed?.isCatchingUp(running: isRunning, at: stage?.number) ?? false
         }
-        /// The bar: never below where the interrupted run had got to. Back at its step, the
-        /// widths continue from there (`StepWidths.continuing`). A run that ended shows where
-        /// it stopped: the paused card read "64 %" (the value the run had started from) after
-        /// running at 44 % (stress run 43833158673).
+        /// The bar's value: never below where the interrupted run had got to (`ResumedRun`).
+        /// A run that ended shows where it stopped (the paused card said "0 %" or the value the
+        /// run started from, stress run 43833158673).
         var shownOverall: Double {
-            if isCatchingUp { return max(overall, resumeFrom?.overall ?? 0) }
-            if !isRunning, step == nil, let stoppedAt {
-                return widths.overall(step: stoppedAt.step, completed: stoppedAt.completed, total: stoppedAt.total)
+            let stopped = isRunning ? nil : stoppedAt.map { widths.overall(step: $0.step, completed: $0.completed, total: $0.total) }
+            if let resumed {
+                return resumed.shown(running: isRunning, catchingUp: isCatchingUp, overall: overall, stopped: stopped)
             }
-            return overall
+            return stopped ?? overall
         }
         /// Photos still to look at in the current stage (images or texts).
         var remaining: Int { max(0, total - completed) }
@@ -382,7 +386,12 @@ final class AppModel {
     private func load() async {
         guard phase == .loading else { return }
         do {
-            if UITestSupport.rebuildsDatabase, let url = try? Self.databaseURL() { SortlyStore.quarantineDatabase(at: url) }
+            if UITestSupport.rebuildsDatabase, let url = try? Self.databaseURL() {
+                SortlyStore.quarantineDatabase(at: url)
+                // Where the analysis got to belongs to the database set aside (review of d612bc0:
+                // the stale "64 %" was the stress run's drop to 38 %).
+                AnalysisMarker.reset()
+            }
             // Opened off the main thread: the integrity check and migrations read the file.
             let url = UITestSupport.databaseURL(try Self.databaseURL())
             let store = try await Task.detached(priority: .userInitiated) { try SortlyStore(url: url) }.value
@@ -457,6 +466,8 @@ final class AppModel {
         if let url = try? Self.databaseURL() {
             SortlyStore.quarantineDatabase(at: url)
         }
+        // The new database starts from nothing: no "Macht da weiter … 64 %" over an empty one.
+        AnalysisMarker.reset()
         bootstrapTask = nil
         phase = .loading
         await bootstrap()
@@ -730,6 +741,8 @@ final class AppModel {
         analysis.appleWait = false
         analysis.stoppedAt = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
+        analysis.resumed = analysis.resumeFrom.map { ResumedRun(stage: $0.stage, shown: $0.overall, stoppedTotal: $0.total) }
+        analysis.mapPass = nil
         HeatLog.reset()
         analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
         // The widths of the analysis this run goes on with; a new analysis gets them from its
@@ -811,6 +824,7 @@ final class AppModel {
             if finished?.isComplete == true {
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
+                analysis.resumed = nil
             }
             if reason == .accessRevoked {
                 // Shown as it is now (limited or none), so the overview offers the way back.
@@ -881,19 +895,24 @@ final class AppModel {
         analysis.total = progress.total
         analysis.waiting = nil
         analysis.appleWait = progress.waitLeft != nil
-        // Back at the step it went on from, below what the card showed before (photos came in,
-        // the database was rebuilt): the widths continue from the value shown, so the number
-        // never goes back and moves on with the work (stress run 43833158673: 64 % to 38 %).
-        if let held = analysis.resumeFrom?.overall, !analysis.isCatchingUp, let step = analysis.step,
-           let continued = analysis.widths.continuing(held: max(held, analysisBar), step: step,
-                                                      completed: analysis.completed, total: analysis.total) {
-            analysis.widths = continued
-            widthsFixed = true
+        analysis.mapPass = progress.stage == .places ? progress.mapPass : nil
+        // Back at the step it went on from, once (`ResumedRun.back`): with more work there
+        // than when it stopped the widths go on from the value shown; a stale value (database
+        // set aside) is dropped, and the bar is drawn from the real value again.
+        if var resumed = analysis.resumed {
+            let hadFloor = resumed.floor != nil
+            if let continued = resumed.back(at: progress.stage.number, step: AnalysisStep(progress.stage),
+                                            completed: progress.completed, total: progress.total, widths: analysis.widths) {
+                analysis.widths = continued
+                widthsFixed = true
+            }
+            if hadFloor, resumed.floor == nil { glide.reset() }
+            analysis.resumed = resumed
         }
         // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`).
         if !analysis.isCatchingUp {
             AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.overall,
-                                              widths: widthsFixed ? analysis.widths : nil)
+                                              widths: widthsFixed ? analysis.widths : nil, total: progress.total)
         }
         let step = AnalysisStep(progress.stage)
         if !analysis.pausing {
@@ -982,13 +1001,14 @@ final class AppModel {
         if let progress = taken.progress { receive(progress, at: now) }
         // "Schon fertig": the early suggestions are read once they are saved (the report that
         // starts the image step comes before that, review I2). Should that read miss them,
-        // it is tried again every 10 s during the image step (the only step they are made in;
-        // refreshDerived is not cheap, so not in the later ones).
+        // it is tried again during the image step (the only step they are made in; refreshDerived
+        // is not cheap, so not in the later ones): every 10 s, less often in a large library
+        // (`AnalysisCardState.earlyLookInterval`).
         if taken.earlyProposals {
             lastEarlyLook = now
             Task { await refreshDerived() }
         } else if snapshot == nil, analysis.stage == .content, earlyLookTask == nil,
-                  lastEarlyLook.map({ now - $0 >= .seconds(10) }) ?? true {
+                  lastEarlyLook.map({ now - $0 >= AnalysisCardState.earlyLookInterval(photos: analysis.total) }) ?? true {
             lastEarlyLook = now
             earlyLookTask = Task {
                 await refreshDerived()
@@ -1199,10 +1219,7 @@ final class AppModel {
             history = plans.prefix(historyLimit).filter { $0.reverts == nil }
             undonePlans = try await store.undoneTargets()
             Purchases.shared.settleUndone(undonePlans)
-            // Photos that could not be read yet (failed attempts) do not count as looked at.
             let contents = try await store.results(ContentAnalysis.self, kind: "content")
-            let analyzed = Set(contents.filter { $0.value.failedAttempts == nil }.keys)
-            let unreadable = Set(contents.filter { $0.value.failedAttempts != nil }.keys)
             let stored = try await store.overrides()
             let overrides = OverrideSet(stored)
             var removed: [SortlyID: Set<AssetID>] = [:]
@@ -1210,35 +1227,26 @@ final class AppModel {
                 if case .assetInSource(let asset, let source) = o.scope { removed[source, default: []].insert(asset) }
             }
             removedFromProposals = removed
+            // Everything that grows with the library is worked out off the main actor; here
+            // it is only assigned (review of d612bc0: with 50,000 photos this was seconds of
+            // main-thread work at every call, a lead for the 7 s Pause tap of the stress run).
             let facts = facts, snapshot = snapshot, settings = settings
-            // Photos Albumist put into albums count as sorted in the area of their suggestion,
-            // also once that suggestion is no longer shown.
-            let byAlbumist = LibraryStatus.organizedBySortly(managedAlbums, inventory: inventory, snapshot: snapshot)
-            let (computed, reasons) = await Task.detached(priority: .userInitiated) {
-                LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                                 contentAnalyzed: analyzed, organizedBySortly: byAlbumist)
+            let managed = managedAlbums, scope = analysisScope
+            let derived = await Task.detached(priority: .userInitiated) {
+                DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
+                                            contents: contents, managed: managed, inventory: inventory, scope: scope)
             }.value
-            states = computed
-            statusReasons = reasons
-            // The trial year counts only its own photos (the ring said "839 von 5.683" over
-            // the whole library while the suggestions were for 2026).
-            let scope = analysisScope, calendar = Calendar.sortlyDefault
-            let inScope = scope == .all ? facts : facts.filter { scope.includes($0, calendar: calendar) }
-            let scopedIDs = Set(inScope.map(\.id))
-            let counted = scope == .all ? Array(computed.values) : computed.filter { scopedIDs.contains($0.key) }.map(\.value)
-            progress = resolver.progress(counted)
-            leftOut = LibraryStatus.leftOut(counted, reasons: reasons, resolver: resolver)
+            states = derived.states
+            statusReasons = derived.reasons
+            progress = derived.progress
+            leftOut = derived.leftOut
             // Not with the early set of a first run (trips and places only): the count would
             // be shown as final hours before the image analysis is done (review minor).
             if recount != nil, (snapshot?.isEarly == false && !proposals.isEmpty)
                 || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
                 recount = nil
             }
-            analysisCounts = AnalysisCounts(
-                photos: inScope.count,
-                analyzed: scope == .all ? analyzed.count : analyzed.intersection(scopedIDs).count,
-                unreadable: scope == .all ? unreadable.count : unreadable.intersection(scopedIDs).count
-            )
+            analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable)
         } catch {
             message = .failure(error.localizedDescription)
         }

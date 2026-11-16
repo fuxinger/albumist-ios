@@ -121,12 +121,25 @@ public actor AnalysisPipeline {
         /// the overview reads them now for "Schon fertig". The report that starts the image
         /// step comes before they are saved, so reading at that report found nothing (review I2).
         public var earlyProposals = false
+        /// The places step's pass over the offline map: how many photos are checked so far.
+        /// With towns on (the default) no place is final before its online lookup, so this is
+        /// what moves while the pass runs (review of d612bc0: "0 von 50.233 Orten" for 60 s).
+        public var mapPass: MapPass? = nil
 
         /// One value for the whole run (0…1), so a bar never jumps back when the next stage starts.
         public static func overall(stage: Stage, completed: Int, total: Int) -> Double {
             let before = Stage.allCases.prefix { $0 != stage }.reduce(0) { $0 + $1.share }
             let within = total > 0 ? min(1, max(0, Double(completed) / Double(total))) : 0
             return min(1, before + stage.share * within)
+        }
+    }
+
+    public struct MapPass: Sendable, Hashable {
+        public var checked: Int
+        public var of: Int
+        public init(checked: Int, of: Int) {
+            self.checked = checked
+            self.of = of
         }
     }
 
@@ -410,10 +423,18 @@ public actor AnalysisPipeline {
             return report
         }
         // Said while reading (the count moves on a large first read) and once more when the
-        // photos are stored.
-        let assets = try await reader.fetchAssets(includeHidden: settings.privacy.includeHiddenAssets,
+        // photos are stored. Pause ends the read at the next report; nothing of a stopped read
+        // is stored (it would count the photos not read yet as deleted).
+        let assets: [AssetSnapshot]
+        do {
+            assets = try await reader.fetchAssets(includeHidden: settings.privacy.includeHiddenAssets,
                                                   knownDetails: try await store.assetsWithFileDetails()) { read, total in
-            onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
+                onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
+                return !control.isPaused
+            }
+        } catch is CancellationError where control.isPaused {
+            report.pausedBecause = .userPaused
+            return report
         }
         report.newOrChanged = try await store.upsertAssets(assets).count
         report.removed = try await store.removeAssets(notIn: Set(assets.map(\.id)))
@@ -721,7 +742,8 @@ public actor AnalysisPipeline {
                 guard pendingTown || refine else { return nil }
             }
             let priority = tripMembers.contains(asset.id) ? 10 : (frequentMembers.contains(asset.id) ? 5 : 0)
-            return .init(assetID: asset.id, coordinate: coordinate, priority: priority)
+            return .init(assetID: asset.id, coordinate: coordinate, priority: priority,
+                         hasTown: existing[asset.id]?.precisionMeters != nil)
         }
         guard !requests.isEmpty else { return .init() }
         let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time)
@@ -735,6 +757,7 @@ public actor AnalysisPipeline {
         onProgress(Progress(stage: .places, completed: before, total: total))
         // The count last shown, repeated with the time left while the run waits for the geocoder.
         let shown = Mutex(before)
+        let control = activeControl
         let outcome = try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
                                          maxRateLimitWait: refining ? nil : Self.foregroundRateLimitWait,
                                          shouldStop: { [weak self] in await self?.stopRequested() ?? true },
@@ -744,6 +767,11 @@ public actor AnalysisPipeline {
                                              shown.withLock { $0 = completed }
                                              onProgress(Progress(stage: .places, completed: completed, total: total))
                                          },
+                                         checked: { checked in
+                                             onProgress(Progress(stage: .places, completed: shown.withLock { $0 }, total: total,
+                                                                 mapPass: MapPass(checked: checked, of: requests.count)))
+                                         },
+                                         paused: { control?.isPaused ?? false },
                                          waiting: { left in
                                              onProgress(Progress(stage: .places, completed: shown.withLock { $0 }, total: total, waitLeft: left))
                                          }) { batch in

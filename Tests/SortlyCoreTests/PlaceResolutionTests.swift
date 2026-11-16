@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SortlyCore
 import SortlyWorldMap
@@ -73,6 +74,38 @@ struct PlaceResolutionTests {
             #expect(e.counted <= e.saved, "counted before saved")
             if i > 0 { #expect(e.counted >= events[i - 1].counted) }
         }
+    }
+
+    /// Review of d612bc0: Pause had no effect during the pass over the map. It stops at the next
+    /// part; what is saved stays, the rest is pending for the next run.
+    @Test func pauseStopsTheMapPassAtTheNextPart() async throws {
+        actor Saved { var ids = Set<AssetID>(); func add(_ b: [AssetID: ResolvedPlace]) { ids.formUnion(b.keys) } }
+        let saved = Saved()
+        let flag = Mutex(false)
+        let n = 3 * PlaceResolutionService.offlineChunk
+        let all = requests(Fixture.Places.rome, count: n, prefix: "r")
+        let outcome = try await service(level: .country, geocoder: FakeGeocoder())
+            .resolve(all, checked: { _ in flag.withLock { $0 = true } }, paused: { flag.withLock { $0 } }) { await saved.add($0) }
+        let ids = await saved.ids
+        #expect(ids.count == PlaceResolutionService.offlineChunk, "saved \(ids.count)")
+        #expect(outcome.pendingOnline.count == n - ids.count)
+        #expect(outcome.pendingOnline.isDisjoint(with: ids))
+    }
+
+    /// Review of d612bc0: a refinement saved the map's country over a stored town before its
+    /// lookup; when the lookup did not happen (offline, Pause) the town was lost. A photo with
+    /// a town never gets anything coarser.
+    @Test func refinementNeverSavesACountryOverATown() async throws {
+        let collector = ResultCollector()
+        let towns = requests(Fixture.Places.rome, count: 20, prefix: "t").map {
+            PlaceResolutionService.Request(assetID: $0.assetID, coordinate: $0.coordinate, hasTown: true)
+        }
+        let fresh = requests(Fixture.Places.rome, count: 5, prefix: "f")
+        _ = try await service(level: .locality, geocoder: FakeGeocoder(failures: [.offline]))
+            .resolve(towns + fresh, refining: true) { await collector.add($0) }
+        let places = await collector.places
+        #expect(towns.allSatisfy { places[$0.assetID] == nil }, "a town was overwritten")
+        #expect(fresh.allSatisfy { places[$0.assetID]?.components.country == "Italien" })
     }
 
     @Test func cachedCellsAreNotRequestedAgain() async throws {

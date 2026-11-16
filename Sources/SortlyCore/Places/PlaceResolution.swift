@@ -74,10 +74,15 @@ public actor PlaceResolutionService {
         public var coordinate: GeoCoordinate
         /// Higher first (trips and frequent places before everything else, speed-up 3).
         public var priority: Int
-        public init(assetID: AssetID, coordinate: GeoCoordinate, priority: Int = 0) {
+        /// The photo has a town already (a refinement asks for a finer one): nothing coarser
+        /// is ever saved over it, not the map's country before the lookup, nor a country after
+        /// a lookup whose town was dropped (review of d612bc0: a stopped refinement lost towns).
+        public var hasTown: Bool
+        public init(assetID: AssetID, coordinate: GeoCoordinate, priority: Int = 0, hasTown: Bool = false) {
             self.assetID = assetID
             self.coordinate = coordinate
             self.priority = priority
+            self.hasTown = hasTown
         }
     }
 
@@ -114,8 +119,9 @@ public actor PlaceResolutionService {
     /// Longest single sleep between two checks of `shouldStop`: Pause, heat or the end of the
     /// app's time interrupt a wait for the geocoder within seconds, not after minutes.
     static let waitSlice: Duration = .seconds(2)
-    /// Places worked out from the map are saved and counted in parts of this size.
-    static let offlineChunk = 2_000
+    /// The pass over the offline map is saved, said (`checked`) and checked for Pause in
+    /// parts of this size.
+    static let offlineChunk = 1_000
 
     public init(
         map: OfflineWorldMap?,
@@ -156,6 +162,8 @@ public actor PlaceResolutionService {
         shouldStop: (@Sendable () async -> Bool)? = nil,
         onlineAllowed: (@Sendable () async -> Bool)? = nil,
         progress: (@Sendable (Int) async -> Void)? = nil,
+        checked: (@Sendable (Int) async -> Void)? = nil,
+        paused: (@Sendable () -> Bool)? = nil,
         waiting: (@Sendable (Duration?) async -> Void)? = nil,
         sink: Sink
     ) async throws -> Outcome {
@@ -175,15 +183,33 @@ public actor PlaceResolutionService {
         var needsOnline: [Request] = []
         var offlineCache: [GeoCell: OfflineWorldMap.Match] = [:]
 
-        // Saved and counted every `offlineChunk` requests: 50,000 photos at once stood at
-        // "0 von 50.233 Orten" for a minute on the simulator (stress run 43833158673). What is
-        // counted is saved first, so a run that ends in between never shows less afterwards.
+        // Every place saved from the map, so a town found later is not counted a second time
+        // (review of d612bc0: 8,500 resolved for 4,500 photos once the map pass came in parts).
+        var savedFromMap = Set<AssetID>()
+        // In parts of `offlineChunk`: saved, then counted, then said (`checked`), and Pause is
+        // looked at. 50,000 photos at once stood at "0 von 50.233 Orten" for a minute
+        // (stress run 43833158673); with towns on (the default) none of them is final before
+        // its lookup, so `checked` is the honest sign of life of this pass.
         for (index, r) in requests.enumerated() {
-            if index > 0, index % Self.offlineChunk == 0, !offlineOnly.isEmpty {
-                try await sink(offlineOnly)
-                outcome.resolved += offlineOnly.count
-                offlineOnly.removeAll(keepingCapacity: true)
-                await progress?(index - needsOnline.count)
+            if index > 0, index % Self.offlineChunk == 0 {
+                if !offlineOnly.isEmpty {
+                    try await sink(offlineOnly)
+                    outcome.resolved += offlineOnly.count
+                    savedFromMap.formUnion(offlineOnly.keys)
+                    offlineOnly.removeAll(keepingCapacity: true)
+                }
+                let final = index - needsOnline.count
+                if final > processed {
+                    processed = final
+                    await progress?(processed)
+                }
+                await checked?(index)
+                // Pause: what is saved stays; the rest is asked for again by the next run.
+                if paused?() == true || Task.isCancelled {
+                    outcome.pendingOnline.formUnion(requests[index...].map(\.assetID))
+                    outcome.pendingOnline.formUnion(needsOnline.map(\.assetID))
+                    return outcome
+                }
             }
             guard r.coordinate.isPlausible else { continue }
             let match = offlineMatch(r.coordinate, memo: &offlineCache)
@@ -193,8 +219,9 @@ public actor PlaceResolutionService {
                 }
             } else {
                 needsOnline.append(r)
-                // Country/region are useful right away, even before the town is known.
-                if let match, match.countryIsCertain, let c = match.components(language: policy.language) {
+                // Country/region are useful right away, even before the town is known (but never
+                // over a town the photo has already).
+                if !r.hasTown, let match, match.countryIsCertain, let c = match.components(language: policy.language) {
                     offlineOnly[r.assetID] = ResolvedPlace(components: c, source: .gpsReverseGeocoded, resolvedAt: now())
                 }
             }
@@ -202,9 +229,12 @@ public actor PlaceResolutionService {
         if !offlineOnly.isEmpty {
             try await sink(offlineOnly)
             outcome.resolved += offlineOnly.count
+            savedFromMap.formUnion(offlineOnly.keys)
+            offlineOnly.removeAll(keepingCapacity: true)
         }
         processed = requests.count - needsOnline.count
         await progress?(processed)
+        await checked?(requests.count)
 
         // One online request per raster cell, highest priority and biggest cells first.
         let cellMeters = policy.cellMeters(refining: refining)
@@ -269,12 +299,17 @@ public actor PlaceResolutionService {
                     if online != PlaceComponents() { outcome.pendingOnline.insert(member.assetID) }
                     continue
                 }
+                if member.hasTown, !merged.townIsValid {
+                    // Only a country came back: the stored town stays.
+                    outcome.pendingOnline.insert(member.assetID)
+                    continue
+                }
                 batch[member.assetID] = ResolvedPlace(components: merged.components, source: .gpsReverseGeocoded, resolvedAt: now(), precisionMeters: merged.townIsValid ? cellMeters : nil)
                 if !merged.townIsValid { outcome.pendingOnline.insert(member.assetID) }
             }
             if !batch.isEmpty {
                 try await sink(batch)
-                outcome.resolved += batch.count - batch.keys.filter { offlineOnly[$0] != nil }.count
+                outcome.resolved += batch.keys.filter { !savedFromMap.contains($0) }.count
             }
             let final = members.count - (outcome.pendingOnline.count - pendingBefore)
             if final > 0 {

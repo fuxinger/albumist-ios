@@ -10942,6 +10942,16 @@
           }
         }
       }
+    },
+    "%@ von %@ mit der Karte geprüft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ of %2$@ checked on the map"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

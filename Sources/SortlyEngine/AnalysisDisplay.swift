@@ -524,6 +524,64 @@ public struct BarGlide: Sendable, Equatable {
     }
 }
 
+// MARK: A run that goes on
+
+/// A run that goes on from where an earlier one stopped (the marker kept across launches):
+/// whether it is still catching up on the quick steps before that point, what the card says,
+/// and, once, whether the bar's widths continue from the value shown before. Pure, so the
+/// Linux tests cover what `AppModel` does with it (review of d612bc0).
+public struct ResumedRun: Sendable, Equatable {
+    /// Pipeline stage number (1…7) the earlier run stopped in.
+    public let stage: Int
+    /// What the card showed when it stopped: never shown less while catching up, nor after a
+    /// Pause in between. `nil` once it no longer applies (a stale value, see `back`).
+    public private(set) var floor: Double?
+    /// How much that stage had to do then (`nil` in markers of older versions).
+    public let stoppedTotal: Int?
+    /// The run got back to `stage` (decided once).
+    public private(set) var isBack = false
+
+    public init(stage: Int, shown: Double, stoppedTotal: Int?) {
+        self.stage = stage
+        self.floor = shown.isFinite ? min(1, max(0, shown)) : nil
+        self.stoppedTotal = stoppedTotal
+    }
+
+    public func isCatchingUp(running: Bool, at current: Int?) -> Bool {
+        running && !isBack && (current ?? 0) < stage
+    }
+
+    /// Every report of the run. The first time it reaches `stage` (and only then), with the
+    /// real value below the floor:
+    /// - that stage has more to do than when it stopped (photos came in): widths that go on
+    ///   from the floor (`StepWidths.continuing`), applied once, so the bar keeps the honest
+    ///   speed of the work (re-spreading on every report let the glide's lead pile up);
+    /// - otherwise the floor is stale (a database set aside while the marker stayed, the
+    ///   cause of stress run 43833158673's 64 % → 38 %): it is dropped and the real value is
+    ///   shown, instead of spreading a fresh analysis over 64…100 %.
+    public mutating func back(at stage: Int, step: AnalysisStep, completed: Int, total: Int, widths: StepWidths) -> StepWidths? {
+        guard !isBack, stage >= self.stage else { return nil }
+        isBack = true
+        guard let floor else { return nil }
+        guard widths.overall(step: step, completed: completed, total: total) < floor else { return nil }
+        let grew = stage == self.stage && (stoppedTotal.map { total > $0 } ?? false)
+        if grew, let continued = widths.continuing(held: floor, step: step, completed: completed, total: total) {
+            return continued
+        }
+        self.floor = nil
+        return nil
+    }
+
+    /// The value the card shows. `stopped`: where the run ended, when it is not running.
+    /// A run paused while catching up keeps the floor (review: the paused card said "3 %"
+    /// after "64 %", while the bar stayed at 64 %).
+    public func shown(running: Bool, catchingUp: Bool, overall: Double, stopped: Double?) -> Double {
+        if running { return catchingUp ? max(overall, floor ?? 0) : overall }
+        if let stopped { return max(stopped, floor ?? 0) }
+        return floor ?? overall
+    }
+}
+
 // MARK: Card state
 
 /// The card's state (spec "SwiftUI": running, slower, waiting, pausing since, paused,
@@ -579,6 +637,13 @@ public enum AnalysisCardState: Sendable, Equatable {
     }
 
     public static let pauseShownAfter: Duration = .seconds(5)
+
+    /// How often the overview looks again for the early suggestions during the image step
+    /// while none are shown: every 10 s, and 10 s more per 5,000 photos (each look derives the
+    /// status of every photo; review of d612bc0: every 10 s with 50,000 photos).
+    public static func earlyLookInterval(photos: Int) -> Duration {
+        .seconds(10 * max(1, photos / 5_000))
+    }
     public static let pausingLongerAfter: Duration = .seconds(10)
 
     public static func resolve(_ i: Inputs) -> AnalysisCardState? {

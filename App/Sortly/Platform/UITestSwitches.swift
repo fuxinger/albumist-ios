@@ -84,6 +84,11 @@ extension UITestSupport {
     /// slow tap or a still card was the app's main thread or the UI test's own snapshot.
     static let watchesMain = flag("-SortlyUITestWatchMain")
 
+    /// `-SortlyUITestWatchMainLog <path>`: every stall over half a second also goes into this
+    /// file of the test runner's ("<end as seconds since 1970> <ms>"), so the stress test can
+    /// assert that the main thread was free when Pause was tapped.
+    static let watchMainLog = value("-SortlyUITestWatchMainLog")
+
     // MARK: Writing
 
     /// `-SortlyUITestDeletionFault declined|ignored`: the first deletion of albums in this
@@ -149,7 +154,7 @@ extension UITestSupport {
     static func prepareLaunch() {
         #if DEBUG
         if fastStart { AppModel.shared.onboardingDone = true }
-        if watchesMain { MainThreadWatch.start() }
+        if watchesMain { MainThreadWatch.start(log: watchMainLog) }
         #endif
     }
 
@@ -177,7 +182,12 @@ extension UITestSupport {
 /// `-SortlyUITestWatchMain`: a background thread asks the main thread every 250 ms to answer
 /// and logs every time it took longer than a second, with the longest so far.
 enum MainThreadWatch {
-    static func start() {
+    static func start(log path: String?) {
+        // Written only by the watch thread below.
+        nonisolated(unsafe) let file = path.flatMap { path -> FileHandle? in
+            FileManager.default.createFile(atPath: path, contents: nil)
+            return FileHandle(forWritingAtPath: path)
+        }
         let thread = Thread {
             var longest = 0.0
             while true {
@@ -186,6 +196,9 @@ enum MainThreadWatch {
                 DispatchQueue.main.async { answered.signal() }
                 answered.wait()
                 let blocked = Date().timeIntervalSince(asked)
+                if blocked > 0.5, let file {
+                    file.write(Data(String(format: "%.3f %d\n", Date().timeIntervalSince1970, Int(blocked * 1000)).utf8))
+                }
                 if blocked > 1 {
                     longest = max(longest, blocked)
                     NSLog("UITEST_MAIN_BLOCKED %d ms (longest %d ms)", Int(blocked * 1000), Int(longest * 1000))

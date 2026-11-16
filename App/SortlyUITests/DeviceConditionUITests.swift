@@ -1151,12 +1151,14 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertEqual(rounds, 1, "Creating the photos needed \(rounds) launches (the app ended before it was done)")
 
         // 2. Measuring
+        try? FileManager.default.removeItem(atPath: mainStalls)
         print("UI_STRESS_PHASE measure")
         // The image step runs at about 1.7 photos/s in the simulator (stress run 43833158673):
         // 50,000 photos would take 8 h. The run measures for SORTLY_STRESS_MINUTES (45) and
         // reports how far it got; the simulator's speed is not a device's.
         let minutes = ProcessInfo.processInfo.environment["SORTLY_STRESS_MINUTES"].flatMap { Int($0) } ?? 45
-        let arguments = ["-SortlyUITestICloudOnly", "-SortlyUITestOffline", "-SortlyUITestWatchMain"]
+        let arguments = ["-SortlyUITestICloudOnly", "-SortlyUITestOffline", "-SortlyUITestWatchMain",
+                         "-SortlyUITestWatchMainLog", mainStalls]
         start(arguments + ["-SortlyUITestRebuildDatabase"])
         let analysisBegan = Date()
         var lastLine = ""
@@ -1232,6 +1234,22 @@ final class DeviceConditionUITests: XCTestCase {
     /// are finished (one per lane) and Fortsetzen appears, within the 10 s after which the card
     /// says "Dauert noch einen Moment". Stress run 43833158673 looked for a button labelled
     /// "Fortsetzen", but its label is "Analyse fortsetzen": found by its identifier now.
+    /// The app's main-thread stalls over 0.5 s ("<end, s since 1970> <ms>"), written by the
+    /// app (-SortlyUITestWatchMainLog) into this file of ours.
+    private var mainStalls: String { NSTemporaryDirectory() + "stress-main-stalls.txt" }
+
+    /// Stalls of the main thread that overlap `from…to`: nil when the app's file cannot be read.
+    private func mainStallsOverlapping(_ from: Date, _ to: Date) -> [(end: Date, ms: Int)]? {
+        guard let text = try? String(contentsOfFile: mainStalls, encoding: .utf8) else { return nil }
+        return text.split(separator: "\n").compactMap { line -> (end: Date, ms: Int)? in
+            let parts = line.split(separator: " ")
+            guard parts.count == 2, let end = Double(parts[0]), let ms = Int(parts[1]) else { return nil }
+            let stall = (end: Date(timeIntervalSince1970: end), ms: ms)
+            let start = stall.end.addingTimeInterval(-Double(ms) / 1000)
+            return start <= to && stall.end >= from ? stall : nil
+        }
+    }
+
     private func measurePauseAndResume() {
         let pause = app.buttons["analysis.pause"]
         guard pause.waitForExistence(timeout: 5) else { print("UI_STEP_MISSING stress pause"); return }
@@ -1263,6 +1281,17 @@ final class DeviceConditionUITests: XCTestCase {
         print("UI_TIMING stress pause: tap \(s(tapped.timeIntervalSince(tapStarted))) s, first look '\(firstLook?.line ?? "")' (took \(s(firstLook?.took)) s), reacted \(s(reacted)) s, Fortsetzen \(s(resumeShown)) s, counting stopped \(s(stopped)) s (\(last - before) more photos)")
         let firstShows = firstLook.map { $0.line.hasPrefix("Wird angehalten") || $0.line.hasPrefix("Analyse pausiert") } ?? false
         XCTAssertTrue(firstShows, "The first look after Pause still read '\(firstLook?.line ?? "")'")
+        // Pause under 1 s: the app's main thread (which changes the card in the tap's own call)
+        // was not held for 1 s or more from the start of the tap until 1 s after it. XCTest's
+        // tap itself also waits for the app to settle (7.15 s in stress run 43833158673); only
+        // when the app's stall file cannot be read is that time the measure.
+        if let stalls = mainStallsOverlapping(tapStarted, tapped.addingTimeInterval(1)) {
+            print("UI_TIMING stress pause: main-thread stalls around the tap \(stalls.map { "\($0.ms) ms" })")
+            XCTAssertTrue(stalls.allSatisfy { $0.ms < 1000 }, "The main thread was held \(stalls.map(\.ms).max() ?? 0) ms around the Pause tap")
+        } else {
+            print("UI_FACT stress pause: the app's stall file cannot be read; the tap's own time is the measure")
+            XCTAssertLessThan(tapped.timeIntervalSince(tapStarted), 1, "The Pause tap took \(s(tapped.timeIntervalSince(tapStarted))) s")
+        }
         XCTAssertLessThan(resumeShown ?? 99, 10, "Fortsetzen came \(s(resumeShown)) s after Pause")
         XCTAssertLessThanOrEqual(stopped, (resumeShown ?? 0) + 0.5, "The count went on after the analysis showed it was paused")
         shot("26a-stress-paused")

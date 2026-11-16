@@ -114,10 +114,17 @@ struct PipelineTests {
         func access() async -> LibraryAccess { .full }
         func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date]) async throws -> [AssetSnapshot] { assets }
         func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
-                         progress: @escaping @Sendable (Int, Int) -> Void) async throws -> [AssetSnapshot] {
-            for read in stride(from: 50, to: assets.count, by: 50) { progress(read, assets.count) }
+                         progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot] {
+            for read in stride(from: 50, to: assets.count, by: 50) {
+                // Like PhotoKitLibrary: a `false` ends the read, and nothing of it is returned.
+                if !progress(read, assets.count) { throw CancellationError() }
+                if read == pauseAt { onPauseAt?() }
+            }
             return assets
         }
+        var pauseAt: Int?
+        var onPauseAt: (@Sendable () -> Void)?
+        func pause(at read: Int, _ action: @escaping @Sendable () -> Void) { pauseAt = read; onPauseAt = action }
         func currentInventory() async throws -> CollectionInventory { CollectionInventory() }
     }
 
@@ -139,6 +146,31 @@ struct PipelineTests {
         #expect(counts.count >= assets.count / 50, "only \(counts.count) reports while reading")
         #expect(counts == counts.sorted())
         #expect(counts.last == assets.count)
+    }
+
+    /// Review of d612bc0: Pause during the library read waited for the whole read (minutes on a
+    /// first read of 50,000 photos). It ends the read at the next report; the run ends paused,
+    /// and nothing of the stopped read is stored (no photo is counted as deleted).
+    @Test func pauseStopsTheLibraryRead() async throws {
+        let s = try setup()
+        _ = try await s.pipeline.run()
+        let stored = try await s.store.allAssets().count
+        let assets = try await s.reader.fetchAssets(includeHidden: false, knownDetails: [:])
+        let reader = ReaderInParts(assets: Array(assets.prefix(assets.count / 2)))
+        let control = AnalysisRunControl()
+        await reader.pause(at: 50) { control.pause() }
+        let pipeline = AnalysisPipeline(
+            store: s.store, reader: reader, analyzer: s.analyzer, geocoder: s.geocoder, map: Self.map,
+            conditions: s.conditions, settings: OrganizationSettings(), calendar: Fixture.calendar, time: ManualTime().source
+        )
+        let reads = Mutex<[Int]>([])
+        let report = try await pipeline.run(control: control, onProgress: { p in
+            if p.stage == .inventory { reads.withLock { $0.append(p.completed) } }
+        })
+        #expect(report.pausedBecause == .userPaused)
+        #expect(reads.withLock { $0.max() ?? 0 } <= 100, "read on after Pause: \(reads.withLock { $0 })")
+        // Half the library was "read" before the stop; none of the other half is gone.
+        #expect(try await s.store.allAssets().count == stored)
     }
 
     @Test func secondRunIsIncremental() async throws {

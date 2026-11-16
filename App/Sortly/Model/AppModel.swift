@@ -949,11 +949,12 @@ final class AppModel {
         if let progress = taken.progress { receive(progress, at: now) }
         // "Schon fertig": the early suggestions are read once they are saved (the report that
         // starts the image step comes before that, review I2). Should that read miss them,
-        // it is tried again every 10 s while the image step or a later one runs.
+        // it is tried again every 10 s during the image step (the only step they are made in;
+        // refreshDerived is not cheap, so not in the later ones).
         if taken.earlyProposals {
             lastEarlyLook = now
             Task { await refreshDerived() }
-        } else if snapshot == nil, (analysis.stage?.number ?? 0) >= AnalysisPipeline.Stage.content.number,
+        } else if snapshot == nil, analysis.stage == .content,
                   lastEarlyLook.map({ now - $0 >= .seconds(10) }) ?? true {
             lastEarlyLook = now
             Task { await refreshDerived() }

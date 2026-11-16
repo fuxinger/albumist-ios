@@ -922,6 +922,14 @@ final class SortlyFlowUITests: XCTestCase {
         return text.exists ? text.label : ""
     }
 
+    /// A list cell without its own label is a row (a link to a screen) only when it shows more
+    /// than one text or an image: a suggestion or album row has its title, "12 Fotos" and a
+    /// thumbnail. A section header ("Länder und Orte") or footer is a cell with one text and
+    /// nothing to open (UI run 43906501407: they were tapped as rows and reported as dead).
+    private func looksLikeRow(_ element: XCUIElement) -> Bool {
+        element.staticTexts.count >= 2 || element.images.count > 0
+    }
+
     /// A row is tapped only when its label is not on the skip list, and a cell found by its
     /// text only when nothing in it is: a tap on the middle of such a cell can land on a
     /// button inside it. (Rows with their own label are tapped as before.)
@@ -951,6 +959,8 @@ final class SortlyFlowUITests: XCTestCase {
             let label = rowLabel(element)
             if label.isEmpty {
                 print("UI_SWEEP_SKIP \(screen) row \(i) (no label, no text)")
+            } else if element.label.isEmpty && !looksLikeRow(element) {
+                print("UI_SWEEP_SKIP \(screen) › \(label) (section header or footer text)")
             } else if !rowIsSafe(element, label: label) {
                 print("UI_SWEEP_SKIP \(screen) › \(label) (changes the library)")
             } else if !rows.contains(where: { $0.label == label }) {

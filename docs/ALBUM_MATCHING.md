@@ -23,7 +23,9 @@ zwar enthält (Abdeckung ≥ 0,5), aber zum größten Teil aus anderen Fotos bes
 < 0,5, z. B. „iPhone-Export“ mit einer ganzen Reise, „Familie“ mit den Hundefotos, „Italien“
 mit der Stadt Rom), ist **kein** Kandidat: Es wird nur unter „Anpassen“ angeboten.
 **Vollständig**: Abdeckung ≥ 0,98 und Reinheit ≥ 0,9. **Ergänzbar**: Reinheit ≥ 0,8 und
-Abdeckung ≥ 0,25. **Größere Sammlung**: ≥ 20 % des Albums gehören zu Geschwister-Vorschlägen
+Abdeckung ≥ 0,25; bei Sammlungen (alles außer Reisen und Zeiträumen) zusätzlich: Der
+Albumname sagt, dass es diese Sammlung ist, oder das Album hat schon ≥ 80 % davon (siehe
+„Sammlungen“). Sonst nur „Ähnliches Album gefunden“. **Größere Sammlung**: ≥ 20 % des Albums gehören zu Geschwister-Vorschlägen
 derselben Familie (z. B. ein Album „Italien“ über mehrere Italienreisen). Liegen zwei Kandidaten
 weniger als 0,15 Punkte auseinander, gilt „mehrere passende Alben“.
 
@@ -43,6 +45,21 @@ Grundsatz (Prüfung 16.11.2026): Albumist ändert ein Album des Nutzers nur, wen
 sicher ist („wird ergänzt“). „Passt vermutlich“ ändert nie etwas von selbst und zählt im Ring
 nicht als sortiert. Unklar heißt nicht erledigt.
 
+**Was als sortiert zählt** (Ring, „davon in deinen Alben“, Bereichsübersicht, alle über
+`AlbumMatcher.sortingAlbums`): das Album bei „schon vollständig“ und „wird ergänzt“. Bei
+„Mehrere passende Alben“ nur Alben, die zu ≥ 80 % aus dem Vorschlag bestehen (das beste und
+die gleich guten). „Ähnliches Album gefunden“ und nicht bearbeitbare Alben zählen nie.
+
+**„Dein Startpaket“ und „Empfohlene auswählen“** nehmen dieselben Vorschläge
+(`ProposalDecision.isSafeToAcceptUnseen`): mindestens wahrscheinlich, nicht persönlich, kein
+Name nötig, klare Aktion, kein „Ähnliches Album gefunden“.
+
+**Albumists eigenes Album** für einen Vorschlag bleibt dessen Album, auch wenn der Vorschlag
+stark wächst („2026“ im Januar angelegt): Es wird ergänzt, nie ein zweites angelegt.
+
+**Gespeicherte Ergebnisse** tragen die Version der Regeln (`AlbumMatcher.version`). Sind sie
+älter, gleicht die App beim Start einmal neu ab.
+
 ## Konfliktstrategien
 - Fotos, die der Nutzer selbst aus einem Album entfernt hat, werden nie wieder hinzugefügt.
 - Vor der Ausführung werden Fingerabdrücke aller betroffenen Alben verglichen; hat sich ein
@@ -55,6 +72,17 @@ nicht als sortiert. Unklar heißt nicht erledigt.
 Smart-Alben (Favoriten, Screenshots …) werden nicht als Ziel verwendet. Geteilte und
 synchronisierte Alben sind nur lesbar. Ausgeblendete Fotos zählen nur mit Zustimmung.
 
+### Sammlungen: Name oder Menge (Zweitprüfung 16.11.2026)
+Eine Sammlung (Land, Ort, Jahr, Monat, Kategorie, Medientyp …) ergänzt ein Album des Nutzers,
+das nur einen Teil von ihr enthält, nur wenn
+- der Albumname nichts sagt, was nicht auch im Namen des Vorschlags steht („Italien“ für
+  Italien, „2019“ für 2019, „Winter 2025/2026“ für „Winter 2025/26“), oder er ein Wort mit
+  ihm teilt, das kein Datum ist („Unsere Hunde“ für Hunde, „Urlaub in Italien“ für Italien),
+- oder das Album schon ≥ 80 % der Sammlung enthält.
+Sonst ist es nur „Ähnliches Album gefunden“: Das Jahr 2019 ergänzt nicht „Italien 2019“ mit
+Fotos von zu Hause, die Kategorie Hunde nicht „Bello“ mit allen anderen Hunden, der Monat
+Mai 2024 nicht „Italien, Mai 2024“. Monate, Jahreszeiten und Zahlen zählen als Datum.
+
 ### Teil-Alben bei Ländern und Orten
 Ein kleineres Album mit anderem Namen ist bei einer Orts-Sammlung ein Teil, nicht das
 Album: „Rom · 2024“ enthält nur Italien-Fotos, ist aber Rom. Albumist schlägt nie vor, es
@@ -62,11 +90,16 @@ mit Fotos aus ganz Italien zu ergänzen. Ergänzt wird nur ein Album, das ein Wo
 Ort teilt („Urlaub in Italien“). Ein Album, das schon den ganzen Ort enthält, zählt weiter
 als vollständig. Unter „Anpassen“ kann man ein Teil-Album trotzdem wählen.
 
+**Eine Reise** (BEFUNDE #3): Liegen alle Fotos eines Albums, die zum Ort gehören, in einer
+einzigen erkannten Reise (auch einer, die zu klein für einen eigenen Vorschlag ist), und hat
+diese Reise weniger als 80 % der Fotos des Orts, ist das Album diese Reise, ein Teil – auch
+ohne Jahr im Namen. Hat man das Land nur auf dieser Reise besucht, bleibt es sein Album.
+
 **Jahr im Namen** (Prüfung 16.11.2026, A2/A9): Steht im Albumnamen ein Jahr, das nicht im
-Namen des Vorschlags steht („Italien 2019“, Albumists eigenes „Italien · Mai 2024“), ist das
+Namen des Vorschlags steht („Italien 2019“, „Italien '19“, „Urlaub2019“, Albumists eigenes
+„Italien · Mai 2024“; „2025/26“ nennt 2025 und 2026), ist das
 Album eine Reise bzw. ein Teil. Keine Sammlung (Land, Ort, Kategorie, Medientyp …) ergänzt es
-mit Fotos anderer Jahre. Ein Jahresvorschlag „2019“ nutzt „Sommer 2019“ weiter. Reisen und
-Zeiträume sind selbst begrenzt und davon nicht betroffen.
+mit Fotos anderer Jahre. Reisen und Zeiträume sind selbst begrenzt und davon nicht betroffen.
 
 ### Alben anderer Vorschläge
 Ein Album, das Albumist für einen anderen Vorschlag angelegt oder ergänzt hat (laut den

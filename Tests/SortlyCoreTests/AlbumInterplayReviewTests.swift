@@ -236,8 +236,9 @@ struct AlbumInterplayFixTests {
         #expect(overview.newAlbumsNeeded == 1)
     }
 
-    /// A2 beyond places: no collection grows an album named after one year. A year suggestion
-    /// still uses an album of the same year.
+    /// A2 beyond places: no collection grows an album named after one year. The year 2019
+    /// (dogs and 300 other photos) does not grow "Hunde 2019" either: the album is about dogs
+    /// (second review 16.11.). An album named "2019" is the year's album.
     @Test func noCollectionGrowsAnAlbumOfOneYear() throws {
         let dogs = set("dog", 0..<200)
         let dogs19 = CollectionSnapshot(id: "d19", title: "Hunde 2019", assetIDs: set("dog", 0..<100))
@@ -245,9 +246,12 @@ struct AlbumInterplayFixTests {
         let r = try #require(matcher.match([category], against: CollectionInventory([dogs19]))[category.id])
         #expect(r.status == .newAlbumRequired)
 
-        let year = AlbumProposal(id: SortlyID("y19"), kind: .chronology(.year), title: "2019", assetIDs: dogs)
+        let year = AlbumProposal(id: SortlyID("y19"), kind: .chronology(.year), title: "2019",
+                                 assetIDs: set("dog", 0..<100).union(set("y19", 0..<300)))
         let y = try #require(matcher.match([year], against: CollectionInventory([dogs19]))[year.id])
-        #expect(y.status == .extendable)
+        #expect(!isTouching(ProposalDecision.recommended(for: year, match: y), "d19"), "\(y.status)")
+        let named = CollectionSnapshot(id: "a19", title: "2019", assetIDs: set("dog", 0..<100))
+        #expect(matcher.match([year], against: CollectionInventory([named]))[year.id]?.status == .extendable)
     }
 
     /// The ring follows the same rule: with several fitting albums, an album named after
@@ -317,5 +321,118 @@ struct AlbumInterplayFixTests {
         case .extendExisting(let id), .keepExisting(let id): id == album
         default: false
         }
+    }
+}
+
+/// Second review of claude/pro-albums (16.11.): one regression test per finding.
+@Suite("Review 16.11.: Zweitprüfung")
+struct AlbumInterplaySecondReviewTests {
+    let matcher = AlbumMatcher()
+
+    func set(_ prefix: String, _ range: Range<Int>) -> Set<AssetID> {
+        Set(range.map { AssetID("\(prefix)-\($0)") })
+    }
+
+    func isTouching(_ d: ProposalDecision, _ album: CollectionID) -> Bool {
+        switch d {
+        case .extendExisting(let id), .keepExisting(let id): id == album
+        default: false
+        }
+    }
+
+    /// 1: Albumist made "2026" in January (20 photos). By December the year has 200: the album
+    /// stays its album and is extended, never a second "2026".
+    @Test func assignedAlbumStaysExtendableWhenTheSuggestionGrows() throws {
+        let year = AlbumProposal(id: SortlyID("y26"), kind: .chronology(.year), title: "2026", assetIDs: set("y", 0..<200))
+        let album = CollectionSnapshot(id: "a26", title: "2026", assetIDs: set("y", 0..<20))
+        let dogs = AlbumProposal(id: SortlyID("c-dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: set("d", 0..<500))
+        let dogAlbum = CollectionSnapshot(id: "a-dogs", title: "Hunde", assetIDs: set("d", 0..<30))
+        let results = matcher.match([year, dogs], against: CollectionInventory([album, dogAlbum]),
+                                    assignments: [year.id: "a26", dogs.id: "a-dogs"])
+        #expect(results[year.id]?.status == .extendable)
+        #expect(ProposalDecision.recommended(for: year, match: results[year.id]) == .extendExisting("a26"))
+        #expect(ProposalDecision.recommended(for: dogs, match: results[dogs.id]) == .extendExisting("a-dogs"))
+    }
+
+    /// 2: a collection fills a subset album of the user only when the name says it is this
+    /// collection or the album holds most of it.
+    @Test func collectionsDoNotFillSubsetAlbumsWithoutACertainMatch() throws {
+        // The year 2019 (150 Italy, 250 other photos) and "Italien 2019".
+        let year = AlbumProposal(id: SortlyID("y19"), kind: .chronology(.year), title: "2019",
+                                 assetIDs: set("it19", 0..<150).union(set("home19", 0..<250)))
+        let italy = CollectionSnapshot(id: "it19", title: "Italien 2019", assetIDs: set("it19", 0..<150))
+        let y = try #require(matcher.match([year], against: CollectionInventory([italy]))[year.id])
+        #expect(y.status == .possibleMatch)
+        #expect(!isTouching(ProposalDecision.recommended(for: year, match: y), "it19"))
+
+        // Hunde and "Bello" (one dog among all).
+        let dogs = AlbumProposal(id: SortlyID("c-dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: set("d", 0..<400))
+        let bello = CollectionSnapshot(id: "bello", title: "Bello", assetIDs: set("d", 0..<120))
+        let d = try #require(matcher.match([dogs], against: CollectionInventory([bello]))[dogs.id])
+        #expect(d.status == .possibleMatch)
+        // Most of all dog photos: then it is the dog album.
+        let most = CollectionSnapshot(id: "bello", title: "Bello", assetIDs: set("d", 0..<350))
+        #expect(matcher.match([dogs], against: CollectionInventory([most]))[dogs.id]?.status == .extendable)
+        // Named after it: extended.
+        let named = CollectionSnapshot(id: "hunde", title: "Unsere Hunde", assetIDs: set("d", 0..<120))
+        #expect(matcher.match([dogs], against: CollectionInventory([named]))[dogs.id]?.status == .extendable)
+
+        // The month Mai 2024 and "Italien, Mai 2024".
+        let may = AlbumProposal(id: SortlyID("m"), kind: .chronology(.month), title: "Mai 2024", assetIDs: set("may", 0..<300))
+        let trip = CollectionSnapshot(id: "trip", title: "Italien, Mai 2024", assetIDs: set("may", 0..<100))
+        #expect(matcher.match([may], against: CollectionInventory([trip]))[may.id]?.status == .possibleMatch)
+    }
+
+    /// 3: the ring with several albums. Album B (62 % trip) alone is a possible match and does
+    /// not count; adding a purer album A must not make all of B count.
+    @Test func multipleMatchesCountOnlyAlbumsThatAreMostlyTheSuggestion() throws {
+        let trip = AlbumProposal(id: SortlyID("t"), kind: .trip, title: "Island", assetIDs: set("t", 0..<100))
+        let b = CollectionSnapshot(id: "b", title: "Sommer", assetIDs: set("t", 0..<90).union(set("x", 0..<55)))
+        let a = CollectionSnapshot(id: "a", title: "Auswahl", assetIDs: set("t", 0..<40))
+        let alone = try #require(matcher.match([trip], against: CollectionInventory([b]))[trip.id])
+        #expect(alone.status == .possibleMatch)
+        let both = try #require(matcher.match([trip], against: CollectionInventory([a, b]))[trip.id])
+        #expect(both.status == .multipleMatches)
+        #expect(both.best?.albumID == "b")
+        #expect(!matcher.sortingAlbums(both, kind: trip.kind, title: trip.title).contains("b"))
+        // The area overview and "davon in deinen Alben" follow the same rule.
+        let overview = try #require(AreaOverview.make(proposals: [trip], matches: [trip.id: both]).first)
+        #expect(overview.existingMatches == 0)
+    }
+
+    /// 5: years in short forms are years; a season over the new year names both.
+    @Test func yearsInShortForms() throws {
+        #expect(AlbumMatcher.years(in: "Italien '19") == [2019])
+        #expect(AlbumMatcher.years(in: "Urlaub2019") == [2019])
+        #expect(AlbumMatcher.years(in: "Winter 2025/26") == [2025, 2026])
+        #expect(AlbumMatcher.years(in: "Winter 2025/2026") == [2025, 2026])
+        #expect(AlbumMatcher.years(in: "Gardasee · 03.08.–14.08.2026") == [2026])
+        #expect(AlbumMatcher.years(in: "Album 12345").isEmpty)
+
+        let country = AlbumProposal(id: SortlyID("it"), kind: .placeCollection(.country), title: "Italien",
+                                    assetIDs: set("it", 0..<300))
+        for title in ["Italien '19", "Urlaub2019 Italien"] {
+            let album = CollectionSnapshot(id: "u", title: title, assetIDs: set("it", 0..<100))
+            let r = try #require(matcher.match([country], against: CollectionInventory([album]))[country.id])
+            #expect(!isTouching(ProposalDecision.recommended(for: country, match: r), "u"), "\(title): \(r.status)")
+        }
+        let winter = AlbumProposal(id: SortlyID("w"), kind: .chronology(.season), title: "Winter 2025/26", assetIDs: set("w", 0..<200))
+        let album = CollectionSnapshot(id: "w", title: "Winter 2025/2026", assetIDs: set("w", 0..<100))
+        #expect(matcher.match([winter], against: CollectionInventory([album]))[winter.id]?.status == .extendable)
+    }
+
+    /// 5 (BEFUNDE #3): an album whose photos all lie in one trip is a part of the place, also
+    /// without a year in its name and without a trip suggestion in the run.
+    @Test func albumOfOneTripIsAPartOfThePlace() throws {
+        let t19 = set("it19", 0..<150), t23 = set("it23", 0..<150)
+        let country = AlbumProposal(id: SortlyID("it"), kind: .placeCollection(.country), title: "Italien",
+                                    folderPath: ["Länder"], assetIDs: t19.union(t23))
+        let album = CollectionSnapshot(id: "u", title: "Urlaub in Italien", assetIDs: set("it19", 0..<100))
+        let r = try #require(matcher.match([country], against: CollectionInventory([album]), trips: [t19, t23])[country.id])
+        #expect(!isTouching(ProposalDecision.recommended(for: country, match: r), "u"), "\(r.status)")
+        #expect(r.alternatives.contains { $0.albumID == "u" })
+        // A country seen on that one trip only: the album is the country's.
+        let once = AlbumProposal(id: SortlyID("it"), kind: .placeCollection(.country), title: "Italien", assetIDs: t19)
+        #expect(matcher.match([once], against: CollectionInventory([album]), trips: [t19])[once.id]?.status == .extendable)
     }
 }

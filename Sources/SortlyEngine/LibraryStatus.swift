@@ -199,15 +199,11 @@ public enum LibraryStatus {
         return (result, reasons)
     }
 
-    /// The albums that make a suggestion's photos count as sorted: the best match when it is
-    /// certain (complete, or can be extended), and when several albums fit, also every one
-    /// that fits exactly as well (`AlbumMatcher.tiedWithBest`). A read-only album (a smart album
-    /// such as Favourites) never counts. A possible match does not count either: Albumist
-    /// makes an album of its own for it, so its photos are not sorted yet (review 16.11.).
+    /// The albums that make a suggestion's photos count as sorted (`AlbumMatcher.sortingAlbums`):
+    /// a certain match, or with several matching albums those that are mostly this suggestion.
+    /// A possible match and a read-only album (a smart album such as Favourites) never count.
     static func fittingAlbums(_ match: MatchResult?, kind: ProposalKind, title: String? = nil) -> Set<CollectionID> {
-        guard let match, let best = match.best, best.isEditable,
-              [.alreadyComplete, .extendable, .multipleMatches].contains(match.status) else { return [] }
-        return Set([best.albumID] + AlbumMatcher().tiedWithBest(match, kind: kind, title: title).map(\.albumID))
+        AlbumMatcher().sortingAlbums(match, kind: kind, title: title)
     }
 
     /// Photos with a place or a trip that the ring leaves out (the line under the ring).

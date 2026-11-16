@@ -301,8 +301,9 @@ struct OverviewView: View {
     private func areaRow(_ area: OrganizationArea, proposals: [AlbumProposal]) -> some View {
         let open = proposals.filter { model.decisions[$0.id] == nil && model.match(for: $0)?.status != .alreadyComplete }.count
         let existing = proposals.filter { p in
-            // Only certain matches: a possible match gets an album of its own (review 16.11.).
-            model.match(for: p).map { [MatchStatus.alreadyComplete, .extendable].contains($0.status) } ?? false
+            // The same albums as the ring (`AlbumMatcher.sortingAlbums`): a possible match gets
+            // an album of its own, several matching albums count only when mostly this suggestion.
+            !AlbumMatcher().sortingAlbums(model.match(for: p), kind: p.kind, title: p.title).isEmpty
         }.count
         // "0 Alben gefunden" read like an error: only mention albums that exist.
         var parts = [String(localized: "\(proposals.count) Vorschläge")]

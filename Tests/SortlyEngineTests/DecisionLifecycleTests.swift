@@ -306,6 +306,35 @@ struct DecisionLifecycleTests {
         #expect(Set(restored.albums.map(\.id)) == Set(before.albums.map(\.id)))
     }
 
+    /// Second review 16.11. (8): results saved by an older matching version are matched again
+    /// once at launch, so the fixed rules hold at once and not only after the next analysis.
+    @Test func outdatedMatchesAreMatchedAgainAtLaunch() async throws {
+        let w = try await world()
+        _ = try await w.pipeline.run()
+        var stored = try #require(try await w.pipeline.latestProposals())
+        #expect(stored.matcherVersion == AlbumMatcher.version)
+        #expect(!stored.matches.isEmpty)
+
+        // Saved before the version stamp: the key is missing, it reads as version 0.
+        let json = try JSONEncoder().encode(stored)
+        var object = try #require(try JSONSerialization.jsonObject(with: json) as? [String: Any])
+        object["matcherVersion"] = nil
+        let old = try JSONDecoder().decode(ProposalSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(old.matcherVersion == 0)
+
+        // Current version: left as it is (here: no matches at all).
+        stored.matches = [:]
+        try await w.store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)
+        #expect(try await w.pipeline.refreshMatchesIfOutdated()?.matches.isEmpty == true)
+        // Older version: matched again and stamped.
+        stored.matcherVersion = 1
+        try await w.store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)
+        let refreshed = try #require(try await w.pipeline.refreshMatchesIfOutdated())
+        #expect(refreshed.matcherVersion == AlbumMatcher.version)
+        #expect(!refreshed.matches.isEmpty)
+        #expect(try await w.pipeline.latestProposals()?.matcherVersion == AlbumMatcher.version)
+    }
+
     /// Review 16.11. (A10): the user dismissed the trip ("Nicht jetzt"), whose own album
     /// "Italien" already holds it completely. The shown country must not extend that album with
     /// the photos of other years.

@@ -738,6 +738,7 @@ public struct AreaOverview: Hashable, Sendable, Identifiable {
     public static func make(proposals: [AlbumProposal], matches: [SortlyID: MatchResult]) -> [AreaOverview] {
         var byArea: [OrganizationArea: [AlbumProposal]] = [:]
         for p in proposals { byArea[p.kind.area, default: []].append(p) }
+        let matcher = AlbumMatcher()
         return OrganizationArea.allCases.compactMap { area in
             guard let ps = byArea[area] else { return nil }
             var assets = Set<AssetID>()
@@ -745,8 +746,11 @@ public struct AreaOverview: Hashable, Sendable, Identifiable {
             for p in ps {
                 assets.formUnion(p.assetIDs)
                 let status = matches[p.id]?.status
+                // "In deinen Alben" only where the photos count as sorted (`sortingAlbums`).
+                let sorted = !matcher.sortingAlbums(matches[p.id], kind: p.kind, title: p.title).isEmpty
                 switch status {
-                case .alreadyComplete, .multipleMatches: existing += 1
+                case .alreadyComplete: existing += 1
+                case .multipleMatches: if sorted { existing += 1 }
                 case .extendable: existing += 1; extendable += 1
                 // A possible match gets an album of its own (review 16.11.).
                 case .possibleMatch, .newAlbumRequired, .nameConflict, .notEditable, .none: new += 1

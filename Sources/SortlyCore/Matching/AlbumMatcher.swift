@@ -99,6 +99,13 @@ public struct AlbumMatcher: Sendable {
         /// Extendable: album is mostly this proposal and already holds a relevant part.
         public var extendablePurity = 0.8
         public var extendableCoverage = 0.25
+        /// A collection (not a trip or period) extends an album without a name that says so
+        /// ("Bello" for Hunde, "Italien 2019" for the year 2019) only when the album already
+        /// holds this much of it; below, it is only a possible match (review 16.11.).
+        public var unnamedCollectionCoverage = 0.8
+        /// A place album whose photos all lie in one trip is that trip, not the place, when the
+        /// trip holds less than this share of the place (review 16.11., BEFUNDE #3).
+        public var oneTripShareOfPlace = 0.8
         /// Share of an album that lies in *other* sibling proposals before it is
         /// treated as a broader collection (Scenario C).
         public var broaderCollectionShare = 0.2
@@ -115,6 +122,11 @@ public struct AlbumMatcher: Sendable {
         self.thresholds = thresholds
     }
 
+    /// Version of the matching rules. Stored with the results; results of an older version
+    /// are matched again at launch, so a changed rule never waits for the next analysis.
+    /// 2: review 16.11. (possible matches never change or count, parts, one album per run).
+    public static let version = 2
+
     /// Matches all proposals in one pass using an inverted membership index.
     /// - Parameters:
     ///   - overrides: albums the user marked as "passt nicht" for a suggestion are never offered
@@ -127,6 +139,8 @@ public struct AlbumMatcher: Sendable {
     ///     (the country Italien must not grow the trip album "Rom · 2024").
     ///   - reserved: albums that already are the complete album of a suggestion outside this
     ///     run (a dismissed one). No suggestion of this run extends them.
+    ///   - trips: the photos of every detected trip. A place album that holds photos of one
+    ///     trip only is a part of the place (`isPart`), whatever its name.
     ///
     /// Within one run an album of the user is changed for one suggestion at most (review 16.11.,
     /// A5 and A10): an album that already holds all of one suggestion ("schon vollständig",
@@ -137,8 +151,14 @@ public struct AlbumMatcher: Sendable {
     public func match(_ proposals: [AlbumProposal], against inventory: CollectionInventory,
                       overrides: OverrideSet = OverrideSet(),
                       assignments: [SortlyID: CollectionID] = [:],
-                      reserved: Set<CollectionID> = []) -> [SortlyID: MatchResult] {
+                      reserved: Set<CollectionID> = [],
+                      trips: [Set<AssetID>] = []) -> [SortlyID: MatchResult] {
         let membership = inventory.albumMembershipIndex()
+        // Detected trips (also those too small for a suggestion), for parts of a place.
+        var tripOf: [AssetID: Int] = [:]
+        if proposals.contains(where: { if case .placeCollection = $0.kind { true } else { false } }) {
+            for (index, members) in trips.enumerated() { for a in members { tripOf[a] = index } }
+        }
 
         // Sibling map per proposal family, to detect albums that span several siblings.
         var siblingOf: [String: [AssetID: SortlyID]] = [:]
@@ -177,6 +197,7 @@ public struct AlbumMatcher: Sendable {
                 assigned: assignments[proposal.id],
                 claimedByOthers: claimed,
                 taken: taken[proposal.id] ?? [],
+                tripOf: tripOf,
                 membership: membership,
                 siblings: siblingOf[family] ?? [:],
                 siblingCounts: &counts,
@@ -232,14 +253,36 @@ public struct AlbumMatcher: Sendable {
         assigned: CollectionID?,
         claimedByOthers: Set<CollectionID>,
         taken: Set<CollectionID>,
+        tripOf: [AssetID: Int],
         membership: [AssetID: [CollectionID]],
         siblings: [AssetID: SortlyID],
         siblingCounts: inout [CollectionID: [SortlyID: Int]],
         titleIndex: [String: [CollectionID]]
     ) -> MatchResult {
         var intersections: [CollectionID: Int] = [:]
+        // Places only: the one trip all of an album's shared photos lie in (nil: none or several).
+        var albumTrip: [CollectionID: Int?] = [:]
+        var tripCount: [Int: Int] = [:]
+        let tracksTrips: Bool
+        if case .placeCollection = proposal.kind { tracksTrips = !tripOf.isEmpty } else { tracksTrips = false }
         for asset in proposal.assetIDs {
-            for album in membership[asset] ?? [] { intersections[album, default: 0] += 1 }
+            let trip = tracksTrips ? tripOf[asset] : nil
+            if let trip { tripCount[trip, default: 0] += 1 }
+            for album in membership[asset] ?? [] {
+                intersections[album, default: 0] += 1
+                if tracksTrips {
+                    if let seen = albumTrip[album] {
+                        if seen != trip { albumTrip[album] = .some(nil) }
+                    } else {
+                        albumTrip[album] = .some(trip)
+                    }
+                }
+            }
+        }
+        /// The album's photos of this place all lie in one trip, and the place is much more than it.
+        func isOneTripOfPlace(_ albumID: CollectionID) -> Bool {
+            guard let trip = albumTrip[albumID] ?? nil, let count = tripCount[trip] else { return false }
+            return Double(count) < thresholds.oneTripShareOfPlace * Double(proposal.assetIDs.count)
         }
 
         let proposalTokens = AlbumTitle.tokens(proposal.title)
@@ -307,7 +350,8 @@ public struct AlbumMatcher: Sendable {
                 isEditable: album.isEditableAlbum
             )
             // In this run the album is another suggestion's: offered under "Anpassen" only.
-            if isTaken && !holdsAll || isPart(candidate, of: proposal) {
+            let oneTrip = relation != .equivalent && metrics.coverage < thresholds.completeCoverage && isOneTripOfPlace(albumID)
+            if isTaken && !holdsAll || oneTrip || isPart(candidate, of: proposal) {
                 parts.append(candidate)
                 continue
             }
@@ -394,11 +438,15 @@ public struct AlbumMatcher: Sendable {
         switch best.relation {
         case _ where bestIsComplete:
             status = .alreadyComplete
+        case _ where best.albumID == assigned:
+            // The album Albumist made or extended for this suggestion stays its album, however
+            // much the suggestion grew ("2026" made in January): never a second one.
+            status = .extendable
         case .equivalent:
             status = .alreadyComplete
         case .partOfProposal where addable == 0:
             status = .alreadyComplete
-        case .partOfProposal where best.metrics.coverage >= thresholds.extendableCoverage:
+        case .partOfProposal where best.metrics.coverage >= thresholds.extendableCoverage && isCertain(best, for: proposal):
             status = .extendable
         default:
             status = .possibleMatch
@@ -434,16 +482,88 @@ public struct AlbumMatcher: Sendable {
         return candidate.nameSimilarity == 0
     }
 
-    /// The album's name holds a year (1900–2099) that the suggestion's name does not.
+    /// The album's name holds a year that the suggestion's name does not.
     static func namesOtherYear(album: String, proposal: String) -> Bool {
-        let years = AlbumTitle.tokens(album).filter(isYear)
+        let years = years(in: album)
         guard !years.isEmpty else { return false }
-        return !years.isSubset(of: AlbumTitle.tokens(proposal).filter(isYear))
+        return !years.isSubset(of: Self.years(in: proposal))
     }
 
-    private static func isYear(_ token: String) -> Bool {
-        guard token.count == 4, let year = Int(token) else { return false }
-        return (1900...2099).contains(year)
+    /// The years a title names: "2019", "Urlaub2019", "Italien '19", "Winter 2025/26" and
+    /// "Winter 2025/2026" (both 2025 and 2026), "2019–2021" (both ends).
+    static func years(in title: String) -> Set<Int> {
+        let chars = Array(title)
+        func digits(at i: Int, count: Int) -> Int? {
+            guard i >= 0, i + count <= chars.count else { return nil }
+            let run = chars[i..<(i + count)]
+            guard run.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+            // Not part of a longer number.
+            if i > 0, chars[i - 1].isASCII && chars[i - 1].isNumber { return nil }
+            if i + count < chars.count, chars[i + count].isASCII && chars[i + count].isNumber { return nil }
+            return Int(String(run))
+        }
+        var result = Set<Int>()
+        var i = 0
+        while i < chars.count {
+            if let year = digits(at: i, count: 4), (1900...2099).contains(year) {
+                result.insert(year)
+                // "2025/26": the short second year belongs to the same century.
+                var j = i + 4
+                while j < chars.count, chars[j] == " " { j += 1 }
+                if j < chars.count, "/–-".contains(chars[j]) {
+                    var k = j + 1
+                    while k < chars.count, chars[k] == " " { k += 1 }
+                    if let short = digits(at: k, count: 2) { result.insert(year / 100 * 100 + short) }
+                }
+                i += 4
+                continue
+            }
+            // "'19", "’19": a year in short form.
+            if "'’‘´`".contains(chars[i]), let short = digits(at: i + 1, count: 2) {
+                result.insert(short <= 69 ? 2000 + short : 1900 + short)
+                i += 3
+                continue
+            }
+            i += 1
+        }
+        return result
+    }
+
+    /// Words of dates: numbers, months and seasons (German and English). A shared date word
+    /// does not make an album a collection's album ("Italien, Mai 2024" is not "Mai 2024").
+    static func isDateWord(_ token: String) -> Bool {
+        if token.allSatisfy({ $0.isASCII && $0.isNumber }) { return true }
+        return dateWords.contains(token)
+    }
+
+    private static let dateWords: Set<String> = [
+        "januar", "jan", "februar", "feb", "marz", "maerz", "mar", "april", "apr", "mai", "juni", "jun", "juli", "jul",
+        "august", "aug", "september", "sep", "sept", "oktober", "okt", "november", "nov", "dezember", "dez",
+        "january", "february", "march", "may", "june", "july", "october", "oct", "december", "dec",
+        "jahr", "year", "monat", "month",
+        "fruhling", "fruehling", "sommer", "herbst", "winter", "spring", "summer", "autumn", "fall",
+    ]
+
+    /// Whether extending `candidate` for a collection is certain enough to be the default.
+    /// Trips and periods: the content decides (`extendableCoverage`). Collections: the album's
+    /// name must say it is this collection (all its words are in the suggestion's name, or it
+    /// shares a word that is not a date: "Italien", "Urlaub in Italien" for Italien), or the
+    /// album already holds most of it. "Bello" for Hunde, "Italien 2019" for the year 2019 or
+    /// "Italien, Mai 2024" for the month Mai 2024 stay possible matches (review 16.11.).
+    func isCertain(_ candidate: MatchCandidate, for proposal: AlbumProposal) -> Bool {
+        if proposal.kind.isEventLike || candidate.metrics.coverage >= thresholds.unnamedCollectionCoverage { return true }
+        return Self.nameSaysCollection(album: candidate.albumTitle, proposal: proposal.title)
+    }
+
+    static func nameSaysCollection(album: String, proposal: String) -> Bool {
+        func words(_ title: String) -> Set<String> { AlbumTitle.tokens(title).filter { !$0.allSatisfy { $0.isASCII && $0.isNumber } } }
+        let a = words(album), p = words(proposal)
+        let albumYears = years(in: album)
+        guard !a.isEmpty || !albumYears.isEmpty else { return false }
+        // Nothing in the album's name beyond the suggestion's ("Italien", "2019",
+        // "Winter 2025/2026" for "Winter 2025/26").
+        if a.isSubset(of: p) && albumYears.isSubset(of: years(in: proposal)) { return true }
+        return a.intersection(p).contains { !isDateWord($0) }
     }
 
     /// The other albums that fit a suggestion exactly as well as its best album when several
@@ -455,6 +575,25 @@ public struct AlbumMatcher: Sendable {
         return result.alternatives.filter {
             $0.isEditable && $0.score == best.score && $0.relation != .broaderCollection
                 && $0.metrics.purity >= thresholds.extendablePurity && !isPart($0, kind: kind, title: title)
+        }
+    }
+
+    /// The albums that make a suggestion's photos count as sorted (the ring, "davon in deinen
+    /// Alben", the area overview): the best album of a certain match (complete, or extended by
+    /// default). With several matching albums only those that are mostly this suggestion
+    /// (purity ≥ `extendablePurity`): the best one and the ones tied with it. A possible match
+    /// and a read-only album never count (review 16.11.).
+    public func sortingAlbums(_ result: MatchResult?, kind: ProposalKind, title: String? = nil) -> Set<CollectionID> {
+        guard let result, let best = result.best, best.isEditable else { return [] }
+        switch result.status {
+        case .alreadyComplete, .extendable:
+            return [best.albumID]
+        case .multipleMatches:
+            var albums = Set(tiedWithBest(result, kind: kind, title: title).map(\.albumID))
+            if best.metrics.purity >= thresholds.extendablePurity { albums.insert(best.albumID) }
+            return albums
+        default:
+            return []
         }
     }
 

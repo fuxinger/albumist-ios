@@ -59,14 +59,30 @@ enum UITestOnboarding {
             && !app.buttons["Pause"].exists
     }
 
-    /// Onboarding, demo library and first analysis, only when the app still shows its welcome
-    /// screen. Returns true when it had to do that.
+    /// Onboarding, demo library and first analysis, when the app still shows its welcome
+    /// screen, or only the demo library and its analysis when the app is past the onboarding
+    /// but still offers it (as `onboardAndSeed` in AccessibilityUITests). Returns true when it
+    /// had to do either.
+    ///
+    /// UI run 43893790053 (group "flow-other"): the runner ended in test 2 right after it tapped
+    /// "Beispiel-Mediathek anlegen"; tests 3 to 7 found the app past its welcome screen and ran
+    /// on the simulator's own handful of photos (no suggestions, no albums: 10 failures).
     @discardableResult
     static func completeIfNeeded(_ app: XCUIApplication, in test: String) -> Bool {
         func button(_ text: String) -> XCUIElement {
             app.buttons.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         }
-        guard button("Los geht").waitForExistence(timeout: 10) else { return false }
+        guard button("Los geht").waitForExistence(timeout: 10) else {
+            let demo = button("Beispiel-Mediathek anlegen")
+            guard demo.waitForExistence(timeout: 5) else { return false }
+            print("UI_FACT \(test): past the onboarding without the demo library, creating it first")
+            demo.tap()
+            XCTAssertTrue(demoLibraryCreated(app), "\(test): demo library not created")
+            let idle = waitStable(timeout: 1200) { analysisIdle(app) }
+            print(idle ? "UI_STEP_OK \(test) demo library" : "UI_STEP_MISSING \(test) demo library")
+            XCTAssertTrue(idle, "\(test): the analysis of the demo library did not finish")
+            return true
+        }
         print("UI_FACT \(test): the app is at its welcome screen, onboarding first")
         button("Los geht").tap()
         if button("Weiter").waitForExistence(timeout: 10) { button("Weiter").tap() }

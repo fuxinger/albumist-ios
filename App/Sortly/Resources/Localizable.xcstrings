@@ -1811,6 +1811,16 @@
         }
       }
     },
+    "Der Speicher deines iPhone ist voll, darum konnte Albumist gerade nichts sichern. Gib etwas Speicher frei, dann geht es dort weiter, wo es aufgehört hat." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your iPhone's storage is full, so Albumist could not save just now. Free up some space and it continues where it stopped."
+          }
+        }
+      }
+    },
     "Der Zielordner wurde inzwischen gelöscht." : {
       "localizations" : {
         "en" : {
@@ -6833,6 +6843,46 @@
         }
       }
     },
+    "Neue Fotos werden analysiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysing new photos"
+          }
+        }
+      }
+    },
+    "Analyse nach erneutem Update" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysing again after an update"
+          }
+        }
+      }
+    },
+    "Weitere neue Fotos werden analysiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysing more new photos"
+          }
+        }
+      }
+    },
+    "Analyse nach Update" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysis after update"
+          }
+        }
+      }
+    },
     "Prüft auf neue Fotos" : {
       "localizations" : {
         "en" : {
@@ -9643,66 +9693,6 @@
         }
       }
     },
-    "Foto wird geladen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Loading photo"
-          }
-        }
-      }
-    },
-    "Name wird vorgeschlagen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Suggesting a name"
-          }
-        }
-      }
-    },
-    "Wird vorbereitet" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Preparing"
-          }
-        }
-      }
-    },
-    "Geschichte wird erzählt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Writing your story"
-          }
-        }
-      }
-    },
-    "Suche läuft" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Searching"
-          }
-        }
-      }
-    },
-    "Kauf läuft" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Purchasing"
-          }
-        }
-      }
-    },
     "Albumist wird geladen" : {
       "localizations" : {
         "en" : {
@@ -10993,6 +10983,76 @@
         }
       }
     },
+    "%@ von %@ mit der Karte geprüft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ of %2$@ checked on the map"
+          }
+        }
+      }
+    },
+    "Foto wird geladen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading photo"
+          }
+        }
+      }
+    },
+    "Name wird vorgeschlagen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggesting a name"
+          }
+        }
+      }
+    },
+    "Wird vorbereitet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing"
+          }
+        }
+      }
+    },
+    "Geschichte wird erzählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Writing your story"
+          }
+        }
+      }
+    },
+    "Suche läuft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Searching"
+          }
+        }
+      }
+    },
+    "Kauf läuft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Purchasing"
+          }
+        }
+      }
+    },
     "Dein Zuhause" : {
       "localizations" : {
         "en" : {
@@ -11809,6 +11869,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“Not a trip” is available once the analysis is finished, because Albumist then plans your trips again."
+          }
+        }
+      }
+    },
+    "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Einstellungen › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The rest is done, but not everything worked. The change is listed under Settings › History and Undo. There you can see what is missing and add it with “Try Missing Steps Again”."
           }
         }
       }

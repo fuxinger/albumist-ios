@@ -13,6 +13,29 @@ enum AnalysisMarker {
         /// restart keeps them, so the bar does not jump. `nil` in markers of older versions and
         /// before the workload is known (the standard widths).
         var widths: StepWidths? = nil
+        /// The database it was written for (`SortlyStore.identity`): a device backup brings
+        /// the marker back but not the database. `nil` in markers of older versions.
+        var database: String? = nil
+        /// Photos still to look at and screenshots still to read (`AnalysisWorkload.heavyLeft`),
+        /// the library's photos, and the analysis version when the run was last seen: on return,
+        /// much more work than then starts a phase of its own instead of holding the value
+        /// (`ResumedRun`, review of 83db832). `nil` in markers of older versions.
+        var left: Int? = nil
+        var photos: Int? = nil
+        var version: String? = nil
+        /// The label of the phase the run was in, kept when it goes on.
+        var newWork: ResumedRun.NewWork? = nil
+        /// Where in `stage` it stood (count of total): a run that goes on holds the value until
+        /// it is past this position (review of 11ef3e1). `nil` in markers of older versions.
+        var completed: Int? = nil
+        var total: Int? = nil
+        /// The usual time left then (`ProgressEstimator.estimatedRemaining`): a run that goes
+        /// on moves from the value by its time share before it knows its own workload.
+        var secondsLeft: Double? = nil
+        /// While a run that goes on holds the value: the longest time the runs since the stop
+        /// spent re-reading before they were cut off (`ResumedRun.caughtUp`), so repeated
+        /// cut-offs do not each move the value by their time share (review of c772325).
+        var caughtUp: Double? = nil
     }
 
     private static let unfinishedKey = "analysis.unfinished"

@@ -6,22 +6,36 @@ name: UI flow
 #   1. Core tests (Linux): the core library's tests on a free Linux runner. No macOS runner
 #      starts for a commit whose core tests fail (fast first, then expensive).
 #   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
-#   3. Four test groups in parallel, each on its own runner and freshly booted simulator
-#      (test-without-building), so the slowest group sets the wall time, not the sum. Job
-#      times measured in UI run 43906501407, including 5-7 min simulator setup:
+#   3. Five test groups, each on its own runner and freshly booted simulator
+#      (test-without-building), at most four at a time (max-parallel), so the slowest group
+#      sets the wall time, not the sum. Job times measured in UI run 43906501407, including
+#      5-7 min simulator setup (device conditions: UI runs 43827092443 and 43795445305 of
+#      claude/pro-switches):
+#        - device conditions: DeviceConditionUITests 01-04, 06, 09-12 (hot iPhone, battery,
+#                          background expiry, iCloud offline, full disk, photo access, empty
+#                          and large library; test12 is the stress test and skips itself here,
+#                          see ui-stress.yml), ~65 min
 #        - full flow:      SortlyFlowUITests/test1_FullFlow (onboarding, demo library, plan,
 #                          the sorting-show video), 32 min
 #        - other flows:    every other UI test except the accessibility tests (flow tests 2-6,
-#                          locked purchase, search; each brings the app to an onboarded demo
-#                          library by itself, see UITestOnboarding), 44 min
+#                          locked purchase, search, and DeviceConditionUITests 05, 07, 08: undo
+#                          and interrupted plans, flows with a plan like flow test 5; each brings
+#                          the app to an onboarded demo library by itself, see
+#                          UITestOnboarding), 44 min + ~20 min
 #        - accessibility:  AccessibilityUITests 1-4 on a small iPhone with Reduce Motion,
 #                          ~48 min (56.5 min with the contrast pass, which is now apart)
 #        - contrast:       AccessibilityUITests test5 with Increase Contrast and Reduce
 #                          Transparency on its own small iPhone, ~18 min (it onboards first)
 #      "other flows" is defined as "everything the other groups do not run", so a new test
-#      class always runs somewhere and no test runs twice.
+#      class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests checks
+#      every UI test against the groups).
 #      With CI's one macOS job this is at most five macOS jobs per push at the peak (the build
-#      job runs before the groups), about all the repository has; accepted on 16.11.
+#      job runs before the groups; max-parallel 4 holds the fifth group back), about all the
+#      repository has; accepted on 16.11. Contrast is listed last, so it is the group that
+#      waits: it starts when the first group (the full flow, ~32 min) is done and ends with
+#      the others.
+#      The 50,000-photo stress run is not part of this run: .github/workflows/ui-stress.yml,
+#      started by hand.
 #
 # Each group runs through .github/scripts/ui_tests.py: a pass that the simulator service lost
 # (an explicit "Error returned in reply from CoreSimulatorService", "Timed out waiting for AX
@@ -111,13 +125,33 @@ jobs:
     name: UI ${{ matrix.title }}
     needs: build
     runs-on: xcode-27
-    # A group takes 25-40 min; a repeat after a simulator failure can add up to its length.
-    timeout-minutes: 90
+    # A group takes 25-65 min; a repeat after a simulator failure can add up to its length.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
+      # Four groups + CI's macOS job = five macOS jobs at the peak (see the top of this file).
+      max-parallel: 4
       matrix:
         include:
           # only / skip: "Class" or "Class/testMethod" of SortlyUITests, separated by spaces.
+          - group: device
+            # The device-condition switches (App/Sortly/Platform/UITestSwitches.swift) on the Pro
+            # simulator. A test that resets the photo access asks the Mac to give it back
+            # (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07 and
+            # 08 (undo, interrupted plan) run with the other flows.
+            title: device conditions
+            device: pro
+            only: >-
+              DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish
+              DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording
+              DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue
+              DeviceConditionUITests/test04_UnreadableICloudOfflineComplete
+              DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
+              DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked
+              DeviceConditionUITests/test10_EmptyLibrary
+              DeviceConditionUITests/test11_LargeLibrary
+              DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
+            skip: ''
           - group: flow-full
             title: full flow and video
             device: pro
@@ -128,8 +162,19 @@ jobs:
             title: other flows, purchase and search
             device: pro
             only: ''
-            # Everything the other two groups run (keep in step with them).
-            skip: SortlyFlowUITests/test1_FullFlow AccessibilityUITests
+            # Everything the other groups run (keep in step with them; GroupTests checks it).
+            skip: >-
+              SortlyFlowUITests/test1_FullFlow
+              AccessibilityUITests
+              DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish
+              DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording
+              DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue
+              DeviceConditionUITests/test04_UnreadableICloudOfflineComplete
+              DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
+              DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked
+              DeviceConditionUITests/test10_EmptyLibrary
+              DeviceConditionUITests/test11_LargeLibrary
+              DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
           - group: accessibility
             # AccessibilityUITests 1-4 on a small iPhone (SE, 375 pt) with Reduce Motion. These
             # tests fail on findings.

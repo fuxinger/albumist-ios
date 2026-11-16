@@ -48,6 +48,9 @@ struct AnalysisProgressCard: View {
     private var title: String {
         switch state {
         case .running(let p, _, _, let catchingUp):
+            // A phase of its own after a stop, or many new photos seen by the library read:
+            // why the number starts again or is held longer (reviews of 83db832 and 11ef3e1).
+            if let newWork = model.analysis.newWork { return AnalysisText.newWork(newWork) }
             if catchingUp != nil { return String(localized: "Macht da weiter, wo sie aufgehört hat") }
             return p?.step.labelText ?? String(localized: "Analyse läuft")
         case .waiting(.cooling, _): return String(localized: "Wartet, bis dein iPhone abkühlt")
@@ -216,6 +219,11 @@ struct AnalysisProgressCard: View {
                     Text(AnalysisText.finish(finish))
                         .accessibilityIdentifier("analysis.finishTime")
                 }
+                // The places step's pass over the map: towns only count after their lookup, so
+                // this is what moves meanwhile (review of d612bc0: "0 von 50.233 Orten" for 60 s).
+                if let pass = model.analysis.mapPass, pass.checked < pass.of {
+                    Text(AnalysisText.mapChecked(pass))
+                }
                 if slower == .warm {
                     Text("Langsamer, weil dein iPhone warm ist")
                 } else if slower == .lowPower {
@@ -260,9 +268,12 @@ struct AnalysisProgressCard: View {
     private var accessibilityValue: String {
         var parts: [String] = []
         if let position, position.hasCount { parts.append(AnalysisText.count(position)) }
+        if case .running = state, let pass = model.analysis.mapPass, pass.checked < pass.of {
+            parts.append(AnalysisText.mapChecked(pass))
+        }
         if case .running = state, let finish = model.analysisFinish { parts.append(AnalysisText.finish(finish)) }
         parts.append(stepLine)
-        parts.append(String(localized: "Analyse zu \(Int((model.analysis.shownOverall * 100).rounded())) % fertig"))
+        parts.append(String(localized: "Analyse zu \(AnalysisPercent.percent(model.analysis.shownOverall, isComplete: model.analysis.isComplete)) % fertig"))
         return parts.joined(separator: ", ")
     }
 
@@ -587,7 +598,9 @@ struct AnalysisDetailsSheet: View {
     private func summary(now: Date) -> String {
         var parts: [String] = []
         if let finish = model.analysisFinish, model.analysis.isRunning { parts.append(AnalysisText.finish(finish)) }
-        parts.append(model.analysisBar.formatted(.percent.precision(.fractionLength(0))))
+        // Never 100 % before the end (`AnalysisPercent`).
+        parts.append(AnalysisPercent.value(model.analysisBar, isComplete: model.analysis.isComplete)
+            .formatted(.percent.precision(.fractionLength(0))))
         if let start = model.analysisStartedAt, model.analysis.isRunning {
             let elapsed = Duration.seconds(max(60, now.timeIntervalSince(start)))
             parts.append(String(localized: "bisher \(elapsed.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))"))
@@ -598,8 +611,11 @@ struct AnalysisDetailsSheet: View {
     private enum Standing { case done, running, later }
 
     private func standing(_ step: AnalysisStep) -> Standing {
+        // After a complete run every row is done, also with the position where a foreground
+        // run stood before (review of 0305d20, 5).
+        if model.analysis.isComplete { return .done }
         guard let current = model.analysis.step ?? model.analysis.stoppedAt?.step else {
-            return model.analysis.lastReport?.isComplete == true ? .done : .later
+            return model.analysis.isComplete ? .done : .later
         }
         if step < current { return .done }
         return step == current ? .running : .later

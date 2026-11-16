@@ -121,12 +121,25 @@ public actor AnalysisPipeline {
         /// the overview reads them now for "Schon fertig". The report that starts the image
         /// step comes before they are saved, so reading at that report found nothing (review I2).
         public var earlyProposals = false
+        /// The places step's pass over the offline map: how many photos are checked so far.
+        /// With towns on (the default) no place is final before its online lookup, so this is
+        /// what moves while the pass runs (review of d612bc0: "0 von 50.233 Orten" for 60 s).
+        public var mapPass: MapPass? = nil
 
         /// One value for the whole run (0…1), so a bar never jumps back when the next stage starts.
         public static func overall(stage: Stage, completed: Int, total: Int) -> Double {
             let before = Stage.allCases.prefix { $0 != stage }.reduce(0) { $0 + $1.share }
             let within = total > 0 ? min(1, max(0, Double(completed) / Double(total))) : 0
             return min(1, before + stage.share * within)
+        }
+    }
+
+    public struct MapPass: Sendable, Hashable {
+        public var checked: Int
+        public var of: Int
+        public init(checked: Int, of: Int) {
+            self.checked = checked
+            self.of = of
         }
     }
 
@@ -161,6 +174,9 @@ public actor AnalysisPipeline {
     /// 2: screenshot categories with whole-word flight rules and short keywords as whole words
     /// (first device test 15.11.); every stored screenshot is read once more.
     public static let textVersion = 2
+    /// Both versions together: a marker that kept another one was written before an update
+    /// that changed the analysis ("Analyse nach Update", `ResumedRun`).
+    public static var analysisVersion: String { "\(contentVersion).\(textVersion)" }
     /// Analyzer errors in a row after which a run stops instead of going through every photo:
     /// when Vision itself fails, each further photo would fail the same way.
     static let analyzerFailureLimit = 5
@@ -434,8 +450,26 @@ public actor AnalysisPipeline {
             report.pausedBecause = .accessRevoked
             return report
         }
-        let assets = try await reader.fetchAssets(includeHidden: settings.privacy.includeHiddenAssets,
-                                                  knownDetails: try await store.assetsWithFileDetails())
+        // Said while reading (the count moves on a large first read) and once more when the
+        // photos are stored. Pause ends the read at the next report. The photos read until then
+        // keep their file details (the next read skips those), but the partial list is never
+        // taken as the library: nothing is removed (review of 9f0bc40: a user who paused again
+        // and again started from nothing each time).
+        let assets: [AssetSnapshot]
+        do {
+            assets = try await reader.fetchAssets(includeHidden: settings.privacy.includeHiddenAssets,
+                                                  knownDetails: try await store.assetsWithFileDetails()) { read, total in
+                onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
+                return !control.isPaused
+            }
+        } catch let paused as LibraryReadPaused {
+            if !paused.read.isEmpty { _ = try await store.upsertAssets(paused.read) }
+            report.pausedBecause = .userPaused
+            return report
+        } catch is CancellationError where control.isPaused {
+            report.pausedBecause = .userPaused
+            return report
+        }
         report.newOrChanged = try await store.upsertAssets(assets).count
         report.removed = try await store.removeAssets(notIn: Set(assets.map(\.id)))
         let inventory = try await reader.currentInventory()
@@ -447,10 +481,17 @@ public actor AnalysisPipeline {
         // 2. Patterns (pure computation over metadata, seconds even for large libraries)
         // Said before the trips are computed, or the card stands at "Mediathek wird gelesen ·
         // N von N" meanwhile (simulated full run: step 2 was first shown when it was done).
-        onProgress(Progress(stage: .patterns, completed: 0, total: 1))
+        // Total 0: no count yet; the photos with a location follow as they are grouped.
+        onProgress(Progress(stage: .patterns, completed: 0, total: 0))
         let all = try await store.allAssets()
         var patternsGeneration = homeGeneration
-        var (trips, frequent) = try await detectPatterns(all: all)
+        // The step's count: photos with a location grouped so far ("12.000 von 30.000 Fotos"),
+        // so it does not stand still on a large library (review of 11ef3e1, minor 3).
+        var grouped = (done: 0, of: 1)
+        var (trips, frequent) = try await detectPatterns(all: all, progress: { done, of in
+            grouped = (done, max(1, of))
+            onProgress(Progress(stage: .patterns, completed: done, total: max(1, of)))
+        })
         report.completedStages.append(.patterns)
 
         // The photos this run analyses: all of them, or one year and the trips that touch it.
@@ -463,7 +504,7 @@ public actor AnalysisPipeline {
         } else {
             scoped = all
         }
-        onProgress(Progress(stage: .patterns, completed: 1, total: 1,
+        onProgress(Progress(stage: .patterns, completed: grouped.of, total: grouped.of,
                             workload: try await workload(all: all, scoped: scoped, range: range)))
 
         // 3. Places
@@ -687,11 +728,13 @@ public actor AnalysisPipeline {
         return (try await inDestinationTime(trips, all: all), frequent)
     }
 
-    private func detectPatterns(all: [AssetSnapshot]) async throws -> (trips: [Trip], frequent: [FrequentPlace]) {
+    /// `progress(grouped, of)`: photos with a location grouped so far (see `TripDetector.analyse`).
+    private func detectPatterns(all: [AssetSnapshot],
+                                progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) async throws -> (trips: [Trip], frequent: [FrequentPlace]) {
         let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
         let answers = try await recurringPlaceAnswers()
         let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar)
-            .analyse(in: all, corrections: corrections, places: answers, home: try await homeSettings())
+            .analyse(in: all, corrections: corrections, places: answers, home: try await homeSettings(), progress: progress)
         let detected = tripAnalysis.trips
         // Trips keep their identity when their photos change a little (an older photo
         // imported, the first one deleted): decisions and deleted albums stay attached.
@@ -733,12 +776,22 @@ public actor AnalysisPipeline {
         let photos = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
         let screenshots = scoped.filter(\.isScreenshotLike)
         let read = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
+        let located = scoped.filter { $0.usableLocation != nil }
+        // Places still to resolve, as the places step asks for them (`resolvePlaces`, not
+        // refining): no place yet, or a town still pending (review of ee36188).
+        let places = try await store.places()
+        let wantsTown = PlaceResolutionPolicy(settings: settings).deepestLevel >= .locality
+        let placesLeft = located.filter { asset in
+            guard let place = places[asset.id] else { return true }
+            return wantsTown && place.precisionMeters == nil
+        }.count
         return AnalysisWorkload(
             photos: photos,
-            located: scoped.filter { $0.usableLocation != nil }.count,
+            located: located.count,
             screenshots: screenshots.count,
             contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, within: range),
-            textLeft: screenshots.filter { read[$0.id] == nil }.count
+            textLeft: screenshots.filter { read[$0.id] == nil }.count,
+            placesLeft: placesLeft
         )
     }
 
@@ -771,7 +824,9 @@ public actor AnalysisPipeline {
                 guard pendingTown || refine else { return nil }
             }
             let priority = tripMembers.contains(asset.id) ? 10 : (frequentMembers.contains(asset.id) ? 5 : 0)
-            return .init(assetID: asset.id, coordinate: coordinate, priority: priority)
+            let stored = existing[asset.id]
+            return .init(assetID: asset.id, coordinate: coordinate, priority: priority,
+                         hasTown: stored?.precisionMeters != nil, hasCountry: stored != nil && stored?.precisionMeters == nil)
         }
         guard !requests.isEmpty else { return .init() }
         let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time)
@@ -785,6 +840,7 @@ public actor AnalysisPipeline {
         onProgress(Progress(stage: .places, completed: before, total: total))
         // The count last shown, repeated with the time left while the run waits for the geocoder.
         let shown = Mutex(before)
+        let control = activeControl
         let outcome = try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
                                          maxRateLimitWait: refining ? nil : Self.foregroundRateLimitWait,
                                          shouldStop: { [weak self] in await self?.stopRequested() ?? true },
@@ -794,6 +850,11 @@ public actor AnalysisPipeline {
                                              shown.withLock { $0 = completed }
                                              onProgress(Progress(stage: .places, completed: completed, total: total))
                                          },
+                                         checked: { checked in
+                                             onProgress(Progress(stage: .places, completed: shown.withLock { $0 }, total: total,
+                                                                 mapPass: MapPass(checked: checked, of: requests.count)))
+                                         },
+                                         paused: { control?.isPaused ?? false },
                                          waiting: { left in
                                              onProgress(Progress(stage: .places, completed: shown.withLock { $0 }, total: total, waitLeft: left))
                                          }) { batch in

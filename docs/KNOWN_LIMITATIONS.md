@@ -35,6 +35,10 @@ mit eingeschränkten Rechten: nur lesend.
 - Wird ein Hinzufügen in ein Album des Nutzers unterbrochen und ist der Ausgang unklar, nimmt
   Rückgängig ein dort doch angekommenes Foto nicht heraus (gewollt, zweite Gegenprüfung 1.1).
   Der Änderungsbeleg zeigt den Schritt als nicht bestätigt.
+- Nimmt der Nutzer während einer Unterbrechung alle Fotos aus einem Album, das der Plan gerade
+  angelegt hat, und tippt danach „Rest anlegen“, legt Albumist sie wieder hinein: Das lässt sich
+  nicht von einer Anfrage unterscheiden, die Fotos nie erreicht hat (gewollt, `DECISIONS.md`).
+  Rückgängig nimmt genau diese Fotos wieder heraus.
 - Benennt der Nutzer ein Album zwischen Ausführen und Abschluss um, zeigt der Beleg den Namen
   zum Zeitpunkt der Ausführung.
 - Die Sicherung der Entscheidungen (I12) erkennt eine andere Mediathek an den Album-Kennungen.

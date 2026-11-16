@@ -106,6 +106,98 @@ struct PipelineTests {
         #expect(try await s.store.loadInventory()["rom"] != nil)
     }
 
+    /// Reads its photos in parts and says so after each, like PhotoKit while it reads file
+    /// details on a first run.
+    actor ReaderInParts: PhotoLibraryReading {
+        let assets: [AssetSnapshot]
+        init(assets: [AssetSnapshot]) { self.assets = assets }
+        func access() async -> LibraryAccess { .full }
+        func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date]) async throws -> [AssetSnapshot] { assets }
+        func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
+                         progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot] {
+            for read in stride(from: 50, to: assets.count, by: 50) {
+                // Like PhotoKitLibrary: a `false` ends the read with what was read until then.
+                if !progress(read, assets.count) { throw LibraryReadPaused(read: Array(assets.prefix(read))) }
+                if read == pauseAt { onPauseAt?() }
+            }
+            return assets
+        }
+        var pauseAt: Int?
+        var onPauseAt: (@Sendable () -> Void)?
+        func pause(at read: Int, _ action: @escaping @Sendable () -> Void) { pauseAt = read; onPauseAt = action }
+        func currentInventory() async throws -> CollectionInventory { CollectionInventory() }
+    }
+
+    /// Stress run 43833158673: reading 50,000 photos took minutes with nothing moving on the
+    /// card. The reader's progress reaches the card as the library step's count, rising, and
+    /// the step ends with every photo counted.
+    @Test func readingTheLibraryIsCountedAsItGoes() async throws {
+        let s = try setup()
+        let assets = try await s.reader.fetchAssets(includeHidden: false, knownDetails: [:])
+        let pipeline = AnalysisPipeline(
+            store: s.store, reader: ReaderInParts(assets: assets), analyzer: s.analyzer, geocoder: s.geocoder, map: Self.map,
+            conditions: s.conditions, settings: OrganizationSettings(), calendar: Fixture.calendar, time: ManualTime().source
+        )
+        let seen = Mutex<[Int]>([])
+        _ = try await pipeline.run(onProgress: { p in
+            if p.stage == .inventory { seen.withLock { $0.append(p.completed) } }
+        })
+        let counts = seen.withLock { $0 }
+        #expect(counts.count >= assets.count / 50, "only \(counts.count) reports while reading")
+        #expect(counts == counts.sorted())
+        #expect(counts.last == assets.count)
+    }
+
+    /// Review of d612bc0: Pause during the library read waited for the whole read (minutes on a
+    /// first read of 50,000 photos). It ends the read at the next report; the run ends paused,
+    /// and nothing of the stopped read is stored (no photo is counted as deleted).
+    @Test func pauseStopsTheLibraryRead() async throws {
+        let s = try setup()
+        _ = try await s.pipeline.run()
+        let stored = try await s.store.allAssets().count
+        let assets = try await s.reader.fetchAssets(includeHidden: false, knownDetails: [:])
+        let reader = ReaderInParts(assets: Array(assets.prefix(assets.count / 2)))
+        let control = AnalysisRunControl()
+        await reader.pause(at: 50) { control.pause() }
+        let pipeline = AnalysisPipeline(
+            store: s.store, reader: reader, analyzer: s.analyzer, geocoder: s.geocoder, map: Self.map,
+            conditions: s.conditions, settings: OrganizationSettings(), calendar: Fixture.calendar, time: ManualTime().source
+        )
+        let reads = Mutex<[Int]>([])
+        let report = try await pipeline.run(control: control, onProgress: { p in
+            if p.stage == .inventory { reads.withLock { $0.append(p.completed) } }
+        })
+        #expect(report.pausedBecause == .userPaused)
+        #expect(reads.withLock { $0.max() ?? 0 } <= 100, "read on after Pause: \(reads.withLock { $0 })")
+        // Half the library was "read" before the stop; none of the other half is gone.
+        #expect(try await s.store.allAssets().count == stored)
+    }
+
+    /// Review of 9f0bc40 (D): a paused read threw away everything it had read, so a user who
+    /// paused again and again never got further. The file details read until the Pause are
+    /// kept (the next read skips them); nothing else changes.
+    @Test func pausedReadKeepsWhatItRead() async throws {
+        let s = try setup()
+        let assets = try await s.reader.fetchAssets(includeHidden: false, knownDetails: [:]).map { a in
+            var a = a
+            a.uniformTypeIdentifier = "public.jpeg"
+            return a
+        }
+        let reader = ReaderInParts(assets: assets)
+        let control = AnalysisRunControl()
+        await reader.pause(at: 100) { control.pause() }
+        let pipeline = AnalysisPipeline(
+            store: s.store, reader: reader, analyzer: s.analyzer, geocoder: s.geocoder, map: Self.map,
+            conditions: s.conditions, settings: OrganizationSettings(), calendar: Fixture.calendar, time: ManualTime().source
+        )
+        let report = try await pipeline.run(control: control)
+        #expect(report.pausedBecause == .userPaused)
+        let known = try await s.store.assetsWithFileDetails()
+        #expect(known.count == 150, "kept \(known.count) of the 150 read")
+        #expect(Set(assets.prefix(150).map(\.id)) == Set(known.keys))
+        #expect(try await s.store.allAssets().count == 150)
+    }
+
     @Test func secondRunIsIncremental() async throws {
         let s = try setup()
         _ = try await s.pipeline.run()

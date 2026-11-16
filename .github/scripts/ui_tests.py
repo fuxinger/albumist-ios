@@ -15,7 +15,10 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
         [--reduce-motion] [--increase-contrast] [--video F] [--out DIR]
       Runs the tests (T is "Class" or "Class/testMethod" of SortlyUITests), prints the
       report lines for the log (steps, screenshots, accessibility findings, restart context,
-      crash reports, SwiftUI runtime warnings) and exits with the result.
+      crash reports, SwiftUI runtime warnings) and exits with the result. A test that reset
+      the photo access (the CI simulator then answers "denied" without asking) prints
+      UI_HOST_GRANT_PHOTOS; the access is given back from the Mac (`simctl privacy grant`)
+      while the pass runs (class HostGrants).
   classify LOG [--status N] [--crash-report F]... [--bundle-json F]
       Prints what `run` would decide for a finished pass (for trying the rules on a log;
       without --bundle-json the result bundle counts as clean).
@@ -72,7 +75,7 @@ BUNDLE_ID = "app.albumist.ios"
 
 # Lines of the xcodebuild log that go into the job log. PREVIEW_JPEG lines carry the
 # screenshots (the gallery is built from them), A11Y_ lines the accessibility findings.
-REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
+REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_HOST|UI_STRESS|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
                     r"Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error")
 REPORT_LIMIT = 15000
 
@@ -558,6 +561,53 @@ class Recorder(threading.Thread):
         self.join(timeout=60)
 
 
+HOST_GRANT = re.compile(r"(?:^|\s)UI_HOST_GRANT_PHOTOS\s*$")
+
+
+def host_grant_requests(text: str) -> int:
+    """How many complete lines of `text` ask the Mac to give the photo access back."""
+    return sum(1 for line in text.split("\n") if HOST_GRANT.search(line))
+
+
+class HostGrants(threading.Thread):
+    """Gives the photo access back from the Mac each time a test asks (UI_HOST_GRANT_PHOTOS,
+    DeviceConditionUITests.grantFromHost): the CI simulator shows no iOS question after an
+    access reset, and Settings opens on its first page, not on Albumist's."""
+
+    def __init__(self, udid: str, log_path: str, interval: float = 2, grant=None):
+        super().__init__(daemon=True)
+        self.udid, self.log_path, self.interval = udid, log_path, interval
+        self.grant = grant or self.grant_photos
+        self.stopped = threading.Event()
+        self.offset = 0
+        self.tail = ""
+
+    def grant_photos(self) -> None:
+        code, _ = sh(["xcrun", "simctl", "privacy", self.udid, "grant", "photos", BUNDLE_ID], timeout=120, quiet=True)
+        print("UI_HOST photo access granted" if code == 0 else f"UI_HOST photo access grant failed (exit {code})", flush=True)
+
+    def check(self) -> None:
+        """Reads what was added to the log since the last call; one grant per complete request line."""
+        try:
+            with open(self.log_path, encoding="utf-8", errors="replace") as log:
+                log.seek(self.offset)
+                chunk = log.read()
+                self.offset = log.tell()
+        except OSError:
+            chunk = ""
+        complete, _, self.tail = (self.tail + chunk).rpartition("\n")
+        for _ in range(host_grant_requests(complete)):
+            self.grant()
+
+    def run(self) -> None:
+        while not self.stopped.wait(self.interval):
+            self.check()
+
+    def stop(self) -> None:
+        self.stopped.set()
+        self.join(timeout=30)
+
+
 def device_state(udid: str) -> str:
     """"Booted", "Shutdown", ... of a simulator, or "" when simctl does not say (then unknown)."""
     code, listing = sh(["xcrun", "simctl", "list", "devices", "-j"], timeout=30, quiet=True)
@@ -650,7 +700,10 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
         watchdog = Watchdog(args.udid, log_path, process)
         watchdog.start()
+        grants = HostGrants(args.udid, log_path)
+        grants.start()
         status = process.wait()
+        grants.stop()
         watchdog.stop()
         watchdog.join(timeout=90)
     if watchdog.fired:

@@ -9,6 +9,7 @@ struct SortlyApp: App {
 
     init() {
         BackgroundWork.register()
+        UITestSupport.prepareLaunch()
         // Before launch ends, so the tap on "Analyse fertig" that opened the app arrives.
         NotificationRouter.register()
     }
@@ -24,10 +25,12 @@ struct SortlyApp: App {
                     await model.bootstrap()
                     if model.access.canRead { LibraryChangeWatcher.shared.start() }
                     // Photos may have changed while Albumist was closed (albums made in Photos).
-                    // (UI runs start it themselves, except the one that rebuilds the database.)
-                    if model.phase == .ready && model.access.canRead && (!UITestSupport.isRunning || UITestSupport.rebuildsDatabase) {
+                    // (UI runs start it themselves, except the ones that rebuild the database or
+                    // test a relaunch; a fast-started UI run creates its demo library first.)
+                    if model.phase == .ready && model.access.canRead && (!UITestSupport.isRunning || UITestSupport.startsAnalysisAtLaunch) {
                         model.startAnalysis()
                     }
+                    await UITestSupport.didLaunch(model)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
                     model.timeChanged()

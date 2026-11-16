@@ -70,4 +70,10 @@ struct SlowedAnalyzer: ContentAnalyzing {
     func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {
         try await base.recognizeText(asset, allowNetwork: allowNetwork)
     }
+
+    /// Handed on: without the preview prefetch every photo of a slowed run came back
+    /// unreadable (UI run 43753915509, "246 Fotos konnten noch nicht gelesen werden").
+    func willAnalyze(_ upcoming: [AssetSnapshot]) async {
+        await base.willAnalyze(upcoming)
+    }
 }

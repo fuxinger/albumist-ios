@@ -65,7 +65,10 @@ def api(path, **params):
 
 
 def runs(workflow):
-    return api(f"actions/workflows/{workflow}/runs", head_sha=SHA, per_page=30).get("workflow_runs", [])
+    # The API filters by head_sha; checking it here too keeps the gate exact even if that
+    # filter were ever ignored (a run of another commit must never count).
+    found = api(f"actions/workflows/{workflow}/runs", head_sha=SHA, per_page=30).get("workflow_runs", [])
+    return [run for run in found if run.get("head_sha") == SHA]
 
 
 def newest_run(workflow):

@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from contextlib import redirect_stdout
 
 os.environ.setdefault("GITHUB_REPOSITORY", "owner/repo")
@@ -18,7 +19,7 @@ import ci_gate  # noqa: E402
 
 def fake(run_status, jobs):
     run = {"id": 7, "run_number": 12, "name": "CI", "event": "pull_request", "html_url": "https://example/7",
-           "status": run_status, "conclusion": None}
+           "head_sha": os.environ["SHA"], "status": run_status, "conclusion": None}
 
     def api(path, **params):
         if path.startswith("actions/workflows/"):
@@ -75,7 +76,7 @@ class CiStageTests(unittest.TestCase):
 
     def fake(self, conclusion, ios):
         run = {"id": 7, "run_number": 12, "name": "CI", "event": "pull_request", "html_url": "https://example/7",
-               "status": "completed", "conclusion": conclusion}
+               "head_sha": os.environ["SHA"], "status": "completed", "conclusion": conclusion}
 
         def api(path, **params):
             if path == "actions/workflows/ci.yml/runs":
@@ -110,7 +111,7 @@ class FullGateTests(unittest.TestCase):
     @staticmethod
     def run_(workflow, status, conclusion, number=12):
         return {"id": 7 if workflow == "ci" else 8, "run_number": number, "name": workflow, "event": "push",
-                "html_url": f"https://example/{workflow}", "status": status, "conclusion": conclusion}
+                "html_url": f"https://example/{workflow}", "head_sha": os.environ["SHA"], "status": status, "conclusion": conclusion}
 
     def fake(self, ci=("completed", "success"), ui=None):
         """ui: None (no UI flow run for this commit) or (status, conclusion). Callables are re-read each call."""
@@ -209,5 +210,14 @@ class FullGateTests(unittest.TestCase):
         self.assertLess(clock[0], 40 * 60)
 
 
+class ExactCommitTests(unittest.TestCase):
+    def test_a_run_of_another_commit_never_counts(self):
+        other = {"id": 9, "run_number": 99, "name": "CI", "event": "push", "html_url": "https://example/9",
+                 "head_sha": "f" * 40, "status": "completed", "conclusion": "success"}
+        with unittest.mock.patch.object(ci_gate, "api", lambda path, **params: {"workflow_runs": [other]}):
+            self.assertEqual(ci_gate.runs("ci.yml"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -568,6 +568,11 @@ final class SortlyFlowUITests: XCTestCase {
         }
 
         print("UI_FACT notifications declined, the app went on: \(app.state == .runningForeground)")
+        // The end of test 1 itself: since the split into 1b-1d (which run in "other flows", on
+        // another simulator) the marker was written at the end of 1d, so test 1's teardown
+        // check failed every run of the full-flow group (UI run 43964816778).
+        UITestOnboarding.fullFlowFinished()
+        print("UI_STEP_OK full flow reached its end")
     }
 
     /// Atlas, library, albums and search on the analysed demo library.
@@ -797,8 +802,6 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Fertig"), "close settings after trip reset")
             _ = waitStable("analysis after trip reset", timeout: 180) { analysisIdle }
         }
-        UITestOnboarding.fullFlowFinished()
-        print("UI_STEP_OK full flow reached its end")
     }
 
     /// Design review D4 (15.11.): "Ignorieren" can be taken back, right after the action

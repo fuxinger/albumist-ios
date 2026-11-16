@@ -1100,4 +1100,141 @@ final class DeviceConditionUITests: XCTestCase {
             shot("26-large-search")
         }
     }
+
+    // MARK: 12 Stress: 50 000 photos, iCloud-only, offline
+
+    /// Runs only when the runner sets SORTLY_STRESS_PHOTOS (ui.yml dispatched with a stress
+    /// count; xcodebuild hands TEST_RUNNER_SORTLY_STRESS_PHOTOS on as that); the normal shards
+    /// skip it at once. That many photos on top of the demo library, originals only in iCloud
+    /// and no network (-SortlyUITestICloudOnly, -SortlyUITestOffline). Measures how fast the
+    /// photos are created and analysed, how fast Pause and Fortsetzen take effect, the longest
+    /// time the overview's analysis line stands still, and how long the app takes to answer
+    /// (one accessibility snapshot). The workflow samples the app's memory on the Mac.
+    func test12_StressManyPhotosICloudOnlyOffline() throws {
+        guard let count = ProcessInfo.processInfo.environment["SORTLY_STRESS_PHOTOS"].flatMap({ Int($0) }), count > 0 else {
+            throw XCTSkip("Stress run only (SORTLY_STRESS_PHOTOS)")
+        }
+        continueAfterFailure = true
+        prepare()
+        let arguments = ["-SortlyUITestLargeLibrary", "\(count)", "-SortlyUITestICloudOnly", "-SortlyUITestOffline"]
+        let began = Date()
+        func elapsed(_ since: Date) -> Int { Int(Date().timeIntervalSince(since)) }
+        start(arguments)
+
+        // Creating the photos: no display of its own; the analysis starts when all are there.
+        // A crash (out of memory) is counted and the app opened again: it adds what is missing.
+        var relaunches = 0
+        var lastReport = Date.distantPast
+        let created = waitStable("\(count) photos created", timeout: 3 * 3600, stableChecks: 1) {
+            if app.state != .runningForeground {
+                relaunches += 1
+                print("UI_FACT stress app ended while creating photos (\(relaunches)) after \(elapsed(began)) s")
+                start(arguments)
+            }
+            let total = analysisCount()?.total ?? analysedPhotos()?.total ?? 0
+            if Date().timeIntervalSince(lastReport) >= 60 {
+                lastReport = Date()
+                print("UI_FACT stress creating: \(elapsed(began)) s, library total shown \(total)")
+            }
+            return total >= count
+        }
+        print("UI_TIMING stress create \(count) photos \(elapsed(began)) s (relaunches \(relaunches))")
+        XCTAssertTrue(created, "The \(count) photos were not created")
+        guard created else { return }
+
+        // The analysis, sampled every second: the progress line, how long one snapshot takes
+        // (the app's main thread answers it), and when a step begins.
+        let analysisBegan = Date()
+        var lastLine = ""
+        var lastChange = Date()
+        var longestStill: (seconds: Double, line: String) = (0, "")
+        var slowestAnswer = 0.0
+        var stepBegan: [Int: Date] = [:]
+        var stepCounts: [Int: (first: Int, last: Int, firstAt: Date, lastAt: Date)] = [:]
+        var paused = false
+        var crashes = 0
+        let finished = waitStable("stress analysis finished", timeout: 4 * 3600, stableChecks: 3) {
+            if app.state != .runningForeground {
+                crashes += 1
+                print("UI_FACT stress app ended during the analysis (\(crashes)) after \(elapsed(analysisBegan)) s")
+                start(arguments + ["-SortlyUITestLaunchAnalysis"])
+            }
+            let asked = Date()
+            let progress = analysisCount()
+            let line = (try? app.descendants(matching: .any)["analysis.progress"].firstMatch.snapshot().label) ?? ""
+            let answer = Date().timeIntervalSince(asked)
+            slowestAnswer = max(slowestAnswer, answer)
+            if answer > 10 { print("UI_FACT stress app answered after \(Int(answer)) s at '\(line)'") }
+            let now = Date()
+            if line != lastLine {
+                let still = now.timeIntervalSince(lastChange)
+                if !lastLine.isEmpty && still > longestStill.seconds { longestStill = (still, lastLine) }
+                if !lastLine.isEmpty && still > 10 { print("UI_FACT stress line stood still \(Int(still)) s: '\(lastLine)'") }
+                lastLine = line
+                lastChange = now
+            }
+            if let progress {
+                if stepBegan[progress.step] == nil {
+                    stepBegan[progress.step] = now
+                    print("UI_TIMING stress step \(progress.step) begins at \(elapsed(analysisBegan)) s (\(progress.done) von \(progress.total))")
+                }
+                let known = stepCounts[progress.step]
+                stepCounts[progress.step] = (known?.first ?? progress.done, progress.done, known?.firstAt ?? now, now)
+                // Pause once, a tenth into the image step; then Fortsetzen.
+                if !paused, progress.step == 4, progress.done >= progress.total / 10 {
+                    paused = true
+                    measurePauseAndResume()
+                    lastChange = Date()
+                }
+            }
+            return analysisIdle
+        }
+        print("UI_TIMING stress analysis \(elapsed(analysisBegan)) s, total \(elapsed(began)) s, app ended \(crashes) times")
+        for (step, c) in stepCounts.sorted(by: { $0.key < $1.key }) {
+            let seconds = c.lastAt.timeIntervalSince(c.firstAt)
+            let rate = seconds > 0 ? Double(c.last - c.first) / seconds : 0
+            print("UI_TIMING stress step \(step): \(c.last - c.first) in \(Int(seconds)) s (\(String(format: "%.1f", rate))/s)")
+        }
+        print("UI_TIMING stress longest still line \(Int(longestStill.seconds)) s: '\(longestStill.line)'")
+        print("UI_TIMING stress slowest answer \(String(format: "%.1f", slowestAnswer)) s")
+        print("UI_FACT stress result \(String(describing: analysedPhotos()))")
+        shot("26-stress-done")
+        XCTAssertTrue(finished, "The analysis of \(count) photos did not finish")
+        XCTAssertEqual(crashes + relaunches, 0, "The app ended during the stress run")
+        XCTAssertLessThanOrEqual(longestStill.seconds, 10, "The analysis line stood still \(Int(longestStill.seconds)) s at '\(longestStill.line)'")
+        XCTAssertLessThan(slowestAnswer, 10, "The app took \(Int(slowestAnswer)) s to answer")
+        let opened = Date()
+        tabButton("Mediathek").tap()
+        let listed = libraryPhotos.firstMatch.waitForExistence(timeout: 60)
+        print("UI_TIMING stress library tab \(String(format: "%.1f", Date().timeIntervalSince(opened))) s (\(listed))")
+        shot("27-stress-library")
+    }
+
+    /// Pause during the image step: how long until "Fortsetzen" shows and until the count
+    /// stops, then how long "Fortsetzen" takes until the count moves again.
+    private func measurePauseAndResume() {
+        let before = analysisCount()?.done ?? 0
+        let tapped = Date()
+        guard tap(app.buttons["Pause"], "stress pause", timeout: 5) else { return }
+        let shown = app.buttons["Fortsetzen"].waitForExistence(timeout: 60)
+        print("UI_TIMING stress pause shown \(String(format: "%.1f", Date().timeIntervalSince(tapped))) s (\(shown))")
+        // The count's last step after the tap: the photos already in the lanes still finish.
+        var last = analysisCount()?.done ?? before
+        var lastMove = Date()
+        while Date().timeIntervalSince(lastMove) < 10 && Date().timeIntervalSince(tapped) < 120 {
+            usleep(500_000)
+            let now = analysisCount()?.done ?? last
+            if now != last { last = now; lastMove = Date() }
+        }
+        let stopped = lastMove.timeIntervalSince(tapped)
+        print("UI_TIMING stress pause stops counting \(String(format: "%.1f", stopped)) s (\(last - before) more photos)")
+        XCTAssertTrue(shown, "Pause did not show Fortsetzen")
+        XCTAssertLessThan(stopped, 10, "The analysis went on \(Int(stopped)) s after Pause")
+        shot("26a-stress-paused")
+        let resumed = Date()
+        guard tap(app.buttons["Fortsetzen"], "stress continue", timeout: 5) else { return }
+        let moves = waitStable("stress count moves after Fortsetzen", timeout: 120, stableChecks: 1) { (analysisCount()?.done ?? last) > last }
+        print("UI_TIMING stress continue moves \(String(format: "%.1f", Date().timeIntervalSince(resumed))) s (\(moves))")
+        XCTAssertTrue(moves, "The analysis did not go on after Fortsetzen")
+    }
 }

@@ -15,6 +15,13 @@ on:
   pull_request:
     paths-ignore: ['**.md']
   workflow_dispatch:
+    inputs:
+      stress_photos:
+        # A stress run instead of the shards: DeviceConditionUITests/test12 with this many
+        # photos (iCloud-only, offline), on one runner, with the app's memory sampled on the Mac.
+        description: Stress run with this many photos (empty = the normal UI run)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -72,6 +79,7 @@ jobs:
   ui:
     name: UI ${{ matrix.shard }}
     needs: build
+    if: inputs.stress_photos == '' || inputs.stress_photos == null
     runs-on: xcode-27
     timeout-minutes: 75
     strategy:
@@ -90,7 +98,7 @@ jobs:
           - shard: device-a
             tests: DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
           - shard: device-b
-            tests: DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary
+            tests: DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
     steps:
       - uses: actions/checkout@v5
       - name: Select newest Xcode
@@ -211,10 +219,80 @@ jobs:
           path: build/sorting-show.mp4
           retention-days: 14
 
+  stress:
+    # Only when dispatched with stress_photos: one long test on one runner. The app's memory
+    # (resident size of the simulator's app process on the Mac) is sampled every 5 s; the
+    # test prints speed, Pause reaction and how long a display stood still.
+    name: UI stress ${{ inputs.stress_photos }} photos
+    needs: build
+    if: inputs.stress_photos != '' && inputs.stress_photos != null
+    runs-on: xcode-27
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v5
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+      - name: Download build products
+        uses: actions/download-artifact@v5
+        with:
+          name: ui-products
+      - name: Boot simulator
+        id: sim
+        run: |
+          mkdir -p products
+          tar -xzf ui-products.tgz -C products
+          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --pro)
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          for attempt in 1 2 3; do
+            xcrun simctl boot "$UDID" 2>/dev/null || true
+            xcrun simctl bootstatus "$UDID" -b && break
+            sleep 15
+          done
+          xcrun simctl privacy "$UDID" grant photos app.albumist.ios || echo "privacy grant failed"
+      - name: Stress run
+        env:
+          # xcodebuild hands TEST_RUNNER_* variables to the tests without the prefix.
+          TEST_RUNNER_SORTLY_STRESS_PHOTOS: ${{ inputs.stress_photos }}
+        run: |
+          set +e
+          UDID="${{ steps.sim.outputs.udid }}"
+          ( while true; do
+              pid=$(pgrep -f "Sortly.app/Sortly" | head -1)
+              [ -n "$pid" ] && echo "$(date +%s) $(ps -o rss= -p "$pid" | tr -d ' ')" >> memory.txt
+              sleep 5
+            done ) &
+          SAMPLER=$!
+          XCTESTRUN=$(ls products/*.xctestrun | head -1)
+          started=$(date +%s)
+          xcodebuild test-without-building \
+            -xctestrun "$XCTESTRUN" \
+            -destination "id=$UDID" \
+            -resultBundlePath build/StressResults.xcresult \
+            -only-testing:SortlyUITests/DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline > ui-log.txt 2>&1 &
+          XCB=$!
+          tail -n +1 -f ui-log.txt | grep --line-buffered -aE "error:|UI_STEP|UI_TIMING|UI_FACT|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed" | grep --line-buffered -v "/SourcePackages/" &
+          # Memory once a minute while it runs.
+          ( while kill -0 $XCB 2>/dev/null; do sleep 60; tail -1 memory.txt 2>/dev/null | awk -v s=$started '{printf "STRESS_MEMORY %d min %d MB\n", ($1-s)/60, $2/1024}'; done ) &
+          ( sleep 19200; echo "::error::Stress run stopped after 320 minutes"; kill -INT $XCB ) &
+          WATCHDOG=$!
+          wait $XCB
+          status=$?
+          kill $WATCHDOG $SAMPLER 2>/dev/null
+          sleep 2
+          pkill -f "tail -n \+1 -f ui-log.txt" 2>/dev/null
+          echo "STRESS_TIME $(( $(date +%s) - started )) s"
+          sort -k2 -n memory.txt | tail -1 | awk '{printf "STRESS_MEMORY_MAX %d MB\n", $2/1024}'
+          tail -1 memory.txt | awk '{printf "STRESS_MEMORY_END %d MB\n", $2/1024}'
+          grep -aE "PREVIEW_JPEG" ui-log.txt | head -2000
+          exit $status
+
   report:
     # Wall time of the whole UI run and of each shard, in one place.
     name: UI summary
-    needs: [build, ui, accessibility]
+    needs: [build, ui, accessibility, stress]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -233,6 +311,7 @@ jobs:
     # with Increase Contrast and Reduce Transparency. Its own runner and simulator, in parallel
     # with the flow, so the whole UI run does not take longer; these tests fail on findings.
     name: Accessibility (small iPhone)
+    if: inputs.stress_photos == '' || inputs.stress_photos == null
     runs-on: xcode-27
     timeout-minutes: 75
     steps:

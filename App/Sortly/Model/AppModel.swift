@@ -192,6 +192,9 @@ final class AppModel {
     var progress = OrganizationStatusResolver.Progress()
     /// How the sorted count came about, per reason (one line of the diagnostic report).
     @ObservationIgnored var statusReasons = LibraryStatus.Reasons()
+    /// Photos with a place or a trip that the ring leaves out (taken at home, no album
+    /// suggested), named under the ring so its smaller total is explained.
+    var leftOut = LibraryStatus.LeftOut()
     /// "Analyse neu aufbauen" removes the proposals, and photos in the user's own matching
     /// albums count as sorted only through them: the ring fell to 0 % until new proposals came
     /// (device test 15.11., "Und oben null"). The last count stays on screen, marked as being
@@ -881,7 +884,9 @@ final class AppModel {
             let scope = analysisScope, calendar = Calendar.sortlyDefault
             let inScope = scope == .all ? facts : facts.filter { scope.includes($0, calendar: calendar) }
             let scopedIDs = Set(inScope.map(\.id))
-            progress = resolver.progress(scope == .all ? Array(computed.values) : computed.filter { scopedIDs.contains($0.key) }.map(\.value))
+            let counted = scope == .all ? Array(computed.values) : computed.filter { scopedIDs.contains($0.key) }.map(\.value)
+            progress = resolver.progress(counted)
+            leftOut = LibraryStatus.leftOut(counted, reasons: reasons, resolver: resolver)
             if recount != nil, !proposals.isEmpty || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
                 recount = nil
             }

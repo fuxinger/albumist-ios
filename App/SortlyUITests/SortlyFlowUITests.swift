@@ -287,9 +287,7 @@ final class SortlyFlowUITests: XCTestCase {
             tap(demo, "seed demo library")
             let started = Date()
             // The demo card disappears from the overview once every photo is in the library.
-            let seeded = waitStable("demo library created", timeout: 600) {
-                !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists
-            }
+            let seeded = UITestOnboarding.demoLibraryCreated(app)
             XCTAssertTrue(seeded, "Demo library not created")
             print("UI_TIMING seed \(Int(Date().timeIntervalSince(started))) s")
         } else {

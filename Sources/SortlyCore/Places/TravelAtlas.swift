@@ -38,6 +38,13 @@ public struct TravelAtlas: Hashable, Sendable {
     public var continents: Set<Continent> { Set(countryCodes.compactMap(Continent.forCountryCode)) }
     /// Share of the 195 UN-recognized states (rounded down to whole percent in the UI).
     public var worldShare: Double { min(1, Double(countryCodes.count) / 195) }
+
+    /// How the world share is shown (design review N11): the locale's percent format
+    /// ("0,51 %" in German, "0.51%" in English) with two significant digits, so one country
+    /// is not "0 %" as with the old whole-number cut-off.
+    public static var worldShareStyle: FloatingPointFormatStyle<Double>.Percent {
+        .percent.precision(.significantDigits(1...2))
+    }
     /// Countries ordered by first visit (unknown dates last, then alphabetically).
     public var countriesByFirstVisit: [String] {
         countryCodes.sorted { a, b in

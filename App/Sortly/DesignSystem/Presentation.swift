@@ -54,7 +54,7 @@ extension OrganizationArea {
         case .trips: "Erkennt Reisen und Ausflüge und trennt sie vom Alltag zu Hause."
         case .frequentPlaces: "Orte, an denen du oft fotografierst. Du gibst ihnen selbst einen Namen."
         case .peopleAndPets: "Haustiere und – nur wenn du es einschaltest – Gesichter."
-        case .messenger: "Bilder aus WhatsApp, Signal und Co., nur mit klaren Hinweisen."
+        case .messenger: "Fotos aus WhatsApp, Signal und Co., nur mit klaren Hinweisen."
         case .screenshots: "Screenshots nach Inhalt: Bestellungen, Tickets, Rezepte …"
         case .imageCategories: "Themen wie Hunde, Strand, Essen oder Autos."
         case .documents: "Rechnungen, Verträge und Kassenbons. Sensible Dokumente nur auf Wunsch."
@@ -154,23 +154,23 @@ enum ReasonText {
         let dates = Date.FormatStyle(date: .numeric, time: .omitted)
         switch reason {
         case .photosInPlaceDuringPeriod(let count, let place, let start, let end):
-            return String(localized: "\(count) Aufnahmen zwischen \(start.formatted(dates)) und \(end.formatted(dates)) in \(place).")
+            return String(localized: "\(count) Fotos zwischen \(start.formatted(dates)) und \(end.formatted(dates)) in \(place).")
         case .photosInPlace(let count, let place):
-            return String(localized: "\(count) Aufnahmen in \(place).")
+            return String(localized: "\(count) Fotos in \(place).")
         case .photosInPeriod(let count, let start, let end):
-            return String(localized: "\(count) Aufnahmen zwischen \(start.formatted(dates)) und \(end.formatted(dates)).")
+            return String(localized: "\(count) Fotos zwischen \(start.formatted(dates)) und \(end.formatted(dates)).")
         case .recurringPlace(let count, let days):
-            return String(localized: "\(count) Aufnahmen an \(days) verschiedenen Tagen am selben Ort.")
+            return String(localized: "\(count) Fotos an \(days) verschiedenen Tagen am selben Ort.")
         case .recognizedContent(let count, let label):
-            return String(localized: "\(count) Bilder zeigen „\(label)“.")
+            return String(localized: "\(count) Fotos zeigen „\(label)“.")
         case .recognizedText(let count, let label):
-            return String(localized: "\(count) Bilder enthalten Text zu „\(label)“.")
+            return String(localized: "\(count) Fotos enthalten Text zu „\(label)“.")
         case .mediaType(let count, let label):
-            return String(localized: "\(count) Medien: \(label).")
+            return String(localized: "\(count) Fotos und Videos: \(label).")
         case .confirmedGroup(let count, let name):
-            return String(localized: "\(count) Bilder von \(name).")
+            return String(localized: "\(count) Fotos von \(name).")
         case .ruleMatched(let count, let rule):
-            return String(localized: "\(count) Bilder passen zur Regel „\(rule)“.")
+            return String(localized: "\(count) Fotos passen zur Regel „\(rule)“.")
         case .inferredWithoutLocation(let count):
             return String(localized: "\(count) Fotos ohne Ort passen zeitlich dazu und sind nur vorgeschlagen.")
         }
@@ -179,21 +179,21 @@ enum ReasonText {
     static func text(_ reason: MatchReason) -> String {
         switch reason {
         case .albumContains(let album, let contained, let total):
-            return String(localized: "Dein Album „\(album)“ enthält schon \(contained) von \(total) Aufnahmen.")
+            return String(localized: "Dein Album „\(album)“ enthält schon \(contained) von \(total) Fotos.")
         case .missingItems(let count):
-            return String(localized: "\(count) passende Aufnahmen fehlen noch und werden ergänzt.")
+            return String(localized: "\(count) passende Fotos fehlen noch und werden ergänzt.")
         case .albumHasOtherItems(let album, let count):
-            return String(localized: "„\(album)“ enthält \(count) weitere Aufnahmen, die nicht dazugehören. Sie bleiben unverändert.")
+            return String(localized: "„\(album)“ enthält \(count) weitere Fotos, die nicht dazugehören. Sie bleiben unverändert.")
         case .albumIsBroaderCollection(let album, let siblings):
             return String(localized: "„\(album)“ ist eine größere Sammlung über \(siblings) Ereignisse und wird nicht als Reisealbum verwendet.")
         case .sameNameDifferentContent(let album, let shared):
-            return String(localized: "Es gibt schon ein Album „\(album)“, aber mit anderem Inhalt (\(shared) gemeinsame Aufnahmen).")
+            return String(localized: "Es gibt schon ein Album „\(album)“, aber mit anderem Inhalt (\(shared) gemeinsame Fotos).")
         case .albumNotEditable(let album):
             return String(localized: "„\(album)“ kann nicht bearbeitet werden (z. B. geteiltes Album).")
         case .severalAlbumsMatch(let count):
             return String(localized: "\(count) Alben passen ähnlich gut. Albumist ergänzt erst, wenn du eines ausgewählt hast.")
         case .weakOverlapOnly(let album, let shared):
-            return String(localized: "„\(album)“ hat nur \(shared) gemeinsame Aufnahmen.")
+            return String(localized: "„\(album)“ hat nur \(shared) gemeinsame Fotos.")
         case .noExistingAlbum:
             return String(localized: "Es gibt noch kein passendes Album.")
         }
@@ -217,5 +217,125 @@ extension OverallStatus {
         case .excluded: "Ausgeschlossen"
         case .pending: "Analyse läuft"
         }
+    }
+}
+
+// MARK: Analysis card (progress display v3)
+
+extension AnalysisStep {
+    /// The card's heading: what is happening now.
+    var label: LocalizedStringKey {
+        switch self {
+        case .library: "Mediathek wird gelesen"
+        case .trips: "Reisen werden erkannt"
+        case .places: "Orte werden bestimmt"
+        case .content: "Bildinhalte werden erkannt"
+        case .text: "Text auf Screenshots wird gelesen"
+        case .proposals: "Vorschläge werden erstellt"
+        }
+    }
+
+    var labelText: String {
+        switch self {
+        case .library: String(localized: "Mediathek wird gelesen")
+        case .trips: String(localized: "Reisen werden erkannt")
+        case .places: String(localized: "Orte werden bestimmt")
+        case .content: String(localized: "Bildinhalte werden erkannt")
+        case .text: String(localized: "Text auf Screenshots wird gelesen")
+        case .proposals: String(localized: "Vorschläge werden erstellt")
+        }
+    }
+
+    /// The Details sheet lists the steps (a list, not a state: T14).
+    var listName: LocalizedStringKey {
+        switch self {
+        case .library: "Mediathek lesen"
+        case .trips: "Reisen erkennen"
+        case .places: "Orte bestimmen"
+        case .content: "Bildinhalte erkennen"
+        case .text: "Text auf Screenshots lesen"
+        case .proposals: "Vorschläge erstellen"
+        }
+    }
+
+    var explanation: LocalizedStringKey {
+        switch self {
+        case .library: "Welche Fotos es gibt, mit Datum und Ort."
+        case .trips: "Aus Datum und Ort deiner Fotos."
+        case .places: "Länder auf dem iPhone, Städtenamen von Apple."
+        case .content: "Was auf den Fotos zu sehen ist. Der längste Schritt."
+        case .text: "Nur Screenshots und Dokumente."
+        case .proposals: "Alben, die zu deinen Fotos passen."
+        }
+    }
+}
+
+/// Texts of the analysis card, shared with the Lock Screen (one source for both).
+enum AnalysisText {
+    /// "von 5.683 Fotos" (the unit of the step, singular and plural in the catalog: T6, T7).
+    static func ofTotal(_ total: Int, _ unit: AnalysisStep.Unit) -> String {
+        switch unit {
+        case .photos: String(localized: "von \(total) Fotos")
+        case .places: String(localized: "von \(total) Orten")
+        case .screenshots: String(localized: "von \(total) Screenshots")
+        case .none: ""
+        }
+    }
+
+    /// "2.431 von 5.683 Fotos", number first.
+    static func count(_ position: AnalysisCardState.Position) -> String {
+        position.completed.formatted() + " " + ofTotal(position.total, position.step.unit)
+    }
+
+    static func time(_ date: Date) -> String {
+        date.formatted(.dateTime.hour().minute())
+    }
+
+    /// "Fertig gegen 23:40", "Fertig morgen gegen 7:10", "Fertig Dienstag gegen 9:00",
+    /// "Gleich fertig" (point 1).
+    static func finish(_ estimate: FinishEstimate, now: Date = Date(), calendar: Calendar = .current) -> String {
+        switch estimate {
+        case .soon:
+            return String(localized: "Gleich fertig")
+        case .at(let date):
+            let time = time(date)
+            switch FinishEstimate.day(of: date, now: now, calendar: calendar) {
+            case .today: return String(localized: "Fertig gegen \(time)")
+            case .tomorrow: return String(localized: "Fertig morgen gegen \(time)")
+            case .weekday: return String(localized: "Fertig \(date.formatted(.dateTime.weekday(.wide))) gegen \(time)")
+            case .date: return String(localized: "Fertig \(date.formatted(.dateTime.day().month())) gegen \(time)")
+            }
+        }
+    }
+
+    /// The Lock Screen while running (point 5): "2.431 von 5.683 Fotos · fertig gegen 23:40";
+    /// without a time to trust only the count.
+    static func lockScreen(_ position: AnalysisCardState.Position, finish: FinishEstimate?, now: Date = Date()) -> String {
+        let count = count(position)
+        switch finish {
+        case nil: return count
+        case .soon?: return String(localized: "\(count) · gleich fertig")
+        case .at(let date)?:
+            let time = time(date)
+            switch FinishEstimate.day(of: date, now: now, calendar: .current) {
+            case .today: return String(localized: "\(count) · fertig gegen \(time)")
+            case .tomorrow: return String(localized: "\(count) · fertig morgen gegen \(time)")
+            default: return count
+            }
+        }
+    }
+
+    /// "noch etwa 12 Min." (Details, at the running step), at least a minute.
+    static func left(_ duration: Duration, width: Duration.UnitsFormatStyle.UnitWidth = .abbreviated) -> String {
+        let minutes = max(1, Int((Double(duration.components.seconds) / 60).rounded()))
+        return Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: width))
+    }
+
+    /// "51 Reisen, 38 Orte" (point 3); parts that are zero are left out.
+    static func alreadyDone(_ done: AlreadyDone) -> String {
+        var parts: [String] = []
+        if done.trips > 0 { parts.append(String(localized: "\(done.trips) Reisen")) }
+        if done.places > 0 { parts.append(String(localized: "\(done.places) Orte")) }
+        return Counted.join(parts, separator: ", ")
     }
 }

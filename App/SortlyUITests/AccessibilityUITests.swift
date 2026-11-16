@@ -73,6 +73,8 @@ final class AccessibilityUITests: XCTestCase {
         var albumsTab: String
         var settings: String
         var done: String
+        /// A pattern: the count is singular or plural ("1 Vorschlag prüfen" once only one
+        /// suggestion is left open, UI run 43796844064).
         var reviewSuggestions: String
         var suggestionTitle: String
         var rowMarker: String
@@ -86,16 +88,16 @@ final class AccessibilityUITests: XCTestCase {
         var country: String
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
-                                  settings: "Einstellungen", done: "Fertig", reviewSuggestions: "Vorschläge prüfen",
-                                  suggestionTitle: "Vorschlag", rowMarker: "Aufnahmen",
-                                  starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Umsetzen",
-                                  applyNow: "Jetzt umsetzen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
+                                  settings: "Einstellungen", done: "Fertig", reviewSuggestions: ".*[0-9.]+ Vorschl(ag|äge) prüfen.*",
+                                  suggestionTitle: "Vorschlag", rowMarker: "Fotos",
+                                  starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
+                                  applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
                                   shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom", country: "Italien")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
-                                   settings: "Settings", done: "Done", reviewSuggestions: "Review",
-                                   suggestionTitle: "Suggestion", rowMarker: "item",
-                                   starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Apply",
-                                   applyNow: "Apply now", undo: "Undo", atlas: "Travel Atlas",
+                                   settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ suggestions?.*",
+                                   suggestionTitle: "Suggestion", rowMarker: "photo",
+                                   starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
+                                   applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
                                    shareAtlas: "Share Travel Atlas", searchQuery: "Rome", country: "Italy")
     }
 
@@ -106,12 +108,28 @@ final class AccessibilityUITests: XCTestCase {
     func test1_OnboardingAtLargestTextInDarkMode() {
         continueAfterFailure = true
         launch(textSize: Self.largestText, dark: true)
-        if button("Los geht").waitForExistence(timeout: 30) {
-            check("onboarding welcome")
+        if !onboardAndSeed(checking: true) {
+            print("UI_STEP_MISSING onboarding (already done on this simulator?)")
+        }
+        check("overview after first analysis")
+        finish("onboarding")
+    }
+
+    /// Onboarding, demo library and its analysis, when the app is at its first start. Test 1
+    /// does this with an audit of every step; a later test that finds the app new does it
+    /// without (run 43796844064: the simulator service dropped the first pass before any test
+    /// ran, and the contrast pass met the welcome screen instead of the overview).
+    /// False when the app was past the onboarding already.
+    @discardableResult
+    private func onboardAndSeed(checking: Bool) -> Bool {
+        let welcome = button("Los geht").waitForExistence(timeout: checking ? 30 : 10)
+        if welcome {
+            if !checking { print("UI_FACT app at its first start: onboarding and demo library first") }
+            if checking { check("onboarding welcome") }
             tap(button("Los geht"), "welcome")
-            check("onboarding areas")
+            if checking { check("onboarding areas") }
             tap(button("Weiter"), "areas")
-            check("onboarding access")
+            if checking { check("onboarding access") }
             if button("Zugriff erlauben").waitForExistence(timeout: 5) {
                 button("Zugriff erlauben").tap()
                 allowPhotosIfAsked()
@@ -119,14 +137,12 @@ final class AccessibilityUITests: XCTestCase {
             if button("Weiter").waitForExistence(timeout: 3) { button("Weiter").tap() }
             let trial = button("Analyse starten").waitForExistence(timeout: 20)
             XCTAssertTrue(trial, "Onboarding did not reach the trial step")
-            check("onboarding trial")
+            if checking { check("onboarding trial") }
             tap(button("Analyse starten"), "start analysis")
             allowNotificationsIfAsked()
-        } else {
-            print("UI_STEP_MISSING onboarding (already done on this simulator?)")
         }
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: 30) {
+        if demo.waitForExistence(timeout: welcome ? 30 : 5) {
             tap(demo, "seed demo library")
             let seeded = waitStable("demo library created", timeout: 600) {
                 !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists
@@ -134,8 +150,7 @@ final class AccessibilityUITests: XCTestCase {
             XCTAssertTrue(seeded, "Demo library not created")
         }
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
-        check("overview after first analysis")
-        finish("onboarding")
+        return welcome
     }
 
     /// The main screens in English at the default text size, light mode: nothing German left,
@@ -174,6 +189,7 @@ final class AccessibilityUITests: XCTestCase {
     func test5_IncreasedContrastAndReducedTransparency() {
         continueAfterFailure = true
         launch()
+        onboardAndSeed(checking: false)
         walk("contrast light", .german, short: true)
         launch(dark: true)
         walk("contrast dark", .german, short: true)
@@ -196,7 +212,7 @@ final class AccessibilityUITests: XCTestCase {
         }
 
         // Suggestions and one suggestion
-        if tap(button(w.reviewSuggestions), "\(tag) open suggestions", timeout: 20) {
+        if tap(app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.reviewSuggestions)).firstMatch, "\(tag) open suggestions", timeout: 20) {
             sleep(1)
             check("\(tag) suggestions", english: english)
             // A List only creates the rows on screen; at the largest text size the first row
@@ -280,6 +296,20 @@ final class AccessibilityUITests: XCTestCase {
         if tap(tabButton(w.libraryTab), "\(tag) library tab") {
             sleep(2)
             check("\(tag) library", english: english)
+            // Design review W11/W12: the photo viewer (system toolbar) and its info sheet.
+            let photo = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*")).firstMatch
+            if !short, photo.waitForExistence(timeout: 5), tap(photo, "\(tag) open photo", timeout: 5) {
+                sleep(2)
+                check("\(tag) photo viewer", english: english)
+                if tap(app.buttons["viewer.info"], "\(tag) photo info", timeout: 5) {
+                    sleep(1)
+                    check("\(tag) photo info", english: english)
+                    tap(app.buttons["detail.close"], "\(tag) close photo info")
+                    sleep(1)
+                }
+                tap(app.buttons["viewer.close"], "\(tag) close photo", timeout: 5)
+                sleep(1)
+            }
         }
         if tap(tabButton(w.albumsTab), "\(tag) albums tab") {
             sleep(2)
@@ -290,6 +320,14 @@ final class AccessibilityUITests: XCTestCase {
             sleep(2)
             check("\(tag) settings", english: english)
             if !short {
+                // Design review W16: history and undo on their own screen. Opened first, from
+                // the top of the list: after scrolling down and back the first row was not in
+                // the tree again (UI run 43773339053, "history" missing).
+                if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
+                    sleep(1)
+                    check("\(tag) history", english: english)
+                    back(); sleep(1)
+                }
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
                 check("\(tag) settings lower", english: english)
@@ -760,6 +798,6 @@ final class AccessibilityUITests: XCTestCase {
     }
 
     private var analysisIdle: Bool {
-        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists) && !app.buttons["Pause"].exists
+        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists) && !app.buttons["Pause"].exists
     }
 }

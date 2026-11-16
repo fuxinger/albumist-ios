@@ -208,7 +208,14 @@ public struct TripDetector: Sendable {
             }
             stays.append(stay)
         }
-        return TripAnalysis(trips: trips, stays: stays, places: placesOftenVisited(oftenHere, photos: geotagged, home: home))
+        // Where the user lives: never a place album of its own, so these photos do not count
+        // for "Länder und Orte" (decision Fuchs 15.11.: the home town and its surroundings, not
+        // the whole home country).
+        let atHome = geotagged.filter { asset in
+            home.distanceToUsualHome(asset.usableLocation!, at: asset.creationDate!) <= configuration.homeRadiusMeters
+        }
+        return TripAnalysis(trips: trips, stays: stays, places: placesOftenVisited(oftenHere, photos: geotagged, home: home),
+                            atHome: Set(atHome.map(\.id)))
     }
 
     /// Within a day trip of the habitual area: a place the user can go to and come back from

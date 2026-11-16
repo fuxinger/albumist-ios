@@ -1,4 +1,5 @@
 import Foundation
+import SortlyEngine
 
 /// Where the analysis got to, kept across launches: a run that iOS ended (or the app was
 /// closed) shows the real state when it goes on, instead of starting at "Schritt 1" again
@@ -8,6 +9,10 @@ enum AnalysisMarker {
         /// Stage number (1…7) and the bar's value when the run was last seen.
         var stage: Int
         var overall: Double
+        /// The bar's widths of this analysis (progress display S6): a run that goes on after a
+        /// restart keeps them, so the bar does not jump. `nil` in markers of older versions and
+        /// before the workload is known (the standard widths).
+        var widths: StepWidths? = nil
     }
 
     private static let unfinishedKey = "analysis.unfinished"

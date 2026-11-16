@@ -27,6 +27,8 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 
 | Status | Punkt | Aufwand | Quelle |
 |---|---|---|---|
+| offen | Tausenderpunkt in den Ring-Zeilen („1.199 teilweise sortiert“): `format: .number` fand den Katalog-Schlüssel nicht (Englisch zeigte „57 Fotos von zu Hause“), daher zurück zu einfachen Zahlen. Richtig: eigene Schlüssel mit `%@` plus Plural über eine Zahl-Variable, oder `AttributedString` mit `inflect`. | S | T 16.11. |
+| offen | Ortsnamen-Stunde: wenn Apple bei jeder Abfrage einen anderen Fehler meldet (nicht Netz, nicht Drosselung), startet die Stunde nie und jeder Lauf fragt wieder bis zu 60 Zellen. Vorschlag: Stunde auch starten, wenn mehr als eine Abfrage einer Runde fehlschlug. | S | Zweitprüfung 16.11. |
 | ✅ | „Ähnliche Alben“ schlug vor, Albumists eigene Alben zusammenzulegen (Land enthält seine Reisen). Eigene Alben und Teil-Alben (Rom in Italien) sind jetzt ausgenommen. | S | T 14.11. |
 | ✅ | Sortier-Show: beim schnellen Blättern überlappten sich Alben, der Platzhalter schimmerte durch das Titelbild. | S | T 14.11. (Video) |
 | ✅ | UI-Test: Tab-Leiste schrumpfte beim Scrollen und versteckte die Tabs; fehlende Schritte machen jetzt ein Bildschirmfoto. | S | T 14.11. |
@@ -47,6 +49,8 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | ✅ | „Flugbuchungen“ falsch erkannt: Stichworte wurden als Wortteile gesucht („Flug“ in „Flugmodus“ und „Ausflug“, „gate“ in „Navigate“, „boarding“ in „Snowboarding“). Jetzt nur mit Flugnummer, Strecke wie „MUC → BCN“ oder „Bordkarte“ plus Flugwort, oder mehreren ganzen Flugwörtern. | S | Fuchs 15.11. (iPhone) |
 | ✅ | „In Fotos ansehen“ führte nicht zu den Alben (iOS erlaubt Apps nicht, ein bestimmtes Album zu öffnen). Knopf heißt jetzt „Fotos-App öffnen“, darunter steht der Weg zu den Alben. | S | Fuchs 15.11. (iPhone) |
 | ✅ | Ordner „Albumist“ über allen Alben: Neue Alben liegen jetzt ohne ihn direkt bei den eigenen Alben (Entscheidung Fuchs). Wer schon Alben im Ordner hat, behält ihn, bis er ihn in den Einstellungen leert. | S | Fuchs 15.11. |
+| ✅ | Ring fiel von „811 von 5.683 sortiert“ auf 141 und 157: Seit dem Kuratieren der Vorschläge (Build 28) steht eine Reise für ein Land, das nur auf ihr vorkam, und der Status las nur die offenen Vorschläge. Eigene Reise-Alben zählen jetzt auch für das Land. Fotos von zu Hause und Fotos, für die kein Album vorgeschlagen wird, zählen nicht mit, und unter dem Ring steht, wie viele das sind. Fotos von einer Reise nach der letzten Analyse zählen bis zur nächsten als unsortiert. | M | Fuchs 15.11. (iPhone) |
+| 💡 | **Produktfrage:** Fotos aus abgelehnten Vorschlägen („Nicht jetzt“) ohne eigenes passendes Album zählen im Ring weiter als unsortiert. Wer ablehnt, erreicht nie 100 %, und die Arbeit bleibt, obwohl entschieden ist. Vorschlag: Ablehnen ist eine Entscheidung. Diese Fotos verlassen den Ring wie Fotos von zu Hause und stehen in der Zeile darunter („… und 40 aus abgelehnten Vorschlägen“); „Abgelehnte Vorschläge wieder zeigen“ holt sie zurück. Dagegen spricht, dass Ablehnen den Ring dann voller macht. Alternative: weiter als Arbeit zählen, aber die Zeile unter dem Ring nennt sie mit dem Weg zurück. Entscheidung Fuchs. | S | Review 16.11. |
 | 🔜 | Alben ganz ohne Ordner („Länder“, „Reisen“) als Schalter, falls gewünscht. | S | Fuchs 15.11. |
 | 💡 | Bereits im Ordner „Albumist“ angelegte Alben auf Wunsch herausholen (Ordner auflösen). | M | Fuchs 15.11. |
 | 💡 | Bedienungshilfen-Prüfung meldet zu wenig Kontrast bei den großen Glas-Knöpfen. Gemessen: Weiß auf Petrol 6:1, also bestanden; vermutlich misst die Prüfung den Glas-Effekt mit. Auf echtem Gerät nachprüfen. | S | T 14.11. |
@@ -111,6 +115,9 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 
 | Status | Punkt | Aufwand | Quelle |
 |---|---|---|---|
+| 💡 | Fortschrittsanzeige: „Gerade angesehen“ lädt die Vorschaubilder über den normalen Zwischenspeicher (`opportunistic`, 30 pt), nicht ausdrücklich `.fastFormat` (S9); am Gerät messen, ob es etwas kostet. | S | pro-progress |
+| 💡 | Fortschrittsanzeige: Im Schritt Orte endet die Arbeit oft am Online-Budget lange vor „1.600 von 1.600“; die Fertig-Uhrzeit ist dort eher zu spät. Die Pipeline könnte die geplanten Abfragen mitteilen. | M | pro-progress |
+| 💡 | Fortschrittsanzeige: Details-Blatt zeigt für kommende Schritte noch keine Mengen („1.040“ beim Text); die Werte kommen schon mit `AnalysisWorkload`. | S | pro-progress |
 | ✅ | Vorschlag-Bildschirm kompakter, Knöpfe ohne Scrollen sichtbar. | S | U |
 | ✅ | „Fotos fliegen in Alben“ beim Umsetzen. | M | U |
 | ✅ | „Nicht jetzt“ ist umkehrbar: später doch anlegen geht; in den Einstellungen „Abgelehnte Vorschläge wieder zeigen“. | M | E1 Oberfläche |
@@ -126,6 +133,10 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | ✅ | Einheitliche Wörter: überall „sortiert“ statt „organisiert“. „Umsetzen“ bleibt für das Anlegen eines ganzen Plans. | S | E1 Oberfläche |
 | 💡 | iPad: Inhalte nicht über die ganze Breite ziehen, Liste und Detail nebeneinander. | M | E1 Oberfläche |
 | 💡 | Erhöhter Kontrast: eigene Farbvarianten. | S | E1 Oberfläche |
+| 💡 | Design-Prüfung 15.11., N7: Fußnote im Startschritt der Einführung kürzen. Zurückgestellt, weil sie zur neuen Fortschrittsanzeige auf `claude/pro-progress` passen muss. | S | Design-Prüfung |
+| 💡 | Design-Prüfung 15.11., W4-Rest: „%lld Aufnahmen“ in der Scan-Show und „Fortsetzen“ in der Analysekarte; der Satz „Das unterbrochene Umsetzen zählt, sobald du oben entschieden hast.“ in der Statuskarte. Zurückgestellt, weil diese Bereiche auf `claude/pro-progress` neu gebaut werden. | S | Design-Prüfung |
+| 💡 | Atlas: „Land/Länder“, „Stadt/Städte“, „Reise/Reisen“ und „Tag/Tage“ werden im Code gewählt statt über Mehrzahl im Katalog. Für Deutsch und Englisch richtig; für weitere Sprachen auf Katalog-Mehrzahl umstellen (Zahl und Wort sind getrennt gestaltet). | S | Design-Prüfung |
+| 💡 | Teaser „Dein Reise-Atlas“ hat keine Überschrift-Eigenschaft, weil er ein Link ist; prüfen, ob VoiceOver-Nutzer ihn im Rotor vermissen. | S | Design-Prüfung |
 
 ## Produkt und App Store
 
@@ -195,7 +206,7 @@ Cloud-KI, keine unbestätigte Änderung, „unbekannt ist nicht erfolgreich“.
 | Status | Punkt | Aufwand | Quelle |
 |---|---|---|---|
 | ✅ | Fotos fliegen in Alben. | M | U |
-| ✅ | Erster Scan als Show: Mosaik aus eigenen Fotos mit wanderndem Licht, gefundene Reisen springen als Karten auf. | M | U |
+| ✅ | Erster Scan als Show: Mosaik aus eigenen Fotos mit wanderndem Licht, gefundene Reisen springen als Karten auf. Nur während der ersten Analyse (Fuchs, 16.11.; Schalter `ScanShowRule.onFirstAnalysis`). | M | U |
 | ✅ | Farben aus den Fotos: jeder Vorschlag und jedes Land im Atlas mit eigenem weichen Farbverlauf aus dem Titelbild. | S | U |
 | ✅ | Zoom-Übergang ins Foto (Mediathek und Atlas-Länder). | S | U |
 | 💡 | 3D-Globus im Atlas. | L | U |

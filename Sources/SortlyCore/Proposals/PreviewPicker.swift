@@ -20,6 +20,20 @@ public enum PreviewPicker {
         }
     }
 
+    /// An album's cover photo: its newest photo, as Photos shows albums by default (design
+    /// review N4: the smallest id was a random photo). Photos without a date only when none
+    /// has one; equal dates fall back to the id, so the cover does not change between runs.
+    public static func newest(_ ids: some Collection<AssetID>, dates: [AssetID: Date]) -> AssetID? {
+        ids.max { a, b in
+            switch (dates[a], dates[b]) {
+            case let (x?, y?): x == y ? a > b : x < y
+            case (nil, .some): true
+            case (.some, nil): false
+            case (nil, nil): a > b
+            }
+        }
+    }
+
     public static func pick(_ ids: some Collection<AssetID>, dates: [AssetID: Date], cover: AssetID?, count: Int) -> [AssetID] {
         let ordered = chronological(ids, dates: dates)
         guard count > 0, ordered.count > count else { return ordered }

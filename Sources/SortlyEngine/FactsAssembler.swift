@@ -67,7 +67,8 @@ public enum FactsAssembler {
         trips: [Trip],
         frequentPlaces: [FrequentPlace],
         groups: [ObservationGroup],
-        inventory: CollectionInventory
+        inventory: CollectionInventory,
+        home: Set<AssetID> = []
     ) -> [AssetFacts] {
         var tripOf: [AssetID: SortlyID] = [:]
         for trip in trips { for id in trip.geotaggedAssetIDs { tripOf[id] = trip.id } }
@@ -100,7 +101,8 @@ public enum FactsAssembler {
                 groupIDs: groupsOf[asset.id] ?? [],
                 albumIDs: Set(albums),
                 recognizedText: recognized,
-                keywords: Set(content?.labels.filter { $0.confidence >= 0.5 }.map(\.identifier) ?? [])
+                keywords: Set(content?.labels.filter { $0.confidence >= 0.5 }.map(\.identifier) ?? []),
+                atHome: home.contains(asset.id)
             )
         }
     }

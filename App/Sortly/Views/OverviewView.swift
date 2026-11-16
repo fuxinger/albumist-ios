@@ -8,6 +8,7 @@ import SortlyEngine
 struct OverviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The ring grows with the text size, so "100 %" still fits inside at the largest sizes.
     @ScaledMetric(relativeTo: .title3) private var ringSide: CGFloat = 84
     @State private var showSettings = false
@@ -34,7 +35,9 @@ struct OverviewView: View {
                         showStarterPlan = true
                     }
                 }
-                if !model.openProposals.isEmpty {
+                // While the analysis runs, "Schon fertig … Ansehen" on its card leads there; when it
+                // has just finished, its card has "Vorschläge prüfen" (point 3, 4: not twice).
+                if !model.openProposals.isEmpty, !model.analysis.isRunning, model.analysisFinished == nil {
                     NavigationLink {
                         ProposalListView(area: nil)
                     } label: {
@@ -122,6 +125,11 @@ struct OverviewView: View {
                         Text(primaryAreasText)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        if let leftOutText {
+                            Text(leftOutText)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                         if model.interruptedPlan != nil {
                             // The unfinished run counts only once the user has decided above
                             // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
@@ -145,12 +153,35 @@ struct OverviewView: View {
         return String(localized: "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: \(names.formatted(.list(type: .and))).")
     }
 
+    /// Photos with a place or a trip that still do not count, so a total smaller than the
+    /// library has a reason on screen: since home no longer counts for "Länder und Orte", the
+    /// total shrank without a word (review of the sorted count, 16.11.).
+    private var leftOutText: String? {
+        var parts: [String] = []
+        if model.leftOut.home > 0 {
+            parts.append(String(localized: "\(model.leftOut.home) Fotos von zu Hause"))
+        }
+        if model.leftOut.noAlbum > 0 {
+            parts.append(String(localized: "\(model.leftOut.noAlbum) Fotos, für die sich kein eigenes Album lohnt"))
+        }
+        guard !parts.isEmpty else { return nil }
+        return String(localized: "Außerdem nicht mitgezählt: \(parts.formatted(.list(type: .and))).")
+    }
+
     @ViewBuilder
     private var analysisCard: some View {
         Card {
-            if model.analysis.isRunning {
-                runningAnalysis
+            if let state = model.analysisCard {
+                // Running, waiting, pausing, paused by the user, just finished, quick check.
+                AnalysisProgressCard(state: state)
+                // The finish moment sits on top of the plain card, which still says what is
+                // analysed and offers "Neu prüfen" (UI run 43796538247, test6: after a long run
+                // the card had neither "Alle 246 Fotos analysiert" nor "Neu prüfen").
+                if case .finished = state { finishedAnalysis }
+                // The photo mosaic: first analysis only (Fuchs 16.11., `ScanShowRule`).
+                if model.showsScanShow { ScanShow() }
             } else if let reason = model.analysis.lastReport?.pausedBecause {
+                // Ended by the device, iOS or the photo access: the reason and the way on.
                 Text(reason.label).font(.headline)
                 Text("Die Analyse setzt genau dort fort, wo sie aufgehört hat.").font(.subheadline).foregroundStyle(.secondary)
                 Button("Fortsetzen") { model.startAnalysis(userInitiated: true) }.buttonStyle(SecondaryButtonStyle())
@@ -161,91 +192,8 @@ struct OverviewView: View {
                 trialNote(year)
             }
         }
-    }
-
-    /// A check for new photos after everything was analysed once: no stage numbers and no bar
-    /// that starts at zero again, only a spinner, unless there is real work to show.
-    private var isQuickCheck: Bool {
-        let analysis = model.analysis
-        guard analysis.kind == .check else { return false }
-        if let stage = analysis.stage, [.content, .text].contains(stage), analysis.remaining >= 50 { return false }
-        return true
-    }
-
-    private var runningTitle: LocalizedStringKey {
-        let analysis = model.analysis
-        if analysis.isCatchingUp { return "Macht da weiter, wo sie aufgehört hat" }
-        if isQuickCheck { return "Prüft auf neue Fotos" }
-        return analysis.stage?.label ?? "Analyse läuft"
-    }
-
-    /// Pause, or right after the tap what happens now: the photos in work are finished first.
-    @ViewBuilder
-    private var pauseControl: some View {
-        if model.analysis.pausing {
-            HStack(spacing: Theme.Spacing.xs) {
-                ProgressView().controlSize(.small)
-                Text("Wird angehalten …").font(.subheadline).foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .combine)
-        } else {
-            Button { model.pauseAnalysis() } label: { TapTarget("Pause") }
-        }
-    }
-
-    @ViewBuilder
-    private var runningAnalysis: some View {
-        let analysis = model.analysis
-        ViewThatFits(in: .horizontal) {
-            HStack {
-                Text(runningTitle).font(.headline)
-                if isQuickCheck { ProgressView().controlSize(.small) }
-                Spacer()
-                pauseControl
-            }
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Text(runningTitle).font(.headline)
-                pauseControl
-            }
-        }
-        // Every full analysis (the first one, after "Analyse neu aufbauen" or another part of
-        // the library), not the short check for new photos (Fuchs 15.11.: "wo sind die
-        // Animationen?" after a rebuild with albums already made).
-        if model.analysis.kind != .check {
-            ScanShow()
-        }
-        if !isQuickCheck {
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                ProgressView(value: analysis.shownOverall)
-                    .tint(Theme.accent)
-                    .animation(.smooth, value: analysis.shownOverall)
-                let steps = AnalysisPipeline.Stage.allCases.count
-                Group {
-                    if let resume = analysis.resumeFrom, analysis.isCatchingUp {
-                        Text("Gleich wieder bei Schritt \(resume.stage) von \(steps)")
-                    } else if let stage = analysis.stage {
-                        if analysis.total > 0 {
-                            Text("Schritt \(stage.number) von \(steps) · \(analysis.completed.formatted()) von \(analysis.total.formatted())")
-                        } else {
-                            Text("Schritt \(stage.number) von \(steps)")
-                        }
-                    }
-                }
-                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-            }
-            .accessibilityElement(children: .combine) // one element: bar plus "150 von 240"
-            .accessibilityIdentifier("analysis.progress")
-        }
-        if let waiting = analysis.waiting {
-            Label(waiting == .batteryLow ? "Wartet, bis der Akku lädt. Geht dann von selbst weiter." : "Kurze Pause, das iPhone ist sehr warm. Geht von selbst weiter.",
-                  systemImage: waiting == .batteryLow ? "battery.25percent" : "thermometer.medium")
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        } else if !isQuickCheck {
-            Text("Du kannst Albumist verlassen. Die Analyse geht danach genau hier weiter.")
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        // A crossfade between states (running, paused, finished …), not with every count.
+        .animation(reduceMotion ? nil : .smooth, value: model.analysisCard?.phase)
     }
 
     @ViewBuilder
@@ -267,6 +215,8 @@ struct OverviewView: View {
                     }
                 }
                 .font(.headline)
+                // UI runs read how the image requests ended (all demo photos were unreadable there).
+                .accessibilityValue(UITestSupport.isRunning ? "image loads: \(ImageLoadStats.summary)" : "")
                 if let date = model.analysis.lastRun {
                     Text("Zuletzt geprüft \(date.formatted(.relative(presentation: .named)))").font(.subheadline).foregroundStyle(.secondary)
                 } else {
@@ -323,7 +273,11 @@ struct OverviewView: View {
     private var areasSection: some View {
         let byArea = Dictionary(grouping: model.proposals, by: \.kind.area)
         return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("BEREICHE")
+            // Caps by style, not in the text (EN reads "Areas"), and a heading for VoiceOver
+            // (design review W10).
+            Text("Bereiche")
+                .textCase(.uppercase)
+                .accessibilityAddTraits(.isHeader)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.top, Theme.Spacing.s)
@@ -458,7 +412,8 @@ struct RestoredFromBackupCard: View {
 }
 
 /// Shown after the app was closed while a plan ran: the rest can be done now, or what
-/// already happened can be taken back.
+/// already happened can be taken back. Each button says what it does (design review W17:
+/// "Fortsetzen / Rückgängig machen / So lassen" needed a paragraph to explain them).
 struct InterruptedPlanCard: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
@@ -466,47 +421,53 @@ struct InterruptedPlanCard: View {
 
     var body: some View {
         let done = plan.steps.filter { if case .succeeded = $0.state { true } else { false } }.count
+        let isUndo = plan.reverts != nil
         Card {
-            Label("Umsetzen wurde unterbrochen", systemImage: "pause.circle").font(.headline)
-            Text("\(done) von \(plan.steps.count) Schritten sind erledigt. Du entscheidest, wie es weitergeht. Nichts wird doppelt angelegt, deine Fotos bleiben in jedem Fall unverändert.")
-                .font(.subheadline).foregroundStyle(.secondary)
+            Group {
+                if isUndo {
+                    Label("Rückgängig wurde unterbrochen", systemImage: "pause.circle")
+                } else {
+                    Label("Anlegen wurde unterbrochen", systemImage: "pause.circle")
+                }
+            }
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
+            Text("Erledigt: \(done) von \(plan.steps.count) Schritten")
+                .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if model.execution.isRunning {
                 ProgressView(value: Double(model.execution.completedSteps), total: Double(max(1, model.execution.totalSteps)))
                     .tint(Theme.accent)
             } else {
-                // The three ways out (I16), each with what it does.
-                Button("Fortsetzen") { Task { await model.resumeInterruptedPlan() } }
+                // The ways out (I16). An interrupted undo cannot itself be taken back (Photos
+                // cannot bring deleted albums back): it can only go on or stay as it is.
+                Button(isUndo ? LocalizedStringKey("Rest zurücknehmen") : LocalizedStringKey("Rest anlegen")) { Task { await model.resumeInterruptedPlan() } }
                     .buttonStyle(PrimaryButtonStyle())
-                // An interrupted undo cannot itself be taken back (Photos cannot bring deleted
-                // albums back): it can only go on or stay as it is.
-                if plan.reverts == nil {
-                    Button("Rückgängig machen") { confirmUndo = true }
+                    .accessibilityIdentifier("interrupted.resume")
+                if !isUndo {
+                    Button("Alles zurücknehmen") { confirmUndo = true }
                         .buttonStyle(SecondaryButtonStyle())
+                        .accessibilityIdentifier("interrupted.undo")
                 }
                 Button { Task { await model.keepInterruptedPlanAsIs() } } label: {
-                    Text("So lassen")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .contentShape(Rectangle())
+                    Group {
+                        if isUndo { Text("So lassen") } else { Text("Nur Erledigtes behalten") }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("interrupted.keep")
-                Group {
-                    if plan.reverts == nil {
-                        Text("Fortsetzen legt den Rest an. Rückgängig nimmt das Erledigte zurück. So lassen behält das Erledigte und lässt den Rest weg; es steht dann im Verlauf und lässt sich später noch zurücknehmen.")
-                    } else {
-                        Text("Fortsetzen nimmt auch den Rest zurück. So lassen behält, was schon zurückgenommen ist; den Rest kannst du später im Änderungsbeleg zurücknehmen.")
-                    }
-                }
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("Deine Fotos bleiben in jedem Fall unverändert.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let failure = model.execution.failure {
-                Text(failure).font(.footnote).foregroundStyle(.red)
+                ErrorNote(text: failure)
             }
         }
-        .confirmationDialog("Bisherige Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
-            Button("Rückgängig machen", role: .destructive) {
+        .confirmationDialog("Alles zurücknehmen?", isPresented: $confirmUndo, titleVisibility: .visible) {
+            Button("Alles zurücknehmen", role: .destructive) {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
@@ -526,7 +487,7 @@ struct StarterSetCard: View {
         let set = model.starterSet(limit: limit)
         if set.count >= 3 {
             Card {
-                Text("Dein Startpaket").font(.headline)
+                Text("Dein Startpaket").font(.headline).accessibilityAddTraits(.isHeader)
                 Text("Die \(set.count) besten Alben aus deiner Mediathek, fertig zum Anlegen. Du siehst vorher genau, was passiert.")
                     .font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: -14) {
@@ -567,7 +528,7 @@ struct LimitedAccessCard: View {
 
     var body: some View {
         Card {
-            Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline)
+            Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline).accessibilityAddTraits(.isHeader)
             Text("Albumist sieht nur die \(model.progress.allPhotos) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
                 .font(.subheadline).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

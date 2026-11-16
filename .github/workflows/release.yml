@@ -1,0 +1,71 @@
+name: Release
+
+# Manual: tags the commit this runs on as vX.Y.Z (MARKETING_VERSION in App/project.yml) and
+# creates a GitHub release whose notes are that version's section of docs/CHANGELOG.md.
+# Only from a release branch, only when the tests of that commit are green (same gate as
+# TestFlight, without waiting), and never over an existing tag: bump MARKETING_VERSION first.
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: Mark as pre-release (0.x versions are pre-releases)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag and GitHub release
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/sortly-app'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # contents: write to push the tag and create the release; actions: read for the test gate.
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Version
+        id: version
+        run: |
+          version=$(python3 .github/scripts/release_notes.py version)
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Tests of this commit are green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          # Do not wait: a release is cut from a commit whose runs are already finished.
+          WAIT_MINUTES: 0
+          NO_RUN_MINUTES: 0
+        run: python3 .github/scripts/ci_gate.py --fail
+      - name: Tag must be new
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "::error::$TAG exists already. Raise MARKETING_VERSION in App/project.yml first."
+            exit 1
+          fi
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          python3 .github/scripts/release_notes.py notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          flags=()
+          [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Albumist $VERSION" --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
+          echo "### Released $TAG ($GITHUB_SHA)" >> "$GITHUB_STEP_SUMMARY"

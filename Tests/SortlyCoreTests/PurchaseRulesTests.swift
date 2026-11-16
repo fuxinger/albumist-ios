@@ -210,6 +210,58 @@ struct PurchaseRulesTests {
         #expect(!PurchaseRules.isUnlocked(by: [E(productID: unlock, isRevoked: true, isFamilyShared: true)], productID: unlock))
     }
 
+    /// An older read of StoreKit's list never undoes what the running app was just told.
+    @Test func olderReadNeverLocksWhatWasJustBoughtOrApproved() {
+        typealias E = PurchaseRules.Entitlement
+        var known = PurchaseRules.SessionKnowledge()
+        // Ask to Buy approved at launch, or a purchase: the update arrives first ...
+        known.saw(transactionID: 7, productID: unlock, isRevoked: false, unlockProductID: unlock)
+        // ... and the launch read, started earlier, comes back without it.
+        let read1 = known.isUnlocked(listed: [], productID: unlock)
+        #expect(read1)
+        // Later reads list it: still unlocked.
+        let read2 = known.isUnlocked(listed: [E(productID: unlock, transactionID: 7)], productID: unlock)
+        #expect(read2)
+        // Other products the app was handed never unlock.
+        var other = PurchaseRules.SessionKnowledge()
+        other.saw(transactionID: 8, productID: "app.albumist.ios.other", isRevoked: false, unlockProductID: unlock)
+        let read3 = other.isUnlocked(listed: [], productID: unlock)
+        #expect(!read3)
+    }
+
+    /// A refund arrives as an update; a read that still lists the purchase unrevoked does not
+    /// unlock it again. Another valid purchase (bought again, or shared) still unlocks.
+    @Test func olderReadNeverUnlocksWhatWasJustRefunded() {
+        typealias E = PurchaseRules.Entitlement
+        var known = PurchaseRules.SessionKnowledge()
+        known.saw(transactionID: 7, productID: unlock, isRevoked: false, unlockProductID: unlock)
+        known.saw(transactionID: 7, productID: unlock, isRevoked: true, unlockProductID: unlock)
+        let read4 = known.isUnlocked(listed: [E(productID: unlock, transactionID: 7)], productID: unlock)
+        #expect(!read4)
+        let read5 = known.isUnlocked(listed: [], productID: unlock)
+        #expect(!read5)
+        // A late "not revoked" message about the same transaction does not bring it back.
+        known.saw(transactionID: 7, productID: unlock, isRevoked: false, unlockProductID: unlock)
+        let read6 = known.isUnlocked(listed: [], productID: unlock)
+        #expect(!read6)
+        let read7 = known.isUnlocked(listed: [E(productID: unlock, isFamilyShared: true, transactionID: 9)], productID: unlock)
+        #expect(read7)
+    }
+
+    /// The list itself reports a revocation the app was not told about (refund while closed):
+    /// that transaction stops counting, also when the app saw it bought earlier.
+    @Test func revocationInTheListEndsWhatTheAppSaw() {
+        typealias E = PurchaseRules.Entitlement
+        var known = PurchaseRules.SessionKnowledge()
+        known.saw(transactionID: 7, productID: unlock, isRevoked: false, unlockProductID: unlock)
+        let read8 = known.isUnlocked(listed: [E(productID: unlock, isRevoked: true, transactionID: 7)], productID: unlock)
+        #expect(!read8)
+        let read9 = known.isUnlocked(listed: [E(productID: unlock, transactionID: 7)], productID: unlock)
+        #expect(!read9)
+        #expect(known.revoked == [7])
+        #expect(known.unlocking.isEmpty)
+    }
+
     // MARK: Price
 
     /// The price shown is always StoreKit's (`product.displayPrice`): 2,99 € in the launch

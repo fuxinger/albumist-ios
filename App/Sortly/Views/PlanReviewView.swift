@@ -52,7 +52,8 @@ struct PlanReviewView: View {
         }
         .scrollPosition($scroll)
         .background(Theme.background)
-        .navigationTitle("Umsetzen")
+        // One name for one step (design review W2): it is the preview of what changes.
+        .navigationTitle("Vorschau")
         // Leaving mid-way would look like cancelling; the work goes on either way.
         .navigationBarBackButtonHidden(model.execution.isRunning)
         .navigationBarTitleDisplayMode(.inline)
@@ -80,10 +81,10 @@ struct PlanReviewView: View {
     @ViewBuilder
     private func planContent(_ plan: ChangePlan) -> some View {
         let summary = plan.summary
-        Text("Das passiert jetzt").font(.title2.weight(.bold))
+        Text("Das ändert sich in Fotos").font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
         if plan.retries != nil {
             // "Fehlendes erneut versuchen" (I16): say that this is not the whole plan again.
-            Text("Nur was beim letzten Umsetzen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt.")
+            Text("Nur was beim letzten Anlegen gefehlt hat. Schon Erledigtes bleibt, wie es ist, und wird nicht doppelt angelegt.")
                 .font(.subheadline).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -104,16 +105,19 @@ struct PlanReviewView: View {
         let albumList = plan.albumPreview(inventory: model.inventory, order: model.acceptedProposals.inDisplayOrder().map(\.id))
         if !albumList.isEmpty { PlanAlbumList(albums: albumList) }
 
+        // Said as what does not happen (design review W1): "0 Originale gelöscht" left
+        // "Originale gelöscht" in the mind when skimming or listening. A number only if a
+        // plan ever were to do it.
         Card {
-            Label {
-                Text("\(summary.originalsDeleted) Originale gelöscht")
-            } icon: {
-                Image(systemName: "checkmark.shield.fill").foregroundStyle(Theme.accent)
+            if summary.originalsDeleted == 0 {
+                guarantee(Text("Kein Original wird gelöscht"))
+            } else {
+                warning(Text("\(summary.originalsDeleted) Originale werden gelöscht"))
             }
-            Label {
-                Text("\(summary.originalCopiesCreated) Kopien angelegt")
-            } icon: {
-                Image(systemName: "checkmark.shield.fill").foregroundStyle(Theme.accent)
+            if summary.originalCopiesCreated == 0 {
+                guarantee(Text("Es werden keine Kopien angelegt"))
+            } else {
+                warning(Text("\(summary.originalCopiesCreated) Kopien werden angelegt"))
             }
             Text("Fotos werden nur in Alben einsortiert. Die Originale bleiben, wo sie sind, und jede Änderung lässt sich rückgängig machen.")
                 .font(.footnote).foregroundStyle(.secondary)
@@ -136,8 +140,13 @@ struct PlanReviewView: View {
         } else if PlanGate.refusal(for: plan, interrupted: model.interruptedPlan) != nil {
             // One plan at a time (plugin review K2): the one that was cut off is settled first.
             Card {
-                Label("Erst das unterbrochene Umsetzen abschließen", systemImage: "pause.circle").font(.headline)
-                Text("Ein früheres Umsetzen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht: Fortsetzen, Rückgängig machen oder So lassen. Danach kannst du diese Änderungen umsetzen, und nichts wird doppelt angelegt.")
+                // Names what was cut off: creating albums or taking them back.
+                let isUndo = model.interruptedPlan?.reverts != nil
+                Label(isUndo ? LocalizedStringKey("Erst das unterbrochene Zurücknehmen abschließen") : LocalizedStringKey("Erst das unterbrochene Anlegen abschließen"),
+                      systemImage: "pause.circle").font(.headline)
+                Text(isUndo
+                     ? LocalizedStringKey("Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt zurückgenommen.")
+                     : LocalizedStringKey("Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht. Danach geht es hier weiter, und nichts wird doppelt angelegt."))
                     .font(.subheadline).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -154,10 +163,11 @@ struct PlanReviewView: View {
                 }
                 Task { await model.execute(plan) }
             } label: {
-                Text("Jetzt umsetzen")
+                applyTitle(summary)
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(blocking || plan.steps.isEmpty)
+            .accessibilityIdentifier("plan.apply")
             if blocking {
                 Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -185,6 +195,22 @@ struct PlanReviewView: View {
         return { Task { await model.keepFirstAccepted(free) } }
     }
 
+    /// The button says what it does (design review W2: "Jetzt umsetzen" was the fourth name
+    /// for this step).
+    private func applyTitle(_ summary: PlanSummary) -> Text {
+        if summary.newAlbums > 0 { return Text("Alben jetzt anlegen") }
+        if summary.removedMemberships == 0 && summary.deletedContainers == 0 { return Text("Fotos jetzt einsortieren") }
+        return Text("Änderungen jetzt ausführen")
+    }
+
+    private func guarantee(_ text: Text) -> some View {
+        Label { text } icon: { Image(systemName: "checkmark.shield.fill").foregroundStyle(Theme.accent) }
+    }
+
+    private func warning(_ text: Text) -> some View {
+        Label { text } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.tint(for: .documents)) }
+    }
+
     /// One line of the summary. Icons share one width so the titles line up.
     private func row(_ symbol: String, _ title: LocalizedStringKey, _ value: Int) -> some View {
         HStack(spacing: Theme.Spacing.m) {
@@ -205,7 +231,7 @@ struct PlanReviewView: View {
             Text("Alben werden angelegt").font(.headline)
             ProgressView(value: Double(model.execution.completedSteps), total: Double(max(1, model.execution.totalSteps)))
                 .tint(Theme.accent)
-            Text("\(model.execution.completedSteps.formatted()) von \(model.execution.totalSteps.formatted()) Schritten")
+            Text("\(model.execution.completedSteps) von \(model.execution.totalSteps) Schritten")
                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
             Text("Du kannst die App dabei offen lassen. Bricht etwas ab, setzt Albumist beim nächsten Start sicher fort.")
                 .font(.footnote).foregroundStyle(.secondary)
@@ -308,7 +334,7 @@ struct ResultCard: View {
             NavigationLink {
                 PlanReceiptView(plan: plan)
             } label: {
-                Text("Änderungsbeleg ansehen")
+                Text("Alle Änderungen ansehen")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
@@ -316,7 +342,7 @@ struct ResultCard: View {
             if !isUndo && !model.undonePlans.contains(plan.id) {
                 Button("Rückgängig machen") { confirmUndo = true }
                     .buttonStyle(SecondaryButtonStyle())
-                Text("Auch später möglich unter Einstellungen › Verlauf. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben.")
+                Text("Auch später möglich unter Einstellungen › Verlauf und Rückgängig. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
@@ -396,7 +422,7 @@ struct UnlockCard: View {
     var body: some View {
         Card {
             Label("Albumist freischalten", systemImage: "lock.open").font(.headline)
-            Text("Dieser Plan ordnet \(albumsInPlan) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums). Mit einem einmaligen Kauf kannst du unbegrenzt sortieren, ohne Abo.")
+            Text("Für diese Auswahl brauchst du \(albumsInPlan) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums). Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.")
                 .font(.subheadline).foregroundStyle(.secondary)
             Button {
                 Task { await purchases.purchase() }
@@ -411,11 +437,16 @@ struct UnlockCard: View {
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(purchases.isPurchasing)
+            // Text buttons with a 44 pt tap area (design review W9: the bare text was ~20 pt).
             HStack {
-                Button("Kauf wiederherstellen") { Task { await purchases.restore() } }
-                    .disabled(purchases.isPurchasing)
+                Button { Task { await purchases.restore() } } label: {
+                    Text("Kauf wiederherstellen").minimumHitTarget()
+                }
+                .disabled(purchases.isPurchasing)
                 Spacer()
-                Button("Code einlösen") { redeeming = true }
+                Button { redeeming = true } label: {
+                    Text("Code einlösen").minimumHitTarget()
+                }
             }
             .font(.subheadline)
             .offerCodeRedemption(isPresented: $redeeming) { _ in
@@ -431,7 +462,7 @@ struct UnlockCard: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             if let error = purchases.lastError {
-                Text(error).font(.footnote).foregroundStyle(.red)
+                ErrorNote(text: error)
             }
         }
         // The price comes from StoreKit; a start without network is made up for here.
@@ -449,11 +480,15 @@ struct PlanAlbumList: View {
     var body: some View {
         let visible = showAll ? albums : Array(albums.prefix(collapsedCount))
         Card {
-            if albums.allSatisfy(\.isNew) {
-                Text("Diese Alben werden angelegt").font(.headline)
-            } else {
-                Text("Diese Alben werden angelegt oder ergänzt").font(.headline)
+            Group {
+                if albums.allSatisfy(\.isNew) {
+                    Text("Diese Alben werden angelegt")
+                } else {
+                    Text("Diese Alben werden angelegt oder ergänzt")
+                }
             }
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
             ForEach(visible) { album in
                 PlanAlbumRow(album: album)
                 if album.id != visible.last?.id { Divider() }

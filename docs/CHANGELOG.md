@@ -2,6 +2,11 @@
 
 ## 0.1.0 (in Entwicklung)
 ### Hinzugefügt
+- Neue Fortschrittsanzeige der Analyse (Entwurf v3 mit den 5 Punkten vom 15.11.): ein Balken in
+  6 Abschnitten nach Zeitanteil, „Fertig gegen 23:40“ für die ganze Analyse, gleitender Balken,
+  „Schon fertig: 51 Reisen, 38 Orte · Ansehen“, Fertig-Moment mit Häkchen, Details-Blatt,
+  Wartezustände ohne das Wort „Pause“, Sperrbildschirm „2.431 von 5.683 Fotos · fertig gegen 23:40“
+  und Mitteilung „Analyse fertig“ mit dem Knopf „Vorschläge prüfen“.
 - Kernlogik: Reisen, häufige Orte, Orte (Offline-Karte + gedrosselter Geocoder), Chronologie,
   Medientypen, Screenshots, Themen, Dokumente, Messenger-Hinweise, Regeln, Suche, Status.
 - Abgleich mit vorhandenen Alben und Erkennung ähnlicher Alben.

@@ -7,7 +7,10 @@ import SortlyTestSupport
 /// K1 undo of an interrupted plan, K2 a new plan next to an interrupted one, W1 a second undo
 /// of a removal, W3 an album that is missing from the album list for a while, W4 the start
 /// screen without photo access. (W2 is in `SortlyStoreTests`, the analysis part of W4 in
-/// `SortlyEngineTests`.)
+/// `SortlyEngineTests`.) The review of that work (6c6ef79) added the reviewer's probes, the
+/// order of "Rückgängig" on an interrupted plan and the second undo into an album that was
+/// there before; its store and album-check parts are `OpenPlansTests` and
+/// `ManagedAlbumCheckTests`.
 @Suite("Plugin review: interrupted plans, undo twice, albums missing for a while")
 struct PluginReviewSafetyTests {
     let planner = OrganizationPlanner(rootFolderTitle: "", chunkSize: 50)
@@ -148,6 +151,16 @@ struct PluginReviewSafetyTests {
         #expect(taking.kept.status == .cancelled)
         #expect(taking.cancelsPlan(after: nil))
         #expect(settled.keptAsIs(current: try await library.currentInventory()).status == .cancelled)
+
+        // "Rückgängig": the plan is stored as cancelled; nothing is finalized or run.
+        let journal = RecordingJournal()
+        let outcome = try await taking.carryOut(journal: journal, finalize: { _ in
+            await journal.note("finalize")
+            return true
+        }, run: { _ in await journal.note("run") })
+        #expect(outcome == .nothingToTakeBack)
+        #expect(await journal.log == ["save \(interrupted.id.rawValue) cancelled"])
+        #expect(taking.selectionToRestore(after: outcome).isEmpty)
     }
 
     /// "So lassen" when no step counts as done, but Photos had created the album before its
@@ -168,6 +181,167 @@ struct PluginReviewSafetyTests {
         #expect(kept.steps[1].state == .skipped(reason: StepState.leftByUserReason))
         let undo = UndoPlanner().undoPlan(for: kept, current: current)
         #expect(undo.steps.map(\.operation) == [.deleteCollection("made", title: "Rom")])
+    }
+
+    // MARK: K1 "Rückgängig" carried out (review of 6c6ef79)
+
+    /// The plan journal as `InterruptedPlanUndo.carryOut` leaves it, with every write, and the
+    /// app's finalization and run, in the order they happened.
+    actor RecordingJournal: PlanJournal {
+        private(set) var plans: [SortlyID: ChangePlan] = [:]
+        private(set) var log: [String] = []
+        func save(_ plan: ChangePlan) async throws {
+            plans[plan.id] = plan
+            log.append("save \(plan.id.rawValue) \(plan.status.rawValue)")
+        }
+        func save(_ plans: [ChangePlan]) async throws {
+            for plan in plans { self.plans[plan.id] = plan }
+            log.append("transaction " + plans.map { "\($0.id.rawValue) \($0.status.rawValue)" }.joined(separator: ", "))
+        }
+        func plan(_ id: SortlyID) async throws -> ChangePlan? { plans[id] }
+        func note(_ entry: String) { log.append(entry) }
+    }
+
+    /// Writes to a journal until the app ends (that save throws, nothing after it is written).
+    actor EndingJournal: ChangePlanStoring {
+        let journal: RecordingJournal
+        let endsAt: @Sendable (ChangePlan) -> Bool
+        private var ended = false
+        init(_ journal: RecordingJournal, endsAt: @escaping @Sendable (ChangePlan) -> Bool) {
+            self.journal = journal
+            self.endsAt = endsAt
+        }
+        func save(_ plan: ChangePlan) async throws {
+            if !ended, endsAt(plan) { ended = true }
+            guard !ended else { throw UndoHardeningTests.EndingPlanStore.Ended() }
+            try await journal.save(plan)
+        }
+    }
+
+    enum UndoEnding: String, CaseIterable, Sendable {
+        /// Everything is taken back.
+        case completed
+        /// "Nicht erlauben" in the iOS question.
+        case deletionDeclined
+        /// The write access is gone by the time the undo starts: refused before its first step.
+        case refusedBeforeItRan
+        /// The plan's results could not be stored (a full disk).
+        case resultsNotStored
+        /// The app ends while the undo runs.
+        case cutOff
+    }
+
+    /// "Rückgängig" on the interrupted plan, in the app's order: the plan as kept and its undo
+    /// in one transaction (from here on the tap is not lost: the next launch stores the plan's
+    /// results and offers the undo to continue), the plan's results stored, the undo run, and
+    /// only a completed undo cancels the plan. Before, the plan's results were stored first and
+    /// the undo was written only when it started, so an app ending in between lost the tap.
+    /// What the journal holds afterwards is what the receipt reads: "Rest rückgängig machen"
+    /// only after an undo that ran in part, "Rückgängig machen" after one that never started.
+    @Test(arguments: UndoEnding.allCases)
+    func rueckgaengigOnAnInterruptedPlan(ending: UndoEnding) async throws {
+        let library = library()
+        let interrupted = try await interruptedAfterCreatingRome(library)
+        let settled = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).reconcileInterrupted(interrupted)
+        let way = InterruptedPlanUndo(settled: settled, current: try await library.currentInventory(), undoID: SortlyID("undo"))
+        let undo = try #require(way.undo)
+        let plan = interrupted.id.rawValue
+        let journal = RecordingJournal()
+        if ending == .deletionDeclined { await library.setDeletionBehavior(.declined, times: 1) }
+
+        let outcome = try await way.carryOut(journal: journal, finalize: { kept in
+            await journal.note("finalize \(kept.id.rawValue) \(kept.status.rawValue)")
+            if ending == .refusedBeforeItRan { await library.setWriteAllowed(false) }
+            return ending != .resultsNotStored
+        }, run: { undo in
+            await journal.note("run \(undo.id.rawValue)")
+            let store: any ChangePlanStoring = ending == .cutOff
+                ? EndingJournal(journal) { $0.steps.contains { if case .succeeded = $0.state { true } else { false } } }
+                : journal
+            _ = try? await ChangeExecutor(library: library, store: store).execute(undo)
+        })
+
+        let log = await journal.log
+        #expect(log.first == "transaction \(plan) completedWithErrors, undo confirmed")
+        #expect(log.dropFirst().first == "finalize \(plan) completedWithErrors")
+        #expect(log.dropFirst(2).first == (ending == .resultsNotStored ? nil : "run undo"))
+        let kept = try #require(await journal.plan(interrupted.id))
+        let undoNow = try #require(await journal.plan(undo.id))
+        let inventory = try await library.currentInventory()
+        let left = inventory.albums.map(\.title).sorted()
+        switch ending {
+        case .completed:
+            #expect(outcome == .undone)
+            #expect(log.last == "save \(plan) cancelled")
+            #expect(undoNow.status == .completed)
+            #expect(inventory.collections.count == 1)
+            #expect(inventory["sommer"]?.assetIDs == Self.ownPhotos)
+        case .deletionDeclined:
+            #expect(outcome == .partlyUndone)
+            // A finished undo that did not get everything back: "Rest rückgängig machen".
+            #expect(undoNow.status == .completedWithErrors)
+            #expect(!PlanReceipt(plan: undoNow, inventory: inventory).isComplete)
+            #expect(left == ["Paris", "Rom", "Sommer"])
+        case .refusedBeforeItRan:
+            #expect(outcome == .notStarted)
+            // Dropped: no undo on the receipt (it offers "Rückgängig machen"), and not offered
+            // as an interrupted plan either.
+            #expect(undoNow.status == .cancelled)
+            #expect(log.last == "save undo cancelled")
+            #expect(left == ["Paris", "Rom", "Sommer"])
+        case .resultsNotStored:
+            #expect(outcome == .resultsNotStored)
+            // Nothing is taken back yet; the undo stays to continue once the results are stored.
+            #expect(undoNow.status == .confirmed)
+            #expect(log.count == 2)
+            #expect(left == ["Paris", "Rom", "Sommer"])
+        case .cutOff:
+            #expect(outcome == .undoInterrupted)
+            // Offered to continue or keep, like any plan that was cut off.
+            #expect(undoNow.status == .running)
+        }
+        // Only a completed undo cancels the plan, and only then the selection comes back.
+        #expect(kept.status == (ending == .completed ? .cancelled : .completedWithErrors))
+        #expect(log.contains("save \(plan) cancelled") == (ending == .completed))
+        #expect(way.selectionToRestore(after: outcome) == (ending == .completed ? [SortlyID("p"), SortlyID("r")] : []))
+    }
+
+    /// Only suggestions the plan carried out leave the selection when it is finalized (review of
+    /// 6c6ef79): "Venedig", whose steps never ran before the app ended, stays selected after
+    /// "So lassen" or "Rückgängig"; Paris (made and filled) and Rom (made) leave it. Before,
+    /// every suggestion of the plan did. An album Photos made although its check failed counts
+    /// as made; a suggestion whose steps all failed does not.
+    @Test func onlySuggestionsThePlanCarriedOutLeaveTheSelection() async throws {
+        let library = library()
+        let plan = confirmed(planner.makePlan(from: [newAlbum("p", "Paris", ids("a", 10..<20)), newAlbum("r", "Rom", ids("a", 0..<10)),
+                                                     newAlbum("v", "Venedig", ids("a", 20..<30))],
+                                              inventory: try await library.currentInventory()))
+        let store = UndoHardeningTests.EndingPlanStore { plan in
+            plan.steps.contains { step in
+                if case .createAlbum(_, "Rom", _) = step.operation, case .succeeded = step.state { return true }
+                return false
+            }
+        }
+        _ = try? await ChangeExecutor(library: library, store: store).execute(plan)
+        let interrupted = try #require(await store.saved.last)
+        let settled = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).reconcileInterrupted(interrupted)
+        let kept = settled.keptAsIs(current: try await library.currentInventory())
+        #expect(Set(kept.steps.compactMap(\.sourceID)) == [SortlyID("p"), SortlyID("r"), SortlyID("v")])
+        #expect(kept.appliedSources == [SortlyID("p"), SortlyID("r")])
+        let way = InterruptedPlanUndo(settled: settled, current: try await library.currentInventory())
+        #expect(way.kept.appliedSources == [SortlyID("p"), SortlyID("r")])
+
+        var failed = ChangePlan(id: SortlyID("f"), createdAt: Date(), confirmedAt: Date(), status: .completedWithErrors, baseline: [:], baselineCollectionIDs: [],
+                                steps: [
+                                    PlanStep(id: "f0", operation: .createAlbum(key: "rom", title: "Rom", parent: .topLevel), sourceID: SortlyID("r"),
+                                             state: .failed(reason: "created collection could not be verified")),
+                                    PlanStep(id: "f1", operation: .addAssets(album: .existing("sommer"), assets: ["a-1"]), sourceID: SortlyID("s"),
+                                             state: .failed(reason: "refused")),
+                                ],
+                                conflicts: [], notes: [], resolvedKeys: ["rom": "made"])
+        #expect(failed.appliedSources == [SortlyID("r")])
+        failed.resolvedKeys = [:]
+        #expect(failed.appliedSources.isEmpty)
     }
 
     // MARK: K2 One plan at a time
@@ -206,9 +380,18 @@ struct PluginReviewSafetyTests {
     final class AddRefusals: @unchecked Sendable {
         private let lock = NSLock()
         private var left: Int
-        init(_ count: Int) { left = count }
+        private var passing: Int
+        /// - Parameter passing: requests that go through before the refusals start.
+        init(_ count: Int, after passing: Int = 0) {
+            left = count
+            self.passing = passing
+        }
         func take() -> Bool {
             lock.withLock {
+                if passing > 0 {
+                    passing -= 1
+                    return false
+                }
                 guard left > 0 else { return false }
                 left -= 1
                 return true
@@ -306,16 +489,12 @@ struct PluginReviewSafetyTests {
         #expect(!(try await library.currentInventory().albums.contains { $0.title == "Rom" }))
     }
 
-    /// One removal took "Rom" away and Albumist's photos out of the user's album "Sommer".
-    /// The first undo brings Rom back with its photos but cannot put the photos back into
-    /// Sommer; the user then takes one photo out of the new Rom. The second undo puts the
-    /// photos back into Sommer and leaves Rom as the user wants it.
-    @Test func secondUndoRespectsWhatTheUserTookOutOfTheAlbumBroughtBack() async throws {
-        let library = library()
+    /// A plan made "Rom" (in "Reisen") and put Albumist's photos into the user's album "Sommer";
+    /// one "Album entfernen" plan then took both back: Rom is deleted, Sommer holds only the
+    /// user's photos again.
+    func removedRomeAndSommer(_ library: InMemoryPhotoLibrary) async throws -> ChangePlan {
         let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
-        let extendSommer = ConfirmedProposal(proposal: AlbumProposal(id: SortlyID("s"), kind: .trip, title: "Sommer", folderPath: [], assetIDs: ids("a", 100..<110)),
-                                             decision: .extendExisting("sommer"))
-        let executed = try await executor.execute(confirmed(planner.makePlan(from: [newAlbum("r", "Rom", ids("a", 0..<10)), extendSommer],
+        let executed = try await executor.execute(confirmed(planner.makePlan(from: [newAlbum("r", "Rom", ids("a", 0..<10)), sommerExtension()],
                                                                             inventory: try await library.currentInventory())))
         let tracker = ManagedAlbumTracker()
         let states = tracker.record(executed, into: [], inventory: try await library.currentInventory())
@@ -329,7 +508,19 @@ struct PluginReviewSafetyTests {
         removal.deleteGuards?.merge(sommerRemoval.deleteGuards ?? [:]) { first, _ in first }
         let removed = try await executor.execute(confirmed(removal))
         #expect(removed.status == .completed)
-        #expect(try await library.currentInventory()["sommer"]?.assetIDs == Self.ownPhotos)
+        let inv = try await library.currentInventory()
+        #expect(inv["sommer"]?.assetIDs == Self.ownPhotos)
+        #expect(!inv.albums.contains { $0.title == "Rom" })
+        return removed
+    }
+
+    /// One removal took "Rom" away and Albumist's photos out of the user's album "Sommer".
+    /// The first undo brings Rom back with its photos but cannot put the photos back into
+    /// Sommer; the user then takes one photo out of the new Rom. The second undo puts the
+    /// photos back into Sommer and leaves Rom as the user wants it.
+    @Test func secondUndoRespectsWhatTheUserTookOutOfTheAlbumBroughtBack() async throws {
+        let library = library()
+        let removed = try await removedRomeAndSommer(library)
 
         // The first add (photos back into Sommer) is refused; Rom comes back complete.
         let first = try await ChangeExecutor(library: ShakyLibrary(inner: library, refusedAdds: AddRefusals(1)), store: InMemoryPlanStore())
@@ -344,12 +535,46 @@ struct PluginReviewSafetyTests {
         }
 
         let rest = UndoPlanner().undoPlan(for: removed, current: try await library.currentInventory(), earlierUndos: [first])
-        let second = try await executor.execute(confirmed(rest))
+        let second = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(confirmed(rest))
         #expect(second.status == .completed)
         let inv = try await library.currentInventory()
         #expect(inv["sommer"]?.assetIDs == Self.ownPhotos.union(ids("a", 100..<110)))
         #expect(inv.albums.filter { $0.title == "Rom" }.map(\.id) == [back.id])
         #expect(inv[back.id]?.assetIDs == ids("a", 1..<10))
+    }
+
+    /// The other way round, for an album that was there before (review of 6c6ef79): the first
+    /// undo of the removal puts the photos back into Sommer but cannot fill the Rom it brings
+    /// back. The user then takes one of those photos out of Sommer again. The second undo fills
+    /// Rom and leaves Sommer as the user wants it.
+    @Test func secondUndoRespectsWhatTheUserTookOutOfAnAlbumTheFirstOneFilled() async throws {
+        let library = library()
+        let removed = try await removedRomeAndSommer(library)
+
+        // The first add (photos back into Sommer) goes through, the second (into the Rom
+        // brought back) is refused.
+        let first = try await ChangeExecutor(library: ShakyLibrary(inner: library, refusedAdds: AddRefusals(1, after: 1)), store: InMemoryPlanStore())
+            .execute(confirmed(UndoPlanner().undoPlan(for: removed, current: try await library.currentInventory())))
+        #expect(first.status == .completedWithErrors)
+        #expect(try await library.currentInventory()["sommer"]?.assetIDs == Self.ownPhotos.union(ids("a", 100..<110)))
+        let back = try #require(try await library.currentInventory().albums.first { $0.title == "Rom" })
+        #expect(back.assetIDs.isEmpty)
+        await library.userEdit { inv in
+            var album = inv["sommer"]!
+            album.assetIDs.remove("a-100")
+            inv.upsert(album)
+        }
+
+        let rest = UndoPlanner().undoPlan(for: removed, current: try await library.currentInventory(), earlierUndos: [first])
+        #expect(!rest.steps.contains { if case .addAssets(.existing("sommer"), _) = $0.operation { true } else { false } },
+                "the second undo puts the photo the user took out back into Sommer: \(rest.steps.map(\.operation))")
+        let second = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(confirmed(rest))
+        #expect(second.status == .completed)
+        let inv = try await library.currentInventory()
+        #expect(inv["sommer"]?.assetIDs == Self.ownPhotos.union(ids("a", 101..<110)))
+        #expect(inv.albums.filter { $0.title == "Rom" }.map(\.id) == [back.id])
+        #expect(inv[back.id]?.assetIDs == ids("a", 0..<10))
+        #expect(await library.assets == allAssets)
     }
 
     // MARK: W3 An album missing from the list for a while
@@ -410,36 +635,146 @@ struct PluginReviewSafetyTests {
         }
     }
 
-    /// The record of an album was lost (an album check that took it for deleted while the list
-    /// lacked it). Undo falls back to the plan's own journal instead of an empty set: the album
-    /// goes, Albumist's photos leave the user's album, and nothing of the user's is touched.
-    @Test func undoWithoutTheAlbumsRecordUsesThePlansJournal() async throws {
+    /// Which media of a plan are still Albumist's when it is taken back (review of 6c6ef79). An
+    /// album without a record holds nothing of Albumist's any more: its record goes once
+    /// Albumist took its photos out, and what the user put in after that is theirs. Only a plan
+    /// whose results were never stored (an interrupted one, `owned: nil`) goes by its journal.
+    @Test func albumWithoutARecordIsTheUsersOnlyAPlanNeverRecordedGoesByItsJournal() async throws {
         let library = library()
         let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
-        let extendSommer = ConfirmedProposal(proposal: AlbumProposal(id: SortlyID("s"), kind: .trip, title: "Sommer", folderPath: [], assetIDs: ids("a", 100..<110)),
-                                             decision: .extendExisting("sommer"))
-        let executed = try await executor.execute(confirmed(planner.makePlan(from: [newAlbum("r", "Rom", ids("a", 0..<10)), extendSommer],
+        let executed = try await executor.execute(confirmed(planner.makePlan(from: [newAlbum("r", "Rom", ids("a", 0..<10)), sommerExtension()],
                                                                             inventory: try await library.currentInventory())))
         let states = ManagedAlbumTracker().record(executed, into: [], inventory: try await library.currentInventory())
         #expect(states.count == 2)
         let before = try await library.currentInventory()
+        func removesFromSommer(_ plan: ChangePlan) -> Bool {
+            plan.steps.contains { if case .removeAssets("sommer", _) = $0.operation { true } else { false } }
+        }
+        func deletesRome(_ plan: ChangePlan) -> Bool {
+            plan.steps.contains { if case .deleteCollection(_, "Rom") = $0.operation { true } else { false } }
+        }
 
-        // A record that is there still wins: Albumist owns nothing in Sommer any more (the user
-        // took its photos out and put them back by hand), so they stay.
-        let respectful = UndoPlanner().undoPlan(for: executed, current: before, owned: ["sommer": []])
-        #expect(!respectful.steps.contains { if case .removeAssets("sommer", _) = $0.operation { true } else { false } })
-        #expect(respectful.steps.contains { if case .deleteCollection(_, "Rom") = $0.operation { true } else { false } })
-
-        // No record at all: the journal decides.
-        let undo = UndoPlanner().undoPlan(for: executed, current: before, owned: [:])
-        #expect(undo.steps.contains { if case .deleteCollection(_, "Rom") = $0.operation { true } else { false } })
-        #expect(undo.steps.contains { if case .removeAssets("sommer", _) = $0.operation { true } else { false } })
-        let undone = try await executor.execute(confirmed(undo))
+        // Recorded: what the records say is Albumist's goes.
+        let recorded = UndoPlanner().undoPlan(for: executed, current: before, owned: owned(states))
+        #expect(removesFromSommer(recorded) && deletesRome(recorded))
+        // A record that is there still wins: Albumist owns nothing in Sommer any more.
+        let respectful = UndoPlanner().undoPlan(for: executed, current: before, owned: ["sommer": [], states.first { $0.lastKnownTitle == "Rom" }!.albumID: ids("a", 0..<10)])
+        #expect(!removesFromSommer(respectful) && deletesRome(respectful))
+        // No record at all: nothing in those albums is Albumist's, everything stays.
+        let unrecorded = UndoPlanner().undoPlan(for: executed, current: before, owned: [:])
+        #expect(!removesFromSommer(unrecorded) && !deletesRome(unrecorded))
+        // Never recorded (owned nil): the journal decides, and everything goes.
+        let journal = UndoPlanner().undoPlan(for: executed, current: before)
+        #expect(removesFromSommer(journal) && deletesRome(journal))
+        let undone = try await executor.execute(confirmed(journal))
         #expect(undone.status == .completed)
         let inv = try await library.currentInventory()
         #expect(inv.collections.count == 1)
         #expect(inv["sommer"]?.assetIDs == Self.ownPhotos)
         #expect(await library.assets == allAssets)
+    }
+
+    // MARK: Review of 6c6ef79: records dropped on purpose (the reviewer's probes)
+
+    func sommerExtension() -> ConfirmedProposal {
+        ConfirmedProposal(proposal: AlbumProposal(id: SortlyID("s"), kind: .trip, title: "Sommer", folderPath: [], assetIDs: ids("a", 100..<110)),
+                          decision: .extendExisting("sommer"))
+    }
+
+    /// The plan extended the user's album "Sommer". "Album entfernen" took Albumist's photos out
+    /// again (its record goes: nothing of Albumist's is left). The user then put the photos back
+    /// by hand: they are the user's now, and "Rückgängig" of the plan leaves them.
+    @Test func undoAfterRemovalKeepsPhotosTheUserPutBackByHand() async throws {
+        let library = library()
+        let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
+        let tracker = ManagedAlbumTracker()
+        let executed = try await executor.execute(confirmed(planner.makePlan(from: [sommerExtension()], inventory: try await library.currentInventory())))
+        #expect(executed.status == .completed)
+        var states = tracker.record(executed, into: [], inventory: try await library.currentInventory())
+        let sommer = try #require(states.first { $0.albumID == "sommer" })
+        let removal = try await executor.execute(confirmed(tracker.removalPlan(for: sommer, current: try await library.currentInventory())))
+        #expect(removal.status == .completed)
+        states = tracker.record(removal, into: states, inventory: try await library.currentInventory())
+        #expect(!states.contains { $0.albumID == "sommer" })
+
+        await library.userEdit { inv in
+            var album = inv["sommer"]!
+            album.assetIDs.formUnion(ids("a", 100..<110))
+            inv.upsert(album)
+        }
+        let current = try await library.currentInventory()
+        let checked = tracker.reconcile(states, with: current)
+        let undo = UndoPlanner().undoPlan(for: executed, current: current, owned: owned(checked.updatedStates))
+        #expect(!undo.steps.contains { if case .removeAssets("sommer", _) = $0.operation { true } else { false } },
+                "undo takes photos the user put back by hand out of Sommer: \(undo.steps.map(\.operation))")
+    }
+
+    /// The same with an album Albumist created: the user had added an own photo, "Album
+    /// entfernen" kept the album and took Albumist's photos out; the user then swapped their
+    /// photo for Albumist's photos by hand. "Rückgängig" of the plan does not delete the album.
+    @Test func undoAfterRemovalDoesNotDeleteAnAlbumTheUserRefilled() async throws {
+        let library = library()
+        let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
+        let tracker = ManagedAlbumTracker()
+        let executed = try await executor.execute(confirmed(planner.makePlan(from: [newAlbum("r", "Rom", ids("a", 0..<10))],
+                                                                            inventory: try await library.currentInventory())))
+        var states = tracker.record(executed, into: [], inventory: try await library.currentInventory())
+        let rome = try #require(states.first { $0.lastKnownTitle == "Rom" })
+        await library.userEdit { inv in
+            var album = inv[rome.albumID]!
+            album.assetIDs.insert("a-200")
+            inv.upsert(album)
+        }
+        states = tracker.reconcile(states, with: try await library.currentInventory()).updatedStates
+        let romeNow = try #require(states.first { $0.albumID == rome.albumID })
+        let removal = try await executor.execute(confirmed(tracker.removalPlan(for: romeNow, current: try await library.currentInventory())))
+        #expect(removal.status == .completed)
+        states = tracker.record(removal, into: states, inventory: try await library.currentInventory())
+        #expect(!states.contains { $0.albumID == rome.albumID })
+        #expect(try await library.currentInventory()[rome.albumID]?.assetIDs == ["a-200"])
+
+        await library.userEdit { inv in
+            var album = inv[rome.albumID]!
+            album.assetIDs = ids("a", 0..<10)
+            inv.upsert(album)
+        }
+        let current = try await library.currentInventory()
+        let checked = tracker.reconcile(states, with: current)
+        let undo = UndoPlanner().undoPlan(for: executed, current: current, owned: owned(checked.updatedStates))
+        #expect(!undo.steps.contains { if case .deleteCollection(rome.albumID, _) = $0.operation { true } else { false } },
+                "undo deletes the album the user refilled by hand: \(undo.steps.map(\.operation))")
+        _ = try await executor.execute(confirmed(undo))
+        #expect(try await library.currentInventory()[rome.albumID]?.assetIDs == ids("a", 0..<10), "album deleted or emptied")
+    }
+
+    /// The same through K1's own path: the first undo is partial (deletion declined) and took
+    /// Albumist's photos out of the extended album, whose record then goes. The user puts some
+    /// back; "Rest rückgängig machen" leaves them.
+    @Test func restUndoKeepsPhotosTheUserPutBackAfterAPartialUndo() async throws {
+        let library = library()
+        let executor = ChangeExecutor(library: library, store: InMemoryPlanStore())
+        let tracker = ManagedAlbumTracker()
+        let executed = try await executor.execute(confirmed(planner.makePlan(from: [newAlbum("r", "Rom", ids("a", 0..<10)), sommerExtension()],
+                                                                            inventory: try await library.currentInventory())))
+        var states = tracker.record(executed, into: [], inventory: try await library.currentInventory())
+        await library.setDeletionBehavior(.declined, times: 1)
+        let first = try await executor.execute(confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory(), owned: owned(states))))
+        #expect(first.status == .completedWithErrors)
+        states = tracker.record(first, into: states, inventory: try await library.currentInventory())
+        #expect(!states.contains { $0.albumID == "sommer" })
+        await library.userEdit { inv in
+            var album = inv["sommer"]!
+            album.assetIDs.formUnion(ids("a", 100..<103))
+            inv.upsert(album)
+        }
+        let current = try await library.currentInventory()
+        let checked = tracker.reconcile(states, with: current)
+        let rest = UndoPlanner().undoPlan(for: executed, current: current, owned: owned(checked.updatedStates), earlierUndos: [first])
+        #expect(!rest.steps.contains { if case .removeAssets("sommer", _) = $0.operation { true } else { false } },
+                "rest undo takes the user's re-added photos out of Sommer: \(rest.steps.map(\.operation))")
+        #expect(rest.steps.contains { if case .deleteCollection(_, "Rom") = $0.operation { true } else { false } })
+        _ = try await executor.execute(confirmed(rest))
+        #expect(try await library.currentInventory()["sommer"]?.assetIDs == Self.ownPhotos.union(ids("a", 100..<103)))
     }
 
     // MARK: W4 Start screen
@@ -455,5 +790,17 @@ struct PluginReviewSafetyTests {
         }
         #expect(StartScreen.after(onboardingDone: true, access: .limited) == .main)
         #expect(StartScreen.after(onboardingDone: true, access: .full) == .main)
+
+        // The access changes while Albumist is open (back from Settings): from "Kein Zugriff"
+        // to the main screen as soon as the photos can be read (the app's `followAccess`). The
+        // introduction goes on by itself, and the main screen stays.
+        #expect(StartScreen.noPhotoAccess.afterAccessChange(to: .full) == .main)
+        #expect(StartScreen.noPhotoAccess.afterAccessChange(to: .limited) == .main)
+        for access in [LibraryAccess.denied, .restricted, .notDetermined] {
+            #expect(StartScreen.noPhotoAccess.afterAccessChange(to: access) == .noPhotoAccess, "\(access)")
+            #expect(StartScreen.main.afterAccessChange(to: access) == .main, "\(access)")
+            #expect(StartScreen.introduction.afterAccessChange(to: access) == .introduction, "\(access)")
+        }
+        #expect(StartScreen.introduction.afterAccessChange(to: .full) == .introduction)
     }
 }

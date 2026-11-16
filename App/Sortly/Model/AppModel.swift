@@ -1,9 +1,13 @@
 import Foundation
 import Observation
+import UIKit
 import SortlyCore
 import SortlyEngine
 import SortlyStore
 import SortlyWorldMap
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// App state and use cases. Views read it; all work happens in the core/engine actors.
 @MainActor
@@ -44,11 +48,23 @@ final class AppModel {
         /// The last run ended before it was done without the user pausing it: opening the
         /// app again goes on by itself.
         var needsResume = false
+        /// The bar's six segments, fixed for the whole analysis (from the first run's workload,
+        /// kept with the marker over Pause and restarts: progress display S6).
+        var widths: StepWidths = .standard
+        /// Where the last run stood when it ended (the paused card: "Bei 2.433 von 5.683 Fotos").
+        var stoppedAt: AnalysisCardState.Position?
+        /// Apple's geocoder makes the places step wait ("Apple antwortet gleich").
+        var appleWait = false
 
         var fraction: Double { total == 0 ? 0 : min(1, Double(completed) / Double(total)) }
-        /// Progress over all stages: one bar that fills once instead of restarting per stage.
+        /// The step the card shows (six steps; the pipeline's groups belong to the last one).
+        var step: AnalysisStep? { stage.map(AnalysisStep.init) }
+        /// Progress over all steps: one bar that fills once instead of restarting per step.
         var overall: Double {
-            stage.map { AnalysisPipeline.Progress.overall(stage: $0, completed: completed, total: total) } ?? 0
+            step.map { widths.overall(step: $0, completed: completed, total: total) } ?? 0
+        }
+        var position: AnalysisCardState.Position? {
+            step.map { AnalysisCardState.Position(step: $0, completed: completed, total: total) }
         }
         /// Still on the quick first steps of a run that goes on from further ahead.
         var isCatchingUp: Bool {
@@ -90,7 +106,66 @@ final class AppModel {
     var access: LibraryAccess = .notDetermined
     var settings = OrganizationSettings() { didSet { bucketCache = [:] } }
     /// Every change also reaches the background task's progress (read off the main thread).
-    var analysis = AnalysisState() { didSet { ContinuedAnalysis.publish(analysis) } }
+    var analysis = AnalysisState() { didSet { ContinuedAnalysis.publish(analysis, finish: analysisFinish) } }
+
+    // MARK: Analysis card (progress display v3)
+    // Written by one tick every 250 ms while a run is busy (S2), never per progress report.
+    // Kept as separate properties, so the gliding bar (4 changes a second) redraws only the bar.
+
+    /// The card's state; the view only renders it.
+    var analysisCard: AnalysisCardState?
+    /// The bar as drawn: the real value plus the glide (point 2).
+    var analysisBar: Double = 0
+    /// "Fertig gegen 23:40" for the whole analysis (point 1); also on the Lock Screen.
+    var analysisFinish: FinishEstimate? { didSet { if analysisFinish != oldValue { ContinuedAnalysis.publish(analysis, finish: analysisFinish) } } }
+    /// Details: time left in the running step ("noch etwa 12 Min."), checked every 5 s.
+    var analysisStepRemaining: Duration?
+    /// Details: when this run started ("bisher 18 Min.").
+    var analysisStartedAt: Date?
+    /// "Gerade angesehen": the last photos of the image step, at most one change a second.
+    var analysisRecent: [AssetID] = []
+    /// The Lock Screen task really runs (chip "Läuft auch im Hintergrund"), or iOS refused it.
+    var analysisBackground: ContinuedAnalysis.Status = .idle
+    /// Albumist is on screen (scene active): no gliding, no thumbnails, no announcements otherwise.
+    var isOnScreen = true
+    /// A long run finished while the app was open: the card says so until the next run or until
+    /// the suggestions are opened from it (point 4).
+    var analysisFinished: AnalysisFinished?
+    struct AnalysisFinished: Equatable {
+        var photos: Int
+        var proposals: Int
+    }
+    /// The check mark and haptic of the finished card play once, not on every return.
+    @ObservationIgnored private var finishMomentPlayed = false
+
+    /// True the first time the finished card is seen for this run: on screen only, so a run
+    /// that ended while the app was in the background plays it when the user comes back
+    /// (review minor: it was not shown at all then).
+    func claimFinishMoment() -> Bool {
+        guard analysisFinished != nil, isOnScreen, !finishMomentPlayed else { return false }
+        finishMomentPlayed = true
+        return true
+    }
+
+    @ObservationIgnored private var progressMailbox = ProgressMailbox()
+    @ObservationIgnored private var estimator = ProgressEstimator()
+    @ObservationIgnored private var glide = BarGlide()
+    @ObservationIgnored private var tickTask: Task<Void, Never>?
+    @ObservationIgnored private var runClockStart = ContinuousClock.now
+    @ObservationIgnored private var pausingSince: ContinuousClock.Instant?
+    @ObservationIgnored private var lastRecentChange: ContinuousClock.Instant?
+    @ObservationIgnored private var lastStepRemainingCheck: ContinuousClock.Instant?
+    /// The widths came from a workload (this analysis), not the standard ones.
+    @ObservationIgnored private var widthsFixed = false
+    /// When the overview last looked for the early suggestions without finding them.
+    @ObservationIgnored private var lastEarlyLook: ContinuousClock.Instant?
+    /// The fallback look still running (saving the early suggestions can take longer than
+    /// 10 s: the looks must not pile up, re-review b).
+    @ObservationIgnored private var earlyLookTask: Task<Void, Never>?
+    /// Both clocks at the last tick, to tell a real clock jump (`timeChanged`).
+    @ObservationIgnored private var lastTickClock: (ContinuousClock.Instant, Date)?
+    /// The card showed this run as a full analysis at least once (not only the quick check).
+    @ObservationIgnored private var runShowedBar = false
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
@@ -190,6 +265,11 @@ final class AppModel {
             .max { $0.1 < $1.1 }?.0
     }
     var progress = OrganizationStatusResolver.Progress()
+    /// How the sorted count came about, per reason (one line of the diagnostic report).
+    @ObservationIgnored var statusReasons = LibraryStatus.Reasons()
+    /// Photos with a place or a trip that the ring leaves out (taken at home, no album
+    /// suggested), named under the ring so its smaller total is explained.
+    var leftOut = LibraryStatus.LeftOut()
     /// "Analyse neu aufbauen" removes the proposals, and photos in the user's own matching
     /// albums count as sorted only through them: the ring fell to 0 % until new proposals came
     /// (device test 15.11., "Und oben null"). The last count stays on screen, marked as being
@@ -229,13 +309,15 @@ final class AppModel {
     /// What the latest analysis asks about recurring places, and where each trip mostly was.
     private(set) var recurringPlaceReport: RecurringPlaceReport?
     var execution = ExecutionState()
-    var message: String?
+    var message: AppMessage?
     /// Where Siri, Shortcuts or a Spotlight result wants to go; the overview opens it.
     var route: Route?
 
     enum Route: Hashable {
         case suggestion(SortlyID)
         case country(String)
+        /// All open suggestions: "Vorschläge prüfen" on the finished notification (point 4).
+        case proposals
     }
 
     let library = PhotoKitLibrary()
@@ -309,7 +391,7 @@ final class AppModel {
                 // Not readable even then: the app starts with the standard settings and says
                 // so, instead of not starting at all.
                 settings = OrganizationSettings()
-                message = String(localized: "Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. Bitte prüfe sie in den Einstellungen.")
+                message = .failure(String(localized: "Deine Einstellungen ließen sich nicht lesen und stehen wieder auf den Standardwerten. Bitte prüfe sie in den Einstellungen."))
             }
             await dropOldRootFolderDefault(store)
             decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
@@ -335,7 +417,7 @@ final class AppModel {
             await refreshDerived()
             // A plan that stopped half way (app closed during "Jetzt umsetzen") is offered
             // on the overview: continue or take back.
-            interruptedPlan = try? await store.unfinishedPlans().last
+            interruptedPlan = try? await store.openInterruptedPlan()
             // Photo access taken away after the introduction: a screen of its own, not the
             // introduction again, whose "Analyse starten" would replace the part of the library
             // chosen before (plugin review W4).
@@ -521,7 +603,7 @@ final class AppModel {
         // before the album check in `refreshDerived` compares (plugin review W2).
         await finishPendingFinalizations()
         await refreshDerived()
-        interruptedPlan = try? await store.unfinishedPlans().last
+        interruptedPlan = try? await store.openInterruptedPlan()
         saveSafetyBackup()
     }
 
@@ -565,7 +647,7 @@ final class AppModel {
     /// The access is back on the "Kein Zugriff" screen (plugin review W4): Albumist goes on
     /// where it was, with the part of the library chosen before. The scope is not touched.
     private func followAccess() {
-        guard phase == .noAccess, access.canRead else { return }
+        guard phase == .noAccess, StartScreen.noPhotoAccess.afterAccessChange(to: access) == .main else { return }
         phase = .ready
         LibraryChangeWatcher.shared.start()
         if !UITestSupport.isRunning { startAnalysis() }
@@ -627,9 +709,19 @@ final class AppModel {
         analysis.completed = 0
         analysis.total = 0
         analysis.waiting = nil
+        analysis.appleWait = false
+        analysis.stoppedAt = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
         HeatLog.reset()
         analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
+        // The widths of the analysis this run goes on with; a new analysis gets them from its
+        // workload (said at the end of the trips step).
+        let storedWidths = analysis.resumeFrom?.widths
+        analysis.widths = storedWidths ?? .standard
+        widthsFixed = storedWidths != nil
+        analysisFinished = nil
+        finishMomentPlayed = false
+        beginCard()
         if userInitiated {
             // A quick check for new photos ("Neu prüfen") needs no background time: asking for
             // it put "Albumist analysiert deine Fotos · Schritt 1 von 7" on the Lock Screen for
@@ -644,6 +736,7 @@ final class AppModel {
         let generation = analysisGeneration
         let control = AnalysisRunControl()
         analysisControl = control
+        startTicks(run: generation)
         analysisTask = Task {
             if let scope {
                 try? await pipeline.setScope(scope)
@@ -653,8 +746,11 @@ final class AppModel {
             // one before (audit 2, 4.2).
             var finished: AnalysisPipeline.Report?
             do {
+                // Kept in the mailbox; the card's tick takes the newest every 250 ms (S2: no task
+                // per report on the main actor).
+                let mailbox = progressMailbox
                 let report = try await pipeline.run(mode: mode, control: control, onProgress: { progress in
-                    Task { @MainActor in AppModel.shared.receive(progress, run: generation) }
+                    mailbox.post(progress)
                 }, onWaiting: { reason in
                     Task { @MainActor in
                         let model = AppModel.shared
@@ -669,7 +765,7 @@ final class AppModel {
                 // Stopped on purpose ("Analyse neu aufbauen", a new scope): not an error to show
                 // (plugin review N3: "Swift.CancellationError error 1").
             } catch {
-                message = error.localizedDescription
+                message = .failure(error.localizedDescription)
             }
             if analysisControl === control { analysisControl = nil }
             BackgroundRunLog.runEnded(paused: finished?.pausedBecause?.rawValue,
@@ -681,11 +777,19 @@ final class AppModel {
             // itself; with the access back, from where it was. Set before isRunning, so the Lock
             // Screen reads how this run ended, not the run before (ContinuedAnalysis.ending).
             let reason = finished?.pausedBecause
+            // The last reports of this run, before it is shown as ended.
+            tick(run: generation)
+            let celebrate = AnalysisCardState.celebratesFinish(isComplete: finished?.isComplete == true,
+                                                               wasQuickCheck: !runShowedBar,
+                                                               ranFor: ContinuousClock.now - runClockStart)
+            analysis.stoppedAt = analysis.position
             analysis.needsResume = finished == nil || (reason != nil && reason != .userPaused)
             analysis.isRunning = false
             analysis.pausing = false
             analysis.stage = nil
             analysis.waiting = nil
+            analysis.appleWait = false
+            endCard()
             if finished?.isComplete == true {
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
@@ -697,9 +801,16 @@ final class AppModel {
             await refreshDerived()
             // Trip identities (names and corrections stay with their trip) are kept in the copy.
             saveSafetyBackup()
-            // "Analyse fertig" only when it really finished (not paused, stopped or failed).
-            if finished?.isComplete == true, !Task.isCancelled {
-                ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
+            // "Analyse fertig" only when it really finished (not paused, stopped or failed), and
+            // not for a quick check (point 4): in the app the card, outside it the notification.
+            // Outside the app also the notification; the card shows the moment once the app
+            // is on screen again.
+            if celebrate, !Task.isCancelled {
+                analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
+                updateCard()
+                if UIApplication.shared.applicationState != .active {
+                    ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
+                }
             }
             BackgroundWork.scheduleRefinement()
             if finished?.isComplete == true { unattendedRetries = 0 }
@@ -728,18 +839,19 @@ final class AppModel {
         }
     }
 
-    /// Progress of the running analysis. Late updates of an earlier run are dropped (a run
-    /// that starts right after another one would otherwise show the old run's stage), and a
-    /// count never goes back within a stage (the updates hop here one by one and can overtake
-    /// each other).
-    private func receive(_ progress: AnalysisPipeline.Progress, run: Int) {
-        guard run == analysisGeneration, analysis.isRunning else { return }
+    /// Progress of the running analysis, taken from the mailbox by the tick. A count never goes
+    /// back within a stage, and a stage never goes back (late reports of the same run).
+    private func receive(_ progress: AnalysisPipeline.Progress, at now: ContinuousClock.Instant) {
+        guard analysis.isRunning else { return }
         if let stage = analysis.stage {
             if progress.stage.number < stage.number { return }
             if progress.stage == stage, progress.completed < analysis.completed { return }
         }
-        // Trips and places are ready before the image analysis: show them now.
-        if progress.stage == .content, analysis.stage != .content, snapshot == nil {
+        // Trips and places are ready before the image analysis: show them now ("Schon fertig").
+        // (Compared by number: with the tick, the report that starts the image step may be
+        // replaced by a later one before it is taken.)
+        if progress.stage.number >= AnalysisPipeline.Stage.content.number,
+           (analysis.stage?.number ?? 0) < AnalysisPipeline.Stage.content.number, snapshot == nil {
             Task { await refreshDerived() }
         }
         // First scan: the photos are known after reading the library (for the scan show).
@@ -750,11 +862,206 @@ final class AppModel {
         analysis.completed = progress.completed
         analysis.total = progress.total
         analysis.waiting = nil
+        analysis.appleWait = progress.waitLeft != nil
         // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`).
         if !analysis.isCatchingUp {
-            AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.overall)
+            AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.overall,
+                                              widths: widthsFixed ? analysis.widths : nil)
         }
+        let step = AnalysisStep(progress.stage)
+        if !analysis.pausing {
+            estimator.record(step: step, completed: progress.completed, total: progress.total, at: now,
+                             appleWait: progress.waitLeft != nil)
+        }
+        glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
+                     itemsPerSecond: estimator.rate, total: progress.total)
         keepRunningInBackgroundIfLong()
+    }
+
+    // MARK: Analysis card tick
+
+    /// A run starts: everything the card measured for the run before is forgotten.
+    private func beginCard() {
+        tickTask?.cancel()
+        progressMailbox = ProgressMailbox()
+        estimator.reset()
+        // Going on with the same analysis: from the bar drawn last (never a step back).
+        if analysis.resumeFrom != nil {
+            glide.reset(keeping: max(analysisBar, analysis.shownOverall))
+        } else {
+            glide.reset()
+        }
+        runClockStart = .now
+        pausingSince = nil
+        lastRecentChange = nil
+        lastStepRemainingCheck = nil
+        lastEarlyLook = nil
+        runShowedBar = false
+        analysisBar = glide.value(at: .now, gliding: false)
+        analysisFinish = nil
+        analysisStepRemaining = nil
+        analysisStartedAt = Date()
+        analysisRecent = []
+        updateCard()
+    }
+
+    /// One tick every 250 ms for the run `run` (its generation), until the run ends.
+    private func startTicks(run: Int) {
+        tickTask?.cancel()
+        tickTask = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.tick(run: run)
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+    }
+
+    /// The run ended: the tick stops; the card shows how it ended.
+    private func endCard() {
+        tickTask?.cancel()
+        tickTask = nil
+        pausingSince = nil
+        analysisFinish = nil
+        analysisStepRemaining = nil
+        analysisRecent = []
+        analysisBackground = .idle
+        updateCard()
+    }
+
+    /// One tick (every 250 ms while a run is busy, S2): takes the newest progress, measures the
+    /// speed, moves the bar, and decides what the card says. Nothing here runs per report.
+    private func tick(run: Int) {
+        guard run == analysisGeneration, analysis.isRunning else { return }
+        let now = ContinuousClock.now
+        let taken = progressMailbox.take()
+        lastTickClock = (now, Date())
+        if let workload = taken.workload {
+            estimator.setWorkload(workload)
+            if !widthsFixed {
+                // Before this the first two steps used the standard widths. The glide starts
+                // again at the real value under the new widths (review I3: it held the old
+                // value, so the bar stood still well into the places step). Nothing is drawn
+                // back: the workload comes with the end of the trips step, where both widths
+                // draw the first two segments full and the rest empty.
+                analysis.widths = StepWidths(workload: workload)
+                widthsFixed = true
+                glide.reset()
+                if let step = analysis.step {
+                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
+                                 itemsPerSecond: nil, total: analysis.total)
+                }
+            }
+        }
+        if let progress = taken.progress { receive(progress, at: now) }
+        // "Schon fertig": the early suggestions are read once they are saved (the report that
+        // starts the image step comes before that, review I2). Should that read miss them,
+        // it is tried again every 10 s during the image step (the only step they are made in;
+        // refreshDerived is not cheap, so not in the later ones).
+        if taken.earlyProposals {
+            lastEarlyLook = now
+            Task { await refreshDerived() }
+        } else if snapshot == nil, analysis.stage == .content, earlyLookTask == nil,
+                  lastEarlyLook.map({ now - $0 >= .seconds(10) }) ?? true {
+            lastEarlyLook = now
+            earlyLookTask = Task {
+                await refreshDerived()
+                earlyLookTask = nil
+            }
+        }
+        // Thumbnails at most once a second, and only while someone can see them (S9).
+        if isOnScreen, !taken.recent.isEmpty, analysis.stage == .content,
+           lastRecentChange.map({ now - $0 >= .seconds(1) }) ?? true, taken.recent != analysisRecent {
+            analysisRecent = taken.recent
+            lastRecentChange = now
+        }
+        if analysis.stage != .content, !analysisRecent.isEmpty { analysisRecent = [] }
+        // No time while it waits, is paused, or is held in the background (S4).
+        let background = ContinuedAnalysis.status
+        if analysis.waiting != nil || analysis.pausing || (!isOnScreen && background != .running) {
+            estimator.idle()
+        }
+        let finish = estimator.finish(at: now, wall: Date())
+        if finish != analysisFinish { analysisFinish = finish }
+        if lastStepRemainingCheck.map({ now - $0 >= .seconds(5) }) ?? true {
+            lastStepRemainingCheck = now
+            let left = estimator.stepRemaining
+            if left != analysisStepRemaining { analysisStepRemaining = left }
+        }
+        // The bar glides only while really working, on screen, without Reduce Motion (point 2).
+        let gliding = analysis.waiting == nil && !analysis.pausing && isOnScreen && !UIAccessibility.isReduceMotionEnabled
+        let bar = glide.value(at: now, gliding: gliding)
+        if abs(bar - analysisBar) > 0.000_05 { analysisBar = bar }
+        if background != analysisBackground { analysisBackground = background }
+        updateCard(now: now)
+    }
+
+    /// Decides the card's state from the model (pure rules in `AnalysisCardState`).
+    func updateCard(now: ContinuousClock.Instant = .now) {
+        var i = AnalysisCardState.Inputs()
+        i.isRunning = analysis.isRunning
+        i.isQuickCheck = isQuickCheck
+        i.runningFor = now - runClockStart
+        i.position = analysis.position
+        if analysis.isCatchingUp, let resume = analysis.resumeFrom {
+            i.catchingUpTo = AnalysisPipeline.Stage.allCases.indices.contains(resume.stage - 1)
+                ? AnalysisStep(AnalysisPipeline.Stage.allCases[resume.stage - 1]).number : nil
+        }
+        i.waiting = analysis.waiting
+        i.slower = analysis.isRunning ? DeviceState(
+            thermal: DeviceState.Thermal(rawValue: ProcessInfo.processInfo.thermalState.rawValue) ?? .critical,
+            isLowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
+        ).slowerReason : nil
+        i.appleWait = analysis.appleWait
+        i.pausingFor = analysis.pausing ? pausingSince.map { now - $0 } ?? .zero : nil
+        i.pausedByUser = !analysis.isRunning && !analysis.needsResume && analysis.lastReport?.pausedBecause == .userPaused
+        i.pausedAt = analysis.stoppedAt
+        i.finished = analysisFinished.map { (photos: $0.photos, proposals: $0.proposals) }
+        let state = AnalysisCardState.resolve(i)
+        if analysis.isRunning, let state, state != .quickCheck(showsPause: true), state != .quickCheck(showsPause: false) {
+            runShowedBar = true
+        }
+        if state != analysisCard { analysisCard = state }
+    }
+
+    /// The photo mosaic under the card: during the first analysis only (`ScanShowRule`).
+    var showsScanShow: Bool {
+        ScanShowRule.shows(isRunning: analysis.isRunning, firstAnalysis: !AnalysisMarker.completedOnce,
+                           isQuickCheck: isQuickCheck)
+    }
+
+    /// The mosaic's light sweep moves (`ScanShowRule.animates`). Read with the card's state,
+    /// which changes when the heat does (`slower`, `waiting`), so the view follows it.
+    func scanShowAnimates(reduceMotion: Bool) -> Bool {
+        ScanShowRule.animates(card: analysisCard, isOnScreen: isOnScreen,
+                              thermal: DeviceState.Thermal(rawValue: ProcessInfo.processInfo.thermalState.rawValue) ?? .critical,
+                              reduceMotion: reduceMotion)
+    }
+
+    /// A check for new photos after everything was analysed once: no step numbers and no bar
+    /// that starts at zero again, only "Sucht neue Fotos", unless there is real work to show.
+    var isQuickCheck: Bool {
+        guard analysis.kind == .check else { return false }
+        if let stage = analysis.stage, [.content, .text].contains(stage), analysis.remaining >= 50 { return false }
+        return true
+    }
+
+    /// The clock or the time zone was changed (`significantTimeChangeNotification`): the
+    /// finish time is a clock time, so it is measured anew (review minor).
+    func timeChanged() {
+        guard analysis.isRunning, let last = lastTickClock else { return }
+        let now = (ContinuousClock.now, Date())
+        lastTickClock = now
+        // Midnight and small carrier corrections send this too: only a real jump counts.
+        guard ProgressEstimator.clockJumped(wallThen: last.1, wallNow: now.1, elapsed: now.0 - last.0) else { return }
+        estimator.idle()
+        analysisFinish = nil
+    }
+
+    /// Scene changes (`SortlyApp`): gliding, thumbnails and announcements only on screen.
+    func sceneChanged(onScreen: Bool) {
+        guard onScreen != isOnScreen else { return }
+        isOnScreen = onScreen
+        if !onScreen { analysisRecent = [] }
     }
 
     /// A run with real work left asks iOS to go on after the user leaves the app.
@@ -796,8 +1103,14 @@ final class AppModel {
     func pauseAnalysis() {
         analysis.needsResume = false
         // Shown at once: the photos in work are finished first, which can take a moment
-        // (device test 15.11.: "Pause reagiert nicht").
-        if analysis.isRunning { analysis.pausing = true }
+        // (device test 15.11.: "Pause reagiert nicht"). The card changes in this same call, not
+        // with the next tick (limit: a visible reaction in under 1 s).
+        if analysis.isRunning, !analysis.pausing {
+            analysis.pausing = true
+            pausingSince = .now
+            estimator.idle()
+            updateCard()
+        }
         analysisControl?.pause()
     }
 
@@ -812,9 +1125,11 @@ final class AppModel {
         }
         guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return false }
         analysis.isRunning = true
+        updateCard()
         defer {
             analysis.isRunning = false
             analysis.pausing = false
+            updateCard()
         }
         // Late progress of the run before must not show up during this one.
         analysisGeneration += 1
@@ -865,17 +1180,27 @@ final class AppModel {
             }
             removedFromProposals = removed
             let facts = facts, snapshot = snapshot, settings = settings
-            let computed = await Task.detached(priority: .userInitiated) {
-                LibraryStatus.compute(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides, contentAnalyzed: analyzed)
+            // Photos Albumist put into albums count as sorted in the area of their suggestion,
+            // also once that suggestion is no longer shown.
+            let byAlbumist = LibraryStatus.organizedBySortly(managedAlbums, inventory: inventory, snapshot: snapshot)
+            let (computed, reasons) = await Task.detached(priority: .userInitiated) {
+                LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
+                                                 contentAnalyzed: analyzed, organizedBySortly: byAlbumist)
             }.value
             states = computed
+            statusReasons = reasons
             // The trial year counts only its own photos (the ring said "839 von 5.683" over
             // the whole library while the suggestions were for 2026).
             let scope = analysisScope, calendar = Calendar.sortlyDefault
             let inScope = scope == .all ? facts : facts.filter { scope.includes($0, calendar: calendar) }
             let scopedIDs = Set(inScope.map(\.id))
-            progress = resolver.progress(scope == .all ? Array(computed.values) : computed.filter { scopedIDs.contains($0.key) }.map(\.value))
-            if recount != nil, !proposals.isEmpty || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
+            let counted = scope == .all ? Array(computed.values) : computed.filter { scopedIDs.contains($0.key) }.map(\.value)
+            progress = resolver.progress(counted)
+            leftOut = LibraryStatus.leftOut(counted, reasons: reasons, resolver: resolver)
+            // Not with the early set of a first run (trips and places only): the count would
+            // be shown as final hours before the image analysis is done (review minor).
+            if recount != nil, (snapshot?.isEarly == false && !proposals.isEmpty)
+                || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
                 recount = nil
             }
             analysisCounts = AnalysisCounts(
@@ -884,7 +1209,7 @@ final class AppModel {
                 unreadable: scope == .all ? unreadable.count : unreadable.intersection(scopedIDs).count
             )
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
         SpotlightIndex.scheduleUpdate(self)
     }
@@ -1094,7 +1419,7 @@ final class AppModel {
             startAnalysis()
             return true
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return false
         }
     }
@@ -1177,7 +1502,7 @@ final class AppModel {
             if rerun { startAnalysis() }
             return true
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return false
         }
     }
@@ -1214,7 +1539,7 @@ final class AppModel {
             }
             if let rematched = try await pipeline?.rematch() { snapshot = rematched }
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
     }
 
@@ -1259,7 +1584,7 @@ final class AppModel {
             }
             plan = OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle).makePlan(from: confirmed, inventory: current, overrides: overrides)
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
     }
 
@@ -1278,7 +1603,7 @@ final class AppModel {
                 .makePlan(from: [ConfirmedProposal(proposal: proposal, decision: decision)], inventory: current, overrides: overrides)
             return plan.steps.isEmpty ? nil : plan
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return nil
         }
     }
@@ -1314,6 +1639,12 @@ final class AppModel {
             execution = ExecutionState(planID: plan.id, failure: String(localized: "Die Gratis-Alben reichen für diese Änderungen nicht. Schalte Albumist frei, um weiterzumachen."))
             return
         }
+        // Every plan runs only once the results of finished plans are stored (after a full disk
+        // they may still wait), so album records are written in run order: for an undo, the
+        // albums of the plan it takes back are Albumist's records (review of 6c6ef79); for any
+        // other plan, results stored late would rebuild a shared album's record without this
+        // plan's photos, and undoing both would leave the album behind (review of 6b34b20).
+        if !(await storeWaitingResults()) { return }
         var confirmed = plan
         if confirmed.status == .draft { confirmed.status = .confirmed }
         if confirmed.confirmedAt == nil { confirmed.confirmedAt = Date() }
@@ -1345,6 +1676,9 @@ final class AppModel {
         } catch {
             execution.failure = failureText(error)
         }
+        // A plan that stopped half way in this session (its journal could not be written, a
+        // full disk) is offered at once, and nothing new runs next to it (review of 6c6ef79, K2).
+        await reloadInterruptedPlan()
         keepAwake.end()
         execution.isRunning = false
         self.plan = nil
@@ -1362,8 +1696,40 @@ final class AppModel {
     }
 
     /// Why nothing new runs while a plan that was cut off is open (plugin review K2).
+    /// Names what was cut off: creating albums, or taking them back (review of the design
+    /// branch: an interrupted undo was called "Anlegen" too).
     private var interruptedPlanFirst: String {
-        String(localized: "Erst das unterbrochene Umsetzen abschließen: in der Übersicht mit Fortsetzen, Rückgängig machen oder So lassen.")
+        interruptedPlan?.reverts != nil
+            ? String(localized: "Ein früheres Zurücknehmen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
+            : String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
+    }
+
+    /// The plan offered to continue, take back or keep, read again from the store after every
+    /// run and every way out (review of 6c6ef79): also a plan that failed half way in this
+    /// session, and the next one once one is settled.
+    private func reloadInterruptedPlan() async {
+        guard let store else { return }
+        do {
+            interruptedPlan = try await store.openInterruptedPlan()
+        } catch {
+            // Not readable now: the offer stays as it is, and so does the wait for it.
+        }
+    }
+
+    /// Stores the results of plans that finished but whose results still wait (after a full
+    /// disk). Before an undo is planned or run: without them, the albums of the plan it takes
+    /// back would count as the user's (review of 6c6ef79). False if that did not work.
+    private func storeWaitingResults() async -> Bool {
+        guard let store else { return false }
+        do {
+            for waiting in try await store.plansAwaitingFinalization() {
+                guard await finalize(waiting) else { return false }
+            }
+            return true
+        } catch {
+            message = .failure(error.localizedDescription)
+            return false
+        }
     }
 
     /// Everything that follows a finished plan, stored in one transaction: Albumist's albums,
@@ -1382,9 +1748,9 @@ final class AppModel {
             let states = ManagedAlbumTracker().record(result, into: try await store.managedAlbums(), inventory: after)
             var newDecisions = decisions
             if result.reverts == nil {
-                // Applied proposals leave the open list; other accepted ones stay accepted.
-                let applied = Set(result.steps.compactMap(\.sourceID))
-                for id in applied where newDecisions[id]?.isAccepted == true {
+                // Applied proposals leave the open list; other accepted ones stay accepted, also
+                // those of this plan whose steps never ran (review of 6c6ef79).
+                for id in result.appliedSources where newDecisions[id]?.isAccepted == true {
                     newDecisions[id] = nil
                     previewOnly[id] = nil
                 }
@@ -1421,7 +1787,7 @@ final class AppModel {
             // Suggestions see the new albums at once (e.g. "Album vollständig").
             if let rematched = try await pipeline?.rematch() { snapshot = rematched }
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
         return stored
     }
@@ -1469,7 +1835,7 @@ final class AppModel {
             return OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle)
                 .makePlan(from: [ConfirmedProposal(proposal: proposal, decision: decision)], inventory: current, overrides: overrides)
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return nil
         }
     }
@@ -1488,7 +1854,7 @@ final class AppModel {
             return OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle)
                 .makePlan(from: [ConfirmedProposal(proposal: proposal, decision: decision)], inventory: current, overrides: overrides)
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return nil
         }
     }
@@ -1501,65 +1867,27 @@ final class AppModel {
     /// changed between two reads slips through (audit 2, 1.5). Nil if the albums could not be
     /// read or what was found could not be stored; planning then waits.
     @discardableResult
-    private func reconcileManagedAlbums(quiet: Bool = false, attempt: Int = 0) async -> CollectionInventory? {
+    private func reconcileManagedAlbums(quiet: Bool = false) async -> CollectionInventory? {
         guard let store else { return nil }
         do {
-            let stored = try await store.managedAlbums()
-            var current = try await library.currentInventory()
-            // Only with full access: a limited library would look like deleted albums and photos.
-            guard !stored.isEmpty, !execution.isRunning, await library.access() == .full else {
-                managedAlbums = stored
-                return current
-            }
-            // Albums Albumist's own plans may still be changing are compared once those plans
-            // are settled: what their own steps did is not the user's decision. That is a plan
-            // that was cut off (offered to continue or take back) and a plan that finished but
-            // whose results are not stored yet (plugin review W2), read from the store (at
-            // launch this runs before `interruptedPlan` is loaded).
-            let changing = try await store.collectionsInFlight()
-            // An album missing from the list counts as deleted only once Photos confirms it when
-            // asked for that album on its own (plugin review W3: the list can lack albums for a
-            // while, e.g. iCloud still syncing after a restore). An empty album list is a valid
-            // answer (the user deleted the last album); only when every remembered album seems
-            // gone at once, a second read has to confirm it. The list that comes back (with the
-            // albums found on their own) is the one everything works with.
-            let checked = try await ManagedAlbumTracker().reconcile(stored, listed: current, in: library, changing: changing)
-            let result = checked.reconciliation
-            current = checked.inventory
-            // The comparison can take a while (albums looked up one by one, a second read). A
-            // plan that started or finished meanwhile wrote its own records, and the list this
-            // comparison started from is old (plugin review N7): it is never written over them.
-            // The store refuses it when its records changed since; then everything is compared
-            // once more from the fresh state, and planning waits if that is refused as well.
-            if execution.isRunning {
+            // While a plan runs, its own changes are not compared.
+            guard !execution.isRunning else {
                 managedAlbums = try await store.managedAlbums()
-                return current
+                return try await library.currentInventory()
             }
-            if !result.changes.isEmpty {
-                // Overrides and the new last-known state in one transaction: a manual change
-                // is never marked as seen without its override.
-                let applied = try await store.applyReconciliation(overrides: result.newOverrides, managedAlbums: result.updatedStates, expected: stored)
-                guard applied else {
-                    if attempt == 0 { return await reconcileManagedAlbums(quiet: quiet, attempt: 1) }
-                    managedAlbums = try await store.managedAlbums()
-                    if !quiet { message = String(localized: "Albumist konnte deine Alben gerade nicht lesen. Versuche es gleich noch einmal.") }
-                    return nil
-                }
-                saveSafetyBackup()
-            }
-            // What is stored, not what this comparison saw: a plan finished meanwhile keeps its albums.
-            let now = try await store.managedAlbums()
-            if result.changes.isEmpty, now != stored, attempt == 0 {
-                // Nothing to write, but a plan changed the albums meanwhile: the album list
-                // returned for planning would be from before it.
-                return await reconcileManagedAlbums(quiet: quiet, attempt: 1)
-            }
-            managedAlbums = now
-            return current
+            // Only with full access. Albums of plans that are unfinished or whose results are
+            // not stored yet are left alone (W2: the same answer before and after those results
+            // are stored, so the order at launch does not matter), and an album only the list
+            // lacks is looked up on its own first (W3). The list that comes back is the one
+            // everything works with. See `ManagedAlbumCheck`.
+            let checked = try await ManagedAlbumCheck(store: store, library: library).run(access: await library.access())
+            if checked.foundChanges { saveSafetyBackup() }
+            managedAlbums = checked.managedAlbums
+            return checked.inventory
         } catch {
             // Fails closed (audit 2, 1.5): without knowing what the user changed in Photos,
             // nothing is planned, so a photo they took out is never put back by mistake.
-            if !quiet { message = String(localized: "Albumist konnte deine Alben gerade nicht lesen. Versuche es gleich noch einmal.") }
+            if !quiet { message = .failure(String(localized: "Albumist konnte deine Alben gerade nicht lesen. Versuche es gleich noch einmal.")) }
             return nil
         }
     }
@@ -1590,7 +1918,9 @@ final class AppModel {
         execution = ExecutionState()
         let overrides = (try? await store.overrides()).map { OverrideSet($0) } ?? OverrideSet()
         await run(interrupted.respecting(overrides), resume: true)
-        if execution.failure == nil { interruptedPlan = nil }
+        // Read again, not cleared: a plan that stopped once more stays offered, and so does
+        // another one that is still open (review of 6c6ef79).
+        await reloadInterruptedPlan()
     }
 
     /// Takes back what an interrupted plan already did, and drops the rest. Steps the
@@ -1601,7 +1931,8 @@ final class AppModel {
     /// albums) and then taken back by an ordinary undo of it. Only a completed undo cancels the
     /// plan; when the undo does not get everything back ("Nicht erlauben" in the iOS question),
     /// the plan stays in the history and the rest can be taken back there (plugin review K1).
-    /// Before, it was cancelled first and its albums stayed in Photos without a trace.
+    /// Before, it was cancelled first and its albums stayed in Photos without a trace. The
+    /// order, and what each ending leaves, is `InterruptedPlanUndo.carryOut`.
     func undoInterruptedPlan() async {
         // An interrupted undo cannot itself be taken back: Photos cannot bring deleted albums
         // back, and undo plans put no photos back. What it already did is kept and recorded
@@ -1619,33 +1950,47 @@ final class AppModel {
             execution = ExecutionState(planID: interrupted.id, failure: ConflictText.text(.writeAccessMissing, inventory: inventory))
             return
         }
+        execution = ExecutionState()
+        // The selection before: a completed undo gives it back to the suggestions the plan
+        // carried out (they leave it with the plan's results).
+        let selection = decisions
+        let previews = previewOnly
         do {
             let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
             let way = InterruptedPlanUndo(settled: settled, current: try await library.currentInventory())
-            // Each step leaves a consistent store: kept (finalized at the next launch if the app
-            // ends now), recorded, then taken back.
-            try await store.save(way.kept)
-            if way.kept.status == .cancelled {
-                // Nothing to take back: the plan simply goes away.
+            // If the app ends before the plan's results are stored, the next launch stores them.
+            try await setPendingFinalization(adding: interrupted.id)
+            let outcome = try await way.carryOut(journal: store, finalize: { await self.finalize($0) }, run: { await self.run($0) })
+            switch outcome {
+            case .nothingToTakeBack:
                 try? await setPendingFinalization(removing: [interrupted.id])
-            } else if await finalize(way.kept), let undoPlan = way.undo {
-                await run(undoPlan)
-                if way.cancelsPlan(after: execution.finished) {
-                    // Everything taken back: the plan leaves the history, as before.
-                    if var original = try await store.plan(interrupted.id) {
-                        original.status = .cancelled
-                        try await store.save(original)
-                    }
-                } else {
-                    message = [String(localized: "Nicht alles ließ sich zurücknehmen. Das unterbrochene Umsetzen steht jetzt unter Einstellungen › Verlauf. Dort kannst du den Rest zurücknehmen."),
-                               execution.failure].compactMap { $0 }.joined(separator: "\n\n")
+            case .undone:
+                for id in way.selectionToRestore(after: outcome) {
+                    decisions[id] = selection[id]
+                    previewOnly[id] = previews[id]
                 }
+                persistDecisions()
+            case .partlyUndone:
+                // The receipt offers "Rest rückgängig machen".
+                message = .failure([String(localized: "Nicht alles ließ sich zurücknehmen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest zurücknehmen."),
+                                    execution.failure].compactMap { $0 }.joined(separator: "\n\n"))
+            case .notStarted:
+                // Nothing was taken back: the receipt offers "Rückgängig machen" (review of 6c6ef79).
+                // Keeps the reason storing earlier results failed (e.g. a full disk), which
+                // finalize put into `message` (review of 6b34b20).
+                let reasons = [execution.failure, message?.text].compactMap { $0 }
+                message = .failure(([String(localized: "Albumist konnte den unterbrochenen Vorgang gerade nicht zurücknehmen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn zurücknehmen.")]
+                                    + reasons.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }).joined(separator: "\n\n"))
+            case .undoInterrupted, .resultsNotStored:
+                // Offered on the overview again: the undo that was cut off, or the one that
+                // runs once the plan's results are stored. Run and finalization said why.
+                break
             }
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
-        // What is still open, from the store: nothing, or an undo that was cut off itself.
-        interruptedPlan = try? await store.unfinishedPlans().last
+        // What is still open, from the store: nothing, or the undo itself.
+        await reloadInterruptedPlan()
         await refreshDerived()
     }
 
@@ -1668,10 +2013,11 @@ final class AppModel {
             } else {
                 await finalize(kept)
             }
-            interruptedPlan = nil
+            // Read again, not cleared: another plan still open is offered next (review of 6c6ef79).
+            await reloadInterruptedPlan()
             await refreshDerived()
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
     }
 
@@ -1684,7 +2030,7 @@ final class AppModel {
             // Photos the user took out of an album since then are not added again.
             return retry.respecting(OverrideSet(try await store.overrides()))
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
             return nil
         }
     }
@@ -1707,6 +2053,7 @@ final class AppModel {
             areaLines.append("\(area.rawValue): " + parts.joined(separator: ", "))
         }
         lines.append("main areas " + areaLines.joined(separator: "; ") + "; outside main areas \(progress.outsideMainAreas)")
+        lines.append(statusReasons.line)
         if let report = analysis.lastReport {
             let last = analysis.lastRun.map { iso.string(from: $0) } ?? "?"
             lines.append("analysis last \(last), complete \(report.isComplete), paused \(report.pausedBecause?.rawValue ?? "no"), stages \(report.completedStages.count), content \(report.contentAnalyzed), text \(report.textRecognized), text waiting \(report.textWaitingForOriginal), text seconds \(Int(report.textSeconds)), places pending online \(report.placesPendingOnline), places throttled \(report.placesThrottled), analyzer failing \(report.analyzerUnavailable)")
@@ -1720,6 +2067,7 @@ final class AppModel {
         case .album: scopeText = "album"
         }
         lines.append("analysis scope \(scopeText), photos \(analysisCounts.photos), analysed \(analysisCounts.analyzed), unreadable \(analysisCounts.unreadable), running \(analysis.isRunning), waiting \(analysis.waiting?.rawValue ?? "no"), needs resume \(analysis.needsResume), background task \(ContinuedAnalysis.isActive)")
+        lines.append("image loads \(ImageLoadStats.summary)")
         lines.append("decisions copy \(lastSafetyBackup.map { iso.string(from: $0) } ?? "none"), albums waiting for access \(pendingLibraryRestore != nil)")
         if let store {
             let overrides = (try? await store.overrides().count) ?? -1
@@ -1744,6 +2092,10 @@ final class AppModel {
         // back only what is still Albumist's (audit 2, 1.6).
         guard !undonePlans.contains(executed.id), executed.reverts == nil, let store, claimExecution() else { return }
         defer { releaseExecution() }
+        // Results that still wait (after a full disk) are stored first: the undo goes by
+        // Albumist's records, and an album without one is the user's (review of 6c6ef79). An
+        // earlier undo stored that way may have taken the plan back already.
+        guard await storeWaitingResults(), !undonePlans.contains(executed.id) else { return }
         // What the user changed by hand since counts first: a photo they took out and put back
         // is theirs now and stays.
         guard let current = await reconcileManagedAlbums() else { return }
@@ -1752,13 +2104,16 @@ final class AppModel {
         // Undos of this plan that did not get everything back (plugin review W1): an album one
         // of them brought back gets the photos still missing, never a second album.
         let earlier: [ChangePlan]
-        do { earlier = try await store.reverts(of: executed.id) } catch { message = error.localizedDescription; return }
+        do { earlier = try await store.reverts(of: executed.id) } catch { message = .failure(error.localizedDescription); return }
         // An album another plan made, left with only this plan's photos, goes too (plugin review N5).
         let created = Set(managedAlbums.filter(\.createdBySortly).map(\.albumID))
         let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, createdByAlbumist: created, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
-            message = interruptedPlanFirst
+            message = AppMessage(title: interruptedPlan?.reverts != nil
+                                 ? String(localized: "Erst das unterbrochene Zurücknehmen abschließen")
+                                 : String(localized: "Erst das unterbrochene Anlegen abschließen"),
+                                 text: interruptedPlanFirst)
             return
         }
         // Free albums and suggestions come back in `finalize`, with the undo itself.
@@ -1795,11 +2150,65 @@ final class AppModel {
         return members
     }
 
+    /// The photos the last "Ignorieren" newly ignored, for "Widerrufen" right after it
+    /// (design review D4: ignoring could not be taken back). A new id per action, so the
+    /// note shows again and its timer starts over.
+    struct IgnoreUndo: Identifiable, Equatable {
+        let id = UUID()
+        let assets: [AssetID]
+    }
+
+    var lastIgnored: IgnoreUndo?
+
+    /// "Ignorieren": no confirmation, because it can be taken back right away ("Widerrufen")
+    /// and later in the "Ignoriert" area ("Nicht mehr ignorieren").
     func ignore(_ assets: [AssetID]) {
         Task {
-            for id in assets { try? await store?.addOverride(UserOverride(scope: .asset(id), decision: .ignoreAsset)) }
-            saveSafetyBackup()
-            await refreshDerived()
+            guard let store else { return }
+            do {
+                let added = try await store.ignoreAssets(assets)
+                saveSafetyBackup()
+                await refreshDerived()
+                guard !added.isEmpty else { lastIgnored = nil; return }
+                let undo = IgnoreUndo(assets: added)
+                lastIgnored = undo
+                announceAndExpire(undo)
+            } catch {
+                message = .failure(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Said once by VoiceOver, and the offer ends here, not in the note: a note in a viewer
+    /// that closed within seconds kept it alive, and it came back much later on another
+    /// screen; every reappearance also announced it again (review of the design branch).
+    /// Longer with VoiceOver (time to reach the button), and in UI tests, whose audit of the
+    /// note takes a few seconds itself.
+    private func announceAndExpire(_ undo: IgnoreUndo) {
+        #if canImport(UIKit)
+        let voiceOver = UIAccessibility.isVoiceOverRunning
+        UIAccessibility.post(notification: .announcement, argument: String(localized: "\(undo.assets.count) Fotos ignoriert"))
+        #else
+        let voiceOver = false
+        #endif
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(voiceOver || UITestSupport.isRunning ? 20 : 6))
+            if self?.lastIgnored?.id == undo.id { self?.lastIgnored = nil }
+        }
+    }
+
+    /// "Nicht mehr ignorieren" and "Widerrufen": Albumist counts and suggests these photos again.
+    func unignore(_ assets: [AssetID]) {
+        if let last = lastIgnored, !Set(last.assets).isDisjoint(with: assets) { lastIgnored = nil }
+        Task {
+            guard let store else { return }
+            do {
+                try await store.unignoreAssets(assets)
+                saveSafetyBackup()
+                await refreshDerived()
+            } catch {
+                message = .failure(error.localizedDescription)
+            }
         }
     }
 
@@ -1895,7 +2304,7 @@ final class AppModel {
             try await store?.resetAnalysis(includingDecisions: false)
             await pipeline?.forgetRecentOnlineLookups()
         } catch {
-            message = error.localizedDescription
+            message = .failure(error.localizedDescription)
         }
         snapshot = nil
         SpotlightIndex.clear()
@@ -1921,5 +2330,17 @@ struct RecountState: Codable, Equatable {
         } else {
             UserDefaults.standard.removeObject(forKey: key)
         }
+    }
+}
+
+/// An alert with its own title (design review W15: every message, error or not, came with
+/// the title "Hinweis"). The text says what happened and what the user can do.
+struct AppMessage: Equatable {
+    var title: String
+    var text: String
+
+    /// Something did not work.
+    static func failure(_ text: String) -> AppMessage {
+        AppMessage(title: String(localized: "Das hat nicht geklappt"), text: text)
     }
 }

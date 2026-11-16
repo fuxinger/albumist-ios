@@ -1,0 +1,174 @@
+name: Nightly
+
+# Full run once a night, on things too slow for every push:
+#   - the random-library stress test with many seeds (SORTLY_STRESS_SEEDS, 16 per push),
+#   - the large-library load tests (20,000 / 100,000 photos, journal with 200 albums) on Linux
+#     and macOS,
+#   - a clean build without any cache (catches a problem of the incremental cache in CI within
+#     a day), with the app tests in the simulator.
+# Scheduled workflows only run from the default branch's copy of this file, so this starts once
+# it is on main. It tests the development branch (see "Pick the commit").
+on:
+  schedule:
+    # 01:00 UTC = 02:00 in Berlin in winter (03:00 in summer; cron has no time zones).
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to test (empty = the development branch)
+        type: string
+        default: ''
+      seeds:
+        description: Random libraries for the stress test
+        type: string
+        default: '300'
+
+permissions:
+  contents: read
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+  SORTLY_STRESS_SEEDS: ${{ inputs.seeds || '300' }}
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  pick:
+    name: Pick the commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.pick.outputs.sha }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The repository variable NIGHTLY_REF can point the nightly run somewhere else.
+          WANTED: ${{ inputs.ref || vars.NIGHTLY_REF || 'claude/sortly-app' }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$WANTED" --jq .sha 2>/dev/null) || sha=""
+          if [ -z "$sha" ]; then
+            echo "::notice::$WANTED not found, testing $GITHUB_REF_NAME instead."
+            sha=$GITHUB_SHA
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "### Nightly run of ${WANTED} (${sha:0:7})" >> "$GITHUB_STEP_SUMMARY"
+
+  core-linux:
+    name: Stress and load tests (Linux)
+    needs: pick
+    runs-on: ubuntu-24.04
+    container: swift:6.2-noble
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.pick.outputs.sha }}
+      - name: Install SQLite headers
+        run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev python3 > /dev/null
+      - name: All core tests, stress test with ${{ env.SORTLY_STRESS_SEEDS }} seeds (clean build)
+        run: |
+          set -o pipefail
+          swift test --parallel 2>&1 | tee core.log
+      - name: Load tests
+        # Separately and after the other tests: their time limits assume an otherwise idle machine.
+        run: |
+          set +e
+          SORTLY_LOAD_TEST=1 swift test --skip-build --filter "LoadTests|JournalLoadTests" > load.log 2>&1
+          status=$?
+          grep -E "LOAD_|passed|failed|error" load.log
+          exit $status
+      - name: Job summary
+        if: always()
+        run: |
+          python3 .github/scripts/test_summary.py summary --title "Nightly: core, stress, load (Linux)" \
+            --swift-log core.log --swift-log load.log --load-log load.log >> "$GITHUB_STEP_SUMMARY" || true
+
+  macos:
+    name: Clean build, stress, load and app tests (macOS)
+    needs: pick
+    runs-on: xcode-27
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.pick.outputs.sha }}
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_*.app' | sort -V | tail -1)
+          [ -n "$XCODE" ] || XCODE=$(find /Applications -maxdepth 1 -name 'Xcode*.app' | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd App && xcodegen generate
+      - name: Pick simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py)
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Core tests with ${{ env.SORTLY_STRESS_SEEDS }} stress seeds
+        run: |
+          set -o pipefail
+          mkdir -p build
+          swift test --parallel 2>&1 | tee build/core.log
+      - name: Load tests
+        # Separately and after the other tests: their time limits assume an otherwise idle machine.
+        run: |
+          set +e
+          SORTLY_LOAD_TEST=1 swift test --skip-build --filter "LoadTests|JournalLoadTests" > build/load.log 2>&1
+          status=$?
+          grep -E "LOAD_|passed|failed|error" build/load.log
+          exit $status
+      - name: Build (no cache) and test app
+        run: |
+          set +e
+          cd App
+          xcodebuild test \
+            -project Sortly.xcodeproj \
+            -scheme Sortly \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$RUNNER_TEMP/clean-dd" \
+            -resultBundlePath ../build/TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1
+          status=$?
+          grep -E "error:|Test Suite|Executed|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -2000
+          exit $status
+      - name: Job summary
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results tests --path build/TestResults.xcresult > build/app-tests.json 2>/dev/null || true
+          python3 .github/scripts/test_summary.py summary --title "Nightly: clean build and tests (macOS)" \
+            --swift-log build/core.log --swift-log build/load.log --xcresult-json build/app-tests.json \
+            --load-log build/load.log >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Upload logs
+        if: always() && hashFiles('build-log.txt') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nightly-ios-log
+          path: |
+            build-log.txt
+            build/core.log
+            build/load.log
+            build/TestResults.xcresult
+          retention-days: 7
+
+  # TODO(ui.yml): the UI flow in English and on a second device size (test plan A11, A16).
+  # ui.yml has no `workflow_call` trigger yet (another change is turning it into a parallel
+  # matrix). Once it accepts inputs, add here, without touching ui.yml from this file:
+  #
+  # ui-english:
+  #   needs: pick
+  #   uses: ./.github/workflows/ui.yml
+  #   with: { ref: '${{ needs.pick.outputs.sha }}', language: en, device: 'iPhone 17 Pro' }
+  # ui-second-device:
+  #   needs: pick
+  #   uses: ./.github/workflows/ui.yml
+  #   with: { ref: '${{ needs.pick.outputs.sha }}', language: de, device: 'iPhone 16e' }

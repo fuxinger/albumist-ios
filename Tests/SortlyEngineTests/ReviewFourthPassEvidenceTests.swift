@@ -20,7 +20,9 @@ struct ReviewFourthPassEvidenceTests {
         // Adapted (review of 11ef3e1, decision): no timing rule any more; before the stopped
         // position the run holds, however slow the places pass is.
         #expect(run.isCatchingUp(running: true, at: 3))
-        let widths = run.back(at: 3, step: .places, completed: 10_000, total: 50_000, widths: w) ?? w
+        // Adapted (review of 0305d20): `back` no longer re-spreads the widths.
+        run.back(at: 3, completed: 10_000, total: 50_000)
+        let widths = w
         let real = widths.overall(step: .content, completed: 30_000, total: 50_000)
         let shown = run.shown(running: true, catchingUp: false, overall: real, stopped: nil)
         #expect(abs(shown - floor) < 0.02, "paused at \(Int(floor * 100)) %, back at the same photo: \(Int(shown * 100)) %")
@@ -31,8 +33,9 @@ struct ReviewFourthPassEvidenceTests {
         let w = StepWidths.standard
         let floor = w.overall(step: .content, completed: 30_000, total: 50_000)
         var run = ResumedRun(stage: 4, shown: floor, left: 21_000, photos: 50_000)
-        let r = run.back(at: 1, step: .library, completed: 10_000, total: 50_000, widths: w)
-        let widths = r ?? w
+        // Adapted (review of 0305d20): `back` no longer re-spreads the widths.
+        run.back(at: 1, completed: 10_000, total: 50_000)
+        let widths = w
         let real = widths.overall(step: .content, completed: 30_000, total: 50_000)
         let shown = run.shown(running: true, catchingUp: false, overall: real, stopped: nil)
         #expect(abs(shown - floor) < 0.02, "paused at \(Int(floor * 100)) %, back at the same photo: \(Int(shown * 100)) %")

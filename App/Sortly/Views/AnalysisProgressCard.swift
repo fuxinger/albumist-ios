@@ -162,7 +162,7 @@ struct AnalysisProgressCard: View {
                 count(position)
             }
             statusLines
-            AnalysisBar(widths: model.analysis.barWidths, grey: state.isGrey, working: state.isWorking,
+            AnalysisBar(widths: model.analysis.widths, grey: state.isGrey, working: state.isWorking,
                         runningStep: position?.step)
             Text(stepLine)
                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
@@ -609,6 +609,9 @@ struct AnalysisDetailsSheet: View {
     private enum Standing { case done, running, later }
 
     private func standing(_ step: AnalysisStep) -> Standing {
+        // After a complete run every row is done, also with the position where a foreground
+        // run stood before (review of 0305d20, 5).
+        if model.analysis.isComplete { return .done }
         guard let current = model.analysis.step ?? model.analysis.stoppedAt?.step else {
             return model.analysis.isComplete ? .done : .later
         }
@@ -618,7 +621,7 @@ struct AnalysisDetailsSheet: View {
 
     private func row(_ step: AnalysisStep) -> some View {
         let standing = standing(step)
-        let fraction = model.analysis.barWidths.fills(for: model.analysisBar)[step.rawValue]
+        let fraction = model.analysis.widths.fills(for: model.analysisBar)[step.rawValue]
         return HStack(alignment: .top, spacing: 14) {
             Group {
                 switch standing {

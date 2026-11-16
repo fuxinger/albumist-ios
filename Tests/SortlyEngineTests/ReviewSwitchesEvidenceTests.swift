@@ -24,7 +24,7 @@ struct ReviewSwitchesEvidenceTests {
         }
         let total = 50_246
         let held = 0.64
-        var widths = StepWidths.standard
+        let widths = StepWidths.standard
         let oneShot = try #require(widths.continuing(held: held, step: .content, completed: 0, total: total))
         var resumed = ResumedRun(stage: 4, shown: held)
         var glide = BarGlide()
@@ -49,10 +49,15 @@ struct ReviewSwitchesEvidenceTests {
                 reported = completed
                 // receive() since the fix: `ResumedRun.back`, once, from the marker's value
                 // (the earlier run stopped at 4,000 of 10,000 photos; 40,246 came in since).
-                if let c = resumed.back(at: 4, step: .content, completed: completed, total: total, widths: widths) {
-                    widths = c
-                }
-                let real = widths.overall(step: .content, completed: completed, total: total)
+                // Adapted (review of 0305d20): no re-spread; the value moves by the time share
+                // (`spend`, with the measured rate as the best estimate) or the real value.
+                resumed.back(at: 4, completed: completed, total: total)
+                // The time left: the photos left at the measured rate, and the text and
+                // suggestion steps after it (their share of the bar against the image step's).
+                let later = Double(total) / rate * (widths.width(of: .text) + widths.width(of: .proposals)) / widths.width(of: .content)
+                resumed.spend(active: t, remaining: Double(total - completed) / rate + later)
+                let real = resumed.shown(running: true, catchingUp: false,
+                                         overall: widths.overall(step: .content, completed: completed, total: total), stopped: nil)
                 glide.update(real: real, at: Self.at(t), step: .content, widths: widths, itemsPerSecond: rate, total: total)
             }
             bar = glide.value(at: Self.at(t), gliding: true)
@@ -63,7 +68,7 @@ struct ReviewSwitchesEvidenceTests {
         // 10,000 of 50,246 photos: the honest gain is about 7 points. Allow 10 % more.
         #expect(gainedShown <= gainedHonest * 1.10,
                 "bar \(bar) vs honest \(honest): moved \(gainedShown / gainedHonest)x as fast as the work")
-        // The segments of the bar are meant to stay fixed for the analysis after the one rescale.
-        #expect(widths == oneShot, "widths re-spread on later reports")
+        // The segments of the bar stay fixed for the analysis (adapted: no rescale at all now).
+        #expect(widths == .standard, "widths re-spread on reports")
     }
 }

@@ -15,8 +15,9 @@ struct ReviewSecondPassEvidenceTests {
         let w = StepWidths.standard
         let floor = w.overall(step: .content, completed: 30_000, total: 50_000)
         var run = ResumedRun(stage: 4, shown: floor)
-        let continued = run.back(at: 4, step: .content, completed: 25_000, total: 45_000, widths: continued0(w))
-        let real = (continued ?? w).overall(step: .content, completed: 25_000, total: 45_000)
+        // Adapted (review of 0305d20): `back` no longer re-spreads the widths.
+        run.back(at: 4, completed: 25_000, total: 45_000)
+        let real = continued0(w).overall(step: .content, completed: 25_000, total: 45_000)
         let shown = run.shown(running: true, catchingUp: false, overall: real, stopped: nil)
         #expect(shown >= floor - 1e-9, "shown \(shown) after \(floor)")
     }
@@ -28,8 +29,9 @@ struct ReviewSecondPassEvidenceTests {
         let w = StepWidths.standard
         let floor = w.overall(step: .content, completed: 30_000, total: 50_000)
         var run = ResumedRun(stage: 4, shown: floor)
-        let continued = run.back(at: 4, step: .content, completed: 0, total: 50_000, widths: w)
-        let real = (continued ?? w).overall(step: .content, completed: 0, total: 50_000)
+        // Adapted (review of 0305d20): `back` no longer re-spreads the widths.
+        run.back(at: 4, completed: 0, total: 50_000)
+        let real = w.overall(step: .content, completed: 0, total: 50_000)
         let shown = run.shown(running: true, catchingUp: false, overall: real, stopped: nil)
         #expect(shown >= floor - 1e-9, "shown \(shown) after \(floor)")
     }

@@ -433,6 +433,22 @@ public struct ProgressEstimator: Sendable {
         return step + .seconds(later)
     }
 
+    /// Time left for the whole analysis by the best estimate there is now, also before it is
+    /// trustworthy: the running step at its measured speed (else the usual time per item), the
+    /// steps after it at the usual times, scaled by this device's speed as far as measured.
+    /// For the time share of a run that goes on (`ResumedRun.spend`), never shown as a time.
+    /// `nil` before the workload is known.
+    public var estimatedRemaining: Duration? {
+        guard let r = running, let workload else { return nil }
+        let factor = deviceFactor
+        let left = Double(max(0, r.total - r.completed))
+        let current = rate.map { left / $0 } ?? left * r.step.secondsPerItem * (r.step.measuresDevice ? factor : 1)
+        let later = AnalysisStep.allCases.filter { $0 > r.step }.reduce(0.0) { sum, s in
+            sum + (Double(workload.itemsLeft(s)) * s.secondsPerItem + s.fixedSeconds) * (s.measuresDevice ? factor : 1)
+        }
+        return .seconds(current + later)
+    }
+
     /// The finish time to show now, or `nil` while there is none to trust.
     public mutating func finish(at now: Instant, wall: Date) -> FinishEstimate? {
         guard let r = running, r.lastAt != nil else { return nil }
@@ -559,24 +575,22 @@ public enum AnalysisPercent {
 // MARK: A run that goes on
 
 /// A run that goes on from where an earlier one stopped (the marker kept across launches):
-/// what the card shows until it is back where it stopped, and, once, how the rest of the work
-/// is spread over the rest of the bar. Pure, so the Linux tests cover what `AppModel` does.
+/// what the card shows. Pure, so the Linux tests cover what `AppModel` does.
 ///
-/// Two ways a run goes on (reviews of 83db832 and 11ef3e1):
-/// - **Holding**: until the run's real position passes the position it stopped at (the same
-///   stage at the same count or further, or a later stage), the value it showed then (the
-///   floor) is held. The count and the step line move meanwhile, so nothing stands still.
-///   Once past, the rest of the work from there is spread over the rest of the bar from the
-///   floor (`back`), once: the work done before the stop is never counted again as new
-///   progress, and the number never goes back.
+/// Two ways a run goes on (reviews of 83db832, 11ef3e1 and 0305d20):
+/// - **From the floor**: the value never goes below what the card showed when the run before
+///   stopped (the floor). From there it moves with the time the run works, as a share of the
+///   time left by the best estimate (`spend`), so the number and the bar move also while the
+///   run re-counts what was done before or works on new photos before the step it stopped
+///   in; the real value takes over once it is ahead. Nothing is re-spread, so the work done
+///   before the stop is never counted again and no segment of the bar goes back.
 /// - **A phase of its own**: the work left is much larger than when it stopped
 ///   (`isMuchMore`: more than 1.5 times and at least 500 photos more, as the workload counts
 ///   them, in the run's part of the library and only what the analysis looks at). The floor
 ///   does not hold: the run shows its own honest value from its own start, under a label that
-///   says why ("Neue Fotos werden analysiert", "Analyse nach Update"). Starting the labelled
-///   phase is not a step back of the same number; within the phase the number never goes
-///   back. The library read may only show the label early; the restart is decided with the
-///   workload.
+///   says why ("Neue Fotos werden analysiert", "Analyse nach Update"). The label and the
+///   phase's own number come together, with the workload; within the phase the number never
+///   goes back.
 ///
 /// Whether the floor belongs to this database at all is decided before (`markerApplies`).
 public struct ResumedRun: Sendable, Equatable {
@@ -604,33 +618,56 @@ public struct ResumedRun: Sendable, Equatable {
     /// Photos still to look at and screenshots still to read when it stopped
     /// (`AnalysisWorkload.heavyLeft`); `nil` in older markers and before the workload was known.
     public let leftThen: Int?
-    /// Photos in the library when it stopped (the library read's total).
+    /// Photos in the library when it stopped (the library read's total; kept for the logs).
     public let photosThen: Int?
+    /// The usual time left when it stopped (`ProgressEstimator.estimatedRemaining`), for the
+    /// time share before this run knows its own workload; `nil` in older markers.
+    public let secondsThen: Double?
+
     /// The app's analysis changed since (`AnalysisPipeline.analysisVersion`).
     public let updated: Bool
-    /// The label of the phase the stopped run was in.
-    private let carried: NewWork?
     /// The label shown (the phase's, or one shown early by the library read).
     public private(set) var newWork: NewWork?
     /// This run started a phase of its own: the floor no longer holds.
     public private(set) var ownStart = false
-    /// The run passed the position it stopped at (decided once).
+    /// The run passed the position it stopped at (decided once): from here on the marker
+    /// keeps this run's own position, and the card no longer says "Macht da weiter".
     public private(set) var isBack = false
-    /// Only where widths cannot carry it (the first step, which has nothing before it): the
-    /// real value `base` when the run got back is drawn at the floor, the rest of the real way
-    /// (base…1) over the rest of the bar (floor…1).
-    public private(set) var base: Double?
+    /// The value moved on by the time this run has worked (`spend`), never lower than before.
+    public private(set) var spread: Double
+    /// The time worked at the last `spend`.
+    private var spent = 0.0
 
     public init(stage: Int, completed: Int? = nil, shown: Double, left: Int? = nil, photos: Int? = nil,
-                updated: Bool = false, newWork: NewWork? = nil) {
+                seconds: Double? = nil, updated: Bool = false, newWork: NewWork? = nil) {
         self.stage = stage
         self.stoppedCompleted = completed
         self.floor = shown.isFinite ? min(1, max(0, shown)) : 0
         self.leftThen = left
         self.photosThen = photos
+        self.secondsThen = seconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        self.spread = self.floor
         self.updated = updated
-        self.carried = newWork
         self.newWork = newWork
+    }
+
+    /// The run has worked `active` seconds since it went on, and `remaining` seconds are left
+    /// by the best estimate now (`ProgressEstimator.estimatedRemaining`; before the workload is
+    /// known, the time left when the run before stopped). The value moves from the floor
+    /// towards 99 % by the share of the time left that was worked since the last call:
+    /// gap x worked / (worked + remaining). With a right estimate it reaches 99 % when the
+    /// work is done, evenly; a larger estimate only slows it down, it never stops nor goes
+    /// back. So the number and the bar move while the run re-counts what was done or works
+    /// on new photos before the step it stopped in (review of 0305d20: 58 s at the floor with
+    /// 450 new photos; deleted photos held it until the count was back). Re-counting is
+    /// quick next to the work left, so back where it stopped the value is barely above the
+    /// floor (no 56 % -> 78 %).
+    public mutating func spend(active: Double, remaining: Double?) {
+        guard !ownStart, active.isFinite, active > spent else { return }
+        let worked = active - spent
+        spent = active
+        guard let left = remaining ?? secondsThen, left.isFinite else { return }
+        spread += (AnalysisPercent.cap - spread) * worked / (worked + max(0, left))
     }
 
     /// A marker belongs to the database it was written for. Markers of older versions carry no
@@ -664,90 +701,45 @@ public struct ResumedRun: Sendable, Equatable {
         holds(running: running) && (current ?? 0) < stage
     }
 
-    /// The library read says how many photos there are. With many more than when the run
-    /// stopped, the label "Neue Fotos werden analysiert" is shown early (reading 50,000 new
-    /// photos takes minutes, stress run 43833158673); the value is still held. Whether a phase
-    /// of its own starts is decided with the workload, which counts only the run's part of the
-    /// library and only what the analysis looks at (review of 11ef3e1: "Nur 2026" with 600
-    /// photos from other years). `true`: the label is shown now.
-    public mutating func library(photos: Int) -> Bool {
-        guard !ownStart, newWork == nil, let leftThen, let photosThen, photos > photosThen else { return false }
-        guard Self.isMuchMore(leftThen + (photos - photosThen), than: leftThen) else { return false }
-        newWork = .newPhotos
-        return true
-    }
-
     /// The workload (said once, after the trips step): with much more work left than when the
     /// run stopped, a phase of its own starts, "Analyse nach Update" when the app's analysis
-    /// changed since, otherwise "Neue Fotos werden analysiert". Otherwise a label shown early
-    /// by the library read goes again. `true`: the phase starts now.
+    /// changed since, otherwise "Neue Fotos werden analysiert". The label appears only now,
+    /// together with the phase's own number (review of 0305d20: a label shown early by the
+    /// library read was followed by the number falling under it). `true`: the phase starts now.
     public mutating func workload(_ workload: AnalysisWorkload) -> Bool {
         guard !ownStart else { return false }
-        guard let leftThen, Self.isMuchMore(workload.contentLeft + workload.textLeft, than: leftThen) else {
-            newWork = carried
-            return false
-        }
+        guard let leftThen, Self.isMuchMore(workload.contentLeft + workload.textLeft, than: leftThen) else { return false }
         newWork = updated ? .afterUpdate : .newPhotos
         ownStart = true
-        base = nil
         return true
     }
 
-    /// Every report of the run until it is back: the first one at or past the stopped position
-    /// (`hasPassed`), and only that one, with the real value below the floor, gives widths that
-    /// spread the rest of the work from there over the rest of the bar from the floor
-    /// (`StepWidths.continuing`), so the bar keeps the honest speed of the work. In the first
-    /// step, which has no earlier steps to shrink, `base` does the same on the value. Before
-    /// the stopped position, and in a phase of its own, nothing.
-    public mutating func back(at current: Int, step: AnalysisStep, completed: Int, total: Int, widths: StepWidths) -> StepWidths? {
-        guard !isBack, !ownStart, hasPassed(at: current, completed: completed, total: total) else { return nil }
+    /// Every report of the run until it is back: `true` for the first one at or past the
+    /// stopped position (`hasPassed`), once. Nothing is re-spread (review of 0305d20): the
+    /// time share already moves the value, and the real value takes over once it is ahead,
+    /// so the work done before the stop is never counted again and no segment goes back.
+    @discardableResult
+    public mutating func back(at current: Int, completed: Int, total: Int) -> Bool {
+        guard !isBack, !ownStart, hasPassed(at: current, completed: completed, total: total) else { return false }
         isBack = true
-        let real = widths.overall(step: step, completed: completed, total: total)
-        guard real < floor - 1e-9 else { return nil }
-        if let continued = widths.continuing(held: floor, step: step, completed: completed, total: total) {
-            return continued
-        }
-        base = real
-        return nil
-    }
-
-    /// The real value as the card draws it after `back`.
-    func drawn(_ real: Double) -> Double {
-        guard let base, base < 1 else { return real }
-        return min(1, max(floor, floor + (real - base) * (1 - floor) / (1 - base)))
-    }
-
-    /// The widths to draw the segments and to cap the glide with. Only with `base` (back in
-    /// the first step) do they differ: the first segment reaches from 0 to where the drawn
-    /// value leaves it, the others are drawn where the drawn value passes them. So the running
-    /// segment holds the drawn value and the glide's cap (the running step's end) is not
-    /// below it (review of 83db832, minor 3).
-    public func drawnWidths(_ widths: StepWidths) -> StepWidths {
-        guard let base, base < 1 else { return widths }
-        let k = (1 - floor) / (1 - base)
-        let shares = AnalysisStep.allCases.map { step in
-            step == .library
-                ? max(1e-6, floor + (widths.end(of: .library) - base) * k)
-                : widths.width(of: step) * k
-        }
-        return StepWidths(shares: shares)
+        return true
     }
 
     /// The value the card shows (never 100 %: `AnalysisPercent`). `stopped`: where the run
-    /// ended, when it is not running. Held at the floor until the run is back; a run paused
-    /// meanwhile keeps the floor (the paused card said "3 %" after "64 %", while the bar
-    /// stayed at 64 %). In a phase of its own the real value. (`catchingUp` is no longer
-    /// needed: holding follows from the run itself.)
+    /// ended, when it is not running. Never below the floor moved on by the time share
+    /// (`spread`); the real value once it is ahead. A run paused while catching up keeps its
+    /// value (the paused card said "3 %" after "64 %", while the bar stayed at 64 %). In a
+    /// phase of its own the real value. (`catchingUp` is no longer needed.)
     public func shown(running: Bool, catchingUp _: Bool, overall: Double, stopped: Double?) -> Double {
         let value: Double
         if ownStart {
             value = running ? overall : (stopped ?? overall)
         } else if running {
-            value = max(floor, drawn(overall))
+            value = max(spread, overall)
         } else if let stopped {
-            value = max(drawn(stopped), floor)
+            value = max(stopped, spread)
         } else {
-            value = floor
+            value = spread
         }
         return AnalysisPercent.value(value, isComplete: false)
     }
@@ -763,6 +755,12 @@ public struct LastRunOutcome: Sendable, Equatable {
     public mutating func started() { completed = false }
     /// A run ended with its report (`nil`: it threw or was cancelled).
     public mutating func ended(with report: AnalysisPipeline.Report?) { completed = report?.isComplete == true }
+    /// A background refinement after the analysis (towns, new photos) ended: it can make the
+    /// analysis complete, but one cut off by iOS does not make a complete analysis read 99 %
+    /// (review of 0305d20, 5): the work done before is still done.
+    public mutating func refined(with report: AnalysisPipeline.Report?) {
+        if report?.isComplete == true { completed = true }
+    }
     public func isComplete(running: Bool) -> Bool { !running && completed }
 }
 

@@ -680,13 +680,14 @@ final class RunLog: @unchecked Sendable {
 /// The app's `AnalysisMarker.Point`, as the simulator keeps it between runs.
 struct SimMarker {
     var stage: Int
-    var completed: Int
+    var completed: Int?
     var overall: Double
     var widths: StepWidths?
     var left: Int?
     var photos: Int?
     var version: String
     var newWork: ResumedRun.NewWork?
+    var secondsLeft: Double?
 }
 
 // MARK: - Harness
@@ -721,6 +722,8 @@ final class Sim: @unchecked Sendable {
     private(set) var passes: [(run: String, shown: Double, floor: Double, real: Double)] = []
     /// Phases of their own that runs started, with their label.
     private(set) var phases: [(run: String, cause: ResumedRun.NewWork)] = []
+    /// Every value the card's number showed (run, time, value).
+    private(set) var shownValues: [(run: String, t: Duration, value: Double)] = []
     /// The bar the card drew last, as a value and as the six segments' fills.
     private var lastShownBar: Double = 0
     private var lastFills: [Double] = []
@@ -1076,8 +1079,16 @@ final class Sim: @unchecked Sendable {
         // much more work starts a phase of its own.
         var resumed = resumeFrom.map {
             ResumedRun(stage: $0.stage, completed: $0.completed, shown: $0.overall, left: $0.left, photos: $0.photos,
-                       updated: $0.version != AnalysisPipeline.analysisVersion, newWork: $0.newWork)
+                       seconds: $0.secondsLeft, updated: $0.version != AnalysisPipeline.analysisVersion, newWork: $0.newWork)
         }
+        // As AppModel.tick: the time the run worked (not waiting, paused or held), for the time
+        // share of a run that goes on (`ResumedRun.spend`).
+        var active = 0.0
+        var lastT = run.start
+        // What the card's title says (AnalysisProgressCard.title): a phase's label, "Macht da
+        // weiter", or the step. The number may start again only together with a new title.
+        var title = ""
+        var phaseStartedNow = false
         var workload: AnalysisWorkload?
         var libraryPhotos: Int?
         var glide = BarGlide()
@@ -1094,6 +1105,7 @@ final class Sim: @unchecked Sendable {
         // What the card shows (rule: nothing stands still for more than 10 s while work goes
         // on): the count or the step's name, the finish time, the bar, Apple's wait spinner.
         var lastText: String?
+        var lastPercent: Int?
         var lastFinishShown: FinishEstimate?
         var barAtChange = lastShownBar
         var shown: [(Duration, FinishEstimate)] = []
@@ -1102,6 +1114,9 @@ final class Sim: @unchecked Sendable {
             switch event.kind {
             case .progress(let p):
                 let s = AnalysisStep(p.stage)
+                if !waiting, !paused { active += (event.t - lastT).seconds }
+                lastT = event.t
+                phaseStartedNow = false
                 if let wl = p.workload {
                     estimator.setWorkload(wl)
                     workload = wl
@@ -1116,10 +1131,9 @@ final class Sim: @unchecked Sendable {
                         w = StepWidths(workload: wl)
                         widthsFixed = true
                         glide.reset()
-                        // A labelled phase starts its own number: not a step back of the same one.
-                        lastShownBar = 0
-                        lastFills = []
-                        lastShown = 0
+                        // A labelled phase starts its own number together with its own title
+                        // (checked below with invariant 3).
+                        phaseStartedNow = true
                         phases.append((run.label, cause))
                     } else if !widthsFixed {
                         // As AppModel.tick: new widths, continued from the bar drawn so far
@@ -1139,27 +1153,25 @@ final class Sim: @unchecked Sendable {
                 if !paused { estimator.record(step: s, completed: p.completed, total: p.total, at: instant(event.t), appleWait: p.waitLeft != nil) }
                 // As AppModel.receive: the library read may show the label early; the first
                 // report past the stopped position spreads the rest from there, once.
-                if p.stage == .inventory, p.total > 0 {
-                    libraryPhotos = p.total
-                    if var r = resumed { _ = r.library(photos: p.total); resumed = r }
+                if p.stage == .inventory, p.total > 0 { libraryPhotos = p.total }
+                if var r = resumed {
+                    r.spend(active: active, remaining: estimator.estimatedRemaining?.seconds)
+                    resumed = r
                 }
                 if var r = resumed {
                     let wasBack = r.isBack
-                    let before = w.overall(step: s, completed: p.completed, total: p.total)
-                    if let c = r.back(at: p.stage.number, step: s, completed: p.completed, total: p.total, widths: w) {
-                        w = c
-                        widthsFixed = true
-                    }
+                    let before = r.shown(running: true, catchingUp: false, overall: w.overall(step: s, completed: p.completed, total: p.total), stopped: nil)
+                    r.back(at: p.stage.number, completed: p.completed, total: p.total)
                     resumed = r
                     if !wasBack, r.isBack {
                         let now = r.shown(running: true, catchingUp: false, overall: w.overall(step: s, completed: p.completed, total: p.total), stopped: nil)
                         passes.append((run.label, now, r.floor, before))
-                        // 10. Back where it stopped, the card reads the value it showed then (or
-                        //     the real value when that is higher): work done before the stop is
-                        //     never counted again as new progress (review of 11ef3e1).
-                        let expected = AnalysisPercent.value(max(r.floor, before), isComplete: false)
-                        if abs(now - expected) > 0.005 {
-                            fail(run, 10, "back at \(p.stage) \(p.completed)/\(p.total): shows \(pct(now)), held \(pct(r.floor)), real \(pct(before))", at: event.t)
+                        // 10. Back where it stopped, going on from there adds nothing to the
+                        //     value: the work done before the stop is never counted again; the
+                        //     value is above the held one only by the time worked to get here
+                        //     (review of 11ef3e1 and 0305d20).
+                        if now > before + 0.005 {
+                            fail(run, 10, "back at \(p.stage) \(p.completed)/\(p.total): shows \(pct(now)) after \(pct(before)), held \(pct(r.floor))", at: event.t)
                         }
                     }
                 }
@@ -1168,22 +1180,41 @@ final class Sim: @unchecked Sendable {
                 let overall = w.overall(step: s, completed: p.completed, total: p.total)
                 let real = resumed?.shown(running: true, catchingUp: false, overall: overall, stopped: nil)
                     ?? AnalysisPercent.value(overall, isComplete: false)
-                // 3. The number never goes back within a phase, also over Pause and restarts.
-                if real + 1e-9 < lastShown {
-                    fail(run, 3, "number shows \(pct(real)) after \(pct(lastShown)) (\(p.stage) \(p.completed)/\(p.total))", at: event.t)
+                // 3. The number never goes back, also over Pause and restarts; only a phase of
+                //    its own starts it again, and only together with a new title (review of
+                //    0305d20: a label shown early, then the number fell under it).
+                let newTitle: String
+                if let label = resumed?.newWork { newTitle = "\(label)" }
+                else if resumed?.isCatchingUp(running: true, at: p.stage.number) == true { newTitle = "catching up" }
+                else { newTitle = "\(s)" }
+                if phaseStartedNow {
+                    if newTitle == title { fail(run, 3, "a phase started under the title it already had (\(title))", at: event.t) }
+                    lastShown = real
+                    lastShownBar = 0
+                    lastFills = []
+                    glide.reset()
+                } else if real + 1e-9 < lastShown {
+                    fail(run, 3, "number shows \(pct(real)) after \(pct(lastShown)) under \(newTitle) (\(p.stage) \(p.completed)/\(p.total))", at: event.t)
                 }
+                title = newTitle
                 lastShown = max(lastShown, real)
+                shownValues.append((run.label, event.t, real))
                 // As AppModel.receive: the marker moves on only once the value is not held.
-                if !(resumed?.holds(running: true) ?? false) {
+                // As AppModel.receive: before the run is back, the marker keeps the stopped
+                // position with the value shown now.
+                do {
+                    let held = (resumed?.holds(running: true) ?? false) ? resumeFrom : nil
                     let carried = workload == nil ? resumeFrom : nil
                     marker = SimMarker(
-                        stage: p.stage.number, completed: p.completed, overall: real, widths: widthsFixed ? w : nil,
+                        stage: held?.stage ?? p.stage.number, completed: held != nil ? held?.completed : p.completed,
+                        overall: real, widths: widthsFixed ? w : nil,
                         left: workload.map { $0.heavyLeft(at: s, completed: p.completed, total: p.total) } ?? carried?.left,
                         photos: carried?.photos ?? libraryPhotos,
                         version: carried?.version ?? AnalysisPipeline.analysisVersion,
-                        newWork: resumed?.newWork)
+                        newWork: resumed?.newWork,
+                        secondsLeft: estimator.estimatedRemaining?.seconds ?? carried?.secondsLeft)
                 }
-                let barWidths = resumed?.drawnWidths(w) ?? w
+                let barWidths = w
                 glide.update(real: real, at: instant(event.t), step: s, widths: barWidths, itemsPerSecond: estimator.rate, total: p.total)
                 let bar = glide.value(at: instant(event.t), gliding: !waiting && !paused)
                 if bar > AnalysisPercent.cap + 1e-9 {
@@ -1213,8 +1244,11 @@ final class Sim: @unchecked Sendable {
                 let finish = estimator.finish(at: instant(event.t), wall: wall(event.t))
                 let display = finish  // already rounded to what the card says
                 // About 0.7 pt on a 340 pt wide bar.
+                // 8. The number or the bar moves (review of 0305d20: a moving count alone is not
+                //    enough); Apple's wait shows its own spinner.
                 let barMoved = bar - barAtChange >= 0.002
-                if text != lastText || display != lastFinishShown || barMoved || p.waitLeft != nil || waiting || paused {
+                let percent = Int((real * 100).rounded())
+                if percent != lastPercent || barMoved || p.waitLeft != nil || waiting || paused {
                     if !waiting, !paused, event.t - lastChange > .seconds(10) {
                         fail(run, 8, "card stood still for \(String(format: "%.1f", (event.t - lastChange).seconds)) s while the run worked (\(p.stage) \(p.completed)/\(p.total))", at: lastChange)
                     }
@@ -1222,6 +1256,7 @@ final class Sim: @unchecked Sendable {
                     barAtChange = bar
                 }
                 lastText = text
+                lastPercent = percent
                 lastFinishShown = display
                 if let finish {
                     // Review I4: before an image or text step was measured, the time would
@@ -1245,6 +1280,7 @@ final class Sim: @unchecked Sendable {
             case .suspended(let d):
                 // Nothing on screen meanwhile; the estimator sees only the gap (S4).
                 lastChange = event.t + d
+                lastT = event.t + d
                 suspendedUntil = event.t + d
             case .work:
                 break

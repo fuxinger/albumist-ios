@@ -29,6 +29,9 @@ enum AnalysisMarker {
         /// it is past this position (review of 11ef3e1). `nil` in markers of older versions.
         var completed: Int? = nil
         var total: Int? = nil
+        /// The usual time left then (`ProgressEstimator.estimatedRemaining`): a run that goes
+        /// on moves from the value by its time share before it knows its own workload.
+        var secondsLeft: Double? = nil
     }
 
     private static let unfinishedKey = "analysis.unfinished"

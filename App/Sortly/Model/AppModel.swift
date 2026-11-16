@@ -91,8 +91,6 @@ final class AppModel {
         /// The label of a phase of its own ("Neue Fotos werden analysiert", "Analyse nach
         /// Update"): much more work than when the run it goes on from stopped (`ResumedRun`).
         var newWork: ResumedRun.NewWork? { resumed?.newWork }
-        /// The widths the segments are drawn with and the glide is capped by (`ResumedRun.drawnWidths`).
-        var barWidths: StepWidths { resumed?.drawnWidths(widths) ?? widths }
         /// The bar's value: never below where the interrupted run had got to, unless a phase
         /// of its own started (`ResumedRun`). A run that ended shows where it stopped (the
         /// paused card said "0 %" or the value the run started from, stress run 43833158673).
@@ -185,6 +183,9 @@ final class AppModel {
     @ObservationIgnored private var lastStepRemainingCheck: ContinuousClock.Instant?
     /// The widths came from a workload (this analysis), not the standard ones.
     @ObservationIgnored private var widthsFixed = false
+    /// Seconds a run that goes on has worked (not waiting, not pausing, not held in the
+    /// background): its time share moves the value from the floor (`ResumedRun.spend`).
+    @ObservationIgnored private var resumedActive = 0.0
     /// When the overview last looked for the early suggestions without finding them.
     /// `refreshDerived` calls that overlap: only the newest assigns its result.
     @ObservationIgnored private var derivedCalls = LatestCall()
@@ -776,12 +777,13 @@ final class AppModel {
         analysis.resumeFrom = AnalysisMarker.unfinished
         analysis.resumed = analysis.resumeFrom.map {
             ResumedRun(stage: $0.stage, completed: $0.completed, shown: $0.overall, left: $0.left, photos: $0.photos,
-                       updated: $0.version.map { $0 != AnalysisPipeline.analysisVersion } ?? false,
+                       seconds: $0.secondsLeft, updated: $0.version.map { $0 != AnalysisPipeline.analysisVersion } ?? false,
                        newWork: $0.newWork)
         }
         analysis.workload = nil
         analysis.libraryPhotos = nil
         analysis.outcome.started()
+        resumedActive = 0
         analysis.mapPass = nil
         HeatLog.reset()
         analysis.kind = analysis.resumeFrom != nil ? .resume : (AnalysisMarker.completedOnce ? .check : .first)
@@ -945,38 +947,37 @@ final class AppModel {
         }
         if progress.stage == .inventory, progress.total > 0 { analysis.libraryPhotos = progress.total }
         // A run that goes on (`ResumedRun`, reviews of 83db832 and 11ef3e1):
-        // - the value is held until the run passes the position the run before stopped at;
-        //   the count and the step line move meanwhile;
-        // - once past, the rest of the work from there is spread over the rest of the bar
-        //   from the held value, once, so work done before the stop is never counted again;
-        // - many more photos in the library read show the label "Neue Fotos werden analysiert"
-        //   early; whether a phase of its own starts is decided with the workload (tick).
+        // - the value never goes below the floor and moves with the time the run works
+        //   (`ResumedRun.spend`, tick); the real value takes over once it is ahead;
+        // - until the run passes the position the run before stopped at, the marker keeps
+        //   that position and the card says "Macht da weiter" before that step;
+        // - much more work starts a phase of its own with its label, with the workload (tick).
         if var resumed = analysis.resumed {
-            if progress.stage == .inventory, progress.total > 0 { _ = resumed.library(photos: progress.total) }
-            if let continued = resumed.back(at: progress.stage.number, step: step, completed: progress.completed,
-                                            total: progress.total, widths: analysis.widths) {
-                analysis.widths = continued
-                widthsFixed = true
-            }
+            resumed.back(at: progress.stage.number, completed: progress.completed, total: progress.total)
             analysis.resumed = resumed
         }
         // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`), with
-        // the position and the work left then. While the value is held, the marker of the run
-        // before stays (its position and value are what this run is holding to). Before this
-        // run's workload is known, the work left and the library of the run before are kept.
-        if !analysis.isHolding {
+        // the value shown, the position and the work left then. Before this run's workload is
+        // known, the work left and the library of the run before are kept.
+        // Before the run is back where the run before stopped, the marker keeps that position
+        // (the furthest the analysis got) with the value shown now, so a run cut off meanwhile
+        // goes on from here without counting work done before the stop again.
+        do {
+            let held = analysis.isHolding ? analysis.resumeFrom : nil
             let carried = analysis.workload == nil ? analysis.resumeFrom : nil
             AnalysisMarker.unfinished = .init(
-                stage: progress.stage.number, overall: analysis.shownOverall,
+                stage: held?.stage ?? progress.stage.number, overall: analysis.shownOverall,
                 widths: widthsFixed ? analysis.widths : nil, database: databaseID,
                 left: analysis.workload.map { $0.heavyLeft(at: step, completed: progress.completed, total: progress.total) }
                     ?? carried?.left,
                 photos: carried?.photos ?? analysis.libraryPhotos,
                 version: carried?.version ?? AnalysisPipeline.analysisVersion,
                 newWork: analysis.newWork,
-                completed: progress.completed, total: progress.total)
+                completed: held != nil ? held?.completed : progress.completed,
+                total: held != nil ? held?.total : progress.total,
+                secondsLeft: estimator.estimatedRemaining.map { Double($0.components.seconds) } ?? carried?.secondsLeft)
         }
-        glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.barWidths,
+        glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
                      itemsPerSecond: estimator.rate, total: progress.total)
         keepRunningInBackgroundIfLong()
     }
@@ -1037,6 +1038,7 @@ final class AppModel {
         guard run == analysisGeneration, analysis.isRunning else { return }
         let now = ContinuousClock.now
         let taken = progressMailbox.take()
+        let previousTick = lastTickClock?.0
         lastTickClock = (now, Date())
         if let workload = taken.workload {
             estimator.setWorkload(workload)
@@ -1054,7 +1056,7 @@ final class AppModel {
                 widthsFixed = true
                 glide.reset()
                 if let step = analysis.step {
-                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.barWidths,
+                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
                                  itemsPerSecond: nil, total: analysis.total)
                 }
             } else if !widthsFixed {
@@ -1078,7 +1080,7 @@ final class AppModel {
                 widthsFixed = true
                 glide.reset(keeping: analysisBar)
                 if let step = analysis.step {
-                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.barWidths,
+                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
                                  itemsPerSecond: nil, total: analysis.total)
                 }
             }
@@ -1109,8 +1111,29 @@ final class AppModel {
         if analysis.stage != .content, !analysisRecent.isEmpty { analysisRecent = [] }
         // No time while it waits, is paused, or is held in the background (S4).
         let background = ContinuedAnalysis.status
-        if analysis.waiting != nil || analysis.pausing || (!isOnScreen && background != .running) {
+        let idle = analysis.waiting != nil || analysis.pausing || (!isOnScreen && background != .running)
+        if idle {
             estimator.idle()
+        }
+        // A run that goes on: the value moves from the floor with the time it works, as a
+        // share of the time left by the best estimate now (`ResumedRun.spend`, review of
+        // 0305d20: nothing stands still, neither the number nor the bar).
+        if var resumed = analysis.resumed, !resumed.ownStart, analysis.stage != nil {
+            if !idle, let previousTick {
+                let d = (now - previousTick).components
+                resumedActive += min(1, Double(d.seconds) + Double(d.attoseconds) / 1e18)
+            }
+            let before = analysis.shownOverall
+            resumed.spend(active: resumedActive, remaining: estimator.estimatedRemaining.map {
+                Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18
+            })
+            if resumed != analysis.resumed {
+                analysis.resumed = resumed
+                if let step = analysis.step, analysis.shownOverall > before + 1e-9 {
+                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
+                                 itemsPerSecond: estimator.rate, total: analysis.total)
+                }
+            }
         }
         let finish = estimator.finish(at: now, wall: Date())
         if finish != analysisFinish { analysisFinish = finish }
@@ -1275,12 +1298,12 @@ final class AppModel {
         do {
             let report = try await withTaskCancellationHandler { try await run.value } onCancel: { run.cancel() }
             analysis.lastReport = report
-            analysis.outcome.ended(with: report)
+            analysis.outcome.refined(with: report)
             await refreshDerived()
             saveSafetyBackup(immediately: true)
             return report.pausedBecause == nil
         } catch {
-            analysis.outcome.ended(with: nil)
+            // Cut off (iOS ended the background time): what was analysed stays analysed.
             return false
         }
     }

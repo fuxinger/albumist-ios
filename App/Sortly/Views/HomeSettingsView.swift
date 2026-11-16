@@ -114,6 +114,7 @@ struct HomeSettingsView: View {
             if model.homeChangeRunning {
                 HStack(spacing: Theme.Spacing.m) {
                     ProgressView()
+                        .accessibilityHidden(true) // the text beside it says what runs
                     Text("Vorschläge werden angepasst …").foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)

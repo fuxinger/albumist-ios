@@ -109,6 +109,7 @@ struct OverviewView: View {
                     ProgressView()
                         .controlSize(.large)
                         .frame(width: min(ringSide, 150), height: min(ringSide, 150))
+                        .accessibilityHidden(true) // "Wird neu gezählt" beside it says it
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                         Text("Wird neu gezählt")
                             .font(.headline)

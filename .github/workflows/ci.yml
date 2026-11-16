@@ -45,6 +45,9 @@ jobs:
             echo "::error::Use NavigationLink { destination } label: { … } instead of NavigationLink(value:)"
             exit 1
           fi
+      - name: Spinner rule
+        # A bare spinner is an element with no description (accessibility audit, VoiceOver).
+        run: python3 .github/scripts/spinner_rule.py .
       - name: Every UI string has English
         run: python3 .github/scripts/check_strings.py .
       - name: Code map lists every Swift file

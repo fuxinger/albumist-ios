@@ -141,6 +141,7 @@ private struct ZoomablePhoto: View {
                     .accessibilityIdentifier("viewer.unavailable")
                 } else {
                     ProgressView().tint(.white)
+                        .accessibilityLabel(Text("Foto wird geladen"))
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)

@@ -263,6 +263,7 @@ struct ProposalDetailView: View {
                             } label: {
                                 if suggesting {
                                     ProgressView().controlSize(.small)
+                                        .accessibilityLabel(Text("Name wird vorgeschlagen"))
                                 } else {
                                     Label("Namen vorschlagen", systemImage: "apple.intelligence")
                                 }
@@ -519,6 +520,7 @@ struct ProposalDetailView: View {
             } label: {
                 if preparing {
                     ProgressView().frame(maxWidth: .infinity)
+                        .accessibilityLabel(Text("Wird vorbereitet"))
                 } else {
                     Text(primaryTitle)
                 }

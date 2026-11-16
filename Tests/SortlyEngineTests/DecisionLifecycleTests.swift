@@ -429,6 +429,13 @@ struct SplitMix {
 /// the pipeline matches them.
 @Suite("Matching speed with places and trips")
 struct PlaceMatchingSpeedTests {
+    /// CPU time the calling thread has used, in seconds.
+    static func threadCPUSeconds() -> Double {
+        var time = timespec()
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time)
+        return Double(time.tv_sec) + Double(time.tv_nsec) / 1_000_000_000
+    }
+
     @Test func placeHeavyLibraryMatchesQuickly() {
         func ids(_ range: Range<Int>) -> Set<AssetID> { Set(range.map { AssetID("x-\($0)") }) }
         // 400 trips of 100 photos, 10,000 photos at home.
@@ -449,11 +456,16 @@ struct PlaceMatchingSpeedTests {
                                   assetIDs: trips[c].union(trips[c + 200]))
             if c % 4 == 0 { dismissed.append(p) } else { open.append(p) }
         }
-        let start = Date()
+        // Measured as this thread's CPU time, not wall time: `match` runs on one thread, and
+        // under `swift test --parallel` on a shared runner the wall time also counts the time
+        // other tests held the CPU (5.02 s once, 2–3 s otherwise, run 43889885825). The limit
+        // is unchanged; only what it measures no longer depends on the neighbours.
+        let wallStart = Date()
+        let cpuStart = Self.threadCPUSeconds()
         let matches = AnalysisPipeline.match(open, dismissed: dismissed, against: CollectionInventory(albums), overrides: OverrideSet(),
                                              assignments: [:], trips: trips)
-        let seconds = Date().timeIntervalSince(start)
-        print("PLACE-PROBE seconds=\(seconds)")
+        let seconds = Self.threadCPUSeconds() - cpuStart
+        print("PLACE-PROBE seconds=\(seconds) wall=\(Date().timeIntervalSince(wallStart))")
         #expect(matches.count == open.count + dismissed.count)
         #expect(seconds < 5)
     }

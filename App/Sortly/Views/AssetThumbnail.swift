@@ -22,17 +22,10 @@ final class ThumbnailCache {
     func image(for id: AssetID, side: CGFloat) async -> UIImage? {
         let key = "\(id.rawValue)#\(Int(side))" as NSString
         if let cached = cache.object(forKey: key) { return cached }
-        let asset: PHAsset
-        if let known = assets.object(forKey: id.rawValue as NSString) {
-            asset = known
-        } else {
-            guard let fetched = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject else { return nil }
-            assets.setObject(fetched, forKey: id.rawValue as NSString)
-            asset = fetched
-        }
+        guard let asset = await photoAsset(for: id) else { return nil }
         let scale = UITraitCollection.current.displayScale
         let size = CGSize(width: side * scale, height: side * scale)
-        let image = await ThumbnailRequest.load(ThumbnailRequest.Asset(asset), size: size, manager: manager)
+        let image = await ThumbnailRequest.load(asset, size: size, manager: manager)
         if let image {
             let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
             cache.setObject(image, forKey: key, cost: cost)
@@ -43,15 +36,22 @@ final class ThumbnailCache {
     /// A large version for the full-screen viewer: not kept in the cache (a few of them would
     /// push out hundreds of thumbnails), and only what is on the device (no download).
     func largeImage(for id: AssetID, pixels: CGSize) async -> UIImage? {
-        let asset: PHAsset
-        if let known = assets.object(forKey: id.rawValue as NSString) {
-            asset = known
-        } else {
-            guard let fetched = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject else { return nil }
-            assets.setObject(fetched, forKey: id.rawValue as NSString)
-            asset = fetched
-        }
-        return await ThumbnailRequest.load(ThumbnailRequest.Asset(asset), size: pixels, manager: manager, contentMode: .aspectFit)
+        guard let asset = await photoAsset(for: id) else { return nil }
+        return await ThumbnailRequest.load(asset, size: pixels, manager: manager, contentMode: .aspectFit)
+    }
+
+    /// The PhotoKit asset of `id`, looked up once and then kept. The lookup never runs on the
+    /// main thread: it reads the Photos database, and while Photos writes to it (new photos,
+    /// the albums of a plan) each lookup waits. On the main actor every thumbnail on screen
+    /// waited in turn: UI run 43930277920 measured the main thread blocked for up to 65 s
+    /// right after a plan ran (the sorting show prefetches its photos while Photos writes),
+    /// and the UI tests' accessibility queries timed out.
+    private func photoAsset(for id: AssetID) async -> ThumbnailRequest.Asset? {
+        let key = id.rawValue as NSString
+        if let known = assets.object(forKey: key) { return ThumbnailRequest.Asset(known) }
+        guard let fetched = await ThumbnailRequest.lookUp(id) else { return nil }
+        assets.setObject(fetched.value, forKey: key)
+        return fetched
     }
 }
 
@@ -66,6 +66,20 @@ enum ThumbnailRequest {
     struct Asset: @unchecked Sendable {
         let value: PHAsset
         init(_ value: PHAsset) { self.value = value }
+    }
+
+    /// Asset lookups wait while Photos writes its database, so they run on their own queue:
+    /// neither the main thread nor the few threads of Swift's shared pool (the analysis runs
+    /// there) wait for them.
+    private static let lookups = DispatchQueue(label: "app.albumist.thumbnail-lookup", qos: .userInitiated, attributes: .concurrent)
+
+    nonisolated static func lookUp(_ id: AssetID) async -> Asset? {
+        await withCheckedContinuation { continuation in
+            lookups.async {
+                let found = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject
+                continuation.resume(returning: found.map { Asset($0) })
+            }
+        }
     }
 
     private final class State: @unchecked Sendable {

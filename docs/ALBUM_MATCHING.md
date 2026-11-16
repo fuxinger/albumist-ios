@@ -148,3 +148,23 @@ Orte-Alben des Zuhauses), nicht wie ein Vorschlag mit vorhandenen Alben abgeglic
 Ein Vorschlag, den der Nutzer schon ausgewählt hat und den die Änderung verändern oder entfernen
 würde, bleibt mit seinem Inhalt von damals (`HeldSuggestions`, Schlüssel `user.heldSuggestions`)
 und wird gegen die Alben von jetzt abgeglichen; er geht erst, wenn er angelegt oder abgewählt ist.
+Fotos, die nicht mehr in der Mediathek sind, fallen aus ihm heraus; bleibt keines, geht er.
+
+Welcher Schritt die Vorschläge nach einer Änderung macht, ist gleich: die Änderung wird mit einer
+Vormerkung (`analysis.pendingHomeChange`, die Vorschläge von vorher) in einer Transaktion
+gespeichert. Wer zuerst Vorschläge macht – `resuggest`, ein Lauf, der den Lock vorher bekam, oder
+der Lauf nach dem nächsten Start, wenn die App dazwischen beendet wurde –, hält die Auswahl, schreibt
+den Hinweis für die Übersicht und löscht die Vormerkung in derselben Transaktion wie die neuen
+Vorschläge. „Analyse neu aufbauen“ läuft über denselben Lock und löscht die Vormerkung mit.
+
+Regeln, wann ein gewähltes Zuhause gilt:
+- **„Stimmt“** auf dem erkannten Zuhause gilt ab dem Moment der Bestätigung
+  (`HomeSettings.confirmedFrom`). Davor entscheidet weiter die Erkennung, in den Monaten eines
+  Umzugs mit beiden Zuhause; „Stimmt“ ändert also nichts an der Vergangenheit und hält das Zuhause
+  nur für spätere Fotos fest. Ohne Namen (noch kein Ort bekannt) wird „Stimmt“ nicht angeboten.
+- **Ein Ort unter „Ändern“** gilt für jedes Datum, das kein früheres Zuhause abdeckt.
+- **Frühere Zuhause** gelten bis zu ihrem Datum (Kette, siehe `HomeSettings.home(at:)`).
+- Welche Länder, Regionen und Orte ein gewähltes Zuhause sind, kommt aus den Fotos im Umkreis
+  (30 km) bei jedem Vorschlagslauf (`HomeContext`), der Name bei der Wahl ist nur Ersatz: ein Ort
+  mit mindestens einem Viertel der Fotos dort, oder dessen Fotos überwiegend dort liegen (ein Land
+  jenseits der nahen Grenze, solange seine Fotos Alltag sind).

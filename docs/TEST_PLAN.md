@@ -100,11 +100,11 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | F5 Foto groß ansehen | 🟡 | UI test1 | Zoom |
 | F6 Sortiert-Ring mit eigenen Alben (Gerätetest 15.11.: 811, dann 157) | 🟡 | SortedCount: eigene Reisealben zählen für ihr Land, Zuhause zählt nicht für Länder und Orte, Neuaufbau, zweiter Lauf, Übernehmen und Rückgängig, „Nicht jetzt“ und „Albumists Fotos herausnehmen“, leere Mediathek, eingeschränkter Zugriff, 100.000 Fotos, alter Stand lädt, mehrere gleich gut passende Alben zählen alle, neue Fotos nach einer Reise bleiben unsortiert im Ring | Ring-Text und Diagnosezeile nur syntaxgeprüft; Zahl auf dem iPhone 📱 |
 | G1 Zweitwohnsitz, Pendeln, Ferienwohnung, lange Reise | 🟡 | RecurringPlace-Lebenslagen (18 Muster: Pendeln, Wochenendhaus, Ferienwohnung, Familie, Umzug, Semester, 6-Monats-Reise, Dienstreisen, Nomaden), TripTimeZone (11), RecurringPlacePipeline | UI-Frage „Bist du hier öfter?“ im UI-Lauf |
-| G2 Zuhause bestätigen, ändern, „Kein Zuhause“ | 🟡 | HomeAtDate: nothingSetLeavesEveryDateToTheDetection, confirmedHomeHoldsForEveryDate, noHomeHoldsForEveryDate; HomeTrip: confirmingTheDetectedHomeChangesNothing, noHomeMeansNoPhotoIsAtHomeButTripsStay, chosenHomeWinsOverTheDetection; HomeNaming: placeAlbumsOfTheHomeFollowTheSettings; HomePipeline: ringCountsTheHomeTheUserChose; App: HomeTextTests | Bildschirm „Dein Zuhause“ im UI-Lauf |
-| G3 Umzug: früheres Zuhause mit Zeitraum, Überschneidungen | 🟡 | HomeAtDate: formerHomesFormAChain, overlapIsDecidedForThePeriodThatEndsFirst, formerHomeAndNoHomeNow; HomeTrip: tripsAreJudgedAgainstTheHomeOfTheirTime; HomeNaming: tripNamesUseTheHomeOfTheTripsTime; HomePipeline: formerHomeBringsBackTheTripBeforeTheMove | UI-Lauf |
+| G2 Zuhause bestätigen, ändern, „Kein Zuhause“ | 🟡 | HomeAtDate: nothingSetLeavesEveryDateToTheDetection, chosenHomeHoldsForEveryDate, confirmedHomeHoldsFromTheConfirmation, noHomeHoldsForEveryDate; HomeTrip: confirmingTheDetectedHomeChangesNothing, confirmingAfterAMoveChangesNothing, noHomeMeansNoPhotoIsAtHomeButTripsStay, chosenHomeWinsOverTheDetection; HomeNaming: placeAlbumsOfTheHomeFollowTheSettings, aCountryAcrossTheBorderInsideTheHomeIsNoAlbum; Review: stimmtAfterAMoveChangesNothing, stimmtAfterAMoveAddsNoTrip, confirmingFromSinceAloneLeavesATripAtTheOldHome, chosenHomeWithoutItsTownNameKeepsTheHomeOutOfPlaceAlbums; HomePipeline: ringCountsTheHomeTheUserChose; HomeSearch: abroadFollowsTheHomeOfEachDate; App: HomeTextTests | Bildschirm „Dein Zuhause“ im UI-Lauf |
+| G3 Umzug: früheres Zuhause mit Zeitraum, Überschneidungen | 🟡 | HomeAtDate: formerHomesFormAChain, overlapIsDecidedForThePeriodThatEndsFirst, formerHomeAndNoHomeNow; HomeTrip: tripsAreJudgedAgainstTheHomeOfTheirTime; HomeNaming: tripNamesUseTheHomeOfTheTripsTime, tripSuggestionsAreNamedWithTheHomeAtTheirStart; HomeCandidate: aRegionIsPlacedWhereItsPhotosAreDensest; HomePipeline: formerHomeBringsBackTheTripBeforeTheMove | UI-Lauf |
 | G4 Eigene Orte („Eltern“, „Arbeit“, eigener Name) sind keine Reisen | 🟡 | HomeTrip: staysAtAPlaceOfTheUsersAreNoTrips; HomeSettingsStorage: personalPlaceKeepsItsIdAndTakesTheUsersName; HomePipeline: chosenSuggestionIsHeldAndTheOverviewIsTold | UI-Lauf |
-| G5 Änderung am Zuhause macht nur die Vorschläge neu: keine Bildanalyse, kein Album, Auswahl bleibt, Übersicht sagt, was wegfiel | 🟡 | HomePipeline: resuggestReadsNoPhotoAndTouchesNoAlbum, chosenSuggestionIsHeldAndTheOverviewIsTold, changingBackLeavesNothingToSay, withoutSuggestionsResuggestWaitsForTheAnalysis | Karte „Zuhause geändert“ im UI-Lauf |
-| G6 Zuhause-Einstellungen gespeichert, alte Stände lesbar, übersteht „Analyse neu aufbauen“ und Sicherung | ✅ | HomeSettingsStorage: roundTrip, olderAndNewerValuesStayReadable, olderPlaceAnswersStayReadable; HomePipeline: settingsAreStoredKeptByARebuildAndInTheBackup, olderStoredValueIsRead | — |
+| G5 Änderung am Zuhause macht nur die Vorschläge neu: keine Bildanalyse, kein Album, Auswahl bleibt, Übersicht sagt, was wegfiel – auch wenn ein Lauf, ein Neustart oder ein Fehler dazwischenkommt | 🟡 | HomePipeline: resuggestReadsNoPhotoAndTouchesNoAlbum, chosenSuggestionIsHeldAndTheOverviewIsTold, changingBackLeavesNothingToSay, withoutSuggestionsResuggestWaitsForTheAnalysis; Review: homeChangeAppliedByARunKeepsTheChosenSuggestion, runFollowsTheChangeButDropsHoldAndNotice, heldSuggestionKeepsDeletedPhotos, rebuildDuringResuggestLeavesOldSuggestionsInTheFreshStore | Karte „Zuhause geändert“ im UI-Lauf |
+| G6 Zuhause-Einstellungen gespeichert, alte Stände lesbar, übersteht „Analyse neu aufbauen“ und Sicherung | ✅ | HomeSettingsStorage: roundTrip, olderAndNewerValuesStayReadable, olderPlaceAnswersStayReadable; HomePipeline: settingsAreStoredKeptByARebuildAndInTheBackup, olderStoredValueIsRead; Review: unreadableHomeValuesStopEveryAnalysis | — |
 
 ## Fortschrittsanzeige der Analyse (Branch `claude/pro-progress`, Plan vom 15.11.2026)
 Entwurf v3 (`progress-display/ENTWURF.md`) mit den 5 Punkten. Die Regeln liegen als reine Typen in
@@ -202,26 +202,40 @@ Einstellung entscheidet die Erkennung wie bisher (Tests der Reisen und Vorschlä
 | Regel | Test (Linux) |
 |---|---|
 | Nichts eingestellt: jedes Datum geht an die Erkennung | HomeAtDateTests.nothingSetLeavesEveryDateToTheDetection |
-| Bestätigtes Zuhause gilt für jedes Datum, auch Fotos ohne Datum | HomeAtDateTests.confirmedHomeHoldsForEveryDate |
+| Unter „Ändern“ gewähltes Zuhause gilt für jedes Datum (soweit kein früheres Zuhause es abdeckt), auch Fotos ohne Datum | HomeAtDateTests.chosenHomeHoldsForEveryDate |
+| „Stimmt“ gilt ab der Bestätigung; davor entscheidet weiter die Erkennung (mit beiden Zuhause in den Monaten eines Umzugs) | HomeAtDateTests.confirmedHomeHoldsFromTheConfirmation |
 | „Kein Zuhause“: kein Foto ist zu Hause, Reisen bleiben (sie richten sich weiter nach dem gewöhnlichen Aufenthaltsort) | HomeAtDateTests.noHomeHoldsForEveryDate, HomeTripTests.noHomeMeansNoPhotoIsAtHomeButTripsStay |
 | Frühere Zuhause als Kette, Ende nicht eingeschlossen | HomeAtDateTests.formerHomesFormAChain |
 | Überschneidung: der Zeitraum, der zuerst endet, gewinnt; gleiches Ende: der spätere Beginn | HomeAtDateTests.overlapIsDecidedForThePeriodThatEndsFirst |
 | Früheres Zuhause und jetzt kein Zuhause | HomeAtDateTests.formerHomeAndNoHomeNow |
-| „Stimmt“ ändert keine Reise und kein Zuhause-Foto | HomeTripTests.confirmingTheDetectedHomeChangesNothing |
+| „Stimmt“ ändert keine Reise und kein Zuhause-Foto, auch nach einem Umzug (erkannt „seit“); spätere Fotos verschieben das bestätigte Zuhause nicht mehr | HomeTripTests.confirmingTheDetectedHomeChangesNothing, confirmingAfterAMoveChangesNothing; HomeReviewCoreTests.stimmtAfterAMoveChangesNothing; HomeReviewStimmtPipelineTests.stimmtAfterAMoveAddsNoTrip |
+| „Stimmt“ nur ab dem erkannten „seit“ reicht nicht (es liegt bis zu zwei Monate vor dem Umzug) | HomeReviewNaiveFixTests.confirmingFromSinceAloneLeavesATripAtTheOldHome |
 | Reisen am Zuhause ihrer Zeit gemessen (Wochenende in München vor dem Umzug) | HomeTripTests.tripsAreJudgedAgainstTheHomeOfTheirTime, HomePipelineTests.formerHomeBringsBackTheTripBeforeTheMove |
 | Eigene Orte: keine Reisen, keine Zuhause-Fotos | HomeTripTests.staysAtAPlaceOfTheUsersAreNoTrips |
-| Reisename mit dem Zuhause der Reisezeit („Bayern“ nur, wenn Bayern damals nicht Zuhause war) | HomeNamingTests.tripNamesUseTheHomeOfTheTripsTime |
+| Reisename mit dem Zuhause der Reisezeit („Bayern“ nur, wenn Bayern damals nicht Zuhause war), auch über die Vorschläge (Beginn der Reise) | HomeNamingTests.tripNamesUseTheHomeOfTheTripsTime, tripSuggestionsAreNamedWithTheHomeAtTheirStart |
 | Orte-Alben des Zuhauses folgen der Einstellung | HomeNamingTests.placeAlbumsOfTheHomeFollowTheSettings |
+| Orte des gewählten Zuhauses aus den Fotos im Umkreis, nicht nur aus dem Namen bei der Wahl (ohne Namen oder nur Region: kein Album „Deutschland“/„München“); Land über der Grenze im Umkreis ist Zuhause, solange seine Fotos Alltag sind | HomeReviewCoreTests.chosenHomeWithoutItsTownNameKeepsTheHomeOutOfPlaceAlbums, HomeNamingTests.aCountryAcrossTheBorderInsideTheHomeIsNoAlbum |
+| „Ausland“ in der Suche am Zuhause des Aufnahmetags | HomeSearchTests.abroadFollowsTheHomeOfEachDate |
 | Ring zählt das gewählte Zuhause | HomePipelineTests.ringCountsTheHomeTheUserChose |
-| Orte zur Auswahl aus den eigenen Fotos, durchsuchbar, offline Regionen | HomeCandidateTests (2) |
+| Orte zur Auswahl aus den eigenen Fotos, durchsuchbar, offline Regionen (Mittelpunkt dort, wo die Fotos am dichtesten sind) | HomeCandidateTests (3) |
 | Name des erkannten Zuhauses aus den Fotos (offline: Region) | HomeNamingTests.homeNameComesFromThePhotosNearIt |
 | Speichern, Migration ohne Einstellung, ältere und neuere Stände, Neuaufbau, Sicherung | HomeSettingsStorageTests (4), HomePipelineTests.settingsAreStoredKeptByARebuildAndInTheBackup, olderStoredValueIsRead |
-| Änderung macht nur die Vorschläge neu: kein Foto gelesen, kein Ort online, kein Album | HomePipelineTests.resuggestReadsNoPhotoAndTouchesNoAlbum |
+| Unlesbare Werte (`user.home`, `user.heldSuggestions`, unbekannte Ortsart) halten keine Analyse auf | HomeReviewStoreTests.unreadableHomeValuesStopEveryAnalysis |
+| Änderung macht nur die Vorschläge neu: kein Foto gelesen, kein Ort online, kein Albumeintrag und kein Plan geändert | HomePipelineTests.resuggestReadsNoPhotoAndTouchesNoAlbum |
 | Ausgewählter Vorschlag bleibt wie gewählt (auch im nächsten Lauf), bis er abgewählt ist; Hinweis zählt Weggefallenes, Neues, Gehaltenes | HomePipelineTests.chosenSuggestionIsHeldAndTheOverviewIsTold |
+| Die Änderung wird mit einer Vormerkung (`analysis.pendingHomeChange`) in einer Transaktion gespeichert; wer die Vorschläge zuerst neu macht (resuggest, ein Lauf mit dem Lock, der nächste Start), hält die Auswahl und sagt es der Übersicht | HomeReviewPipelineTests.homeChangeAppliedByARunKeepsTheChosenSuggestion, HomeReviewDuringRunTests.runFollowsTheChangeButDropsHoldAndNotice |
+| Gehaltener Vorschlag verliert gelöschte Fotos; ohne Fotos wird er losgelassen | HomeReviewPipelineTests.heldSuggestionKeepsDeletedPhotos |
+| „Analyse neu aufbauen“ wartet auf eine laufende Änderung (Run-Lock) | HomeReviewStoreTests.rebuildDuringResuggestLeavesOldSuggestionsInTheFreshStore |
 | Hin und zurück vor „OK“: kein Hinweis | HomePipelineTests.changingBackLeavesNothingToSay |
 | Ohne Vorschläge wartet die Änderung auf die Analyse | HomePipelineTests.withoutSuggestionsResuggestWaitsForTheAnalysis |
 | Texte (Name, Zusammenfassung, früheres Zuhause, eigene Orte, Englisch) | App: HomeTextTests (5); StringCatalogTests.countVariesByPlural (4 neue Zählungen) |
 
 Nur syntaktisch bzw. im Simulator-Build geprüft: der Bildschirm „Dein Zuhause“, die Auswahl
 der Orte und die Karte „Zuhause geändert“ (kein UI-Schritt; der UI-Lauf teilt sich den Simulator
-mit den anderen Tests und wurde nicht angefasst).
+mit den anderen Tests und wurde nicht angefasst). Ebenso in der App: keine Analyse, kein Plan,
+kein Neuaufbau und kein Nachholen nach einer Foto-Änderung startet, während eine Änderung läuft
+(eine angefragte Analyse startet danach); Auswahl und „Hinzufügen“ sind dann gesperrt, und wer
+es trotzdem versucht, bekommt „Gerade nicht möglich“. „Stimmt“ fehlt, solange das erkannte
+Zuhause keinen Namen hat. `rematch()` schreibt keine älteren Vorschläge zurück, wenn
+währenddessen neue kamen (Zähler, ohne eigenen Test: der Ablauf lässt sich im Test nicht
+zuverlässig verschränken).

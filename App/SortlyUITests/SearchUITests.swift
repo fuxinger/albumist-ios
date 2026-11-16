@@ -144,7 +144,7 @@ final class SortlySearchUITests: XCTestCase {
     }
 
     private var analysisIdle: Bool {
-        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists) && !app.buttons["Pause"].exists
+        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists) && !app.buttons["Pause"].exists
     }
 
     // MARK: Search helpers

@@ -302,11 +302,76 @@ struct ContinuedAnalysisEndingTests {
         }
     }
 
+    /// Point 5: "Analyse fertig" with the number of suggestions under it.
+    @Test func finishedSaysHowManySuggestions() {
+        var analysis = state(complete: true, needsResume: false)
+        analysis.lastReport?.proposals = 216
+        let ending = ContinuedAnalysis.ending(analysis)
+        #expect(ending.title == String(localized: "Analyse fertig"))
+        #expect(ending.subtitle == String(localized: "\(216) Vorschläge"))
+    }
+
     /// An error leaves the report of the run before: a finished one must not read as "fertig".
     @Test func anErrorAfterAFinishedRunIsNotFinished() {
         let ending = ContinuedAnalysis.ending(state(complete: true, needsResume: true))
         #expect(ending.title == String(localized: "Analyse wartet auf dich"))
         #expect(!ending.complete)
+    }
+}
+
+/// Point 5 and the card's texts (progress display v3): number first, the finish time only when
+/// there is one to trust, never while the run waits.
+@MainActor
+@Suite("Analysis card and Lock Screen texts")
+struct AnalysisTextTests {
+    private func running(_ step: AnalysisPipeline.Stage = .content, completed: Int = 2_431, total: Int = 5_683) -> AppModel.AnalysisState {
+        var state = AppModel.AnalysisState()
+        state.isRunning = true
+        state.stage = step
+        state.completed = completed
+        state.total = total
+        return state
+    }
+
+    @Test func lockScreenNumberFirstThenFinishTime() {
+        let today = Calendar.current.date(bySettingHour: 23, minute: 40, second: 0, of: Date()) ?? Date()
+        let count = AnalysisText.count(.init(step: .content, completed: 2_431, total: 5_683))
+        #expect(count.hasPrefix(2_431.formatted()))
+        #expect(count.contains(5_683.formatted()))
+        let withTime = ContinuedAnalysis.subtitle(running(), finish: .at(today))
+        #expect(withTime.hasPrefix(count))
+        #expect(withTime.contains(AnalysisText.time(today)))
+        // Without a time to trust: the count only.
+        #expect(ContinuedAnalysis.subtitle(running(), finish: nil) == count)
+        // Waiting: no time, the reason.
+        var waiting = running()
+        waiting.waiting = .batteryLow
+        #expect(ContinuedAnalysis.subtitle(waiting, finish: .at(today)) == String(localized: "Wartet aufs Laden"))
+        // A step without a count says the step.
+        #expect(ContinuedAnalysis.subtitle(running(.groups, completed: 0, total: 0), finish: nil)
+                == String(localized: "Schritt \(6) von \(6)"))
+    }
+
+    @Test func unitsFollowTheStepWithSingular() {
+        #expect(AnalysisText.ofTotal(1, .photos) == String(localized: "von \(1) Fotos"))
+        #expect(AnalysisText.ofTotal(1_600, .places) == String(localized: "von \(1_600) Orten"))
+        #expect(AnalysisText.ofTotal(1_040, .screenshots) == String(localized: "von \(1_040) Screenshots"))
+        #expect(AnalysisText.ofTotal(1, .photos) != AnalysisText.ofTotal(2, .photos).replacingOccurrences(of: "2", with: "1"))
+    }
+
+    @Test func finishTimeTodayTomorrowAndSoon() {
+        let now = Calendar.current.date(bySettingHour: 22, minute: 55, second: 0, of: Date()) ?? Date()
+        let later = now.addingTimeInterval(45 * 60)
+        let tomorrow = now.addingTimeInterval(8 * 3_600)
+        #expect(AnalysisText.finish(.at(later), now: now) == String(localized: "Fertig gegen \(AnalysisText.time(later))"))
+        #expect(AnalysisText.finish(.at(tomorrow), now: now) == String(localized: "Fertig morgen gegen \(AnalysisText.time(tomorrow))"))
+        #expect(AnalysisText.finish(.soon, now: now) == String(localized: "Gleich fertig"))
+    }
+
+    @Test func alreadyDoneLeavesZerosOut() {
+        #expect(AnalysisText.alreadyDone(AlreadyDone(trips: 51, places: 38))
+                == String(localized: "\(51) Reisen") + ", " + String(localized: "\(38) Orte"))
+        #expect(AnalysisText.alreadyDone(AlreadyDone(trips: 0, places: 3)) == String(localized: "\(3) Orte"))
     }
 }
 

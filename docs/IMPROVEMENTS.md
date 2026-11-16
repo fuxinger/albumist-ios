@@ -115,6 +115,9 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 
 | Status | Punkt | Aufwand | Quelle |
 |---|---|---|---|
+| 💡 | Fortschrittsanzeige: „Gerade angesehen“ lädt die Vorschaubilder über den normalen Zwischenspeicher (`opportunistic`, 30 pt), nicht ausdrücklich `.fastFormat` (S9); am Gerät messen, ob es etwas kostet. | S | pro-progress |
+| 💡 | Fortschrittsanzeige: Im Schritt Orte endet die Arbeit oft am Online-Budget lange vor „1.600 von 1.600“; die Fertig-Uhrzeit ist dort eher zu spät. Die Pipeline könnte die geplanten Abfragen mitteilen. | M | pro-progress |
+| 💡 | Fortschrittsanzeige: Details-Blatt zeigt für kommende Schritte noch keine Mengen („1.040“ beim Text); die Werte kommen schon mit `AnalysisWorkload`. | S | pro-progress |
 | ✅ | Vorschlag-Bildschirm kompakter, Knöpfe ohne Scrollen sichtbar. | S | U |
 | ✅ | „Fotos fliegen in Alben“ beim Umsetzen. | M | U |
 | ✅ | „Nicht jetzt“ ist umkehrbar: später doch anlegen geht; in den Einstellungen „Abgelehnte Vorschläge wieder zeigen“. | M | E1 Oberfläche |
@@ -203,7 +206,7 @@ Cloud-KI, keine unbestätigte Änderung, „unbekannt ist nicht erfolgreich“.
 | Status | Punkt | Aufwand | Quelle |
 |---|---|---|---|
 | ✅ | Fotos fliegen in Alben. | M | U |
-| ✅ | Erster Scan als Show: Mosaik aus eigenen Fotos mit wanderndem Licht, gefundene Reisen springen als Karten auf. | M | U |
+| ✅ | Erster Scan als Show: Mosaik aus eigenen Fotos mit wanderndem Licht, gefundene Reisen springen als Karten auf. Nur während der ersten Analyse (Fuchs, 16.11.; Schalter `ScanShowRule.onFirstAnalysis`). | M | U |
 | ✅ | Farben aus den Fotos: jeder Vorschlag und jedes Land im Atlas mit eigenem weichen Farbverlauf aus dem Titelbild. | S | U |
 | ✅ | Zoom-Übergang ins Foto (Mediathek und Atlas-Länder). | S | U |
 | 💡 | 3D-Globus im Atlas. | L | U |

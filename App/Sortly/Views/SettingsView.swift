@@ -11,7 +11,6 @@ struct SettingsView: View {
     @State private var redeeming = false
     @State private var rejectedCount = 0
     @State private var confirmTripReset = false
-    @State private var withdrawing: PlaceAnswer?
 
     var body: some View {
         @Bindable var model = model
@@ -45,6 +44,14 @@ struct SettingsView: View {
                 Text("Mediathek")
             } footer: {
                 Text("Mit einem Jahr geht es schneller: Albumist analysiert dann nur diese Fotos und macht nur dafür Vorschläge.")
+            }
+
+            // Where the user lives, former homes and other places that are not trips (also the
+            // places answered with "Ja, hier bin ich öfter").
+            Section {
+                HomeSettingsRow()
+            } footer: {
+                Text("Wo du wohnst und welche Orte keine Reisen sind.")
             }
 
             Section {
@@ -142,33 +149,6 @@ struct SettingsView: View {
                     Text("Reisen")
                 } footer: {
                     Text("Albumist hält sich an deine Änderungen, auch bei jeder neuen Analyse.")
-                }
-            }
-
-            // "Hier bin ich öfter": the places whose stays are not trips, and the way back.
-            if !model.recurringPlaces.oftenHere.isEmpty {
-                Section {
-                    ForEach(model.recurringPlaces.oftenHere) { answer in
-                        HStack {
-                            Text(model.recurringPlaceProposal(for: answer)?.title ?? answer.name ?? String(localized: "Unbenannter Ort"))
-                            Spacer()
-                            Button("Wieder als Reisen zeigen") { withdrawing = answer }
-                                .font(.subheadline)
-                                .disabled(model.analysis.isRunning || model.execution.isRunning)
-                                .accessibilityIdentifier("settings.withdrawRecurringPlace")
-                        }
-                    }
-                } header: {
-                    Text("Hier bist du öfter")
-                } footer: {
-                    Text("Aufenthalte an diesen Orten zählt Albumist nicht als Reisen. Jeder Ort bekommt stattdessen ein eigenes Album.")
-                }
-                // One dialog for the section, not one per row.
-                .confirmationDialog("Wieder als Reisen zeigen?", isPresented: Binding(get: { withdrawing != nil }, set: { if !$0 { withdrawing = nil } }),
-                                    titleVisibility: .visible, presenting: withdrawing) { answer in
-                    Button("Als Reisen zeigen") { Task { _ = await model.withdrawRecurringPlace(answer) } }
-                } message: { _ in
-                    Text("Aufenthalte an diesem Ort werden wieder als Reisen vorgeschlagen. Schon angelegte Alben bleiben, wie sie sind.")
                 }
             }
 

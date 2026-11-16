@@ -154,6 +154,21 @@ public struct AlbumMatcher: Sendable {
                       assignments: [SortlyID: CollectionID] = [:],
                       reserved: Set<CollectionID> = [],
                       trips: [Set<AssetID>] = []) -> [SortlyID: MatchResult] {
+        var stats = Stats()
+        return match(proposals, against: inventory, overrides: overrides, assignments: assignments,
+                     reserved: reserved, trips: trips, stats: &stats)
+    }
+
+    /// Work counted during one run, for tests that must not depend on the clock.
+    struct Stats {
+        /// How often the photos of each album were read to find its trip (`isOneTripOfPlace`):
+        /// at most once per album and run.
+        var albumTripScans: [CollectionID: Int] = [:]
+    }
+
+    func match(_ proposals: [AlbumProposal], against inventory: CollectionInventory,
+               overrides: OverrideSet, assignments: [SortlyID: CollectionID],
+               reserved: Set<CollectionID>, trips: [Set<AssetID>], stats: inout Stats) -> [SortlyID: MatchResult] {
         let membership = inventory.albumMembershipIndex()
         // Detected trips (also those too small for a suggestion), for parts of a place.
         var tripOf: [AssetID: Int] = [:]
@@ -203,6 +218,7 @@ public struct AlbumMatcher: Sendable {
                 tripOf: tripOf,
                 trips: trips,
                 albumTrips: &albumTrips,
+                stats: &stats,
                 membership: membership,
                 siblings: siblingOf[family] ?? [:],
                 siblingCounts: &counts,
@@ -261,6 +277,7 @@ public struct AlbumMatcher: Sendable {
         tripOf: [AssetID: Int],
         trips: [Set<AssetID>],
         albumTrips: inout [CollectionID: Int?],
+        stats: inout Stats,
         membership: [AssetID: [CollectionID]],
         siblings: [AssetID: SortlyID],
         siblingCounts: inout [CollectionID: [SortlyID: Int]],
@@ -287,6 +304,7 @@ public struct AlbumMatcher: Sendable {
                     found = t
                 }
                 albumTrips[album.id] = .some(found)
+                stats.albumTripScans[album.id, default: 0] += 1
                 trip = found
             }
             guard let trip else { return false }

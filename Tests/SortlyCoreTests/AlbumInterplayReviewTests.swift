@@ -505,3 +505,33 @@ extension AlbumInterplayRecheckTests {
         #expect(ProposalDecision.uncertainExtensions(decisions, proposals: all, matches: matches, protected: [dogs.id]) == [moved.id])
     }
 }
+
+extension AlbumInterplayRecheckTests {
+    /// Final check 16.11. (2): the one-trip rule reads an album's photos at most once per run,
+    /// however many places (country, region, towns, shown and matched again after a conflict)
+    /// ask about it. Counted, not timed: before, the work grew with every place and photo.
+    @Test func oneTripRuleReadsEachAlbumAtMostOncePerRun() throws {
+        let trips = (0..<20).map { set("t\($0)", 0..<50) }
+        var albums: [CollectionSnapshot] = []
+        for i in 0..<20 {
+            albums.append(CollectionSnapshot(id: CollectionID("trip-\(i)"), title: "Ferien \(i)", assetIDs: set("t\(i)", 0..<30)))
+            albums.append(CollectionSnapshot(id: CollectionID("mix-\(i)"), title: "Auswahl \(i)",
+                                             assetIDs: set("t\(i)", 0..<20).union(set("t\((i + 1) % 20)", 0..<20))))
+        }
+        var proposals: [AlbumProposal] = []
+        for c in 0..<2 {
+            let members = (0..<10).reduce(into: Set<AssetID>()) { $0.formUnion(trips[c * 10 + $1]) }
+            proposals.append(AlbumProposal(id: SortlyID("c\(c)"), kind: .placeCollection(.country), title: "Land \(c)", assetIDs: members))
+            proposals.append(AlbumProposal(id: SortlyID("r\(c)"), kind: .placeCollection(.administrativeArea), title: "Region \(c)", assetIDs: members))
+        }
+        for t in 0..<20 {
+            proposals.append(AlbumProposal(id: SortlyID("s\(t)"), kind: .placeCollection(.locality), title: "Stadt \(t)",
+                                           assetIDs: trips[t].union(trips[(t + 1) % 20])))
+        }
+        var stats = AlbumMatcher.Stats()
+        _ = matcher.match(proposals, against: CollectionInventory(albums), overrides: OverrideSet(), assignments: [:],
+                          reserved: [], trips: trips, stats: &stats)
+        #expect(stats.albumTripScans.count >= 20, "the rule was asked: \(stats.albumTripScans.count) albums")
+        #expect(stats.albumTripScans.values.allSatisfy { $0 == 1 }, "\(stats.albumTripScans.filter { $0.value > 1 })")
+    }
+}

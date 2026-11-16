@@ -511,5 +511,40 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.run_watchdog(self.STARTED_LOG, ["Shutdown", "Shutdown"]), ("", False))
 
 
+class GroupTests(unittest.TestCase):
+    """The UI groups of ui.yml: every test runs in exactly one group (no test twice, none lost)."""
+
+    def groups(self):
+        import re
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "workflows", "ui.yml")
+        text = open(path, encoding="utf-8").read()
+        groups = {}
+        for block in re.split(r"\n\s*- group: ", text.split("include:", 1)[1].split("\n    env:", 1)[0])[1:]:
+            name = block.split("\n", 1)[0].strip()
+            fields = dict(re.findall(r"^\s*(only|skip|increase_contrast|reduce_motion|device): ?(.*)$", block, re.M))
+            groups[name] = {k: v.strip().strip("'") for k, v in fields.items()}
+        return groups
+
+    def test_four_groups_and_the_contrast_job(self):
+        groups = self.groups()
+        self.assertEqual(set(groups), {"flow-full", "flow-other", "accessibility", "contrast"})
+        test5 = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
+        self.assertEqual(groups["contrast"]["only"], test5)
+        self.assertEqual(groups["contrast"]["increase_contrast"], "true")
+        self.assertEqual(groups["contrast"]["reduce_motion"], "true")
+        self.assertEqual(groups["contrast"]["device"], "se")
+        self.assertEqual(groups["accessibility"]["skip"], test5)
+        self.assertNotIn("increase_contrast", groups["accessibility"])
+
+    def test_other_flows_skip_exactly_what_the_others_run(self):
+        groups = self.groups()
+        others = set()
+        for name in ("flow-full", "accessibility", "contrast"):
+            others |= set(groups[name]["only"].split())
+        covered = {t for t in others if not any(t != o and t.startswith(o + "/") for o in others)}
+        self.assertEqual(set(groups["flow-other"]["skip"].split()), covered)
+        self.assertEqual(groups["flow-other"]["only"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

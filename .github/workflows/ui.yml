@@ -6,19 +6,22 @@ name: UI flow
 #   1. Core tests (Linux): the core library's tests on a free Linux runner. No macOS runner
 #      starts for a commit whose core tests fail (fast first, then expensive).
 #   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
-#   3. Three test groups in parallel, each on its own runner and freshly booted simulator
-#      (test-without-building), so the slowest group sets the wall time, not the sum:
+#   3. Four test groups in parallel, each on its own runner and freshly booted simulator
+#      (test-without-building), so the slowest group sets the wall time, not the sum. Job
+#      times measured in UI run 43906501407, including 5-7 min simulator setup:
 #        - full flow:      SortlyFlowUITests/test1_FullFlow (onboarding, demo library, plan,
-#                          the sorting-show video), ~21-26 min
+#                          the sorting-show video), 32 min
 #        - other flows:    every other UI test except the accessibility tests (flow tests 2-6,
 #                          locked purchase, search; each brings the app to an onboarded demo
-#                          library by itself, see UITestOnboarding), ~20-29 min
-#        - accessibility:  AccessibilityUITests on a small iPhone with Reduce Motion, then
-#                          test5 with Increase Contrast, ~30 min
-#      "other flows" is defined as "everything the other two groups do not run", so a new test
+#                          library by itself, see UITestOnboarding), 44 min
+#        - accessibility:  AccessibilityUITests 1-4 on a small iPhone with Reduce Motion,
+#                          ~48 min (56.5 min with the contrast pass, which is now apart)
+#        - contrast:       AccessibilityUITests test5 with Increase Contrast and Reduce
+#                          Transparency on its own small iPhone, ~18 min (it onboards first)
+#      "other flows" is defined as "everything the other groups do not run", so a new test
 #      class always runs somewhere and no test runs twice.
-#      With CI's one macOS job this is at most four macOS jobs per push (the build job runs
-#      before the groups), out of about five for the whole repository.
+#      With CI's one macOS job this is at most five macOS jobs per push at the peak (the build
+#      job runs before the groups), about all the repository has; accepted on 16.11.
 #
 # Each group runs through .github/scripts/ui_tests.py: a pass that the simulator service lost
 # (an explicit "Error returned in reply from CoreSimulatorService", "Timed out waiting for AX
@@ -127,21 +130,31 @@ jobs:
             # Everything the other two groups run (keep in step with them).
             skip: SortlyFlowUITests/test1_FullFlow AccessibilityUITests
           - group: accessibility
-            # AccessibilityUITests 1-4 on a small iPhone (SE, 375 pt) with Reduce Motion, then
-            # test5 on its own with Increase Contrast and Reduce Transparency switched on, same
-            # simulator. These tests fail on findings.
+            # AccessibilityUITests 1-4 on a small iPhone (SE, 375 pt) with Reduce Motion. These
+            # tests fail on findings.
             title: accessibility (small iPhone)
             device: se
             only: AccessibilityUITests
             skip: AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency
             reduce_motion: true
-            contrast: AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency
+          - group: contrast
+            # AccessibilityUITests test5 on its own small iPhone with Reduce Motion, Increase
+            # Contrast and Reduce Transparency switched on before the first launch; the test
+            # brings the app to an onboarded demo library by itself (onboardAndSeed). Its own job
+            # since 16.11. (UI run 43906501407: 8 min after tests 1-4 made accessibility the
+            # longest group, 56.5 min).
+            title: contrast (small iPhone)
+            device: se
+            only: AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency
+            skip: ''
+            reduce_motion: true
+            increase_contrast: true
     env:
       GROUP: ${{ matrix.group }}
       DEVICE: ${{ matrix.device }}
       ONLY: ${{ matrix.only }}
       SKIP: ${{ matrix.skip }}
-      CONTRAST: ${{ matrix.contrast }}
+      INCREASE_CONTRAST: ${{ matrix.increase_contrast }}
       REDUCE_MOTION: ${{ matrix.reduce_motion }}
       VIDEO: ${{ matrix.video }}
     steps:
@@ -184,17 +197,10 @@ jobs:
           [ -n "$XCTESTRUN" ] || { echo "::error::no .xctestrun in the build products"; exit 1; }
           flags=()
           [ "$REDUCE_MOTION" = "true" ] && flags+=(--reduce-motion --a11y-summary)
+          [ "$INCREASE_CONTRAST" = "true" ] && flags+=(--increase-contrast)
           [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
             --only "$ONLY" --skip "$SKIP" "${flags[@]}"
-          status=$?
-          contrast=0
-          if [ -n "$CONTRAST" ]; then
-            python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP-contrast" --xctestrun "$XCTESTRUN" \
-              --only "$CONTRAST" --reduce-motion --increase-contrast --a11y-summary
-            contrast=$?
-          fi
-          [ $status -eq 0 ] && [ $contrast -eq 0 ]
       - name: Job summary
         if: always()
         run: |

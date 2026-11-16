@@ -21,11 +21,11 @@ name: TestFlight
 # recorded it (.github/scripts/archive_check.py). The export only signs that app; nothing is
 # rebuilt between the gate and the upload. After a successful upload the commit gets the git tag
 # build-<number> (job "tag", the only one with contents: write).
-# Waiting for CI rather than starting at once keeps a push at four Mac jobs at a time (CI's
-# iOS job and the three UI groups; the archive takes the place of CI's job when that is done),
+# Waiting for CI rather than starting at once keeps a push at five Mac jobs at a time (CI's
+# iOS job and the four UI groups; the archive takes the place of CI's job when that is done),
 # and a commit whose Linux or iOS tests fail never starts it.
 # (`ci_gate.py --linux` would start it after CI's Linux jobs instead, ~15 min earlier, at the
-# cost of a fifth Mac job beside CI and UI; not needed while the UI run is the long part.)
+# cost of a sixth Mac job beside CI and UI; not needed while the UI run is the long part.)
 # The archive artifact is deleted at the end of the run. It holds the unsigned app with the
 # team id in its build settings; a team id is not secret (it is in the signature of every app
 # the team ships), and DEVELOPMENT_TEAM stays in the archive step because the export has only

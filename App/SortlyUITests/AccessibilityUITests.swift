@@ -755,6 +755,9 @@ final class AccessibilityUITests: XCTestCase {
             if underBar { app.swipeDown() } else if underTabs || !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
+        if tabs.exists, swipes > 0 || element.frame.maxY > tabs.frame.minY {
+            print("UI_FACT tap \(step): element \(element.frame), tab bar \(tabs.frame), \(swipes) swipes")
+        }
         element.tap()
         print("UI_STEP_OK \(step)")
         return true

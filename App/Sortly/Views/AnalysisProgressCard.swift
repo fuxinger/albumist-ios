@@ -48,9 +48,10 @@ struct AnalysisProgressCard: View {
     private var title: String {
         switch state {
         case .running(let p, _, _, let catchingUp):
-            if catchingUp != nil { return String(localized: "Macht da weiter, wo sie aufgehört hat") }
-            // A phase of its own after a stop: why the number started again (review of 83db832).
+            // A phase of its own after a stop, or many new photos seen by the library read:
+            // why the number starts again or is held longer (reviews of 83db832 and 11ef3e1).
             if let newWork = model.analysis.newWork { return AnalysisText.newWork(newWork) }
+            if catchingUp != nil { return String(localized: "Macht da weiter, wo sie aufgehört hat") }
             return p?.step.labelText ?? String(localized: "Analyse läuft")
         case .waiting(.cooling, _): return String(localized: "Wartet, bis dein iPhone abkühlt")
         case .waiting(.charging, _): return String(localized: "Wartet aufs Laden")
@@ -609,7 +610,7 @@ struct AnalysisDetailsSheet: View {
 
     private func standing(_ step: AnalysisStep) -> Standing {
         guard let current = model.analysis.step ?? model.analysis.stoppedAt?.step else {
-            return model.analysis.lastReport?.isComplete == true ? .done : .later
+            return model.analysis.isComplete ? .done : .later
         }
         if step < current { return .done }
         return step == current ? .running : .later

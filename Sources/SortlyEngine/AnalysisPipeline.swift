@@ -456,11 +456,19 @@ public actor AnalysisPipeline {
         // 2. Patterns (pure computation over metadata, seconds even for large libraries)
         // Said before the trips are computed, or the card stands at "Mediathek wird gelesen ·
         // N von N" meanwhile (simulated full run: step 2 was first shown when it was done).
-        onProgress(Progress(stage: .patterns, completed: 0, total: 1))
+        // Total 0: no count yet; the photos with a location follow as they are grouped.
+        onProgress(Progress(stage: .patterns, completed: 0, total: 0))
         let all = try await store.allAssets()
         let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
         let answers = try await recurringPlaceAnswers()
-        let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar).analyse(in: all, corrections: corrections, places: answers)
+        // The step's count: photos with a location grouped so far ("12.000 von 30.000 Fotos"),
+        // so it does not stand still on a large library (review of 11ef3e1, minor 3).
+        var grouped = (done: 0, of: 1)
+        let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar)
+            .analyse(in: all, corrections: corrections, places: answers, progress: { done, of in
+                grouped = (done, max(1, of))
+                onProgress(Progress(stage: .patterns, completed: done, total: max(1, of)))
+            })
         let detected = tripAnalysis.trips
         // Trips keep their identity when their photos change a little (an older photo
         // imported, the first one deleted): decisions and deleted albums stay attached.
@@ -489,7 +497,7 @@ public actor AnalysisPipeline {
         } else {
             scoped = all
         }
-        onProgress(Progress(stage: .patterns, completed: 1, total: 1,
+        onProgress(Progress(stage: .patterns, completed: grouped.of, total: grouped.of,
                             workload: try await workload(all: all, scoped: scoped, range: range)))
 
         // 3. Places

@@ -12,17 +12,15 @@ struct ReviewThirdPassEvidenceTests {
     @Test func newWorkBeforeTheStoppedStepIsNotFrozenAtTheFloor() {
         let w = StepWidths.standard
         // Adapted to the decision (review of 83db832, IMPORTANT 2): the marker keeps the work
-        // left when the run stopped (2,000 screenshots to read), the workload says how much
-        // there is now, and "quick" is the measured work up to the stopped step.
+        // left when the run stopped (2,000 screenshots to read), and the workload says how much
+        // there is now.
         var run = ResumedRun(stage: 5, shown: 0.90, left: 2_000, photos: 50_000, updated: true)
         let update = AnalysisWorkload(photos: 50_000, located: 30_000, screenshots: 2_000, contentLeft: 50_000, textLeft: 2_000)
         _ = run.workload(update)
         var values: Set<Int> = []
         for done in stride(from: 0, through: 50_000, by: 5_000) {
             let real = w.overall(step: .content, completed: done, total: 50_000)
-            let measured = ResumedRun.secondsUntilBack(stage: 5, step: .content, completed: done, total: 50_000,
-                                                       itemsPerSecond: 10, workload: update)
-            let catching = run.isCatchingUp(running: true, at: 4, secondsLeft: measured)
+            let catching = run.isCatchingUp(running: true, at: 4)
             values.insert(Int((run.shown(running: true, catchingUp: catching, overall: real, stopped: nil) * 100).rounded()))
         }
         #expect(values.count > 1, "shown all through the image step: \(values.sorted()) %")

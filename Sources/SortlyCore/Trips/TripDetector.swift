@@ -84,18 +84,26 @@ public struct TripDetector: Sendable {
         analyse(in: assets, corrections: corrections, places: places, excludeFromInference: excludeFromInference).trips
     }
 
+    /// Photos with a location between two `progress` calls.
+    public static let progressEvery = 1_000
+
     /// The trips, every stay away (also those too small for a trip, to notice places the user
     /// goes to again and again), and the photos at the places the user said they are often at.
+    /// `progress(grouped, of)`: photos with a location gone through so far, every
+    /// `progressEvery` (the trips step's count, so it does not stand still on a large library:
+    /// review of 11ef3e1, minor 3).
     public func analyse(
         in assets: [AssetSnapshot],
         corrections: TripCorrections = .init(),
         places: RecurringPlaceAnswers = .init(),
-        excludeFromInference: (AssetSnapshot) -> Bool = { _ in false }
+        excludeFromInference: (AssetSnapshot) -> Bool = { _ in false },
+        progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }
     ) -> TripAnalysis {
         let geotagged = assets
             .filter { $0.usableLocation != nil && $0.creationDate != nil && !$0.isScreenshotLike && !corrections.excludedAssets.contains($0.id) }
             .sorted { ($0.creationDate!, $0.id) < ($1.creationDate!, $1.id) }
         guard !geotagged.isEmpty else { return TripAnalysis(trips: [], stays: [], places: []) }
+        progress(0, geotagged.count)
 
         // A place the user is often at counts like the habitual area, at every time: its stays
         // are not trips, and an excursion from there starts there.
@@ -128,7 +136,8 @@ public struct TripDetector: Sendable {
             home.movedOn.contains { $0 > a && $0 <= b }
         }
 
-        for asset in geotagged {
+        for (index, asset) in geotagged.enumerated() {
+            if index > 0, index % Self.progressEvery == 0 { progress(index, geotagged.count) }
             let date = asset.creationDate!
             let coordinate = asset.usableLocation!
             let distanceHome = home.distanceToHome(coordinate, at: date)
@@ -174,6 +183,7 @@ public struct TripDetector: Sendable {
             segments.append(seg.members)
             splitBefore.append(currentSplit)
         }
+        progress(geotagged.count, geotagged.count)
 
         // A trip the user split stays split into all its parts, however small a part is, as
         // long as the whole trip was big enough to be found (audit 2, 2.1): the workshop

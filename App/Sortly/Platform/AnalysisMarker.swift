@@ -25,6 +25,10 @@ enum AnalysisMarker {
         var version: String? = nil
         /// The label of the phase the run was in, kept when it goes on.
         var newWork: ResumedRun.NewWork? = nil
+        /// Where in `stage` it stood (count of total): a run that goes on holds the value until
+        /// it is past this position (review of 11ef3e1). `nil` in markers of older versions.
+        var completed: Int? = nil
+        var total: Int? = nil
     }
 
     private static let unfinishedKey = "analysis.unfinished"

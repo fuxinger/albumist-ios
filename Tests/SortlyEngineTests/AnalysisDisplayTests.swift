@@ -505,7 +505,7 @@ struct AnalysisDisplayTests {
         #expect(ahead.shown(running: true, catchingUp: false, overall: 0.7, stopped: nil) == 0.7)
     }
 
-    // MARK: New work after a stop (review of 83db832, IMPORTANT 2)
+    // MARK: A run that goes on (reviews of 83db832 and 11ef3e1)
 
     /// "Much more work": more than 1.5 times the work left when the run stopped, and at least
     /// 500 photos more. Both have to hold.
@@ -528,9 +528,9 @@ struct AnalysisDisplayTests {
     }
 
     /// Label "Neue Fotos werden analysiert": stopped in the text step at 90 % with 2,000
-    /// screenshots left; 10,000 photos came in. The library read says so, and the run starts a
-    /// phase of its own at once: its own honest value from its own start, never back within
-    /// the phase, never 100 % before the end. A few new photos do not start one.
+    /// screenshots left; 10,000 photos came in. The library read shows the label early, the
+    /// workload starts the phase: its own honest value from its own start, never back within
+    /// the phase, never 100 % before the end. A few new photos show no label.
     @Test func newPhotosStartTheirOwnPhase() {
         var few = ResumedRun(stage: 5, shown: 0.90, left: 2_000, photos: 50_000)
         let r1 = few.library(photos: 50_300)
@@ -543,16 +543,19 @@ struct AnalysisDisplayTests {
         let r2 = run.library(photos: 60_000)
         #expect(r2)
         #expect(run.newWork == .newPhotos)
-        #expect(!run.isCatchingUp(running: true, at: 1))
-        let r3 = run.back(at: 1, step: .library, completed: 0, total: 60_000, widths: w)
-        #expect(r3 == nil)
-        // Decided once: the workload later changes nothing.
+        // Only the label so far: the value is still held until the workload decides.
+        #expect(!run.ownStart)
+        #expect(run.shown(running: true, catchingUp: true, overall: 0.01, stopped: nil) == 0.90)
         let more = AnalysisWorkload(photos: 60_000, located: 30_000, screenshots: 2_100, contentLeft: 10_000, textLeft: 2_100)
         let r4 = run.workload(more)
-        #expect(!r4)
+        #expect(r4)
         #expect(run.newWork == .newPhotos)
+        #expect(run.ownStart)
+        #expect(!run.isCatchingUp(running: true, at: 3))
+        let r3 = run.back(at: 5, step: .text, completed: 0, total: 2_100, widths: w)
+        #expect(r3 == nil)
         var last = -1.0
-        var path: [(AnalysisStep, Int)] = [(.library, 60_000), (.trips, 1), (.places, 30_000), (.content, 10_000), (.text, 2_100)]
+        var path: [(AnalysisStep, Int)] = [(.trips, 1), (.places, 30_000), (.content, 10_000), (.text, 2_100)]
         path.append((.proposals, 1))
         for (step, total) in path {
             for done in stride(from: 0, through: total, by: max(1, total / 20)) {
@@ -563,7 +566,7 @@ struct AnalysisDisplayTests {
             }
         }
         // Its own start: the number begins at the phase's real value, not at the floor.
-        #expect(run.shown(running: true, catchingUp: false, overall: 0, stopped: nil) == 0)
+        #expect(run.shown(running: true, catchingUp: false, overall: 0.08, stopped: nil) == 0.08)
         // Paused inside the phase: where it stood, not the old floor.
         #expect(run.shown(running: false, catchingUp: false, overall: 0, stopped: 0.2) == 0.2)
     }
@@ -589,62 +592,142 @@ struct AnalysisDisplayTests {
         let r7 = same.workload(update)
         #expect(r7)
         #expect(same.newWork == .newPhotos)
-        // A marker of an older version kept no work left: no phase (it goes on from the floor).
+        // A marker of an older version kept no work left: no phase (it holds the floor).
         var old = ResumedRun(stage: 7, shown: 0.996)
         let r8 = old.workload(update)
         #expect(!r8)
     }
 
-    /// Catching up (holding the floor) is decided by the measured work up to the stopped step,
-    /// not by the step: the same image step is quick with 100 photos left and not with 50,000.
-    @Test func catchingUpOnlyWhileTheWorkIsQuick() {
-        let run = ResumedRun(stage: 5, shown: 0.90, left: 2_000, photos: 50_000)
-        let few = AnalysisWorkload(photos: 50_000, located: 30_000, screenshots: 2_000, contentLeft: 100, textLeft: 2_000)
-        let many = AnalysisWorkload(photos: 50_000, located: 30_000, screenshots: 2_000, contentLeft: 50_000, textLeft: 2_000)
-        // Not measured yet (the step's first seconds): nothing decided, still catching up.
-        let unmeasured = ResumedRun.secondsUntilBack(stage: 5, step: .library, completed: 0, total: 50_000, itemsPerSecond: nil, workload: nil)
-        #expect(unmeasured == nil)
-        #expect(run.isCatchingUp(running: true, at: 1, secondsLeft: unmeasured))
-        // Reading known photos fast: quick.
-        let read = ResumedRun.secondsUntilBack(stage: 5, step: .library, completed: 0, total: 50_000, itemsPerSecond: 10_000, workload: nil)
-        #expect(run.isCatchingUp(running: true, at: 1, secondsLeft: read))
-        // Places done, 100 images to look at: quick. 50,000: not.
-        let quick = ResumedRun.secondsUntilBack(stage: 5, step: .places, completed: 30_000, total: 30_000, itemsPerSecond: 50, workload: few)
-        let slow = ResumedRun.secondsUntilBack(stage: 5, step: .places, completed: 30_000, total: 30_000, itemsPerSecond: 50, workload: many)
-        #expect(run.isCatchingUp(running: true, at: 3, secondsLeft: quick))
-        #expect(!run.isCatchingUp(running: true, at: 3, secondsLeft: slow))
-        let inStep = ResumedRun.secondsUntilBack(stage: 5, step: .content, completed: 0, total: 100, itemsPerSecond: 10, workload: few)
-        #expect(run.isCatchingUp(running: true, at: 4, secondsLeft: inStep))
-        let inBigStep = ResumedRun.secondsUntilBack(stage: 5, step: .content, completed: 0, total: 50_000, itemsPerSecond: 10, workload: many)
-        #expect(!run.isCatchingUp(running: true, at: 4, secondsLeft: inBigStep))
-        // At or after the stopped step: nothing to catch up.
-        #expect(ResumedRun.secondsUntilBack(stage: 5, step: .text, completed: 0, total: 2_000, itemsPerSecond: nil, workload: many) == 0)
+    /// Review of 11ef3e1 (minor 1): the library read counts the whole library and every item,
+    /// the work left counts the run's part and only what the analysis looks at. Stopped at the
+    /// end with nothing left, with "Nur 2026": 600 photos from other years come in by iCloud.
+    /// The read shows the label early, but the workload (nothing new in 2026) takes it back
+    /// and starts no phase; the value stays held.
+    @Test func newPhotosOutsideTheScopeStartNoPhase() {
+        var run = ResumedRun(stage: 7, completed: 0, shown: 0.98, left: 0, photos: 50_000)
+        let r1 = run.library(photos: 50_600)
+        #expect(r1)
+        #expect(run.newWork == .newPhotos)
+        let in2026 = AnalysisWorkload(photos: 4_000, located: 3_000, screenshots: 100, contentLeft: 0, textLeft: 0)
+        let r2 = run.workload(in2026)
+        #expect(!r2)
+        #expect(run.newWork == nil)
+        #expect(!run.ownStart)
+        #expect(run.shown(running: true, catchingUp: true, overall: 0.1, stopped: nil) == 0.98)
     }
 
-    /// More work before the stopped step, but not much more (or an older marker that kept no
-    /// work left): not quick, so the run goes on from the floor on its first report there,
-    /// and the number moves with the work instead of standing at the floor.
-    @Test func moreWorkBeforeTheStoppedStepGoesOnFromTheFloor() throws {
+    /// The same with 600 items the analysis does not look at (as the workload counts them): no
+    /// phase, and a label the stopped run had (it was in a phase) comes back.
+    @Test func newItemsTheAnalysisDoesNotLookAtStartNoPhase() {
+        var run = ResumedRun(stage: 7, completed: 0, shown: 0.98, left: 0, photos: 50_000)
+        let r1 = run.library(photos: 50_600)
+        #expect(r1)
+        let same = AnalysisWorkload(photos: 50_000, located: 30_000, screenshots: 2_000, contentLeft: 0, textLeft: 0)
+        let r2 = run.workload(same)
+        #expect(!r2)
+        #expect(run.newWork == nil)
+        var inPhase = ResumedRun(stage: 7, completed: 0, shown: 0.6, left: 0, photos: 50_000, newWork: .afterUpdate)
+        let r3 = inPhase.library(photos: 50_600)
+        #expect(!r3)
+        let r4 = inPhase.workload(same)
+        #expect(!r4)
+        #expect(inPhase.newWork == .afterUpdate)
+    }
+
+    /// Review of 11ef3e1 (IMPORTANT): the value is held until the run passes the position it
+    /// stopped at, whatever the steps before it take; then it goes on from the floor with the
+    /// rest of the work from there. Stopped at 30,000 of 50,000 in the image step; nothing
+    /// changed; the library read and the places pass are slow. At photo 30,000 the card reads
+    /// the value it was paused at, and from there it moves with the work to the end.
+    @Test func heldUntilPastTheStoppedPosition() throws {
+        let w = StepWidths.standard
+        let floor = w.overall(step: .content, completed: 30_000, total: 50_000)
+        var run = ResumedRun(stage: 4, completed: 30_000, shown: floor, left: 21_000, photos: 50_000)
+        var widths = w
+        let path: [(Int, AnalysisStep, Int, Int)] = [
+            (1, .library, 0, 50_000), (1, .library, 25_000, 50_000), (1, .library, 50_000, 50_000),
+            (2, .trips, 0, 1), (2, .trips, 1, 1),
+            (3, .places, 0, 30_000), (3, .places, 15_000, 30_000), (3, .places, 30_000, 30_000),
+        ]
+        for (stage, step, completed, total) in path {
+            let r = run.back(at: stage, step: step, completed: completed, total: total, widths: widths)
+            #expect(r == nil)
+            #expect(run.holds(running: true))
+            let v = run.shown(running: true, catchingUp: true, overall: widths.overall(step: step, completed: completed, total: total), stopped: nil)
+            #expect(v == floor, "\(step) \(completed): \(v)")
+        }
+        #expect(run.isCatchingUp(running: true, at: 3))
+        // Back at the stopped position: nothing to re-spread (nothing changed), the same value.
+        let r = run.back(at: 4, step: .content, completed: 30_000, total: 50_000, widths: widths)
+        widths = r ?? widths
+        #expect(run.isBack)
+        var last = floor
+        for done in stride(from: 30_000, through: 50_000, by: 1_000) {
+            let v = run.shown(running: true, catchingUp: false, overall: widths.overall(step: .content, completed: done, total: 50_000), stopped: nil)
+            #expect(v >= last)
+            #expect(abs(v - w.overall(step: .content, completed: done, total: 50_000)) < 1e-9, "\(done): counted again")
+            last = v
+        }
+    }
+
+    /// More work before the stopped step, but not much more (1,000 new photos, or an older
+    /// marker that kept no work left): held, while the count moves, until the run passes where
+    /// it stopped; then the rest is spread from the floor once, and the number moves on.
+    @Test func moreWorkBeforeTheStoppedStepIsHeldThenGoesOnFromTheFloor() throws {
         let w = StepWidths.standard
         for left in [Int?.some(2_000), nil] {
-            var run = ResumedRun(stage: 5, shown: 0.90, left: left, photos: 50_000)
-            let work = AnalysisWorkload(photos: 51_000, located: 30_000, screenshots: 2_000, contentLeft: 1_000, textLeft: 2_000)
+            var run = ResumedRun(stage: 5, completed: 500, shown: 0.90, left: left, photos: 50_000)
+            let work = AnalysisWorkload(photos: 51_000, located: 30_000, screenshots: 2_000, contentLeft: 1_000, textLeft: 1_500)
             let r9 = run.workload(work)
             #expect(!r9)
-            let secondsLeft = ResumedRun.secondsUntilBack(stage: 5, step: .content, completed: 0, total: 1_000, itemsPerSecond: 8, workload: work)
-            #expect(!run.isCatchingUp(running: true, at: 4, secondsLeft: secondsLeft))
-            let continued = run.back(at: 4, step: .content, completed: 0, total: 1_000, widths: w)
+            for done in stride(from: 49_000, through: 51_000, by: 100) {
+                let r = run.back(at: 4, step: .content, completed: done, total: 51_000, widths: w)
+                #expect(r == nil)
+                let v = run.shown(running: true, catchingUp: true, overall: w.overall(step: .content, completed: done, total: 51_000), stopped: nil)
+                #expect(v == 0.90)
+            }
+            // The text step from 0 to where it stopped (500 of 2,000): still held.
+            let early = run.back(at: 5, step: .text, completed: 0, total: 2_000, widths: w)
+            #expect(early == nil)
+            #expect(!run.isBack)
+            let continued = run.back(at: 5, step: .text, completed: 500, total: 2_000, widths: w)
             let widths = try #require(continued)
             var values: Set<Int> = []
-            var last = 0.0
-            for done in stride(from: 0, through: 1_000, by: 50) {
-                let v = run.shown(running: true, catchingUp: false, overall: widths.overall(step: .content, completed: done, total: 1_000), stopped: nil)
-                #expect(v >= max(last, 0.90 - 1e-9))
+            var last = 0.90 - 1e-9
+            for done in stride(from: 500, through: 2_000, by: 50) {
+                let v = run.shown(running: true, catchingUp: false, overall: widths.overall(step: .text, completed: done, total: 2_000), stopped: nil)
+                #expect(v >= last)
                 last = v
                 values.insert(Int((v * 1_000).rounded()))
             }
             #expect(values.count > 10, "stands still: \(values.sorted())")
         }
+    }
+
+    /// A marker of an older version kept no count: the run is back when it reaches the stage.
+    @Test func olderMarkerIsBackAtItsStage() {
+        var run = ResumedRun(stage: 4, shown: 0.5)
+        #expect(!run.hasPassed(at: 3, completed: 30_000, total: 30_000))
+        #expect(run.hasPassed(at: 4, completed: 0, total: 50_000))
+        let r = run.back(at: 4, step: .content, completed: 0, total: 50_000, widths: .standard)
+        #expect(r != nil)
+        #expect(run.isBack)
+    }
+
+    /// Review of 11ef3e1 (minor 2): a run that throws after a complete one has no outcome of
+    /// its own, so the details never say 100 % from the earlier report.
+    @Test func onlyTheLastRunsOwnOutcomeIsComplete() {
+        var outcome = LastRunOutcome()
+        var complete = AnalysisPipeline.Report()
+        complete.completedStages = AnalysisPipeline.Stage.allCases
+        outcome.ended(with: complete)
+        #expect(outcome.isComplete(running: false))
+        #expect(AnalysisPercent.percent(0.97, isComplete: outcome.isComplete(running: false)) == 100)
+        outcome.started()
+        #expect(!outcome.isComplete(running: true))
+        outcome.ended(with: nil)          // the next run threw
+        #expect(!outcome.isComplete(running: false))
+        #expect(AnalysisPercent.percent(0.97, isComplete: outcome.isComplete(running: false)) == 97)
     }
 
     /// A run that goes on inside a phase keeps the phase's label; its floor is the phase's

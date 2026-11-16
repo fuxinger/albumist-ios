@@ -83,6 +83,59 @@ struct FullRunDisplayTests {
         sim.finish()
     }
 
+    /// (h) Review of 11ef3e1: paused in the image step; nothing changed. The run that goes on
+    /// holds the value through the steps before (the count moves) and, back at the photo it
+    /// stopped at, reads the value it was paused at (invariant 10), then moves to the end.
+    @Test func resumeIsHeldUntilWhereItStopped() async throws {
+        let sim = try Sim(scale: 0.2)
+        let first = await sim.run("h1 pause in content", pause: .when(stage: .content, atLeast: 0.6))
+        #expect(first.lastStage == .content)
+        let rest = await sim.run("h2 goes on")
+        sim.expectComplete(rest)
+        #expect(sim.passes.contains { $0.run == "h2 goes on" })
+        #expect(sim.phases.isEmpty)
+        sim.finish()
+    }
+
+    /// (i) A few photos come in while paused in the text step: not much more work, so no phase;
+    /// held until back where it stopped, then on from there.
+    @Test func fewNewPhotosAreHeldThenGoOn() async throws {
+        let sim = try Sim(scale: 0.2)
+        let first = await sim.run("i1 pause in text", pause: .when(stage: .text, atLeast: 0.5))
+        #expect(first.lastStage == .text)
+        await sim.addPhotos(20)
+        let rest = await sim.run("i2 goes on")
+        sim.expectComplete(rest)
+        #expect(sim.phases.isEmpty)
+        #expect(sim.passes.contains { $0.run == "i2 goes on" })
+        sim.finish()
+    }
+
+    /// (j) Many photos come in while paused in the text step: a phase of its own, "Neue Fotos
+    /// werden analysiert", with its own number from its own start, never back within it.
+    @Test func manyNewPhotosStartTheirOwnPhase() async throws {
+        let sim = try Sim(scale: 0.2)
+        let first = await sim.run("j1 pause in text", pause: .when(stage: .text, atLeast: 0.5))
+        #expect(first.lastStage == .text)
+        await sim.addPhotos(800)
+        let rest = await sim.run("j2 new photos")
+        sim.expectComplete(rest)
+        #expect(sim.phases.map(\.cause) == [.newPhotos])
+        sim.finish()
+    }
+
+    /// (k) An update changes the image analysis while paused near the end: "Analyse nach Update".
+    @Test func anUpdateStartsItsOwnPhase() async throws {
+        let sim = try Sim(scale: 0.2)
+        let first = await sim.run("k1 pause in text", pause: .when(stage: .text, atLeast: 0.5))
+        #expect(first.lastStage == .text)
+        try await sim.updateChangesTheAnalysis()
+        let rest = await sim.run("k2 after update")
+        sim.expectComplete(rest)
+        #expect(sim.phases.map(\.cause) == [.afterUpdate])
+        sim.finish()
+    }
+
     /// (c) The app is ended in the middle of the image analysis; a fresh pipeline on the same
     /// store goes on.
     @Test func restartMidContentWithFreshPipeline() async throws {
@@ -331,7 +384,10 @@ struct FullRunDisplayTests {
         let run = await sim.run("patterns")
         let patterns = run.progress.filter { $0.stage == .patterns }
         #expect(patterns.first?.completed == 0)
-        #expect(patterns.last?.completed == 1)
+        // Then the photos with a location as they are grouped (review of 11ef3e1, minor 3).
+        #expect((patterns.last?.completed ?? 0) > 1)
+        #expect(patterns.last?.completed == patterns.last?.total)
+        #expect(Set(patterns.map(\.completed)).count >= 2)
     }
 
     /// The image analysis saves and reports at least once a second, also on a warm device
@@ -621,46 +677,16 @@ final class RunLog: @unchecked Sendable {
     }
 }
 
-/// The analysis card's bar as AppModel computes it (`receive`, `overall`, `shownOverall`,
-/// `AnalysisMarker`): late or lower updates are dropped, and a run that goes on shows at
-/// least where the interrupted one got to while it catches up.
-struct DisplayModel {
-    var stage: Stage?
-    var completed = 0
-    var total = 0
-    var marker: (stage: Int, overall: Double)?
-    var resumeFrom: (stage: Int, overall: Double)?
-
-    var overall: Double { stage.map { PipelineProgress.overall(stage: $0, completed: completed, total: total) } ?? 0 }
-    var isCatchingUp: Bool {
-        guard let resumeFrom else { return false }
-        return (stage?.number ?? 0) < resumeFrom.stage
-    }
-    var shown: Double { isCatchingUp ? max(overall, resumeFrom?.overall ?? 0) : overall }
-
-    mutating func start() {
-        stage = nil
-        completed = 0
-        total = 0
-        resumeFrom = marker
-    }
-
-    mutating func receive(_ progress: PipelineProgress) {
-        if let stage {
-            if progress.stage.number < stage.number { return }
-            if progress.stage == stage, progress.completed < completed { return }
-        }
-        stage = progress.stage
-        completed = progress.completed
-        total = progress.total
-        if !isCatchingUp { marker = (progress.stage.number, overall) }
-    }
-
-    mutating func end(complete: Bool) {
-        if complete { marker = nil }
-        resumeFrom = nil
-        stage = nil
-    }
+/// The app's `AnalysisMarker.Point`, as the simulator keeps it between runs.
+struct SimMarker {
+    var stage: Int
+    var completed: Int
+    var overall: Double
+    var widths: StepWidths?
+    var left: Int?
+    var photos: Int?
+    var version: String
+    var newWork: ResumedRun.NewWork?
 }
 
 // MARK: - Harness
@@ -684,12 +710,17 @@ final class Sim: @unchecked Sendable {
     var runs: [RunLog] = []
     /// The run before, of the same analysis (cleared by "Analyse neu aufbauen").
     private var previous: [RunLog] = []
-    private var display = DisplayModel()
-    /// The bar's value last shown in this analysis (pause and resume included).
+    /// The number the card showed last in this analysis (pause and resume included; a phase
+    /// of its own starts it again).
     private var lastShown: Double = 0
     /// The app's `AnalysisMarker.unfinished`: where the analysis got to, with its widths once
     /// they are known (kept over Pause and a restart: S6). A run that goes on starts from it.
-    private var marker: (stage: Int, overall: Double, widths: StepWidths?)?
+    private var marker: SimMarker?
+    /// Where runs that went on passed the position the run before stopped at: the value then,
+    /// the held value, and the real value under the widths (review of 11ef3e1).
+    private(set) var passes: [(run: String, shown: Double, floor: Double, real: Double)] = []
+    /// Phases of their own that runs started, with their label.
+    private(set) var phases: [(run: String, cause: ResumedRun.NewWork)] = []
     /// The bar the card drew last, as a value and as the six segments' fills.
     private var lastShownBar: Double = 0
     private var lastFills: [Double] = []
@@ -738,10 +769,35 @@ final class Sim: @unchecked Sendable {
         )
     }
 
+    /// Photos come in between runs (copies of the library's everyday photos under new ids).
+    func addPhotos(_ count: Int) async {
+        var assets = await reader.assets
+        let everyday = library.assets.filter { !$0.isScreenshotLike && $0.creationDate != nil }
+        for i in 0..<count {
+            var copy = everyday[i % everyday.count]
+            copy.id = AssetID("added-\(assets.count)-\(i)")
+            copy.creationDate = copy.creationDate?.addingTimeInterval(60)
+            assets.append(copy)
+        }
+        await reader.set(assets: assets)
+    }
+
+    /// An update that changed the image analysis: every photo is to be looked at again, and
+    /// the marker was written by the version before.
+    func updateChangesTheAnalysis() async throws {
+        let ids = try await store.allAssets().map(\.id)
+        try await store.markAnalyzed(ids, version: 0)
+        marker?.version = "0.0"
+        countsStartAgain = true
+    }
+
+    /// The next run's counts start again (an update asks for every photo again): not compared
+    /// with where the run before ended.
+    private var countsStartAgain = false
+
     /// "Analyse neu aufbauen": the next run is a full one again (AnalysisMarker.reset()).
     func newAnalysis() {
         previous = []
-        display = DisplayModel()
         lastShown = 0
         marker = nil
         lastShownBar = 0
@@ -792,7 +848,6 @@ final class Sim: @unchecked Sendable {
             })
         }
         armed.withLock { $0?.task = task }
-        display.start()
         do {
             log.report = try await task.value
         } catch {
@@ -803,9 +858,9 @@ final class Sim: @unchecked Sendable {
         current.withLock { $0 = nil }
         check(log)
         checkCard(log)
+        countsStartAgain = false
         runs.append(log)
         previous.append(log)
-        display.end(complete: log.report?.isComplete == true)
         if log.report?.isComplete == true {
             lastShown = 0
             marker = nil
@@ -914,7 +969,7 @@ final class Sim: @unchecked Sendable {
             if let last = lastOf[p.stage] {
                 if p.completed < last.completed { fail(run, 2, "\(p.stage) went back from \(last.completed) to \(p.completed) (von \(p.total))", at: event.t) }
                 if p.total != last.total, last.total != 0 { fail(run, 2, "\(p.stage) total changed from \(last.total) to \(p.total)", at: event.t) }
-            } else if [.places, .content, .text].contains(p.stage),
+            } else if !countsStartAgain, [.places, .content, .text].contains(p.stage),
                       let before = previous.last(where: { $0.last(p.stage) != nil })?.last(p.stage), before.total == p.total, p.completed < before.completed {
                 // Counts that persist across runs (the other steps are computed anew each run).
                 fail(run, 2, "\(p.stage) starts at \(p.completed) von \(p.total), below where the run before ended (\(before.completed))", at: event.t)
@@ -926,11 +981,6 @@ final class Sim: @unchecked Sendable {
                 fail(run, 3, "overall went back from \(pct(rawOverall)) to \(pct(overall)) at \(p.stage) \(p.completed)/\(p.total)", at: event.t)
             }
             rawOverall = max(rawOverall, overall)
-            display.receive(p)
-            if display.shown + 1e-9 < lastShown {
-                fail(run, 3, "bar shows \(pct(display.shown)) after \(pct(lastShown)) (\(p.stage) \(p.completed)/\(p.total))", at: event.t)
-            }
-            lastShown = max(lastShown, display.shown)
         }
 
         // 4. No silent stretch while working; 5. no "N von N" while the stage still works.
@@ -1021,6 +1071,15 @@ final class Sim: @unchecked Sendable {
         let resumeFrom = marker
         var w = resumeFrom?.widths ?? .standard
         var widthsFixed = resumeFrom?.widths != nil
+        // As AppModel.startAnalysis: a run that goes on (`ResumedRun`, reviews of 83db832 and
+        // 11ef3e1): held until it passes where the run before stopped, then on from there;
+        // much more work starts a phase of its own.
+        var resumed = resumeFrom.map {
+            ResumedRun(stage: $0.stage, completed: $0.completed, shown: $0.overall, left: $0.left, photos: $0.photos,
+                       updated: $0.version != AnalysisPipeline.analysisVersion, newWork: $0.newWork)
+        }
+        var workload: AnalysisWorkload?
+        var libraryPhotos: Int?
         var glide = BarGlide()
         if resumeFrom != nil {
             glide.reset(keeping: lastShownBar)
@@ -1043,14 +1102,33 @@ final class Sim: @unchecked Sendable {
             switch event.kind {
             case .progress(let p):
                 let s = AnalysisStep(p.stage)
-                if let workload = p.workload {
-                    estimator.setWorkload(workload)
-                    if !widthsFixed {
+                if let wl = p.workload {
+                    estimator.setWorkload(wl)
+                    workload = wl
+                    // As AppModel.tick: much more work than when the run before stopped starts
+                    // a phase of its own, with this workload's widths, from its own start.
+                    var startsPhase = false
+                    if var r = resumed {
+                        startsPhase = r.workload(wl)
+                        resumed = r
+                    }
+                    if startsPhase, let cause = resumed?.newWork {
+                        w = StepWidths(workload: wl)
+                        widthsFixed = true
+                        glide.reset()
+                        // A labelled phase starts its own number: not a step back of the same one.
+                        lastShownBar = 0
+                        lastFills = []
+                        lastShown = 0
+                        phases.append((run.label, cause))
+                    } else if !widthsFixed {
                         // As AppModel.tick: new widths, continued from the bar drawn so far
-                        // where they would put it lower (review of 9f0bc40: never falls).
+                        // where they would put it lower (review of 9f0bc40: never falls); not
+                        // while a run that goes on holds its value (review of 11ef3e1).
                         let held = glide.value(at: instant(event.t), gliding: false)
-                        var nw = StepWidths(workload: workload)
-                        if let c = nw.continuing(held: held, step: s, completed: p.completed, total: p.total) { nw = c }
+                        var nw = StepWidths(workload: wl)
+                        if !(resumed?.holds(running: true) ?? false),
+                           let c = nw.continuing(held: held, step: s, completed: p.completed, total: p.total) { nw = c }
                         w = nw
                         widthsFixed = true
                         glide.reset(keeping: held)
@@ -1059,24 +1137,68 @@ final class Sim: @unchecked Sendable {
                 if let step, s < step { continue }
                 step = s
                 if !paused { estimator.record(step: s, completed: p.completed, total: p.total, at: instant(event.t), appleWait: p.waitLeft != nil) }
-                // As AppModel (`shownOverall`, `receive`): while catching up to where the
-                // interrupted run got, never below it; the marker moves on only after that.
+                // As AppModel.receive: the library read may show the label early; the first
+                // report past the stopped position spreads the rest from there, once.
+                if p.stage == .inventory, p.total > 0 {
+                    libraryPhotos = p.total
+                    if var r = resumed { _ = r.library(photos: p.total); resumed = r }
+                }
+                if var r = resumed {
+                    let wasBack = r.isBack
+                    let before = w.overall(step: s, completed: p.completed, total: p.total)
+                    if let c = r.back(at: p.stage.number, step: s, completed: p.completed, total: p.total, widths: w) {
+                        w = c
+                        widthsFixed = true
+                    }
+                    resumed = r
+                    if !wasBack, r.isBack {
+                        let now = r.shown(running: true, catchingUp: false, overall: w.overall(step: s, completed: p.completed, total: p.total), stopped: nil)
+                        passes.append((run.label, now, r.floor, before))
+                        // 10. Back where it stopped, the card reads the value it showed then (or
+                        //     the real value when that is higher): work done before the stop is
+                        //     never counted again as new progress (review of 11ef3e1).
+                        let expected = AnalysisPercent.value(max(r.floor, before), isComplete: false)
+                        if abs(now - expected) > 0.005 {
+                            fail(run, 10, "back at \(p.stage) \(p.completed)/\(p.total): shows \(pct(now)), held \(pct(r.floor)), real \(pct(before))", at: event.t)
+                        }
+                    }
+                }
+                // As AppModel (`shownOverall`): held at the floor until the run is back; never
+                // 100 % before the end.
                 let overall = w.overall(step: s, completed: p.completed, total: p.total)
-                let catchingUp = resumeFrom.map { p.stage.number < $0.stage } ?? false
-                let real = catchingUp ? max(overall, resumeFrom?.overall ?? 0) : overall
-                if !catchingUp { marker = (p.stage.number, overall, widthsFixed ? w : nil) }
-                glide.update(real: real, at: instant(event.t), step: s, widths: w, itemsPerSecond: estimator.rate, total: p.total)
+                let real = resumed?.shown(running: true, catchingUp: false, overall: overall, stopped: nil)
+                    ?? AnalysisPercent.value(overall, isComplete: false)
+                // 3. The number never goes back within a phase, also over Pause and restarts.
+                if real + 1e-9 < lastShown {
+                    fail(run, 3, "number shows \(pct(real)) after \(pct(lastShown)) (\(p.stage) \(p.completed)/\(p.total))", at: event.t)
+                }
+                lastShown = max(lastShown, real)
+                // As AppModel.receive: the marker moves on only once the value is not held.
+                if !(resumed?.holds(running: true) ?? false) {
+                    let carried = workload == nil ? resumeFrom : nil
+                    marker = SimMarker(
+                        stage: p.stage.number, completed: p.completed, overall: real, widths: widthsFixed ? w : nil,
+                        left: workload.map { $0.heavyLeft(at: s, completed: p.completed, total: p.total) } ?? carried?.left,
+                        photos: carried?.photos ?? libraryPhotos,
+                        version: carried?.version ?? AnalysisPipeline.analysisVersion,
+                        newWork: resumed?.newWork)
+                }
+                let barWidths = resumed?.drawnWidths(w) ?? w
+                glide.update(real: real, at: instant(event.t), step: s, widths: barWidths, itemsPerSecond: estimator.rate, total: p.total)
                 let bar = glide.value(at: instant(event.t), gliding: !waiting && !paused)
+                if bar > AnalysisPercent.cap + 1e-9 {
+                    fail(run, 3, "drawn bar \(pct(bar)) before the end (never 100 %)", at: event.t)
+                }
                 // What the eye sees is the segments: each one's fill never goes back (also
                 // when the widths change, review I3), and the drawn value never goes back
                 // under the same widths.
-                let fills = w.fills(for: bar)
+                let fills = barWidths.fills(for: bar)
                 if let back = zip(fills, lastFills).enumerated().first(where: { $0.element.0 + 1e-9 < $0.element.1 }) {
                     fail(run, 3, "segment \(back.offset + 1) went back from \(pct(back.element.1)) to \(pct(back.element.0)) at \(p.stage) \(p.completed)/\(p.total)", at: event.t)
                 }
                 // Against the real value as the app computes it, not the glide's own (which
                 // kept the old widths' value and so hid the frozen bar, review I3).
-                if bar > real + BarGlide.maxLead * w.width(of: s) + 1e-9 {
+                if bar > real + BarGlide.maxLead * barWidths.width(of: s) + 1e-9 {
                     fail(run, 3, "drawn bar \(pct(bar)) more than 1 % of the step ahead of \(pct(real))", at: event.t)
                 }
                 // The drawn value never falls within a run, also not when the widths come

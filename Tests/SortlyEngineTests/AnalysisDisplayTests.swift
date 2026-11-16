@@ -310,6 +310,24 @@ struct AnalysisDisplayTests {
         #expect(still.value(at: Self.at(10), gliding: true) == 0.4)
     }
 
+    /// Review minor: a run that goes on with the same analysis starts from the bar drawn
+    /// last, not from the real value below it (the glided lead was lost: a step back).
+    @Test func glideGoesOnFromTheBarDrawnLast() {
+        let w = StepWidths.standard
+        var g = BarGlide()
+        g.update(real: 0.30, at: Self.at(0), step: .content, widths: w, itemsPerSecond: 100, total: 10_000)
+        let drawn = g.value(at: Self.at(10), gliding: true)
+        #expect(drawn > 0.30)
+        var next = BarGlide()
+        next.reset(keeping: drawn)
+        next.update(real: 0.30, at: Self.at(20), step: .content, widths: w, itemsPerSecond: nil, total: 10_000)
+        #expect(next.value(at: Self.at(20), gliding: false) == drawn)
+        // A plain reset (new widths, a new analysis) starts at the real value.
+        next.reset()
+        next.update(real: 0.04, at: Self.at(21), step: .places, widths: w, itemsPerSecond: nil, total: 100)
+        #expect(next.value(at: Self.at(21), gliding: true) == 0.04)
+    }
+
     // MARK: Card states (P1, P5–P7, P10–P12, P17)
 
     static func running(_ configure: (inout AnalysisCardState.Inputs) -> Void) -> AnalysisCardState? {
@@ -350,6 +368,8 @@ struct AnalysisDisplayTests {
         #expect(Self.running { $0.waiting = .thermal }?.isGrey == false)
         #expect(Self.running { $0.waiting = .thermal }?.isWorking == false)
         #expect(Self.running { _ in }?.isWorking == true)
+        // Review minor: no light sweep while Apple's geocoder is waited for.
+        #expect(Self.running { $0.appleWait = true }?.isWorking == false)
         #expect(position.hasCount)
         #expect(!AnalysisCardState.Position(step: .proposals, completed: 0, total: 0).hasCount)
         #expect(!AnalysisCardState.Position(step: .trips, completed: 1, total: 1).hasCount)

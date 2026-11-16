@@ -871,14 +871,19 @@ final class AppModel {
         tickTask?.cancel()
         progressMailbox = ProgressMailbox()
         estimator.reset()
-        glide.reset()
+        // Going on with the same analysis: from the bar drawn last (never a step back).
+        if analysis.resumeFrom != nil {
+            glide.reset(keeping: max(analysisBar, analysis.shownOverall))
+        } else {
+            glide.reset()
+        }
         runClockStart = .now
         pausingSince = nil
         lastRecentChange = nil
         lastStepRemainingCheck = nil
         lastEarlyLook = nil
         runShowedBar = false
-        analysisBar = analysis.shownOverall
+        analysisBar = glide.value(at: .now, gliding: false)
         analysisFinish = nil
         analysisStepRemaining = nil
         analysisStartedAt = Date()
@@ -918,10 +923,18 @@ final class AppModel {
         if let workload = taken.workload {
             estimator.setWorkload(workload)
             if !widthsFixed {
-                // Before this the first two steps used the standard widths; the drawn bar never
-                // goes back meanwhile (the glide holds it until the real value passes).
+                // Before this the first two steps used the standard widths. The glide starts
+                // again at the real value under the new widths (review I3: it held the old
+                // value, so the bar stood still well into the places step). Nothing is drawn
+                // back: the workload comes with the end of the trips step, where both widths
+                // draw the first two segments full and the rest empty.
                 analysis.widths = StepWidths(workload: workload)
                 widthsFixed = true
+                glide.reset()
+                if let step = analysis.step {
+                    glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
+                                 itemsPerSecond: nil, total: analysis.total)
+                }
             }
         }
         if let progress = taken.progress { receive(progress, at: now) }

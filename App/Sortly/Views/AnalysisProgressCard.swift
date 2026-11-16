@@ -204,7 +204,13 @@ struct AnalysisProgressCard: View {
             switch state {
             case .running(_, let slower, let appleWait, _):
                 if appleWait {
-                    Text("Apple antwortet gleich")
+                    // The wait can last a minute; the spinner says it is alive meanwhile
+                    // (limit: nothing stands still for more than 10 s while work goes on).
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                            .accessibilityHidden(true)
+                        Text("Apple antwortet gleich")
+                    }
                 } else if let finish = model.analysisFinish {
                     Text(AnalysisText.finish(finish))
                         .accessibilityIdentifier("analysis.finishTime")

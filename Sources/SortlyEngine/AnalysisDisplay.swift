@@ -463,8 +463,16 @@ public struct BarGlide: Sendable, Equatable {
         return shown
     }
 
-    /// A new run.
+    /// A new run, or new widths for the run (review I3: the glide held the bar at the old
+    /// widths' value, so it stood still until the real value under the new widths caught up).
     public mutating func reset() { self = BarGlide() }
+
+    /// A run that goes on with the same analysis: starts from the value drawn last, so the
+    /// bar does not lose the lead it had glided (review minor: up to 1 % of a step back).
+    public mutating func reset(keeping drawn: Double) {
+        self = BarGlide()
+        shown = drawn
+    }
 }
 
 // MARK: Card state
@@ -554,8 +562,9 @@ public enum AnalysisCardState: Sendable, Equatable {
 
     /// Fill in accent, or grey only while paused (M5).
     public var isGrey: Bool { if case .paused = self { true } else { false } }
-    /// Motion (the light sweep, the gliding bar) only while really working (rule 4).
-    public var isWorking: Bool { if case .running = self { true } else { false } }
+    /// Motion (the light sweep, the gliding bar) only while really working (rule 4); not
+    /// while Apple's geocoder is waited for (review minor: the sweep ran during that wait).
+    public var isWorking: Bool { if case .running(_, _, let appleWait, _) = self { !appleWait } else { false } }
 }
 
 // MARK: Already done

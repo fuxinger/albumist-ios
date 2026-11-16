@@ -677,12 +677,12 @@ final class Sim: @unchecked Sendable {
     private var display = DisplayModel()
     /// The bar's value last shown in this analysis (pause and resume included).
     private var lastShown: Double = 0
-    /// The card's bar as the app draws it: six steps with widths fixed for the whole analysis
-    /// (from the first workload said, kept over Pause and a restart: S6), gliding between reports.
-    private var widths: StepWidths?
+    /// The app's `AnalysisMarker.unfinished`: where the analysis got to, with its widths once
+    /// they are known (kept over Pause and a restart: S6). A run that goes on starts from it.
+    private var marker: (stage: Int, overall: Double, widths: StepWidths?)?
+    /// The bar the card drew last, as a value and as the six segments' fills.
     private var lastShownBar: Double = 0
-    /// The highest real value of this analysis (the app's `shownOverall` with `resumeFrom`).
-    private var lastRealBar: Double = 0
+    private var lastFills: [Double] = []
     /// Every finish time the card showed: (simulated time, what it said, the run's real end).
     var finishTimes: [(run: String, t: Duration, shown: FinishEstimate, end: Duration, complete: Bool)] = []
     var violations: [String] = []
@@ -733,9 +733,9 @@ final class Sim: @unchecked Sendable {
         previous = []
         display = DisplayModel()
         lastShown = 0
-        widths = nil
+        marker = nil
         lastShownBar = 0
-        lastRealBar = 0
+        lastFills = []
     }
 
     private func fire(_ t: Duration, _ progress: PipelineProgress?) {
@@ -798,9 +798,9 @@ final class Sim: @unchecked Sendable {
         display.end(complete: log.report?.isComplete == true)
         if log.report?.isComplete == true {
             lastShown = 0
-            widths = nil
+            marker = nil
             lastShownBar = 0
-            lastRealBar = 0
+            lastFills = []
         }
         return log
     }
@@ -1001,13 +1001,27 @@ final class Sim: @unchecked Sendable {
         func instant(_ t: Duration) -> ContinuousClock.Instant { base.advanced(by: t) }
         func wall(_ t: Duration) -> Date { SimClock.base.addingTimeInterval(t.seconds) }
         var estimator = ProgressEstimator()
+        // As AppModel.startAnalysis and beginCard: the widths of the analysis this run goes on
+        // with, and the bar from where it was drawn last.
+        let resumeFrom = marker
+        var w = resumeFrom?.widths ?? .standard
+        var widthsFixed = resumeFrom?.widths != nil
         var glide = BarGlide()
+        if resumeFrom != nil {
+            glide.reset(keeping: lastShownBar)
+        } else {
+            lastShownBar = 0
+            lastFills = []
+        }
         var step: AnalysisStep?
         var waiting = false
         var paused = false
         var lastChange: Duration = run.start
-        var lastSeen: (step: AnalysisStep, completed: Int, wait: Int?)?
-        var lastBar = 0.0
+        // What the card shows (rule: nothing stands still for more than 10 s while work goes
+        // on): the count or the step's name, the finish time, the bar, Apple's wait spinner.
+        var lastText: String?
+        var lastFinishShown: FinishEstimate?
+        var barAtChange = lastShownBar
         var shown: [(Duration, FinishEstimate)] = []
         var suspendedUntil: Duration?
         for event in run.timeline {
@@ -1016,35 +1030,54 @@ final class Sim: @unchecked Sendable {
                 let s = AnalysisStep(p.stage)
                 if let workload = p.workload {
                     estimator.setWorkload(workload)
-                    if widths == nil { widths = StepWidths(workload: workload) }
+                    if !widthsFixed {
+                        // As AppModel.tick: new widths, the glide starts at the new real value.
+                        w = StepWidths(workload: workload)
+                        widthsFixed = true
+                        glide.reset()
+                    }
                 }
-                let w = widths ?? .standard
                 if let step, s < step { continue }
                 step = s
                 if !paused { estimator.record(step: s, completed: p.completed, total: p.total, at: instant(event.t), appleWait: p.waitLeft != nil) }
-                // As AppModel: the real value is never below where the analysis got to.
-                let real = max(w.overall(step: s, completed: p.completed, total: p.total), lastRealBar)
-                lastRealBar = real
+                // As AppModel (`shownOverall`, `receive`): while catching up to where the
+                // interrupted run got, never below it; the marker moves on only after that.
+                let overall = w.overall(step: s, completed: p.completed, total: p.total)
+                let catchingUp = resumeFrom.map { p.stage.number < $0.stage } ?? false
+                let real = catchingUp ? max(overall, resumeFrom?.overall ?? 0) : overall
+                if !catchingUp { marker = (p.stage.number, overall, widthsFixed ? w : nil) }
                 glide.update(real: real, at: instant(event.t), step: s, widths: w, itemsPerSecond: estimator.rate, total: p.total)
                 let bar = glide.value(at: instant(event.t), gliding: !waiting && !paused)
-                if bar + 1e-9 < lastShownBar {
-                    fail(run, 3, "drawn bar went back from \(pct(lastShownBar)) to \(pct(bar)) at \(p.stage) \(p.completed)/\(p.total)", at: event.t)
+                // What the eye sees is the segments: each one's fill never goes back (also
+                // when the widths change, review I3), and the drawn value never goes back
+                // under the same widths.
+                let fills = w.fills(for: bar)
+                if let back = zip(fills, lastFills).enumerated().first(where: { $0.element.0 + 1e-9 < $0.element.1 }) {
+                    fail(run, 3, "segment \(back.offset + 1) went back from \(pct(back.element.1)) to \(pct(back.element.0)) at \(p.stage) \(p.completed)/\(p.total)", at: event.t)
                 }
-                if bar > glide.real + BarGlide.maxLead * w.width(of: s) + 1e-9 {
-                    fail(run, 3, "drawn bar \(pct(bar)) more than 1 % of the step ahead of \(pct(glide.real))", at: event.t)
+                // Against the real value as the app computes it, not the glide's own (which
+                // kept the old widths' value and so hid the frozen bar, review I3).
+                if bar > real + BarGlide.maxLead * w.width(of: s) + 1e-9 {
+                    fail(run, 3, "drawn bar \(pct(bar)) more than 1 % of the step ahead of \(pct(real))", at: event.t)
                 }
-                lastShownBar = max(lastShownBar, bar)
-                let seen = (s, p.completed, p.waitLeft.map { Int($0.seconds) })
-                let moved = lastSeen.map { $0.step != seen.0 || $0.completed != seen.1 || $0.wait != seen.2 } ?? true
-                if moved || bar > lastBar + 1e-6 || waiting || paused {
+                lastShownBar = bar
+                lastFills = fills
+                let position = AnalysisCardState.Position(step: s, completed: p.completed, total: p.total)
+                let text = position.hasCount ? "\(p.completed)/\(p.total)" : "\(s)"
+                let finish = estimator.finish(at: instant(event.t), wall: wall(event.t))
+                let display = finish  // already rounded to what the card says
+                // About 0.7 pt on a 340 pt wide bar.
+                let barMoved = bar - barAtChange >= 0.002
+                if text != lastText || display != lastFinishShown || barMoved || p.waitLeft != nil || waiting || paused {
                     if !waiting, !paused, event.t - lastChange > .seconds(10) {
                         fail(run, 8, "card stood still for \(String(format: "%.1f", (event.t - lastChange).seconds)) s while the run worked (\(p.stage) \(p.completed)/\(p.total))", at: lastChange)
                     }
                     lastChange = event.t
+                    barAtChange = bar
                 }
-                lastSeen = seen
-                lastBar = bar
-                if let finish = estimator.finish(at: instant(event.t), wall: wall(event.t)) {
+                lastText = text
+                lastFinishShown = display
+                if let finish {
                     if waiting || paused { fail(run, 9, "finish time shown while \(waiting ? "waiting" : "paused")", at: event.t) }
                     if let until = suspendedUntil, event.t - until < .seconds(30) {
                         fail(run, 9, "finish time shown \(Int((event.t - until).seconds)) s after the app came back from the background (settles 30 s first)", at: event.t)

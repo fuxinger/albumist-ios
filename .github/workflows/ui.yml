@@ -243,7 +243,7 @@ jobs:
     needs: build
     if: inputs.stress_photos != '' && inputs.stress_photos != null
     runs-on: xcode-27
-    timeout-minutes: 330
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v5
       - name: Select newest Xcode
@@ -275,9 +275,11 @@ jobs:
         run: |
           set +e
           UDID="${{ steps.sim.outputs.udid }}"
+          # Memory of the app process every 5 s, tagged with the test's phase (create / measure).
+          echo prepare > phase.txt
           ( while true; do
               pid=$(pgrep -f "Sortly.app/Sortly" | head -1)
-              [ -n "$pid" ] && echo "$(date +%s) $(ps -o rss= -p "$pid" | tr -d ' ')" >> memory.txt
+              [ -n "$pid" ] && echo "$(date +%s) $(ps -o rss= -p "$pid" | tr -d ' ') $(cat phase.txt)" >> memory.txt
               sleep 5
             done ) &
           SAMPLER=$!
@@ -294,10 +296,13 @@ jobs:
           ( tail -n +1 -f ui-log.txt 2>/dev/null | grep --line-buffered -a "UI_HOST_GRANT_PHOTOS" | while read -r _; do
               xcrun simctl privacy "$UDID" grant photos app.albumist.ios && echo "UI_HOST photo access granted"
             done ) &
-          tail -n +1 -f ui-log.txt | grep --line-buffered -aE "error:|UI_STEP|UI_TIMING|UI_FACT|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed" | grep --line-buffered -v "/SourcePackages/" &
-          # Memory once a minute while it runs.
-          ( while kill -0 $XCB 2>/dev/null; do sleep 60; tail -1 memory.txt 2>/dev/null | awk -v s=$started '{printf "STRESS_MEMORY %d min %d MB\n", ($1-s)/60, $2/1024}'; done ) &
-          ( sleep 19200; echo "::error::Stress run stopped after 320 minutes"; kill -INT $XCB ) &
+          ( tail -n +1 -f ui-log.txt 2>/dev/null | grep --line-buffered -ao "UI_STRESS_PHASE [a-z]*" | while read -r _ phase; do echo "$phase" > phase.txt; done ) &
+          tail -n +1 -f ui-log.txt | grep --line-buffered -aE "error:|UI_STEP|UI_TIMING|UI_FACT|UI_HOST|UI_STRESS|Test Case|Executed|\*\* |Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error" | grep --line-buffered -v "/SourcePackages/" &
+          # Memory once a minute while it runs ("no app" when the last sample is older than 30 s).
+          ( while kill -0 $XCB 2>/dev/null; do sleep 60
+              tail -1 memory.txt 2>/dev/null | awk -v s=$started -v now=$(date +%s) '{ if (now-$1 > 30) printf "STRESS_MEMORY %d min no app (last %d MB, %s)\n", (now-s)/60, $2/1024, $3; else printf "STRESS_MEMORY %d min %d MB %s\n", (now-s)/60, $2/1024, $3 }'
+            done ) &
+          ( sleep 20400; echo "::error::Stress run stopped after 340 minutes"; kill -INT $XCB ) &
           WATCHDOG=$!
           wait $XCB
           status=$?
@@ -305,9 +310,28 @@ jobs:
           sleep 2
           pkill -f "tail -n \+1 -f ui-log.txt" 2>/dev/null
           echo "STRESS_TIME $(( $(date +%s) - started )) s"
-          xcrun simctl spawn "$UDID" log show --last 6h --style compact --predicate 'eventMessage CONTAINS "UITEST_LARGE_LIBRARY"' 2>/dev/null | tail -5
-          sort -k2 -n memory.txt | tail -1 | awk '{printf "STRESS_MEMORY_MAX %d MB\n", $2/1024}'
-          tail -1 memory.txt | awk '{printf "STRESS_MEMORY_END %d MB\n", $2/1024}'
+          for phase in prepare create measure; do
+            awk -v p=$phase '$3 == p' memory.txt | sort -k2 -n | tail -1 | awk -v p=$phase '{printf "STRESS_MEMORY_MAX %s %d MB\n", p, $2/1024}'
+          done
+          tail -1 memory.txt | awk '{printf "STRESS_MEMORY_END %d MB (%s)\n", $2/1024, $3}'
+          # Why the app ended, if it did: creating progress, iOS's reason (RunningBoard, jetsam),
+          # crash reports of the app on the Mac and in the simulator, and the result bundle.
+          xcrun simctl spawn "$UDID" log show --last 6h --style compact --predicate 'eventMessage CONTAINS "UITEST_LARGE_LIBRARY"' 2>/dev/null | cut -c 1-300 | tail -20 | sed 's/^/STRESS_LOG /'
+          xcrun simctl spawn "$UDID" log show --last 6h --style compact \
+            --predicate '(subsystem == "com.apple.runningboard" OR process == "SpringBoard" OR process == "launchd_sim" OR eventMessage CONTAINS[c] "jetsam") AND eventMessage CONTAINS "albumist"' 2>/dev/null \
+            | grep -aiE "termin|exit|kill|jetsam|crash|memory|limit|watchdog|signal" | cut -c 1-300 | tail -60 | sed 's/^/STRESS_END_REASON /'
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/*.ips ~/Library/Logs/DiagnosticReports/*.crash ~/Library/Logs/CoreSimulator/*/*.ips 2>/dev/null | head -40); do
+            case "$(basename "$f")" in
+              *Sortly*|*Albumist*|*Runner*|*testmanagerd*|*JetsamEvent*)
+                echo "STRESS_CRASH_REPORT $f"
+                head -c 30000 "$f" | sed 's/^/STRESS_CRASH_REPORT /' ;;
+            esac
+          done
+          find ~/Library/Developer/CoreSimulator/Devices/"$UDID"/data/Library/Logs -name "*.ips" 2>/dev/null | head -10 | while read -r f; do
+            echo "STRESS_CRASH_REPORT $f"; head -c 30000 "$f" | sed 's/^/STRESS_CRASH_REPORT /'
+          done
+          xcrun xcresulttool get test-results tests --path build/StressResults.xcresult 2>/dev/null | head -c 20000 | sed 's/^/STRESS_RESULT /'
+          grep -anB60 "Restarting after" ui-log.txt | grep -av "PREVIEW_JPEG" | cut -c 1-300 | head -300 | sed 's/^/STRESS_RESTART_CONTEXT /'
           grep -aE "PREVIEW_JPEG" ui-log.txt | head -2000
           exit $status
 

@@ -68,6 +68,12 @@ extension UITestSupport {
     /// of 120 trips) are added once, to find what gets slow with a real-sized library.
     static let largeLibrary = value("-SortlyUITestLargeLibrary").flatMap { Int($0) } ?? 0
 
+    /// `-SortlyUITestCreateOnly` with `-SortlyUITestLargeLibrary`: the launch only creates the
+    /// photos and then ends the app, so the stress test measures the analysis in a fresh
+    /// launch and knows when creating is done (the app is gone). Creating 50 000 photos while
+    /// catch-up runs analysed them made both phases unreadable (stress run 43823462215).
+    static let createsOnly = flag("-SortlyUITestCreateOnly")
+
     // MARK: Writing
 
     /// `-SortlyUITestDeletionFault declined|ignored`: the first deletion of albums in this
@@ -143,6 +149,11 @@ extension UITestSupport {
         guard isRunning, model.phase == .ready, model.access.canRead else { return }
         if fastStart, !emptyLibrary, !DemoLibrary.shared.isDone {
             await DemoLibrary.shared.seed(then: model)
+        }
+        if largeLibrary > 0, createsOnly {
+            let added = await LargeLibrary.createIfNeeded(count: largeLibrary)
+            NSLog("UITEST_LARGE_LIBRARY create-only launch done (added: %@)", added ? "yes" : "no")
+            exit(0)
         }
         if largeLibrary > 0, await LargeLibrary.createIfNeeded(count: largeLibrary) {
             model.startAnalysis(userInitiated: true)

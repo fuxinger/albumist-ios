@@ -39,6 +39,7 @@ enum LargeLibrary {
                 return start > created
             }
             UserDefaults.standard.set(range.upperBound, forKey: createdKey)
+            if range.upperBound % 5_000 == 0 { NSLog("UITEST_LARGE_LIBRARY %d of %d created", range.upperBound, count) }
         }
         return true
     }

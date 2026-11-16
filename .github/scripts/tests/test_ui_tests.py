@@ -479,15 +479,25 @@ class WatchdogTests(unittest.TestCase):
         verdict, _ = ui_tests.decide(-15, self.STOPPED, bundle=ui_tests.watchdog_bundle(["result bundle not readable (x)"]))
         self.assertEqual(verdict, "retry")
 
-    def run_watchdog(self, log_text, states):
+    def run_watchdog(self, log_text, states, start_test_at_check=None):
+        """start_test_at_check: number of the device_state call (from 1) during which a test starts,
+        i.e. its "started" line reaches the log while simctl is being asked."""
         import subprocess
         import tempfile
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as log:
             log.write(log_text)
         process = subprocess.Popen(["sleep", "30"])
         answers = iter(states)
+        calls = [0]
         original = ui_tests.device_state
-        ui_tests.device_state = lambda udid: next(answers, states[-1])
+
+        def fake_state(udid):
+            calls[0] += 1
+            if calls[0] == start_test_at_check:
+                with open(log.name, "a") as started:
+                    started.write(self.STARTED_LOG)
+            return next(answers, states[-1])
+        ui_tests.device_state = fake_state
         try:
             dog = ui_tests.Watchdog("U", log.name, process, interval=0.05)
             dog.start()
@@ -509,6 +519,13 @@ class WatchdogTests(unittest.TestCase):
 
     def test_watchdog_thread_leaves_a_started_pass_alone(self):
         self.assertEqual(self.run_watchdog(self.STARTED_LOG, ["Shutdown", "Shutdown"]), ("", False))
+
+    def test_a_test_started_during_the_state_check_is_not_stopped(self):
+        # Review 16.11. (probe.py): the log was read before device_state (up to 30 s), so a test
+        # that started during the second check was still stopped. The log is read again first.
+        self.assertEqual(self.run_watchdog("", ["Shutdown", "Shutdown"], start_test_at_check=2), ("", False))
+        self.assertEqual(self.run_watchdog("", ["Booted", "Shutdown", "Shutdown"], start_test_at_check=3),
+                         ("", False))
 
 
 class GroupTests(unittest.TestCase):

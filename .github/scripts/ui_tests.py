@@ -45,7 +45,8 @@ new one, and only for the tests that did not pass (-only-testing as before, plus
 A watchdog (class Watchdog) stops a pass early when the simulator leaves "Booted" before
 the first test started (two checks 20 s apart); the UI_WATCHDOG line it leaves in the log is
 one of the infrastructure failures above, and the stop counts as FLAKY_BOOT. It never stops a
-pass in which a test has started.
+pass in which a test has started (the log is read again right before the stop, so a test that
+started while simctl was being asked counts too).
 Anything else is never repeated: a real failure stays red. A pass that ran no test at all
 fails (a renamed test would otherwise make an empty, green selection), and a repeat whose
 selection would be empty is not started (only possible when every --only entry is a single
@@ -550,18 +551,25 @@ class Watchdog(threading.Thread):
         self.stopped = threading.Event()
         self.fired = ""
 
+    def read_log(self) -> str:
+        try:
+            with open(self.log_path, encoding="utf-8", errors="replace") as log:
+                return log.read()
+        except OSError:
+            return ""
+
     def run(self) -> None:
         states: list[str] = []
         while not self.stopped.wait(self.interval):
-            try:
-                with open(self.log_path, encoding="utf-8", errors="replace") as log:
-                    text = log.read()
-            except OSError:
-                text = ""
+            text = self.read_log()
             if STARTED.search(text):
                 return
             states.append(device_state(self.udid))
             if watchdog_should_stop(text, states):
+                # device_state can take up to 30 s; a test that started meanwhile must not be
+                # stopped, so the log is read again right before the stop.
+                if STARTED.search(self.read_log()):
+                    return
                 self.fired = states[-1]
                 print(f"UI_WATCHDOG simulator {self.udid} is {self.fired} before the first test; stopping the pass", flush=True)
                 self.process.terminate()

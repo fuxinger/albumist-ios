@@ -216,6 +216,7 @@ Cloud-KI, keine unbestätigte Änderung, „unbekannt ist nicht erfolgreich“.
 | ✅ | Erster Scan als Show: Mosaik aus eigenen Fotos mit wanderndem Licht, gefundene Reisen springen als Karten auf. Nur während der ersten Analyse (Fuchs, 16.11.; Schalter `ScanShowRule.onFirstAnalysis`). | M | U |
 | ✅ | Farben aus den Fotos: jeder Vorschlag und jedes Land im Atlas mit eigenem weichen Farbverlauf aus dem Titelbild. | S | U |
 | ✅ | Zoom-Übergang ins Foto (Mediathek und Atlas-Länder). | S | U |
+| 🔜 | „Seit wann wohnst du dort?“ genauer vorschlagen: eine Reise kurz nach dem Umzug oder ein Urlaub von 15 und mehr Fototagen legt den Vorschlag später als den Umzug (harmlos, die Reisen bleiben wie automatisch; nur wer sehr selten zu Hause fotografiert, behält nach „Festlegen“ eine kleine Reise am neuen Ort). Idee aus der Prüfung Runde 5: Tage woanders einfach zählen und den Aufenthalt nur an einer Strecke enden lassen, die meist an einem anderen Ort war. | S | U |
 | 💡 | 3D-Globus im Atlas. | L | U |
 | 💡 | Zeitreise-Regler durch die Jahre. | M | U |
 | 💡 | Reise als Postkarte teilen (umdrehbar). | M | U |

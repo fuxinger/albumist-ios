@@ -30,8 +30,10 @@ struct ScanShow: View {
         let photos = mosaicPhotos
         return Group {
             if photos.count >= columns {
-                TimelineView(.animation(minimumInterval: 0.1, paused: reduceMotion)) { context in
-                    let sweep = reduceMotion ? -10 : sweepPosition(at: context.date)
+                // The sweep moves only while the analysis really works (`ScanShowRule.animates`).
+                let moving = model.scanShowAnimates(reduceMotion: reduceMotion)
+                TimelineView(.animation(minimumInterval: 0.1, paused: !moving)) { context in
+                    let sweep = moving ? sweepPosition(at: context.date) : -10
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
                         ForEach(Array(photos.enumerated()), id: \.element) { index, id in
                             let column = Double(index % columns)

@@ -466,6 +466,36 @@ struct AnalysisDisplayTests {
         #expect(!ScanShowRule.shows(isRunning: true, firstAnalysis: true, isQuickCheck: false, enabled: false))
     }
 
+    /// Re-review N1: the mosaic's sweep only while really working, on screen, below serious heat.
+    @Test func mosaicMovesOnlyWhileWorking() {
+        let working = Self.running { _ in }
+        #expect(ScanShowRule.animates(card: working, isOnScreen: true, thermal: .fair, reduceMotion: false))
+        // Heat: from serious up, also while the card still says "running, slower".
+        #expect(!ScanShowRule.animates(card: Self.running { $0.slower = .warm }, isOnScreen: true, thermal: .serious, reduceMotion: false))
+        #expect(!ScanShowRule.animates(card: working, isOnScreen: true, thermal: .critical, reduceMotion: false))
+        // Waiting to cool down, Apple's wait, pausing, paused.
+        #expect(!ScanShowRule.animates(card: Self.running { $0.waiting = .thermal }, isOnScreen: true, thermal: .fair, reduceMotion: false))
+        #expect(!ScanShowRule.animates(card: Self.running { $0.appleWait = true }, isOnScreen: true, thermal: .nominal, reduceMotion: false))
+        #expect(!ScanShowRule.animates(card: Self.running { $0.pausingFor = .seconds(1) }, isOnScreen: true, thermal: .nominal, reduceMotion: false))
+        #expect(!ScanShowRule.animates(card: nil, isOnScreen: true, thermal: .nominal, reduceMotion: false))
+        // Off screen, Reduce Motion.
+        #expect(!ScanShowRule.animates(card: working, isOnScreen: false, thermal: .nominal, reduceMotion: false))
+        #expect(!ScanShowRule.animates(card: working, isOnScreen: true, thermal: .nominal, reduceMotion: true))
+    }
+
+    /// Re-review a: the notification also comes at midnight and for small carrier
+    /// corrections; only a real jump of the wall clock resets the finish time.
+    @Test func onlyARealClockJumpCounts() {
+        let then = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        // Midnight: wall and real time moved alike.
+        #expect(!ProgressEstimator.clockJumped(wallThen: then, wallNow: then + 0.25, elapsed: .milliseconds(250)))
+        // The carrier corrects by 3 s.
+        #expect(!ProgressEstimator.clockJumped(wallThen: then, wallNow: then + 3.25, elapsed: .milliseconds(250)))
+        // Set by hand: an hour ahead, or ten minutes back.
+        #expect(ProgressEstimator.clockJumped(wallThen: then, wallNow: then + 3_600, elapsed: .milliseconds(250)))
+        #expect(ProgressEstimator.clockJumped(wallThen: then, wallNow: then - 600, elapsed: .milliseconds(250)))
+    }
+
     @Test func alreadyDoneCounts() {
         func proposal(_ kind: ProposalKind, _ n: Int) -> AlbumProposal {
             AlbumProposal(id: SortlyID("p\(n)"), kind: kind, title: "P\(n)", assetIDs: [])

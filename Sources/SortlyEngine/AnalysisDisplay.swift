@@ -420,6 +420,15 @@ public struct ProgressEstimator: Sendable {
         return Self.display(accepted, wall: wall, rules: rules)
     }
 
+    /// The wall clock jumped (set by hand, another time zone does not count: a `Date` stays
+    /// the same instant): it moved more than `tolerance` apart from the time that really
+    /// passed. `significantTimeChangeNotification` also comes at midnight and when the
+    /// carrier corrects the time by a little (re-review a); then the time shown stays.
+    public static func clockJumped(wallThen: Date, wallNow: Date, elapsed: Duration,
+                                   tolerance: TimeInterval = 60) -> Bool {
+        abs(wallNow.timeIntervalSince(wallThen) - elapsed.seconds) > tolerance
+    }
+
     static func display(_ finish: Date, wall: Date, rules: Rules) -> FinishEstimate {
         let left = finish.timeIntervalSince(wall)
         if left < rules.soon { return .soon }
@@ -599,6 +608,15 @@ public enum ScanShowRule {
     public static func shows(isRunning: Bool, firstAnalysis: Bool, isQuickCheck: Bool,
                              enabled: Bool = onFirstAnalysis) -> Bool {
         enabled && isRunning && firstAnalysis && !isQuickCheck
+    }
+
+    /// The mosaic's light sweep moves only while the analysis really works (rule 4, S1): not
+    /// while it waits (heat, battery), is pausing or paused, not while Apple's geocoder is
+    /// waited for, not off screen, and not from serious heat up (re-review N1: it ran at
+    /// 10 Hz the whole run, also while the iPhone cooled down).
+    public static func animates(card: AnalysisCardState?, isOnScreen: Bool, thermal: DeviceState.Thermal,
+                                reduceMotion: Bool) -> Bool {
+        (card?.isWorking ?? false) && isOnScreen && thermal < .serious && !reduceMotion
     }
 }
 

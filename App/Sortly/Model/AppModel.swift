@@ -159,6 +159,11 @@ final class AppModel {
     @ObservationIgnored private var widthsFixed = false
     /// When the overview last looked for the early suggestions without finding them.
     @ObservationIgnored private var lastEarlyLook: ContinuousClock.Instant?
+    /// The fallback look still running (saving the early suggestions can take longer than
+    /// 10 s: the looks must not pile up, re-review b).
+    @ObservationIgnored private var earlyLookTask: Task<Void, Never>?
+    /// Both clocks at the last tick, to tell a real clock jump (`timeChanged`).
+    @ObservationIgnored private var lastTickClock: (ContinuousClock.Instant, Date)?
     /// The card showed this run as a full analysis at least once (not only the quick check).
     @ObservationIgnored private var runShowedBar = false
     var snapshot: ProposalSnapshot?
@@ -929,6 +934,7 @@ final class AppModel {
         guard run == analysisGeneration, analysis.isRunning else { return }
         let now = ContinuousClock.now
         let taken = progressMailbox.take()
+        lastTickClock = (now, Date())
         if let workload = taken.workload {
             estimator.setWorkload(workload)
             if !widthsFixed {
@@ -954,10 +960,13 @@ final class AppModel {
         if taken.earlyProposals {
             lastEarlyLook = now
             Task { await refreshDerived() }
-        } else if snapshot == nil, analysis.stage == .content,
+        } else if snapshot == nil, analysis.stage == .content, earlyLookTask == nil,
                   lastEarlyLook.map({ now - $0 >= .seconds(10) }) ?? true {
             lastEarlyLook = now
-            Task { await refreshDerived() }
+            earlyLookTask = Task {
+                await refreshDerived()
+                earlyLookTask = nil
+            }
         }
         // Thumbnails at most once a second, and only while someone can see them (S9).
         if isOnScreen, !taken.recent.isEmpty, analysis.stage == .content,
@@ -1020,6 +1029,14 @@ final class AppModel {
                            isQuickCheck: isQuickCheck)
     }
 
+    /// The mosaic's light sweep moves (`ScanShowRule.animates`). Read with the card's state,
+    /// which changes when the heat does (`slower`, `waiting`), so the view follows it.
+    func scanShowAnimates(reduceMotion: Bool) -> Bool {
+        ScanShowRule.animates(card: analysisCard, isOnScreen: isOnScreen,
+                              thermal: DeviceState.Thermal(rawValue: ProcessInfo.processInfo.thermalState.rawValue) ?? .critical,
+                              reduceMotion: reduceMotion)
+    }
+
     /// A check for new photos after everything was analysed once: no step numbers and no bar
     /// that starts at zero again, only "Sucht neue Fotos", unless there is real work to show.
     var isQuickCheck: Bool {
@@ -1031,7 +1048,11 @@ final class AppModel {
     /// The clock or the time zone was changed (`significantTimeChangeNotification`): the
     /// finish time is a clock time, so it is measured anew (review minor).
     func timeChanged() {
-        guard analysis.isRunning else { return }
+        guard analysis.isRunning, let last = lastTickClock else { return }
+        let now = (ContinuousClock.now, Date())
+        lastTickClock = now
+        // Midnight and small carrier corrections send this too: only a real jump counts.
+        guard ProgressEstimator.clockJumped(wallThen: last.1, wallNow: now.1, elapsed: now.0 - last.0) else { return }
         estimator.idle()
         analysisFinish = nil
     }

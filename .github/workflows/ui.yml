@@ -21,11 +21,13 @@ name: UI flow
 #      before the groups), out of about five for the whole repository.
 #
 # Each group runs through .github/scripts/ui_tests.py: a pass that the simulator service lost
-# ("CoreSimulatorService: Connection interrupted", "Timed out waiting for AX loaded
-# notification", runner restarted without a crash report) and that found nothing about the
-# app is repeated once on a rebooted simulator, for the tests that did not pass only. A failed
-# test, an accessibility finding, a Fatal error or a crash report of the app is never
-# repeated. Result bundles and logs are uploaded when a group fails.
+# (an explicit "Error returned in reply from CoreSimulatorService", "Timed out waiting for AX
+# loaded notification", runner not installed or launched, ...) and in which neither the log,
+# a crash report nor the result bundle shows anything about the app is repeated once, on an
+# erased and newly prepared simulator, for the tests that did not pass only. A failed test,
+# an error line, an accessibility finding, a crash, a timeout or a bare runner restart is
+# never repeated, and a pass that ran no test fails. Result bundles and logs are uploaded
+# when a group fails.
 on:
   pull_request:
     paths-ignore: ['**.md']
@@ -88,6 +90,7 @@ jobs:
           status=$?
           grep -aE "error:|\*\* " ../build-log.txt | grep -v "/SourcePackages/" | head -100
           [ $status = 0 ] || exit $status
+          set -e
           # Only what the tests run: the apps and the .xctestrun (no modules or objects).
           cd ../build/dd/Build/Products
           ls
@@ -108,9 +111,6 @@ jobs:
     runs-on: xcode-27
     # A group takes 25-40 min; a repeat after a simulator failure can add up to its length.
     timeout-minutes: 90
-    permissions:
-      contents: read
-      actions: read # gh run download (build products of this run)
     strategy:
       fail-fast: false
       matrix:
@@ -165,16 +165,19 @@ jobs:
           [ "$REDUCE_MOTION" = "true" ] && flags+=(--reduce-motion)
           nohup python3 .github/scripts/ui_tests.py boot --udid "$UDID" "${flags[@]}" --ready-file sim-ready > sim-boot.log 2>&1 &
       - name: Download build products
-        env:
-          GH_TOKEN: ${{ github.token }}
+        # v8 is the download action that pairs with upload-artifact v7 (its README).
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ui-products
+          path: products-download
+      - name: Unpack build products
         run: |
-          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name ui-products --dir products-download
           mkdir -p products
           tar -xzf products-download/ui-products.tgz -C products
           ls products
       - name: Wait for the simulator
         run: |
-          for i in $(seq 1 180); do [ -f sim-ready ] && break; sleep 5; done
+          for _ in $(seq 1 180); do [ -f sim-ready ] && break; sleep 5; done
           cat sim-boot.log
           [ "$(cat sim-ready 2>/dev/null)" = ok ] || { echo "simulator did not boot"; exit 1; }
       - name: Run UI tests
@@ -182,7 +185,8 @@ jobs:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
           set +e
-          XCTESTRUN=$(ls products/*.xctestrun | head -1)
+          XCTESTRUN=$(ls products/*.xctestrun 2>/dev/null | head -1)
+          [ -n "$XCTESTRUN" ] || { echo "::error::no .xctestrun in the build products"; exit 1; }
           flags=()
           [ "$REDUCE_MOTION" = "true" ] && flags+=(--reduce-motion --a11y-summary)
           [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)

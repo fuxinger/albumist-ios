@@ -380,6 +380,7 @@ struct AssetDetailView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("detail.list")
             .navigationTitle("Info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

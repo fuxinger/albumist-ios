@@ -341,6 +341,29 @@ struct AnalysisReliabilityTests {
         #expect(third.onlineRequests > 0)
     }
 
+    /// UI run 43779950348: a first run that got all its towns must not hold back the towns of
+    /// photos added minutes later (the demo library arrives in chunks, a device gets new trip
+    /// photos): they were left with region names for an hour.
+    @Test func photosAddedAfterACompleteLookupGetTheirTownsAtOnce() async throws {
+        let geocoder = FakeGeocoder()
+        let s = try setup(photos: 12, geocoder: geocoder, foregroundOnlineBudget: 60)
+        let first = try await s.pipeline.run()
+        #expect(first.onlineRequests > 0)
+        #expect(first.placesPendingOnline == 0)
+
+        s.clock.value.withLock { $0 = $0.addingTimeInterval(5 * 60) }
+        let rome = (0..<6).map { i in
+            AssetSnapshot(id: AssetID("rome\(i)"), kind: .image, creationDate: Fixture.date("2026-06-20 10:00").addingTimeInterval(Double(i) * 3_600),
+                          location: Fixture.Places.rome, pixelWidth: 4032, pixelHeight: 3024)
+        }
+        await s.reader.set(assets: (await s.reader.assets) + rome)
+        let second = try await s.pipeline.run()
+        #expect(second.onlineRequests > 0)
+        #expect(second.placesPendingOnline == 0)
+        let places = try await s.store.places()
+        #expect(places[AssetID("rome0")]?.components.locality == "Rom")
+    }
+
     /// "Analyse neu aufbauen" within the hour: the place cache is gone, so the rebuild asks again.
     @Test func aRebuildAsksForTownNamesAgainAtOnce() async throws {
         let geocoder = RefusingGeocoder()

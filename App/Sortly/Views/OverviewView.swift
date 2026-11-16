@@ -26,6 +26,9 @@ struct OverviewView: View {
                 if let restore = model.restoredFromBackup {
                     RestoredFromBackupCard(restore: restore)
                 }
+                if model.recheckedSuggestions > 0 {
+                    RecheckedSuggestionsCard(count: model.recheckedSuggestions)
+                }
                 if model.access == .limited { LimitedAccessCard() }
                 statusCard
                 analysisCard
@@ -301,7 +304,9 @@ struct OverviewView: View {
     private func areaRow(_ area: OrganizationArea, proposals: [AlbumProposal]) -> some View {
         let open = proposals.filter { model.decisions[$0.id] == nil && model.match(for: $0)?.status != .alreadyComplete }.count
         let existing = proposals.filter { p in
-            model.match(for: p).map { [MatchStatus.alreadyComplete, .extendable, .possibleMatch].contains($0.status) } ?? false
+            // The same albums as the ring (`AlbumMatcher.sortingAlbums`): a possible match gets
+            // an album of its own, several matching albums count only when mostly this suggestion.
+            !AlbumMatcher().sortingAlbums(model.match(for: p), kind: p.kind, title: p.title).isEmpty
         }.count
         // "0 Alben gefunden" read like an error: only mention albums that exist.
         var parts = [String(localized: "\(proposals.count) Vorschläge")]
@@ -407,6 +412,29 @@ struct RestoredFromBackupCard: View {
             Button("OK") { model.restoredFromBackup = nil }
                 .buttonStyle(SecondaryButtonStyle())
                 .accessibilityIdentifier("overview.restoredFromBackup.ok")
+        }
+    }
+}
+
+/// Shown once after an update made the rules for the user's own albums stricter (re-check
+/// 16.11.): suggestions whose "ergänzen" was chosen under the old rules are open again, so
+/// nothing changes in an album without the user looking again.
+struct RecheckedSuggestionsCard: View {
+    @Environment(AppModel.self) private var model
+    var count: Int
+
+    var body: some View {
+        Card {
+            Label("Vorschläge neu geprüft", systemImage: "checklist").font(.headline)
+            Text("\(count) Vorschläge neu geprüft: bitte noch einmal ansehen.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert.")
+                .font(.subheadline).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("OK") { model.dismissRecheckNotice() }
+                .buttonStyle(SecondaryButtonStyle())
+                .accessibilityIdentifier("overview.rechecked.ok")
         }
     }
 }

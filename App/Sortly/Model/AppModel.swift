@@ -466,6 +466,17 @@ final class AppModel {
     private(set) var lastSafetyBackup: Date?
     /// Set when this start restored the decisions from the copy; the overview says so once.
     var restoredFromBackup: BackupRestore?
+    /// Suggestions an update of the matching rules set back to open (re-check 16.11.): their
+    /// "ergänzen" was accepted under the old rules and is no longer a certain match. The
+    /// overview says so until the user taps OK. The count is stored by the pipeline in the
+    /// same transaction as the reopened decisions (`AnalysisPipeline.recheckedSuggestionsKey`).
+    var recheckedSuggestions = 0
+
+    /// "OK" on the card.
+    func dismissRecheckNotice() {
+        recheckedSuggestions = 0
+        Task { try? await store?.setValue(0, forKey: AnalysisPipeline.recheckedSuggestionsKey) }
+    }
 
     struct BackupRestore: Equatable {
         /// When the copy was made.
@@ -1155,7 +1166,11 @@ final class AppModel {
         guard let store, let pipeline else { return }
         await reconcileManagedAlbums(quiet: true)
         do {
-            snapshot = try await pipeline.latestProposals()
+            // Results of an older matching version are matched again once (review 16.11.).
+            let refresh = try await pipeline.refreshMatchesIfOutdated()
+            snapshot = refresh.snapshot
+            reopenAfterRecheck(refresh.reopened)
+            recheckedSuggestions = try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0
             recurringPlaceReport = try await pipeline.recurringPlaceReport()
             facts = try await pipeline.currentFacts()
             inventory = try await store.loadInventory()
@@ -1241,6 +1256,8 @@ final class AppModel {
     /// The best suggestions for a first round ("Dein Startpaket"): safe ones only (at least
     /// likely, nothing sensitive, no name needed, a clear action), trips and places first,
     /// then the biggest. Returned in display order, the order the preview lists them in.
+    /// A possible match is no clear action: a similar album of the user exists, so the user
+    /// looks at it first (review 16.11.).
     func starterSet(limit: Int) -> [AlbumProposal] {
         func rank(_ p: AlbumProposal) -> Int {
             switch p.kind.area {
@@ -1250,7 +1267,7 @@ final class AppModel {
             }
         }
         return Array(openProposals
-            .filter { $0.reliability >= .likely && !$0.isSensitive && !$0.requiresUserName && recommendedDecision(for: $0).isAccepted }
+            .filter { ProposalDecision.isSafeToAcceptUnseen($0, match: match(for: $0)) }
             .sorted { (rank($0), $0.assetIDs.count, $1.title) > (rank($1), $1.assetIDs.count, $0.title) }
             .prefix(limit)).inDisplayOrder()
     }
@@ -1541,6 +1558,17 @@ final class AppModel {
         } catch {
             message = .failure(error.localizedDescription)
         }
+    }
+
+    /// Decisions the pipeline set back to open after a rule update (already saved, together
+    /// with the count the overview shows): dropped here too, and the backup copy follows.
+    private func reopenAfterRecheck(_ ids: Set<SortlyID>) {
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            decisions[id] = nil
+            previewOnly[id] = nil
+        }
+        persistDecisions()
     }
 
     func setUserTitle(_ title: String, for proposal: AlbumProposal) {

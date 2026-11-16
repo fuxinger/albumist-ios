@@ -305,13 +305,17 @@ extension ProposalDecision {
     /// What "Übernehmen" does for a proposal (prompt §5.4): keep a complete album, extend a
     /// matching one, otherwise create a new album. Ambiguous cases and unnamed personal
     /// places/groups stay undecided until the user chooses.
+    ///
+    /// Only a certain match (`extendable`) changes an album of the user. A possible match
+    /// (`possibleMatch`) gets an album of its own; the user can still pick the existing album
+    /// under "Anpassen" (review 16.11., A1–A4: "Unklar heißt nicht erledigt").
     public static func recommended(for proposal: AlbumProposal, match: MatchResult?, userTitle: String? = nil) -> ProposalDecision {
         let title = userTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         if proposal.requiresUserName && (title ?? "").isEmpty { return .undecided }
         switch match?.status {
         case .alreadyComplete:
             if let id = match?.best?.albumID { return .keepExisting(id) }
-        case .extendable, .possibleMatch:
+        case .extendable:
             if let best = match?.best, best.isEditable { return .extendExisting(best.albumID) }
         case .multipleMatches, .ambiguous:
             return .undecided
@@ -319,6 +323,43 @@ extension ProposalDecision {
             break
         }
         return .createNew(title: (title?.isEmpty ?? true) ? nil : title, folderPath: nil)
+    }
+
+    /// Whether a suggestion may be accepted without the user looking at it ("Dein Startpaket",
+    /// "Empfohlene auswählen"): at least likely, nothing sensitive, no name needed, a clear
+    /// action, and no similar album of the user that only possibly fits (review 16.11.).
+    public static func isSafeToAcceptUnseen(_ proposal: AlbumProposal, match: MatchResult?) -> Bool {
+        proposal.reliability >= .likely && !proposal.isSensitive && !proposal.requiresUserName
+            && match?.status != .possibleMatch && recommended(for: proposal, match: match).isAccepted
+    }
+
+    /// The existing album an accepted decision adds photos to: "ergänzen", or renaming or
+    /// moving with extending. nil when it adds nothing to an album of the user.
+    public var extendedAlbum: CollectionID? {
+        switch self {
+        case .extendExisting(let id): id
+        case .renameExisting(let id, _, true), .moveExisting(let id, _, true): id
+        default: nil
+        }
+    }
+
+    /// After the matching rules changed (a new `AlbumMatcher.version`): the suggestions whose
+    /// accepted, not yet applied decision still adds photos to an album that is no longer a
+    /// certain match for it (`AlbumMatcher.sortingAlbums`). They go back to open, so the user
+    /// decides again (re-check 16.11.: a Startpaket "ergänzen" on what is now only a possible
+    /// match must not run). Applied suggestions have no decision any more; `protected` are the
+    /// suggestions of a plan that already started (an interrupted one): never touched.
+    public static func uncertainExtensions(_ decisions: [SortlyID: ProposalDecision], proposals: [AlbumProposal],
+                                           matches: [SortlyID: MatchResult], protected: Set<SortlyID> = []) -> Set<SortlyID> {
+        let matcher = AlbumMatcher()
+        var result = Set<SortlyID>()
+        for proposal in proposals where !protected.contains(proposal.id) {
+            guard let decision = decisions[proposal.id], decision.isAccepted, let album = decision.extendedAlbum else { continue }
+            if !matcher.sortingAlbums(matches[proposal.id], kind: proposal.kind, title: proposal.title).contains(album) {
+                result.insert(proposal.id)
+            }
+        }
+        return result
     }
 
     public var isAccepted: Bool {

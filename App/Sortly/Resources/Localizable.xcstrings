@@ -851,6 +851,46 @@
         }
       }
     },
+    "%lld Vorschläge neu geprüft: bitte noch einmal ansehen." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Vorschlag neu geprüft: bitte noch einmal ansehen."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Vorschläge neu geprüft: bitte noch einmal ansehen."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld suggestion rechecked: please take another look."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld suggestions rechecked: please take another look."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld Vorschläge prüfen" : {
       "localizations" : {
         "en" : {
@@ -1131,6 +1171,16 @@
         }
       }
     },
+    "Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist now adds to your own albums only when they surely fit. These suggestions are open again; nothing changed in your albums."
+          }
+        }
+      }
+    },
     "Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst." : {
       "localizations" : {
         "en" : {
@@ -1187,6 +1237,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist sticks to your changes, in every new analysis too."
+          }
+        }
+      }
+    },
+    "Albumist legt ein neues Album an und ändert „%@“ nicht. Unter „Anpassen“ kannst du stattdessen „%@“ ergänzen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist creates a new album and leaves “%1$@” unchanged. Under “Adjust” you can add to “%2$@” instead."
+          }
+        }
+      }
+    },
+    "Albumist legt ohnehin ein neues Album an und bietet dieses unter „Anpassen“ nicht mehr an. Am Album selbst ändert sich nichts." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist creates a new album anyway and no longer offers this one under “Adjust”. The album itself stays unchanged."
           }
         }
       }
@@ -3781,6 +3851,16 @@
         }
       }
     },
+    "Vorschläge neu geprüft" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggestions rechecked"
+          }
+        }
+      }
+    },
     "Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist." : {
       "localizations" : {
         "en" : {
@@ -3917,16 +3997,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add to existing album"
-          }
-        }
-      }
-    },
-    "Vorhandenes Album passt vermutlich" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "An existing album probably fits"
           }
         }
       }
@@ -4131,6 +4201,16 @@
         }
       }
     },
+    "Ähnliches Album gefunden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Similar album found"
+          }
+        }
+      }
+    },
     "Änderungen rückgängig machen?" : {
       "localizations" : {
         "en" : {
@@ -4207,6 +4287,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@” can’t be edited."
+          }
+        }
+      }
+    },
+    "„%@“ nicht mehr anbieten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop offering “%@”"
           }
         }
       }

@@ -69,7 +69,8 @@ extension MatchStatus {
         switch self {
         case .alreadyComplete: "Schon vollständig vorhanden"
         case .extendable: "Vorhandenes Album wird ergänzt"
-        case .possibleMatch: "Vorhandenes Album passt vermutlich"
+        // Not "passt vermutlich": a possible match gets an album of its own (review 16.11.).
+        case .possibleMatch: "Ähnliches Album gefunden"
         case .multipleMatches: "Mehrere passende Alben"
         case .nameConflict: "Gleicher Name, anderer Inhalt"
         case .newAlbumRequired: "Neues Album"
@@ -80,8 +81,8 @@ extension MatchStatus {
 
     var tint: Color {
         switch self {
-        case .alreadyComplete, .extendable, .possibleMatch: Theme.accent
-        case .newAlbumRequired: Theme.tint(for: .places)
+        case .alreadyComplete, .extendable: Theme.accent
+        case .newAlbumRequired, .possibleMatch: Theme.tint(for: .places)
         default: Theme.tint(for: .documents)
         }
     }
@@ -196,6 +197,8 @@ enum ReasonText {
             return String(localized: "„\(album)“ hat nur \(shared) gemeinsame Fotos.")
         case .noExistingAlbum:
             return String(localized: "Es gibt noch kein passendes Album.")
+        case .keptUnchangedUntilChosen(let album):
+            return String(localized: "Albumist legt ein neues Album an und ändert „\(album)“ nicht. Unter „Anpassen“ kannst du stattdessen „\(album)“ ergänzen.")
         }
     }
 }

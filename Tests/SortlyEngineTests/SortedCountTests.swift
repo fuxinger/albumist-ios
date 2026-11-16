@@ -412,9 +412,38 @@ struct SortedCountTests {
                         alternatives: [], sameNameAlbums: [], reasons: [])
         }
         #expect(LibraryStatus.fittingAlbums(result(.multipleMatches), kind: .trip) == ["a"])
-        #expect(LibraryStatus.fittingAlbums(result(.possibleMatch), kind: .trip) == ["a"])
+        // Only a possible match: Albumist makes its own album, the photos are not sorted yet (review 16.11.).
+        #expect(LibraryStatus.fittingAlbums(result(.possibleMatch), kind: .trip).isEmpty)
         #expect(LibraryStatus.fittingAlbums(result(.notEditable, editable: false), kind: .trip).isEmpty)
         #expect(LibraryStatus.fittingAlbums(result(.nameConflict), kind: .trip).isEmpty)
+    }
+
+    /// Review 16.11. (A1, A4): an album that only possibly fits, or that holds the trip among
+    /// thousands of other photos, does not make the trip count as sorted in the ring.
+    @Test func possibleMatchAndCatchAllAlbumDoNotCountAsSorted() throws {
+        let trip = (0..<40).map { AssetID("pm-\($0)") }
+        let proposal = AlbumProposal(id: SortlyID("pm"), kind: .trip, title: "Island", assetIDs: Set(trip))
+        var settings = OrganizationSettings()
+        settings.primaryAreas = [.trips]
+        for album in [
+            // 24 of 40 trip photos and 16 others: possible match.
+            CollectionSnapshot(id: "sommer", title: "Sommer", assetIDs: Set(trip.prefix(24)).union((0..<16).map { AssetID("x-\($0)") })),
+            // The whole trip among 2,000 other photos: not the trip's album.
+            CollectionSnapshot(id: "export", title: "Export", assetIDs: Set(trip).union((0..<2000).map { AssetID("y-\($0)") })),
+        ] {
+            let inventory = CollectionInventory([album])
+            let match = try #require(AlbumMatcher().match([proposal], against: inventory)[proposal.id])
+            #expect([.possibleMatch, .newAlbumRequired].contains(match.status))
+            let facts = trip.map { id in
+                AssetFacts(asset: AssetSnapshot(id: id, kind: .image, creationDate: Fixture.date("2023-07-12"), location: Self.trips[0].spot.at),
+                           place: Self.trips[0].spot.place, placeSource: .gpsReverseGeocoded, tripID: SortlyID("t"),
+                           albumIDs: album.assetIDs.contains(id) ? [album.id] : [])
+            }
+            let snapshot = ProposalSnapshot(generatedAt: Fixture.date("2026-11-01"), scope: .all, proposals: [proposal],
+                                            matches: [proposal.id: match])
+            let states = LibraryStatus.compute(facts: facts, snapshot: snapshot, settings: settings, contentAnalyzed: Set(trip))
+            #expect(trip.allSatisfy { states[$0]?.areas[.trips] != .preExisting }, "\(album.title): \(match.status)")
+        }
     }
 
     /// A trip split by hand into two albums of the same size: both fit equally well, and both

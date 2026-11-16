@@ -28,9 +28,13 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
     /// The early set of a first run (trips and places, before the image analysis). The full
     /// set that replaces it keeps every suggestion of it the user already decided on.
     public var isEarly = false
+    /// `AlbumMatcher.version` of `matches`. Results of an older version (0: stored before the
+    /// stamp) are matched again at launch (`refreshMatchesIfOutdated`).
+    public var matcherVersion: Int
 
     public init(generatedAt: Date, scope: OrganizationScope, proposals: [AlbumProposal], matches: [SortlyID: MatchResult],
-                dismissed: [AlbumProposal] = [], standIns: [StandIn] = [], isEarly: Bool = false) {
+                dismissed: [AlbumProposal] = [], standIns: [StandIn] = [], isEarly: Bool = false,
+                matcherVersion: Int = AlbumMatcher.version) {
         self.generatedAt = generatedAt
         self.scope = scope
         self.proposals = proposals
@@ -38,9 +42,10 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         self.dismissed = dismissed
         self.standIns = standIns
         self.isEarly = isEarly
+        self.matcherVersion = matcherVersion
     }
 
-    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly }
+    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly, matcherVersion }
 
     /// Snapshots stored before dismissed suggestions and stand-ins were kept still load.
     public init(from decoder: any Decoder) throws {
@@ -52,6 +57,7 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         dismissed = try c.decodeIfPresent([AlbumProposal].self, forKey: .dismissed) ?? []
         standIns = try c.decodeIfPresent([StandIn].self, forKey: .standIns) ?? []
         isEarly = try c.decodeIfPresent(Bool.self, forKey: .isEarly) ?? false
+        matcherVersion = try c.decodeIfPresent(Int.self, forKey: .matcherVersion) ?? 0
     }
 }
 
@@ -182,7 +188,8 @@ public actor AnalysisPipeline {
         static let home = "analysis.home"
         /// The trial run's year chosen at the start (kept by "Analyse neu aufbauen").
         static let scope = "user.analysisScope"
-        /// The user's decisions on suggestions (written by the app, read here only).
+        /// The user's decisions on suggestions (written by the app; here only to set decisions
+        /// back to open after a rule update, together with the new matches).
         static let decisions = "user.decisions"
     }
 
@@ -1030,13 +1037,15 @@ public actor AnalysisPipeline {
                 keptMatches[p.id] = previous.matches[p.id]
             }
         }
+        let tripSets = trips.map { Set($0.allAssetIDs) }
         var matches = Self.match(suggestions.open, dismissed: suggestions.dismissed, against: inventory, overrides: overrides,
-                                 assignments: Self.assignments(try await store.managedAlbums()))
+                                 assignments: Self.assignments(try await store.managedAlbums()), trips: tripSets)
         if generation != albumGeneration {
             // A plan was applied while this ran: match against the albums as they are now, or
             // the suggestions would offer albums that were just created.
             matches = Self.match(suggestions.open, dismissed: suggestions.dismissed, against: try await store.loadInventory(),
-                                 overrides: OverrideSet(try await store.overrides()), assignments: Self.assignments(try await store.managedAlbums()))
+                                 overrides: OverrideSet(try await store.overrides()), assignments: Self.assignments(try await store.managedAlbums()),
+                                 trips: tripSets)
         }
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
         let snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
@@ -1048,11 +1057,20 @@ public actor AnalysisPipeline {
     /// The shown suggestions are matched on their own, as always. The dismissed ones are
     /// matched together with them, so an album that spans several trips stays a broader
     /// collection for a dismissed trip too; only their results are taken from that pass.
+    /// An album that already is the complete album of a dismissed suggestion stays its album:
+    /// no shown suggestion extends it (review 16.11., A10).
     static func match(_ open: [AlbumProposal], dismissed: [AlbumProposal], against inventory: CollectionInventory,
-                      overrides: OverrideSet, assignments: [SortlyID: CollectionID]) -> [SortlyID: MatchResult] {
-        var matches = AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments)
-        guard !dismissed.isEmpty else { return matches }
-        let all = AlbumMatcher().match(open + dismissed, against: inventory, overrides: overrides, assignments: assignments)
+                      overrides: OverrideSet, assignments: [SortlyID: CollectionID],
+                      trips: [Set<AssetID>] = []) -> [SortlyID: MatchResult] {
+        guard !dismissed.isEmpty else {
+            return AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
+        }
+        let all = AlbumMatcher().match(open + dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
+        let reserved = Set(dismissed.compactMap { p in
+            all[p.id].flatMap { $0.status == .alreadyComplete && $0.best?.isEditable == true ? $0.best?.albumID : nil }
+        })
+        var matches = AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments,
+                                           reserved: reserved, trips: trips)
         for p in dismissed { matches[p.id] = all[p.id] }
         return matches
     }
@@ -1130,13 +1148,70 @@ public actor AnalysisPipeline {
     /// albums were created or the user said an album does not fit. The suggestions then show
     /// the right state at once instead of after the next analysis.
     public func rematch() async throws -> ProposalSnapshot? {
+        guard let snapshot = try await rematched() else { return nil }
+        try await store.setValue(snapshot, forKey: Key.proposals)
+        return snapshot
+    }
+
+    /// The stored suggestions matched again with the current rules, not saved yet.
+    private func rematched() async throws -> ProposalSnapshot? {
         albumGeneration += 1
         guard var snapshot = try await latestProposals() else { return nil }
         let inventory = try await store.loadInventory()
         let overrides = OverrideSet(try await store.overrides())
+        let trips = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map { Set($0.allAssetIDs) }
         snapshot.matches = Self.match(snapshot.proposals, dismissed: snapshot.dismissed, against: inventory, overrides: overrides,
-                                      assignments: Self.assignments(try await store.managedAlbums()))
-        try await store.setValue(snapshot, forKey: Key.proposals)
+                                      assignments: Self.assignments(try await store.managedAlbums()), trips: trips)
+        snapshot.matcherVersion = AlbumMatcher.version
         return snapshot
+    }
+
+    /// What `refreshMatchesIfOutdated` did.
+    public struct MatchRefresh: Sendable {
+        /// The suggestions with their matches (nil: there are none).
+        public var snapshot: ProposalSnapshot?
+        /// Suggestions whose accepted "extend this album" decision was no longer a certain
+        /// match under the new rules (`ProposalDecision.uncertainExtensions`) and is open again
+        /// in the store. The app drops them from its decisions in memory too.
+        public var reopened: Set<SortlyID> = []
+    }
+
+    /// How many suggestions a rule update set back to open, until the user tapped OK on the
+    /// overview. Kept in the store and written together with the reopened decisions.
+    public static let recheckedSuggestionsKey = "user.recheckedSuggestions"
+
+    /// At launch: suggestions matched by an older version of the rules are matched again, so
+    /// a fixed rule (review 16.11.: possible matches never change albums) holds at once and not
+    /// only after the next analysis. Decisions accepted under the old rules that would now
+    /// extend an album without a certain match go back to open (`reopened`); suggestions of a
+    /// plan that already started (not finished) are never among them.
+    ///
+    /// The new matches with their version stamp, the decisions without the reopened ones and
+    /// the count for the overview are written in one transaction (final check 16.11.): if the
+    /// app is ended in between, nothing is written and the next launch does it again. Before,
+    /// the stamp was saved first, and an old "ergänzen" survived such a crash for good.
+    public func refreshMatchesIfOutdated() async throws -> MatchRefresh {
+        try await refreshMatchesIfOutdated(afterEachWrite: nil)
+    }
+
+    /// `afterEachWrite`: for tests, runs inside the transaction after each value (see
+    /// `SortlyStore.setValues`); throwing there is the app ending half way.
+    func refreshMatchesIfOutdated(afterEachWrite: (@Sendable (String) throws -> Void)?) async throws -> MatchRefresh {
+        guard let snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
+        guard snapshot.matcherVersion < AlbumMatcher.version else { return MatchRefresh(snapshot: snapshot) }
+        guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
+        var decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
+        let started = Set(try await store.unfinishedPlans().flatMap { $0.steps.compactMap(\.sourceID) })
+        let reopened = ProposalDecision.uncertainExtensions(decisions, proposals: rematched.proposals + rematched.dismissed,
+                                                            matches: rematched.matches, protected: started)
+        var values: [String: any Encodable & Sendable] = [Key.proposals: rematched]
+        if !reopened.isEmpty {
+            for id in reopened { decisions[id] = nil }
+            let shown = try await store.value(Int.self, forKey: Self.recheckedSuggestionsKey) ?? 0
+            values[Key.decisions] = decisions
+            values[Self.recheckedSuggestionsKey] = shown + reopened.count
+        }
+        try await store.setValues(values, afterEach: afterEachWrite)
+        return MatchRefresh(snapshot: rematched, reopened: reopened)
     }
 }

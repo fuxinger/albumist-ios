@@ -6,11 +6,14 @@ name: TestFlight feedback
 # (docs/TESTFLIGHT.md); it needs the role Admin, App Manager or Developer. Without the secrets
 # the run stops after one quick check.
 #
-# The report goes to the job summary, the whole folder (report.md, screenshots, crash logs) to
-# the artifact "testflight-feedback" (30 days). This repository is public: the job summary can be
-# read by anyone, the artifact downloaded by any signed-in GitHub user. Tester e-mail addresses
-# and names are therefore never fetched; "Inhalt" = counts keeps comments out of the summary and
-# uploads no artifact (used for checking the key).
+# The schedule and the default are "counts": the job summary shows only how many feedback and
+# crash submissions each build has. No comment, device data, screenshot or crash log is fetched,
+# written or uploaded. "full" (comments, screenshots, crash logs; summary plus an artifact kept
+# 7 days) is refused by the script itself unless the GitHub API reports this repository as
+# private: while it is public, anyone can read job summaries and any signed-in GitHub user can
+# download artifacts, and screenshots of a photo app may show the testers' own photos. The
+# artifact is only uploaded when the script says it ran full (step output mode=full), never
+# because of the input alone.
 #
 # Everything testers send is untrusted text. It only ever travels in files: never in ${{ }}
 # expressions, shell commands or the log (a log line starting with "::" would be a command).
@@ -20,10 +23,10 @@ on:
   workflow_dispatch:
     inputs:
       report:
-        description: 'Inhalt: full = Kommentare in der Zusammenfassung und Artefakt; counts = nur Anzahlen'
+        description: 'Inhalt: counts = nur Anzahlen je Build; full = Kommentare, Screenshots, Absturzprotokolle (nur bei privatem Repository)'
         type: choice
-        options: [full, counts]
-        default: full
+        options: [counts, full]
+        default: counts
 
 permissions:
   contents: read
@@ -70,19 +73,21 @@ jobs:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           KEY_PATH: ${{ runner.temp }}/asc/AuthKey.p8
-          SUMMARY_MODE: ${{ inputs.report || 'full' }}
+          # Read by the script to ask GitHub whether the repository is private (mode full only).
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.report || 'counts' }}
         run: |
           python3 .github/scripts/asc_feedback.py --bundle-id app.albumist.ios \
-            --out "$RUNNER_TEMP/feedback" --summary "$GITHUB_STEP_SUMMARY" --summary-mode "$SUMMARY_MODE"
+            --out "$RUNNER_TEMP/feedback" --summary "$GITHUB_STEP_SUMMARY" --mode "$MODE"
       - name: Remove key
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"
       - name: Keep report, screenshots and crash logs
-        if: always() && steps.secrets.outputs.ready == 'true' && (inputs.report || 'full') == 'full'
+        if: always() && steps.fetch.outputs.mode == 'full'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: testflight-feedback
           path: ${{ runner.temp }}/feedback
-          retention-days: 30
+          retention-days: 7
           if-no-files-found: ignore
           overwrite: true

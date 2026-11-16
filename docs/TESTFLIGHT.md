@@ -62,25 +62,32 @@ Produkt-ID `app.albumist.ios.unlock`.
 ## Abstürze und Feedback abholen
 
 Was Tester in TestFlight schicken (Feedback mit Screenshot und Kommentar, Absturzberichte mit
-Absturzprotokoll), holt GitHub jeden Morgen um 06:00 UTC von selbst ab
+Absturzprotokoll), fragt GitHub jeden Morgen um 06:00 UTC von selbst ab
 (`.github/workflows/asc-feedback.yml`, Skript `.github/scripts/asc_feedback.py`). Von Hand:
 Actions > **TestFlight feedback** > Run workflow.
 
-- Ergebnis: der Bericht steht in der Zusammenfassung des Laufs (Datum, Build, Gerät, System,
-  Kommentar, die obersten Zeilen des Absturzprotokolls). Screenshots, vollständige
-  Absturzprotokolle und `report.md` liegen im Artefakt **testflight-feedback** (30 Tage).
+- **counts** (täglich und Standard): die Zusammenfassung des Laufs zeigt nur, wie viele
+  Feedbacks und Abstürze jeder Build hat, und das Datum des neuesten. Kommentare, Gerätedaten,
+  Screenshots und Absturzprotokolle werden dabei gar nicht erst abgefragt, nichts wird
+  gespeichert oder hochgeladen. Die Inhalte selbst stehen in App Store Connect > Albumist >
+  TestFlight > Feedback (Screenshots und Abstürze).
+- **full** (Kommentare, Screenshots, vollständige Absturzprotokolle mit den obersten Zeilen;
+  Bericht in der Zusammenfassung, alles als Artefakt **testflight-feedback** für 7 Tage) geht nur,
+  solange das Repository **privat** ist. Das Skript fragt GitHub selbst danach; bei einem
+  öffentlichen Repository bricht es mit „Mode full is refused“ ab, bevor irgendetwas abgeholt wird.
+  Grund: die Zusammenfassung eines öffentlichen Repositorys kann jeder lesen, das Artefakt jeder
+  mit GitHub-Konto laden, und Screenshots einer Foto-App können eigene Fotos der Tester zeigen.
+- E-Mail-Adressen und Namen der Tester holt das Skript nie, auch nicht bei full. Texte der Tester
+  erscheinen nur als Text (kein HTML, keine Links, keine Erwähnungen) und nie im Protokoll des Laufs.
 - Gleicher Schlüssel wie der Upload (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`). Er braucht die
   Rolle **Admin**, **App Manager** oder **Developer**; mit einer anderen Rolle meldet der Lauf
   „HTTP 403“ und nennt die fehlende Rolle. Die Rolle eines Schlüssels lässt sich nicht ändern:
   App Store Connect > Benutzer und Zugriff > Integrationen > App Store Connect API >
   Team-Schlüssel, neuen Schlüssel mit passender Rolle erzeugen, alten widerrufen und die
-  Secrets `ASC_KEY_ID` und `ASC_KEY_P8` ersetzen.
-- Das Repository ist öffentlich: die Zusammenfassung kann jeder lesen, das Artefakt jeder mit
-  GitHub-Konto laden. Deshalb holt das Skript nie E-Mail-Adressen oder Namen der Tester. Für einen
-  Lauf ohne Inhalte bei „Inhalt“ **counts** wählen (nur Anzahlen, kein Artefakt).
-- Texte der Tester werden nur als Text gezeigt (kein HTML, keine Links, keine Erwähnungen) und
-  nie ins Protokoll des Laufs geschrieben.
-- Der tägliche Lauf startet erst, wenn die Datei in `main` ist (GitHub plant nur dort).
+  Secrets `ASC_KEY_ID` und `ASC_KEY_P8` ersetzen. Geprüft 16.11.: der vorhandene Schlüssel darf
+  beides lesen (Lauf 43969243298).
+- Der tägliche Lauf und „Run workflow“ gehen erst, wenn die Datei in `main` ist (GitHub plant
+  und startet Workflows nur von dort).
 
 ## Gut zu wissen
 

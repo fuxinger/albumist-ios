@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import asc_feedback  # noqa: E402
@@ -215,10 +216,21 @@ class MarkdownTests(unittest.TestCase):
         self.assertIn("- Build: 42", report)
         self.assertIn("iPhone16,2", asc_feedback.render("A", [{"item": submission("z"), "included": {},
                                                                "files": [], "problems": []}], [], [], "now"))
-        counts = asc_feedback.render("Albumist", [{"item": item, "included": {}, "files": [], "problems": []}],
-                                     [], [], "now", counts_only=True)
-        self.assertIn("1 Feedback mit Screenshot", counts)
-        self.assertNotIn("img", counts)
+
+    def test_counts_report_has_numbers_per_build_and_no_tester_text(self):
+        item = submission("s1", comment=HOSTILE)
+        other = submission("s2", comment="geheim")
+        other["relationships"]["build"]["data"]["id"] = "b2"
+        included = {("builds", "b1"): BUILD, ("builds", "b2"): {"type": "builds", "id": "b2", "attributes": {"version": "43"}}}
+        crash = submission("c1", comment="privat")
+        counts = asc_feedback.render_counts("Albumist", [{"item": item, "included": included},
+                                                         {"item": other, "included": included}],
+                                            [{"item": crash, "included": included}], [], "now")
+        self.assertIn("| 43 | 1 | 0 | 2026\\-11\\-16 |", counts)
+        self.assertIn("| 42 | 1 | 1 | 2026\\-11\\-16 |", counts)
+        self.assertLess(counts.index("| 43 |"), counts.index("| 42 |"))      # newest build first
+        for secret in ("img", "script", "geheim", "privat", "iPhone", "s1", "c1", "@"):
+            self.assertNotIn(secret, counts)
 
 
 TEXT_CRASH = """Incident Identifier: X
@@ -291,7 +303,7 @@ class FetchTests(unittest.TestCase):
             return asc_feedback.download(url, transport=lambda m, u, h: (200, {"Content-Type": "image/png"}, b"PNG"))
 
         name, screenshots, crash_entries, errors, denied = asc_feedback.fetch(
-            client(fake), "app.albumist.ios", self.out, 50, download_fn=fake_download)
+            client(fake), "app.albumist.ios", self.out, 50, download_fn=fake_download, full=True)
         self.assertEqual(name, "Albumist (app.albumist.ios)")
         self.assertEqual(errors, [])
         self.assertFalse(denied)
@@ -306,6 +318,30 @@ class FetchTests(unittest.TestCase):
         self.assertIn("sort=-createdDate", list_call)
         self.assertNotIn("email", list_call)
         self.assertNotIn("tester", list_call)
+
+    def test_counts_mode_requests_no_tester_data_and_writes_nothing(self):
+        shots = {"data": [submission("s1", screenshots=[{"url": "https://cdn.example/1.png"}])],
+                 "included": [BUILD], "links": {}}
+        crashes = {"data": [submission("c1")], "included": [BUILD], "links": {}}
+        fake = FakeAPI([
+            (f"{API}/v1/apps?", [(200, APP)]),
+            (f"{API}/v1/apps/123/betaFeedbackScreenshotSubmissions", [(200, shots)]),
+            (f"{API}/v1/apps/123/betaFeedbackCrashSubmissions", [(200, crashes)]),
+        ])
+
+        def no_download(url):
+            raise AssertionError("counts mode must not download screenshots")
+
+        _, screenshots, crash_entries, errors, _ = asc_feedback.fetch(
+            client(fake), "app.albumist.ios", self.out, 50, download_fn=no_download)
+        self.assertEqual((len(screenshots), len(crash_entries), errors), (1, 1, []))
+        self.assertEqual(os.listdir(self.out), [])
+        urls = [u for _, u, _ in fake.calls]
+        self.assertFalse(any("crashLog" in u for u in urls))
+        for url in urls[1:]:
+            self.assertIn("=createdDate,build", url)
+            for field in ("comment", "screenshots", "deviceModel", "email", "locale"):
+                self.assertNotIn(field, url)
 
     def test_403_on_one_section_still_fetches_the_other(self):
         crashes = {"data": [], "links": {}}
@@ -324,6 +360,81 @@ class FetchTests(unittest.TestCase):
         fake = FakeAPI([(f"{API}/v1/apps?", [(200, {"data": []})])])
         with self.assertRaises(asc_feedback.AppMissing):
             asc_feedback.fetch(client(fake), "app.albumist.ios", self.out, 50)
+
+
+class PrivacyGateTests(unittest.TestCase):
+    def github(self, status, body):
+        calls = []
+
+        def transport(method, url, headers):
+            calls.append((url, headers))
+            return status, {}, json.dumps(body).encode() if not isinstance(body, bytes) else body
+        return transport, calls
+
+    def test_only_a_clear_private_answer_counts_as_private(self):
+        transport, calls = self.github(200, {"private": True})
+        self.assertTrue(asc_feedback.repo_is_private("fuxinger/sortly-ios", "gh-token", transport))
+        self.assertEqual(calls[0][0], "https://api.github.com/repos/fuxinger/sortly-ios")
+        self.assertEqual(calls[0][1]["Authorization"], "Bearer gh-token")
+        for status, body in [(200, {"private": False}), (200, {}), (200, {"private": "true"}), (404, {}),
+                             (200, b"not json")]:
+            self.assertFalse(asc_feedback.repo_is_private("fuxinger/sortly-ios", "t", self.github(status, body)[0]))
+        self.assertFalse(asc_feedback.repo_is_private("", "t", transport))
+        self.assertFalse(asc_feedback.repo_is_private("a/b/../c?x=1", "t", transport))
+
+        def broken(method, url, headers):
+            raise OSError("network down")
+        self.assertFalse(asc_feedback.repo_is_private("fuxinger/sortly-ios", "t", broken))
+
+    def run_main(self, args, github_answer):
+        out = tempfile.mkdtemp()
+        summary = os.path.join(out, "summary.md")
+        transport, calls = self.github(*github_answer)
+        env = {"GITHUB_REPOSITORY": "fuxinger/sortly-ios", "GH_TOKEN": "t", "KEY_ID": "k", "ISSUER_ID": "i",
+               "KEY_PATH": os.path.join(out, "missing.p8"), "GITHUB_OUTPUT": os.path.join(out, "output")}
+        with mock.patch.dict(os.environ, env), mock.patch.object(asc_feedback, "urllib_transport", transport), \
+                mock.patch.object(asc_feedback.Client, "get", side_effect=AssertionError("App Store Connect called")):
+            code = asc_feedback.main(args + ["--out", os.path.join(out, "feedback"), "--summary", summary])
+        written = sorted(os.listdir(out))
+        shutil.rmtree(out)
+        return code, calls, written
+
+    def test_full_is_refused_on_a_public_repository_before_anything_is_fetched(self):
+        code, calls, written = self.run_main(["--mode", "full"], (200, {"private": False}))
+        self.assertEqual(code, 4)
+        self.assertEqual(len(calls), 1)                    # only GitHub was asked
+        self.assertEqual(written, [])                      # no summary, no folder, no mode=full output
+
+    def test_full_is_refused_when_the_visibility_cannot_be_read(self):
+        self.assertEqual(self.run_main(["--mode", "full"], (403, {"message": "denied"}))[0], 4)
+
+    def test_counts_is_the_default_and_needs_no_visibility_check(self):
+        with mock.patch.object(asc_feedback, "fetch", return_value=("Albumist", [], [], [], False)) as fetch:
+            code, calls, written = self.run_main([], (200, {"private": False}))
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [])
+        self.assertFalse(fetch.call_args.kwargs["full"])
+        self.assertEqual(written, ["summary.md"])          # no feedback folder, no mode=full output
+
+    def test_full_runs_on_a_private_repository_and_signals_the_upload(self):
+        with mock.patch.object(asc_feedback, "fetch", return_value=("Albumist", [], [], [], False)) as fetch:
+            code, calls, written = self.run_main(["--mode", "full"], (200, {"private": True}))
+        self.assertEqual(code, 0)
+        self.assertTrue(fetch.call_args.kwargs["full"])
+        self.assertEqual(written, ["feedback", "output", "summary.md"])
+
+
+class WorkflowTests(unittest.TestCase):
+    def test_schedule_and_default_are_counts_and_the_artifact_follows_the_script(self):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "workflows", "asc-feedback.yml")
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn("default: counts", text)
+        self.assertIn("MODE: ${{ inputs.report || 'counts' }}", text)
+        self.assertIn("if: always() && steps.fetch.outputs.mode == 'full'", text)
+        self.assertIn("retention-days: 7", text)
+        self.assertNotRegex(text, r"(?m)^  push:")
+        self.assertNotRegex(text, r"(?m)^  pull_request")
 
 
 class MainTests(unittest.TestCase):

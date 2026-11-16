@@ -1,6 +1,13 @@
 """Fetches TestFlight feedback (screenshots with comments) and crash reports of one app.
 
-  python3 asc_feedback.py --bundle-id app.albumist.ios --out feedback [--summary FILE] [--summary-mode full|counts]
+  python3 asc_feedback.py --bundle-id app.albumist.ios [--summary FILE] [--mode counts|full] [--out feedback]
+
+Mode counts (default): only the number of feedback and crash submissions per build. Only the
+build and date of each submission are requested; no comment, device data, screenshot or crash
+log is fetched or written. Mode full: comments, screenshots and crash logs into --out. Full is
+refused (exit 4) unless the GitHub API reports GITHUB_REPOSITORY as private (GH_TOKEN): while the
+repository is public, its job summaries and artifacts are readable by others, and screenshots
+of a photo app may show the testers' own photos.
 
 Uses the App Store Connect API with the same team key as the TestFlight upload: KEY_ID,
 ISSUER_ID and KEY_PATH (the .p8 file) in the environment. The JWT is signed with the openssl
@@ -14,13 +21,13 @@ Endpoints (App Store Connect API 4.0, checked against Apple's documentation 16.1
 Apple allows these for keys with the role Admin, App Manager or Developer; any other role
 (Marketing, Sales, Finance, Customer Support, ...) gets 403.
 
-Writes into --out: report.md, screenshots/<submission>-<n>.<ext>, crashlogs/<submission>.txt.
+Full writes into --out: report.md, screenshots/<submission>-<n>.<ext>, crashlogs/<submission>.txt.
 Everything testers send is untrusted text: it is only written into files (Markdown escaped, crash
 logs in code fences), never printed to the log, where a line starting with "::" would be read as
 a workflow command. Tester e-mail addresses and names are never requested (public repository).
 
 Exit codes: 0 all fetched, 1 a section failed (report written with what worked), 2 the key is
-not accepted or lacks the role, 3 no app with that bundle id.
+not accepted or lacks the role, 3 no app with that bundle id, 4 full refused (public repository).
 """
 import argparse
 import html
@@ -47,6 +54,7 @@ SCREENSHOT_FIELDS = ("createdDate,comment,deviceModel,deviceFamily,osVersion,app
                      "connectionType,batteryPercentage,appUptimeInMilliseconds,screenshots,build")
 CRASH_FIELDS = ("createdDate,comment,deviceModel,deviceFamily,osVersion,appPlatform,locale,"
                 "connectionType,batteryPercentage,appUptimeInMilliseconds,build")
+COUNT_FIELDS = "createdDate,build"   # counts mode: no comment, device or screenshot fields at all
 MAX_DOWNLOAD = 25 * 1024 * 1024
 SUMMARY_LIMIT = 900_000          # GitHub allows 1 MiB per step summary
 TOKEN_LIFETIME = 15 * 60         # Apple accepts at most 20 minutes
@@ -330,16 +338,42 @@ def describe(item, included):
     return "\n".join(f"- {key}: {value}" for key, value in rows)
 
 
-def render(app, screenshots, crashes, errors, generated, counts_only=False):
+def render_counts(app, screenshots, crashes, errors, generated):
+    """Counts per build only: no tester text, no device details, no crash frames (public repository)."""
+    per_build = {}
+    for kind, entries in (("feedback", screenshots), ("crashes", crashes)):
+        for entry in entries:
+            build = build_version(entry["item"], entry["included"])
+            row = per_build.setdefault(build, {"feedback": 0, "crashes": 0, "newest": ""})
+            row[kind] += 1
+            created = str((entry["item"].get("attributes") or {}).get("createdDate") or "")
+            row["newest"] = max(row["newest"], created)
     out = [f"# TestFlight-Feedback {md_inline(app)}", "",
            f"Abgeholt: {md_inline(generated)} · {len(screenshots)} Feedback mit Screenshot · "
            f"{len(crashes)} Absturzberichte", ""]
     for message in errors:
         out += [f"**Fehler:** {md_inline(message, 600)}", ""]
-    if counts_only:
-        out += ["Inhalte (Kommentare, Screenshots, Absturzprotokolle) stehen nur im Bericht des Laufs, "
-                "nicht in dieser Zusammenfassung.", ""]
-        return "\n".join(out)
+    if per_build:
+        out += ["| Build | Feedback | Abstürze | Neuestes |", "|---|---|---|---|"]
+        def order(key):
+            return (0, -int(key)) if str(key).isdigit() else (1, 0)
+        for build in sorted(per_build, key=order):
+            row = per_build[build]
+            out.append(f"| {md_inline(build, 20)} | {row['feedback']} | {row['crashes']} | "
+                       f"{md_inline(row['newest'][:10], 20)} |")
+        out.append("")
+    out += ["Nur Anzahlen: solange das Repository öffentlich ist, stehen Kommentare, Screenshots und "
+            "Absturzprotokolle nur in App Store Connect (TestFlight > Feedback, Abstürze).", ""]
+    return "\n".join(out)
+
+
+def render(app, screenshots, crashes, errors, generated):
+    """The full report (mode full, private repository only)."""
+    out = [f"# TestFlight-Feedback {md_inline(app)}", "",
+           f"Abgeholt: {md_inline(generated)} · {len(screenshots)} Feedback mit Screenshot · "
+           f"{len(crashes)} Absturzberichte", ""]
+    for message in errors:
+        out += [f"**Fehler:** {md_inline(message, 600)}", ""]
     out += ["## Feedback mit Screenshots", ""]
     if not screenshots:
         out += ["Keins.", ""]
@@ -369,8 +403,24 @@ def render(app, screenshots, crashes, errors, generated, counts_only=False):
     return "\n".join(out)
 
 
-def fetch(client, bundle_id, out_dir, max_items, download_fn=download):
-    """Fetches both sections; returns (app name, screenshots, crashes, errors, access_denied)."""
+def repo_is_private(repo, token, transport=None):
+    """Asks GitHub itself whether the repository is private. Anything but a clear yes counts as public."""
+    if not repo or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        return False
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        status, _, body = (transport or urllib_transport)("GET", f"https://api.github.com/repos/{repo}", headers)
+        return status == 200 and json.loads(body).get("private") is True
+    except (OSError, ValueError, AttributeError, urllib.error.URLError):
+        return False
+
+
+def fetch(client, bundle_id, out_dir, max_items, download_fn=download, full=False):
+    """Fetches both sections; returns (app name, screenshots, crashes, errors, access_denied).
+    Without full only the build and date of each submission are requested; nothing is downloaded
+    and nothing is written."""
     apps = client.get("/v1/apps", {"filter[bundleId]": bundle_id, "fields[apps]": "bundleId,name"}, "apps")["data"]
     apps = [a for a in apps if (a.get("attributes") or {}).get("bundleId") == bundle_id] or apps
     if not apps:
@@ -379,18 +429,20 @@ def fetch(client, bundle_id, out_dir, max_items, download_fn=download):
     name = f"{(app.get('attributes') or {}).get('name') or bundle_id} ({bundle_id})"
     errors, denied = [], False
     screenshots, crashes = [], []
-    os.makedirs(os.path.join(out_dir, "screenshots"), exist_ok=True)
-    os.makedirs(os.path.join(out_dir, "crashlogs"), exist_ok=True)
+    if full:
+        os.makedirs(os.path.join(out_dir, "screenshots"), exist_ok=True)
+        os.makedirs(os.path.join(out_dir, "crashlogs"), exist_ok=True)
 
     common = {"include": "build", "fields[builds]": "version", "sort": "-createdDate",
               "limit": str(min(max_items, 200))}
     try:
         items, included = client.pages(f"/v1/apps/{app['id']}/betaFeedbackScreenshotSubmissions",
-                                       dict(common, **{"fields[betaFeedbackScreenshotSubmissions]": SCREENSHOT_FIELDS}),
+                                       dict(common, **{"fields[betaFeedbackScreenshotSubmissions]":
+                                                       SCREENSHOT_FIELDS if full else COUNT_FIELDS}),
                                        "betaFeedbackScreenshotSubmissions", max_items)
         for item in items:
             entry = {"item": item, "included": included, "files": [], "problems": []}
-            images = (item.get("attributes") or {}).get("screenshots") or []
+            images = ((item.get("attributes") or {}).get("screenshots") or []) if full else []
             for number, image in enumerate(images, 1):
                 try:
                     body, ext = download_fn(str((image or {}).get("url") or ""))
@@ -409,22 +461,24 @@ def fetch(client, bundle_id, out_dir, max_items, download_fn=download):
 
     try:
         items, included = client.pages(f"/v1/apps/{app['id']}/betaFeedbackCrashSubmissions",
-                                       dict(common, **{"fields[betaFeedbackCrashSubmissions]": CRASH_FIELDS}),
+                                       dict(common, **{"fields[betaFeedbackCrashSubmissions]":
+                                                       CRASH_FIELDS if full else COUNT_FIELDS}),
                                        "betaFeedbackCrashSubmissions", max_items)
         for item in items:
             entry = {"item": item, "included": included, "file": "", "excerpt": "", "problems": []}
-            try:
-                log = client.get(f"/v1/betaFeedbackCrashSubmissions/{urllib.parse.quote(str(item.get('id')), safe='')}"
-                                 "/crashLog", {"fields[betaCrashLogs]": "logText"}, "crashLog")
-                text = ((log.get("data") or {}).get("attributes") or {}).get("logText") or ""
-                entry["file"] = f"crashlogs/{safe_id(item.get('id'))}.txt"
-                with open(os.path.join(out_dir, entry["file"]), "w", encoding="utf-8") as handle:
-                    handle.write(text)
-                entry["excerpt"] = top_frames(text)
-            except AccessError:
-                raise
-            except (LookupError, RuntimeError, ValueError, OSError) as error:
-                entry["problems"].append(f"Absturzprotokoll: {error}")
+            if full:
+                try:
+                    log = client.get(f"/v1/betaFeedbackCrashSubmissions/{urllib.parse.quote(str(item.get('id')), safe='')}"
+                                     "/crashLog", {"fields[betaCrashLogs]": "logText"}, "crashLog")
+                    text = ((log.get("data") or {}).get("attributes") or {}).get("logText") or ""
+                    entry["file"] = f"crashlogs/{safe_id(item.get('id'))}.txt"
+                    with open(os.path.join(out_dir, entry["file"]), "w", encoding="utf-8") as handle:
+                        handle.write(text)
+                    entry["excerpt"] = top_frames(text)
+                except AccessError:
+                    raise
+                except (LookupError, RuntimeError, ValueError, OSError) as error:
+                    entry["problems"].append(f"Absturzprotokoll: {error}")
             crashes.append(entry)
     except AccessError as error:
         errors.append(str(error))
@@ -437,20 +491,31 @@ def fetch(client, bundle_id, out_dir, max_items, download_fn=download):
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--bundle-id", default="app.albumist.ios")
-    parser.add_argument("--out", default="feedback")
-    parser.add_argument("--max-items", type=int, default=100, help="per section, newest first")
+    parser.add_argument("--out", default="feedback", help="folder for report.md, screenshots and crash logs (full)")
+    parser.add_argument("--max-items", type=int, default=200, help="per section, newest first")
     parser.add_argument("--summary", help="also write the report here (GITHUB_STEP_SUMMARY)")
-    parser.add_argument("--summary-mode", choices=["full", "counts"], default="full")
+    parser.add_argument("--mode", choices=["counts", "full"], default="counts",
+                        help="counts: numbers per build only; full: comments, screenshots, crash logs "
+                             "(refused unless GitHub reports the repository GITHUB_REPOSITORY as private)")
     args = parser.parse_args(argv)
+    full = args.mode == "full"
+    if full and not repo_is_private(os.environ.get("GITHUB_REPOSITORY", ""),
+                                    os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")):
+        print("::error title=full refused::Mode full is refused: the repository is public (or its visibility "
+              "could not be read), and tester screenshots and comments must never land in a public job summary "
+              "or a downloadable artifact. Use mode counts; read the feedback itself in App Store Connect > "
+              "TestFlight > Feedback.")
+        return 4
     for name in ("KEY_ID", "ISSUER_ID", "KEY_PATH"):
         if not os.environ.get(name):
             print(f"::error::{name} is not set")
             return 2
-    os.makedirs(args.out, exist_ok=True)
+    if full:
+        os.makedirs(args.out, exist_ok=True)
     client = Client(lambda: make_token(os.environ["KEY_ID"], os.environ["ISSUER_ID"], os.environ["KEY_PATH"]))
     generated = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
     try:
-        app, screenshots, crashes, errors, denied = fetch(client, args.bundle_id, args.out, args.max_items)
+        app, screenshots, crashes, errors, denied = fetch(client, args.bundle_id, args.out, args.max_items, full=full)
     except AccessError as error:
         app, screenshots, crashes, errors, denied = args.bundle_id, [], [], [str(error)], True
     except AppMissing as error:
@@ -458,18 +523,24 @@ def main(argv=None):
         return 3
     except (LookupError, RuntimeError, ValueError, OSError, subprocess.CalledProcessError) as error:
         app, screenshots, crashes, errors, denied = args.bundle_id, [], [], [one_line(error, 400)], False
-    report = render(app, screenshots, crashes, errors, generated)
-    with open(os.path.join(args.out, "report.md"), "w", encoding="utf-8") as handle:
-        handle.write(report)
+    if full:
+        report = render(app, screenshots, crashes, errors, generated)
+        with open(os.path.join(args.out, "report.md"), "w", encoding="utf-8") as handle:
+            handle.write(report)
+    else:
+        report = render_counts(app, screenshots, crashes, errors, generated)
     if args.summary:
-        summary = render(app, screenshots, crashes, errors, generated, counts_only=args.summary_mode == "counts")
+        summary = report
         if len(summary.encode()) > SUMMARY_LIMIT:
             summary = summary.encode()[:SUMMARY_LIMIT].decode(errors="ignore") + \
                 "\n\n(gekürzt, vollständig in report.md im Artefakt)\n"
         with open(args.summary, "a", encoding="utf-8") as handle:
             handle.write(summary + "\n")
+    if full and os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+            handle.write("mode=full\n")      # the only signal that lets the workflow upload the artifact
     # Only counts and our own messages go to the log, never tester text.
-    print(f"ASC_FEEDBACK screenshots={len(screenshots)} "
+    print(f"ASC_FEEDBACK mode={args.mode} screenshots={len(screenshots)} "
           f"screenshot_files={sum(len(e['files']) for e in screenshots)} crashes={len(crashes)} "
           f"crash_logs={sum(1 for e in crashes if e['file'])} errors={len(errors)}")
     if client.rate_limit:

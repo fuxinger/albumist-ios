@@ -119,7 +119,7 @@ final class SortlyFlowUITests: XCTestCase {
 
     private func audit(_ screen: String) {
         // The screen first comes to rest (a ring or count still moving after an analysis):
-        // an audit of a screen in motion ends the whole test (see `fullFlowFinished`).
+        // an audit of a screen in motion ends the whole test (see `UITestOnboarding`).
         // One snapshot per check (labels and frames); element addresses differ every time.
         var last = ""
         for _ in 0..<6 {
@@ -235,13 +235,13 @@ final class SortlyFlowUITests: XCTestCase {
     /// snapshot" (expected in `audit`), and that issue ends the test method: test 1 then
     /// "passed" after the overview audit having done nothing more (runs 43773339053 and
     /// 43804947107: no "A11Y_AUDIT_DONE overview", no plan applied, so test 4's backup had
-    /// no history to bring back). Test 2 reports such a cut-off test 1 as a failure.
-    private static var fullFlowStarted = false
-    private static var fullFlowFinished = false
+    /// no history to bring back). Test 2 reports such a cut-off test 1 as a failure. The
+    /// markers are files (`UITestOnboarding`): run 43816787321 lost the test runner inside
+    /// test 1, and the restarted runner began with fresh static flags.
 
     func test1_FullFlow() {
         continueAfterFailure = true
-        Self.fullFlowStarted = true
+        UITestOnboarding.fullFlowStarts()
         launch()
 
         // Onboarding
@@ -641,7 +641,7 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Fertig"), "close settings after trip reset")
             _ = waitStable("analysis after trip reset", timeout: 180) { analysisIdle }
         }
-        Self.fullFlowFinished = true
+        UITestOnboarding.fullFlowFinished()
         print("UI_STEP_OK full flow reached its end")
     }
 
@@ -805,6 +805,15 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(whole, "After the merge the trip is not one again")
     }
 
+    /// Test 1 did not reach its end (or did not run): the app may still be at its welcome
+    /// screen. One plain start finishes the onboarding and the demo library first, so a
+    /// cut-off test 1 does not fail every later test (run 43816787321: 13 failures).
+    private func completeOnboardingIfCutOff(_ test: String) {
+        guard !UITestOnboarding.fullFlowReachedItsEnd else { return }
+        launch()
+        if UITestOnboarding.completeIfNeeded(app, in: test) { shot("x-onboarded-again-\(test)") }
+    }
+
     /// Creates albums once if "Verlauf und Rückgängig" is empty: the starter set, else the
     /// suggestions already selected.
     private func ensureHistory() {
@@ -833,10 +842,11 @@ final class SortlyFlowUITests: XCTestCase {
     /// Same app state, but with the largest accessibility text size in dark mode.
     func test2_LargeTextDarkMode() {
         continueAfterFailure = true
-        if Self.fullFlowStarted && !Self.fullFlowFinished {
+        if UITestOnboarding.fullFlowWasCutOff {
             print("UI_STEP_MISSING full flow reached its end")
-            XCTFail("test1_FullFlow stopped before its end without a failure (an accessibility audit was cut off?)")
+            XCTFail("test1_FullFlow stopped before its end (an accessibility audit cut off, or the test runner restarted)")
         }
+        completeOnboardingIfCutOff("test2")
         XCUIDevice.shared.appearance = .dark
         launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-SortlyUITestDark"])
         sleep(5)
@@ -926,6 +936,7 @@ final class SortlyFlowUITests: XCTestCase {
     /// Third run: every tab, every row, one level deep.
     func test3_TapThroughSweep() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test3")
         launch()
         sleep(5)
         sweep("Übersicht", depth: 0)
@@ -953,6 +964,7 @@ final class SortlyFlowUITests: XCTestCase {
     /// must bring the decisions and the history back and say so.
     func test4_DecisionsComeBackAfterRebuild() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test4")
         launch(["-SortlyUITestBackup"])
         sleep(5)
         // The copy must hold a history to bring back: when the earlier tests left none (test 1
@@ -1006,6 +1018,7 @@ final class SortlyFlowUITests: XCTestCase {
     /// "Fehlendes erneut versuchen" makes a plan with only the missing steps.
     func test5_InterruptedPlanCanBeLeftAndRetried() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test5")
         launch()
         _ = waitStable("analysis idle before interruption", timeout: 120) { analysisIdle }
         // Select something to apply: the selection of earlier runs, else the recommended ones.
@@ -1082,6 +1095,7 @@ final class SortlyFlowUITests: XCTestCase {
     /// year: choosing one shows it on the overview, "Alle Jahre" takes it back.
     func test6_AnalysisKeepsGoingThroughBackgroundAndTabs() {
         continueAfterFailure = true
+        completeOnboardingIfCutOff("test6")
         launch(["-SortlyUITestSlowAnalysis"])
         _ = waitStable("analysis idle before rebuild", timeout: 300) { analysisIdle }
         // A full run from scratch: "Analyse neu aufbauen" in the settings.

@@ -148,6 +148,8 @@ final class SortlyLockedUITests: XCTestCase {
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked",
                                "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "1"]
         app.launch()
+        // A cut-off test 1 left the app at its welcome screen (run 43816787321).
+        if !UITestOnboarding.fullFlowReachedItsEnd { UITestOnboarding.completeIfNeeded(app, in: "test7") }
         // The overview is idle (the earlier runs analysed the demo library).
         let idle = anything("Fotos analysiert").waitForExistence(timeout: 120) || anything("Analyse aktuell").exists
         print(idle ? "UI_STEP_OK locked overview" : "UI_STEP_MISSING locked overview")

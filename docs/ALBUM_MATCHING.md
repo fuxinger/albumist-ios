@@ -74,6 +74,15 @@ Aufzeichnungen zu verwalteten Alben), wird nie mit fremden Fotos ergänzt und ni
 angeboten. Es zählt nur, wenn es schon genau diesen Vorschlag enthält (ein Land, das man
 auf einer einzigen Reise besucht hat).
 
+### Ein Album pro Lauf für einen Vorschlag (Prüfung 16.11.2026, A5/A10)
+In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen Vorschlag:
+- Ein Album, das einen Vorschlag schon vollständig enthält („Album so lassen“, auch ohne dass
+  man es antippt), gehört diesem Vorschlag. Kein anderer Vorschlag ergänzt es. Das gilt auch
+  für Vorschläge, die man mit „Nicht jetzt“ zurückgestellt hat.
+- Wollen mehrere Vorschläge dasselbe Album ergänzen, bekommt es der, dem es am ähnlichsten
+  ist (Jaccard, dann Wert). Die anderen bekommen ein eigenes Album und sehen das vorhandene
+  nur unter „Anpassen“.
+
 ### Mehrere passende Alben
 Albumist ergänzt dann nichts von sich aus. Die Erklärung nennt jedes passende Album; der
 Hauptknopf heißt „Album auswählen“ und öffnet die Auswahl.

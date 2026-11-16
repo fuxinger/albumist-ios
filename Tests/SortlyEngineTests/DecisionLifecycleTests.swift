@@ -305,6 +305,22 @@ struct DecisionLifecycleTests {
         for album in before.albums { #expect(restored[album.id] == album, "seed \(seed): \(album.title) not restored") }
         #expect(Set(restored.albums.map(\.id)) == Set(before.albums.map(\.id)))
     }
+
+    /// Review 16.11. (A10): the user dismissed the trip ("Nicht jetzt"), whose own album
+    /// "Italien" already holds it completely. The shown country must not extend that album with
+    /// the photos of other years.
+    @Test func completeAlbumOfADismissedSuggestionIsNotExtended() throws {
+        let y19 = Set((0..<150).map { AssetID("it19-\($0)") }), y23 = Set((0..<150).map { AssetID("it23-\($0)") })
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: y19)
+        let trip = AlbumProposal(id: SortlyID("t19"), kind: .trip, title: "Italien · Mai 2019", assetIDs: y19)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
+                                    folderPath: ["Länder"], assetIDs: y19.union(y23))
+        let matches = AnalysisPipeline.match([country], dismissed: [trip], against: CollectionInventory([album]),
+                                             overrides: OverrideSet(), assignments: [:])
+        #expect(matches[trip.id]?.status == .alreadyComplete)
+        let decision = ProposalDecision.recommended(for: country, match: matches[country.id])
+        #expect(decision == .createNew(title: nil, folderPath: nil), "\(String(describing: matches[country.id]?.status))")
+    }
 }
 
 /// Small deterministic generator for the randomized cases.

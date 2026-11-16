@@ -103,6 +103,23 @@ struct AlbumInterplayReviewTests {
         #expect(!isTouching(decision, "best"), "390 Fotos würden in ein 10-Fotos-Auswahlalbum gelegt: \(result.status)")
     }
 
+    // A5: in ONE run two suggestions must not both extend the same album of the user
+    // (country and trip both pick "Italien 2019").
+    @Test("A5 Zwei Vorschläge ergänzen im selben Lauf nicht dasselbe Album")
+    func a5_twoSuggestionsSameAlbum() throws {
+        let y19 = set("it19", 0..<150), y23 = set("it23", 0..<150)
+        let album = CollectionSnapshot(id: "it2019", title: "Italien 2019", assetIDs: set("it19", 0..<100))
+        let t19 = trip("t19", y19, "Italien · 2019")
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
+                                    folderPath: ["Länder"], assetIDs: y19.union(y23))
+        let results = matcher.match([t19, country], against: CollectionInventory([album]))
+        let users = [t19, country].filter { p in
+            results[p.id].map { isTouching(ProposalDecision.recommended(for: p, match: $0), "it2019") } ?? false
+        }
+        print("A5 users=\(users.map(\.title)) trip=\(String(describing: results[t19.id]?.status)) country=\(String(describing: results[country.id]?.status))")
+        #expect(users.count <= 1, "Beide Vorschläge nutzen „Italien 2019“")
+    }
+
     // A6: an album the user created as a shared album is read-only. Albumist must say so
     // and create a new one, never pretend it fits.
     @Test("A6 Geteiltes Album zählt nicht als sortiert")
@@ -248,5 +265,57 @@ struct AlbumInterplayFixTests {
         renamed.alternatives = renamed.alternatives.map { var c = $0; c.albumTitle = "Italien 2019"; return c }
         #expect(matcher.tiedWithBest(result, kind: country.kind, title: country.title).count == 1)
         #expect(matcher.tiedWithBest(renamed, kind: country.kind, title: country.title).isEmpty)
+    }
+
+    /// A5 without the year in the name: the trip and the country both want "Italien". The trip
+    /// (the album is most like it) keeps it; the country gets an album of its own and is offered
+    /// "Italien" only under "Anpassen".
+    @Test func oneAlbumPerRunForOneSuggestion() throws {
+        let y19 = set("it19", 0..<150), y23 = set("it23", 0..<150)
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it19", 0..<100))
+        let trip = AlbumProposal(id: SortlyID("t19"), kind: .trip, title: "Italien · Mai 2019", assetIDs: y19)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
+                                    folderPath: ["Länder"], assetIDs: y19.union(y23))
+        // Either order of the suggestions gives the same answer.
+        for ps in [[trip, country], [country, trip]] {
+            let results = matcher.match(ps, against: CollectionInventory([album]))
+            #expect(results[trip.id]?.status == .extendable)
+            #expect(ProposalDecision.recommended(for: trip, match: results[trip.id]) == .extendExisting("it"))
+            let c = try #require(results[country.id])
+            #expect(ProposalDecision.recommended(for: country, match: c) == .createNew(title: nil, folderPath: nil))
+            #expect(c.alternatives.contains { $0.albumID == "it" })
+        }
+    }
+
+    /// A10: an album that is already complete for one suggestion ("Album so lassen") belongs to
+    /// it; another suggestion of the same run does not extend it.
+    @Test func completeAlbumIsNotExtendedByAnotherSuggestion() throws {
+        let y19 = set("it19", 0..<150), y23 = set("it23", 0..<150)
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: y19)
+        let trip = AlbumProposal(id: SortlyID("t19"), kind: .trip, title: "Italien · Mai 2019", assetIDs: y19)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
+                                    folderPath: ["Länder"], assetIDs: y19.union(y23))
+        // Alone, the country would extend it (the album is named after it).
+        #expect(matcher.match([country], against: CollectionInventory([album]))[country.id]?.status == .extendable)
+
+        let results = matcher.match([trip, country], against: CollectionInventory([album]))
+        #expect(results[trip.id]?.status == .alreadyComplete)
+        let c = try #require(results[country.id])
+        #expect(!isTouching(ProposalDecision.recommended(for: country, match: c), "it"))
+
+        // The same for a suggestion outside the run (dismissed): its complete album is reserved.
+        let reserved = matcher.match([country], against: CollectionInventory([album]), reserved: ["it"])
+        #expect(!isTouching(ProposalDecision.recommended(for: country, match: try #require(reserved[country.id])), "it"))
+
+        // A suggestion that the album holds completely may still keep it as well.
+        let same = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", assetIDs: y19)
+        #expect(matcher.match([trip, same], against: CollectionInventory([album]))[same.id]?.status == .alreadyComplete)
+    }
+
+    func isTouching(_ d: ProposalDecision, _ album: CollectionID) -> Bool {
+        switch d {
+        case .extendExisting(let id), .keepExisting(let id): id == album
+        default: false
+        }
     }
 }

@@ -1048,11 +1048,18 @@ public actor AnalysisPipeline {
     /// The shown suggestions are matched on their own, as always. The dismissed ones are
     /// matched together with them, so an album that spans several trips stays a broader
     /// collection for a dismissed trip too; only their results are taken from that pass.
+    /// An album that already is the complete album of a dismissed suggestion stays its album:
+    /// no shown suggestion extends it (review 16.11., A10).
     static func match(_ open: [AlbumProposal], dismissed: [AlbumProposal], against inventory: CollectionInventory,
                       overrides: OverrideSet, assignments: [SortlyID: CollectionID]) -> [SortlyID: MatchResult] {
-        var matches = AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments)
-        guard !dismissed.isEmpty else { return matches }
+        guard !dismissed.isEmpty else {
+            return AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments)
+        }
         let all = AlbumMatcher().match(open + dismissed, against: inventory, overrides: overrides, assignments: assignments)
+        let reserved = Set(dismissed.compactMap { p in
+            all[p.id].flatMap { $0.status == .alreadyComplete && $0.best?.isEditable == true ? $0.best?.albumID : nil }
+        })
+        var matches = AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments, reserved: reserved)
         for p in dismissed { matches[p.id] = all[p.id] }
         return matches
     }

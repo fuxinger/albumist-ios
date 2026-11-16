@@ -125,9 +125,19 @@ public struct AlbumMatcher: Sendable {
     ///     or another album has the same content, so an applied suggestion never comes back.
     ///     It is also *only* that suggestion's album: another suggestion never extends it
     ///     (the country Italien must not grow the trip album "Rom · 2024").
+    ///   - reserved: albums that already are the complete album of a suggestion outside this
+    ///     run (a dismissed one). No suggestion of this run extends them.
+    ///
+    /// Within one run an album of the user is changed for one suggestion at most (review 16.11.,
+    /// A5 and A10): an album that already holds all of one suggestion ("schon vollständig",
+    /// whether or not the user tapped "Album so lassen") is that suggestion's album, and no
+    /// other suggestion extends it. When several suggestions would extend the same album, the
+    /// one it fits best (Jaccard, then score) keeps it; the others get an album of their own and
+    /// see it only under "Anpassen".
     public func match(_ proposals: [AlbumProposal], against inventory: CollectionInventory,
                       overrides: OverrideSet = OverrideSet(),
-                      assignments: [SortlyID: CollectionID] = [:]) -> [SortlyID: MatchResult] {
+                      assignments: [SortlyID: CollectionID] = [:],
+                      reserved: Set<CollectionID> = []) -> [SortlyID: MatchResult] {
         let membership = inventory.albumMembershipIndex()
 
         // Sibling map per proposal family, to detect albums that span several siblings.
@@ -155,7 +165,8 @@ public struct AlbumMatcher: Sendable {
         // Counted once per album instead of once per suggestion, so a big album shared by
         // many suggestions (all favourites, a camera roll export) is read only once.
         var siblingCounts: [String: [CollectionID: [SortlyID: Int]]] = [:]
-        for proposal in proposals {
+        var taken: [SortlyID: Set<CollectionID>] = [:]
+        func run(_ proposal: AlbumProposal) {
             let claimed = Set(owners.compactMap { albumID, ids in ids.contains(proposal.id) ? nil : albumID })
             let family = proposal.kind.familyKey
             var counts = siblingCounts[family, default: [:]]
@@ -165,12 +176,51 @@ public struct AlbumMatcher: Sendable {
                 overrides: overrides,
                 assigned: assignments[proposal.id],
                 claimedByOthers: claimed,
+                taken: taken[proposal.id] ?? [],
                 membership: membership,
                 siblings: siblingOf[family] ?? [:],
                 siblingCounts: &counts,
                 titleIndex: titleIndex
             )
             siblingCounts[family] = counts
+        }
+        for proposal in proposals { run(proposal) }
+
+        // One album, one suggestion per run. Every round takes at least one album away from
+        // one suggestion for good, so this ends; in practice after one or two rounds.
+        while true {
+            var kept = reserved
+            var extending: [CollectionID: [AlbumProposal]] = [:]
+            for p in proposals {
+                guard let r = results[p.id], let best = r.best, best.isEditable else { continue }
+                switch r.status {
+                case .alreadyComplete: kept.insert(best.albumID)
+                case .extendable: extending[best.albumID, default: []].append(p)
+                default: break
+                }
+            }
+            var losers: [(AlbumProposal, CollectionID)] = []
+            for (albumID, ps) in extending {
+                // The suggestion the album was applied to keeps it (`assignments`), and so does
+                // one it is already complete for.
+                let contenders = ps.filter { assignments[$0.id] != albumID }
+                if contenders.count < ps.count || kept.contains(albumID) {
+                    losers += contenders.map { ($0, albumID) }
+                    continue
+                }
+                guard contenders.count > 1 else { continue }
+                func rank(_ p: AlbumProposal) -> (Double, Double, String) {
+                    let best = results[p.id]?.best
+                    return (best?.metrics.jaccard ?? 0, best?.score ?? 0, p.id.rawValue)
+                }
+                let winner = contenders.max { rank($0) < rank($1) }
+                losers += contenders.filter { $0.id != winner?.id }.map { ($0, albumID) }
+            }
+            if losers.isEmpty { break }
+            for (p, albumID) in losers.sorted(by: { $0.0.id.rawValue < $1.0.id.rawValue }) {
+                taken[p.id, default: []].insert(albumID)
+                run(p)
+            }
         }
         return results
     }
@@ -181,6 +231,7 @@ public struct AlbumMatcher: Sendable {
         overrides: OverrideSet,
         assigned: CollectionID?,
         claimedByOthers: Set<CollectionID>,
+        taken: Set<CollectionID>,
         membership: [AssetID: [CollectionID]],
         siblings: [AssetID: SortlyID],
         siblingCounts: inout [CollectionID: [SortlyID: Int]],
@@ -233,8 +284,14 @@ public struct AlbumMatcher: Sendable {
             }
 
             // Another suggestion's album only counts if it already is exactly this set
-            // (a country visited on one trip); it is never extended with this suggestion's photos.
+            // (a country visited on one trip; an equivalent album is complete, see `status`);
+            // it is never extended with this suggestion's photos.
             if claimedByOthers.contains(albumID) && relation != .equivalent { continue }
+            // Taken in this run by another suggestion: the same, but still offered under "Anpassen".
+            let isTaken = taken.contains(albumID)
+            let holdsAll = isTaken && (relation == .equivalent || (relation == .partOfProposal && !proposal.assetIDs.contains {
+                !album.assetIDs.contains($0) && overrides.mayAdd($0, toAlbum: albumID) && overrides.mayAdd($0, toSource: proposal.id)
+            }))
 
             let nameSimilarity = Self.tokenSimilarity(proposalTokens, AlbumTitle.tokens(album.title))
             let weights = Self.weights(for: proposal.kind)
@@ -249,7 +306,8 @@ public struct AlbumMatcher: Sendable {
                 score: score,
                 isEditable: album.isEditableAlbum
             )
-            if isPart(candidate, of: proposal) {
+            // In this run the album is another suggestion's: offered under "Anpassen" only.
+            if isTaken && !holdsAll || isPart(candidate, of: proposal) {
                 parts.append(candidate)
                 continue
             }

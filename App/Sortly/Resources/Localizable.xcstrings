@@ -6853,6 +6853,16 @@
         }
       }
     },
+    "Weitere neue Fotos werden analysiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analysing more new photos"
+          }
+        }
+      }
+    },
     "Analyse nach Update" : {
       "localizations" : {
         "en" : {

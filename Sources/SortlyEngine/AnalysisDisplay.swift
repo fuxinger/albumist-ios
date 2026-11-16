@@ -586,11 +586,15 @@ public enum AnalysisPercent {
 ///   before the stop is never counted again and no segment of the bar goes back.
 /// - **A phase of its own**: the work left is much larger than when it stopped
 ///   (`isMuchMore`: more than 1.5 times and at least 500 photos more, as the workload counts
-///   them, in the run's part of the library and only what the analysis looks at). The floor
-///   does not hold: the run shows its own honest value from its own start, under a label that
-///   says why ("Neue Fotos werden analysiert", "Analyse nach Update"). The label and the
-///   phase's own number come together, with the workload; within the phase the number never
-///   goes back.
+///   them, in the run's part of the library and only what the analysis looks at), or there
+///   is new work and the number could only move slower than the visible pace from where it
+///   stands to 99 % (`movesTooSlowly`, review of c772325). The floor does not hold: the run
+///   shows its own honest value from its own start, under a label that says why ("Neue Fotos
+///   werden analysiert", "Analyse nach Update"). The label and the phase's own number come
+///   together, with the workload; within the phase the number never goes back. A phase that
+///   goes on later keeps its value under its label; it starts again only when the number
+///   could not move visibly, and then under another title ("Weitere neue Fotos werden
+///   analysiert").
 ///
 /// Whether the floor belongs to this database at all is decided before (`markerApplies`).
 public struct ResumedRun: Sendable, Equatable {
@@ -601,12 +605,28 @@ public struct ResumedRun: Sendable, Equatable {
         /// The app's analysis changed with an update and asks for the photos again
         /// ("Analyse nach Update").
         case afterUpdate
+        /// More photos came in during a phase "Neue Fotos werden analysiert", and its number
+        /// could no longer move visibly ("Weitere neue Fotos werden analysiert", review of
+        /// c772325: a second phase never starts again under the title already shown).
+        case moreNewPhotos
     }
 
     /// "Much more work": more than this times the work left when the run stopped …
     public static let muchMoreFactor = 1.5
     /// … and at least this many photos more.
     public static let muchMoreAtLeast = 500
+    /// The slowest pace the card still visibly moves at: 0.25 % per 10 s, a little above the
+    /// 0.2 % of the bar (about 0.7 pt on a 340 pt wide bar) that counts as a move (review of
+    /// c772325). A run with new work whose number could only move slower than this from where
+    /// it stands to 99 % by the time left starts a phase of its own (`workload`); a run that
+    /// re-reads what the runs before it already re-read moves no faster (`spend`).
+    public static let visiblePace = 0.0025 / 10
+    /// Usual time per photo or screenshot still to look at, and per photo of the library, for
+    /// markers that carry no time left (`init`, `library(photos:)`): the image step's time,
+    /// and the library read, trips and image step together.
+    static let usualSecondsPerItemLeft = AnalysisStep.content.secondsPerItem
+    static let usualSecondsPerPhoto = AnalysisStep.library.secondsPerItem + AnalysisStep.trips.secondsPerItem
+        + AnalysisStep.content.secondsPerItem
 
     /// Pipeline stage number (1…7) the earlier run stopped in.
     public let stage: Int
@@ -621,8 +641,20 @@ public struct ResumedRun: Sendable, Equatable {
     /// Photos in the library when it stopped (the library read's total; kept for the logs).
     public let photosThen: Int?
     /// The usual time left when it stopped (`ProgressEstimator.estimatedRemaining`), for the
-    /// time share before this run knows its own workload; `nil` in older markers.
-    public let secondsThen: Double?
+    /// time share before this run knows its own workload. Older markers carry none: then the
+    /// work left then at the usual times, or, without that either, the library's photos once
+    /// the library read counted them (`library(photos:)`, review of c772325: the number moves
+    /// within 10 s after the update).
+    public private(set) var secondsThen: Double?
+    /// Active time the runs before this one spent re-reading (before they knew their workload)
+    /// while they held the value, the longest of them; they were cut off before they got past
+    /// where the run stopped. This run re-reads the same: until it has worked as long, the value
+    /// moves at the visible pace at most (review of c772325: ten cut-offs of 40 s while
+    /// re-reading moved 37 % to 57 % with nothing done).
+    public let caughtUpBefore: Double
+    /// The same for this run: the longest re-read so far, including this run's (kept in the
+    /// marker while the run holds).
+    public private(set) var caughtUp: Double
 
     /// The app's analysis changed since (`AnalysisPipeline.analysisVersion`).
     public let updated: Bool
@@ -639,16 +671,33 @@ public struct ResumedRun: Sendable, Equatable {
     private var spent = 0.0
 
     public init(stage: Int, completed: Int? = nil, shown: Double, left: Int? = nil, photos: Int? = nil,
-                seconds: Double? = nil, updated: Bool = false, newWork: NewWork? = nil) {
+                seconds: Double? = nil, updated: Bool = false, newWork: NewWork? = nil, caughtUp: Double? = nil) {
         self.stage = stage
         self.stoppedCompleted = completed
         self.floor = shown.isFinite ? min(1, max(0, shown)) : 0
         self.leftThen = left
         self.photosThen = photos
         self.secondsThen = seconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+            ?? left.map { Self.usualSeconds(left: $0) }
         self.spread = self.floor
         self.updated = updated
         self.newWork = newWork
+        let before = caughtUp.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 0
+        self.caughtUpBefore = before
+        self.caughtUp = before
+    }
+
+    /// The usual time for `left` photos and screenshots still to look at.
+    static func usualSeconds(left: Int) -> Double {
+        Double(max(0, left)) * usualSecondsPerItemLeft + AnalysisStep.proposals.fixedSeconds
+    }
+
+    /// The library read counted the library's `photos`: a marker of an older version without
+    /// the time nor the work left then gets the usual time for the photos not yet behind the
+    /// value shown (review of c772325, 4: such a marker held the number until the workload).
+    public mutating func library(photos: Int) {
+        guard secondsThen == nil, photos > 0 else { return }
+        secondsThen = Double(photos) * Self.usualSecondsPerPhoto * max(0.01, 1 - floor) + AnalysisStep.proposals.fixedSeconds
     }
 
     /// The run has worked `active` seconds since it went on, and `remaining` seconds are left
@@ -662,12 +711,30 @@ public struct ResumedRun: Sendable, Equatable {
     /// 450 new photos; deleted photos held it until the count was back). Re-counting is
     /// quick next to the work left, so back where it stopped the value is barely above the
     /// floor (no 56 % -> 78 %).
+    ///
+    /// Before the workload (`remaining == nil`) the run re-reads the library: while it has not
+    /// worked longer than the runs before it already re-read (`caughtUpBefore`), it moves at
+    /// the visible pace at most. So repeated cut-offs while re-reading add one run's time
+    /// share and then only the slowest visible movement: n cut-offs of a seconds each move the
+    /// value at most by the time share of one run of a seconds plus (n - 1) x a x
+    /// `visiblePace` (37 % with 1,000 s left, ten cut-offs of 40 s: 39.4 % plus 9 x 0.1 %,
+    /// below 48.5 %, instead of 57 %). The value is never written back lower (it would fall
+    /// on the next start).
     public mutating func spend(active: Double, remaining: Double?) {
         guard !ownStart, active.isFinite, active > spent else { return }
         let worked = active - spent
+        let from = spent
         spent = active
+        if remaining == nil { caughtUp = max(caughtUp, active) }
         guard let left = remaining ?? secondsThen, left.isFinite else { return }
-        spread += (AnalysisPercent.cap - spread) * worked / (worked + max(0, left))
+        var step = (AnalysisPercent.cap - spread) * worked / (worked + max(0, left))
+        let again = remaining == nil ? max(0, min(active, caughtUpBefore) - from) : 0
+        if again > 0 {
+            // The part of this stretch that re-reads what a run before already re-read.
+            let share = again / worked
+            step = step * (1 - share) + min(step * share, Self.visiblePace * again)
+        }
+        spread = min(AnalysisPercent.cap, spread + max(0, step))
     }
 
     /// A marker belongs to the database it was written for. Markers of older versions carry no
@@ -681,6 +748,14 @@ public struct ResumedRun: Sendable, Equatable {
     /// Much more work than when the run stopped.
     public static func isMuchMore(_ now: Int, than then: Int) -> Bool {
         Double(now) > Double(then) * muchMoreFactor && now - then >= muchMoreAtLeast
+    }
+
+    /// From `value`, the number could only move slower than the visible pace to 99 % in the
+    /// `remaining` seconds (review of c772325: stopped at the end of the text step, 450 new
+    /// photos, the number stood at 98-99 % for 85 s).
+    public static func movesTooSlowly(from value: Double, remaining: Double) -> Bool {
+        guard remaining.isFinite, remaining > 0 else { return false }
+        return (AnalysisPercent.cap - value) / remaining < visiblePace
     }
 
     /// The report (`current` stage, `completed` of `total`) is at or past where the run
@@ -701,15 +776,37 @@ public struct ResumedRun: Sendable, Equatable {
         holds(running: running) && (current ?? 0) < stage
     }
 
-    /// The workload (said once, after the trips step): with much more work left than when the
-    /// run stopped, a phase of its own starts, "Analyse nach Update" when the app's analysis
-    /// changed since, otherwise "Neue Fotos werden analysiert". The label appears only now,
-    /// together with the phase's own number (review of 0305d20: a label shown early by the
-    /// library read was followed by the number falling under it). `true`: the phase starts now.
-    public mutating func workload(_ workload: AnalysisWorkload) -> Bool {
-        guard !ownStart else { return false }
-        guard let leftThen, Self.isMuchMore(workload.contentLeft + workload.textLeft, than: leftThen) else { return false }
-        newWork = updated ? .afterUpdate : .newPhotos
+    /// The workload (said once, after the trips step), with the time left by the estimate
+    /// now (`remaining`). A phase of its own starts, "Analyse nach Update" when the app's
+    /// analysis changed since, otherwise "Neue Fotos werden analysiert",
+    /// - with much more work left than when the run stopped (`isMuchMore`), or
+    /// - with more work than then (or after an update) when the number could only move slower
+    ///   than the visible pace from where it stands to 99 % (`movesTooSlowly`, review of
+    ///   c772325), whatever the amount.
+    /// A run that already shows a phase's label goes on from its value under it: only the
+    /// second rule starts a phase again, and only under another title ("Weitere neue Fotos
+    /// werden analysiert"; review of c772325: never again under the title already shown).
+    /// The label appears only now, together with the phase's own number (review of 0305d20).
+    /// `true`: the phase starts now.
+    public mutating func workload(_ workload: AnalysisWorkload, remaining: Double? = nil) -> Bool {
+        guard !ownStart, let leftThen else { return false }
+        let work = workload.contentLeft + workload.textLeft
+        let tooSlow = (updated || work > leftThen) && remaining.map { Self.movesTooSlowly(from: spread, remaining: $0) } == true
+        let cause: NewWork = updated ? .afterUpdate : .newPhotos
+        let label: NewWork
+        if let shownLabel = newWork {
+            guard tooSlow else { return false }
+            switch (cause, shownLabel) {
+            case (.afterUpdate, .afterUpdate): return false  // no other title for it
+            case (.afterUpdate, _): label = .afterUpdate
+            case (_, .newPhotos): label = .moreNewPhotos
+            default: label = .newPhotos
+            }
+        } else {
+            guard tooSlow || Self.isMuchMore(work, than: leftThen) else { return false }
+            label = cause
+        }
+        newWork = label
         ownStart = true
         return true
     }
@@ -757,9 +854,15 @@ public struct LastRunOutcome: Sendable, Equatable {
     public mutating func ended(with report: AnalysisPipeline.Report?) { completed = report?.isComplete == true }
     /// A background refinement after the analysis (towns, new photos) ended: it can make the
     /// analysis complete, but one cut off by iOS does not make a complete analysis read 99 %
-    /// (review of 0305d20, 5): the work done before is still done.
-    public mutating func refined(with report: AnalysisPipeline.Report?) {
-        if report?.isComplete == true { completed = true }
+    /// (review of 0305d20, 5): the work done before is still done. `true`: this refinement
+    /// made the analysis complete, so nothing is left to go on with: the marker of an earlier
+    /// unfinished run and its resume are cleared (review of c772325, 6: the card read 100 %,
+    /// then "Macht da weiter · 37 %").
+    @discardableResult
+    public mutating func refined(with report: AnalysisPipeline.Report?) -> Bool {
+        guard report?.isComplete == true else { return false }
+        completed = true
+        return true
     }
     public func isComplete(running: Bool) -> Bool { !running && completed }
 }

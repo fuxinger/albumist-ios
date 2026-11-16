@@ -716,10 +716,14 @@ struct AnalysisDisplayTests {
         done.ended(with: complete)
         var cutOff = AnalysisPipeline.Report()
         cutOff.pausedBecause = .timeBudget
-        done.refined(with: cutOff)
-        done.refined(with: nil)
+        let cutOffClears = done.refined(with: cutOff)
+        let nothingClears = done.refined(with: nil)
+        #expect(!cutOffClears && !nothingClears)
         #expect(done.isComplete(running: false))
-        outcome.refined(with: complete)
+        // Review of c772325 (6): a complete refinement says so, and AppModel clears the marker
+        // of the unfinished run and its resume (no "Macht da weiter · 37 %" after 100 %).
+        let clears = outcome.refined(with: complete)
+        #expect(clears)
         #expect(outcome.isComplete(running: false))
     }
 
@@ -730,6 +734,84 @@ struct AnalysisDisplayTests {
         #expect(run.newWork == .newPhotos)
         #expect(!run.ownStart)
         #expect(run.shown(running: true, catchingUp: true, overall: 0.02, stopped: nil) == 0.35)
+    }
+
+    /// Review of c772325 (1): new work the number could not visibly move through (less than
+    /// 0.25 % per 10 s from where it stands to 99 % by the time left) starts a phase of its
+    /// own, whatever the amount; the same amount with room to move does not.
+    @Test func newWorkTooSlowToShowStartsAPhase() {
+        let wl = AnalysisWorkload(photos: 50_450, located: 30_000, screenshots: 2_000, contentLeft: 450, textLeft: 10)
+        #expect(!ResumedRun.isMuchMore(460, than: 10))
+        var high = ResumedRun(stage: 5, completed: 1_990, shown: 0.985, left: 10, photos: 50_000, seconds: 30)
+        #expect(ResumedRun.movesTooSlowly(from: 0.985, remaining: 65))
+        let highStarts = high.workload(wl, remaining: 65)
+        #expect(highStarts && high.newWork == .newPhotos)
+        var low = ResumedRun(stage: 5, completed: 1_000, shown: 0.60, left: 10, photos: 50_000, seconds: 30)
+        let lowStarts = low.workload(wl, remaining: 65)
+        #expect(!lowStarts && low.newWork == nil)
+        // No new work (only what was left then): no label, the value goes on from the floor.
+        var same = ResumedRun(stage: 5, completed: 1_990, shown: 0.985, left: 460, photos: 50_000, seconds: 30)
+        let sameStarts = same.workload(wl, remaining: 65)
+        #expect(!sameStarts)
+        // Without the estimate, only the amount decides.
+        var unknown = ResumedRun(stage: 5, completed: 1_990, shown: 0.985, left: 10, photos: 50_000, seconds: 30)
+        let unknownStarts = unknown.workload(wl)
+        #expect(!unknownStarts)
+    }
+
+    /// Review of c772325 (2): a run that already shows "Neue Fotos werden analysiert" never
+    /// starts again under that title. Much more work alone does not restart it; new work it
+    /// could not visibly move through starts a phase under "Weitere neue Fotos werden
+    /// analysiert" (and after that one, "Neue Fotos werden analysiert" again).
+    @Test func aShownPhaseStartsAgainOnlyUnderAnotherTitle() {
+        let much = AnalysisWorkload(photos: 52_000, located: 30_000, screenshots: 2_000, contentLeft: 1_600, textLeft: 0)
+        var roomy = ResumedRun(stage: 4, completed: 700, shown: 0.63, left: 100, photos: 50_800, newWork: .newPhotos)
+        let roomyStarts = roomy.workload(much, remaining: 300)
+        #expect(!roomyStarts)
+        #expect(roomy.newWork == .newPhotos && !roomy.ownStart)
+        var stuck = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, newWork: .newPhotos)
+        let stuckStarts = stuck.workload(much, remaining: 300)
+        #expect(stuckStarts)
+        #expect(stuck.newWork == .moreNewPhotos)
+        var again = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, newWork: .moreNewPhotos)
+        let againStarts = again.workload(much, remaining: 300)
+        #expect(againStarts && again.newWork == .newPhotos)
+        // An update phase that cannot move: a new-photos phase may follow it, another update
+        // phase may not (no other title for it): it goes on from its value.
+        var update = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, updated: false, newWork: .afterUpdate)
+        let updateStarts = update.workload(much, remaining: 300)
+        #expect(updateStarts && update.newWork == .newPhotos)
+        var twice = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, updated: true, newWork: .afterUpdate)
+        let twiceStarts = twice.workload(much, remaining: 300)
+        #expect(!twiceStarts && twice.newWork == .afterUpdate)
+    }
+
+    /// Review of c772325 (4): a marker of an older version without the time left moves the
+    /// number within 10 s after the update: by the work left then at the usual times, or,
+    /// without that either, by the library's photos once the library read counted them.
+    @Test func olderMarkerWithoutTimeLeftMovesWithinTenSeconds() {
+        func firstMove(_ run: inout ResumedRun, photosAt: Double?) -> Double {
+            let start = AnalysisPercent.percent(run.shown(running: true, catchingUp: true, overall: 0.01, stopped: nil), isComplete: false)
+            var t = 0.0
+            while t < 60 {
+                t += 0.25
+                if let photosAt, t >= photosAt { run.library(photos: 10_000) }
+                run.spend(active: t, remaining: nil)
+                let p = AnalysisPercent.percent(run.shown(running: true, catchingUp: true, overall: 0.01, stopped: nil), isComplete: false)
+                if p != start { return t }
+            }
+            return .infinity
+        }
+        var withLeft = ResumedRun(stage: 4, completed: 3_000, shown: 0.37, left: 6_000, photos: 10_000)
+        #expect(withLeft.secondsThen != nil)
+        #expect(firstMove(&withLeft, photosAt: nil) <= 10)
+        var bare = ResumedRun(stage: 4, shown: 0.37)
+        #expect(bare.secondsThen == nil)
+        #expect(firstMove(&bare, photosAt: 1) <= 10)
+        // A marker that carries the time left keeps it.
+        var stamped = ResumedRun(stage: 4, shown: 0.37, left: 6_000, seconds: 900)
+        stamped.library(photos: 10_000)
+        #expect(stamped.secondsThen == 900)
     }
 
     /// Never 100 % while work is left: the number, the glide and a floor from 99.6 % stop at

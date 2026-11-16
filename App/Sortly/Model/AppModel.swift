@@ -778,7 +778,7 @@ final class AppModel {
         analysis.resumed = analysis.resumeFrom.map {
             ResumedRun(stage: $0.stage, completed: $0.completed, shown: $0.overall, left: $0.left, photos: $0.photos,
                        seconds: $0.secondsLeft, updated: $0.version.map { $0 != AnalysisPipeline.analysisVersion } ?? false,
-                       newWork: $0.newWork)
+                       newWork: $0.newWork, caughtUp: $0.caughtUp)
         }
         analysis.workload = nil
         analysis.libraryPhotos = nil
@@ -945,7 +945,12 @@ final class AppModel {
             estimator.record(step: step, completed: progress.completed, total: progress.total, at: now,
                              appleWait: progress.waitLeft != nil)
         }
-        if progress.stage == .inventory, progress.total > 0 { analysis.libraryPhotos = progress.total }
+        if progress.stage == .inventory, progress.total > 0 {
+            analysis.libraryPhotos = progress.total
+            // A marker of an older version without the time left: the usual time for the
+            // library's photos (`ResumedRun.library`, review of c772325).
+            analysis.resumed?.library(photos: progress.total)
+        }
         // A run that goes on (`ResumedRun`, reviews of 83db832 and 11ef3e1):
         // - the value never goes below the floor and moves with the time the run works
         //   (`ResumedRun.spend`, tick); the real value takes over once it is ahead;
@@ -975,7 +980,9 @@ final class AppModel {
                 newWork: analysis.newWork,
                 completed: held != nil ? held?.completed : progress.completed,
                 total: held != nil ? held?.total : progress.total,
-                secondsLeft: estimator.estimatedRemaining.map { Double($0.components.seconds) } ?? carried?.secondsLeft)
+                secondsLeft: estimator.estimatedRemaining.map { Double($0.components.seconds) }
+                    ?? (carried != nil ? analysis.resumed?.secondsThen ?? carried?.secondsLeft : nil),
+                caughtUp: held != nil ? analysis.resumed?.caughtUp : nil)
         }
         glide.update(real: analysis.shownOverall, at: now, step: step, widths: analysis.widths,
                      itemsPerSecond: estimator.rate, total: progress.total)
@@ -1043,12 +1050,15 @@ final class AppModel {
         if let workload = taken.workload {
             estimator.setWorkload(workload)
             analysis.workload = workload
-            // Much more work left than when the run it goes on from stopped: a phase of its own
-            // ("Analyse nach Update" or "Neue Fotos werden analysiert") with this workload's
-            // widths, from its own start (`ResumedRun.workload`).
+            // Much more work left than when the run it goes on from stopped, or new work the
+            // number could not visibly move through: a phase of its own ("Analyse nach Update",
+            // "Neue Fotos werden analysiert", "Weitere neue Fotos werden analysiert") with this
+            // workload's widths, from its own start (`ResumedRun.workload`).
             var startsPhase = false
             if var resumed = analysis.resumed {
-                startsPhase = resumed.workload(workload)
+                startsPhase = resumed.workload(workload, remaining: estimator.estimatedRemaining.map {
+                    Double($0.components.seconds) + Double($0.components.attoseconds) / 1e18
+                })
                 analysis.resumed = resumed
             }
             if startsPhase {
@@ -1298,7 +1308,14 @@ final class AppModel {
         do {
             let report = try await withTaskCancellationHandler { try await run.value } onCancel: { run.cancel() }
             analysis.lastReport = report
-            analysis.outcome.refined(with: report)
+            if analysis.outcome.refined(with: report) {
+                // Complete now: nothing to go on with (review of c772325: the card read 100 %
+                // and then "Macht da weiter · 37 %" from the marker of the run before).
+                AnalysisMarker.finished()
+                analysis.needsResume = false
+                analysis.resumeFrom = nil
+                analysis.resumed = nil
+            }
             await refreshDerived()
             saveSafetyBackup(immediately: true)
             return report.pausedBecause == nil

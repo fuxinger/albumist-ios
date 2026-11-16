@@ -688,6 +688,7 @@ struct SimMarker {
     var version: String
     var newWork: ResumedRun.NewWork?
     var secondsLeft: Double?
+    var caughtUp: Double?
 }
 
 // MARK: - Harness
@@ -722,8 +723,9 @@ final class Sim: @unchecked Sendable {
     private(set) var passes: [(run: String, shown: Double, floor: Double, real: Double)] = []
     /// Phases of their own that runs started, with their label.
     private(set) var phases: [(run: String, cause: ResumedRun.NewWork)] = []
-    /// Every value the card's number showed (run, time, value).
+    /// Every value the card's number showed (run, time, value), and the bar drawn then.
     private(set) var shownValues: [(run: String, t: Duration, value: Double)] = []
+    private(set) var shownBars: [(run: String, t: Duration, bar: Double)] = []
     /// The bar the card drew last, as a value and as the six segments' fills.
     private var lastShownBar: Double = 0
     private var lastFills: [Double] = []
@@ -783,6 +785,29 @@ final class Sim: @unchecked Sendable {
             assets.append(copy)
         }
         await reader.set(assets: assets)
+    }
+
+    /// The longest stretch of the run `label` in which the card stood still: the number on
+    /// whole percent did not change and the bar did not move by 0.2 % (invariant 8's measure,
+    /// without its exceptions for waiting).
+    func longestStill(_ label: String) -> Duration {
+        let values = shownValues.filter { $0.run == label }
+        let bars = shownBars.filter { $0.run == label }
+        var longest: Duration = .zero
+        var since: Duration?
+        var percentThen: Int?
+        var barThen = 0.0
+        for (v, b) in zip(values, bars) {
+            let percent = AnalysisPercent.percent(v.value, isComplete: false)
+            if since == nil || percent != percentThen || b.bar - barThen >= 0.002 {
+                since = v.t
+                percentThen = percent
+                barThen = b.bar
+            } else if let since {
+                longest = max(longest, v.t - since)
+            }
+        }
+        return longest
     }
 
     /// An update that changed the image analysis: every photo is to be looked at again, and
@@ -1079,7 +1104,8 @@ final class Sim: @unchecked Sendable {
         // much more work starts a phase of its own.
         var resumed = resumeFrom.map {
             ResumedRun(stage: $0.stage, completed: $0.completed, shown: $0.overall, left: $0.left, photos: $0.photos,
-                       seconds: $0.secondsLeft, updated: $0.version != AnalysisPipeline.analysisVersion, newWork: $0.newWork)
+                       seconds: $0.secondsLeft, updated: $0.version != AnalysisPipeline.analysisVersion, newWork: $0.newWork,
+                       caughtUp: $0.caughtUp)
         }
         // As AppModel.tick: the time the run worked (not waiting, paused or held), for the time
         // share of a run that goes on (`ResumedRun.spend`).
@@ -1124,7 +1150,7 @@ final class Sim: @unchecked Sendable {
                     // a phase of its own, with this workload's widths, from its own start.
                     var startsPhase = false
                     if var r = resumed {
-                        startsPhase = r.workload(wl)
+                        startsPhase = r.workload(wl, remaining: estimator.estimatedRemaining?.seconds)
                         resumed = r
                     }
                     if startsPhase, let cause = resumed?.newWork {
@@ -1153,7 +1179,10 @@ final class Sim: @unchecked Sendable {
                 if !paused { estimator.record(step: s, completed: p.completed, total: p.total, at: instant(event.t), appleWait: p.waitLeft != nil) }
                 // As AppModel.receive: the library read may show the label early; the first
                 // report past the stopped position spreads the rest from there, once.
-                if p.stage == .inventory, p.total > 0 { libraryPhotos = p.total }
+                if p.stage == .inventory, p.total > 0 {
+                    libraryPhotos = p.total
+                    resumed?.library(photos: p.total)
+                }
                 if var r = resumed {
                     r.spend(active: active, remaining: estimator.estimatedRemaining?.seconds)
                     resumed = r
@@ -1212,7 +1241,9 @@ final class Sim: @unchecked Sendable {
                         photos: carried?.photos ?? libraryPhotos,
                         version: carried?.version ?? AnalysisPipeline.analysisVersion,
                         newWork: resumed?.newWork,
-                        secondsLeft: estimator.estimatedRemaining?.seconds ?? carried?.secondsLeft)
+                        secondsLeft: estimator.estimatedRemaining?.seconds
+                            ?? (carried != nil ? resumed?.secondsThen ?? carried?.secondsLeft : nil),
+                        caughtUp: held != nil ? resumed?.caughtUp : nil)
                 }
                 let barWidths = w
                 glide.update(real: real, at: instant(event.t), step: s, widths: barWidths, itemsPerSecond: estimator.rate, total: p.total)
@@ -1239,6 +1270,7 @@ final class Sim: @unchecked Sendable {
                 }
                 lastShownBar = bar
                 lastFills = fills
+                shownBars.append((run.label, event.t, bar))
                 let position = AnalysisCardState.Position(step: s, completed: p.completed, total: p.total)
                 let text = position.hasCount ? "\(p.completed)/\(p.total)" : "\(s)"
                 let finish = estimator.finish(at: instant(event.t), wall: wall(event.t))

@@ -291,6 +291,7 @@ enum AnalysisText {
         switch cause {
         case .newPhotos: String(localized: "Neue Fotos werden analysiert")
         case .afterUpdate: String(localized: "Analyse nach Update")
+        case .moreNewPhotos: String(localized: "Weitere neue Fotos werden analysiert")
         }
     }
 

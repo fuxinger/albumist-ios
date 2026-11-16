@@ -59,6 +59,12 @@ struct ReviewFifthPassEvidenceTests {
         let floor = try #require(sim.shownValues.last { $0.run == "r5 pause in text" }?.value)
         let held = Self.longestAt(floor, in: sim.shownValues.filter { $0.run == "r5 goes on" })
         #expect(held <= .seconds(10), "number held at the floor for \(Int(held.seconds)) s")
+        // Review of c772325 (5): measured as the card shows it, on whole percent and the bar
+        // (a move of 0.2 %), not on a value creeping by 0.0001; and every invariant of the
+        // simulator's card (8: something moves every 10 s).
+        let still = sim.longestStill("r5 goes on")
+        #expect(still <= .seconds(10), "number and bar stood still for \(Int(still.seconds)) s")
+        sim.finish()
     }
 
     /// The longest stretch the number stayed exactly at `value`.
@@ -97,6 +103,10 @@ struct ReviewFifthPassEvidenceTests {
         let floor = try #require(sim.shownValues.last { $0.run == "r5 pause in content" }?.value)
         let frozen = Self.longestAt(floor, in: sim.shownValues.filter { $0.run == "r5 after deleting" })
         #expect(frozen <= .seconds(10), "number held at the floor for \(Int(frozen.seconds)) s inside the image step")
+        // Review of c772325 (5): on whole percent and the bar, and every invariant of the card.
+        let still = sim.longestStill("r5 after deleting")
+        #expect(still <= .seconds(10), "number and bar stood still for \(Int(still.seconds)) s inside the image step")
+        sim.finish()
     }
 
     /// 4. Silent stretches of the trips step on a 50,000-item library (wall clock on Linux; an

@@ -32,6 +32,10 @@ enum AnalysisMarker {
         /// The usual time left then (`ProgressEstimator.estimatedRemaining`): a run that goes
         /// on moves from the value by its time share before it knows its own workload.
         var secondsLeft: Double? = nil
+        /// While a run that goes on holds the value: the longest time the runs since the stop
+        /// spent re-reading before they were cut off (`ResumedRun.caughtUp`), so repeated
+        /// cut-offs do not each move the value by their time share (review of c772325).
+        var caughtUp: Double? = nil
     }
 
     private static let unfinishedKey = "analysis.unfinished"

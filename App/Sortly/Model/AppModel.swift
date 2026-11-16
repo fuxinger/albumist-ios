@@ -1007,6 +1007,12 @@ final class AppModel {
         if state != analysisCard { analysisCard = state }
     }
 
+    /// The photo mosaic under the card: during the first analysis only (`ScanShowRule`).
+    var showsScanShow: Bool {
+        ScanShowRule.shows(isRunning: analysis.isRunning, firstAnalysis: !AnalysisMarker.completedOnce,
+                           isQuickCheck: isQuickCheck)
+    }
+
     /// A check for new photos after everything was analysed once: no step numbers and no bar
     /// that starts at zero again, only "Sucht neue Fotos", unless there is real work to show.
     var isQuickCheck: Bool {

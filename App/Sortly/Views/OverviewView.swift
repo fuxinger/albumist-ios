@@ -154,6 +154,8 @@ struct OverviewView: View {
             if let state = model.analysisCard {
                 // Running, waiting, pausing, paused by the user, just finished, quick check.
                 AnalysisProgressCard(state: state)
+                // The photo mosaic: first analysis only (Fuchs 16.11., `ScanShowRule`).
+                if model.showsScanShow { ScanShow() }
             } else if let reason = model.analysis.lastReport?.pausedBecause {
                 // Ended by the device, iOS or the photo access: the reason and the way on.
                 Text(reason.label).font(.headline)

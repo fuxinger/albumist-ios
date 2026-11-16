@@ -452,6 +452,20 @@ struct AnalysisDisplayTests {
 
     // MARK: Already done (P16)
 
+    /// Fuchs 16.11.: the photo mosaic during the first analysis (also when it goes on after a
+    /// pause), never on a later one; the switch turns it off for the first one too.
+    @Test func mosaicOnlyOnTheFirstAnalysis() {
+        #expect(ScanShowRule.onFirstAnalysis)
+        // First analysis, running: shown.
+        #expect(ScanShowRule.shows(isRunning: true, firstAnalysis: true, isQuickCheck: false))
+        // Later analyses: not shown, also with real work to show (a big batch of new photos).
+        #expect(!ScanShowRule.shows(isRunning: true, firstAnalysis: false, isQuickCheck: false))
+        #expect(!ScanShowRule.shows(isRunning: true, firstAnalysis: false, isQuickCheck: true))
+        // Not while nothing runs, and not with the switch off.
+        #expect(!ScanShowRule.shows(isRunning: false, firstAnalysis: true, isQuickCheck: false))
+        #expect(!ScanShowRule.shows(isRunning: true, firstAnalysis: true, isQuickCheck: false, enabled: false))
+    }
+
     @Test func alreadyDoneCounts() {
         func proposal(_ kind: ProposalKind, _ n: Int) -> AlbumProposal {
             AlbumProposal(id: SortlyID("p\(n)"), kind: kind, title: "P\(n)", assetIDs: [])

@@ -584,6 +584,24 @@ public enum AnalysisCardState: Sendable, Equatable {
     public var isWorking: Bool { if case .running(_, _, let appleWait, _) = self { !appleWait } else { false } }
 }
 
+// MARK: Photo mosaic
+
+/// The photo mosaic with the trips found ("Erster Scan als Show", `ScanShow`) above the
+/// progress card. Fuchs decided on 16.11.: only during the first analysis; later analyses show
+/// only the calm card. One switch turns it off for the first analysis too.
+public enum ScanShowRule {
+    /// The switch: `false` shows the mosaic never.
+    public static let onFirstAnalysis = true
+
+    /// `firstAnalysis`: no analysis was completed yet (also when the first one goes on after a
+    /// pause or a restart). `AnalysisMarker.reset()` ("Analyse neu aufbauen", another part of
+    /// the library) clears that, so the next full analysis counts as a first one again.
+    public static func shows(isRunning: Bool, firstAnalysis: Bool, isQuickCheck: Bool,
+                             enabled: Bool = onFirstAnalysis) -> Bool {
+        enabled && isRunning && firstAnalysis && !isQuickCheck
+    }
+}
+
 // MARK: Already done
 
 /// "Schon fertig: 51 Reisen, 38 Orte" (point 3): suggestions of the steps that are done, while

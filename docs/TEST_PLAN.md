@@ -130,6 +130,10 @@ Zahl, solange noch gearbeitet wird.
 | P16 „Schon fertig“: erst ab Bildinhalten, Vorschläge stabil | AnalysisDisplayTests: alreadyDoneCounts; FullRunDisplay: earlyProposalsKeepTheirIDs | „Ansehen“ öffnet die Liste (UI-Test analysis.showDone) |
 | P17 Fertig-Moment und Mitteilung „Vorschläge prüfen“ | AnalysisDisplayTests: finishMomentOnlyForACompleteLongRun | Haptik, Mitteilungsknopf 📱 |
 | P18 Sperrbildschirm „2.431 von 5.683 Fotos · fertig gegen 23:40“, Ende „Analyse fertig“ / „216 Vorschläge“ | — | App-Test ContinuedAnalysisEndingTests (nur Syntax geprüft) |
+| P19 (Review I2) „Schon fertig“ erscheint im ersten Lauf: Meldung, sobald die frühen Vorschläge gespeichert sind | FullRunDisplay: earlySuggestionsAreSaidOnceSaved | Tick liest sie dann, sonst alle 10 s erneut (nur Syntax) |
+| P20 (Review I3) Balken steht beim Wechsel der Breiten nicht still, kein Abschnitt geht zurück | FullRunDisplay: Invariante 3 je Abschnitt, wie AppModel (Marker, shownOverall, Neustart des Gleitens) | — |
+| P21 (Review I4) keine Uhrzeit, bevor das Gerät gemessen ist; Genauigkeit auf einem langsameren Gerät | AnalysisDisplayTests: noFinishTimeBeforeTheDeviceIsMeasured; FullRunDisplay: uninterruptedFullRun (≤ max(2 Min., 10 %)) | — |
+| P22 Kleinere Punkte: entschiedene frühe Vorschläge bleiben, „Gleich fertig“ bleibt nicht hängen, kein Rücksprung nach Fortsetzen, kein Lichtstreif bei Apples Wartezeit, Foto-Mosaik nur bei der ersten Analyse | FullRunDisplay: decidedEarlySuggestionsStay; AnalysisDisplayTests: gleichFertigDoesNotLinger, glideGoesOnFromTheBarDrawnLast, cardStates, mosaicOnlyOnTheFirstAnalysis | Zeitumstellung, Fertig-Moment nach Hintergrund, Neuzählung erst mit vollem Stand 📱 (nur Syntax) |
 
 ## Testdaten
 Synthetische Bibliotheken (Koordinaten, Zeitstempel, Alben) in `Fixtures.swift`.

@@ -38,8 +38,7 @@ public enum HomeCandidates {
     public static func make(facts: [AssetFacts], calendar: Calendar = .sortlyDefault) -> [HomeCandidate] {
         struct Group {
             var components: PlaceComponents
-            var latitudes: [Double] = []
-            var longitudes: [Double] = []
+            var coordinates: [GeoCoordinate] = []
             var days = Set<Date>()
             var first: Date?
             var last: Date?
@@ -52,8 +51,7 @@ public enum HomeCandidates {
                 isoCountryCode: place.isoCountryCode, country: place.country, administrativeArea: place.administrativeArea,
                 subAdministrativeArea: key.level == .locality ? place.subAdministrativeArea : nil,
                 locality: key.level == .locality ? place.locality : nil))
-            group.latitudes.append(c.latitude)
-            group.longitudes.append(c.longitude)
+            group.coordinates.append(c)
             if let date = f.asset.creationDate {
                 group.days.insert(calendar.startOfDay(for: date))
                 group.first = min(group.first ?? date, date)
@@ -62,14 +60,32 @@ public enum HomeCandidates {
             groups[key] = group
         }
         return groups.compactMap { key, group -> HomeCandidate? in
-            guard group.days.count >= minimumDays else { return nil }
-            // The median, not the mean: a few photos at the edge of a large town do not move it.
-            let lat = group.latitudes.sorted()[group.latitudes.count / 2]
-            let lon = group.longitudes.sorted()[group.longitudes.count / 2]
-            return HomeCandidate(id: key.description, center: GeoCoordinate(latitude: lat, longitude: lon), components: group.components,
-                                 photoCount: group.latitudes.count, photoDays: group.days.count, firstDate: group.first, lastDate: group.last)
+            guard group.days.count >= minimumDays, let center = center(of: group.coordinates) else { return nil }
+            return HomeCandidate(id: key.description, center: center, components: group.components,
+                                 photoCount: group.coordinates.count, photoDays: group.days.count, firstDate: group.first, lastDate: group.last)
         }
         .sorted { ($0.photoDays, $0.photoCount, $1.id) > ($1.photoDays, $1.photoCount, $0.id) }
+    }
+
+    /// Where the photos of a place are densest: the median of the photos within
+    /// `RecurringPlaceAnswers.matchRadiusMeters` of the busiest cell of about 11 km. Not the
+    /// median of all of them: offline a candidate is a whole region ("Bayern"), and the median of
+    /// everyday photos in Munich and trips to Nuremberg and Würzburg lies near Nuremberg, more
+    /// than the home radius away from where the user lives. For a town it is its busy part.
+    static func center(of coordinates: [GeoCoordinate]) -> GeoCoordinate? {
+        guard !coordinates.isEmpty else { return nil }
+        struct Cell: Hashable { var lat: Int; var lon: Int }
+        var cells: [Cell: [GeoCoordinate]] = [:]
+        for c in coordinates {
+            cells[Cell(lat: Int((c.latitude * 10).rounded(.down)), lon: Int((c.longitude * 10).rounded(.down))), default: []].append(c)
+        }
+        let busiest = cells.max { a, b in (a.value.count, b.key.lat, b.key.lon) < (b.value.count, a.key.lat, a.key.lon) }!.value
+        let anchor = GeoCoordinate(latitude: busiest.map(\.latitude).sorted()[busiest.count / 2],
+                                   longitude: busiest.map(\.longitude).sorted()[busiest.count / 2])
+        let near = coordinates.filter { GeoMath.distance($0, anchor) <= RecurringPlaceAnswers.matchRadiusMeters }
+        // The median, not the mean: a few photos at the edge of a large town do not move it.
+        return GeoCoordinate(latitude: near.map(\.latitude).sorted()[near.count / 2],
+                             longitude: near.map(\.longitude).sorted()[near.count / 2])
     }
 
     /// The candidates whose town, region or country contains `query` (case, accents and "ß"

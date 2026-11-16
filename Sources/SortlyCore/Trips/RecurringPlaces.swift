@@ -41,6 +41,21 @@ public struct PlaceAnswer: Hashable, Sendable, Codable, Identifiable {
         self.kind = kind
         self.label = label
     }
+
+    enum CodingKeys: String, CodingKey { case id, center, oftenHere, name, answeredAt, kind, label }
+
+    /// `kind` and `label` are read leniently: a kind a later version added ("Schule") is read
+    /// as not said, so one answer never makes all of them unreadable.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(SortlyID.self, forKey: .id)
+        center = try c.decode(GeoCoordinate.self, forKey: .center)
+        oftenHere = try c.decode(Bool.self, forKey: .oftenHere)
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? nil
+        answeredAt = try c.decode(Date.self, forKey: .answeredAt)
+        kind = (try? c.decodeIfPresent(PersonalPlaceKind.self, forKey: .kind)) ?? nil
+        label = (try? c.decodeIfPresent(String.self, forKey: .label)) ?? nil
+    }
 }
 
 /// All answers (store key `user.recurringPlaces`, part of the decisions copy in the backup).
@@ -49,6 +64,14 @@ public struct RecurringPlaceAnswers: Hashable, Sendable, Codable {
 
     public init(places: [PlaceAnswer] = []) {
         self.places = places
+    }
+
+    enum CodingKeys: String, CodingKey { case places }
+
+    /// An answer this build cannot read is left out; the others stay.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        places = ((try? c.decodeIfPresent([Lenient<PlaceAnswer>].self, forKey: .places)) ?? nil)?.compactMap(\.value) ?? []
     }
 
     /// One answer covers everything within this distance of its center. Half the radius the
@@ -128,6 +151,8 @@ public struct RecurringPlace: Hashable, Sendable, Codable, Identifiable {
     public var distinctDays: Int
     public var firstDate: Date
     public var lastDate: Date
+    /// What the place is to the user ("Eltern", "Arbeit"), when they said so.
+    public var kind: PersonalPlaceKind? = nil
 }
 
 /// One separate time away (every stretch the trip detection found, also those too small for a
@@ -215,6 +240,14 @@ public struct RecurringPlaceReport: Hashable, Sendable, Codable {
 }
 
 public enum RecurringPlaces {
+    /// Whether a place the user is often at gets its album ("Häufige Orte"), by what it is to
+    /// them. The one rule for it: every place does for now, the places from "Dein Zuhause"
+    /// ("Eltern", "Zweitwohnung", "Arbeit", own name) like the answers on a trip card. To leave
+    /// out work, say `kind != .work` here (open question for the owner, 16.11.).
+    public static func getsAnAlbum(_ kind: PersonalPlaceKind?) -> Bool {
+        true
+    }
+
     /// The suggestion id of the album of the place the user answered `answer` for: the same for
     /// as long as the answer exists, so decisions on the album stay attached.
     public static func proposalID(for answer: SortlyID) -> SortlyID {
@@ -301,6 +334,7 @@ extension ProposalEngine {
         let labels = Labels(settings.titleLanguage)
         let byID = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return places.compactMap { place -> AlbumProposal? in
+            guard RecurringPlaces.getsAnAlbum(place.kind) else { return nil }
             // `facts` are the usable ones: photos the user excluded or ignored stay out.
             let members = place.assetIDs.filter { byID[$0] != nil }
             guard members.count >= settings.trips.minPhotos else { return nil }

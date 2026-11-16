@@ -277,7 +277,8 @@ public struct TripDetector: Sendable {
                 assetIDs: assets.map(\.id),
                 distinctDays: Set(assets.map { calendar.startOfDay(for: $0.creationDate!) }).count,
                 firstDate: first,
-                lastDate: last
+                lastDate: last,
+                kind: answers[index].kind
             )
         }
     }

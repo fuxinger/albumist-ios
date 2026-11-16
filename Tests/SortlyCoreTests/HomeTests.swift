@@ -23,12 +23,30 @@ struct HomeAtDateTests {
         #expect(home.chosenPlaces.isEmpty)
     }
 
-    @Test func confirmedHomeHoldsForEveryDate() {
-        let home = HomeSettings().confirming(Self.munich, date: now)
+    /// A place picked under "Ändern" holds for every date.
+    @Test func chosenHomeHoldsForEveryDate() {
+        let home = HomeSettings().choosing(Self.munich, date: now)
         #expect(!home.isAutomatic)
         #expect(home.home(at: Fixture.date("2010-01-01")) == .chosen(Self.munich))
         #expect(home.home(at: Fixture.date("2030-01-01")) == .chosen(Self.munich))
         #expect(home.home(at: nil) == .chosen(Self.munich))
+    }
+
+    /// "Stimmt" holds from the confirmation on: before it, the detection decides as before.
+    @Test func confirmedHomeHoldsFromTheConfirmation() {
+        let home = HomeSettings().confirming(Self.munich, date: now)
+        #expect(!home.isAutomatic)
+        #expect(home.usesDetection)
+        #expect(home.home(at: Fixture.date("2010-01-01")) == .detected)
+        #expect(home.home(at: Fixture.date("2026-11-15")) == .detected)
+        #expect(home.home(at: now) == .chosen(Self.munich))
+        #expect(home.home(at: Fixture.date("2030-01-01")) == .chosen(Self.munich))
+        #expect(home.home(at: nil) == .chosen(Self.munich))
+        // Picked under "Ändern" afterwards: for every date again.
+        #expect(home.choosing(Self.munich, date: now).home(at: Fixture.date("2010-01-01")) == .chosen(Self.munich))
+        // Read back the same.
+        let data = try! JSONEncoder().encode(home)
+        #expect(try! JSONDecoder().decode(HomeSettings.self, from: data) == home)
     }
 
     @Test func noHomeHoldsForEveryDate() {
@@ -41,7 +59,7 @@ struct HomeAtDateTests {
     /// "Bis 2015: Köln", "Bis 2019: Hamburg", now München: a chain, the end of each is not included.
     @Test func formerHomesFormAChain() {
         let home = HomeSettings()
-            .confirming(Self.munich, date: now)
+            .choosing(Self.munich, date: now)
             .addingFormer(FormerHome(place: Self.hamburgHome, until: Fixture.date("2019-01-01")), date: now)
             .addingFormer(FormerHome(place: Self.cologneHome, until: Fixture.date("2015-01-01")), date: now)
         #expect(home.former.map(\.place) == [Self.cologneHome, Self.hamburgHome])
@@ -88,12 +106,12 @@ struct HomeAtDateTests {
 
     @Test func backToAutomaticKeepsFormerHomesAndRemovingOneWorks() {
         let former = FormerHome(place: Self.hamburgHome, until: Fixture.date("2019-01-01"))
-        var home = HomeSettings().confirming(Self.munich, date: now).addingFormer(former, date: now)
+        var home = HomeSettings().choosing(Self.munich, date: now).addingFormer(former, date: now)
         home = home.automatic(date: now)
         #expect(home.home(at: Fixture.date("2020-01-01")) == .detected)
         #expect(home.home(at: Fixture.date("2018-01-01")) == .chosen(Self.hamburgHome))
         #expect(!home.isAutomatic)
-        home = home.removingFormer(former.id, date: now)
+        home = home.removingFormer([former.id], date: now)
         #expect(home.isAutomatic)
     }
 
@@ -118,7 +136,7 @@ struct HomeSettingsStorageTests {
 
     @Test func roundTrip() throws {
         let now = Fixture.date("2026-11-16")
-        let home = HomeSettings().confirming(HomeAtDateTests.munich, date: now)
+        let home = HomeSettings().choosing(HomeAtDateTests.munich, date: now)
             .addingFormer(FormerHome(place: HomeAtDateTests.hamburgHome, from: Fixture.date("2012-01-01"), until: Fixture.date("2019-01-01")), date: now)
         let data = try encoder.encode(home)
         #expect(try decoder.decode(HomeSettings.self, from: data) == home)
@@ -190,6 +208,29 @@ struct HomeTripTests {
         #expect(!automatic.atHome.isEmpty)
     }
 
+    /// "Stimmt" after a move (the detection knows when: `since` is set): the time in the old
+    /// town stays everyday life, no trip comes up, no photo changes between home and away.
+    @Test func confirmingAfterAMoveChangesNothing() throws {
+        var lib = LibraryBuilder()
+        lib.daily(from: "2017-01-01", to: "2018-12-31", at: HomeAtDateTests.hamburg, perDay: 2, hour: 19)
+        lib.daily(from: "2019-01-01", to: "2020-12-31", at: Fixture.Places.munichHome, perDay: 2, hour: 19)
+        let automatic = detector.analyse(in: lib.assets)
+        let detected = try #require(automatic.detectedHome)
+        #expect(detected.since != nil)
+        #expect(GeoMath.distance(detected.center, Fixture.Places.munichHome) < 1_000)
+        let confirmed = detector.analyse(in: lib.assets, home: HomeSettings().confirming(HomePlace(center: detected.center, components: nil), date: now))
+        #expect(confirmed.trips == automatic.trips)
+        #expect(confirmed.trips.isEmpty)
+        #expect(confirmed.atHome == automatic.atHome)
+        // Photos after the confirmation are judged by the confirmed home, whatever the detection
+        // would say: a long stay in Hamburg later is a trip.
+        var later = lib
+        let away = later.daily(from: "2026-12-01", to: "2027-03-31", at: HomeAtDateTests.hamburg, perDay: 3, hour: 19)
+        let pinned = detector.analyse(in: later.assets, home: HomeSettings().confirming(HomePlace(center: detected.center, components: nil), date: now))
+        #expect(pinned.trips.contains { Set(away).isSubset(of: Set($0.geotaggedAssetIDs)) })
+        #expect(pinned.atHome.isDisjoint(with: away))
+    }
+
     /// "Kein Zuhause": no photo is at home, the trips stay what they were.
     @Test func noHomeMeansNoPhotoIsAtHomeButTripsStay() {
         let (lib, _) = munichLibrary()
@@ -215,7 +256,7 @@ struct HomeTripTests {
         #expect(detected.since != nil)
 
         let settings = HomeSettings()
-            .confirming(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now)
+            .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now)
             .addingFormer(FormerHome(place: HomeAtDateTests.hamburgHome, until: Fixture.date("2019-01-01")), date: now)
         let chosen = detector.analyse(in: lib.assets, home: settings)
         let trip = try #require(chosen.trips.first { Set($0.geotaggedAssetIDs) == Set(weekend) })
@@ -241,7 +282,7 @@ struct HomeTripTests {
         #expect(analysis.atHome.isDisjoint(with: garda))
         // Also with a home the user chose.
         let chosen = detector.analyse(in: lib.assets, places: parents,
-                                      home: HomeSettings().confirming(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now))
+                                      home: HomeSettings().choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now))
         #expect(chosen.trips.isEmpty)
         #expect(chosen.atHome.isDisjoint(with: garda))
     }
@@ -249,7 +290,7 @@ struct HomeTripTests {
     /// A home the user chose wins over the detection: everyday life somewhere else then is away.
     @Test func chosenHomeWinsOverTheDetection() {
         let (lib, _) = munichLibrary()
-        let settings = HomeSettings().confirming(HomePlace(center: Fixture.Places.gardaLake, components: nil), date: now)
+        let settings = HomeSettings().choosing(HomePlace(center: Fixture.Places.gardaLake, components: nil), date: now)
         let analysis = detector.analyse(in: lib.assets, home: settings)
         #expect(analysis.atHome.isEmpty)
         // The detected home is still Albumist's own finding, shown next to the choice.
@@ -276,7 +317,7 @@ struct HomeNamingTests {
         let augsburg = place("Bayern", "Augsburg"), tegernsee = place("Bayern", "Tegernsee")
         let trip = [augsburg, augsburg, tegernsee, tegernsee]
         let settings = HomeSettings()
-            .confirming(HomeAtDateTests.munich, date: now)
+            .choosing(HomeAtDateTests.munich, date: now)
             .addingFormer(FormerHome(place: HomeAtDateTests.hamburgHome, until: Fixture.date("2019-01-01")), date: now)
         let home = HomeContext(settings: settings)
         func name(at date: String) -> String? {
@@ -293,6 +334,88 @@ struct HomeNamingTests {
         // "Kein Zuhause": no region is home.
         let none = HomeContext(settings: HomeSettings().withoutHome(date: now), profile: everyday)
         #expect(ProposalEngine.primaryPlaceName(trip, kind: .weekendTrip, labels: labels, isHome: { none.isHome($0, at: Fixture.date("2020-06-01")) }).0 == "Bayern")
+    }
+
+    /// The same through the suggestions (`tripProposals`): each trip is judged by the home at
+    /// its start. A weekend in Nuremberg and Regensburg while living in Hamburg is "Bayern";
+    /// the same weekend after the move to Munich is named after its towns.
+    @Test func tripSuggestionsAreNamedWithTheHomeAtTheirStart() throws {
+        let nuremberg = GeoCoordinate(latitude: 49.4521, longitude: 11.0767)
+        let regensburg = GeoCoordinate(latitude: 49.0134, longitude: 12.1016)
+        let table: [(GeoCoordinate, PlaceComponents)] = [
+            (HomeAtDateTests.hamburg, PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Hamburg", locality: "Hamburg")),
+            (Fixture.Places.munichHome, place("Bayern", "München")),
+            (nuremberg, place("Bayern", "Nürnberg")),
+            (regensburg, place("Bayern", "Regensburg")),
+        ]
+        var lib = LibraryBuilder()
+        lib.daily(from: "2017-01-01", to: "2018-12-31", at: HomeAtDateTests.hamburg, perDay: 2, hour: 19, skipping: [("2018-06-08", "2018-06-10")])
+        lib.daily(from: "2019-01-01", to: "2020-12-31", at: Fixture.Places.munichHome, perDay: 2, hour: 19, skipping: [("2020-06-12", "2020-06-14")])
+        for (start, end) in [("2018-06-08", "2018-06-09"), ("2020-06-12", "2020-06-13")] {
+            lib.daily(from: start, to: start, at: nuremberg, perDay: 8, hour: 10)
+            lib.daily(from: end, to: end, at: regensburg, perDay: 8, hour: 10)
+        }
+        let facts = lib.assets.map { a -> AssetFacts in
+            guard let c = a.usableLocation else { return AssetFacts(asset: a) }
+            let nearest = table.min { GeoMath.distance(c, $0.0) < GeoMath.distance(c, $1.0) }!
+            return AssetFacts(asset: a, place: nearest.1, placeSource: .gpsReverseGeocoded)
+        }
+        let home = HomeSettings()
+            .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now)
+            .addingFormer(FormerHome(place: HomePlace(center: HomeAtDateTests.hamburg, components: nil), until: Fixture.date("2019-01-01")), date: now)
+        let trips = TripDetector(calendar: Fixture.calendar).detect(in: lib.assets, home: home)
+        #expect(trips.count == 2)
+        var settings = OrganizationSettings()
+        settings.titleLanguage = .german
+        settings.enabledAreas = [.trips]
+        let titles = ProposalEngine(settings: settings, calendar: Fixture.calendar)
+            .proposals(for: AnalysisSnapshot(facts: facts, trips: trips, home: home))
+            .filter { $0.kind != .frequentPlace }
+            .sorted { ($0.dateRange?.start ?? .distantPast) < ($1.dateRange?.start ?? .distantPast) }
+            .map(\.title)
+        #expect(titles.count == 2)
+        #expect(titles.first?.hasPrefix("Bayern") == true)
+        #expect(titles.last?.hasPrefix("Nürnberg & Regensburg") == true)
+    }
+
+    /// Living in Konstanz, with some everyday photos across the border in Kreuzlingen: inside
+    /// the home radius, so Switzerland is home too while its photos are these everyday ones
+    /// (no album "Schweiz" of the way to the supermarket). Trips to Zurich, further away and
+    /// more photos than the everyday ones, give it its album again.
+    @Test func aCountryAcrossTheBorderInsideTheHomeIsNoAlbum() {
+        let konstanz = GeoCoordinate(latitude: 47.6603, longitude: 9.1758)
+        let kreuzlingen = GeoCoordinate(latitude: 47.6505, longitude: 9.1750)
+        let zurich = GeoCoordinate(latitude: 47.3769, longitude: 8.5417)
+        let table: [(GeoCoordinate, PlaceComponents)] = [
+            (konstanz, PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Baden-Württemberg", locality: "Konstanz")),
+            (kreuzlingen, PlaceComponents(isoCountryCode: "CH", country: "Schweiz", administrativeArea: "Thurgau", locality: "Kreuzlingen")),
+            (zurich, PlaceComponents(isoCountryCode: "CH", country: "Schweiz", administrativeArea: "Zürich", locality: "Zürich")),
+        ]
+        func facts(_ lib: LibraryBuilder) -> [AssetFacts] {
+            lib.assets.map { a in
+                let c = a.usableLocation!
+                let nearest = table.min { GeoMath.distance(c, $0.0) < GeoMath.distance(c, $1.0) }!
+                return AssetFacts(asset: a, place: nearest.1, placeSource: .gpsReverseGeocoded)
+            }
+        }
+        var lib = LibraryBuilder()
+        lib.daily(from: "2025-01-01", to: "2026-06-30", at: konstanz, perDay: 2, hour: 19)
+        lib.daily(from: "2025-01-03", to: "2026-06-30", at: kreuzlingen, perDay: 1, everyNthDay: 9, hour: 11)
+        var settings = OrganizationSettings()
+        settings.titleLanguage = .german
+        settings.enabledAreas = [.places, .trips]
+        let engine = ProposalEngine(settings: settings, calendar: Fixture.calendar)
+        let home = HomeSettings().choosing(HomePlace(center: konstanz, components: nil), date: now)
+        func titles(_ lib: LibraryBuilder) -> Set<String> {
+            let trips = TripDetector(calendar: Fixture.calendar).detect(in: lib.assets, home: home)
+            return Set(engine.proposals(for: AnalysisSnapshot(facts: facts(lib), trips: trips, home: home)).filter { $0.kind.area == .places }.map(\.title))
+        }
+        #expect(!titles(lib).contains("Schweiz"))
+        var trips = lib
+        for month in ["2025-03", "2025-07", "2025-10", "2026-02", "2026-05"] {
+            trips.daily(from: "\(month)-10", to: "\(month)-14", at: zurich, perDay: 12, hour: 10)
+        }
+        #expect(titles(trips).contains("Schweiz"))
     }
 
     /// A Munich library with towns as albums: "München" is no album while Munich is home
@@ -315,7 +438,7 @@ struct HomeNamingTests {
         let automatic = titles(HomeSettings())
         #expect(!automatic.contains("München"))
         #expect(!automatic.contains("Deutschland"))
-        let chosen = titles(HomeSettings().confirming(HomeAtDateTests.munich, date: now))
+        let chosen = titles(HomeSettings().choosing(HomeAtDateTests.munich, date: now))
         #expect(chosen == automatic)
         // "Deutschland" holds the same photos as "München": the town is the album (curation rule 3).
         let none = titles(HomeSettings().withoutHome(date: now))
@@ -368,5 +491,60 @@ struct HomeCandidateTests {
         #expect(candidates.count == 1)
         #expect(candidates[0].name == HomeName(region: "Bayern", country: "Deutschland"))
         #expect(candidates[0].components.locality == nil)
+    }
+
+    /// Offline, "Bayern" holds the everyday photos in Munich and many days in Nuremberg and
+    /// Würzburg: the region's place is where the photos are densest (Munich), not the median of
+    /// all of them (near Nuremberg, 150 km away), so choosing it makes Munich home.
+    @Test func aRegionIsPlacedWhereItsPhotosAreDensest() {
+        var lib = LibraryBuilder()
+        lib.daily(from: "2026-01-01", to: "2026-04-10", at: Fixture.Places.munichHome, perDay: 1)
+        lib.daily(from: "2026-05-01", to: "2026-07-19", at: GeoCoordinate(latitude: 49.4521, longitude: 11.0767), perDay: 1)
+        lib.daily(from: "2026-08-01", to: "2026-10-19", at: GeoCoordinate(latitude: 49.7913, longitude: 9.9534), perDay: 1)
+        let facts = lib.assets.map { AssetFacts(asset: $0, place: .init(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Bayern"), placeSource: .gpsReverseGeocoded) }
+        let candidates = HomeCandidates.make(facts: facts, calendar: Fixture.calendar)
+        #expect(candidates.count == 1)
+        #expect(candidates[0].photoCount == lib.assets.count)
+        #expect(GeoMath.distance(candidates[0].center, Fixture.Places.munichHome) < 1_000)
+    }
+}
+
+@Suite("Dein Zuhause: search")
+struct HomeSearchTests {
+    /// "Ausland" is measured against the home of each photo's date, like trips and suggestions:
+    /// Vienna until 2019, then Munich. A weekend in Munich in 2018 and one in Vienna in 2020 are
+    /// abroad; the everyday photos of both homes are not.
+    @Test func abroadFollowsTheHomeOfEachDate() {
+        let vienna = GeoCoordinate(latitude: 48.2082, longitude: 16.3738)
+        let table: [(GeoCoordinate, PlaceComponents)] = [
+            (vienna, PlaceComponents(isoCountryCode: "AT", country: "Österreich", administrativeArea: "Wien", locality: "Wien")),
+            (Fixture.Places.munichHome, PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Bayern", locality: "München")),
+            (Fixture.Places.rome, PlaceComponents(isoCountryCode: "IT", country: "Italien", administrativeArea: "Latium", locality: "Rom")),
+        ]
+        var lib = LibraryBuilder()
+        lib.daily(from: "2017-01-01", to: "2018-12-31", at: vienna, perDay: 1, hour: 19, skipping: [("2018-05-10", "2018-05-20"), ("2018-09-07", "2018-09-09")])
+        lib.daily(from: "2019-01-01", to: "2020-12-31", at: Fixture.Places.munichHome, perDay: 1, hour: 19, skipping: [("2020-05-10", "2020-05-20"), ("2020-09-11", "2020-09-13")])
+        var away = lib.daily(from: "2018-05-12", to: "2018-05-18", at: Fixture.Places.rome, perDay: 6, hour: 10)
+        away += lib.daily(from: "2020-05-12", to: "2020-05-18", at: Fixture.Places.rome, perDay: 6, hour: 10)
+        away += lib.daily(from: "2018-09-07", to: "2018-09-09", at: Fixture.Places.munichHome, perDay: 6, hour: 11)
+        away += lib.daily(from: "2020-09-11", to: "2020-09-13", at: vienna, perDay: 6, hour: 11)
+        let facts = lib.assets.map { a -> AssetFacts in
+            guard let c = a.usableLocation else { return AssetFacts(asset: a) }
+            let nearest = table.min { GeoMath.distance(c, $0.0) < GeoMath.distance(c, $1.0) }!
+            return AssetFacts(asset: a, place: nearest.1, placeSource: .gpsReverseGeocoded)
+        }
+        let now = Fixture.date("2026-11-16")
+        let home = HomeSettings()
+            .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now)
+            .addingFormer(FormerHome(place: HomePlace(center: vienna, components: nil), until: Fixture.date("2019-01-01")), date: now)
+        let abroad = SearchIndex(facts: facts, home: home, calendar: Fixture.calendar).search("Ausland", now: now).ids
+        #expect(Set(abroad) == Set(away))
+        // Nothing set: the everyday countries, as for the suggestions (both hold a quarter of
+        // the photos here); only Rome is abroad.
+        let detected = SearchIndex(facts: facts, calendar: Fixture.calendar).search("Ausland", now: now).ids
+        #expect(Set(detected) == Set(facts.filter { $0.gpsPlace?.isoCountryCode == "IT" }.map(\.id)))
+        // "Kein Zuhause": the country with the most photos, as before this setting.
+        let none = SearchIndex(facts: facts, home: HomeSettings().withoutHome(date: now), calendar: Fixture.calendar).search("Ausland", now: now).ids
+        #expect(Set(none) == Set(facts.filter { $0.gpsPlace?.isoCountryCode != "DE" }.map(\.id)))
     }
 }

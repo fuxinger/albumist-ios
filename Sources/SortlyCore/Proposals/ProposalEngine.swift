@@ -46,7 +46,7 @@ public struct ProposalEngine: Sendable {
     public func suggestions(for analysis: AnalysisSnapshot, overrides: OverrideSet = OverrideSet()) -> Suggestions {
         let usable = analysis.facts.filter { !overrides.isExcluded($0.id) && !overrides.isIgnored($0.id) }
         let profile = LibraryProfile(facts: usable, trips: analysis.trips)
-        let home = HomeContext(settings: analysis.home, profile: profile)
+        let home = HomeContext(settings: analysis.home, profile: profile, facts: usable, radius: settings.trips.advanced.homeRadiusMeters)
         var result: [AlbumProposal] = []
         var standIns: [StandIn] = []
         let areas = settings.enabledAreas

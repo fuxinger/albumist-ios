@@ -29,8 +29,10 @@ public struct HomePlace: Hashable, Sendable, Codable, Identifiable {
         self.init(id: .stable("home", String(format: "%.3f,%.3f", center.latitude, center.longitude)), center: center, components: components)
     }
 
-    /// The country, region, district and town of this home (as place keys at their level):
-    /// the places that are "at home" for trip names and are no album of their own.
+    /// The country, region, district and town this home was called when the user chose it (as
+    /// place keys at their level). Only the fallback for `HomeContext`, which names a chosen
+    /// home from the photos around it whenever suggestions are made: names stored at the
+    /// choice can be missing (offline, "Ort ohne Namen") or only the region.
     public var keys: Set<PlaceKey> {
         guard let components else { return [] }
         return Set([PlaceLevel.country, .administrativeArea, .subAdministrativeArea, .locality].compactMap { components.key(at: $0) })
@@ -83,13 +85,19 @@ public struct HomeSettings: Hashable, Sendable, Codable {
     public var mode: Mode
     /// The current home, when `mode` is `.confirmed`.
     public var confirmed: HomePlace?
+    /// From when the current home holds. "Stimmt" on the detected home sets the moment of the
+    /// confirmation: it changes nothing about the past (the detection keeps deciding before it,
+    /// with both homes in the months of a move) and keeps later photos from moving the home.
+    /// A place picked under "Ändern" holds for all time (nil), as far as no former home covers a date.
+    public var confirmedFrom: Date?
     public var former: [FormerHome]
     /// When the user last changed something here.
     public var changedAt: Date?
 
-    public init(mode: Mode = .automatic, confirmed: HomePlace? = nil, former: [FormerHome] = [], changedAt: Date? = nil) {
+    public init(mode: Mode = .automatic, confirmed: HomePlace? = nil, confirmedFrom: Date? = nil, former: [FormerHome] = [], changedAt: Date? = nil) {
         self.mode = mode
         self.confirmed = confirmed
+        self.confirmedFrom = confirmedFrom
         self.former = former
         self.changedAt = changedAt
     }
@@ -104,7 +112,8 @@ public struct HomeSettings: Hashable, Sendable, Codable {
     /// place suggestions and the sorted ring all ask this, through `HomeReference` and
     /// `HomeContext`):
     /// - the user's periods are the former homes (`from` … `until`, `from` nil = open) and the
-    ///   current home (confirmed or none) from the beginning of time to the end;
+    ///   current home: "Kein Zuhause" and a place picked under "Ändern" from the beginning of
+    ///   time to the end, a confirmed detected home ("Stimmt") from the confirmation on;
     /// - of the periods that contain `date`, the one that ends first wins. So "Bis 2015: Köln",
     ///   "Bis 2019: Hamburg" and "München" read as a chain: Köln, then Hamburg, then München,
     ///   and an overlap is decided for the more specific (shorter-lived) period;
@@ -123,7 +132,9 @@ public struct HomeSettings: Hashable, Sendable, Codable {
         switch currentMode {
         case .automatic: return .detected
         case .none: return .none
-        case .confirmed: return confirmed.map(HomeAtDate.chosen) ?? .detected
+        case .confirmed:
+            if let date, let confirmedFrom, date < confirmedFrom { return .detected }
+            return confirmed.map(HomeAtDate.chosen) ?? .detected
         }
     }
 
@@ -134,20 +145,24 @@ public struct HomeSettings: Hashable, Sendable, Codable {
     }
 
     /// Some dates are left to the detection.
-    public var usesDetection: Bool { currentMode == .automatic }
+    public var usesDetection: Bool { currentMode == .automatic || (currentMode == .confirmed && confirmedFrom != nil) }
 
     // MARK: Codable (fields added later are read with their defaults)
 
-    enum CodingKeys: String, CodingKey { case version, mode, confirmed, former, changedAt }
+    enum CodingKeys: String, CodingKey { case version, mode, confirmed, confirmedFrom, former, changedAt }
 
+    /// Lenient: a field this build cannot read (a later version's shape, or damage) is read as
+    /// not set, so the value never stops an analysis. A mode a later version added is read as
+    /// "automatic", and a confirmed home that cannot be read too: the detection is always safe.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        let raw = try c.decodeIfPresent(String.self, forKey: .mode) ?? Mode.automatic.rawValue
-        // A mode a later version added is read as "automatic": the detection is always safe.
-        mode = Mode(rawValue: raw) ?? .automatic
-        confirmed = try c.decodeIfPresent(HomePlace.self, forKey: .confirmed)
-        former = try c.decodeIfPresent([FormerHome].self, forKey: .former) ?? []
-        changedAt = try c.decodeIfPresent(Date.self, forKey: .changedAt)
+        let raw = (try? c.decodeIfPresent(String.self, forKey: .mode)) ?? nil
+        mode = raw.flatMap(Mode.init(rawValue:)) ?? .automatic
+        confirmed = (try? c.decodeIfPresent(HomePlace.self, forKey: .confirmed)) ?? nil
+        confirmedFrom = (try? c.decodeIfPresent(Date.self, forKey: .confirmedFrom)) ?? nil
+        former = ((try? c.decodeIfPresent([Lenient<FormerHome>].self, forKey: .former)) ?? nil)?.compactMap(\.value) ?? []
+        changedAt = (try? c.decodeIfPresent(Date.self, forKey: .changedAt)) ?? nil
+        if mode == .confirmed && confirmed == nil { mode = .automatic }
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -155,17 +170,30 @@ public struct HomeSettings: Hashable, Sendable, Codable {
         try c.encode(Self.formatVersion, forKey: .version)
         try c.encode(mode, forKey: .mode)
         try c.encodeIfPresent(confirmed, forKey: .confirmed)
+        try c.encodeIfPresent(confirmedFrom, forKey: .confirmedFrom)
         try c.encode(former, forKey: .former)
         try c.encodeIfPresent(changedAt, forKey: .changedAt)
     }
 
     // MARK: Changes from the settings screen
 
-    /// "Stimmt" on the detected home, or a place the user chose under "Ändern".
+    /// "Stimmt" on the detected home: it holds from `date` on and changes nothing before
+    /// (`confirmedFrom`).
     public func confirming(_ place: HomePlace, date: Date) -> HomeSettings {
         var copy = self
         copy.mode = .confirmed
         copy.confirmed = place
+        copy.confirmedFrom = date
+        copy.changedAt = date
+        return copy
+    }
+
+    /// A place the user picked under "Ändern": their home for every date no former home covers.
+    public func choosing(_ place: HomePlace, date: Date) -> HomeSettings {
+        var copy = self
+        copy.mode = .confirmed
+        copy.confirmed = place
+        copy.confirmedFrom = nil
         copy.changedAt = date
         return copy
     }
@@ -175,6 +203,7 @@ public struct HomeSettings: Hashable, Sendable, Codable {
         var copy = self
         copy.mode = .none
         copy.confirmed = nil
+        copy.confirmedFrom = nil
         copy.changedAt = date
         return copy
     }
@@ -184,6 +213,7 @@ public struct HomeSettings: Hashable, Sendable, Codable {
         var copy = self
         copy.mode = .automatic
         copy.confirmed = nil
+        copy.confirmedFrom = nil
         copy.changedAt = date
         return copy
     }
@@ -196,9 +226,9 @@ public struct HomeSettings: Hashable, Sendable, Codable {
         return copy
     }
 
-    public func removingFormer(_ id: SortlyID, date: Date) -> HomeSettings {
+    public func removingFormer(_ ids: Set<SortlyID>, date: Date) -> HomeSettings {
         var copy = self
-        copy.former.removeAll { $0.id == id }
+        copy.former.removeAll { ids.contains($0.id) }
         copy.changedAt = date
         return copy
     }
@@ -222,19 +252,61 @@ public struct DetectedHome: Hashable, Sendable, Codable {
 /// What the suggestions ask about home: "is this country, region or town the user's home at
 /// this date?". Goes through `HomeSettings.home(at:)`; where the user set nothing, the
 /// everyday places of the library decide as before (`LibraryProfile`).
+///
+/// A chosen home's places are taken from the photos around it each time suggestions are made
+/// (`placeKeys(around:facts:)`), the way the ring and the trip detection judge it by distance,
+/// not only from the names stored when the user chose it: those can be missing (offline,
+/// "Ort ohne Namen") or only the region, and "Deutschland" or "München" would become an album
+/// of all home photos once the towns are named.
 public struct HomeContext: Sendable {
     public var settings: HomeSettings
     public var profile: LibraryProfile
+    /// The places of each chosen home (by `HomePlace.id`), from the photos around it.
+    public var chosenKeys: [SortlyID: Set<PlaceKey>]
 
-    public init(settings: HomeSettings = HomeSettings(), profile: LibraryProfile = LibraryProfile()) {
+    public init(settings: HomeSettings = HomeSettings(), profile: LibraryProfile = LibraryProfile(), facts: [AssetFacts] = [],
+                radius: Double = TripDetector.Configuration().homeRadiusMeters) {
         self.settings = settings
         self.profile = profile
+        var keys: [SortlyID: Set<PlaceKey>] = [:]
+        for place in settings.chosenPlaces where keys[place.id] == nil {
+            keys[place.id] = place.keys.union(Self.placeKeys(around: place.center, facts: facts, radius: radius))
+        }
+        chosenKeys = keys
     }
+
+    /// The countries, regions, districts and towns that are home around `center`: among the
+    /// photos within `radius` (the home radius of the trip detection), a place holding at least
+    /// a quarter of them (as for the everyday places, `LibraryProfile.everydayShare`), or one
+    /// most of whose photos in the whole library lie there. So a town across the border inside
+    /// the radius is home, and so is its country when the user's photos of it are mostly these
+    /// everyday ones; a country visited on trips further away keeps its album.
+    static func placeKeys(around center: GeoCoordinate, facts: [AssetFacts], radius: Double) -> Set<PlaceKey> {
+        let levels: [PlaceLevel] = [.country, .administrativeArea, .subAdministrativeArea, .locality]
+        var near: [PlaceKey: Int] = [:]
+        var everywhere: [PlaceKey: Int] = [:]
+        var nearPhotos = 0
+        for f in facts {
+            guard let place = f.gpsPlace else { continue }
+            let keys = levels.compactMap { place.key(at: $0) }
+            for key in keys { everywhere[key, default: 0] += 1 }
+            guard let c = f.asset.usableLocation, GeoMath.distance(c, center) <= radius else { continue }
+            nearPhotos += 1
+            for key in keys { near[key, default: 0] += 1 }
+        }
+        let needed = Double(nearPhotos) * LibraryProfile.everydayShare
+        return Set(near.filter { key, count in
+            Double(count) >= needed || 2 * count > everywhere[key, default: 0]
+        }.keys)
+    }
+
+    /// The places of `place` as a home.
+    func keys(of place: HomePlace) -> Set<PlaceKey> { chosenKeys[place.id] ?? place.keys }
 
     /// Whether `key` is home at `date`: never a trip's name, never an album of its own.
     public func isHome(_ key: PlaceKey, at date: Date?) -> Bool {
         switch settings.home(at: date) {
-        case .chosen(let place): place.keys.contains(key)
+        case .chosen(let place): keys(of: place).contains(key)
         case .none: false
         case .detected: profile.isEveryday(key)
         }
@@ -242,9 +314,16 @@ public struct HomeContext: Sendable {
 
     /// Whether `key` is home at any time: no place album of its own (curation rule 1).
     public func isHomeAtSomeTime(_ key: PlaceKey) -> Bool {
-        if settings.chosenPlaces.contains(where: { $0.keys.contains(key) }) { return true }
+        if settings.chosenPlaces.contains(where: { keys(of: $0).contains(key) }) { return true }
         return settings.usesDetection && profile.isEveryday(key)
     }
+}
+
+/// Decodes one element of a list on its own: an element this build cannot read (a later
+/// version's shape, or damage) is left out instead of making the whole list unreadable.
+public struct Lenient<T: Decodable & Sendable>: Decodable, Sendable {
+    public let value: T?
+    public init(from decoder: any Decoder) throws { value = try? T(from: decoder) }
 }
 
 /// How a home is called in the settings: the town ("München und Umgebung"), or where only

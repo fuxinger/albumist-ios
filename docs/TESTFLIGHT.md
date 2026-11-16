@@ -59,6 +59,29 @@ Käufe in TestFlight kosten nichts (Testumgebung von Apple). Damit „Freischalt
 braucht es in App Store Connect einen In-App-Kauf vom Typ „Nicht verbrauchbar“ mit der
 Produkt-ID `app.albumist.ios.unlock`.
 
+## Abstürze und Feedback abholen
+
+Was Tester in TestFlight schicken (Feedback mit Screenshot und Kommentar, Absturzberichte mit
+Absturzprotokoll), holt GitHub jeden Morgen um 06:00 UTC von selbst ab
+(`.github/workflows/asc-feedback.yml`, Skript `.github/scripts/asc_feedback.py`). Von Hand:
+Actions > **TestFlight feedback** > Run workflow.
+
+- Ergebnis: der Bericht steht in der Zusammenfassung des Laufs (Datum, Build, Gerät, System,
+  Kommentar, die obersten Zeilen des Absturzprotokolls). Screenshots, vollständige
+  Absturzprotokolle und `report.md` liegen im Artefakt **testflight-feedback** (30 Tage).
+- Gleicher Schlüssel wie der Upload (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`). Er braucht die
+  Rolle **Admin**, **App Manager** oder **Developer**; mit einer anderen Rolle meldet der Lauf
+  „HTTP 403“ und nennt die fehlende Rolle. Die Rolle eines Schlüssels lässt sich nicht ändern:
+  App Store Connect > Benutzer und Zugriff > Integrationen > App Store Connect API >
+  Team-Schlüssel, neuen Schlüssel mit passender Rolle erzeugen, alten widerrufen und die
+  Secrets `ASC_KEY_ID` und `ASC_KEY_P8` ersetzen.
+- Das Repository ist öffentlich: die Zusammenfassung kann jeder lesen, das Artefakt jeder mit
+  GitHub-Konto laden. Deshalb holt das Skript nie E-Mail-Adressen oder Namen der Tester. Für einen
+  Lauf ohne Inhalte bei „Inhalt“ **counts** wählen (nur Anzahlen, kein Artefakt).
+- Texte der Tester werden nur als Text gezeigt (kein HTML, keine Links, keine Erwähnungen) und
+  nie ins Protokoll des Laufs geschrieben.
+- Der tägliche Lauf startet erst, wenn die Datei in `main` ist (GitHub plant nur dort).
+
 ## Gut zu wissen
 
 - Interne Tester (bis 100 Personen aus dem eigenen Team) brauchen keine Prüfung durch Apple.

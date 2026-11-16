@@ -1,0 +1,88 @@
+name: TestFlight feedback
+
+# Fetches what testers send from TestFlight: feedback with screenshots and crash reports with
+# their crash logs (.github/scripts/asc_feedback.py, App Store Connect API). Daily at 06:00 UTC
+# (schedules only run from the default branch) and by hand. Same team key as the upload
+# (docs/TESTFLIGHT.md); it needs the role Admin, App Manager or Developer. Without the secrets
+# the run stops after one quick check.
+#
+# The report goes to the job summary, the whole folder (report.md, screenshots, crash logs) to
+# the artifact "testflight-feedback" (30 days). This repository is public: the job summary can be
+# read by anyone, the artifact downloaded by any signed-in GitHub user. Tester e-mail addresses
+# and names are therefore never fetched; "Inhalt" = counts keeps comments out of the summary and
+# uploads no artifact (used for checking the key).
+#
+# Everything testers send is untrusted text. It only ever travels in files: never in ${{ }}
+# expressions, shell commands or the log (a log line starting with "::" would be a command).
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      report:
+        description: 'Inhalt: full = Kommentare in der Zusammenfassung und Artefakt; counts = nur Anzahlen'
+        type: choice
+        options: [full, counts]
+        default: full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asc-feedback
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    name: Fetch TestFlight feedback and crashes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - id: secrets
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -n "$KEY_ID" ] && [ -n "$ISSUER_ID" ] && [ -n "$KEY_P8" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped: the App Store Connect secrets are not set (docs/TESTFLIGHT.md)."
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: App Store Connect key
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$KEY_P8" > "$RUNNER_TEMP/asc/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey.p8"
+      - name: Fetch feedback and crash logs
+        id: fetch
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          KEY_PATH: ${{ runner.temp }}/asc/AuthKey.p8
+          SUMMARY_MODE: ${{ inputs.report || 'full' }}
+        run: |
+          python3 .github/scripts/asc_feedback.py --bundle-id app.albumist.ios \
+            --out "$RUNNER_TEMP/feedback" --summary "$GITHUB_STEP_SUMMARY" --summary-mode "$SUMMARY_MODE"
+      - name: Remove key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"
+      - name: Keep report, screenshots and crash logs
+        if: always() && steps.secrets.outputs.ready == 'true' && (inputs.report || 'full') == 'full'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testflight-feedback
+          path: ${{ runner.temp }}/feedback
+          retention-days: 30
+          if-no-files-found: ignore
+          overwrite: true

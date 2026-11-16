@@ -10482,6 +10482,346 @@
           }
         }
       }
+    },
+    "Albumist braucht Fotos mit Datum und Ort, zum Beispiel von Reisen. Daraus schlägt es Alben für Länder und Reisen vor." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist needs photos with a date and a place, from trips for example. From those it suggests albums for countries and trips."
+          }
+        }
+      }
+    },
+    "Mit Beispielfotos ausprobieren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try It with Sample Photos"
+          }
+        }
+      }
+    },
+    "Beispielfotos wieder entfernen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Sample Photos"
+          }
+        }
+      }
+    },
+    "Beispielfotos anlegen?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add sample photos?"
+          }
+        }
+      }
+    },
+    "Beispielfotos entfernen?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove sample photos?"
+          }
+        }
+      }
+    },
+    "Beispielfotos entfernen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Sample Photos"
+          }
+        }
+      }
+    },
+    "Albumist löscht nur seine eigenen Beispielfotos und die Alben, die es nur aus ihnen gemacht hat. iOS fragt vorher noch einmal. Deine eigenen Fotos und Alben bleiben, wie sie sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist deletes only its own sample photos and the albums it made only of them. iOS asks once more first. Your own photos and albums stay as they are."
+          }
+        }
+      }
+    },
+    "Die Beispielfotos hat Albumist zum Ausprobieren in deiner Mediathek angelegt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist added the sample photos to your library so you could try it out."
+          }
+        }
+      }
+    },
+    "Die Fotos-App ließ sich nicht öffnen. Öffne sie bitte selbst vom Home-Bildschirm." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Photos app could not be opened. Please open it from the Home Screen."
+          }
+        }
+      }
+    },
+    "Die Beispielfotos konnten nicht angelegt werden. Bitte versuche es noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The sample photos could not be added. Please try again."
+          }
+        }
+      }
+    },
+    "Die Beispielfotos konnten nicht entfernt werden. Bitte versuche es noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The sample photos could not be removed. Please try again."
+          }
+        }
+      }
+    },
+    "Preis wird geladen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading price …"
+          }
+        }
+      }
+    },
+    "Noch keine Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Photos Yet"
+          }
+        }
+      }
+    },
+    "Noch keine Fotos freigegeben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Photos Shared Yet"
+          }
+        }
+      }
+    },
+    "Keine Fotos aus %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Photos from %@"
+          }
+        }
+      }
+    },
+    "Noch zu wenige Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not Enough Photos Yet"
+          }
+        }
+      }
+    },
+    "Fotos ohne Ort" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos Without a Place"
+          }
+        }
+      }
+    },
+    "Deine Mediathek ist leer. Neue Fotos erkennt Albumist von selbst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your library is empty. Albumist notices new photos by itself."
+          }
+        }
+      }
+    },
+    "Du hast Albumist noch keine Fotos freigegeben. Gib oben Fotos frei." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You have not shared any photos with Albumist yet. Share photos above."
+          }
+        }
+      }
+    },
+    "Im Probelauf sieht Albumist nur Fotos aus %@. Nimm die ganze Mediathek dazu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In the trial run Albumist only sees photos from %@. Add the whole library."
+          }
+        }
+      }
+    },
+    "Keines deiner Fotos hat einen Aufnahmeort. Damit die Kamera ihn speichert: Einstellungen › Datenschutz & Sicherheit › Ortungsdienste › Kamera." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "None of your photos has a location. To let the camera save it: Settings › Privacy & Security › Location Services › Camera."
+          }
+        }
+      }
+    },
+    "Albumist hat noch keinen Ort und keine Reise mit genug Fotos für ein eigenes Album gefunden. Neue Fotos prüft es von selbst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist has not found a place or a trip with enough photos for an album of its own yet. It checks new photos by itself."
+          }
+        }
+      }
+    },
+    "Albumist sieht erst %lld Fotos. Für ein Album braucht es mehr Fotos von einem Ort oder einer Reise." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist sieht erst %lld Foto. Für ein Album braucht es mehr Fotos von einem Ort oder einer Reise."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist sieht erst %lld Fotos. Für ein Album braucht es mehr Fotos von einem Ort oder einer Reise."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist sees only %lld photo so far. An album needs more photos of one place or trip."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist sees only %lld photos so far. An album needs more photos of one place or trip."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Beispielfotos anlegen" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Beispielfoto anlegen"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Beispielfotos anlegen"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Add %lld Sample Photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Add %lld Sample Photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Albumist legt %lld Beispielfotos von vier Reisen in deiner Fotos-Mediathek an. Das ist nötig, damit Albumist daraus Alben anlegen kann. Du kannst sie jederzeit wieder entfernen: nur diese Beispielfotos und die Alben, die Albumist daraus gemacht hat." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist legt %lld Beispielfoto von vier Reisen in deiner Fotos-Mediathek an. Das ist nötig, damit Albumist daraus Alben anlegen kann. Du kannst sie jederzeit wieder entfernen: nur diese Beispielfotos und die Alben, die Albumist daraus gemacht hat."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist legt %lld Beispielfotos von vier Reisen in deiner Fotos-Mediathek an. Das ist nötig, damit Albumist daraus Alben anlegen kann. Du kannst sie jederzeit wieder entfernen: nur diese Beispielfotos und die Alben, die Albumist daraus gemacht hat."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist adds %lld sample photo from four trips to your Photos library. This is needed so Albumist can make albums from it. You can remove them at any time: only these sample photos and the albums Albumist made from them."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Albumist adds %lld sample photos from four trips to your Photos library. This is needed so Albumist can make albums from them. You can remove them at any time: only these sample photos and the albums Albumist made from them."
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

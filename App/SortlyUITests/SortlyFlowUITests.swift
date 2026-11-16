@@ -118,6 +118,16 @@ final class SortlyFlowUITests: XCTestCase {
     }
 
     private func audit(_ screen: String) {
+        // The screen first comes to rest (a ring or count still moving after an analysis):
+        // an audit of a screen in motion ends the whole test (see `fullFlowFinished`).
+        // One snapshot per check (labels and frames); element addresses differ every time.
+        var last = ""
+        for _ in 0..<6 {
+            let tree = app.debugDescription.replacing(#/0x[0-9a-f]+/#, with: "")
+            if tree == last { break }
+            last = tree
+            sleep(1)
+        }
         // An element that changes while the audit reads the screen (a progress bar finishing)
         // makes XCTest record "Failed to get matching snapshot". That says nothing about the app,
         // so only that internal error is expected; every other failure still counts.
@@ -220,8 +230,18 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertFalse(unreadable.exists, "Demo photos unreadable \(when): \(unreadable.label)", file: file, line: line)
     }
 
+    /// Set by test 1 at its start and its end; the runner keeps them for the later tests.
+    /// An audit that meets a screen in motion makes XCTest record "Failed to get matching
+    /// snapshot" (expected in `audit`), and that issue ends the test method: test 1 then
+    /// "passed" after the overview audit having done nothing more (runs 43773339053 and
+    /// 43804947107: no "A11Y_AUDIT_DONE overview", no plan applied, so test 4's backup had
+    /// no history to bring back). Test 2 reports such a cut-off test 1 as a failure.
+    private static var fullFlowStarted = false
+    private static var fullFlowFinished = false
+
     func test1_FullFlow() {
         continueAfterFailure = true
+        Self.fullFlowStarted = true
         launch()
 
         // Onboarding
@@ -621,6 +641,8 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Fertig"), "close settings after trip reset")
             _ = waitStable("analysis after trip reset", timeout: 180) { analysisIdle }
         }
+        Self.fullFlowFinished = true
+        print("UI_STEP_OK full flow reached its end")
     }
 
     /// Design review D4 (15.11.): "Ignorieren" can be taken back, right after the action
@@ -783,9 +805,38 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(whole, "After the merge the trip is not one again")
     }
 
+    /// Creates albums once if "Verlauf und Rückgängig" is empty: the starter set, else the
+    /// suggestions already selected.
+    private func ensureHistory() {
+        guard tap(app.buttons["Einstellungen"], "settings before backup"),
+              tap(app.buttons["settings.history"], "history before backup", timeout: 5) else { return }
+        sleep(1)
+        let empty = app.staticTexts["Noch keine Änderungen"].exists
+        print("UI_FACT history empty before backup \(empty)")
+        back(); sleep(1)
+        tap(button("Fertig"), "close settings before backup")
+        sleep(1)
+        guard empty else { return }
+        let starter = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ Alben (kostenlos )?anlegen")).firstMatch
+        let selected = button("ausgewählte Alben anlegen")
+        let open = starter.waitForExistence(timeout: 10) ? starter : selected
+        guard tap(open, "open a plan for the backup", timeout: 10),
+              app.navigationBars["Vorschau"].waitForExistence(timeout: 20),
+              tap(app.buttons["plan.apply"], "apply a plan for the backup", timeout: 30) else { return }
+        let done = button("Rückgängig machen").waitForExistence(timeout: 900)
+        print(done ? "UI_STEP_OK plan for the backup applied" : "UI_STEP_MISSING plan for the backup applied")
+        XCTAssertTrue(done, "The plan for the backup did not finish")
+        back(); sleep(2)
+        _ = waitStable("analysis before backup", timeout: 180) { analysisIdle }
+    }
+
     /// Same app state, but with the largest accessibility text size in dark mode.
     func test2_LargeTextDarkMode() {
         continueAfterFailure = true
+        if Self.fullFlowStarted && !Self.fullFlowFinished {
+            print("UI_STEP_MISSING full flow reached its end")
+            XCTFail("test1_FullFlow stopped before its end without a failure (an accessibility audit was cut off?)")
+        }
         XCUIDevice.shared.appearance = .dark
         launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-SortlyUITestDark"])
         sleep(5)
@@ -904,6 +955,10 @@ final class SortlyFlowUITests: XCTestCase {
         continueAfterFailure = true
         launch(["-SortlyUITestBackup"])
         sleep(5)
+        // The copy must hold a history to bring back: when the earlier tests left none (test 1
+        // cut off before its plan), this test creates one first instead of testing a backup
+        // that has nothing to restore.
+        ensureHistory()
         // Going to the background writes the copy.
         XCUIDevice.shared.press(.home)
         sleep(4)

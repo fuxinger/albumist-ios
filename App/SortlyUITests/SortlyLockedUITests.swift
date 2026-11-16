@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// The locked path of the one-time purchase, end to end (runs after SortlyFlowUITests, on the
 /// library and suggestions that run left behind). The app starts with `-SortlyUITestLocked`
@@ -41,14 +42,57 @@ final class SortlyLockedUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9.]+ Vorschl(ag|äge) prüfen.*")).firstMatch
     }
 
-    /// Opens the suggestions and selects the recommended ones; true when something is then
+    /// What is on screen, as base64 chunks in the log (artifacts are not reachable everywhere).
+    private func shot(_ name: String) {
+        let image = XCUIScreen.main.screenshot().image
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.5
+        let small = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+        guard let data = small.jpegData(compressionQuality: 0.55) else { return }
+        let text = data.base64EncodedString()
+        let size = 4000
+        let total = (text.count + size - 1) / size
+        var index = 0
+        var start = text.startIndex
+        while start < text.endIndex {
+            let end = text.index(start, offsetBy: size, limitedBy: text.endIndex) ?? text.endIndex
+            print("PREVIEW_JPEG ui-\(name) \(index + 1)/\(total) \(text[start..<end])")
+            start = end
+            index += 1
+        }
+    }
+
+    /// The number on "N Vorschläge prüfen", 0 without the button.
+    private func openSuggestionCount() -> Int {
+        let review = reviewSuggestionsButton()
+        guard review.exists, let match = review.label.firstMatch(of: #/(\d+)/#) else { return 0 }
+        return Int(match.1) ?? 0
+    }
+
+    /// Opens the suggestions and selects the recommended ones, or else one suggestion for a
+    /// new album with its own "Auswählen und später anlegen"; true when something is then
     /// ready to be created.
     private func selectRecommended(_ step: String) -> Bool {
         let review = reviewSuggestionsButton()
         guard review.waitForExistence(timeout: 20) else { return false }
         tap(review, step)
         sleep(1)
-        if button("empfohlene auswählen").waitForExistence(timeout: 5) { button("empfohlene auswählen").tap(); sleep(1) }
+        shot("71-locked-suggestions")
+        if button("empfohlene auswählen").waitForExistence(timeout: 5) {
+            button("empfohlene auswählen").tap(); sleep(1)
+        } else {
+            let row = app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "Neues Album")).firstMatch
+            print("UI_FACT locked: no recommended ones, a row for a new album \(row.exists)")
+            if row.exists {
+                row.tap(); sleep(2)
+                let later = button("Auswählen und später anlegen")
+                if later.waitForExistence(timeout: 5) { tap(later, "select one suggestion (locked)"); sleep(1) }
+                // The detail goes back to the list by itself after the choice; if not, back.
+                if app.navigationBars["Vorschlag"].exists { back(); sleep(1) }
+            }
+        }
         back(); sleep(1)
         return button("ausgewählte Alben anlegen").waitForExistence(timeout: 10)
     }
@@ -115,7 +159,18 @@ final class SortlyLockedUITests: XCTestCase {
         let apply = button("ausgewählte Alben anlegen")
         if !apply.waitForExistence(timeout: 5) && !selectRecommended("open suggestions (locked)") {
             print("UI_FACT locked: nothing recommendable left, taking back the newest plans")
-            if takeBackNewestPlans(limit: 2) > 0 { _ = selectRecommended("open suggestions after taking back (locked)") }
+            let before = openSuggestionCount()
+            if takeBackNewestPlans(limit: 2) > 0 {
+                // The suggestions of the plans taken back return once the undo is stored and
+                // matched again; the count on the overview says when (run 43804947107 went on
+                // at once and found the one suggestion that was there before).
+                var after = openSuggestionCount()
+                let end = Date().addingTimeInterval(120)
+                while after <= before && Date() < end { sleep(2); after = openSuggestionCount() }
+                print("UI_FACT locked: open suggestions \(before) before taking back, \(after) after")
+                shot("70-locked-overview-after-takeback")
+                _ = selectRecommended("open suggestions after taking back (locked)")
+            }
         }
         let ready = apply.waitForExistence(timeout: 10)
         print(ready ? "UI_STEP_OK something to create (locked)" : "UI_STEP_MISSING something to create (locked)")

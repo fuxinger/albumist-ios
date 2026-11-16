@@ -193,6 +193,24 @@ final class SortlyFlowUITests: XCTestCase {
 
     // MARK: Tests
 
+    /// The demo library is fully readable: the analysis card says "Alle N Fotos analysiert"
+    /// and no photo counts as unreadable. UI runs reported "0 von 246 Fotos analysiert" and
+    /// "246 Fotos konnten noch nicht gelesen werden" for weeks without failing.
+    private func assertEveryPhotoAnalysed(_ when: String, file: StaticString = #filePath, line: UInt = #line) {
+        let card = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Alle ", "Fotos analysiert")).firstMatch
+        _ = card.waitForExistence(timeout: 10)
+        // Any other analysis line (e.g. "0 von 246 Fotos analysiert") is printed for the log.
+        let other = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fotos analysiert")).firstMatch
+        print("UI_FACT analysis card \(when): \(card.exists ? card.label : "not found (\(other.exists ? other.label : "-"))") | \(card.exists ? (card.value as? String ?? "-") : "-")")
+        let unreadable = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "konnten noch nicht gelesen")).firstMatch
+        if unreadable.exists { print("UI_FACT unreadable \(when): \(unreadable.label)") }
+        let all = card.exists && card.label.hasPrefix("Alle ")
+        print(all && !unreadable.exists ? "UI_STEP_OK every photo analysed \(when)" : "UI_STEP_MISSING every photo analysed \(when)")
+        XCTAssertTrue(card.exists, "No analysis card \(when)", file: file, line: line)
+        XCTAssertTrue(all, "Not every demo photo analysed \(when): \(card.label)", file: file, line: line)
+        XCTAssertFalse(unreadable.exists, "Demo photos unreadable \(when): \(unreadable.label)", file: file, line: line)
+    }
+
     func test1_FullFlow() {
         continueAfterFailure = true
         launch()
@@ -241,6 +259,15 @@ final class SortlyFlowUITests: XCTestCase {
         // Seeding starts a fresh analysis; wait until it ran and the overview stays idle.
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
         print("UI_TIMING analysis \(Int(Date().timeIntervalSince(analysed))) s")
+        assertEveryPhotoAnalysed("after seeding")
+        // With every photo readable the suggestions reach the overview a little after the
+        // analysis card says done (run 43774578089: the overview changed during its audit,
+        // which ended test1 there). The audit waits for them.
+        let offers = Date()
+        let ready = waitStable("suggestions on the overview", timeout: 180) {
+            app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9]+ (Vorschläge|Vorschlag) prüfen|[0-9]+ Alben (kostenlos )?anlegen")).firstMatch.exists
+        }
+        print("UI_FACT suggestions on the overview \(ready) after \(Int(Date().timeIntervalSince(offers))) s")
         // The demo library holds 12 trips; "1 Reisen" was a real detection bug.
         let teaser = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Dein Reise-Atlas")).firstMatch
         if teaser.waitForExistence(timeout: 10) {
@@ -920,9 +947,7 @@ final class SortlyFlowUITests: XCTestCase {
         }
         let done = waitStable("analysis finished after background and tabs", timeout: 60) { analysisIdle }
         XCTAssertTrue(done, "The analysis did not finish after background and tabs")
-        let all = anything("Alle ").exists && anything("Fotos analysiert").exists
-        print(all ? "UI_STEP_OK every photo analysed" : "UI_STEP_MISSING every photo analysed")
-        print("UI_FACT analysis card \(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "analysiert")).firstMatch.label)")
+        assertEveryPhotoAnalysed("after background and tabs")
         shot("63-analysis-done"); audit("analysis done")
 
         // "Neu prüfen" finds nothing new and says so.

@@ -36,6 +36,10 @@ struct PlanReceiptView: View {
         }
         .navigationTitle("Änderungen")
         .navigationBarTitleDisplayMode(.inline)
+        // Opened from the result, the receipt belongs to it: the App Store rating question
+        // waits until the user has left both (`ReviewPrompt`).
+        .onAppear { ReviewPrompt.shared.screenAppeared() }
+        .onDisappear { ReviewPrompt.shared.screenDisappeared() }
         .toolbar {
             if let receipt {
                 ToolbarItem(placement: .primaryAction) {

@@ -3,9 +3,9 @@
 Every UI job (ui.yml) uses this script, so all of them treat a failure the same way:
 
   pick  --device pro|se
-      Prints the UDID of the simulator for the job: an iPhone Pro ("pro", the screenshots of
-      the UI flow) or a newly created iPhone SE on the newest runtime ("se", the small iPhone
-      of the accessibility tests; the narrowest iPhone there when the runtime has no SE).
+      Prints the UDID of the simulator for the job, both pinned in .github/toolchain.json: the
+      image's iPhone Pro ("pro", the screenshots of the UI flow) or a newly created iPhone SE
+      ("se", the small iPhone of the accessibility tests), on the pinned runtime. No fallback.
   boot  --udid U [--reduce-motion] [--ready-file F]
       Boots the simulator (three attempts: CoreSimulator on the hosted Macs sometimes aborts
       the first bootstatus), grants photo access, fixes the status bar and writes the
@@ -274,32 +274,28 @@ def sh(command: list[str], timeout: float = 300, quiet: bool = False) -> tuple[i
 
 
 def pick(device: str) -> str:
-    _, listing = sh(["xcrun", "simctl", "list", "devices", "available", "-j"], quiet=True)
+    """UDID of the pinned simulator (.github/toolchain.json): "pro" is the image's iPhone Pro
+    on the pinned runtime, "se" a new iPhone SE (375 pt) created from the pinned device type on
+    that runtime. No fallback: a missing simulator fails the job (exit 2 in main)."""
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pick_simulator.py")
-
-    def choose(flag: str) -> str:
-        done = subprocess.run([sys.executable, script, flag], input=listing, capture_output=True, text=True)
-        sys.stderr.write(done.stderr)
-        return done.stdout.strip()
-
     if device == "se":
-        # An iPhone SE (375 pt) on the newest general runtime if that runtime still offers one.
-        _, runtimes = sh(["xcrun", "simctl", "list", "runtimes", "available", "-j"], quiet=True)
-        try:
-            found = [r for r in json.loads(runtimes)["runtimes"]
-                     if r.get("platform") == "iOS" and re.search(r"iOS-\d+(?:-\d+)*$", r["identifier"])]
-        except (ValueError, KeyError):
-            found = []
-        found.sort(key=lambda r: tuple(int(p) for p in r["version"].split(".")))
-        if found:
-            code, udid = sh(["xcrun", "simctl", "create", "Albumist SE",
-                             "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation",
-                             found[-1]["identifier"]], quiet=True)
-            if code == 0 and re.fullmatch(r"[0-9A-F-]{36}", udid.strip()):
-                print(f"Albumist SE on {found[-1]['identifier']}", file=sys.stderr)
-                return udid.strip()
-        return choose("--small")
-    return choose("--pro")
+        sys.path.insert(0, os.path.dirname(script))
+        from pick_simulator import pins
+        toolchain = pins()
+        small, runtime = toolchain["simulators"]["small"], toolchain["runtime"]["identifier"]
+        code, udid = sh(["xcrun", "simctl", "create", small["name"], small["create"], runtime], quiet=True)
+        if code == 0 and re.fullmatch(r"[0-9A-F-]{36}", udid.strip()):
+            print(f"{small['name']} ({small['create']}) on {runtime}", file=sys.stderr)
+            return udid.strip()
+        print(f"::error title=Pinned toolchain::could not create {small['name']} ({small['create']}) on {runtime}: "
+              f"{udid.strip()[:300]}. Update .github/toolchain.json on purpose.", flush=True)
+        return ""
+    _, listing = sh(["xcrun", "simctl", "list", "devices", "available", "-j"], quiet=True)
+    done = subprocess.run([sys.executable, script, "--role", "pro"], input=listing, capture_output=True, text=True)
+    sys.stderr.write(done.stderr)
+    if done.returncode != 0:
+        print(f"::error title=Pinned toolchain::{done.stderr.strip()[:300]}", flush=True)
+    return done.stdout.strip()
 
 
 def boot(udid: str) -> bool:

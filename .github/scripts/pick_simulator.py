@@ -1,66 +1,59 @@
-"""Print the UDID of an available iPhone simulator on the newest iOS runtime.
+"""Print the UDID of the pinned simulator for a role, and nothing else.
 
-Usage: xcrun simctl list devices available -j | python3 pick_simulator.py [--pro | --small]
---pro prefers a "Pro" model (not "Max"), like the screenshots in the App Store.
---small prefers the narrowest iPhone: an SE (375 pt), then a "mini", then an "e" model.
+Usage: xcrun simctl list devices available -j | python3 pick_simulator.py [--role default|pro]
 
-Regular iPhones on the general runtime win: Xcode 27 also ships device-specific runtimes
-(e.g. "iOS-27-2-iPhone19-4" for the foldable "iPhone Duo"), and the UI flow and its
-screenshots are written for the classic portrait iPhone.
+The runtime and the simulator of each role are pinned in .github/toolchain.json: "default"
+(CI and the nightly run) and "pro" (the UI flow and its App Store screenshots). The small iPhone
+of the accessibility tests is created from its pinned device type by `ui_tests.py pick --device
+se`. There is no fallback to "the newest runtime" or "a similar iPhone": when the pinned one is
+missing (a new runner image), this fails with what the image offers instead, and the pins are
+updated on purpose. "--pro" is kept as a short form of "--role pro".
 """
+from __future__ import annotations
+
 import json
-import re
+import os
 import sys
 
-devices = json.load(sys.stdin)["devices"]
-pro = "--pro" in sys.argv
-small = "--small" in sys.argv
-SPECIAL = ("Duo", "Fold", "Flip")
+TOOLCHAIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "toolchain.json")
 
 
-def version(runtime: str) -> tuple[int, ...]:
-    match = re.search(r"iOS-(\d+(?:-\d+)*)", runtime)
-    return tuple(int(p) for p in match.group(1).split("-")) if match else ()
+def pins(path: str = TOOLCHAIN) -> dict:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
-def generic(runtime: str) -> bool:
-    """True for "…SimRuntime.iOS-27-2", false for a device-specific "…iOS-27-2-iPhone19-4"."""
-    return re.search(r"iOS-\d+(?:-\d+)*$", runtime) is not None
+def pick(devices: dict, role: str, toolchain: dict) -> tuple[str, str]:
+    """(udid, description) of the one available simulator of `role` on the pinned runtime.
+    Raises SystemExit with the reason when there is none or more than one."""
+    if role not in toolchain["simulators"]:
+        raise SystemExit(f"unknown simulator role {role!r} (toolchain.json has {sorted(toolchain['simulators'])})")
+    runtime = toolchain["runtime"]["identifier"]
+    pin = toolchain["simulators"][role]
+    on_runtime = [d for d in devices.get(runtime, []) if d.get("isAvailable", True)]
+    found = [d for d in on_runtime if d.get("name") == pin["name"]
+             and (not pin.get("type") or d.get("deviceTypeIdentifier") == pin["type"])]
+    if len(found) == 1:
+        d = found[0]
+        return d["udid"], f"{d['name']} ({d.get('deviceTypeIdentifier', '?')}) on {runtime}"
+    if not found:
+        offered = sorted({d.get("name", "?") for d in on_runtime})
+        raise SystemExit(f"pinned simulator {pin['name']!r} not found on {runtime} "
+                         f"(it has: {', '.join(offered) or 'nothing; is the runtime installed?'}); "
+                         "update .github/toolchain.json on purpose")
+    raise SystemExit(f"{len(found)} simulators named {pin['name']!r} on {runtime}: "
+                     + ", ".join(d["udid"] for d in found))
 
 
-def small_rank(name: str) -> int:
-    """Higher is narrower: SE (375 pt) > mini (375 pt) > "16e"-style models (390 pt) > others."""
-    if " SE" in name:
-        return 3
-    if "mini" in name:
-        return 2
-    if re.search(r"iPhone \d+e\b", name):
-        return 1
+def main(argv: list[str]) -> int:
+    role = "pro" if "--pro" in argv else "default"
+    if "--role" in argv:
+        role = argv[argv.index("--role") + 1]
+    udid, description = pick(json.load(sys.stdin)["devices"], role, pins())
+    print(description, file=sys.stderr)
+    print(udid)
     return 0
 
 
-def model_number(name: str) -> int:
-    match = re.search(r"iPhone (\d+)", name)
-    return int(match.group(1)) if match else 0
-
-
-candidates = []
-for runtime, entries in devices.items():
-    if "iOS" not in runtime:
-        continue
-    for d in entries:
-        name = d["name"]
-        if not name.startswith("iPhone"):
-            continue
-        regular = not any(word in name for word in SPECIAL)
-        if small:
-            preferred = small_rank(name)
-        else:
-            preferred = int(("Pro" in name and "Max" not in name) if pro else ("Pro" not in name and "Plus" not in name))
-        candidates.append(((regular, generic(runtime), version(runtime), preferred, model_number(name), name), runtime, d))
-
-if not candidates:
-    sys.exit("No iPhone simulator found")
-_, runtime, best = max(candidates, key=lambda c: c[0])
-print(f"{best['name']} on {runtime}", file=sys.stderr)
-print(best["udid"])
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

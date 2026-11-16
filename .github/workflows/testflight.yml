@@ -158,14 +158,12 @@ jobs:
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Select newest Xcode
+      - name: Select pinned Xcode
         id: xcode
+        # The pinned release Xcode (.github/toolchain.json), never a beta: App Store Connect
+        # refuses beta builds. The id output names it in build-info.txt.
         run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
-          xcodebuild -version
-          echo "id=$(xcodebuild -version | tr -c 'A-Za-z0-9.\n' '-' | paste -sd- -)" >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/toolchain.py xcode
           # Files restored from the cache have new inode numbers; without this Xcode's build
           # system would treat all of them as changed.
           defaults write com.apple.dt.XCBuild IgnoreFileSystemDeviceInodeChanges -bool YES
@@ -247,12 +245,13 @@ jobs:
       ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - name: Select newest Xcode
-        run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
-          xcodebuild -version
+      # Only the CI scripts and the toolchain pins of this commit; the app comes from the archive.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github
+          persist-credentials: false
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode
       - name: Paths
         run: |
           echo "KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
@@ -276,9 +275,9 @@ jobs:
           [ "$version" = "${{ github.run_number }}" ] \
             || { echo "::error::The archive has build number $version, not ${{ github.run_number }}"; exit 1; }
           echo "Archive of ${GITHUB_SHA:0:7}, build $version"
-          xcode="$(xcodebuild -version | tr -c 'A-Za-z0-9.\n' '-' | paste -sd- -)"
+          xcode="$(python3 .github/scripts/toolchain.py id)"
           grep -qx "xcode=$xcode" "$RUNNER_TEMP/release/build-info.txt" \
-            || echo "::warning::The archive was built with another Xcode than this export uses ($xcode)"
+            || { echo "::error::The archive was not built with the pinned $xcode that this export uses"; exit 1; }
       - name: App Store Connect key
         env:
           KEY_P8: ${{ secrets.ASC_KEY_P8 }}

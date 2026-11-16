@@ -120,7 +120,8 @@ struct HomeSettingsView: View {
             }
             switch model.homeSettings.currentMode {
             case .confirmed:
-                homeRow(title: HomeText.area(model.homeSettings.confirmed?.components), detail: Text("Von dir festgelegt"), symbol: "house.fill")
+                homeRow(title: HomeText.area(model.homeSettings.confirmed?.components),
+                        detail: model.homeSettings.confirmedFrom == nil ? Text("Von dir festgelegt") : Text("Von dir bestätigt"), symbol: "house.fill")
                 // The newest photos point somewhere else (moved since): said, never changed by itself.
                 if let detected = model.detectedHomePlace, let chosen = model.homeSettings.confirmed,
                    GeoMath.distance(detected.center, chosen.center) > HomeText.radiusMeters {
@@ -136,14 +137,21 @@ struct HomeSettingsView: View {
             case .automatic:
                 if let detected = model.detectedHomePlace {
                     homeRow(title: HomeText.area(detected.components), detail: detectedDetail, symbol: "house")
-                    Button {
-                        Task { await model.confirmDetectedHome() }
-                    } label: {
-                        Label("Stimmt", systemImage: "checkmark")
+                    if detected.components != nil {
+                        Button {
+                            Task { await model.confirmDetectedHome() }
+                        } label: {
+                            Label("Stimmt", systemImage: "checkmark")
+                        }
+                        .disabled(!model.canChangeHome)
+                        .accessibilityIdentifier("home.confirm")
+                        .accessibilityHint(Text("Albumist verwendet dieses Zuhause ab jetzt, auch wenn sich deine Fotos ändern."))
+                    } else {
+                        // No name yet: nothing to confirm that the user could recognise.
+                        Text("Albumist kennt die Orte dort noch nicht. Sobald sie bekannt sind, kannst du dein Zuhause bestätigen.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(!model.canChangeHome)
-                    .accessibilityIdentifier("home.confirm")
-                    .accessibilityHint(Text("Albumist verwendet dieses Zuhause, auch wenn sich deine Fotos ändern."))
                     changeLink(Text("Ändern"))
                 } else {
                     // Empty state: nothing detected yet, and why.
@@ -221,8 +229,8 @@ struct HomeSettingsView: View {
                 Label(HomeText.former(home), systemImage: "clock.arrow.circlepath")
             }
             .onDelete { offsets in
-                let homes = offsets.map { model.homeSettings.former[$0] }
-                Task { for home in homes { await model.removeFormerHome(home) } }
+                let ids = Set(offsets.map { model.homeSettings.former[$0].id })
+                Task { await model.removeFormerHomes(ids) }
             }
             .deleteDisabled(!model.canChangeHome)
             NavigationLink {
@@ -289,9 +297,17 @@ struct HomePlacePicker: View {
     @State private var query = ""
 
     private var candidates: [HomeCandidate] { HomeCandidates.filter(model.homeCandidates, query: query) }
+    /// Picking the current home changes it at once: not while Albumist is busy. The other
+    /// purposes only fill in a form.
+    private var busy: Bool { purpose == .current && !model.canChangeHome }
 
     var body: some View {
         List {
+            if busy {
+                Text("Während die Analyse oder das Anlegen läuft, kannst du hier nichts ändern.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             if purpose == .current && query.isEmpty {
                 Section {
                     if model.homeSettings.currentMode != .automatic {
@@ -326,6 +342,7 @@ struct HomePlacePicker: View {
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
+                    .disabled(busy)
                     .accessibilityIdentifier("home.candidate")
                 }
             } header: {
@@ -353,6 +370,7 @@ struct HomePlacePicker: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
+        .disabled(busy)
     }
 
     /// "Bayern, Deutschland · 120 Tage".
@@ -371,6 +389,8 @@ struct FormerHomeEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var place: HomeCandidate?
     @State private var until = Calendar.current.date(byAdding: .year, value: -1, to: .now) ?? .now
+    /// A tap is being stored: a second one waits (double tap).
+    @State private var adding = false
 
     var body: some View {
         Form {
@@ -394,13 +414,15 @@ struct FormerHomeEditor: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Hinzufügen") {
-                    guard let place else { return }
+                    guard let place, !adding else { return }
+                    adding = true
                     Task {
-                        await model.addFormerHome(place, until: until)
-                        dismiss()
+                        // Not stored (Albumist was busy): the form stays, the user was told.
+                        if await model.addFormerHome(place, until: until) { dismiss() }
+                        adding = false
                     }
                 }
-                .disabled(place == nil || !model.canChangeHome)
+                .disabled(place == nil || adding || !model.canChangeHome)
                 .accessibilityIdentifier("home.former.add")
             }
         }
@@ -414,9 +436,10 @@ struct PersonalPlaceEditor: View {
     @State private var kind: PersonalPlaceKind = .parents
     @State private var label = ""
     @State private var place: HomeCandidate?
+    @State private var adding = false
 
     private var canAdd: Bool {
-        place != nil && model.canChangeHome && (kind != .other || !label.trimmingCharacters(in: .whitespaces).isEmpty)
+        place != nil && !adding && model.canChangeHome && (kind != .other || !label.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
     var body: some View {
@@ -450,10 +473,11 @@ struct PersonalPlaceEditor: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Hinzufügen") {
-                    guard let place else { return }
+                    guard let place, !adding else { return }
+                    adding = true
                     Task {
-                        await model.addPersonalPlace(place, kind: kind, label: label)
-                        dismiss()
+                        if await model.addPersonalPlace(place, kind: kind, label: label) { dismiss() }
+                        adding = false
                     }
                 }
                 .disabled(!canAdd)

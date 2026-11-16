@@ -56,6 +56,9 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
         #endif
         // The sample photos start one analysis after the last chunk, and after a removal.
         if SamplePhotos.shared.isAdding || SamplePhotos.shared.isRemoving { return false }
+        // Not while a change in "Dein Zuhause" makes the suggestions again (it would start right
+        // after it anyway).
         return model.phase == .ready && model.access.canRead && !model.execution.isRunning && !model.analysis.isRunning
+            && !model.homeChangeRunning
     }
 }

@@ -11103,12 +11103,12 @@
         }
       }
     },
-    "Albumist verwendet dieses Zuhause, auch wenn sich deine Fotos ändern." : {
+    "Albumist verwendet dieses Zuhause ab jetzt, auch wenn sich deine Fotos ändern." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist keeps this home, even when your photos change."
+            "value" : "Albumist uses this home from now on, even if your photos change."
           }
         }
       }
@@ -11639,6 +11639,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Your newest photos point to %@."
+          }
+        }
+      }
+    },
+    "Von dir bestätigt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirmed by you"
+          }
+        }
+      }
+    },
+    "Albumist kennt die Orte dort noch nicht. Sobald sie bekannt sind, kannst du dein Zuhause bestätigen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist doesn't know the places there yet. Once it does, you can confirm your home."
+          }
+        }
+      }
+    },
+    "Albumist ist gerade beschäftigt. Versuch es gleich noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is busy right now. Please try again in a moment."
           }
         }
       }

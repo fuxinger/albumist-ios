@@ -21,15 +21,32 @@ import Foundation
 ///   stopped half way, results not stored), and no plan that was cut off was found in it;
 /// - nothing is busy: no analysis (so never during the first one), no plan, no change in "Dein
 ///   Zuhause", no plan that was cut off; Albumist is on screen and shows no message;
-/// - it did not ask for this version of the app yet, nor in the last 120 days.
+/// - the user left the result a moment ago and stayed in Albumist: leaving the app while the
+///   question waits drops it, and a wait that ran long (the app was in the background) counts
+///   as gone (`momentLasts`);
+/// - it did not ask for this version of the app yet, nor in the last 120 days (a last question
+///   dated more than a day ahead counts as asked today, `State.clockChecked`).
 ///
-/// The first day is not left out: the first albums are the moment that was chosen, and most
-/// people make them on the day they install Albumist. Apple's advice (not at the first launch or
-/// during the introduction, only once people know the app) holds anyway: never at a start, never
-/// while an analysis runs, only after a task the user finished and looked at.
+/// So it may ask after any plan like this, at most once per version and 120 days apart; for
+/// most people the first such plan makes their first albums. The first day is not left out:
+/// the first albums are the moment that was chosen, and most people make them on the day they
+/// install Albumist. Apple's advice (not at the first launch or during the introduction, only
+/// once people know the app) holds anyway: never at a start, never while an analysis runs, only
+/// after a task the user finished and looked at.
 public enum ReviewPromptPolicy {
     /// At least this many days between two questions.
     public static let daysBetweenQuestions = 120
+
+    /// After the user left the result, the next screen settles first: the question never covers
+    /// the result or its receipt.
+    public static let delay: Duration = .milliseconds(1500)
+    /// The check for new photos that follows every plan is waited for this long at most. A first
+    /// analysis that is still running takes longer: then nothing is asked (no analysis may run).
+    public static let analysisWait: Duration = .seconds(15)
+    /// A moment is gone this long after the user left the result: both waits and 2 s to spare.
+    /// Measured on `ContinuousClock`, where time in the background counts: a wait that iOS
+    /// suspended never asks the moment the user comes back, maybe hours later.
+    public static let momentLasts: Duration = delay + analysisWait + .seconds(2)
 
     /// Why Albumist does not ask now.
     public enum Refusal: Hashable, Sendable {
@@ -60,6 +77,9 @@ public enum ReviewPromptPolicy {
         case planInterrupted
         /// Albumist is not on screen.
         case notOnScreen
+        /// The user left the result longer than `momentLasts` ago (Albumist was in the
+        /// background meanwhile, or the wait ran long).
+        case momentPassed
         /// A message is on screen.
         case messageShown
         /// Asked before in this version of the app.
@@ -85,6 +105,17 @@ public enum ReviewPromptPolicy {
             State(lastAskedVersion: version, lastAskedAt: date)
         }
 
+        /// A last question dated more than a day after `now` counts as asked now: the clock was
+        /// set back, or it was wrong when Albumist asked. The 120 days then run from today, not
+        /// from a date that may lie years ahead (the app stores the result). Up to a day ahead
+        /// stays as it is (time zones, a clock the network set right) and counts as recent.
+        public func clockChecked(now: Date) -> State {
+            guard let last = lastAskedAt, last.timeIntervalSince(now) > 24 * 60 * 60 else { return self }
+            var state = self
+            state.lastAskedAt = now
+            return state
+        }
+
         /// The stored value. Fields a later version adds come from the defaults
         /// (`StoredDefaults`); nothing stored or unreadable bytes count as never asked (iOS
         /// still allows at most three questions a year).
@@ -101,6 +132,7 @@ public enum ReviewPromptPolicy {
 
     /// What the app is doing at the moment of asking.
     public struct Situation: Hashable, Sendable {
+        /// Also a plan that has its claim but has not started yet.
         public var planRunning: Bool
         /// Also "Analyse neu aufbauen" while it clears the tables.
         public var analysisRunning: Bool
@@ -112,10 +144,13 @@ public enum ReviewPromptPolicy {
         /// Albumist's sample photos (or the simulator's demo library) are in the library.
         public var samplePhotos: Bool
         public var uiTest: Bool
+        /// How long ago the user left the result (`Session.takeWaiting`), on `ContinuousClock`:
+        /// time in the background counts.
+        public var sinceLeft: Duration
 
         public init(planRunning: Bool = false, analysisRunning: Bool = false, homeChangeRunning: Bool = false,
                     planInterrupted: Bool = false, onScreen: Bool = true, messageShown: Bool = false,
-                    samplePhotos: Bool = false, uiTest: Bool = false) {
+                    samplePhotos: Bool = false, uiTest: Bool = false, sinceLeft: Duration = .zero) {
             self.planRunning = planRunning
             self.analysisRunning = analysisRunning
             self.homeChangeRunning = homeChangeRunning
@@ -124,6 +159,7 @@ public enum ReviewPromptPolicy {
             self.messageShown = messageShown
             self.samplePhotos = samplePhotos
             self.uiTest = uiTest
+            self.sinceLeft = sinceLeft
         }
     }
 
@@ -133,6 +169,9 @@ public enum ReviewPromptPolicy {
     public struct Session: Hashable, Sendable {
         /// The plan whose result was seen last, until it is settled (asked about or not).
         public private(set) var waiting: ChangePlan?
+        /// When the user left the result of the waiting plan (and its receipt): the moment to
+        /// ask, a little later. `ContinuousClock`: time in the background counts.
+        public private(set) var left: ContinuousClock.Instant?
         /// Results and receipts on screen now. A receipt opened from the result covers it: the
         /// question waits until the user has left both.
         public private(set) var screens = 0
@@ -148,16 +187,30 @@ public enum ReviewPromptPolicy {
             waiting = plan
         }
 
-        /// A result or receipt came on screen.
+        /// A result or receipt came on screen: a moment that waited is over (the next one comes
+        /// when the user leaves them).
         public mutating func screenAppeared() {
             screens += 1
+            left = nil
         }
 
-        /// A result or receipt left the screen. True when the user has now left the result of
-        /// a plan that waits: the moment to ask (a little later, see the app).
-        public mutating func screenDisappeared() -> Bool {
+        /// A result or receipt left the screen at `now`. True when the user has now left the
+        /// result of a plan that waits: the moment to ask (a little later, see the app).
+        public mutating func screenDisappeared(at now: ContinuousClock.Instant) -> Bool {
             screens = max(0, screens - 1)
-            return screens == 0 && waiting != nil
+            guard screens == 0, waiting != nil else { return false }
+            left = now
+            return true
+        }
+
+        /// Albumist left the screen (another app, the Home Screen, a call, Control Center).
+        /// A moment that waited is gone, and its plan with it: the question would come when
+        /// the user is back, maybe hours later. A result still on screen keeps its plan (the
+        /// user may be looking at the new albums in Photos): leaving it later is the moment.
+        public mutating func sceneLeft() {
+            guard left != nil else { return }
+            left = nil
+            waiting = nil
         }
 
         /// The user asked to take `plan` back (whether or not it all went).
@@ -179,12 +232,14 @@ public enum ReviewPromptPolicy {
             hadTrouble = true
         }
 
-        /// The plan to ask about now, once. Nil when none waits, or while a result or receipt
-        /// is on screen again (then it waits until the user leaves them).
-        public mutating func takeWaiting() -> ChangePlan? {
-            guard screens == 0, let plan = waiting else { return nil }
+        /// The plan to ask about now and when the user left its result, once. Nil when none
+        /// waits, or while a result or receipt is on screen again (then it waits until the user
+        /// leaves them).
+        public mutating func takeWaiting() -> (plan: ChangePlan, left: ContinuousClock.Instant)? {
+            guard screens == 0, let plan = waiting, let left else { return nil }
             waiting = nil
-            return plan
+            self.left = nil
+            return (plan, left)
         }
     }
 
@@ -206,6 +261,7 @@ public enum ReviewPromptPolicy {
         if situation.homeChangeRunning { return .homeChangeRunning }
         if situation.planInterrupted { return .planInterrupted }
         if !situation.onScreen { return .notOnScreen }
+        if situation.sinceLeft > momentLasts { return .momentPassed }
         if situation.messageShown { return .messageShown }
         if state.lastAskedVersion == version { return .askedInThisVersion }
         if let last = state.lastAskedAt, now.timeIntervalSince(last) < Double(daysBetweenQuestions) * 24 * 60 * 60 {

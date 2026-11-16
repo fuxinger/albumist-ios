@@ -6,11 +6,11 @@ import SortlyCore
 ///
 /// The result of a plan ("Fertig" with "Rückgängig machen", `ResultCard`) and its receipt
 /// (`PlanReceiptView`) report when they come and go; the model reports every plan that ended,
-/// every undo and a plan that was cut off. When the user leaves the result of a plan that made
-/// new albums, `due` changes. `MainTabs` then waits a moment (and briefly for the check for new
-/// photos that follows every plan) and asks with SwiftUI's `requestReview` if `confirm` still
-/// says yes. Never at a start: the session begins empty at every launch, and nothing but a
-/// result seen in this run can make the question due.
+/// every undo, a plan that was cut off, and Albumist leaving the screen. When the user leaves
+/// the result of a plan that made new albums, `due` changes. `MainTabs` then waits a moment
+/// (and briefly for the check for new photos that follows every plan) and asks with SwiftUI's
+/// `requestReview` if `confirm` still says yes. Never at a start: the session begins empty at
+/// every launch, and nothing but a result seen in this run can make the question due.
 @MainActor
 @Observable
 final class ReviewPrompt {
@@ -19,12 +19,6 @@ final class ReviewPrompt {
     /// A result counts as seen after this long on screen, not when it only flashed by (the sheet
     /// of "Zu Album hinzufügen" closes as soon as its plan is done).
     nonisolated static let seenAfter: Duration = .seconds(1)
-    /// After the result was left: the next screen settles first, so the question never covers
-    /// the result or its receipt.
-    nonisolated static let delay: Duration = .milliseconds(1500)
-    /// The check for new photos that follows every plan is waited for this long at most. A first
-    /// analysis that is still running takes longer: then nothing is asked (no analysis may run).
-    nonisolated static let analysisWait: Duration = .seconds(15)
     /// The last question (`ReviewPromptPolicy.State`), one value in the user defaults.
     nonisolated private static let stateKey = "review.prompt"
 
@@ -47,7 +41,15 @@ final class ReviewPrompt {
     /// A result or receipt left the screen. UI tests never get the question (nothing may cover
     /// the screen they tap next); `confirm` says no to them as well.
     func screenDisappeared() {
-        if session.screenDisappeared(), !UITestSupport.isRunning { due = UUID() }
+        if session.screenDisappeared(at: ContinuousClock.now), !UITestSupport.isRunning { due = UUID() }
+    }
+
+    /// Albumist left the screen (`AppModel.sceneChanged`): a question that waits is dropped, and
+    /// the wait in `MainTabs` ends with it (its sleep counts the time in the background, so it
+    /// would ask the moment the user comes back). A result still on screen keeps its plan.
+    func sceneLeft() {
+        session.sceneLeft()
+        due = nil
     }
 
     /// "Rückgängig machen" for `plan`, from its result, its receipt or the history.
@@ -73,21 +75,29 @@ final class ReviewPrompt {
         guard moment == due else { return false }
         due = nil
         // Nil while the result or its receipt is on screen again: it waits until they are left.
-        guard let plan = session.takeWaiting() else { return false }
+        guard let waiting = session.takeWaiting() else { return false }
         let now = Date()
         let version = Self.appVersion
         let situation = ReviewPromptPolicy.Situation(
-            planRunning: model.execution.isRunning,
+            // A plan that has its claim may not run yet (an await lies between).
+            planRunning: model.execution.isRunning || model.isExecutionClaimed,
             analysisRunning: model.analysis.isRunning || model.analysisResetting,
             homeChangeRunning: model.homeChangeRunning,
             planInterrupted: model.interruptedPlan != nil,
             onScreen: model.isOnScreen,
             messageShown: model.message != nil,
             samplePhotos: Self.samplePhotosInLibrary,
-            uiTest: UITestSupport.isRunning
+            uiTest: UITestSupport.isRunning,
+            sinceLeft: ContinuousClock.now - waiting.left
         )
-        let state = ReviewPromptPolicy.State(stored: UserDefaults.standard.data(forKey: Self.stateKey))
-        guard ReviewPromptPolicy.refusal(after: plan, session: session, situation: situation,
+        let stored = ReviewPromptPolicy.State(stored: UserDefaults.standard.data(forKey: Self.stateKey))
+        // A last question dated far ahead (the clock was set back) counts as asked today, and is
+        // stored so: the 120 days run from today.
+        let state = stored.clockChecked(now: now)
+        if state != stored, let data = state.stored {
+            UserDefaults.standard.set(data, forKey: Self.stateKey)
+        }
+        guard ReviewPromptPolicy.refusal(after: waiting.plan, session: session, situation: situation,
                                          state: state, version: version, now: now) == nil else { return false }
         if let data = ReviewPromptPolicy.State.asked(version: version, at: now).stored {
             UserDefaults.standard.set(data, forKey: Self.stateKey)

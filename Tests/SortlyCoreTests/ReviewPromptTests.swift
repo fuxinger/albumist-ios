@@ -12,6 +12,8 @@ struct ReviewPromptTests {
 
     let now = Date(timeIntervalSinceReferenceDate: 815_000_000)
     let day: TimeInterval = 24 * 60 * 60
+    /// When results are left, unless a test says otherwise (`ContinuousClock`).
+    let start = ContinuousClock.now
 
     // MARK: Plans
 
@@ -55,17 +57,18 @@ struct ReviewPromptTests {
         return session
     }
 
-    /// A result or receipt leaves the screen; `moment`: whether that is the moment to ask.
-    /// (The session changes, so this is not done inside `#expect`.)
-    func leave(_ session: inout Policy.Session, moment: Bool, sourceLocation: SourceLocation = #_sourceLocation) {
-        let isMoment = session.screenDisappeared()
+    /// A result or receipt leaves the screen (at `time`, else `start`); `moment`: whether that is
+    /// the moment to ask. (The session changes, so this is not done inside `#expect`.)
+    func leave(_ session: inout Policy.Session, moment: Bool, at time: ContinuousClock.Instant? = nil,
+               sourceLocation: SourceLocation = #_sourceLocation) {
+        let isMoment = session.screenDisappeared(at: time ?? start)
         #expect(isMoment == moment, sourceLocation: sourceLocation)
     }
 
     /// Takes the plan to ask about now and expects `plan` (nil: none).
     func expectTaken(_ session: inout Policy.Session, _ plan: ChangePlan?, sourceLocation: SourceLocation = #_sourceLocation) {
         let taken = session.takeWaiting()
-        #expect(taken?.id == plan?.id, sourceLocation: sourceLocation)
+        #expect(taken?.plan.id == plan?.id, sourceLocation: sourceLocation)
     }
 
     func refusal(_ plan: ChangePlan, session: Policy.Session? = nil, situation: Policy.Situation = Policy.Situation(),
@@ -76,10 +79,11 @@ struct ReviewPromptTests {
 
     // MARK: When it asks
 
-    /// The first new albums, a result seen and left, nothing busy, never asked: it asks. Also on
-    /// the day of the first launch (decided 16.11.: no day is left out, the first albums are the
-    /// moment; see the type's comment).
-    @Test func asksAfterTheFirstNewAlbumsEvenOnTheFirstDay() async throws {
+    /// A plan that made new albums without a problem, its result seen and left a moment ago,
+    /// nothing busy, not asked in this version or the last 120 days: it asks. Any such plan, not
+    /// only the first one (for most people the first one makes their first albums); also on the
+    /// day of the first launch (decided 16.11.: no day is left out, see the type's comment).
+    @Test func asksAfterAPlanWithNewAlbumsEvenOnTheFirstDay() async throws {
         let plan = try await applied()
         #expect(plan.status == .completed)
         #expect(refusal(plan) == nil)
@@ -165,6 +169,74 @@ struct ReviewPromptTests {
         expectTaken(&other, nil)
         leave(&other, moment: true)
         expectTaken(&other, plan)
+    }
+
+    // MARK: Only right after the result was left, in Albumist
+
+    /// The user leaves the result, then Albumist (Home Screen, another app, a call) while the
+    /// question waits: it is dropped, also when they come back and open and leave a receipt.
+    @Test func leavingAlbumistWhileTheQuestionWaitsDropsIt() async throws {
+        let plan = try await applied()
+        var session = seenAndLeft(plan)
+        session.sceneLeft()
+        expectTaken(&session, nil)
+        // Back in Albumist: a receipt from "Verlauf" opened and left is no moment for it.
+        session.screenAppeared()
+        leave(&session, moment: false)
+        expectTaken(&session, nil)
+    }
+
+    /// "In Fotos ansehen" on the result leaves Albumist while the result stays on screen: back
+    /// from Photos, leaving the result is still the moment.
+    @Test func leavingAlbumistWithTheResultOnScreenKeepsIt() async throws {
+        let plan = try await applied()
+        var session = Policy.Session()
+        session.screenAppeared()
+        session.resultSeen(plan)
+        session.sceneLeft()
+        leave(&session, moment: true)
+        expectTaken(&session, plan)
+        #expect(refusal(plan, session: session) == nil)
+    }
+
+    /// The wait for the question counts the time in the background (`ContinuousClock`): asked
+    /// later than `momentLasts` after the result was left, nothing is asked, also when the app
+    /// did not hear that it left the screen (or the tabs came back with an old moment).
+    @Test func questionLongAfterLeavingTheResultIsNotAsked() async throws {
+        #expect(Policy.momentLasts == Policy.delay + Policy.analysisWait + .seconds(2))
+        let plan = try await applied()
+        var session = Policy.Session()
+        session.screenAppeared()
+        session.resultSeen(plan)
+        leave(&session, moment: true, at: start)
+        let waiting = session.takeWaiting()
+        let taken = try #require(waiting)
+        #expect(taken.plan.id == plan.id)
+        #expect(taken.left == start)
+        // As the app measures it: the clock at the question minus the moment the result was left.
+        func asked(at time: ContinuousClock.Instant) -> Policy.Refusal? {
+            refusal(plan, session: session, situation: Policy.Situation(sinceLeft: time - taken.left))
+        }
+        #expect(asked(at: start + Policy.delay) == nil)
+        #expect(asked(at: start + Policy.momentLasts) == nil)
+        #expect(asked(at: start + Policy.momentLasts + .milliseconds(1)) == .momentPassed)
+        // Hours in the background, the sleep of the wait already over when the user is back.
+        #expect(asked(at: start + .seconds(3 * 60 * 60)) == .momentPassed)
+    }
+
+    /// Back on the result while the question waits: that moment is over, leaving it again is
+    /// the next one (with its own time).
+    @Test func backOnTheResultStartsTheMomentAgain() async throws {
+        let plan = try await applied()
+        var session = seenAndLeft(plan)
+        session.screenAppeared()
+        #expect(session.left == nil)
+        // Albumist leaves the screen with the result on it: the plan stays.
+        session.sceneLeft()
+        leave(&session, moment: true, at: start + .seconds(60))
+        let waiting = session.takeWaiting()
+        #expect(waiting?.plan.id == plan.id)
+        #expect(waiting?.left == start + .seconds(60))
     }
 
     // MARK: Taken back
@@ -340,11 +412,27 @@ struct ReviewPromptTests {
         #expect(refusal(plan, state: state, version: "1.1.0", at: now.addingTimeInterval(120 * day)) == nil)
     }
 
-    /// A last question "in the future" (the clock was set back since): counts as recent.
+    /// A last question "in the future" (the clock was set back since): counts as recent. More
+    /// than a day ahead it counts as asked today (`clockChecked`, stored by the app), so the 120
+    /// days run from today instead of from a date that may lie years ahead.
     @Test func clockSetBackCountsAsRecent() async throws {
         let plan = try await applied()
         let state = Policy.State.asked(version: "1.0.0", at: now.addingTimeInterval(30 * day))
         #expect(refusal(plan, state: state, version: "1.1.0") == .askedRecently)
+        let checked = state.clockChecked(now: now)
+        #expect(checked == Policy.State.asked(version: "1.0.0", at: now))
+        #expect(refusal(plan, state: checked, version: "1.1.0") == .askedRecently)
+        #expect(refusal(plan, state: checked, version: "1.1.0", at: now.addingTimeInterval(120 * day)) == nil)
+        // Unchecked, the date 30 days ahead would still hold it back then.
+        #expect(refusal(plan, state: state, version: "1.1.0", at: now.addingTimeInterval(120 * day)) == .askedRecently)
+        // Up to a day ahead stays as it is (time zones, a clock the network set right).
+        let soon = Policy.State.asked(version: "1.0.0", at: now.addingTimeInterval(day - 60))
+        #expect(soon.clockChecked(now: now) == soon)
+        #expect(refusal(plan, state: soon, version: "1.1.0") == .askedRecently)
+        // Never asked, or asked in the past: nothing to change.
+        #expect(Policy.State().clockChecked(now: now) == Policy.State())
+        let past = Policy.State.asked(version: "1.0.0", at: now.addingTimeInterval(-3 * day))
+        #expect(past.clockChecked(now: now) == past)
     }
 
     // MARK: Stored state

@@ -362,6 +362,8 @@ final class AppModel {
     /// One plan at a time (apply, resume, undo, take back): claimed before the first await of
     /// every entry point, released when it ends.
     @ObservationIgnored private var executionClaimed = false
+    /// A plan has its claim: it runs, or is about to (`execution.isRunning` follows after an await).
+    var isExecutionClaimed: Bool { executionClaimed }
     /// Decisions that exist only for an open preview: kept in memory, never written to disk.
     /// Value: what was stored before the preview (nil = undecided).
     @ObservationIgnored private var previewOnly: [SortlyID: ProposalDecision?] = [:]
@@ -1106,7 +1108,11 @@ final class AppModel {
     func sceneChanged(onScreen: Bool) {
         guard onScreen != isOnScreen else { return }
         isOnScreen = onScreen
-        if !onScreen { analysisRecent = [] }
+        if !onScreen {
+            analysisRecent = []
+            // A rating question that waits is dropped: never when the user comes back (`ReviewPrompt`).
+            ReviewPrompt.shared.sceneLeft()
+        }
     }
 
     /// A run with real work left asks iOS to go on after the user leaves the app.

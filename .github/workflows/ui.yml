@@ -100,6 +100,7 @@ jobs:
           path: ui-products.tgz
           retention-days: 1
           compression-level: 0
+          overwrite: true
 
   ui:
     name: UI ${{ matrix.title }}

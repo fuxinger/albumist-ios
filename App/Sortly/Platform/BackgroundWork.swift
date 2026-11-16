@@ -19,7 +19,13 @@ enum BackgroundWork {
         }
     }
 
+    /// On a background queue: the request waits for the system's task scheduler, which can be
+    /// busy for seconds (the main thread waited for it after every analysis).
     static func scheduleRefinement() {
+        DispatchQueue.global(qos: .utility).async { submitRefinement() }
+    }
+
+    private static func submitRefinement() {
         let request = BGProcessingTaskRequest(identifier: AppInfo.refinementTaskID)
         request.requiresExternalPower = true
         request.requiresNetworkConnectivity = false

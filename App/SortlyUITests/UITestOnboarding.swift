@@ -8,6 +8,8 @@ import XCTest
 /// new runner at test 2 with an app still at its welcome screen, and every later test failed
 /// on that one cut-off (13 failures). Each later test now brings the app to that state by
 /// itself when test 1 did not reach its end, so a cut-off costs test 1 and nothing else.
+/// In CI (ui.yml) test 1 runs in its own group; the other flow tests run on another simulator
+/// and always onboard by themselves there.
 @MainActor
 enum UITestOnboarding {
     /// Start and end markers of a first test in the runner's temporary folder. A static flag
@@ -32,10 +34,6 @@ enum UITestOnboarding {
             try? Data().write(to: finished)
         }
 
-        var wasCutOff: Bool {
-            FileManager.default.fileExists(atPath: started.path) && !FileManager.default.fileExists(atPath: finished.path)
-        }
-
         var reachedItsEnd: Bool {
             FileManager.default.fileExists(atPath: finished.path)
         }
@@ -50,7 +48,6 @@ enum UITestOnboarding {
 
     static func fullFlowStarts() { fullFlow.starts() }
     static func fullFlowFinished() { fullFlow.ends() }
-    static var fullFlowWasCutOff: Bool { fullFlow.wasCutOff }
     static var fullFlowReachedItsEnd: Bool { fullFlow.reachedItsEnd }
 
     /// The overview says the analysis is done and nothing runs (as `analysisIdle` in the tests).

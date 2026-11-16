@@ -242,10 +242,26 @@ final class SortlyFlowUITests: XCTestCase {
     func test1_FullFlow() {
         continueAfterFailure = true
         UITestOnboarding.fullFlowStarts()
+        // Test 1 runs first on a freshly erased simulator (its own group in ui.yml, and a repeat
+        // after a simulator failure erases it again). An issue that ends the method early (an
+        // audit meeting a screen in motion) would otherwise let it pass without its later checks;
+        // this replaces the check test 2 made while both ran in one job.
+        let end = UITestOnboarding.fullFlow.finished
+        addTeardownBlock {
+            if !FileManager.default.fileExists(atPath: end.path) {
+                print("UI_STEP_MISSING full flow reached its end")
+                XCTFail("test1_FullFlow stopped before its end (an accessibility audit cut it off, or the test runner restarted)")
+            }
+        }
         launch()
 
-        // Onboarding
-        if button("Los geht").waitForExistence(timeout: 20) {
+        // Onboarding: a fresh simulator always starts at the welcome screen.
+        let welcome = button("Los geht").waitForExistence(timeout: 20)
+        if !welcome {
+            print("UI_STEP_MISSING welcome screen")
+            XCTFail("test1_FullFlow must start on a fresh simulator: no welcome screen, so the onboarding checks did not run")
+        }
+        if welcome {
             shot("01-welcome"); audit("welcome")
             tap(button("Los geht"), "welcome")
             shot("02-areas")
@@ -302,7 +318,8 @@ final class SortlyFlowUITests: XCTestCase {
             XCTAssertTrue(seeded, "Demo library not created")
             print("UI_TIMING seed \(Int(Date().timeIntervalSince(started))) s")
         } else {
-            print("UI_STEP_MISSING demo button (already seeded?)")
+            print("UI_STEP_MISSING demo button")
+            XCTFail("No \"Beispiel-Mediathek anlegen\" on a fresh simulator: the empty-library checks and the seeding did not run")
         }
         let analysed = Date()
         // Seeding starts a fresh analysis; wait until it ran and the overview stays idle.
@@ -851,10 +868,8 @@ final class SortlyFlowUITests: XCTestCase {
     /// Same app state, but with the largest accessibility text size in dark mode.
     func test2_LargeTextDarkMode() {
         continueAfterFailure = true
-        if UITestOnboarding.fullFlowWasCutOff {
-            print("UI_STEP_MISSING full flow reached its end")
-            XCTFail("test1_FullFlow stopped before its end (an accessibility audit cut off, or the test runner restarted)")
-        }
+        // Whether test 1 reached its end is checked by test 1 itself (its teardown block): the
+        // two run in different groups on different simulators now.
         completeOnboardingIfCutOff("test2")
         XCUIDevice.shared.appearance = .dark
         launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-SortlyUITestDark"])
@@ -901,10 +916,13 @@ final class SortlyFlowUITests: XCTestCase {
 
     /// Taps every row (and on top-level screens every button in the content) and checks
     /// that each tap leads somewhere and back works: no dead rows, no crash, no lost screen.
-    private func sweep(_ screen: String, depth: Int, strict: Bool = false) {
+    /// Returns how many taps led somewhere (this screen and the screens below it).
+    @discardableResult
+    private func sweep(_ screen: String, depth: Int, strict: Bool = false) -> Int {
+        var reached = 0
         let start = screenTitle
         let useCells = app.collectionViews.cells.count > 0
-        if depth > 0 && !useCells { return } // detail screens hold actions, not navigation
+        if depth > 0 && !useCells { return 0 } // detail screens hold actions, not navigation
         let query = useCells ? app.collectionViews.cells : app.scrollViews.firstMatch.buttons
         var labels: [String] = []
         for i in 0..<min(query.count, 8) {
@@ -921,12 +939,13 @@ final class SortlyFlowUITests: XCTestCase {
                 print("UI_SWEEP_CRASH \(screen) › \(label)")
                 XCTFail("App crashed after tapping \(label) on \(screen)")
                 launch(); sleep(5)
-                return
+                return reached
             }
             let now = screenTitle
             if now != start {
                 print("UI_SWEEP_OK \(screen) › \(label) → \(now)")
-                if depth == 0 && useCells { sweep("\(screen) › \(label)", depth: 1) }
+                reached += 1
+                if depth == 0 && useCells { reached += sweep("\(screen) › \(label)", depth: 1) }
                 back(); sleep(1)
                 if screenTitle != start {
                     print("UI_SWEEP_BACK_FAILED \(screen) › \(label) (still \(screenTitle))")
@@ -935,11 +954,13 @@ final class SortlyFlowUITests: XCTestCase {
                 }
             } else if closeSheet() {
                 print("UI_SWEEP_OK \(screen) › \(label) → sheet")
+                reached += 1
             } else {
                 print("UI_SWEEP_NOOP \(screen) › \(label)")
                 if strict { XCTFail("Row '\(label)' on \(screen) did nothing") }
             }
         }
+        return reached
     }
 
     /// Third run: every tab, every row, one level deep.
@@ -948,12 +969,26 @@ final class SortlyFlowUITests: XCTestCase {
         completeOnboardingIfCutOff("test3")
         launch()
         sleep(5)
-        sweep("Übersicht", depth: 0)
+        // A sweep that reaches nothing proves nothing: the tabs whose rows always led somewhere
+        // in the CI runs must do so again. Albums and search reached no row in any run so far
+        // (docs/IMPROVEMENTS.md, open); their counts are printed until the sweep handles them.
+        let required: Set<String> = ["Übersicht", "Mediathek"]
+        func check(_ tab: String, _ reached: Int) {
+            print("UI_SWEEP_TAB \(tab) \(reached)")
+            if required.contains(tab) && reached == 0 {
+                XCTFail("The sweep reached no screen from the tab \(tab)")
+            }
+        }
+        check("Übersicht", sweep("Übersicht", depth: 0))
         for tab in ["Mediathek", "Alben", "Suchen"] {
             let button = tab == "Suchen" ? searchTabButton() : tabButton(tab)
-            guard button.waitForExistence(timeout: 5) else { print("UI_STEP_MISSING sweep tab \(tab)"); continue }
+            guard button.waitForExistence(timeout: 5) else {
+                print("UI_STEP_MISSING sweep tab \(tab)")
+                XCTFail("No tab \(tab) for the sweep")
+                continue
+            }
             button.tap(); sleep(2)
-            sweep(tab, depth: 0)
+            check(tab, sweep(tab, depth: 0))
         }
         // Suggestions list, the screen that had dead rows.
         tabButton("Übersicht").tap(); sleep(1)

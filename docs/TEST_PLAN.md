@@ -98,6 +98,7 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | F3 Suche mit echten Anfragen | 🟡 | SearchQuerySet: 100 echte Anfragen (alle 100 finden, was sie sollen); SearchPerformance: 50.000 Fotos; SortlySearchUITests: 6 Anfragen in der UI | erster UI-Lauf steht aus |
 | F4 Probejahr bleibt | 🟡 | trialYearIsKeptForLaterRuns, UI test6 | Neustart, Wahl im Onboarding |
 | F5 Foto groß ansehen | 🟡 | UI test1 | Zoom |
+| F6 Sortiert-Ring mit eigenen Alben (Gerätetest 15.11.: 811, dann 157) | 🟡 | SortedCount: eigene Reisealben zählen für ihr Land, Zuhause zählt nicht für Länder und Orte, Neuaufbau, zweiter Lauf, Übernehmen und Rückgängig, „Nicht jetzt“ und „Albumists Fotos herausnehmen“, leere Mediathek, eingeschränkter Zugriff, 100.000 Fotos, alter Stand lädt, mehrere passende Alben | Ring-Text und Diagnosezeile nur syntaxgeprüft; Zahl auf dem iPhone 📱 |
 | G1 Zweitwohnsitz, Pendeln, Ferienwohnung, lange Reise | 🟡 | RecurringPlace-Lebenslagen (18 Muster: Pendeln, Wochenendhaus, Ferienwohnung, Familie, Umzug, Semester, 6-Monats-Reise, Dienstreisen, Nomaden), TripTimeZone (11), RecurringPlacePipeline | UI-Frage „Bist du hier öfter?“ im UI-Lauf |
 
 ## Testdaten

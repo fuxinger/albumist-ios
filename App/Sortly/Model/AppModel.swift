@@ -190,6 +190,8 @@ final class AppModel {
             .max { $0.1 < $1.1 }?.0
     }
     var progress = OrganizationStatusResolver.Progress()
+    /// How the sorted count came about, per reason (one line of the diagnostic report).
+    @ObservationIgnored var statusReasons = LibraryStatus.Reasons()
     /// "Analyse neu aufbauen" removes the proposals, and photos in the user's own matching
     /// albums count as sorted only through them: the ring fell to 0 % until new proposals came
     /// (device test 15.11., "Und oben null"). The last count stays on screen, marked as being
@@ -865,10 +867,15 @@ final class AppModel {
             }
             removedFromProposals = removed
             let facts = facts, snapshot = snapshot, settings = settings
-            let computed = await Task.detached(priority: .userInitiated) {
-                LibraryStatus.compute(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides, contentAnalyzed: analyzed)
+            // Photos Albumist put into albums count as sorted in the area of their suggestion,
+            // also once that suggestion is no longer shown.
+            let byAlbumist = LibraryStatus.organizedBySortly(managedAlbums, inventory: inventory, snapshot: snapshot)
+            let (computed, reasons) = await Task.detached(priority: .userInitiated) {
+                LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
+                                                 contentAnalyzed: analyzed, organizedBySortly: byAlbumist)
             }.value
             states = computed
+            statusReasons = reasons
             // The trial year counts only its own photos (the ring said "839 von 5.683" over
             // the whole library while the suggestions were for 2026).
             let scope = analysisScope, calendar = Calendar.sortlyDefault
@@ -1724,6 +1731,7 @@ final class AppModel {
             areaLines.append("\(area.rawValue): " + parts.joined(separator: ", "))
         }
         lines.append("main areas " + areaLines.joined(separator: "; ") + "; outside main areas \(progress.outsideMainAreas)")
+        lines.append(statusReasons.line)
         if let report = analysis.lastReport {
             let last = analysis.lastRun.map { iso.string(from: $0) } ?? "?"
             lines.append("analysis last \(last), complete \(report.isComplete), paused \(report.pausedBecause?.rawValue ?? "no"), stages \(report.completedStages.count), content \(report.contentAnalyzed), text \(report.textRecognized), text waiting \(report.textWaitingForOriginal), text seconds \(Int(report.textSeconds)), places pending online \(report.placesPendingOnline), places throttled \(report.placesThrottled), analyzer failing \(report.analyzerUnavailable)")

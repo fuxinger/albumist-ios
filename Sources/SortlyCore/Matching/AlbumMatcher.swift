@@ -353,6 +353,18 @@ public struct AlbumMatcher: Sendable {
             && candidate.nameSimilarity == 0
     }
 
+    /// The other albums that fit a suggestion exactly as well as its best album when several
+    /// match (`multipleMatches`): editable, the same score, mostly this suggestion's photos,
+    /// and no part of a place (`isPart`). Until the user picks one, each of them sorts its photos.
+    public func tiedWithBest(_ result: MatchResult, kind: ProposalKind) -> [MatchCandidate] {
+        guard result.status == .multipleMatches, let best = result.best else { return [] }
+        let probe = AlbumProposal(id: result.proposalID, kind: kind, title: "", assetIDs: [])
+        return result.alternatives.filter {
+            $0.isEditable && $0.score == best.score && $0.relation != .broaderCollection
+                && $0.metrics.purity >= thresholds.extendablePurity && !isPart($0, of: probe)
+        }
+    }
+
     struct Weights { var purity: Double; var coverage: Double; var name: Double }
 
     /// Event albums must be pure; collections may be partial but should be on-topic.

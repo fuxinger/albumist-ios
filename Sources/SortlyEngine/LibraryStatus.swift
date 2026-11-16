@@ -15,8 +15,17 @@ import SortlyCore
 ///   few photos gets no album (`PlaceSettings.minPhotos`).
 /// Before, such photos counted as unsorted for good, with nothing that could ever sort them.
 public enum LibraryStatus {
+    /// Why a photo with a place or a trip is left out of the ring.
+    public enum NotCounted: Hashable, Sendable {
+        /// Taken where the user lives: no place album.
+        case home
+        /// Albumist suggests no album for it (too few photos, a routine visit without a place album).
+        case noAlbum
+    }
+
     /// How the photos of the main areas came to count as sorted, or why an area does not count
-    /// for them, in photo-and-area pairs (one line of the diagnostic report).
+    /// for them. The counts are photo-and-area pairs (a photo sorted for its place and its trip
+    /// counts twice); `notCounted` is per photo.
     public struct Reasons: Hashable, Sendable {
         public init() {}
         /// In an own album that fits the photo's suggestion.
@@ -31,8 +40,12 @@ public enum LibraryStatus {
         public var home = 0
         /// No album on purpose (too few photos, a routine visit without a place album).
         public var noAlbum = 0
+        /// Per photo for which a main area was left out by one of the two rules above (home first).
+        public var notCounted: [AssetID: NotCounted] = [:]
 
-        /// "sorted by own album 12, stand-in album 3, dismissed 0, Albumist 5; not counted home 40, no album 2"
+        /// One line of the diagnostic report, in photo-and-area pairs: "sorted per area by own
+        /// album 800, stand-in album 620, dismissed suggestion 0, Albumist 0; not counted home
+        /// 1354, no album 12".
         public var line: String {
             "sorted per area by own album \(ownAlbum), stand-in album \(standInAlbum), dismissed suggestion \(dismissedAlbum), Albumist \(byAlbumist); not counted home \(home), no album \(noAlbum)"
         }
@@ -81,11 +94,11 @@ public enum LibraryStatus {
             proposedIn[area, default: []].formUnion(p.assetIDs)
             albumIn[area, default: []].formUnion(p.assetIDs)
             if isUncertain(p) { uncertainIn[area, default: []].formUnion(p.assetIDs) }
-            note(fittingAlbums(snapshot?.matches[p.id]), .own, area, p.assetIDs)
+            note(fittingAlbums(snapshot?.matches[p.id], kind: p.kind), .own, area, p.assetIDs)
         }
         for p in dismissed {
             albumIn[p.kind.area, default: []].formUnion(p.assetIDs)
-            note(fittingAlbums(snapshot?.matches[p.id]), .dismissed, p.kind.area, p.assetIDs)
+            note(fittingAlbums(snapshot?.matches[p.id], kind: p.kind), .dismissed, p.kind.area, p.assetIDs)
         }
         let openIDs = Set(open.map(\.id))
         let byID = Dictionary((open + dismissed).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -94,7 +107,7 @@ public enum LibraryStatus {
             albumIn[s.area, default: []].formUnion(s.assetIDs)
             if openIDs.contains(by.id) { proposedIn[s.area, default: []].formUnion(s.assetIDs) }
             if isUncertain(by) { uncertainIn[s.area, default: []].formUnion(s.assetIDs) }
-            note(fittingAlbums(snapshot?.matches[by.id]), .standIn, s.area, s.assetIDs)
+            note(fittingAlbums(snapshot?.matches[by.id], kind: by.kind), .standIn, s.area, s.assetIDs)
         }
 
         let resolver = OrganizationStatusResolver(primaryAreas: settings.primaryAreas)
@@ -106,8 +119,12 @@ public enum LibraryStatus {
         for f in facts {
             let analyzed = contentAnalyzed.contains(f.id)
             // With suggestions made for this photo's part of the library, a photo without an album
-            // in places or trips has none on purpose.
-            let suggested = snapshot.map { $0.scope.includes(f, calendar: calendar) } ?? false
+            // in places or trips has none on purpose. Not a photo taken after the suggestions were
+            // made: back from a trip, its photos count as unsorted until the next analysis has
+            // made their suggestions, instead of leaving the ring.
+            let suggested = snapshot.map { snapshot in
+                snapshot.scope.includes(f, calendar: calendar) && (f.asset.creationDate ?? .distantPast) <= snapshot.generatedAt
+            } ?? false
             var areas: [OrganizationArea: AreaFacts] = [:]
             for area in settings.enabledAreas {
                 var a = AreaFacts()
@@ -162,6 +179,11 @@ public enum LibraryStatus {
                 guard settings.primaryAreas.contains(area), !overrides.isIgnored(f.id), !overrides.isExcluded(f.id) else { continue }
                 if let notCounted {
                     reasons[keyPath: notCounted] += 1
+                    if notCounted == \.home {
+                        reasons.notCounted[f.id] = .home
+                    } else if reasons.notCounted[f.id] == nil {
+                        reasons.notCounted[f.id] = .noAlbum
+                    }
                 } else if a.applicable, byAlbumist {
                     reasons.byAlbumist += 1
                 } else if a.applicable, let source {
@@ -178,12 +200,39 @@ public enum LibraryStatus {
     }
 
     /// The albums that make a suggestion's photos count as sorted: the best match when it fits
-    /// (complete, can be extended, probably fits), also when several albums fit equally well.
-    /// A read-only album (a smart album such as Favourites) never counts.
-    static func fittingAlbums(_ match: MatchResult?) -> Set<CollectionID> {
+    /// (complete, can be extended, probably fits), and when several albums fit, also every one
+    /// that fits exactly as well (`AlbumMatcher.tiedWithBest`). A read-only album (a smart album
+    /// such as Favourites) never counts.
+    static func fittingAlbums(_ match: MatchResult?, kind: ProposalKind) -> Set<CollectionID> {
         guard let match, let best = match.best, best.isEditable,
               [.alreadyComplete, .extendable, .possibleMatch, .multipleMatches].contains(match.status) else { return [] }
-        return [best.albumID]
+        return Set([best.albumID] + AlbumMatcher().tiedWithBest(match, kind: kind).map(\.albumID))
+    }
+
+    /// Photos with a place or a trip that the ring leaves out (the line under the ring).
+    public struct LeftOut: Hashable, Sendable {
+        public init(home: Int = 0, noAlbum: Int = 0) {
+            self.home = home
+            self.noAlbum = noAlbum
+        }
+        /// Taken at home.
+        public var home: Int
+        /// Albumist suggests no album for them.
+        public var noAlbum: Int
+    }
+
+    /// The photos among `states` that the ring leaves out by the two rules of `Reasons`.
+    public static func leftOut(_ states: some Sequence<AssetOrganizationState>, reasons: Reasons,
+                               resolver: OrganizationStatusResolver) -> LeftOut {
+        var result = LeftOut()
+        for state in states where resolver.isOutsideMainAreas(state) {
+            switch reasons.notCounted[state.assetID] {
+            case .home?: result.home += 1
+            case .noAlbum?: result.noAlbum += 1
+            case nil: break
+            }
+        }
+        return result
     }
 
     /// The photos Albumist put into albums and that are still there, per area of the suggestion

@@ -230,6 +230,7 @@ public struct ProposalEngine: Sendable {
         // One album per place the user goes to again and again (Scenario B): every routine
         // visit there, and the longer trips there too.
         var made = Set<SortlyID>()
+        let tripsByID = Dictionary(trips.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for destination in regular.destinations {
             let places = destination.members.compactMap { byID[$0]?.gpsPlace }
             let (name, key, _) = Self.primaryPlaceName(places, kind: .shortTrip, labels: labels, profile: profile)
@@ -239,10 +240,11 @@ public struct ProposalEngine: Sendable {
             result.append(collection(id: id, name: name, key: key, members: destination.members, facts: byID))
             // The routine visits there have no trip album: this album is theirs.
             let members = Set(destination.members)
-            for trip in trips where regular.outings.contains(trip.id) {
+            for tripID in destination.trips where regular.outings.contains(tripID) {
+                guard let trip = tripsByID[tripID] else { continue }
                 let visit = members.intersection(trip.geotaggedAssetIDs)
                 if !visit.isEmpty {
-                    routineVisits.append(StandIn(area: .trips, suggestion: id, dropped: trip.id, assetIDs: visit, reason: .routineVisit))
+                    routineVisits.append(StandIn(area: .trips, suggestion: id, dropped: tripID, assetIDs: visit, reason: .routineVisit))
                 }
             }
         }
@@ -303,6 +305,8 @@ public struct ProposalEngine: Sendable {
             var members: [AssetID]
             /// Fallback identity when the place has no name yet.
             var anchor: String
+            /// The short trips with days there (routine visits among them).
+            var trips: [SortlyID] = []
         }
         var destinations: [Destination] = []
         /// Short trips spent mostly at such places.
@@ -361,7 +365,7 @@ public struct ProposalEngine: Sendable {
                     && !spots.query(near: photo.at, radius: Self.destinationRadius).isEmpty
             }.map(\.id).sorted()
             let anchor = String(format: "%.2f,%.2f", cluster.centroid.latitude, cluster.centroid.longitude)
-            result.destinations.append(.init(members: members, anchor: anchor))
+            result.destinations.append(.init(members: members, anchor: anchor, trips: shortTrips.sorted().map { trips[$0].id }))
             for i in cluster.memberIndices where points[i].short { routineMembers[points[i].trip, default: 0] += points[i].members.count }
         }
         for (index, count) in routineMembers {

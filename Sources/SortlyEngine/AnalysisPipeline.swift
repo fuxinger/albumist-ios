@@ -971,7 +971,7 @@ public actor AnalysisPipeline {
             matches = Self.match(suggestions.open, dismissed: suggestions.dismissed, against: try await store.loadInventory(),
                                  overrides: OverrideSet(try await store.overrides()), assignments: Self.assignments(try await store.managedAlbums()))
         }
-        let snapshot = ProposalSnapshot(generatedAt: Date(), scope: scope, proposals: suggestions.open, matches: matches,
+        let snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
                                         dismissed: suggestions.dismissed, standIns: suggestions.standIns)
         try await store.setValue(snapshot, forKey: Key.proposals)
         return snapshot

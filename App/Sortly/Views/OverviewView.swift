@@ -115,13 +115,18 @@ struct OverviewView: View {
                             // Photos already in a matching album for one main area but not yet for the
                             // other count as partly sorted; without this line the ring looked too low
                             // (device test 15.11.: 157 sorted, 1,199 partly).
-                            Text("Dazu \(model.progress.partially) teilweise sortiert")
+                            Text("Dazu \(model.progress.partially, format: .number) teilweise sortiert")
                                 .font(.subheadline)
                                 .monospacedDigit()
                         }
                         Text(primaryAreasText)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        if let leftOutText {
+                            Text(leftOutText)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                         if model.interruptedPlan != nil {
                             // The unfinished run counts only once the user has decided above
                             // (unknown is not done), so "0 sortiert" next to "39 of 61 steps" is explained.
@@ -143,6 +148,21 @@ struct OverviewView: View {
         // Only photos the main areas apply to count, so the total is smaller than the library
         // (device test 15.11.: "141 von 5.737 sortiert" next to "14.351 von 14.352 Fotos analysiert").
         return String(localized: "Gezählt werden nur Fotos, die zu deinen Hauptbereichen passen: \(names.formatted(.list(type: .and))).")
+    }
+
+    /// Photos with a place or a trip that still do not count, so a total smaller than the
+    /// library has a reason on screen: since home no longer counts for "Länder und Orte", the
+    /// total shrank without a word (review of the sorted count, 16.11.).
+    private var leftOutText: String? {
+        var parts: [String] = []
+        if model.leftOut.home > 0 {
+            parts.append(String(localized: "\(model.leftOut.home, format: .number) Fotos von zu Hause"))
+        }
+        if model.leftOut.noAlbum > 0 {
+            parts.append(String(localized: "\(model.leftOut.noAlbum, format: .number) Fotos, für die sich kein eigenes Album lohnt"))
+        }
+        guard !parts.isEmpty else { return nil }
+        return String(localized: "Außerdem nicht mitgezählt: \(parts.formatted(.list(type: .and))).")
     }
 
     @ViewBuilder

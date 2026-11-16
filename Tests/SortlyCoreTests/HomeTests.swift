@@ -25,7 +25,7 @@ struct HomeAtDateTests {
 
     /// A place picked under "Ändern" holds for every date.
     @Test func chosenHomeHoldsForEveryDate() {
-        let home = HomeSettings().choosing(Self.munich, date: now)
+        let home = HomeSettings().choosing(Self.munich, from: nil, date: now)
         #expect(!home.isAutomatic)
         #expect(home.home(at: Fixture.date("2010-01-01")) == .chosen(Self.munich))
         #expect(home.home(at: Fixture.date("2030-01-01")) == .chosen(Self.munich))
@@ -43,7 +43,7 @@ struct HomeAtDateTests {
         #expect(home.home(at: Fixture.date("2030-01-01")) == .chosen(Self.munich))
         #expect(home.home(at: nil) == .chosen(Self.munich))
         // Picked under "Ändern" afterwards: for every date again.
-        #expect(home.choosing(Self.munich, date: now).home(at: Fixture.date("2010-01-01")) == .chosen(Self.munich))
+        #expect(home.choosing(Self.munich, from: nil, date: now).home(at: Fixture.date("2010-01-01")) == .chosen(Self.munich))
         // Read back the same.
         let data = try! JSONEncoder().encode(home)
         #expect(try! JSONDecoder().decode(HomeSettings.self, from: data) == home)
@@ -59,7 +59,7 @@ struct HomeAtDateTests {
     /// "Bis 2015: Köln", "Bis 2019: Hamburg", now München: a chain, the end of each is not included.
     @Test func formerHomesFormAChain() {
         let home = HomeSettings()
-            .choosing(Self.munich, date: now)
+            .choosing(Self.munich, from: nil, date: now)
             .addingFormer(FormerHome(place: Self.hamburgHome, until: Fixture.date("2019-01-01")), date: now)
             .addingFormer(FormerHome(place: Self.cologneHome, until: Fixture.date("2015-01-01")), date: now)
         #expect(home.former.map(\.place) == [Self.cologneHome, Self.hamburgHome])
@@ -106,7 +106,7 @@ struct HomeAtDateTests {
 
     @Test func backToAutomaticKeepsFormerHomesAndRemovingOneWorks() {
         let former = FormerHome(place: Self.hamburgHome, until: Fixture.date("2019-01-01"))
-        var home = HomeSettings().choosing(Self.munich, date: now).addingFormer(former, date: now)
+        var home = HomeSettings().choosing(Self.munich, from: nil, date: now).addingFormer(former, date: now)
         home = home.automatic(date: now)
         #expect(home.home(at: Fixture.date("2020-01-01")) == .detected)
         #expect(home.home(at: Fixture.date("2018-01-01")) == .chosen(Self.hamburgHome))
@@ -136,7 +136,7 @@ struct HomeSettingsStorageTests {
 
     @Test func roundTrip() throws {
         let now = Fixture.date("2026-11-16")
-        let home = HomeSettings().choosing(HomeAtDateTests.munich, date: now)
+        let home = HomeSettings().choosing(HomeAtDateTests.munich, from: nil, date: now)
             .addingFormer(FormerHome(place: HomeAtDateTests.hamburgHome, from: Fixture.date("2012-01-01"), until: Fixture.date("2019-01-01")), date: now)
         let data = try encoder.encode(home)
         #expect(try decoder.decode(HomeSettings.self, from: data) == home)
@@ -256,7 +256,7 @@ struct HomeTripTests {
         #expect(detected.since != nil)
 
         let settings = HomeSettings()
-            .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now)
+            .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), from: nil, date: now)
             .addingFormer(FormerHome(place: HomeAtDateTests.hamburgHome, until: Fixture.date("2019-01-01")), date: now)
         let chosen = detector.analyse(in: lib.assets, home: settings)
         let trip = try #require(chosen.trips.first { Set($0.geotaggedAssetIDs) == Set(weekend) })
@@ -282,7 +282,7 @@ struct HomeTripTests {
         #expect(analysis.atHome.isDisjoint(with: garda))
         // Also with a home the user chose.
         let chosen = detector.analyse(in: lib.assets, places: parents,
-                                      home: HomeSettings().choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now))
+                                      home: HomeSettings().choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), from: nil, date: now))
         #expect(chosen.trips.isEmpty)
         #expect(chosen.atHome.isDisjoint(with: garda))
     }
@@ -290,7 +290,7 @@ struct HomeTripTests {
     /// A home the user chose wins over the detection: everyday life somewhere else then is away.
     @Test func chosenHomeWinsOverTheDetection() {
         let (lib, _) = munichLibrary()
-        let settings = HomeSettings().choosing(HomePlace(center: Fixture.Places.gardaLake, components: nil), date: now)
+        let settings = HomeSettings().choosing(HomePlace(center: Fixture.Places.gardaLake, components: nil), from: nil, date: now)
         let analysis = detector.analyse(in: lib.assets, home: settings)
         #expect(analysis.atHome.isEmpty)
         // The detected home is still Albumist's own finding, shown next to the choice.
@@ -317,7 +317,7 @@ struct HomeNamingTests {
         let augsburg = place("Bayern", "Augsburg"), tegernsee = place("Bayern", "Tegernsee")
         let trip = [augsburg, augsburg, tegernsee, tegernsee]
         let settings = HomeSettings()
-            .choosing(HomeAtDateTests.munich, date: now)
+            .choosing(HomeAtDateTests.munich, from: nil, date: now)
             .addingFormer(FormerHome(place: HomeAtDateTests.hamburgHome, until: Fixture.date("2019-01-01")), date: now)
         let home = HomeContext(settings: settings)
         func name(at date: String) -> String? {
@@ -361,7 +361,7 @@ struct HomeNamingTests {
             return AssetFacts(asset: a, place: nearest.1, placeSource: .gpsReverseGeocoded)
         }
         let home = HomeSettings()
-            .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now)
+            .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), from: nil, date: now)
             .addingFormer(FormerHome(place: HomePlace(center: HomeAtDateTests.hamburg, components: nil), until: Fixture.date("2019-01-01")), date: now)
         let trips = TripDetector(calendar: Fixture.calendar).detect(in: lib.assets, home: home)
         #expect(trips.count == 2)
@@ -405,7 +405,7 @@ struct HomeNamingTests {
         settings.titleLanguage = .german
         settings.enabledAreas = [.places, .trips]
         let engine = ProposalEngine(settings: settings, calendar: Fixture.calendar)
-        let home = HomeSettings().choosing(HomePlace(center: konstanz, components: nil), date: now)
+        let home = HomeSettings().choosing(HomePlace(center: konstanz, components: nil), from: nil, date: now)
         func titles(_ lib: LibraryBuilder) -> Set<String> {
             let trips = TripDetector(calendar: Fixture.calendar).detect(in: lib.assets, home: home)
             return Set(engine.proposals(for: AnalysisSnapshot(facts: facts(lib), trips: trips, home: home)).filter { $0.kind.area == .places }.map(\.title))
@@ -438,7 +438,7 @@ struct HomeNamingTests {
         let automatic = titles(HomeSettings())
         #expect(!automatic.contains("München"))
         #expect(!automatic.contains("Deutschland"))
-        let chosen = titles(HomeSettings().choosing(HomeAtDateTests.munich, date: now))
+        let chosen = titles(HomeSettings().choosing(HomeAtDateTests.munich, from: nil, date: now))
         #expect(chosen == automatic)
         // "Deutschland" holds the same photos as "München": the town is the album (curation rule 3).
         let none = titles(HomeSettings().withoutHome(date: now))
@@ -535,7 +535,7 @@ struct HomeSearchTests {
         }
         let now = Fixture.date("2026-11-16")
         let home = HomeSettings()
-            .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), date: now)
+            .choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), from: nil, date: now)
             .addingFormer(FormerHome(place: HomePlace(center: vienna, components: nil), until: Fixture.date("2019-01-01")), date: now)
         let abroad = SearchIndex(facts: facts, home: home, calendar: Fixture.calendar).search("Ausland", now: now).ids
         #expect(Set(abroad) == Set(away))

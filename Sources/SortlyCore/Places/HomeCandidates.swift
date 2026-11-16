@@ -67,6 +67,39 @@ public enum HomeCandidates {
         .sorted { ($0.photoDays, $0.photoCount, $1.id) > ($1.photoDays, $1.photoCount, $0.id) }
     }
 
+    /// A stretch away from a place at least this long ends a stay there: a move, not a trip.
+    public static let moveGap: TimeInterval = 28 * 86_400
+
+    /// When the user's current stay at `center` began, for "Seit wann wohnst du dort?" under
+    /// "Ändern": the first day of the latest run of photo days near it (within `radius`). Only
+    /// a stretch of at least `moveGap` with photos elsewhere and none near it ends the run, so
+    /// trips do not; days without photos say nothing. Too late a date does no harm (before it
+    /// the detection decides), too early would make the years in the old town a trip.
+    public static func stayStart(near center: GeoCoordinate, assets: some Sequence<AssetSnapshot>,
+                                 radius: Double = TripDetector.Configuration().homeRadiusMeters,
+                                 calendar: Calendar = .sortlyDefault) -> Date? {
+        var near = Set<Date>(), away = Set<Date>()
+        for asset in assets {
+            guard let c = asset.usableLocation, let date = asset.creationDate, !asset.isScreenshotLike else { continue }
+            let day = calendar.startOfDay(for: date)
+            if GeoMath.distance(c, center) <= radius { near.insert(day) } else { away.insert(day) }
+        }
+        guard var start = near.max() else { return nil }
+        // Newest first: near days extend the stay, a long enough stretch of days only elsewhere ends it.
+        var awayLatest: Date?
+        for day in near.union(away).sorted(by: >) where day < start {
+            if near.contains(day) {
+                awayLatest = nil
+                start = day
+            } else {
+                let latest = awayLatest ?? day
+                awayLatest = latest
+                if latest.timeIntervalSince(day) + 86_400 >= moveGap { break }
+            }
+        }
+        return start
+    }
+
     /// Where the photos of a place are densest: the median of the photos within
     /// `RecurringPlaceAnswers.matchRadiusMeters` of the busiest cell of about 11 km. Not the
     /// median of all of them: offline a candidate is a whole region ("Bayern"), and the median of

@@ -85,10 +85,12 @@ public struct HomeSettings: Hashable, Sendable, Codable {
     public var mode: Mode
     /// The current home, when `mode` is `.confirmed`.
     public var confirmed: HomePlace?
-    /// From when the current home holds. "Stimmt" on the detected home sets the moment of the
-    /// confirmation: it changes nothing about the past (the detection keeps deciding before it,
-    /// with both homes in the months of a move) and keeps later photos from moving the home.
-    /// A place picked under "Ändern" holds for all time (nil), as far as no former home covers a date.
+    /// From when the current home holds; before it the detection keeps deciding (with both homes
+    /// in the months of a move), so a confirmation never changes the past behind the user's back.
+    /// "Stimmt" on the detected home: the moment of the confirmation (it only keeps later photos
+    /// from moving the home). A place picked under "Ändern": the day the user says they live
+    /// there since ("Seit wann wohnst du dort?", proposed by `HomeCandidates.stayStart`). nil
+    /// (every date) only in values stored by earlier builds of this branch.
     public var confirmedFrom: Date?
     public var former: [FormerHome]
     /// When the user last changed something here.
@@ -112,8 +114,8 @@ public struct HomeSettings: Hashable, Sendable, Codable {
     /// place suggestions and the sorted ring all ask this, through `HomeReference` and
     /// `HomeContext`):
     /// - the user's periods are the former homes (`from` … `until`, `from` nil = open) and the
-    ///   current home: "Kein Zuhause" and a place picked under "Ändern" from the beginning of
-    ///   time to the end, a confirmed detected home ("Stimmt") from the confirmation on;
+    ///   current home: "Kein Zuhause" from the beginning of time to the end, a chosen or confirmed
+    ///   home from `confirmedFrom` on;
     /// - of the periods that contain `date`, the one that ends first wins. So "Bis 2015: Köln",
     ///   "Bis 2019: Hamburg" and "München" read as a chain: Köln, then Hamburg, then München,
     ///   and an overlap is decided for the more specific (shorter-lived) period;
@@ -188,12 +190,14 @@ public struct HomeSettings: Hashable, Sendable, Codable {
         return copy
     }
 
-    /// A place the user picked under "Ändern": their home for every date no former home covers.
-    public func choosing(_ place: HomePlace, date: Date) -> HomeSettings {
+    /// A place the user picked under "Ändern", their home `from` the day they moved there (the
+    /// app always passes one; nil, every date, is for the tests of the period rules). Before it
+    /// the detection decides as with "Stimmt"; former homes the user entered win for their periods.
+    public func choosing(_ place: HomePlace, from: Date?, date: Date) -> HomeSettings {
         var copy = self
         copy.mode = .confirmed
         copy.confirmed = place
-        copy.confirmedFrom = nil
+        copy.confirmedFrom = from
         copy.changedAt = date
         return copy
     }
@@ -263,41 +267,25 @@ public struct HomeContext: Sendable {
     public var profile: LibraryProfile
     /// The places of each chosen home (by `HomePlace.id`), from the photos around it.
     public var chosenKeys: [SortlyID: Set<PlaceKey>]
+    /// How many places' keys were worked out (once per distinct place of the library, however
+    /// many homes were chosen): for the test that keeps this linear.
+    var placeKeyLookups = 0
 
     public init(settings: HomeSettings = HomeSettings(), profile: LibraryProfile = LibraryProfile(), facts: [AssetFacts] = [],
                 radius: Double = TripDetector.Configuration().homeRadiusMeters) {
         self.settings = settings
         self.profile = profile
         var keys: [SortlyID: Set<PlaceKey>] = [:]
-        for place in settings.chosenPlaces where keys[place.id] == nil {
-            keys[place.id] = place.keys.union(Self.placeKeys(around: place.center, facts: facts, radius: radius))
+        let chosen = settings.chosenPlaces
+        if !chosen.isEmpty {
+            // The places of every photo once; per home only the distance is measured.
+            let table = PlaceKeyTable(facts: facts)
+            placeKeyLookups = table.lookups
+            for place in chosen where keys[place.id] == nil {
+                keys[place.id] = place.keys.union(table.homeKeys(around: place.center, radius: radius))
+            }
         }
         chosenKeys = keys
-    }
-
-    /// The countries, regions, districts and towns that are home around `center`: among the
-    /// photos within `radius` (the home radius of the trip detection), a place holding at least
-    /// a quarter of them (as for the everyday places, `LibraryProfile.everydayShare`), or one
-    /// most of whose photos in the whole library lie there. So a town across the border inside
-    /// the radius is home, and so is its country when the user's photos of it are mostly these
-    /// everyday ones; a country visited on trips further away keeps its album.
-    static func placeKeys(around center: GeoCoordinate, facts: [AssetFacts], radius: Double) -> Set<PlaceKey> {
-        let levels: [PlaceLevel] = [.country, .administrativeArea, .subAdministrativeArea, .locality]
-        var near: [PlaceKey: Int] = [:]
-        var everywhere: [PlaceKey: Int] = [:]
-        var nearPhotos = 0
-        for f in facts {
-            guard let place = f.gpsPlace else { continue }
-            let keys = levels.compactMap { place.key(at: $0) }
-            for key in keys { everywhere[key, default: 0] += 1 }
-            guard let c = f.asset.usableLocation, GeoMath.distance(c, center) <= radius else { continue }
-            nearPhotos += 1
-            for key in keys { near[key, default: 0] += 1 }
-        }
-        let needed = Double(nearPhotos) * LibraryProfile.everydayShare
-        return Set(near.filter { key, count in
-            Double(count) >= needed || 2 * count > everywhere[key, default: 0]
-        }.keys)
     }
 
     /// The places of `place` as a home.
@@ -316,6 +304,60 @@ public struct HomeContext: Sendable {
     public func isHomeAtSomeTime(_ key: PlaceKey) -> Bool {
         if settings.chosenPlaces.contains(where: { keys(of: $0).contains(key) }) { return true }
         return settings.usesDetection && profile.isEveryday(key)
+    }
+}
+
+/// The country, region, district and town keys of the photos' places, worked out once per
+/// distinct place (`PlaceComponents.key(at:)` normalizes names and is slow on 50,000 photos),
+/// with where each photo was taken.
+struct PlaceKeyTable {
+    static let levels: [PlaceLevel] = [.country, .administrativeArea, .subAdministrativeArea, .locality]
+    /// Keys of each distinct place.
+    private(set) var keys: [[PlaceKey]] = []
+    /// Photos with a usable location: where, and the index of their place in `keys`.
+    private(set) var located: [(coordinate: GeoCoordinate, place: Int)] = []
+    /// Photos per key in the whole library.
+    private(set) var everywhere: [PlaceKey: Int] = [:]
+    var lookups: Int { keys.count }
+
+    init(facts: [AssetFacts]) {
+        var index: [PlaceComponents: Int] = [:]
+        for f in facts {
+            guard let place = f.gpsPlace else { continue }
+            let i: Int
+            if let known = index[place] {
+                i = known
+            } else {
+                i = keys.count
+                keys.append(Self.levels.compactMap { place.key(at: $0) })
+                index[place] = i
+            }
+            for key in keys[i] { everywhere[key, default: 0] += 1 }
+            if let c = f.asset.usableLocation { located.append((c, i)) }
+        }
+    }
+
+    /// The countries, regions, districts and towns that are home around `center`: among the
+    /// photos within `radius` (the home radius of the trip detection), a place holding at least
+    /// a quarter of them (as for the everyday places, `LibraryProfile.everydayShare`), or one
+    /// most of whose photos in the whole library lie there. So a town across the border inside
+    /// the radius is home, and so is its country when the user's photos of it are mostly these
+    /// everyday ones; a country visited on trips further away keeps its album.
+    func homeKeys(around center: GeoCoordinate, radius: Double) -> Set<PlaceKey> {
+        var nearPerPlace: [Int: Int] = [:]
+        var nearPhotos = 0
+        for photo in located where GeoMath.distance(photo.coordinate, center) <= radius {
+            nearPhotos += 1
+            nearPerPlace[photo.place, default: 0] += 1
+        }
+        var near: [PlaceKey: Int] = [:]
+        for (place, count) in nearPerPlace {
+            for key in keys[place] { near[key, default: 0] += count }
+        }
+        let needed = Double(nearPhotos) * LibraryProfile.everydayShare
+        return Set(near.filter { key, count in
+            Double(count) >= needed || 2 * count > everywhere[key, default: 0]
+        }.keys)
     }
 }
 

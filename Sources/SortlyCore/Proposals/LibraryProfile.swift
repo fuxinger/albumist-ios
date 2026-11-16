@@ -46,13 +46,18 @@ public struct LibraryProfile: Sendable, Hashable {
         var everyday = 0
         var photos = 0, screenshots = 0
         var bursts: [AssetID: String] = [:]
+        // Keys once per distinct place: working them out normalizes names, slow per photo.
+        var placeCounts: [PlaceComponents: Int] = [:]
         for f in facts {
             if f.asset.isScreenshotLike { screenshots += 1 } else { photos += 1 }
             if let burst = f.asset.burstIdentifier { bursts[f.id] = burst }
             guard !onTrip.contains(f.id), let place = f.gpsPlace else { continue }
             everyday += 1
+            placeCounts[place, default: 0] += 1
+        }
+        for (place, n) in placeCounts {
             for level in [PlaceLevel.country, .administrativeArea, .subAdministrativeArea, .locality] {
-                if let key = place.key(at: level) { counts[key, default: 0] += 1 }
+                if let key = place.key(at: level) { counts[key, default: 0] += n }
             }
         }
         let needed = Double(everyday) * Self.everydayShare

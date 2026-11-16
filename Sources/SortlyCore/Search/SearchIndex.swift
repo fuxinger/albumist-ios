@@ -195,8 +195,17 @@ public struct SearchIndex: Sendable {
         }?.key
         let homeContext = HomeContext(settings: home, profile: LibraryProfile(facts: facts.filter { $0.tripID == nil }, trips: []), facts: facts)
         var abroad = Bitset(count: sorted.count)
+        var countryKeys: [String: PlaceKey] = [:]
         for (i, f) in sorted.enumerated() {
-            guard let place = f.gpsPlace, let code = place.isoCountryCode, let key = place.key(at: .country) else { continue }
+            guard let place = f.gpsPlace, let code = place.isoCountryCode else { continue }
+            let key: PlaceKey
+            if let known = countryKeys[code] {
+                key = known
+            } else {
+                guard let made = place.key(at: .country) else { continue }
+                key = made
+                countryKeys[code] = made
+            }
             let date = f.asset.creationDate
             let atHome: Bool
             switch home.home(at: date) {

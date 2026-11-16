@@ -1041,7 +1041,13 @@ final class SortlyFlowUITests: XCTestCase {
         } else {
             print("UI_SWEEP_SKIP Suchen › \(label) › photo (not hittable)")
         }
-        if app.buttons["Abbrechen"].exists { app.buttons["Abbrechen"].tap(); sleep(1) }
+        // Leave the search: "Abbrechen", or on iOS 26 the field's "Schließen" (UI run
+        // 43964816778: the search stayed open with its keyboard, and the tap on the
+        // "Übersicht" tab after the sweep left the app on "Suchen").
+        for label in ["Abbrechen", "Schließen"] where app.buttons[label].exists && app.buttons[label].isHittable {
+            app.buttons[label].tap(); sleep(1)
+            break
+        }
         return reached
     }
 
@@ -1059,23 +1065,6 @@ final class SortlyFlowUITests: XCTestCase {
             if reached == 0 { XCTFail("The sweep reached no screen from \(tab)") }
         }
         check("Übersicht", sweep("Übersicht", depth: 0))
-        // Suggestions list, the screen that had dead rows. Before the other tabs: the search
-        // tab, swept last, focuses its field, and the keyboard then covers the tab bar (UI run
-        // 43954645840: the tap meant for "Übersicht" stayed on the search screen with its
-        // keyboard up, so "Vorschläge prüfen" was never on screen; also runs 43930277920 and
-        // 43945035122).
-        tabButton("Übersicht").tap(); sleep(1)
-        let suggestions = reviewSuggestionsButton()
-        if suggestions.waitForExistence(timeout: 5) {
-            suggestions.tap(); sleep(2)
-            check("Vorschläge", sweep("Vorschläge", depth: 0, strict: true))
-            back()
-        } else {
-            print("UI_STEP_MISSING sweep suggestions")
-            shot("x-missing-sweep-suggestions") // what was on screen instead
-            XCTFail("No \"Vorschläge prüfen\" on the overview for the sweep")
-        }
-        // The search tab last (see above).
         for tab in ["Mediathek", "Alben", "Suchen"] {
             let button = tab == "Suchen" ? searchTabButton() : tabButton(tab)
             guard button.waitForExistence(timeout: 5) else {
@@ -1095,6 +1084,29 @@ final class SortlyFlowUITests: XCTestCase {
             } else {
                 check(tab, sweep(tab, depth: 0))
             }
+        }
+        // Suggestions list, the screen that had dead rows.
+        // Back on the overview before looking for its button: a tab tap while the search is
+        // still active can leave the app on "Suchen" (UI run 43964816778).
+        let overview = app.navigationBars["Übersicht"]
+        var tries = 0
+        repeat {
+            tabButton("Übersicht").tap(); sleep(1)
+            tries += 1
+        } while !overview.waitForExistence(timeout: 3) && tries < 3
+        let suggestions = reviewSuggestionsButton()
+        if suggestions.waitForExistence(timeout: 5) {
+            suggestions.tap(); sleep(2)
+            check("Vorschläge", sweep("Vorschläge", depth: 0, strict: true))
+            back()
+        } else {
+            print("UI_STEP_MISSING sweep suggestions")
+            // What the overview showed instead (UI runs 43930271358, 43930277920, 43949880264
+            // left no picture of it): screen title, buttons and the analysis card.
+            let buttons = app.buttons.allElementsBoundByIndex.prefix(30).map(\.label).filter { !$0.isEmpty }
+            print("UI_FACT sweep overview: \(screenTitle) | \(buttons.joined(separator: " | "))")
+            shot("x-sweep-no-suggestions")
+            XCTFail("No \"Vorschläge prüfen\" on the overview for the sweep")
         }
         print("UI_SWEEP_DONE")
     }

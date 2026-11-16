@@ -149,8 +149,6 @@ final class AppModel {
 
     @ObservationIgnored private var progressMailbox = ProgressMailbox()
     @ObservationIgnored private var estimator = ProgressEstimator()
-    /// The last stage and time the unfinished-run marker was written (see `tickNow`).
-    @ObservationIgnored private var markerWritten: (stage: Int, at: ContinuousClock.Instant)?
     @ObservationIgnored private var glide = BarGlide()
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     @ObservationIgnored private var runClockStart = ContinuousClock.now
@@ -911,16 +909,9 @@ final class AppModel {
         analysis.waiting = nil
         analysis.appleWait = progress.waitLeft != nil
         // Kept across launches: a run that iOS ended goes on from here (see `resumeFrom`).
-        // Written when the stage changes and otherwise every few seconds, not with every tick:
-        // each write encodes JSON and hands it to the preferences service on this thread.
-        let stageNumber = progress.stage.number
-        if !analysis.isCatchingUp,
-           markerWritten.map({ $0.stage != stageNumber || ContinuousClock.now - $0.at >= .seconds(5) }) ?? true {
-            markerWritten = (stageNumber, ContinuousClock.now)
-            MainThreadStallWatch.shared.section("analysis marker") {
-                AnalysisMarker.unfinished = .init(stage: stageNumber, overall: analysis.overall,
-                                                  widths: widthsFixed ? analysis.widths : nil)
-            }
+        if !analysis.isCatchingUp {
+            AnalysisMarker.unfinished = .init(stage: progress.stage.number, overall: analysis.overall,
+                                              widths: widthsFixed ? analysis.widths : nil)
         }
         let step = AnalysisStep(progress.stage)
         if !analysis.pausing {

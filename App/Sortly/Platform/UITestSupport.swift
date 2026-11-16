@@ -72,6 +72,12 @@ struct SlowedAnalyzer: ContentAnalyzing {
     func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {
         try await base.recognizeText(asset, allowNetwork: allowNetwork)
     }
+
+    /// Handed on: without the preview prefetch every photo of a slowed run came back
+    /// unreadable (UI run 43753915509, "246 Fotos konnten noch nicht gelesen werden").
+    func willAnalyze(_ upcoming: [AssetSnapshot]) async {
+        await base.willAnalyze(upcoming)
+    }
 }
 
 // MARK: Main-thread watch
@@ -95,8 +101,8 @@ struct SlowedAnalyzer: ContentAnalyzing {
 ///   80 s ..., with the section it hangs in and how long that section has been running
 /// Stall lines end in `(app not active)` when the app was in the background or behind a
 /// system alert during the stall: the system may hold back a main thread then.
-final class MainThreadStallWatch: @unchecked Sendable {
-    static let shared = MainThreadStallWatch()
+final class MainThreadWatch: @unchecked Sendable {
+    static let shared = MainThreadWatch()
     private let logger = Logger(subsystem: "app.albumist.ios", category: "uitest")
     private let lock = NSLock()
     /// Uptime (ns) and wall clock (s since 1970) of the ping the main thread has not answered yet.
@@ -114,6 +120,11 @@ final class MainThreadStallWatch: @unchecked Sendable {
     private var active = true
     /// The app was not active at some point while the current ping waited.
     private var inactiveInStall = false
+    /// `-SortlyUITestWatchMain` (stress runs, `watchForStress`): `UITEST_MAIN_BLOCKED` lines,
+    /// and every stall over half a second in the test runner's file.
+    private var stressLines = false
+    private var stressFile: FileHandle?
+    private var longestStall: Double = 0
 
     @MainActor
     func start() {
@@ -129,6 +140,23 @@ final class MainThreadStallWatch: @unchecked Sendable {
         thread.name = "Albumist main-thread watch"
         thread.qualityOfService = .userInteractive
         thread.start()
+    }
+
+    /// `-SortlyUITestWatchMain` (DeviceConditionUITests test12, ui-stress.yml): besides the lines
+    /// above, `UITEST_MAIN_BLOCKED <ms> ms (longest <ms> ms)` for every stall over a second, and
+    /// with `-SortlyUITestWatchMainLog <path>` every stall over half a second as
+    /// "<end as seconds since 1970> <ms>" in that file of the test runner's.
+    @MainActor
+    func watchForStress(log path: String?) {
+        let file = path.flatMap { path -> FileHandle? in
+            FileManager.default.createFile(atPath: path, contents: nil)
+            return FileHandle(forWritingAtPath: path)
+        }
+        lock.lock()
+        stressLines = true
+        stressFile = file
+        lock.unlock()
+        start()
     }
 
     private func setActive(_ value: Bool) {
@@ -207,9 +235,19 @@ final class MainThreadStallWatch: @unchecked Sendable {
         let names = seenInStall.isEmpty ? "unmarked" : seenInStall.joined(separator: ", ")
         let inactive = inactiveInStall
         askedAt = nil
+        let waited = asked.map { Self.seconds(now - $0) } ?? 0
+        let stress = stressLines, file = stressFile
+        if stress, waited > 1 { longestStall = max(longestStall, waited) }
+        let longest = longestStall
         lock.unlock()
-        guard let asked else { return }
-        let waited = Self.seconds(now - asked)
+        guard asked != nil else { return }
+        // Written only here, on the main thread.
+        if waited > 0.5, let file {
+            file.write(Data(String(format: "%.3f %ld\n", Date().timeIntervalSince1970, Int(waited * 1000)).utf8))
+        }
+        if stress, waited > 1 {
+            NSLog("UITEST_MAIN_BLOCKED %ld ms (longest %ld ms)", Int(waited * 1000), Int(longest * 1000))
+        }
         if waited >= 2 {
             note("UI_MAIN_STALL \(Self.text(waited)) s from \(Self.clock(since)) UTC in \(names)\(Self.tag(inactive))")
         } else if waited >= 1 {

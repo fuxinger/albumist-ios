@@ -19,7 +19,7 @@ enum LedgerKeychain {
     }
 
     static func load() -> FreeAlbumLedger? {
-        MainThreadStallWatch.shared.section("keychain read") { loadNow() }
+        MainThreadWatch.shared.section("keychain read") { loadNow() }
     }
 
     private static func loadNow() -> FreeAlbumLedger? {
@@ -33,7 +33,7 @@ enum LedgerKeychain {
 
     /// Readable after the first unlock, so a plan that finishes in the background can count.
     static func save(_ ledger: FreeAlbumLedger) {
-        MainThreadStallWatch.shared.section("keychain write") { saveNow(ledger) }
+        MainThreadWatch.shared.section("keychain write") { saveNow(ledger) }
     }
 
     private static func saveNow(_ ledger: FreeAlbumLedger) {

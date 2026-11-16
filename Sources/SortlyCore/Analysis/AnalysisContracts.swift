@@ -21,7 +21,30 @@ public protocol PhotoLibraryReading: Sendable {
     /// differs from the one given there. The others come with `uniformTypeIdentifier == nil`
     /// and without the RAW flag; the store keeps their earlier values.
     func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date]) async throws -> [AssetSnapshot]
+    /// The same, saying how far it is (`progress(read, total)`, from any thread) while it
+    /// reads, so the count moves during a long first read: reading 50,000 photos without
+    /// their file details took minutes on the simulator with nothing moving on the card
+    /// (stress run 43833158673). `progress` answers whether to go on: `false` (Pause) ends
+    /// the read with `LibraryReadPaused`, which carries the photos read so far. They are never
+    /// taken as the whole library (that would count the rest as deleted), but their file
+    /// details are kept, so a user who pauses again and again still gets further each time.
+    /// Readers that are quick anyway use the plain one.
+    func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
+                     progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot]
     func currentInventory() async throws -> CollectionInventory
+}
+
+/// A library read ended by Pause: the photos read until then (see `fetchAssets(progress:)`).
+public struct LibraryReadPaused: Error, Sendable {
+    public var read: [AssetSnapshot]
+    public init(read: [AssetSnapshot]) { self.read = read }
+}
+
+public extension PhotoLibraryReading {
+    func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
+                     progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot] {
+        try await fetchAssets(includeHidden: includeHidden, knownDetails: knownDetails)
+    }
 }
 
 /// One classifier label as produced by the image classifier.

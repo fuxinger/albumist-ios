@@ -15,7 +15,10 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
         [--reduce-motion] [--increase-contrast] [--video F] [--out DIR]
       Runs the tests (T is "Class" or "Class/testMethod" of SortlyUITests), prints the
       report lines for the log (steps, screenshots, accessibility findings, restart context,
-      crash reports, SwiftUI runtime warnings) and exits with the result.
+      crash reports, SwiftUI runtime warnings) and exits with the result. A test that reset
+      the photo access (the CI simulator then answers "denied" without asking) prints
+      UI_HOST_GRANT_PHOTOS; the access is given back from the Mac (`simctl privacy grant`)
+      while the pass runs (class HostGrants).
   classify LOG [--status N] [--crash-report F]... [--bundle-json F]
       Prints what `run` would decide for a finished pass (for trying the rules on a log;
       without --bundle-json the result bundle counts as clean).
@@ -45,7 +48,8 @@ new one, and only for the tests that did not pass (-only-testing as before, plus
 A watchdog (class Watchdog) stops a pass early when the simulator leaves "Booted" before
 the first test started (two checks 20 s apart); the UI_WATCHDOG line it leaves in the log is
 one of the infrastructure failures above, and the stop counts as FLAKY_BOOT. It never stops a
-pass in which a test has started.
+pass in which a test has started (the log is read again right before the stop, so a test that
+started while simctl was being asked counts too).
 Anything else is never repeated: a real failure stays red. A pass that ran no test at all
 fails (a renamed test would otherwise make an empty, green selection), and a repeat whose
 selection would be empty is not started (only possible when every --only entry is a single
@@ -71,7 +75,7 @@ BUNDLE_ID = "app.albumist.ios"
 
 # Lines of the xcodebuild log that go into the job log. PREVIEW_JPEG lines carry the
 # screenshots (the gallery is built from them), A11Y_ lines the accessibility findings.
-REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
+REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_HOST|UI_STRESS|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
                     r"Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error")
 REPORT_LIMIT = 15000
 
@@ -311,6 +315,42 @@ def flaky_lines(record: dict) -> list[str]:
     return lines
 
 
+SWEEP_SKIP = re.compile(r"\bUI_SWEEP_SKIP (.+?)\s*$")
+
+
+def sweep_skips(log: str) -> list[dict]:
+    """The rows the tap-through sweep (UI test 3) left out, from its UI_SWEEP_SKIP lines, in
+    order and each once: {"where": "Vorschläge › Länder und Orte", "why": "section header or
+    footer text"}. The sweep skips a cell without its own label that has fewer than two texts
+    and no image as a section header or footer; listed in the run summary so that a real row
+    skipped that way is seen."""
+    found: list[dict] = []
+    for line in log.splitlines():
+        match = SWEEP_SKIP.search(line)
+        if not match or ": error:" in line:
+            continue
+        text = match.group(1)
+        why = re.match(r"^(.*?) \(([^()]*)\)$", text)
+        entry = {"where": why.group(1), "why": why.group(2)} if why else {"where": text, "why": ""}
+        if entry not in found:
+            found.append(entry)
+    return found
+
+
+def sweep_summary(records: list[dict]) -> str:
+    """Markdown: every row the sweep left out, per group ("" when no group has any)."""
+    rows = [(r["group"], s) for r in records for s in r.get("sweep_skips", [])]
+    if not rows:
+        return ""
+    cell = lambda text: text.replace("|", "\\|")  # noqa: E731
+    md = ["### UI test 3: rows the tap-through sweep did not tap", "",
+          f"{len(rows)} row(s) left out. \"section header or footer text\" is a cell without its own label "
+          "with fewer than two texts and no image; if a real row is listed so, the sweep missed it.", "",
+          "| Group | Where | Why |", "|---|---|---|"]
+    md += [f"| {group} | {cell(s['where'])} | {cell(s['why'])} |" for group, s in rows]
+    return "\n".join(md) + "\n"
+
+
 def flaky_summary(records: list[dict]) -> tuple[str, list[str]]:
     """(Markdown for the run summary, FLAKY lines) over every group's record."""
     boots = sum(len(r.get("boot", [])) for r in records)
@@ -326,7 +366,8 @@ def flaky_summary(records: list[dict]) -> tuple[str, list[str]]:
             md += [f"| {r['group']} | boot | | | {b} |" for b in r.get("boot", [])]
             md += [f"| {r['group']} | repeat | | | {x['result']}: {'; '.join(x['reasons'])} |" for x in r.get("retries", [])]
             md += [f"| {r['group']} | flaky | {f['test']} | {f['first']} | {f['reason']} |" for f in r.get("flaky", [])]
-    return "\n".join(md) + "\n", lines
+    sweep = sweep_summary(records)
+    return "\n".join(md) + "\n" + ("\n" + sweep if sweep else ""), lines
 
 
 def sh(command: list[str], timeout: float = 300, quiet: bool = False) -> tuple[int, str]:
@@ -520,6 +561,53 @@ class Recorder(threading.Thread):
         self.join(timeout=60)
 
 
+HOST_GRANT = re.compile(r"(?:^|\s)UI_HOST_GRANT_PHOTOS\s*$")
+
+
+def host_grant_requests(text: str) -> int:
+    """How many complete lines of `text` ask the Mac to give the photo access back."""
+    return sum(1 for line in text.split("\n") if HOST_GRANT.search(line))
+
+
+class HostGrants(threading.Thread):
+    """Gives the photo access back from the Mac each time a test asks (UI_HOST_GRANT_PHOTOS,
+    DeviceConditionUITests.grantFromHost): the CI simulator shows no iOS question after an
+    access reset, and Settings opens on its first page, not on Albumist's."""
+
+    def __init__(self, udid: str, log_path: str, interval: float = 2, grant=None):
+        super().__init__(daemon=True)
+        self.udid, self.log_path, self.interval = udid, log_path, interval
+        self.grant = grant or self.grant_photos
+        self.stopped = threading.Event()
+        self.offset = 0
+        self.tail = ""
+
+    def grant_photos(self) -> None:
+        code, _ = sh(["xcrun", "simctl", "privacy", self.udid, "grant", "photos", BUNDLE_ID], timeout=120, quiet=True)
+        print("UI_HOST photo access granted" if code == 0 else f"UI_HOST photo access grant failed (exit {code})", flush=True)
+
+    def check(self) -> None:
+        """Reads what was added to the log since the last call; one grant per complete request line."""
+        try:
+            with open(self.log_path, encoding="utf-8", errors="replace") as log:
+                log.seek(self.offset)
+                chunk = log.read()
+                self.offset = log.tell()
+        except OSError:
+            chunk = ""
+        complete, _, self.tail = (self.tail + chunk).rpartition("\n")
+        for _ in range(host_grant_requests(complete)):
+            self.grant()
+
+    def run(self) -> None:
+        while not self.stopped.wait(self.interval):
+            self.check()
+
+    def stop(self) -> None:
+        self.stopped.set()
+        self.join(timeout=30)
+
+
 def device_state(udid: str) -> str:
     """"Booted", "Shutdown", ... of a simulator, or "" when simctl does not say (then unknown)."""
     code, listing = sh(["xcrun", "simctl", "list", "devices", "-j"], timeout=30, quiet=True)
@@ -550,18 +638,25 @@ class Watchdog(threading.Thread):
         self.stopped = threading.Event()
         self.fired = ""
 
+    def read_log(self) -> str:
+        try:
+            with open(self.log_path, encoding="utf-8", errors="replace") as log:
+                return log.read()
+        except OSError:
+            return ""
+
     def run(self) -> None:
         states: list[str] = []
         while not self.stopped.wait(self.interval):
-            try:
-                with open(self.log_path, encoding="utf-8", errors="replace") as log:
-                    text = log.read()
-            except OSError:
-                text = ""
+            text = self.read_log()
             if STARTED.search(text):
                 return
             states.append(device_state(self.udid))
             if watchdog_should_stop(text, states):
+                # device_state can take up to 30 s; a test that started meanwhile must not be
+                # stopped, so the log is read again right before the stop.
+                if STARTED.search(self.read_log()):
+                    return
                 self.fired = states[-1]
                 print(f"UI_WATCHDOG simulator {self.udid} is {self.fired} before the first test; stopping the pass", flush=True)
                 self.process.terminate()
@@ -605,7 +700,10 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
         watchdog = Watchdog(args.udid, log_path, process)
         watchdog.start()
+        grants = HostGrants(args.udid, log_path)
+        grants.start()
         status = process.wait()
+        grants.stop()
         watchdog.stop()
         watchdog.join(timeout=90)
     if watchdog.fired:
@@ -695,7 +793,9 @@ def command_run(args) -> int:
                 retry_result = "not started (simulator did not come back)"
         if retry is None:
             retry_reasons = []
-    write_flaky(args, flaky_record(args.name, first_log, retry_reasons, retry_log, retry_result, boot_retries(args.out)))
+    record = flaky_record(args.name, first_log, retry_reasons, retry_log, retry_result, boot_retries(args.out))
+    record["sweep_skips"] = sweep_skips(first_log + "\n" + (retry_log or ""))
+    write_flaky(args, record)
     # The result is the last pass: the first one when nothing was repeated, else the repeat
     # (which ran every test that had not passed in the first one).
     failed = passes[-1][1] != 0
@@ -770,7 +870,8 @@ def boot_retries(out: str) -> list[str]:
 
 def write_flaky(args, record: dict) -> None:
     """build/flaky-NAME.json (collected by the UI summary job), FLAKY lines in the log and,
-    when anything was repeated, rows in the job summary. Nothing is repeated silently."""
+    when anything was repeated or the sweep left rows out, rows in the job summary. Nothing is
+    repeated silently."""
     with open(os.path.join(args.out, f"flaky-{args.name}.json"), "w", encoding="utf-8") as f:
         json.dump(record, f, indent=1)
     lines = flaky_lines(record)
@@ -780,7 +881,7 @@ def write_flaky(args, record: dict) -> None:
         print(f"::warning title=UI {args.name} flaky::{len(record['flaky'])} test(s) passed only on the repeat: "
               + ", ".join(f["test"] for f in record["flaky"]), flush=True)
     path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if path and lines:
+    if path and (lines or record.get("sweep_skips")):
         with open(path, "a", encoding="utf-8") as out:
             out.write("\n" + flaky_summary([record])[0])
 
@@ -879,6 +980,10 @@ def main(argv: list[str] | None = None) -> int:
         if flaky or retries:
             print(f"::notice title=UI flaky tests::{retries} repeat(s) after a simulator failure, "
                   f"{flaky} test(s) passed only on the repeat", file=sys.stderr)
+        skipped = sum(len(r.get("sweep_skips", [])) for r in records)
+        if skipped:
+            print(f"::notice title=UI sweep::{skipped} row(s) not tapped by the tap-through sweep "
+                  "(listed in the run summary)", file=sys.stderr)
         print(markdown)
         return 0
     if args.command == "classify":

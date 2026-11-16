@@ -83,6 +83,56 @@ struct AnalysisCoverageTests {
 
     // MARK: B4 photo access changed during a run
 
+    /// Review of 11ef3e1 (minor 3): the trips step stood still (no count, the value held) on a
+    /// large library. It counts the photos with a location it has grouped, every 1,000, and the
+    /// card shows that count; the whole run reports it as it goes.
+    @Test func tripsStepCountsThePhotosItGroups() async throws {
+        let assets = Self.library(photos: 4_500)
+        var seen: [Int] = []
+        var of = 0
+        _ = TripDetector(configuration: OrganizationSettings().trips.advanced, calendar: Fixture.calendar)
+            .analyse(in: assets, progress: { done, total in seen.append(done); of = total })
+        #expect(of == 4_500)
+        #expect(seen == [0, 1_000, 2_000, 3_000, 4_000, 4_500])
+        #expect(AnalysisCardState.Position(step: .trips, completed: 2_000, total: 4_500).hasCount)
+        #expect(!AnalysisCardState.Position(step: .trips, completed: 0, total: 1).hasCount)
+
+        let store = try SortlyStore(url: nil)
+        let reader = InMemoryLibraryReader(assets: assets)
+        let pipeline = Self.pipeline(store: store, reader: reader, analyzer: Analyzer())
+        let counts = Mutex<[Int]>([])
+        _ = try await pipeline.run(onProgress: { p in
+            if p.stage == .patterns { counts.withLock { $0.append(p.completed) } }
+        })
+        let reported = counts.withLock { $0 }
+        #expect(Set(reported).count >= 5, "trips step reports: \(reported)")
+        #expect(reported == reported.sorted())
+    }
+
+    /// Review of ee36188 (4): the places step's work left counts only located photos whose
+    /// place is not resolved yet, so the time left is not inflated on a run that goes on.
+    @Test func placesLeftCountsOnlyUnresolvedPlaces() async throws {
+        let assets = Self.library(photos: 300)
+        let store = try SortlyStore(url: nil)
+        let reader = InMemoryLibraryReader(assets: assets)
+        let pipeline = Self.pipeline(store: store, reader: reader, analyzer: Analyzer())
+        let workloads = Mutex<[AnalysisWorkload]>([])
+        let record: @Sendable (AnalysisPipeline.Progress) -> Void = { p in
+            if let w = p.workload { workloads.withLock { $0.append(w) } }
+        }
+        _ = try await pipeline.run(onProgress: record)
+        _ = try await pipeline.run(onProgress: record)
+        let seen = workloads.withLock { $0 }
+        let first = try #require(seen.first), second = try #require(seen.last)
+        #expect(seen.count == 2)
+        #expect(first.located > 0)
+        #expect(first.itemsLeft(.places) == first.located)
+        let resolved = try await store.places().count
+        #expect(resolved > 0)
+        #expect(second.itemsLeft(.places) == max(0, second.located - resolved), "\(second) with \(resolved) places resolved")
+        #expect(AnalysisWorkload(photos: 10, located: 8, screenshots: 0, contentLeft: 0, textLeft: 0).itemsLeft(.places) == 8)
+    }
+
     @Test func accessRevokedDuringARunStopsCleanlyAndResumes() async throws {
         let assets = Self.library(photos: 40)
         let reader = InMemoryLibraryReader(assets: assets)

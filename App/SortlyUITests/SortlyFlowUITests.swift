@@ -6,6 +6,9 @@ import UIKit
 /// Every step prints `UI_STEP_OK` / `UI_STEP_MISSING`, screenshots are printed as
 /// `PREVIEW_JPEG ui-…` chunks and accessibility audit findings as `A11Y_ISSUE` lines,
 /// so the CI log is the whole report (artifact downloads are not available to us).
+/// CI runs groups of these tests on separate simulators, so each test sets itself up:
+/// test1_FullFlow goes through the real onboarding and seeding, the others start with
+/// `prepare()` (fast start, demo library) and make the state they need themselves.
 @MainActor
 final class SortlyFlowUITests: XCTestCase {
     private var app = XCUIApplication()
@@ -172,12 +175,20 @@ final class SortlyFlowUITests: XCTestCase {
         print("UI_STEP_MISSING system photo alert")
     }
 
-    private func allowNotificationsIfAsked() {
+    /// A10: the notification question is declined; the app must work just the same (it only
+    /// uses notifications to say that a long analysis finished while it was away).
+    private func declineNotificationsIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for label in ["Erlauben", "Allow"] {
-            let allow = springboard.buttons[label]
-            if allow.waitForExistence(timeout: 4) { allow.tap(); print("UI_STEP_OK notification alert"); return }
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            for label in ["Nicht erlauben", "Don’t Allow", "Don't Allow"] where springboard.buttons[label].exists {
+                springboard.buttons[label].tap()
+                print("UI_STEP_OK notification alert declined")
+                return
+            }
+            usleep(500_000)
         }
+        print("UI_FACT no notification alert")
     }
 
     /// Polls until `condition` held on `stableChecks` checks in a row (2 s apart).
@@ -204,15 +215,104 @@ final class SortlyFlowUITests: XCTestCase {
     }
 
     /// The card's progress element (one element, B1): value "120 von 412 Fotos, fertig gegen
-    /// 23:40, Schritt 4 von 6, …", as (step, done, total).
+    /// 23:40, Schritt 4 von 6, …", as (step, done, total). Read from one snapshot: the element
+    /// can go away between an `exists` and reading it, and that read failed test6 (run
+    /// 43743310212).
     private func analysisCount() -> (step: Int, done: Int, total: Int)? {
-        let element = app.descendants(matching: .any)["analysis.progress"]
-        guard element.exists else { return nil }
-        let text = ((element.value as? String) ?? "") + " " + element.label
+        guard let snapshot = try? app.descendants(matching: .any)["analysis.progress"].firstMatch.snapshot() else { return nil }
+        let text = ((snapshot.value as? String) ?? "") + " " + snapshot.label
         let digits = text.replacingOccurrences(of: ".", with: "")
         guard let s = digits.firstMatch(of: #/Schritt (\d+) von \d+/#), let step = Int(s.1),
               let m = digits.firstMatch(of: #/(\d+) von (\d+) /#), let done = Int(m.1), let total = Int(m.2) else { return nil }
         return (step, done, total)
+    }
+
+    // MARK: Setup for tests that run alone
+
+    /// Every test except test1 may be the first on a fresh simulator: the onboarding counts as
+    /// done (`-SortlyUITestFastStart`), the demo library is created and analysed. On a
+    /// simulator where that already happened this only waits until nothing runs.
+    private func prepare() {
+        let started = Date()
+        launch(["-SortlyUITestFastStart"])
+        let noAccess = app.buttons["access.continue"]
+        if noAccess.waitForExistence(timeout: 5) {
+            // Photo access is not granted (the CI grant did not hold, or a test took it away):
+            // with the introduction done the app shows "Kein Zugriff auf deine Fotos" (W4).
+            noAccess.tap()
+            allowPhotosIfAsked()
+            // Opened once more, so the fast start runs as with access (demo library, if missing).
+            launch(["-SortlyUITestFastStart"])
+        } else if button("Los geht").exists {
+            // A first start without the fast start's introduction: the real onboarding.
+            tap(button("Los geht"), "welcome (prepare)")
+            sleep(1)
+            tap(app.buttons["Weiter"], "areas (prepare)")
+            if noAccess.waitForExistence(timeout: 5) { noAccess.tap(); allowPhotosIfAsked() }
+            if app.buttons["Weiter"].waitForExistence(timeout: 3) { app.buttons["Weiter"].tap() }
+            tap(button("Analyse starten"), "start analysis (prepare)", timeout: 20)
+            declineNotificationsIfAsked()
+        }
+        let demo = button("Beispiel-Mediathek anlegen")
+        if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists { demo.tap() }
+        let ready = waitStable("demo library analysed", timeout: 900) {
+            anything("Fotos analysiert").exists && !app.buttons["Pause"].exists && !anything("Beispielfotos werden angelegt").exists
+                && !button("Beispiel-Mediathek anlegen").exists
+        }
+        print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
+        XCTAssertTrue(ready, "The demo library was not created and analysed")
+        print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
+    }
+
+    /// Two photos from the library into a new album: opens its plan ("Umsetzen").
+    private func openManualPlan(_ title: String) -> Bool {
+        guard tap(tabButton("Mediathek"), "library for \(title)") else { return false }
+        sleep(2)
+        let photos = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*"))
+        if !photos.firstMatch.waitForExistence(timeout: 5) { tap(app.buttons["Alle"], "all photos for \(title)", timeout: 5); sleep(2) }
+        guard tap(app.buttons["Auswählen"], "select photos for \(title)"), photos.count >= 2 else { return false }
+        photos.element(boundBy: 0).tap()
+        photos.element(boundBy: 1).tap()
+        guard tap(button("Zu Album hinzufügen"), "add to album for \(title)") else { return false }
+        var field = app.textFields["Name des neuen Albums"]
+        if !field.waitForExistence(timeout: 5) { field = app.textFields.firstMatch }
+        guard tap(field, "name for \(title)") else { return false }
+        field.typeText(title)
+        guard tap(app.buttons["Anlegen"], "create \(title)") else { return false }
+        return app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
+    }
+
+    /// Opens the plan of the recommended suggestions (or of what is selected already); a new
+    /// album of two photos when nothing is recommended.
+    private func openRecommendedPlan(_ what: String) -> Bool {
+        var apply = button("ausgewählte Alben anlegen")
+        // "16 Vorschläge prüfen", or "1 Vorschlag prüfen" when one is left.
+        let open = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ Vorschl(ag|äge) prüfen")).firstMatch
+        if !apply.waitForExistence(timeout: 5), open.waitForExistence(timeout: 10), tap(open, "open suggestions for \(what)") {
+            sleep(1)
+            if button("empfohlene auswählen").waitForExistence(timeout: 5) { button("empfohlene auswählen").tap(); sleep(1) }
+            back(); sleep(1)
+            apply = button("ausgewählte Alben anlegen")
+        }
+        if apply.waitForExistence(timeout: 5) {
+            guard tap(apply, "open plan for \(what)", timeout: 20) else { return false }
+            sleep(3)
+            return true
+        }
+        print("UI_FACT nothing recommended for \(what): a new album of two photos instead")
+        return openManualPlan("Testalbum \(what)")
+    }
+
+    /// Applies a plan, so the history holds one; the app is started again afterwards.
+    @discardableResult
+    private func applyRecommended(_ what: String, relaunchWith extra: [String] = []) -> Bool {
+        guard openRecommendedPlan(what), tap(app.buttons["plan.apply"], "apply plan for \(what)", timeout: 30) else { return false }
+        let done = button("Rückgängig machen").waitForExistence(timeout: 900)
+        print(done ? "UI_STEP_OK plan for \(what) finished" : "UI_STEP_MISSING plan for \(what) finished")
+        XCTAssertTrue(done, "The plan for \(what) did not finish")
+        sleep(2)
+        launch(extra)
+        return done
     }
 
     // MARK: Tests
@@ -244,6 +344,8 @@ final class SortlyFlowUITests: XCTestCase {
     /// markers are files (`UITestOnboarding`): run 43816787321 lost the test runner inside
     /// test 1, and the restarted runner began with fresh static flags.
 
+    /// The first start as a user sees it: onboarding (notifications declined), demo library,
+    /// analysis, overview, starter set, suggestions, the trip list, applying and the receipt.
     func test1_FullFlow() {
         continueAfterFailure = true
         UITestOnboarding.fullFlowStarts()
@@ -298,7 +400,7 @@ final class SortlyFlowUITests: XCTestCase {
             XCTAssertTrue(trial, "Onboarding did not reach the trial step")
             shot("04-trial"); audit("trial")
             tap(button("Analyse starten"), "start analysis")
-            allowNotificationsIfAsked()
+            declineNotificationsIfAsked()
         }
 
         // Demo library
@@ -430,7 +532,6 @@ final class SortlyFlowUITests: XCTestCase {
                 back(); sleep(1)
                 shot("08d-back-to-trips")
             }
-            tripWorkshop()
             back(); sleep(1)
         }
 
@@ -471,6 +572,18 @@ final class SortlyFlowUITests: XCTestCase {
             back(); sleep(2)
         }
 
+        print("UI_FACT notifications declined, the app went on: \(app.state == .runningForeground)")
+        // The end of test 1 itself: since the split into 1b-1d (which run in "other flows", on
+        // another simulator) the marker was written at the end of 1d, so test 1's teardown
+        // check failed every run of the full-flow group (UI run 43964816778).
+        UITestOnboarding.fullFlowFinished()
+        print("UI_STEP_OK full flow reached its end")
+    }
+
+    /// Atlas, library, albums and search on the analysed demo library.
+    func test1b_AtlasLibrarySearch() {
+        continueAfterFailure = true
+        prepare()
         // Travel atlas
         if tap(button("Reise-Atlas"), "open atlas", timeout: 30) {
             sleep(8)
@@ -547,7 +660,8 @@ final class SortlyFlowUITests: XCTestCase {
             sleep(2)
             shot("18-albums"); audit("albums")
             // Design review W12: an album shows all its photos, and each opens large.
-            let album = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9] Fotos?")).firstMatch
+            // An album with photos: an empty one has none to open.
+            let album = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "(.*[^0-9.])?[1-9][0-9.]* Fotos?")).firstMatch
             if tap(album, "open an album", timeout: 5) {
                 let photo = app.buttons["album.photo"].firstMatch
                 if tap(photo, "open a photo of the album", timeout: 10) {
@@ -576,7 +690,13 @@ final class SortlyFlowUITests: XCTestCase {
                 sleep(1)
             }
         }
+    }
 
+    /// Undo of a plan from the history in the settings: one question from iOS, everything gone.
+    func test1c_UndoFromHistory() {
+        continueAfterFailure = true
+        prepare()
+        applyRecommended("undo")
         // Settings and undo
         if tap(tabButton("Übersicht"), "overview tab") {
             if tap(app.buttons["Einstellungen"], "settings") {
@@ -649,7 +769,19 @@ final class SortlyFlowUITests: XCTestCase {
                 tap(button("Fertig"), "close settings")
             }
         }
+    }
 
+    /// Reise-Werkstatt: split a trip and merge it again, then take the changes back in the
+    /// settings.
+    func test1d_TripWorkshop() {
+        continueAfterFailure = true
+        prepare()
+        let travel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Reisen")).firstMatch
+        if tap(travel, "open travel area for workshop", timeout: 10) {
+            sleep(1)
+            tripWorkshop()
+            back(); sleep(1)
+        }
         // The trip changes from the workshop can be taken back in the settings.
         if tap(app.buttons["Einstellungen"], "settings for trip reset") {
             sleep(1)
@@ -672,8 +804,6 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Fertig"), "close settings after trip reset")
             _ = waitStable("analysis after trip reset", timeout: 180) { analysisIdle }
         }
-        UITestOnboarding.fullFlowFinished()
-        print("UI_STEP_OK full flow reached its end")
     }
 
     /// Design review D4 (15.11.): "Ignorieren" can be taken back, right after the action
@@ -876,6 +1006,7 @@ final class SortlyFlowUITests: XCTestCase {
         // Whether test 1 reached its end is checked by test 1 itself (its teardown block): the
         // two run in different groups on different simulators now.
         completeOnboardingIfCutOff("test2")
+        prepare()
         XCUIDevice.shared.appearance = .dark
         launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-SortlyUITestDark"])
         sleep(5)
@@ -931,6 +1062,8 @@ final class SortlyFlowUITests: XCTestCase {
     /// than one text or an image: a suggestion or album row has its title, "12 Fotos" and a
     /// thumbnail. A section header ("Länder und Orte") or footer is a cell with one text and
     /// nothing to open (UI run 43906501407: they were tapped as rows and reported as dead).
+    /// Every cell skipped this way is printed as UI_SWEEP_SKIP, and ui_tests.py lists those in
+    /// the job summary and the run's "UI summary", so a real row skipped here is seen.
     private func looksLikeRow(_ element: XCUIElement) -> Bool {
         element.staticTexts.count >= 2 || element.images.count > 0
     }
@@ -1055,7 +1188,7 @@ final class SortlyFlowUITests: XCTestCase {
     func test3_TapThroughSweep() {
         continueAfterFailure = true
         completeOnboardingIfCutOff("test3")
-        launch()
+        prepare()
         sleep(5)
         // A sweep that reaches nothing proves nothing: every tab and the suggestions list must
         // lead somewhere. The albums tab is the exception only while the library really has no
@@ -1113,13 +1246,16 @@ final class SortlyFlowUITests: XCTestCase {
 
     // MARK: Safety backup
 
-    /// Fourth run: the decisions of the earlier runs are copied when the app goes to the
+    /// Fourth run: the decisions and the plan made here are copied when the app goes to the
     /// background, the database is then set aside (as with "Neu aufbauen") and the next start
     /// must bring the decisions and the history back and say so.
     func test4_DecisionsComeBackAfterRebuild() {
         continueAfterFailure = true
         completeOnboardingIfCutOff("test4")
+        prepare()
+        // Decisions and a plan in the history, made in a run that keeps the backup copy.
         launch(["-SortlyUITestBackup"])
+        applyRecommended("backup", relaunchWith: ["-SortlyUITestBackup"])
         sleep(5)
         // The copy must hold a history to bring back: when the earlier tests left none (test 1
         // cut off before its plan), this test creates one first instead of testing a backup
@@ -1170,31 +1306,37 @@ final class SortlyFlowUITests: XCTestCase {
     /// Fifth run: the app is closed while a plan runs. The next start offers to continue,
     /// undo or leave it; "Nur Erledigtes behalten" keeps what was done, the change list says so and
     /// "Fehlendes erneut versuchen" makes a plan with only the missing steps.
+    /// (Fortsetzen and Rückgängig: DeviceConditionUITests.test07.)
     func test5_InterruptedPlanCanBeLeftAndRetried() {
         continueAfterFailure = true
         completeOnboardingIfCutOff("test5")
-        launch()
+        prepare()
+        // The first change in Photos goes through at once, every later one waits 30 s, so the
+        // app is always closed half way.
+        launch(["-SortlyUITestSlowPlan"])
         _ = waitStable("analysis idle before interruption", timeout: 120) { analysisIdle }
-        // Select something to apply: the selection of earlier runs, else the recommended ones.
-        var apply = button("ausgewählte Alben anlegen")
-        if !apply.waitForExistence(timeout: 5), tap(reviewSuggestionsButton(), "open suggestions for interruption", timeout: 20) {
-            sleep(1)
-            if button("empfohlene auswählen").waitForExistence(timeout: 5) { button("empfohlene auswählen").tap(); sleep(1) }
-            back(); sleep(1)
-            apply = button("ausgewählte Alben anlegen")
+        // Something to apply: the selection of earlier runs, else the recommended ones, else a
+        // new album of two photos. Tests 1c and 4 apply the recommended suggestions on this
+        // simulator first, so often only one that is not recommended is left (UI run
+        // 43930271358: "1 Vorschlag prüfen", nothing to select, "Missing: open plan for
+        // interruption"). Any plan of two or more changes is cut off by the slow plan.
+        guard openRecommendedPlan("interruption") else {
+            print("UI_STEP_MISSING plan for interruption")
+            XCTFail("No plan to interrupt could be opened")
+            return
         }
-        guard tap(apply, "open plan for interruption", timeout: 20) else { return }
-        sleep(3)
         guard tap(app.buttons["plan.apply"], "start plan for interruption", timeout: 30) else { return }
-        // The run takes about 16 s; closing the app after 3 s leaves it half done.
-        sleep(3)
+        sleep(5)
+        print("UI_FACT plan running when the app was closed: \(anything("Alben werden angelegt").exists)")
         app.terminate()
         sleep(2)
         launch()
         let card = anything("Anlegen wurde unterbrochen")
         guard card.waitForExistence(timeout: 30) else {
-            // The plan finished before the app was closed: nothing to repair in this run.
-            print("UI_FACT no interruption card (plan finished before the app was closed)")
+            // Not silent any more: with the slow plan this means the interruption was lost.
+            print("UI_STEP_MISSING interruption card")
+            shot("x-no-interruption-card")
+            XCTFail("No interruption card although the app was closed in the middle of a plan")
             return
         }
         print("UI_STEP_OK interruption card")
@@ -1250,6 +1392,7 @@ final class SortlyFlowUITests: XCTestCase {
     func test6_AnalysisKeepsGoingThroughBackgroundAndTabs() {
         continueAfterFailure = true
         completeOnboardingIfCutOff("test6")
+        prepare()
         launch(["-SortlyUITestSlowAnalysis"])
         _ = waitStable("analysis idle before rebuild", timeout: 300) { analysisIdle }
         // A full run from scratch: "Analyse neu aufbauen" in the settings.
@@ -1283,6 +1426,18 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(inContent, "The analysis did not reach the image step")
         record("before leaving")
         shot("60-analysis-running"); audit("analysis running")
+
+        // In the foreground the count moves (run 43743310212 printed only "0/246" while the
+        // app was away, which says nothing about the foreground).
+        let start = analysisCount()
+        let moved = waitStable("progress moves in the foreground", timeout: 60, stableChecks: 1) {
+            guard let start else { return true }
+            guard let now = analysisCount() else { return analysisIdle }
+            return now.step > start.step || (now.step == start.step && now.done > start.done)
+        }
+        print(moved ? "UI_STEP_OK progress moves in the foreground" : "UI_STEP_MISSING progress moves in the foreground")
+        XCTAssertTrue(moved, "The analysis progress did not move in the foreground for 60 s")
+        record("in the foreground")
 
         // Leave the app (on the simulator iOS holds it right away) and come back.
         XCUIDevice.shared.press(.home)

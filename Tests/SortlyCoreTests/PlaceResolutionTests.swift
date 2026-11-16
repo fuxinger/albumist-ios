@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SortlyCore
 import SortlyWorldMap
@@ -48,6 +49,89 @@ struct PlaceResolutionTests {
         #expect(munich?.components.administrativeArea == "Bayern") // offline name, not "Bavaria"
         #expect(munich?.precisionMeters == 5_000)
         #expect(munich?.needsRefinement(to: 1_000) == true)
+    }
+
+    /// Stress run 43833158673: 50,000 photos stood at "0 von 50.233 Orten" for a minute, then
+    /// jumped. Places from the map are now saved and counted in parts; each count is reported
+    /// only after its places are saved, and it never goes down.
+    @Test func manyOfflinePlacesAreSavedAndCountedInParts() async throws {
+        actor Log {
+            var saved = 0
+            var events: [(saved: Int, counted: Int)] = []
+            func save(_ n: Int) { saved += n }
+            func count(_ n: Int) { events.append((saved, n)) }
+        }
+        let log = Log()
+        let n = 2 * PlaceResolutionService.offlineChunk + 500
+        let all = requests(Fixture.Places.rome, count: n, prefix: "r")
+        let outcome = try await service(level: .country, geocoder: FakeGeocoder())
+            .resolve(all, progress: { await log.count($0) }) { await log.save($0.count) }
+        #expect(outcome.resolved == n)
+        let events = await log.events
+        #expect(events.count >= 3, "counted only \(events.count) times")
+        #expect(events.last?.counted == n)
+        for (i, e) in events.enumerated() {
+            #expect(e.counted <= e.saved, "counted before saved")
+            if i > 0 { #expect(e.counted >= events[i - 1].counted) }
+        }
+    }
+
+    /// Review of d612bc0: Pause had no effect during the pass over the map. It stops at the next
+    /// part; what is saved stays, the rest is pending for the next run.
+    @Test func pauseStopsTheMapPassAtTheNextPart() async throws {
+        actor Saved { var ids = Set<AssetID>(); func add(_ b: [AssetID: ResolvedPlace]) { ids.formUnion(b.keys) } }
+        let saved = Saved()
+        let flag = Mutex(false)
+        let n = 3 * PlaceResolutionService.offlineChunk
+        let all = requests(Fixture.Places.rome, count: n, prefix: "r")
+        let outcome = try await service(level: .country, geocoder: FakeGeocoder())
+            .resolve(all, checked: { _ in flag.withLock { $0 = true } }, paused: { flag.withLock { $0 } }) { await saved.add($0) }
+        let ids = await saved.ids
+        #expect(ids.count == PlaceResolutionService.offlineChunk, "saved \(ids.count)")
+        #expect(outcome.pendingOnline.count == n - ids.count)
+        #expect(outcome.pendingOnline.isDisjoint(with: ids))
+    }
+
+    /// Review of d612bc0: a refinement saved the map's country over a stored town before its
+    /// lookup; when the lookup did not happen (offline, Pause) the town was lost. A photo with
+    /// a town never gets anything coarser.
+    @Test func refinementNeverSavesACountryOverATown() async throws {
+        let collector = ResultCollector()
+        let towns = requests(Fixture.Places.rome, count: 20, prefix: "t").map {
+            PlaceResolutionService.Request(assetID: $0.assetID, coordinate: $0.coordinate, hasTown: true)
+        }
+        let fresh = requests(Fixture.Places.rome, count: 5, prefix: "f")
+        _ = try await service(level: .locality, geocoder: FakeGeocoder(failures: [.offline]))
+            .resolve(towns + fresh, refining: true) { await collector.add($0) }
+        let places = await collector.places
+        #expect(towns.allSatisfy { places[$0.assetID] == nil }, "a town was overwritten")
+        #expect(fresh.allSatisfy { places[$0.assetID]?.components.country == "Italien" })
+    }
+
+    /// Review of 9f0bc40 (C): at town level a Pause left the photos with their country from the
+    /// map; the next run checked them again and its "geprüft" count started lower. They count
+    /// as checked from the start now, and the count only rises.
+    @Test func checkedCountGoesOnAfterAPause() async throws {
+        actor Log { var counts: [Int] = []; func add(_ n: Int) { counts.append(n) } }
+        let n = 3 * PlaceResolutionService.offlineChunk
+        let all = requests(Fixture.Places.rome, count: n, prefix: "r")
+        // First run: paused after the second part.
+        let first = Log()
+        let parts = Mutex(0)
+        _ = try await service(level: .locality, geocoder: FakeGeocoder(failures: [.offline]))
+            .resolve(all, checked: { await first.add($0); parts.withLock { $0 += 1 } }, paused: { parts.withLock { $0 >= 2 } }) { _ in }
+        let lastShown = try #require(await first.counts.last)
+        #expect(lastShown == 2 * PlaceResolutionService.offlineChunk)
+        // Next run: what has its country is passed on as such.
+        let next = Log()
+        let again = all.enumerated().map { i, r in
+            PlaceResolutionService.Request(assetID: r.assetID, coordinate: r.coordinate, hasCountry: i < lastShown)
+        }
+        _ = try await service(level: .locality, geocoder: FakeGeocoder(failures: [.offline]))
+            .resolve(again, checked: { await next.add($0) }) { _ in }
+        let counts = await next.counts
+        #expect(counts.first == lastShown, "started at \(counts.first ?? -1) after \(lastShown)")
+        #expect(counts == counts.sorted() && counts.last == n)
     }
 
     @Test func cachedCellsAreNotRequestedAgain() async throws {

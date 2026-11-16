@@ -263,13 +263,11 @@ private struct ExecutionHaptics: ViewModifier {
 /// Result of an executed plan: what happened, a way to see it in Photos, and undo.
 struct ResultCard: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.requestReview) private var requestReview
     var plan: ChangePlan
     @State private var confirmUndo = false
     @State private var appeared = false
     @State private var photosDidNotOpen = false
     @Environment(\.openURL) private var openURL
-    private static let reviewKey = "review.askedAfterFirstAlbums"
 
     var body: some View {
         // What really happened (photos that were no longer there are not counted).
@@ -361,16 +359,17 @@ struct ResultCard: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .onAppear { appeared = true }
-        .task {
-            // Ask for a rating once, at the moment the first albums are done (never after errors).
-            let summary = plan.appliedSummary
-            guard !UITestSupport.isRunning, summary.newAlbums + summary.extendedAlbums > 0,
-                  !plan.steps.contains(where: { if case .failed = $0.state { true } else { false } }),
-                  !UserDefaults.standard.bool(forKey: Self.reviewKey) else { return }
-            UserDefaults.standard.set(true, forKey: Self.reviewKey)
-            try? await Task.sleep(for: .seconds(2))
-            requestReview()
+        .onAppear {
+            appeared = true
+            ReviewPrompt.shared.screenAppeared()
+        }
+        // The App Store rating question never covers the result: it may come only once the user
+        // has left it (and its receipt), a moment later (`ReviewPrompt`, `ReviewPromptPolicy`).
+        .onDisappear { ReviewPrompt.shared.screenDisappeared() }
+        .task(id: plan.id) {
+            // Seen: on screen for a moment, again for each plan the card shows (an undo).
+            do { try await Task.sleep(for: ReviewPrompt.seenAfter) } catch { return }
+            ReviewPrompt.shared.resultSeen(plan)
         }
         .confirmationDialog("Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
             Button("Rückgängig machen", role: .destructive) {

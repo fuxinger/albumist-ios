@@ -49,6 +49,10 @@ jobs:
         run: python3 .github/scripts/check_strings.py .
       - name: Code map lists every Swift file
         run: python3 scripts/gen_codemap.py --check
+      - name: CI scripts (unit tests)
+        # The retry rule of the UI jobs (ui_tests.py) and the test gate (ci_gate.py), with log
+        # snippets of real runs: a simulator failure is repeated, a real finding never.
+        run: python3 -m unittest discover -s .github/scripts/tests -v
       - name: Test-plan map names real tests
         # Warnings only: a stale name in docs/TEST_COVERAGE_MAP.txt makes a case look untested
         # in the job summary, it does not make the app worse.

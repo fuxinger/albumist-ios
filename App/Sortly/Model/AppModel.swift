@@ -2298,8 +2298,12 @@ final class AppModel {
         // albums that wait for a preview, a step Photos refused) is said, not left to be found
         // in the history.
         if let finished = execution.finished, finished.id == interrupted.id, finished.status == .completedWithErrors {
-            message = .failure([String(localized: "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Einstellungen › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen."),
-                                execution.failure].compactMap { $0 }.joined(separator: "\n\n"))
+            // Keeps a reason said before, e.g. that the results could not be stored (finalize
+            // put it into `message`), as the undo of an interrupted plan does (second review of
+            // resume-fill, D2).
+            let reasons = [execution.failure, message?.text].compactMap { $0 }
+            message = .failure(([String(localized: "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Einstellungen › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen.")]
+                                + reasons.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }).joined(separator: "\n\n"))
         }
         // Read again, not cleared: a plan that stopped once more stays offered, and so does
         // another one that is still open (review of 6c6ef79).

@@ -100,7 +100,9 @@ public struct PlanValidator: Sendable {
 ///   media it is about to add or remove (the intent);
 /// - a step found `running` after a restart is reconciled with the real library first:
 ///   nothing is created twice (Scenario J), media the user took out after an interrupted
-///   add stay out, and an album found by name is never claimed as Albumist's own;
+///   add stay out, and an album found by name is never claimed as Albumist's own; an add the
+///   interruption kept from reaching Photos is completed only in an album this plan created
+///   (nothing of it arrived there), never in the user's own albums without a preview;
 /// - success is recorded only after the change was read back and verified, and the record
 ///   keeps exactly what changed, so undo and the managed-album list never act on media the
 ///   user added or removed by hand;
@@ -356,8 +358,10 @@ public actor ChangeExecutor {
                 // After an interruption the library alone cannot tell whether the request went
                 // through: a photo in the album may be Albumist's or the user's, a missing one
                 // may never have been added or been taken out by the user (audit 2, 1.1, 1.2).
-                // So nothing is added again by itself: "Fehlendes erneut versuchen" shows the
-                // missing photos first and adds them only after the user confirms.
+                // In the user's albums nothing is added again by itself: "Fehlendes erneut
+                // versuchen" shows the missing photos first and adds them only after the user
+                // confirms. In an album this plan created, an add of which nothing arrived is
+                // completed (below).
                 let arrived = intent.filter { album.assetIDs.contains($0) }
                 if intent.isEmpty {
                     plan.record?.settle(step.id, [])
@@ -719,9 +723,10 @@ extension ChangePlan {
         })
     }
 
-    /// The plan with the user's newer decisions applied to the steps that have not run yet:
-    /// before an interrupted plan is resumed, photos the user has taken out of an album since
-    /// (or excluded) are not added anymore.
+    /// The plan with the user's newer decisions applied to the steps that have not run yet,
+    /// and to the add step an interruption left running: before an interrupted plan is resumed,
+    /// photos the user has taken out of an album since (or ignored or excluded) are not added
+    /// anymore.
     /// Albums for suggestions whose album the user deleted since are not made again, nor the
     /// folders that would only have held them, nor filled (audit 2, 1.3).
     public func respecting(_ overrides: OverrideSet) -> ChangePlan {
@@ -758,9 +763,17 @@ extension ChangePlan {
                 foldersChanged = true
             }
         }
+        // Also the add step the interruption left running: in an album the plan made itself,
+        // "Rest anlegen" may still add its photos (see `perform`), and photos the user ignored
+        // or excluded since are not among them (second review of resume-fill, D1). Its journaled
+        // intent stays as it was; the reconciliation reads that, not this list.
         for index in copy.steps.indices {
-            guard copy.steps[index].state == .pending, case .addAssets(let ref, let assets) = copy.steps[index].operation else { continue }
-            if case .planned(let key) = ref, dropped.contains(key) {
+            let open: Bool = switch copy.steps[index].state {
+            case .pending, .running: true
+            default: false
+            }
+            guard open, case .addAssets(let ref, let assets) = copy.steps[index].operation else { continue }
+            if copy.steps[index].state == .pending, case .planned(let key) = ref, dropped.contains(key) {
                 copy.steps[index].state = .skipped(reason: StepState.deletedByUserReason)
                 continue
             }

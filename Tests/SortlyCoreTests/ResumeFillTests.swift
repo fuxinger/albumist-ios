@@ -75,6 +75,32 @@ struct ResumeFillTests {
         #expect(RetryPlanner().retryPlan(for: resumed, current: try await lib.currentInventory()) == nil)
     }
 
+    /// A photo the user ignored (or excluded) after the interruption is not added by "Rest
+    /// anlegen", the same as in a run started fresh (second review of resume-fill, D1).
+    @Test func photoIgnoredSinceIsNotFilledIn() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let crashed = try await interrupt(plan, lib, store, step: try newAlbumAdd(plan), afterApplying: false)
+        let ignored = OverrideSet([UserOverride(scope: .asset("x"), decision: .ignoreAsset)])
+        let resumed = try await ChangeExecutor(library: lib, store: store).execute(crashed.respecting(ignored))
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await newAlbum(lib).assetIDs == ["y"])
+        #expect(resumed.appliedAssets == ["y"])
+    }
+
+    /// Ignoring photos does not change what the user's own album gets on resume: still
+    /// nothing without a preview, and the journaled intent is what is checked.
+    @Test func ignoredPhotoDoesNotTouchTheUsersAlbumOnResume() async throws {
+        let (lib, plan) = try await setup(extendOwn: true)
+        let store = InMemoryPlanStore()
+        let own = try #require(plan.steps.firstIndex { if case .addAssets(.existing("sommer"), _) = $0.operation { true } else { false } })
+        let crashed = try await interrupt(plan, lib, store, step: own, afterApplying: false)
+        let ignored = OverrideSet([UserOverride(scope: .asset("z"), decision: .ignoreAsset)])
+        let resumed = try await ChangeExecutor(library: lib, store: store).execute(crashed.respecting(ignored))
+        #expect(try await lib.currentInventory()["sommer"]?.assetIDs == ["o"])
+        #expect(resumed.steps[own].state == .failed(reason: StepState.unclearReason))
+    }
+
     /// The user's own album gets nothing without a preview, while the plan's own album next to
     /// it is filled in the same resume.
     @Test func userAlbumUntouched() async throws {
@@ -160,6 +186,7 @@ struct ResumeFillTests {
         let crashed = try await interrupt(plan, lib, store, step: add, afterApplying: false)
         let executor = ChangeExecutor(library: lib, store: store)
         let resumed = try await executor.execute(crashed.respecting(OverrideSet()))
+        #expect(resumed.appliedAssets.contains("x"))
         let album = try await newAlbum(lib)
         await lib.userEdit { inv in if var a = inv[album.id] { a.assetIDs.insert("u"); inv.upsert(a) } }
 

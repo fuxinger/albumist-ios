@@ -43,6 +43,8 @@ struct StatusAndDecisionTests {
             proposals: [
                 AlbumProposal(id: SortlyID("p"), kind: .trip, title: "Rom", assetIDs: [trip]),
                 AlbumProposal(id: SortlyID("c"), kind: .placeCollection(.country), title: "Deutschland", assetIDs: [home]),
+                // Italy was visited more than once: its own country album, not yet made.
+                AlbumProposal(id: SortlyID("it"), kind: .placeCollection(.country), title: "Italien", assetIDs: [trip]),
             ],
             matches: [SortlyID("p"): match(.alreadyComplete)]
         )

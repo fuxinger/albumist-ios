@@ -18,7 +18,36 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
     public var generatedAt: Date
     public var scope: OrganizationScope
     public var proposals: [AlbumProposal]
+    /// Matches of the shown and of the dismissed suggestions.
     public var matches: [SortlyID: MatchResult]
+    /// Suggestions the user dismissed: never shown, but an own album that fits one still
+    /// counts as sorted (`Suggestions`).
+    public var dismissed: [AlbumProposal] = []
+    /// Albums that stand for photos without an album of their own (`StandIn`).
+    public var standIns: [StandIn] = []
+
+    public init(generatedAt: Date, scope: OrganizationScope, proposals: [AlbumProposal], matches: [SortlyID: MatchResult],
+                dismissed: [AlbumProposal] = [], standIns: [StandIn] = []) {
+        self.generatedAt = generatedAt
+        self.scope = scope
+        self.proposals = proposals
+        self.matches = matches
+        self.dismissed = dismissed
+        self.standIns = standIns
+    }
+
+    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns }
+
+    /// Snapshots stored before dismissed suggestions and stand-ins were kept still load.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try c.decode(Date.self, forKey: .generatedAt)
+        scope = try c.decode(OrganizationScope.self, forKey: .scope)
+        proposals = try c.decode([AlbumProposal].self, forKey: .proposals)
+        matches = try c.decode([SortlyID: MatchResult].self, forKey: .matches)
+        dismissed = try c.decodeIfPresent([AlbumProposal].self, forKey: .dismissed) ?? []
+        standIns = try c.decodeIfPresent([StandIn].self, forKey: .standIns) ?? []
+    }
 }
 
 /// Runs the analysis stages in a fixed, resumable order (prompt §13, §14):
@@ -134,6 +163,8 @@ public actor AnalysisPipeline {
         /// Version of the masks the stored texts went through (see `TextMinimizer.maskVersion`).
         static let textMaskVersion = "analysis.textMaskVersion"
         static let proposals = "analysis.proposals"
+        /// Photos taken where the user lives (`TripAnalysis.atHome`), from the last analysis.
+        static let home = "analysis.home"
         /// The trial run's year chosen at the start (kept by "Analyse neu aufbauen").
         static let scope = "user.analysisScope"
     }
@@ -380,6 +411,7 @@ public actor AnalysisPipeline {
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
+        try await store.setValue(tripAnalysis.atHome, forKey: Key.home)
         report.completedStages.append(.patterns)
         onProgress(Progress(stage: .patterns, completed: 1, total: 1))
 
@@ -930,18 +962,31 @@ public actor AnalysisPipeline {
             // Like trips: a place with photos in the trial year comes with all its photos.
             recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) }
         )
-        let proposals = ProposalEngine(settings: settings, calendar: calendar).proposals(for: analysis, overrides: overrides)
-        var matches = AlbumMatcher().match(proposals, against: inventory, overrides: overrides,
-                                           assignments: Self.assignments(try await store.managedAlbums()))
+        let suggestions = ProposalEngine(settings: settings, calendar: calendar).suggestions(for: analysis, overrides: overrides)
+        var matches = Self.match(suggestions.open, dismissed: suggestions.dismissed, against: inventory, overrides: overrides,
+                                 assignments: Self.assignments(try await store.managedAlbums()))
         if generation != albumGeneration {
             // A plan was applied while this ran: match against the albums as they are now, or
             // the suggestions would offer albums that were just created.
-            matches = AlbumMatcher().match(proposals, against: try await store.loadInventory(), overrides: OverrideSet(try await store.overrides()),
-                                           assignments: Self.assignments(try await store.managedAlbums()))
+            matches = Self.match(suggestions.open, dismissed: suggestions.dismissed, against: try await store.loadInventory(),
+                                 overrides: OverrideSet(try await store.overrides()), assignments: Self.assignments(try await store.managedAlbums()))
         }
-        let snapshot = ProposalSnapshot(generatedAt: Date(), scope: scope, proposals: proposals, matches: matches)
+        let snapshot = ProposalSnapshot(generatedAt: Date(), scope: scope, proposals: suggestions.open, matches: matches,
+                                        dismissed: suggestions.dismissed, standIns: suggestions.standIns)
         try await store.setValue(snapshot, forKey: Key.proposals)
         return snapshot
+    }
+
+    /// The shown suggestions are matched on their own, as always. The dismissed ones are
+    /// matched together with them, so an album that spans several trips stays a broader
+    /// collection for a dismissed trip too; only their results are taken from that pass.
+    static func match(_ open: [AlbumProposal], dismissed: [AlbumProposal], against inventory: CollectionInventory,
+                      overrides: OverrideSet, assignments: [SortlyID: CollectionID]) -> [SortlyID: MatchResult] {
+        var matches = AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments)
+        guard !dismissed.isEmpty else { return matches }
+        let all = AlbumMatcher().match(open + dismissed, against: inventory, overrides: overrides, assignments: assignments)
+        for p in dismissed { matches[p.id] = all[p.id] }
+        return matches
     }
 
     /// Facts for every asset from the stored results (also used by search and status).
@@ -989,7 +1034,8 @@ public actor AnalysisPipeline {
             trips: trips,
             frequentPlaces: frequent,
             groups: groups,
-            inventory: inventory
+            inventory: inventory,
+            home: try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
         )
     }
 
@@ -1020,8 +1066,8 @@ public actor AnalysisPipeline {
         guard var snapshot = try await latestProposals() else { return nil }
         let inventory = try await store.loadInventory()
         let overrides = OverrideSet(try await store.overrides())
-        snapshot.matches = AlbumMatcher().match(snapshot.proposals, against: inventory, overrides: overrides,
-                                                assignments: Self.assignments(try await store.managedAlbums()))
+        snapshot.matches = Self.match(snapshot.proposals, dismissed: snapshot.dismissed, against: inventory, overrides: overrides,
+                                      assignments: Self.assignments(try await store.managedAlbums()))
         try await store.setValue(snapshot, forKey: Key.proposals)
         return snapshot
     }

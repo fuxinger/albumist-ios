@@ -21,7 +21,11 @@ name: TestFlight
 # CI's job when that is done), and a commit whose Linux or iOS tests fail never starts it.
 # (`ci_gate.py --linux` would start it after CI's Linux jobs instead, ~15 min earlier, at the
 # cost of a fifth Mac job beside CI and UI; not needed while the UI run is the long part.)
-# The archive artifact is deleted at the end of the run.
+# The archive artifact is deleted at the end of the run. It holds the unsigned app with the
+# team id in its build settings; a team id is not secret (it is in the signature of every app
+# the team ships), and DEVELOPMENT_TEAM stays in the archive step because the export has only
+# been proven with it. Because of the deletion, after a failed upload use "Re-run all jobs"
+# (it archives again); "Re-run failed jobs" fails by design, the archive is gone.
 #
 # Why not `workflow_run`: that trigger only works from the workflow file on the default branch
 # (main), which lags behind the release branch, and it would run fork-PR code with these
@@ -234,9 +238,6 @@ jobs:
     if: needs.gate.outputs.ok == 'true' && needs.archive.result == 'success' && (github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main')
     runs-on: xcode-27
     timeout-minutes: 30
-    permissions:
-      contents: read
-      actions: read # gh run download (the archive of this run)
     # Uploads run one after another and are never cancelled half way; a newer one waits.
     concurrency:
       group: testflight-upload
@@ -257,11 +258,14 @@ jobs:
           echo "KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
           echo "ARCHIVE=$RUNNER_TEMP/release/Albumist.xcarchive" >> "$GITHUB_ENV"
           echo "EXPORT_OPTIONS=$RUNNER_TEMP/ExportOptions.plist" >> "$GITHUB_ENV"
+      - name: Download the archive of this run
+        # v8 is the download action that pairs with upload-artifact v7 (its README).
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: testflight-archive
+          path: ${{ runner.temp }}/download
       - name: Archive of the gated commit
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name testflight-archive --dir "$RUNNER_TEMP/download"
           mkdir -p "$RUNNER_TEMP/release"
           tar -xzf "$RUNNER_TEMP/download/release-archive.tgz" -C "$RUNNER_TEMP/release"
           cat "$RUNNER_TEMP/release/build-info.txt"

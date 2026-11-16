@@ -320,7 +320,7 @@ struct ProposalDetailView: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .contentShape(Rectangle())
                     }
-                    .disabled(model.analysis.isRunning || model.execution.isRunning)
+                    .disabled(!model.canChangeHome)
                     .accessibilityIdentifier("proposal.oftenHere")
                     .confirmationDialog("Keine Reise?", isPresented: $confirmOftenHere, titleVisibility: .visible) {
                         Button("Keine Reise, hier bin ich öfter") { answerOftenHere(true) }
@@ -377,17 +377,36 @@ struct ProposalDetailView: View {
                 .accessibilityIdentifier("proposal.oftenHere.yes")
             Button("Nein, das sind Reisen") { answerOftenHere(false) }
                 .buttonStyle(SecondaryButtonStyle())
+                // While a change in "Dein Zuhause" is applied, like "Ja": the answer would be
+                // stored beside it and the question come back until the suggestions are new.
+                .disabled(model.homeChangeRunning)
                 .accessibilityIdentifier("proposal.oftenHere.no")
-            // Only "Ja" waits: it plans the trips anew, "Nein" changes nothing (design review
-            // N8 found the two buttons behaving differently without a word why).
-            if model.analysis.isRunning || model.execution.isRunning {
-                Text(model.execution.isRunning
-                     ? LocalizedStringKey("„Ja“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
-                     : LocalizedStringKey("„Ja“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu."))
+            // Why a button waits (design review N8 found the two buttons behaving differently
+            // without a word why): "Ja" plans the trips anew, "Nein" changes nothing.
+            if let reason = oftenHereWaitReason {
+                Text(reason)
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// Why "Ja, hier bin ich öfter" (and during a change in "Dein Zuhause" also "Nein") waits;
+    /// nil when both can be tapped.
+    private var oftenHereWaitReason: LocalizedStringKey? {
+        if model.homeChangeRunning {
+            return LocalizedStringKey("Gleich wieder möglich: Albumist passt gerade die Vorschläge an deine Änderung in „Dein Zuhause“ an.")
+        }
+        if model.analysisResetting {
+            return LocalizedStringKey("„Ja“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu.")
+        }
+        if model.execution.isRunning {
+            return LocalizedStringKey("„Ja“ geht, sobald das Anlegen fertig ist, denn danach plant Albumist deine Reisen neu.")
+        }
+        if model.analysis.isRunning {
+            return LocalizedStringKey("„Ja“ geht, sobald die Analyse fertig ist, denn danach plant Albumist deine Reisen neu.")
+        }
+        return nil
     }
 
     /// A "Ja" makes this suggestion go away when the suggestions are made again (like every

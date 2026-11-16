@@ -212,8 +212,10 @@ struct SettingsView: View {
         .confirmationDialog("Analyse neu aufbauen?", isPresented: $confirmReset, titleVisibility: .visible) {
             Button("Neu aufbauen", role: .destructive) {
                 Task {
-                    await model.resetAnalysis()
-                    model.startAnalysis(userInitiated: true)
+                    // Refused during a change in "Dein Zuhause": only the busy message, no run.
+                    if await model.resetAnalysis() {
+                        model.startAnalysis(userInitiated: true)
+                    }
                 }
             }
         } message: {

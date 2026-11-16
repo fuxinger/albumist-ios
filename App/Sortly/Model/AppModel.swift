@@ -352,8 +352,9 @@ final class AppModel {
     /// Runs in a row that ended early by themselves (an error, Vision failing): tried again
     /// a little later instead of only at the next start of the app.
     @ObservationIgnored private var unattendedRetries = 0
-    /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile.
-    @ObservationIgnored private var analysisResetting = false
+    /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile. Observed: the
+    /// suggestion's "Ja, hier bin ich öfter" says why it waits.
+    private(set) var analysisResetting = false
     /// One plan at a time (apply, resume, undo, take back): claimed before the first await of
     /// every entry point, released when it ends.
     @ObservationIgnored private var executionClaimed = false
@@ -2501,12 +2502,15 @@ final class AppModel {
 
     /// "Analyse neu aufbauen": a running analysis stops first and is waited for, so it cannot
     /// write old results into the fresh tables; Spotlight forgets the old results too.
-    func resetAnalysis() async {
+    /// Clears the analysis for "Analyse neu aufbauen". false when it was refused (a change in
+    /// "Dein Zuhause" is being applied; the busy message is shown): the caller starts no run.
+    @discardableResult
+    func resetAnalysis() async -> Bool {
         // Not while a change in "Dein Zuhause" makes the suggestions again (the pipeline would
         // wait for it; the settings screen and the overview would show it half done).
         if homeChangeRunning {
             message = .busy
-            return
+            return false
         }
         // No new run starts while the tables are cleared.
         analysisResetting = true
@@ -2532,6 +2536,7 @@ final class AppModel {
         snapshot = nil
         SpotlightIndex.clear()
         await refreshDerived()
+        return true
     }
 }
 

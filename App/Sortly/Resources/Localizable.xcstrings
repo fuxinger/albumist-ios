@@ -11693,12 +11693,32 @@
         }
       }
     },
-    "Vorgeschlagen nach deinen Fotos. Fotos von davor misst Albumist weiter wie bisher, so wird die Zeit am alten Wohnort keine Reise." : {
+    "Vorgeschlagen nach deinen Fotos. Für Fotos von davor bleibt alles wie bisher." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Suggested from your photos. Albumist keeps judging earlier photos as before, so the time where you lived before does not become a trip."
+            "value" : "Suggested from your photos. Nothing changes for photos from before then."
+          }
+        }
+      }
+    },
+    "Gleich wieder möglich: Albumist passt gerade die Vorschläge an deine Änderung in „Dein Zuhause“ an." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Possible again in a moment: Albumist is updating the suggestions for your change in “Your home”."
+          }
+        }
+      }
+    },
+    "„Ja“ geht, sobald die Analyse neu aufgebaut ist, denn danach plant Albumist deine Reisen neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“Yes” is available once the analysis has been rebuilt, because Albumist then plans your trips again."
           }
         }
       }

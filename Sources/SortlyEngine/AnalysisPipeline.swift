@@ -224,6 +224,13 @@ public actor AnalysisPipeline {
     /// Bumped whenever the stored suggestions are replaced: `rematch()` matches again when new
     /// suggestions came while it matched, instead of writing older ones back.
     private var proposalsGeneration = 0
+    /// Changes in "Dein Zuhause" between checking for a `PendingHomeChange` and storing
+    /// themselves: while one is, suggestions that finish keep the mark (they could remove the one
+    /// the change saw and leave it unmarked).
+    private var homeChangesBeingStored = 0
+    /// Tests only: runs after `setHomeChange` checked for a pending change, before it stores.
+    var afterPendingCheck: (@Sendable () async -> Void)?
+    func setAfterPendingCheck(_ hook: (@Sendable () async -> Void)?) { afterPendingCheck = hook }
     /// Online place lookups per normal run; the rest waits for the overnight refinement run.
     /// Keeps the first analysis from spending up to an hour on town names before photos are
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
@@ -1118,7 +1125,7 @@ public actor AnalysisPipeline {
             let notice = try await homeChangeNotice()?.followed(by: snapshot, held: heldIDs, date: now())
                 ?? HomeChangeNotice(before: pending.before, after: snapshot, held: heldIDs, date: now())
             // A change stored while these suggestions were made stays pending for the next step.
-            if homeChange == homeGeneration {
+            if homeChange == homeGeneration, homeChangesBeingStored == 0 {
                 if notice.isEmpty { removing.insert(Self.homeChangeNoticeKey) } else { values[Self.homeChangeNoticeKey] = notice }
                 removing.insert(Key.pendingHomeChange)
             }
@@ -1211,9 +1218,14 @@ public actor AnalysisPipeline {
             changes = changes || old.oftenHere != places.oftenHere
         }
         guard !values.isEmpty else { return }
+        // From the check for a pending change to the bump after the write, suggestions that
+        // finish keep the mark (see makeProposals): the check, the write and the bump act as one.
+        if changes { homeChangesBeingStored += 1 }
+        defer { if changes { homeChangesBeingStored -= 1 } }
         if changes, try await pendingHomeChange() == nil, let current = try await latestProposals() {
             values[Key.pendingHomeChange] = PendingHomeChange(before: current, date: now())
         }
+        if changes, let afterPendingCheck { await afterPendingCheck() }
         try await store.setValues(values)
         // After the write, and only when something the suggestions are made from changed ("Nein,
         // das sind Reisen" changes nothing): suggestions made from what was read before stay

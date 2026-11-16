@@ -297,7 +297,15 @@ struct HomePlacePicker: View {
     var onPick: (Choice) -> Void
     @State private var query = ""
     /// The town picked as the current home, asking since when.
-    @State private var askingSince: HomeCandidate?
+    /// The place picked as home and the proposed "Seit wann": worked out once when it is
+    /// picked (it goes over every photo), not on every redraw.
+    @State private var askingSince: SinceQuestion?
+
+    struct SinceQuestion: Identifiable {
+        var candidate: HomeCandidate
+        var proposed: Date
+        var id: String { candidate.id }
+    }
 
     private var candidates: [HomeCandidate] { HomeCandidates.filter(model.homeCandidates, query: query) }
     /// Picking the current home changes it at once: not while Albumist is busy. The other
@@ -336,7 +344,7 @@ struct HomePlacePicker: View {
                 ForEach(candidates) { candidate in
                     Button {
                         if purpose == .current {
-                            askingSince = candidate
+                            askingSince = SinceQuestion(candidate: candidate, proposed: model.homeStayStart(candidate))
                         } else {
                             onPick(.place(candidate))
                             dismiss()
@@ -359,10 +367,10 @@ struct HomePlacePicker: View {
         .searchable(text: $query, prompt: Text("Ort suchen"))
         .navigationTitle(purpose == .current ? Text("Zuhause wählen") : Text("Ort wählen"))
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $askingSince) { candidate in
-            HomeSinceSheet(candidate: candidate, proposed: model.homeStayStart(candidate)) { since in
+        .sheet(item: $askingSince) { question in
+            HomeSinceSheet(candidate: question.candidate, proposed: question.proposed) { since in
                 askingSince = nil
-                onPick(.home(candidate, since: since))
+                onPick(.home(question.candidate, since: since))
                 dismiss()
             }
         }
@@ -419,7 +427,7 @@ struct HomeSinceSheet: View {
                     DatePicker("Seit wann wohnst du dort?", selection: $since, in: ...Date.now, displayedComponents: .date)
                         .accessibilityIdentifier("home.since")
                 } footer: {
-                    Text("Vorgeschlagen nach deinen Fotos. Fotos von davor misst Albumist weiter wie bisher, so wird die Zeit am alten Wohnort keine Reise.")
+                    Text("Vorgeschlagen nach deinen Fotos. Für Fotos von davor bleibt alles wie bisher.")
                 }
             }
             .navigationTitle("Zuhause festlegen")

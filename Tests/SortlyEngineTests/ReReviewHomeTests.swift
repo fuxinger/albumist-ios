@@ -100,4 +100,52 @@ struct ReReviewChangeAfterAMovePipelineTests {
         let homeBefore = try await s.store.value(Set<AssetID>.self, forKey: "analysis.home")?.count ?? 0
         #expect(new.filter { $0.kind == .trip }.isEmpty)
     }
+    /// Visits to the partner in the new town every other weekend since 2024, moved there on
+    /// 1.9.2026, picked under "Ändern" with the proposed date: no trip appears, in particular
+    /// none over the Munich years.
+    @Test func visitsBeforeTheMoveAddNoTripAfterPickingTheNewTown() async throws {
+        let s = try HomePipelineTests().setup { lib in
+            lib.daily(from: "2019-01-01", to: "2026-08-31", at: Fixture.Places.munichHome, perDay: 2, hour: 19)
+            lib.daily(from: "2024-01-06", to: "2026-08-29", at: HomePipelineTests.hamburg, perDay: 6, everyNthDay: 14, hour: 11)
+            lib.daily(from: "2024-01-07", to: "2026-08-30", at: HomePipelineTests.hamburg, perDay: 6, everyNthDay: 14, hour: 11)
+            lib.daily(from: "2026-09-01", to: "2026-11-15", at: HomePipelineTests.hamburg, perDay: 2, hour: 19)
+        }
+        _ = try await s.pipeline.run()
+        let before = try #require(try await s.pipeline.latestProposals())
+        let facts = try await s.pipeline.currentFacts()
+        let hamburg = HomePlace(center: HomePipelineTests.hamburg, components: HomeName.components(near: HomePipelineTests.hamburg, facts: facts))
+        let since = try #require(HomeCandidates.stayStart(near: HomePipelineTests.hamburg, assets: facts.map(\.asset), calendar: Fixture.calendar))
+        #expect(since == Fixture.date("2026-09-01"))
+        try await s.pipeline.setHomeSettings(HomeSettings().choosing(hamburg, from: since, date: now))
+        _ = try await s.pipeline.resuggest()
+        let after = try #require(try await s.pipeline.latestProposals())
+        let beforeIDs = Set(before.proposals.map(\.id))
+        #expect(after.proposals.filter { !beforeIDs.contains($0.id) && $0.kind == .trip }.isEmpty)
+    }
+}
+
+@Suite("Round 3: storing a home change")
+struct HomeChangeMarkTests {
+    let now = Fixture.date("2026-11-16")
+
+    /// Suggestions that finish between the check for a pending change and the write of a new
+    /// change (the actor waits for the store in between) keep the mark: the new change is never
+    /// stored without one, and the next suggestions apply it.
+    @Test func suggestionsFinishingWhileAChangeIsStoredKeepTheMark() async throws {
+        let s = try HomePipelineTests().setup { lib in _ = HomePipelineTests.gardaEveryMonth(&lib) }
+        let p = s.pipeline
+        _ = try await p.run()
+        let parents = try await p.recurringPlaceAnswers()
+            .addingPersonalPlace(at: Fixture.Places.gardaLake, name: "Malcesine", kind: .parents, label: nil, date: now)
+        // A first change, not yet applied: the mark is there.
+        try await p.setRecurringPlaceAnswers(parents)
+        #expect(try await p.pendingHomeChange() != nil)
+        // A second change; suggestions for the first one finish right after its check.
+        await p.setAfterPendingCheck { _ = try? await p.resuggest() }
+        try await p.setHomeSettings(HomeSettings().choosing(HomePlace(center: Fixture.Places.munichHome, components: nil), from: nil, date: now))
+        await p.setAfterPendingCheck(nil)
+        #expect(try await p.pendingHomeChange() != nil)
+        _ = try await p.resuggest()
+        #expect(try await p.pendingHomeChange() == nil)
+    }
 }

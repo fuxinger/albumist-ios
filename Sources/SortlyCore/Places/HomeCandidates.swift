@@ -67,37 +67,48 @@ public enum HomeCandidates {
         .sorted { ($0.photoDays, $0.photoCount, $1.id) > ($1.photoDays, $1.photoCount, $0.id) }
     }
 
-    /// A stretch away from a place at least this long ends a stay there: a move, not a trip.
-    public static let moveGap: TimeInterval = 28 * 86_400
+    /// A stay ends at a stretch of this many photo days (days without photos are not counted)…
+    public static let moveStretchDays = 28
+    /// …of which at least this share are elsewhere: four of five, so a stretch elsewhere clearly
+    /// outnumbers the days near the place. Visits every two or three weeks before a move (two
+    /// days in 14 or 21) do not stop it; a holiday of three weeks among a month of photo days
+    /// (21 of 28) does not end the stay at home.
+    public static let moveShareElsewhere = 0.8
 
     /// When the user's current stay at `center` began, for "Seit wann wohnst du dort?" under
-    /// "Ändern": the first day of the latest run of photo days near it (within `radius`). Only
-    /// a stretch of at least `moveGap` with photos elsewhere and none near it ends the run, so
-    /// trips do not; days without photos say nothing. Too late a date does no harm (before it
-    /// the detection decides), too early would make the years in the old town a trip.
+    /// "Ändern". Each day with photos counts near the place (within `radius`) or elsewhere, by
+    /// where most of its photos are; days without photos say nothing. Going back from the newest
+    /// day near the place, the stay ends at the first stretch of `moveStretchDays` photo days of
+    /// which at least `moveShareElsewhere` are elsewhere; it starts on the first day near the
+    /// place after the last day elsewhere in that stretch. Without such a stretch: the first day
+    /// near the place. Too late a date does little harm (before it the detection decides, and
+    /// the user can change it), too early would make the time in the old town a trip.
     public static func stayStart(near center: GeoCoordinate, assets: some Sequence<AssetSnapshot>,
                                  radius: Double = TripDetector.Configuration().homeRadiusMeters,
                                  calendar: Calendar = .sortlyDefault) -> Date? {
-        var near = Set<Date>(), away = Set<Date>()
+        var photos: [Date: (near: Int, elsewhere: Int)] = [:]
         for asset in assets {
             guard let c = asset.usableLocation, let date = asset.creationDate, !asset.isScreenshotLike else { continue }
             let day = calendar.startOfDay(for: date)
-            if GeoMath.distance(c, center) <= radius { near.insert(day) } else { away.insert(day) }
+            if GeoMath.distance(c, center) <= radius { photos[day, default: (0, 0)].near += 1 } else { photos[day, default: (0, 0)].elsewhere += 1 }
         }
-        guard var start = near.max() else { return nil }
-        // Newest first: near days extend the stay, a long enough stretch of days only elsewhere ends it.
-        var awayLatest: Date?
-        for day in near.union(away).sorted(by: >) where day < start {
-            if near.contains(day) {
-                awayLatest = nil
-                start = day
-            } else {
-                let latest = awayLatest ?? day
-                awayLatest = latest
-                if latest.timeIntervalSince(day) + 86_400 >= moveGap { break }
-            }
+        let byDay = photos.mapValues { $0.near >= $0.elsewhere }
+        guard let newest = byDay.filter(\.value).keys.max() else { return nil }
+        // Newest first, from the newest day near the place.
+        let days = byDay.keys.filter { $0 <= newest }.sorted(by: >)
+        let isNear = days.map { byDay[$0]! }
+        let window = moveStretchDays
+        let limit = Int((Double(window) * (1 - moveShareElsewhere)).rounded(.down))
+        var nearInWindow = 0
+        for i in days.indices {
+            if isNear[i] { nearInWindow += 1 }
+            if i >= window, isNear[i - window] { nearInWindow -= 1 }
+            guard i + 1 >= window, nearInWindow <= limit else { continue }
+            // The stretch is days[i - window + 1 ... i]; its newest day elsewhere ends it.
+            let lastElsewhere = (i - window + 1 ... i).first { !isNear[$0] }!
+            return days[(0..<lastElsewhere).last { isNear[$0] }!]
         }
-        return start
+        return isNear.lastIndex(of: true).map { days[$0] }
     }
 
     /// Where the photos of a place are densest: the median of the photos within

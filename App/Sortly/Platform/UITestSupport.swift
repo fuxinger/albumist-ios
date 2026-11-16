@@ -85,7 +85,7 @@ struct SlowedAnalyzer: ContentAnalyzing {
 ///
 /// Lines (kept few, so the 40 printed lines hold them):
 /// - `UI_MAIN_STALL 12.3 s from 18:31:05.2 UTC in <section>`: every stall of 2 s or more, with
-///   its start (the test prints `UI_CLOCK` lines on the same clock) and the marked section the
+///   its start (the test prints `UI_FACT clock` lines on the same clock) and the marked section the
 ///   main thread was in while it did not answer (`unmarked`: SwiftUI, UIKit or XCTest's own
 ///   work, such as an accessibility audit, which runs on the app's main thread)
 /// - `UI_MAIN_STALL 1-2 s in <section>`: shorter stalls, counted per section
@@ -226,7 +226,7 @@ final class MainThreadStallWatch: @unchecked Sendable {
     private static func seconds(_ nanoseconds: UInt64) -> Double { Double(nanoseconds) / 1_000_000_000 }
     private static func text(_ seconds: Double) -> String { String(format: "%.1f", seconds) }
 
-    /// Time of day in UTC with tenths ("18:31:05.2"), as the UI tests print it (`UI_CLOCK`).
+    /// Time of day in UTC with tenths ("18:31:05.2"), as the UI tests print it (`UI_FACT clock`).
     static func clock(_ since1970: Double) -> String {
         let day = since1970.truncatingRemainder(dividingBy: 86_400)
         let hours = Int(day / 3600), minutes = Int(day.truncatingRemainder(dividingBy: 3600) / 60)

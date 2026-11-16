@@ -109,13 +109,25 @@ class DecideTests(unittest.TestCase):
     def test_service_interrupted_is_retried(self):
         verdict, reasons = ui_tests.decide(65, SERVICE_INTERRUPTED)
         self.assertEqual(verdict, "retry")
-        self.assertIn("CoreSimulatorService failed", reasons)
+        self.assertIn("CoreSimulatorService connection lost", reasons)
 
-    def test_runner_restart_without_crash_report_is_retried(self):
-        self.assertEqual(ui_tests.decide(65, RESTART)[0], "retry")
+    def test_runner_restart_alone_is_not_retried(self):
+        # It is also what an app hang or a runner crash without a report looks like.
+        verdict, reasons = ui_tests.decide(65, RESTART)
+        self.assertEqual(verdict, "fail")
+        self.assertIn("runner restart alone", reasons[0])
+
+    def test_runner_restart_with_a_service_error_is_retried(self):
+        log = RESTART.replace("Restarting after", "Error returned in reply from CoreSimulatorService: Connection interrupted\nRestarting after")
+        self.assertEqual(ui_tests.decide(65, log)[0], "retry")
+
+    def test_stale_service_banner_is_not_a_simulator_failure(self):
+        log = "attempting to unload a stale CoreSimulatorService job\n** TEST FAILED **\n"
+        self.assertEqual(ui_tests.decide(65, log)[0], "fail")
 
     def test_runner_restart_with_app_crash_report_is_not_retried(self):
-        verdict, reasons = ui_tests.decide(65, RESTART, ["/Users/runner/Library/Logs/DiagnosticReports/Sortly-2026-11-16-131900.ips"])
+        log = RESTART.replace("Restarting after", "Error returned in reply from CoreSimulatorService: Connection interrupted\nRestarting after")
+        verdict, reasons = ui_tests.decide(65, log, ["/Users/runner/Library/Logs/DiagnosticReports/Sortly-2026-11-16-131900.ips"])
         self.assertEqual(verdict, "fail")
         self.assertTrue(any("Sortly-2026-11-16-131900.ips" in r for r in reasons))
 
@@ -132,6 +144,12 @@ class DecideTests(unittest.TestCase):
         verdict, reasons = ui_tests.decide(65, SERVICE_AND_ASSERTION)
         self.assertEqual(verdict, "fail")
         self.assertIn("a test failed", reasons)
+
+    def test_green_pass_without_any_test_fails(self):
+        log = "Test Suite 'Selected tests' started.\n\t Executed 0 tests, with 0 failures (0 unexpected)\n** TEST EXECUTE SUCCEEDED **\n"
+        verdict, reasons = ui_tests.decide(0, log)
+        self.assertEqual(verdict, "fail")
+        self.assertIn("no test ran", reasons[0])
 
     def test_assertion_is_not_retried(self):
         self.assertEqual(ui_tests.decide(65, FLOW_ASSERTION)[0], "fail")
@@ -151,11 +169,21 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(ui_tests.decide(65, log)[0], "fail")
 
     def test_compile_error_is_not_retried(self):
-        self.assertEqual(ui_tests.decide(65, COMPILE_ERROR), ("fail", ["build failed"]))
+        self.assertEqual(ui_tests.decide(65, COMPILE_ERROR), ("fail", ["an error was recorded"]))
 
     def test_unknown_failure_is_not_retried(self):
         log = "Test Case '-[SortlyUITests.SortlyFlowUITests test2_LargeTextDarkMode]' passed (54.787 seconds).\n** TEST FAILED **\n"
         self.assertEqual(ui_tests.decide(65, log)[0], "fail")
+
+    def test_result_bundle_must_agree(self):
+        # The log only shows the simulator, but the bundle has a real issue: no repeat.
+        verdict, reasons = ui_tests.decide(65, SERVICE_INTERRUPTED, bundle=["result bundle: Crash: Sortly (4242)"])
+        self.assertEqual(verdict, "fail")
+        self.assertIn("result bundle: Crash: Sortly (4242)", reasons)
+
+    def test_unreadable_result_bundle_blocks_the_repeat(self):
+        verdict, _ = ui_tests.decide(65, AX_TIMEOUT, bundle=["result bundle not readable (no such file)"])
+        self.assertEqual(verdict, "fail")
 
     def test_simulator_gone_after_the_pass_counts_as_infra(self):
         log = "Test Case '-[SortlyUITests.SortlyFlowUITests test2_LargeTextDarkMode]' started.\n** TEST FAILED **\n"
@@ -164,7 +192,89 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(ui_tests.decide(65, log, probe=probe)[0], "retry")
 
 
+# Reviewer's adversarial cases (16.11.): each must NOT be repeated.
+R = "Restarting after unexpected exit, crash, or test timeout in SortlyFlowUITests.test1_FullFlow(); summary will include totals from previous launches.\n"
+ADVERSARIAL = {
+    "runner segv, test-named line": "Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' started.\n" + R +
+        "Testing failed:\n\tSortlyFlowUITests.test1_FullFlow(): Test crashed with signal segv.\n** TEST FAILED **\n",
+    "runner abrt, Crash: line": "Test Case '-[SortlyUITests.AccessibilityUITests test3_X]' started.\n" + R +
+        "Testing failed:\n\ttest3_X(): Crash: SortlyUITests-Runner (1234) at specialized Array.subscript\n** TEST FAILED **\n",
+    "app crash (XCTest wording)": "Test Case '-[SortlyUITests.SortlyFlowUITests test2_X]' started.\n" + R +
+        "Testing failed:\n\tAlbumist (app.albumist.ios) crashed in specialized AppModel.apply()\n** TEST FAILED **\n",
+    "test timeout": "Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' started.\n" + R +
+        "Testing failed:\n\ttest1_FullFlow(): Test exceeded execution time allowance of 10 minutes\n** TEST FAILED **\n",
+    "new-style failed line": "Test case 'SortlyFlowUITests.test1_FullFlow()' failed on 'iPhone 17 Pro' (985.9 seconds)\n" + R + "** TEST FAILED **\n",
+    "suite failed only (setUp error)": "Test Suite 'SortlyFlowUITests' failed at 2026-11-16.\nCoreSimulatorService: Connection interrupted\n** TEST FAILED **\n",
+    "issue outside test (<unknown>:0)": "<unknown>:0: error: SortlyUITests : Failed to launch app\nLost connection to testmanagerd\n** TEST FAILED **\n",
+    "A11Y_FAIL tab-separated": "A11Y_FAIL\ten overview | x\nCoreSimulatorService: Connection interrupted\n** TEST FAILED **\n",
+    "swift testing issue": "\u2718 Test foo() recorded an issue at X.swift:3\nCoreSimulatorService\n",
+    "hang: app never idles then runner killed": "Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' started.\n"
+        "    t = 214.02s     Wait for app.albumist.ios to idle\n" + R + "** TEST FAILED **\n",
+}
+
+
+class AdversarialTests(unittest.TestCase):
+    def test_none_is_repeated(self):
+        for name, log in ADVERSARIAL.items():
+            with self.subTest(name):
+                verdict, reasons = ui_tests.decide(65, log)
+                self.assertEqual(verdict, "fail", f"{name}: {reasons}")
+
+    def test_none_is_repeated_even_when_the_simulator_is_gone_afterwards(self):
+        probe = "Process spawn via launchd failed because device is not booted.\n"
+        for name, log in ADVERSARIAL.items():
+            if name == "hang: app never idles then runner killed":
+                continue  # a dead simulator after a bare restart is the one infra case (test above)
+            with self.subTest(name):
+                self.assertEqual(ui_tests.decide(65, log, probe=probe)[0], "fail")
+
+
+def case(name, result, *messages):
+    return {"nodeType": "Test Case", "name": name, "result": result,
+            "children": [{"nodeType": "Failure Message", "name": m} for m in messages]}
+
+
+def bundle(*cases, top_messages=()):
+    return {"testNodes": [{"nodeType": "Test Plan", "name": "SortlyUI", "result": "Failed", "children": [
+        {"nodeType": "UI test bundle", "name": "SortlyUITests", "result": "Failed",
+         "children": [{"nodeType": "Failure Message", "name": m} for m in top_messages] + [
+             {"nodeType": "Test Suite", "name": "SortlyFlowUITests", "result": "Failed", "children": list(cases)}]}]}]}
+
+
+class BundleTests(unittest.TestCase):
+    def test_passed_tests_and_an_infra_message_are_clean(self):
+        tree = bundle(case("test2_LargeTextDarkMode()", "Passed"),
+                      case("test1_FullFlow()", "Failed",
+                           "SortlyUITests-Runner encountered an error (Failed to install or launch the test runner. "
+                           "(Underlying Error: Error returned in reply from CoreSimulatorService: Connection interrupted))"))
+        self.assertEqual(ui_tests.bundle_findings(tree), [])
+
+    def test_crash_message_is_a_finding(self):
+        tree = bundle(case("test1_FullFlow()", "Failed", "Crash: Sortly (4242) at AppModel.apply()"))
+        self.assertEqual(len(ui_tests.bundle_findings(tree)), 1)
+
+    def test_failed_test_without_a_message_is_a_finding(self):
+        self.assertEqual(len(ui_tests.bundle_findings(bundle(case("test3_TapThroughSweep()", "Failed")))), 1)
+
+    def test_issue_outside_any_test_is_a_finding(self):
+        tree = bundle(case("test2()", "Passed"), top_messages=["Failed to launch app.albumist.ios"])
+        self.assertEqual(len(ui_tests.bundle_findings(tree)), 1)
+
+    def test_skipped_and_expected_failures_are_clean(self):
+        self.assertEqual(ui_tests.bundle_findings(bundle(case("a()", "Skipped"), case("b()", "Expected Failure"))), [])
+
+
 class SelectionTests(unittest.TestCase):
+    def test_no_repeat_when_every_named_test_passed(self):
+        log = "Test Case '-[SortlyUITests.SortlyFlowUITests test1_FullFlow]' passed (12.0 seconds).\n"
+        self.assertIsNone(ui_tests.retry_arguments(["SortlyFlowUITests/test1_FullFlow"], [], log))
+        contrast = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
+        self.assertIsNone(ui_tests.retry_arguments([contrast], [contrast], ""))
+
+    def test_repeat_of_a_named_test_that_did_not_pass(self):
+        self.assertEqual(ui_tests.retry_arguments(["SortlyFlowUITests/test1_FullFlow"], [], AX_TIMEOUT),
+                         ["-only-testing:SortlyUITests/SortlyFlowUITests/test1_FullFlow"])
+
     def test_retry_skips_the_tests_that_passed(self):
         arguments = ui_tests.retry_arguments(
             ["AccessibilityUITests"], ["AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"], RESTART)

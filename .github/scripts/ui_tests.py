@@ -16,21 +16,35 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       Runs the tests (T is "Class" or "Class/testMethod" of SortlyUITests), prints the
       report lines for the log (steps, screenshots, accessibility findings, restart context,
       crash reports, SwiftUI runtime warnings) and exits with the result.
-  classify LOG [--status N] [--crash-report F]...
-      Prints what `run` would decide for a finished pass (for trying the rules on a log).
+  classify LOG [--status N] [--crash-report F]... [--bundle-json F]
+      Prints what `run` would decide for a finished pass (for trying the rules on a log;
+      without --bundle-json the result bundle counts as clean).
 
-The retry rule (`decide`): a pass that failed is repeated ONCE, on a freshly rebooted
-simulator, and only for the tests that did not pass (-only-testing as before, plus
--skip-testing for every test that passed), when
-  - the log shows the simulator service or the test runner failing ("CoreSimulatorService:
-    Connection interrupted", "Timed out waiting for AX loaded notification", "Failed to
-    install or launch the test runner", a runner restart after an unexpected exit, ...), and
-  - nothing points at the app or the tests: no failed test, no recorded issue, no
-    accessibility finding (A11Y_FAIL), no "Fatal error", no crash report of the app or the
-    test runner (~/Library/Logs/DiagnosticReports/Sortly*.ips) written during the pass.
-Anything else is never repeated: a real failure stays red. Both passes keep their own log
-and result bundle (NAME.xcresult, NAME-retry.xcresult); the screenshots of the tests that
-passed in the first pass are printed from its log.
+The retry rule (`decide`): a pass that failed is repeated ONCE, on a simulator that is shut
+down, ERASED (app, photos, the runner's marker files) and booted and prepared again like a
+new one, and only for the tests that did not pass (-only-testing as before, plus
+-skip-testing for every test that passed), when all of these hold:
+  - the log (or a simctl call right after the pass) shows an explicit failure of the
+    simulator service or of the test runner before it ran a test: "Error returned in reply
+    from CoreSimulatorService", "CoreSimulatorService: Connection interrupted", "Timed out
+    waiting for AX loaded notification", "failed to initialize for UI testing", "Failed to
+    install or launch the test runner", "Failed to establish communication with the test
+    runner", "device is not booted", a runner stopped with SIGTERM before its first test.
+    "Restarting after unexpected exit, crash, or test timeout" alone is NOT enough: it is
+    also what an app hang or crash looks like;
+  - no log line points at the app or the tests: no failed test case or suite, no ": error:"
+    line (other than the infrastructure lines above), no recorded issue, no A11Y_FAIL, no
+    "Fatal error", "Crash:", "crashed", "Test crashed with signal ..." (other than the SIGTERM
+    above) or "execution time allowance";
+  - no crash report of the app or the test runner (~/Library/Logs/DiagnosticReports/Sortly*)
+    was written during the pass;
+  - the result bundle agrees: no test case failed with a message other than the
+    infrastructure ones above, no issue outside a test, and it can be read at all.
+Anything else is never repeated: a real failure stays red. A pass that ran no test at all
+fails (a renamed test would otherwise make an empty, green selection), and a repeat whose
+selection would be empty is not started. Both passes keep their own log and result bundle
+(NAME.xcresult, NAME-retry.xcresult); the screenshots of the tests that passed in the first
+pass are printed from its log.
 """
 from __future__ import annotations
 
@@ -54,37 +68,45 @@ REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|A11Y_|PREVIEW_JP
                     r"Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error")
 REPORT_LIMIT = 15000
 
-# The simulator service or the test runner failed (seen on the hosted Macs, Nov 2026).
+# Explicit failures of the simulator service or of the test runner before its first test
+# (seen on the hosted Macs, Nov 2026). Matched per line.
 INFRA = [
-    (re.compile(r"CoreSimulatorService"), "CoreSimulatorService failed"),
+    (re.compile(r"Error returned in reply from CoreSimulatorService|CoreSimulatorService: Connection (?:interrupted|invalid)"),
+     "CoreSimulatorService connection lost"),
     (re.compile(r"Timed out waiting for AX loaded notification"), "AX loaded notification timed out"),
     (re.compile(r"failed to initialize for UI testing", re.I), "test runner failed to initialize"),
     (re.compile(r"Failed to install or launch the test runner"), "test runner not installed or launched"),
     (re.compile(r"Failed to establish communication with the test runner"), "no connection to the test runner"),
     (re.compile(r"Test runner exited before starting test execution"), "test runner exited before the tests"),
     (re.compile(r"test runner hung before establishing connection", re.I), "test runner hung before connecting"),
-    (re.compile(r"Lost connection to testmanagerd"), "lost connection to testmanagerd"),
-    (re.compile(r"device is not booted|Unable to boot|Bad or unknown session"), "simulator not booted"),
-    (re.compile(r"Restarting after unexpected exit, crash, or test timeout"), "test runner restarted"),
+    (re.compile(r"\bdevice is not booted\b"), "simulator not booted"),
     # SIGTERM to a runner that had not started a test yet (the simulator was going away).
     (re.compile(r"Test crashed with signal term (?:before establishing connection|while preparing to run tests)"),
      "test runner stopped before the tests"),
 ]
 
-# Anything here is about the app or the tests: never repeated.
+# Anything here is about the app or the tests: never repeated. Matched per line, on lines
+# that are not one of the infrastructure lines above.
 REAL = [
-    (re.compile(r"Test Case '-\[[\w.]+ \w+\]' failed"), "a test failed"),
-    (re.compile(r": error: -\[[\w.]+ \w+\]"), "a test recorded an issue"),
-    (re.compile(r"recorded an issue"), "a test recorded an issue"),
+    (re.compile(r"Test [Cc]ase '.*' failed"), "a test failed"),
+    (re.compile(r"Test Suite '.*' failed"), "a test suite failed"),
+    (re.compile(r": error:"), "an error was recorded"),
+    (re.compile(r"recorded an issue"), "an issue was recorded"),
     (re.compile(r"with [1-9]\d* failures?\b"), "failures counted"),
-    (re.compile(r"\bA11Y_FAIL "), "accessibility finding"),
+    (re.compile(r"\bA11Y_FAIL\b"), "accessibility finding"),
     (re.compile(r"Fatal error"), "Swift runtime error (Fatal error)"),
-    (re.compile(r"\b(?:Sortly|SortlyUITests-Runner)\b[^\n]{0,80}\bcrashed\b(?! with signal term "
-                r"(?:before establishing connection|while preparing to run tests))"), "the app or the test runner crashed"),
-    (re.compile(r"\*\* (?:TEST )?BUILD FAILED \*\*|\.swift:\d+:\d+: error:"), "build failed"),
+    (re.compile(r"Test crashed with signal"), "a test crashed"),
+    (re.compile(r"\bCrash:"), "a crash"),
+    (re.compile(r"\bcrashed\b", re.I), "something crashed"),
+    (re.compile(r"execution time allowance"), "a test ran out of time"),
+    (re.compile(r"\*\* (?:TEST )?BUILD FAILED \*\*"), "build failed"),
 ]
 
+# Lines that carry data, not messages (base64 screenshots and video).
+DATA_LINE = re.compile(r"PREVIEW_JPEG|UI_VIDEO_B64")
+
 CASE = re.compile(r"Test Case '-\[(?:[\w]+)\.(\w+) (\w+)\]' (passed|failed|skipped)")
+PASSED = ("Passed", "Skipped", "Expected Failure")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -101,32 +123,89 @@ def finished_tests(log: str) -> dict[str, str]:
     return result
 
 
-def decide(status: int, log: str, crash_reports: list[str] | None = None, probe: str = "") -> tuple[str, list[str]]:
+def is_infra(line: str) -> list[str]:
+    return [reason for pattern, reason in INFRA if pattern.search(line)]
+
+
+def scan(text: str) -> tuple[list[str], list[str]]:
+    """(real reasons, infrastructure reasons) found in a log, line by line."""
+    real: list[str] = []
+    infra: list[str] = []
+    for line in text.splitlines():
+        if DATA_LINE.search(line):
+            continue
+        found = is_infra(line)
+        if found:
+            infra += [r for r in found if r not in infra]
+            continue
+        real += [reason for pattern, reason in REAL if pattern.search(line) and reason not in real]
+    return real, infra
+
+
+def bundle_findings(tests: dict) -> list[str]:
+    """Problems in `xcresulttool get test-results tests` output that are not the simulator's:
+    any failure message that is not an infrastructure line, and any test case that did not
+    pass without saying why. Tests that never started are not in the bundle."""
+    findings: list[str] = []
+
+    def messages(node: dict) -> list[str]:
+        found = []
+        for child in node.get("children", []) or []:
+            if child.get("nodeType") == "Failure Message":
+                found.append(child.get("name", ""))
+            found += messages(child)
+        return found
+
+    def walk(node: dict) -> None:
+        kind = node.get("nodeType")
+        if kind == "Failure Message":
+            text = node.get("name", "")
+            if not is_infra(text):
+                findings.append(f"result bundle: {text[:200]}")
+        if kind == "Test Case" and node.get("result") not in PASSED and not messages(node):
+            findings.append(f"result bundle: {node.get('name', '?')} {node.get('result', 'no result')} without a message")
+        for child in node.get("children", []) or []:
+            walk(child)
+
+    for node in tests.get("testNodes", []) or []:
+        walk(node)
+    return findings
+
+
+def decide(status: int, log: str, crash_reports: list[str] | None = None, probe: str = "",
+           bundle: list[str] | None = None) -> tuple[str, list[str]]:
     """("pass" | "retry" | "fail", reasons) for one finished pass.
 
-    status: exit code of xcodebuild; log: its whole output; crash_reports: paths of
-    Sortly*.ips reports written during the pass; probe: output of a simctl call made right
-    after the pass (says whether the simulator is still there).
+    status: exit code of xcodebuild; log: its whole output; crash_reports: paths of Sortly*
+    reports written during the pass; probe: output of a simctl call made right after the pass
+    (says whether the simulator is still there); bundle: `bundle_findings` of the pass's
+    result bundle (or the reason it could not be read). Both the log and the bundle must
+    show nothing about the app before a pass is repeated.
     """
+    ran = finished_tests(log)
     if status == 0:
+        if not ran:
+            return "fail", ["no test ran (a renamed test, or a selection that matches nothing)"]
         return "pass", []
-    real = sorted({reason for pattern, reason in REAL if pattern.search(log)})
+    real, infra = scan(log)
     if crash_reports:
         real.append("crash report " + ", ".join(os.path.basename(p) for p in crash_reports))
+    real += list(bundle or [])
     if real:
         return "fail", real
-    infra = []
-    for pattern, reason in INFRA:
-        if (pattern.search(log) or pattern.search(probe)) and reason not in infra:
-            infra.append(reason)
+    for line in probe.splitlines():
+        infra += [r for r in is_infra(line) if r not in infra]
     if infra:
         return "retry", infra
-    return "fail", ["no sign of a simulator failure (unknown cause, not repeated)"]
+    return "fail", ["no explicit simulator failure (unknown cause; a runner restart alone is not repeated)"]
 
 
-def retry_arguments(only: list[str], skip: list[str], log: str) -> list[str]:
-    """xcodebuild selection for the repeat: the same tests minus every test that passed."""
+def retry_arguments(only: list[str], skip: list[str], log: str) -> list[str] | None:
+    """xcodebuild selection for the repeat: the same tests minus every test that passed.
+    None when nothing is left (every test named in --only passed): no "-only X -skip X"."""
     done = [name for name, state in finished_tests(log).items() if state in ("passed", "skipped")]
+    if only and all("/" in t and (t in done or t in skip) for t in only):
+        return None
     return selection(only, skip + [name for name in done if name not in skip])
 
 
@@ -226,12 +305,30 @@ def prepare(udid: str, reduce_motion: bool = False, increase_contrast: bool = Fa
         print(f"A11Y_SETTING DarkenSystemColors={darken.strip()} EnhancedBackgroundContrastEnabled={enhanced.strip()}", flush=True)
 
 
-def reboot(udid: str, reduce_motion: bool, increase_contrast: bool) -> bool:
+def reset(udid: str, reduce_motion: bool, increase_contrast: bool) -> bool:
+    """Shut down, erase, boot and prepare again: the repeat starts like a new group (the app,
+    its data, the photo library and the runner's marker files are gone, so a repeated test 1
+    meets the welcome screen and checks every step again)."""
     sh(["xcrun", "simctl", "shutdown", udid], timeout=180)
+    if sh(["xcrun", "simctl", "erase", udid], timeout=300)[0] != 0:
+        print("UI_SIM_ERASE_FAILED", flush=True)
+        return False
+    print("UI_SIM_ERASED", flush=True)
     if not boot(udid):
         return False
     prepare(udid, reduce_motion, increase_contrast)
     return True
+
+
+def read_bundle(path: str) -> list[str]:
+    """`bundle_findings` of a result bundle, or why it could not be read (then no repeat)."""
+    code, output = sh(["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", path], timeout=300, quiet=True)
+    if code != 0:
+        return [f"result bundle not readable ({output.strip()[:200]})"]
+    try:
+        return bundle_findings(json.loads(output))
+    except ValueError as error:
+        return [f"result bundle not readable ({error})"]
 
 
 def crash_reports(since: float) -> list[str]:
@@ -292,7 +389,7 @@ class Recorder(threading.Thread):
         return any(re.search(pattern, line) for line in self.lines)
 
     def run(self) -> None:
-        while not self.stop_flag.is_set() and not self.seen(r"UI_STEP_OK open plan$"):
+        while not self.stop_flag.is_set() and not self.seen(r"UI_STEP_OK open plan"):
             time.sleep(1)
         if self.stop_flag.is_set():
             return
@@ -315,7 +412,7 @@ class Recorder(threading.Thread):
 
 
 def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str, str, float]:
-    """One xcodebuild run; returns (status, log text, log path, start time)."""
+    """One xcodebuild run; returns (status, log text, result bundle path, start time)."""
     suffix = "" if label == "first" else "-retry"
     log_path = os.path.join(args.out, f"{args.name}{suffix}-log.txt")
     result = os.path.join(args.out, f"{args.name}{suffix}.xcresult")
@@ -347,7 +444,7 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     print(f"UI_PASS_TIME {args.name} {label} {int(time.time() - started)} s (exit {status})", flush=True)
     with open(log_path, encoding="utf-8", errors="replace") as log:
         text = log.read()
-    return status, text, log_path, started
+    return status, text, result, started
 
 
 def report(text: str, status: int, label: str) -> None:
@@ -384,30 +481,34 @@ def command_run(args) -> int:
     chosen = selection(args.only, args.skip)
     if args.increase_contrast:
         prepare(args.udid, increase_contrast=True, basics=False)
-    status, text, _, started = run_pass(args, "first", chosen, build=True)
+    status, text, bundle_path, started = run_pass(args, "first", chosen, build=True)
     report(text, status, "first")
-    crashes = crash_reports(started)
+    crashes = crash_reports(started) if status else []
     # Whether the simulator is still there after a failed pass ("device is not booted").
-    _, probe = sh(["xcrun", "simctl", "getenv", args.udid, "HOME"], timeout=60, quiet=True) if status else (0, "")
-    verdict, reasons = decide(status, text, crashes, probe[:4000])
+    probe = sh(["xcrun", "simctl", "spawn", args.udid, "launchctl", "getenv", "HOME"], timeout=60, quiet=True)[1] if status else ""
+    bundle = read_bundle(bundle_path) if status else []
+    verdict, reasons = decide(status, text, crashes, probe[:4000], bundle)
     print(f"UI_VERDICT {args.name} first: {verdict}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
     print_crash_reports(crashes + other_crash_reports(started) if status else [], "first")
-    passes = [("first", status, verdict, reasons, text)]
+    passes = [("first", 0 if verdict == "pass" else (status or 1), verdict, reasons, text)]
     if verdict == "retry":
         retry = retry_arguments(args.only, args.skip, text)
-        print(f"::warning title=UI {args.name}::The simulator failed ({'; '.join(reasons)}); no test found a problem. "
-              "The tests that did not pass run once more on a rebooted simulator.")
-        if reboot(args.udid, args.reduce_motion, args.increase_contrast):
-            status, text, _, started = run_pass(args, "retry", retry, build=False)
-            report(text, status, "retry")
-            crashes = crash_reports(started)
-            verdict, reasons = decide(status, text, crashes)
-            print(f"UI_VERDICT {args.name} retry: {'pass' if status == 0 else 'fail'}" +
-                  (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
-            print_crash_reports(crashes + other_crash_reports(started) if status else [], "retry")
-            passes.append(("retry", status, "pass" if status == 0 else "fail", reasons, text))
+        if retry is None:
+            print(f"UI_VERDICT {args.name}: every selected test passed, nothing to repeat; the failed pass stays red")
         else:
-            print("UI_VERDICT retry impossible: the simulator did not boot again")
+            print(f"::warning title=UI {args.name}::The simulator failed ({'; '.join(reasons)}); no test found a problem. "
+                  "The tests that did not pass run once more on an erased simulator.")
+            if reset(args.udid, args.reduce_motion, args.increase_contrast):
+                status, text, bundle_path, started = run_pass(args, "retry", retry, build=False)
+                report(text, status, "retry")
+                crashes = crash_reports(started) if status else []
+                verdict, reasons = decide(status, text, crashes, bundle=read_bundle(bundle_path) if status else [])
+                final = "pass" if verdict == "pass" else "fail"
+                print(f"UI_VERDICT {args.name} retry: {final}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
+                print_crash_reports(crashes + other_crash_reports(started) if status else [], "retry")
+                passes.append(("retry", 0 if final == "pass" else (status or 1), final, reasons, text))
+            else:
+                print("UI_VERDICT retry impossible: the simulator did not come back after the erase")
     # The result is the last pass: the first one when nothing was repeated, else the repeat
     # (which ran every test that had not passed in the first one).
     failed = passes[-1][1] != 0
@@ -511,6 +612,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("log")
     c.add_argument("--status", type=int, default=65)
     c.add_argument("--crash-report", action="append", default=[])
+    c.add_argument("--bundle-json", help="output of `xcrun xcresulttool get test-results tests` for the pass")
     args = parser.parse_args(argv)
     # Space-separated lists are allowed too (matrix values in ui.yml).
     for key in ("only", "skip"):
@@ -534,10 +636,17 @@ def main(argv: list[str] | None = None) -> int:
             with open(args.ready_file, "w") as ready:
                 ready.write("ok\n" if ok else "failed\n")
         return 0 if ok else 1
+    if args.command == "run" and args.xctestrun is not None and not os.path.isfile(args.xctestrun):
+        print(f"::error::--xctestrun '{args.xctestrun}' is not a file (no .xctestrun in the build products?)")
+        return 2
     if args.command == "classify":
         with open(args.log, encoding="utf-8", errors="replace") as log:
             text = log.read()
-        verdict, reasons = decide(args.status, text, args.crash_report)
+        bundle = []
+        if args.bundle_json:
+            with open(args.bundle_json, encoding="utf-8") as tests:
+                bundle = bundle_findings(json.load(tests))
+        verdict, reasons = decide(args.status, text, args.crash_report, bundle=bundle)
         print(f"{verdict}: {'; '.join(reasons)}")
         return 0
     return command_run(args)

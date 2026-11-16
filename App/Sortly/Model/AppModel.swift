@@ -1155,7 +1155,8 @@ final class AppModel {
         guard let store, let pipeline else { return }
         await reconcileManagedAlbums(quiet: true)
         do {
-            snapshot = try await pipeline.latestProposals()
+            // Results of an older matching version are matched again once (review 16.11.).
+            snapshot = try await pipeline.refreshMatchesIfOutdated()
             recurringPlaceReport = try await pipeline.recurringPlaceReport()
             facts = try await pipeline.currentFacts()
             inventory = try await store.loadInventory()
@@ -1252,8 +1253,7 @@ final class AppModel {
             }
         }
         return Array(openProposals
-            .filter { $0.reliability >= .likely && !$0.isSensitive && !$0.requiresUserName && recommendedDecision(for: $0).isAccepted
-                && match(for: $0)?.status != .possibleMatch }
+            .filter { ProposalDecision.isSafeToAcceptUnseen($0, match: match(for: $0)) }
             .sorted { (rank($0), $0.assetIDs.count, $1.title) > (rank($1), $1.assetIDs.count, $0.title) }
             .prefix(limit)).inDisplayOrder()
     }

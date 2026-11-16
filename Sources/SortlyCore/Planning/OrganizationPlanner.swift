@@ -325,6 +325,14 @@ extension ProposalDecision {
         return .createNew(title: (title?.isEmpty ?? true) ? nil : title, folderPath: nil)
     }
 
+    /// Whether a suggestion may be accepted without the user looking at it ("Dein Startpaket",
+    /// "Empfohlene auswählen"): at least likely, nothing sensitive, no name needed, a clear
+    /// action, and no similar album of the user that only possibly fits (review 16.11.).
+    public static func isSafeToAcceptUnseen(_ proposal: AlbumProposal, match: MatchResult?) -> Bool {
+        proposal.reliability >= .likely && !proposal.isSensitive && !proposal.requiresUserName
+            && match?.status != .possibleMatch && recommended(for: proposal, match: match).isAccepted
+    }
+
     public var isAccepted: Bool {
         switch self {
         case .undecided, .reject: false

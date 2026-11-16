@@ -41,12 +41,12 @@ struct ProposalListView: View {
         }
     }
 
-    /// Open suggestions that may be accepted in one go: at least "likely", no name needed,
-    /// a clear recommended action, never sensitive ones (prompt §8).
+    /// Open suggestions that may be accepted in one go: the same safe list as "Dein Startpaket"
+    /// (`ProposalDecision.isSafeToAcceptUnseen`; never sensitive ones, prompt §8, and no
+    /// possible match, review 16.11.).
     private var recommendable: [AlbumProposal] {
         proposals.filter { p in
-            model.decisions[p.id] == nil && p.reliability >= .likely && !p.isSensitive && !p.requiresUserName
-                && model.recommendedDecision(for: p).isAccepted
+            model.decisions[p.id] == nil && ProposalDecision.isSafeToAcceptUnseen(p, match: model.match(for: p))
         }
     }
 
@@ -417,8 +417,16 @@ struct ProposalDetailView: View {
                 }
                 // "Passt nicht" names one album; with several albums the choice happens under "Album auswählen".
                 if let best = match.best, best.isEditable, ![.newAlbumRequired, .multipleMatches].contains(match.status) {
+                    // A possible match already gets a new album: the button only stops offering it.
+                    let onlyOffered = match.status == .possibleMatch
                     Button { rejectingMatch = true } label: {
-                        Text("„\(best.albumTitle)“ passt nicht")
+                        Group {
+                            if onlyOffered {
+                                Text("„\(best.albumTitle)“ nicht mehr anbieten")
+                            } else {
+                                Text("„\(best.albumTitle)“ passt nicht")
+                            }
+                        }
                             .font(.subheadline.weight(.semibold))
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())
@@ -428,7 +436,11 @@ struct ProposalDetailView: View {
                                 Task { await model.rejectMatch(best.albumID, for: proposal) }
                             }
                         } message: {
-                            Text("Albumist merkt sich das und schlägt stattdessen ein neues oder ein anderes passendes Album vor. Am Album selbst ändert sich nichts.")
+                            if onlyOffered {
+                                Text("Albumist legt ohnehin ein neues Album an und bietet dieses unter „Anpassen“ nicht mehr an. Am Album selbst ändert sich nichts.")
+                            } else {
+                                Text("Albumist merkt sich das und schlägt stattdessen ein neues oder ein anderes passendes Album vor. Am Album selbst ändert sich nichts.")
+                            }
                         }
                 }
             }

@@ -435,4 +435,17 @@ struct AlbumInterplaySecondReviewTests {
         let once = AlbumProposal(id: SortlyID("it"), kind: .placeCollection(.country), title: "Italien", assetIDs: t19)
         #expect(matcher.match([once], against: CollectionInventory([album]), trips: [t19])[once.id]?.status == .extendable)
     }
+
+    /// 7: "Empfohlene auswählen" and "Dein Startpaket" take the same safe suggestions.
+    @Test func safeToAcceptUnseenLeavesOutPossibleMatches() throws {
+        let dogs = AlbumProposal(id: SortlyID("c-dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: set("d", 0..<400))
+        let best = CollectionSnapshot(id: "best", title: "Beste Hundefotos", assetIDs: set("d", 0..<10))
+        let possible = matcher.match([dogs], against: CollectionInventory([best]))[dogs.id]
+        #expect(possible?.status == .possibleMatch)
+        #expect(!ProposalDecision.isSafeToAcceptUnseen(dogs, match: possible))
+        #expect(ProposalDecision.isSafeToAcceptUnseen(dogs, match: matcher.match([dogs], against: CollectionInventory())[dogs.id]))
+        var sensitive = dogs
+        sensitive.isSensitive = true
+        #expect(!ProposalDecision.isSafeToAcceptUnseen(sensitive, match: nil))
+    }
 }

@@ -183,7 +183,7 @@ final class AppModel {
         // Cache hits must still register the dependency, or views would never see new facts.
         access(keyPath: \.facts)
         if let cached = atlasCache[year ?? 0] { return cached }
-        let atlas = MainThreadWatch.shared.section("travel atlas") { TravelAtlas.compute(facts: facts, year: year) }
+        let atlas = MainThreadStallWatch.shared.section("travel atlas") { TravelAtlas.compute(facts: facts, year: year) }
         atlasCache[year ?? 0] = atlas
         return atlas
     }
@@ -191,7 +191,7 @@ final class AppModel {
     var atlasYears: [Int] {
         access(keyPath: \.facts)
         if let cached = atlasYearsCache { return cached }
-        let years = MainThreadWatch.shared.section("atlas years") { TravelAtlas.years(facts: facts) }
+        let years = MainThreadStallWatch.shared.section("atlas years") { TravelAtlas.years(facts: facts) }
         atlasYearsCache = years
         return years
     }
@@ -204,7 +204,7 @@ final class AppModel {
     var factsByID: [AssetID: AssetFacts] {
         access(keyPath: \.facts)
         if let factsIndex { return factsIndex }
-        let index = MainThreadWatch.shared.section("facts by id") {
+        let index = MainThreadStallWatch.shared.section("facts by id") {
             Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         }
         factsIndex = index
@@ -215,7 +215,7 @@ final class AppModel {
     var creationDates: [AssetID: Date] {
         access(keyPath: \.facts)
         if let datesCache { return datesCache }
-        let dates = MainThreadWatch.shared.section("creation dates") {
+        let dates = MainThreadStallWatch.shared.section("creation dates") {
             Dictionary(facts.compactMap { f in f.asset.creationDate.map { (f.id, $0) } }, uniquingKeysWith: { first, _ in first })
         }
         datesCache = dates
@@ -252,7 +252,7 @@ final class AppModel {
         let key = "\(code)|\(year ?? 0)"
         access(keyPath: \.facts)
         if let cached = countryCache[key] { return cached }
-        let photos = MainThreadWatch.shared.section("country photos") { CountryPhotos.collect(countryCode: code, facts: facts, year: year) }
+        let photos = MainThreadStallWatch.shared.section("country photos") { CountryPhotos.collect(countryCode: code, facts: facts, year: year) }
         countryCache[key] = photos
         return photos
     }
@@ -976,7 +976,7 @@ final class AppModel {
     /// One tick (every 250 ms while a run is busy, S2): takes the newest progress, measures the
     /// speed, moves the bar, and decides what the card says. Nothing here runs per report.
     private func tick(run: Int) {
-        MainThreadWatch.shared.section("analysis tick") { tickNow(run: run) }
+        MainThreadStallWatch.shared.section("analysis tick") { tickNow(run: run) }
     }
 
     private func tickNow(run: Int) {
@@ -1213,7 +1213,7 @@ final class AppModel {
             detectedHome = try await pipeline.detectedHome()
             homeChangeNotice = try await pipeline.homeChangeNotice()
             let newFacts = try await pipeline.currentFacts()
-            MainThreadWatch.shared.section("refresh: facts") { facts = newFacts }
+            MainThreadStallWatch.shared.section("refresh: facts") { facts = newFacts }
             inventory = try await store.loadInventory()
             let inventory = inventory
             // Albumist's own albums overlap on purpose (a country holds its trips).
@@ -1238,14 +1238,14 @@ final class AppModel {
             let facts = facts, snapshot = snapshot, settings = settings
             // Photos Albumist put into albums count as sorted in the area of their suggestion,
             // also once that suggestion is no longer shown.
-            let byAlbumist = MainThreadWatch.shared.section("refresh: sorted by Albumist") {
+            let byAlbumist = MainThreadStallWatch.shared.section("refresh: sorted by Albumist") {
                 LibraryStatus.organizedBySortly(managedAlbums, inventory: inventory, snapshot: snapshot)
             }
             let (computed, reasons) = await Task.detached(priority: .userInitiated) {
                 LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
                                                  contentAnalyzed: analyzed, organizedBySortly: byAlbumist)
             }.value
-            MainThreadWatch.shared.section("refresh: states") {
+            MainThreadStallWatch.shared.section("refresh: states") {
                 states = computed
                 statusReasons = reasons
             }
@@ -1798,7 +1798,7 @@ final class AppModel {
                 }
                 return ConfirmedProposal(proposal: proposal, decision: decision)
             }
-            plan = MainThreadWatch.shared.section("make plan") {
+            plan = MainThreadStallWatch.shared.section("make plan") {
                 OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle).makePlan(from: confirmed, inventory: current, overrides: overrides)
             }
         } catch {
@@ -2355,7 +2355,7 @@ final class AppModel {
     /// Several undos when the first one was only partial: newest first.
     func receipt(for plan: ChangePlan) async -> (plan: PlanReceipt, undos: [PlanReceipt]) {
         let undos = (try? await store?.reverts(of: plan.id)) ?? []
-        return MainThreadWatch.shared.section("receipt") {
+        return MainThreadStallWatch.shared.section("receipt") {
             (PlanReceipt(plan: plan, inventory: inventory), undos.map { PlanReceipt(plan: $0, inventory: inventory) })
         }
     }
@@ -2374,7 +2374,7 @@ final class AppModel {
         access(keyPath: \.settings)
         if let cached = bucketCache[bucket] { return cached }
         let resolver = resolver
-        let members = MainThreadWatch.shared.section("library bucket") {
+        let members = MainThreadStallWatch.shared.section("library bucket") {
             facts.filter { f in
                 guard let state = states[f.id] else { return bucket == .all }
                 return resolver.buckets(state).contains(bucket)

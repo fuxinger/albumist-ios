@@ -95,8 +95,8 @@ struct SlowedAnalyzer: ContentAnalyzing {
 ///   80 s ..., with the section it hangs in and how long that section has been running
 /// Stall lines end in `(app not active)` when the app was in the background or behind a
 /// system alert during the stall: the system may hold back a main thread then.
-final class MainThreadWatch: @unchecked Sendable {
-    static let shared = MainThreadWatch()
+final class MainThreadStallWatch: @unchecked Sendable {
+    static let shared = MainThreadStallWatch()
     private let logger = Logger(subsystem: "app.albumist.ios", category: "uitest")
     private let lock = NSLock()
     /// Uptime (ns) and wall clock (s since 1970) of the ping the main thread has not answered yet.

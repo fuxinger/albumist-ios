@@ -256,7 +256,7 @@ enum UITestOnboarding {
     }
 
     /// `UI_CLOCK 18:31:05.2 <event>`: the time of a test step in UTC, on the clock the app's
-    /// `UI_MAIN_STALL` lines use (`MainThreadWatch.clock`), so a stall can be put next to the
+    /// `UI_MAIN_STALL` lines use (`MainThreadStallWatch.clock`), so a stall can be put next to the
     /// step, the tap or the accessibility audit that ran then.
     static func clock(_ event: String) {
         print("UI_CLOCK \(clockText(Date())) \(event)")

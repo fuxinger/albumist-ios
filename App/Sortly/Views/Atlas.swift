@@ -87,7 +87,7 @@ struct AtlasMap: View {
     var body: some View {
         Canvas { context, size in
             var land = Path(), visited = Path(), recent = Path()
-            MainThreadWatch.shared.section("atlas map paths") {
+            MainThreadStallWatch.shared.section("atlas map paths") {
                 for country in outlines {
                     let path = Self.path(country, in: size)
                     if country.code == latest { recent.addPath(path) }
@@ -612,7 +612,7 @@ struct ShareCardImage: Transferable {
         let outlines = await AtlasOutlines.shared.load(from: map)
         let renderer = ImageRenderer(content: ShareCard(atlas: atlas, sortedPhotos: sortedPhotos, outlines: outlines, cover: cover))
         renderer.scale = scale  // 720 × 1280 pt × 1.5 = 1080 × 1920 px
-        let png = MainThreadWatch.shared.section("share image") { renderer.uiImage?.pngData() }
+        let png = MainThreadStallWatch.shared.section("share image") { renderer.uiImage?.pngData() }
         guard let data = png else { throw CocoaError(.fileWriteUnknown) }
         return data
     }

@@ -29,7 +29,7 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
 
     /// Also called when a run ends that saw changes arrive meanwhile.
     func scheduleCatchUp() {
-        MainThreadWatch.shared.section("library change") { scheduleCatchUpNow() }
+        MainThreadStallWatch.shared.section("library change") { scheduleCatchUpNow() }
     }
 
     private func scheduleCatchUpNow() {

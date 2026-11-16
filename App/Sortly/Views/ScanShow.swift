@@ -20,7 +20,7 @@ struct ScanShow: View {
 
     /// Photos spread over the whole library, so the mosaic shows years, not one afternoon.
     private var mosaicPhotos: [AssetID] {
-        MainThreadWatch.shared.section("scan show photos") { pickMosaicPhotos() }
+        MainThreadStallWatch.shared.section("scan show photos") { pickMosaicPhotos() }
     }
 
     private func pickMosaicPhotos() -> [AssetID] {

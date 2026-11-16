@@ -1,0 +1,107 @@
+name: CodeQL
+
+# Code scanning (advanced setup; GitHub's default setup is off for this repository, the two
+# cannot run side by side). Results appear under Security > Code scanning.
+#   - actions and python (workflows and .github/scripts): Linux, no build, every pull request.
+#   - swift: needs a real build on macOS, so it runs nightly and on pull requests only when a
+#     push changed Swift sources since the last analysed commit.
+# Sources/CSQLite is a module map and a header shim with no C code, so c-cpp is not analysed.
+# Not part of the TestFlight gate (ci_gate.py only looks at CI and the UI flow): a finding never
+# blocks a build for the testers; it is reviewed in the Security tab.
+on:
+  pull_request:
+    paths-ignore: ['**.md']
+  schedule:
+    # 01:30 UTC, after the nightly test run has started.
+    - cron: '30 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, python]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+
+  changes:
+    # Pull requests only: did Swift change since the last commit whose Swift analysis passed?
+    if: github.event_name == 'pull_request'
+    name: Changes
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      workflow: codeql.yml
+      job-prefix: Analyze (swift)
+
+  swift:
+    name: Analyze (swift)
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.swift != 'false') }}
+    runs-on: xcode-27
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_*.app' | sort -V | tail -1)
+          [ -n "$XCODE" ] || XCODE=$(find /Applications -maxdepth 1 -name 'Xcode*.app' | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd App && xcodegen generate
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: swift
+          build-mode: manual
+      # A clean build (fresh DerivedData, no cache): CodeQL only sees what is compiled.
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          cd App
+          xcodebuild build \
+            -project Sortly.xcodeproj \
+            -scheme Sortly \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/codeql-dd" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO > ../codeql-build.txt 2>&1 \
+            || { grep -E "error:" -A3 ../codeql-build.txt | head -60; exit 1; }
+          tail -3 ../codeql-build.txt
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:swift

@@ -1,0 +1,59 @@
+name: Fehler melden
+description: Etwas in Albumist funktioniert nicht wie erwartet.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Danke für die Meldung!
+
+        **Achtung, dieses Repository ist öffentlich:** Jede Meldung kann von allen gelesen werden.
+        Bitte keine privaten Fotos oder Screenshots mit privaten Fotos anhängen und keine Namen,
+        Orte, Albumnamen oder anderen persönlichen Angaben eintragen. Sicherheitslücken bitte
+        nicht hier melden, sondern wie in der [Sicherheitsrichtlinie](https://github.com/fuxinger/sortly-ios/security/policy) beschrieben.
+  - type: textarea
+    id: what
+    attributes:
+      label: Was ist passiert?
+      description: Was hast du erwartet, und was ist stattdessen passiert?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Schritte zum Nachstellen
+      description: So genau wie möglich, damit der Fehler nachgestellt werden kann.
+      placeholder: |
+        1. Albumist öffnen
+        2. Auf „…“ tippen
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Gerät und iOS-Version
+      placeholder: z. B. iPhone 16 Pro, iOS 26.1
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Albumist-Version und Build
+      description: In TestFlight unter Albumist zu sehen, z. B. 0.1.0 (28).
+  - type: textarea
+    id: diagnosis
+    attributes:
+      label: Diagnose
+      description: |
+        In Albumist: Einstellungen > „Diagnose teilen“, den Text kopieren und hier einfügen.
+        Der Bericht enthält Zustände, Zahlen und Fehlercodes, aber keine Fotos, Namen oder Orte.
+        Bitte trotzdem kurz durchlesen, bevor du ihn hier veröffentlichst.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Datenschutz
+      options:
+        - label: Meine Meldung enthält keine privaten Fotos, Namen oder Orte.
+          required: true

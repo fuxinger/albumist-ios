@@ -1,0 +1,6 @@
+# Only the bug form; security problems go through a private report (SECURITY.md).
+blank_issues_enabled: false
+contact_links:
+  - name: Sicherheitslücke melden (privat)
+    url: https://github.com/fuxinger/sortly-ios/security/advisories/new
+    about: Bitte nie als öffentliches Issue, sondern als private Meldung an den Maintainer.

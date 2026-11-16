@@ -895,7 +895,9 @@ def main(argv: list[str] | None = None) -> int:
         print(udid)
         return 0
     if args.command == "boot":
+        began = time.time()
         ok = boot(args.udid)
+        booted = time.time()
         if BOOT_RETRIES:
             os.makedirs(args.out, exist_ok=True)
             with open(os.path.join(args.out, "boot-retries.json"), "w", encoding="utf-8") as f:
@@ -904,6 +906,8 @@ def main(argv: list[str] | None = None) -> int:
             prepare(args.udid, reduce_motion=args.reduce_motion)
         else:
             print("simulator did not boot")
+        # Where the minutes before the first test go (boot vs. photo access, status bar, settings).
+        print(f"UI_BOOT_TIME boot {int(booted - began)} s, prepare {int(time.time() - booted)} s", flush=True)
         if args.ready_file:
             with open(args.ready_file, "w") as ready:
                 ready.write("ok\n" if ok else "failed\n")

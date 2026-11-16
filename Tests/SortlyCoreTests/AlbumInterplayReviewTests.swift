@@ -52,6 +52,20 @@ struct AlbumInterplayReviewTests {
         #expect(!isTouching(decision, "familie"), "80 Hundefotos würden in „Familie“ gelegt: \(result.status)")
     }
 
+    // A2: the user's own trip album "Italien 2019" must not become the country album and
+    // receive the photos of 2021 and 2023.
+    @Test("A2 Land Italien ergänzt nicht das Reisealbum „Italien 2019“")
+    func a2_countryExtendsDatedTripAlbum() throws {
+        let y19 = set("it19", 0..<150), y21 = set("it21", 0..<100), y23 = set("it23", 0..<150)
+        let album = CollectionSnapshot(id: "it2019", title: "Italien 2019", assetIDs: y19)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien",
+                                    folderPath: ["Länder"], assetIDs: y19.union(y21).union(y23))
+        let result = try #require(matcher.match([country], against: CollectionInventory([album]))[country.id])
+        let decision = ProposalDecision.recommended(for: country, match: result)
+        print("A2 status=\(result.status) decision=\(decision)")
+        #expect(!isTouching(decision, "it2019"), "250 Fotos aus 2021/2023 würden in „Italien 2019“ gelegt: \(result.status)")
+    }
+
     // A3: a city suggestion fully inside a country album is not "done" through that album.
     @Test("A3 Stadt Rom wird nicht vom Länderalbum „Italien“ geschluckt")
     func a3_cityInsideCountryAlbum() throws {
@@ -141,6 +155,20 @@ struct AlbumInterplayReviewTests {
         print("A8 merge suggestions: \(merges.map(\.albumIDs))")
         #expect(merges.isEmpty, "Albumists eigene Alben werden zum Zusammenführen angeboten")
     }
+
+    // A9: after reinstall, a new trip to Italy comes in. The old trip album named after the
+    // country must not be grown by the country (A2 for Albumist's own albums).
+    @Test("A9 Nach Neuinstallation: neue Italienreise landet nicht im alten Reisealbum")
+    func a9_reinstallNewTripNotIntoOldTripAlbum() throws {
+        let t24 = set("it24", 0..<120), t26 = set("it26", 0..<90)
+        let t24Album = CollectionSnapshot(id: "a-t24", title: "Italien · Mai 2024", parentID: "f-r", assetIDs: t24)
+        let country = AlbumProposal(id: SortlyID("n-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: t24.union(t26))
+        let r = try #require(matcher.match([country], against: CollectionInventory([t24Album]))[country.id])
+        let d = ProposalDecision.recommended(for: country, match: r)
+        print("A9 status=\(r.status) decision=\(d)")
+        #expect(!isTouching(d, "a-t24"))
+    }
 }
 
 /// Regression tests for the fixes of the review 16.11. beyond the review's own tests: what the
@@ -189,5 +217,36 @@ struct AlbumInterplayFixTests {
         let overview = try #require(AreaOverview.make(proposals: [p], matches: results).first)
         #expect(overview.existingMatches == 0)
         #expect(overview.newAlbumsNeeded == 1)
+    }
+
+    /// A2 beyond places: no collection grows an album named after one year. A year suggestion
+    /// still uses an album of the same year.
+    @Test func noCollectionGrowsAnAlbumOfOneYear() throws {
+        let dogs = set("dog", 0..<200)
+        let dogs19 = CollectionSnapshot(id: "d19", title: "Hunde 2019", assetIDs: set("dog", 0..<100))
+        let category = AlbumProposal(id: SortlyID("c-dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: dogs)
+        let r = try #require(matcher.match([category], against: CollectionInventory([dogs19]))[category.id])
+        #expect(r.status == .newAlbumRequired)
+
+        let year = AlbumProposal(id: SortlyID("y19"), kind: .chronology(.year), title: "2019", assetIDs: dogs)
+        let y = try #require(matcher.match([year], against: CollectionInventory([dogs19]))[year.id])
+        #expect(y.status == .extendable)
+    }
+
+    /// The ring follows the same rule: with several fitting albums, an album named after
+    /// another year does not count for a country.
+    @Test func tiedAlbumOfOneYearDoesNotCount() throws {
+        let it = set("it", 0..<40)
+        let country = AlbumProposal(id: SortlyID("it"), kind: .placeCollection(.country), title: "Italien", assetIDs: it)
+        let inventory = CollectionInventory([
+            CollectionSnapshot(id: "it-1", title: "Italien", assetIDs: set("it", 0..<20)),
+            CollectionSnapshot(id: "it-2", title: "Italien", assetIDs: set("it", 20..<40)),
+        ])
+        let result = try #require(matcher.match([country], against: inventory)[country.id])
+        #expect(result.status == .multipleMatches)
+        var renamed = result
+        renamed.alternatives = renamed.alternatives.map { var c = $0; c.albumTitle = "Italien 2019"; return c }
+        #expect(matcher.tiedWithBest(result, kind: country.kind, title: country.title).count == 1)
+        #expect(matcher.tiedWithBest(renamed, kind: country.kind, title: country.title).isEmpty)
     }
 }

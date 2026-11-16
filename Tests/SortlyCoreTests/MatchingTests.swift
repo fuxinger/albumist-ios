@@ -243,10 +243,23 @@ struct PlacePartMatchingTests {
 
     @Test func anAlbumNamedAfterThePlaceIsStillExtended() throws {
         let country = italy(rome.union(florence))
-        let album = CollectionSnapshot(id: "u-it", title: "Italien 2024", assetIDs: rome)
+        let album = CollectionSnapshot(id: "u-it", title: "Urlaub in Italien", assetIDs: rome)
         let result = try #require(matcher.match([country], against: CollectionInventory([album]))[country.id])
         #expect(result.status == .extendable)
         #expect(result.best?.albumID == "u-it")
+    }
+
+    /// Review 16.11. (A2): a year in the name makes the album one trip, not the country.
+    /// Before, "Italien 2024" was extended with the photos of every other year.
+    @Test func anAlbumWithAYearIsAPartOfThePlace() throws {
+        let country = italy(rome.union(florence))
+        let album = CollectionSnapshot(id: "u-it", title: "Italien 2024", assetIDs: rome)
+        let result = try #require(matcher.match([country], against: CollectionInventory([album]))[country.id])
+        #expect(result.status == .newAlbumRequired)
+        #expect(result.alternatives.map(\.albumID) == ["u-it"])
+        // Still complete when it holds the whole place.
+        let whole = CollectionSnapshot(id: "u-it", title: "Italien 2024", assetIDs: rome.union(florence))
+        #expect(matcher.match([country], against: CollectionInventory([whole]))[country.id]?.status == .alreadyComplete)
     }
 
     @Test func aCountryVisitedOnOneTripIsCompleteInThatTripAlbum() throws {

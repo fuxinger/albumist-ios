@@ -59,9 +59,14 @@ synchronisierte Alben sind nur lesbar. Ausgeblendete Fotos zählen nur mit Zusti
 Ein kleineres Album mit anderem Namen ist bei einer Orts-Sammlung ein Teil, nicht das
 Album: „Rom · 2024“ enthält nur Italien-Fotos, ist aber Rom. Albumist schlägt nie vor, es
 mit Fotos aus ganz Italien zu ergänzen. Ergänzt wird nur ein Album, das ein Wort mit dem
-Ort teilt („Italien 2019“, „Urlaub in Italien“). Ein Album, das schon den ganzen Ort
-enthält, zählt weiter als vollständig. Unter „Anpassen“ kann man ein Teil-Album trotzdem
-wählen.
+Ort teilt („Urlaub in Italien“). Ein Album, das schon den ganzen Ort enthält, zählt weiter
+als vollständig. Unter „Anpassen“ kann man ein Teil-Album trotzdem wählen.
+
+**Jahr im Namen** (Prüfung 16.11.2026, A2/A9): Steht im Albumnamen ein Jahr, das nicht im
+Namen des Vorschlags steht („Italien 2019“, Albumists eigenes „Italien · Mai 2024“), ist das
+Album eine Reise bzw. ein Teil. Keine Sammlung (Land, Ort, Kategorie, Medientyp …) ergänzt es
+mit Fotos anderer Jahre. Ein Jahresvorschlag „2019“ nutzt „Sommer 2019“ weiter. Reisen und
+Zeiträume sind selbst begrenzt und davon nicht betroffen.
 
 ### Alben anderer Vorschläge
 Ein Album, das Albumist für einen anderen Vorschlag angelegt oder ergänzt hat (laut den

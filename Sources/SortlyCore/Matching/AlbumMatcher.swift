@@ -353,27 +353,50 @@ public struct AlbumMatcher: Sendable {
         return MatchResult(proposalID: proposal.id, status: status, best: best, alternatives: alternatives, sameNameAlbums: sameName, reasons: reasons)
     }
 
-    /// A smaller album about something else inside a place collection: "Rom · 2024" holds
-    /// only Italy photos, but it is Rom, not Italien, and must not grow into a country album.
+    /// A smaller album about something else inside a collection: "Rom · 2024" holds only
+    /// Italy photos, but it is Rom, not Italien, and must not grow into a country album.
     /// The content alone cannot tell a part from an incomplete album, so the name decides:
-    /// only an album that shares a word with the place ("Italien 2019", "Urlaub in Italien")
-    /// is extended. An album that already holds the whole place still counts as complete.
+    /// - a place collection only extends an album that shares a word with the place
+    ///   ("Urlaub in Italien");
+    /// - no collection (place, category, year …) extends an album whose name holds a year the
+    ///   suggestion's name does not: "Italien 2019" or Albumist's own "Italien · Mai 2024" is
+    ///   one trip, not the country, and never gets the photos of other years (review 16.11.,
+    ///   A2 and A9). Events (trips, periods) are bounded themselves and not affected.
+    /// An album that already holds the whole suggestion still counts as complete.
     func isPart(_ candidate: MatchCandidate, of proposal: AlbumProposal) -> Bool {
-        guard case .placeCollection = proposal.kind else { return false }
-        return candidate.relation != .equivalent
-            && candidate.metrics.coverage < thresholds.completeCoverage
-            && candidate.nameSimilarity == 0
+        isPart(candidate, kind: proposal.kind, title: proposal.title)
+    }
+
+    /// `title` nil: the suggestion's name is unknown, only the content and the shared words count.
+    func isPart(_ candidate: MatchCandidate, kind: ProposalKind, title: String?) -> Bool {
+        guard !kind.isEventLike, candidate.relation != .equivalent,
+              candidate.metrics.coverage < thresholds.completeCoverage else { return false }
+        if let title, Self.namesOtherYear(album: candidate.albumTitle, proposal: title) { return true }
+        guard case .placeCollection = kind else { return false }
+        return candidate.nameSimilarity == 0
+    }
+
+    /// The album's name holds a year (1900–2099) that the suggestion's name does not.
+    static func namesOtherYear(album: String, proposal: String) -> Bool {
+        let years = AlbumTitle.tokens(album).filter(isYear)
+        guard !years.isEmpty else { return false }
+        return !years.isSubset(of: AlbumTitle.tokens(proposal).filter(isYear))
+    }
+
+    private static func isYear(_ token: String) -> Bool {
+        guard token.count == 4, let year = Int(token) else { return false }
+        return (1900...2099).contains(year)
     }
 
     /// The other albums that fit a suggestion exactly as well as its best album when several
     /// match (`multipleMatches`): editable, the same score, mostly this suggestion's photos,
-    /// and no part of a place (`isPart`). Until the user picks one, each of them sorts its photos.
-    public func tiedWithBest(_ result: MatchResult, kind: ProposalKind) -> [MatchCandidate] {
+    /// and no part (`isPart`; pass the suggestion's `title` for the year rule). Until the user
+    /// picks one, each of them sorts its photos.
+    public func tiedWithBest(_ result: MatchResult, kind: ProposalKind, title: String? = nil) -> [MatchCandidate] {
         guard result.status == .multipleMatches, let best = result.best else { return [] }
-        let probe = AlbumProposal(id: result.proposalID, kind: kind, title: "", assetIDs: [])
         return result.alternatives.filter {
             $0.isEditable && $0.score == best.score && $0.relation != .broaderCollection
-                && $0.metrics.purity >= thresholds.extendablePurity && !isPart($0, of: probe)
+                && $0.metrics.purity >= thresholds.extendablePurity && !isPart($0, kind: kind, title: title)
         }
     }
 

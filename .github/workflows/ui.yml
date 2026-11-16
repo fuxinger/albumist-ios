@@ -129,8 +129,8 @@ jobs:
             # Everything the other two groups run (keep in step with them).
             skip: SortlyFlowUITests/test1_FullFlow AccessibilityUITests
           - group: accessibility
-            # AccessibilityUITests on a small iPhone (SE, 375 pt) with Reduce Motion, then
-            # test5 once more with Increase Contrast and Reduce Transparency on the same
+            # AccessibilityUITests 1-4 on a small iPhone (SE, 375 pt) with Reduce Motion, then
+            # test5 on its own with Increase Contrast and Reduce Transparency switched on, same
             # simulator. These tests fail on findings.
             title: accessibility (small iPhone)
             device: se

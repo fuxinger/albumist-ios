@@ -44,6 +44,27 @@ enum AtlasStyle {
 
 // MARK: - Map
 
+/// The country shapes of the map for a few sizes, made once: the map is drawn again with
+/// every step of the reveal, every change of the screen and every share picture, and making
+/// the shapes of all countries is the expensive part of drawing it.
+final class AtlasPathCache: @unchecked Sendable {
+    static let shared = AtlasPathCache()
+    private let lock = NSLock()
+    private var bySize: [String: [Path]] = [:]
+
+    func paths(for outlines: [AtlasOutlines.Country], size: CGSize, make: (AtlasOutlines.Country) -> Path) -> [Path] {
+        // The outlines are loaded once and never change; their count tells "not loaded yet".
+        let key = String(format: "%.2fx%.2f/%ld", size.width, size.height, outlines.count)
+        if let known = lock.withLock({ bySize[key] }) { return known }
+        let made = outlines.map(make)
+        lock.withLock {
+            if bySize.count >= 6 { bySize.removeAll() }
+            bySize[key] = made
+        }
+        return made
+    }
+}
+
 /// Flat world map in system colors, like the map in the Photos app. `highlighted` may grow
 /// during the reveal animation.
 struct AtlasMap: View {
@@ -71,10 +92,16 @@ struct AtlasMap: View {
         return path
     }
 
+    /// Every country's shape at this size, made once per size (`AtlasPathCache`).
+    private func countryPaths(in size: CGSize) -> [Path] {
+        AtlasPathCache.shared.paths(for: outlines, size: size) { Self.path($0, in: size) }
+    }
+
     /// The visited country at `location`; small countries get a few points of slack.
     private func country(at location: CGPoint) -> String? {
-        let visited = outlines.filter { highlighted.contains($0.code) }
-        let paths = visited.map { ($0.code, Self.path($0, in: size)) }
+        let paths = zip(outlines, countryPaths(in: size))
+            .filter { highlighted.contains($0.0.code) }
+            .map { ($0.0.code, $0.1) }
         if let hit = paths.first(where: { $0.1.contains(location, eoFill: true) }) { return hit.0 }
         func distance(_ rect: CGRect) -> CGFloat {
             hypot(max(rect.minX - location.x, 0, location.x - rect.maxX), max(rect.minY - location.y, 0, location.y - rect.maxY))
@@ -88,8 +115,7 @@ struct AtlasMap: View {
         Canvas { context, size in
             var land = Path(), visited = Path(), recent = Path()
             MainThreadWatch.shared.section("atlas map paths") {
-                for country in outlines {
-                    let path = Self.path(country, in: size)
+                for (country, path) in zip(outlines, countryPaths(in: size)) {
                     if country.code == latest { recent.addPath(path) }
                     else if highlighted.contains(country.code) { visited.addPath(path) }
                     else { land.addPath(path) }
@@ -162,7 +188,9 @@ struct AtlasView: View {
         .task {
             outlines = await AtlasOutlines.shared.load(from: model.worldMap)
             guard revealed == 0 else { return }
-            if reduceMotion { revealed = order.count; return }
+            // At once with Reduce Motion, and in UI runs: the fill redraws the map with every
+            // country, and the tests read the screen meanwhile.
+            if reduceMotion || UITestSupport.isRunning { revealed = order.count; return }
             // Fill one country after another; long lists speed up.
             let step = order.count > 40 ? 0.06 : (order.count > 15 ? 0.12 : 0.25)
             for index in 1...max(order.count, 1) {

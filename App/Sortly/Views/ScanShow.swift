@@ -34,37 +34,28 @@ struct ScanShow: View {
         let photos = mosaicPhotos
         return Group {
             if photos.count >= columns {
-                // The sweep moves only while the analysis really works (`ScanShowRule.animates`).
-                let moving = model.scanShowAnimates(reduceMotion: reduceMotion)
-                TimelineView(.animation(minimumInterval: 0.1, paused: !moving)) { context in
-                    let sweep = moving ? sweepPosition(at: context.date) : -10
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
-                        ForEach(Array(photos.enumerated()), id: \.element) { index, id in
-                            let column = Double(index % columns)
-                            // Distance of this tile from the light band running left to right.
-                            let glow = max(0, 1 - abs(column - sweep) / 1.6)
-                            AssetThumbnail(id: id, side: 64)
-                                .aspectRatio(1, contentMode: .fill)
-                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                .compositingGroup() // fade photo and its placeholder as one
-                                .opacity(0.55 + 0.45 * glow)
-                                .scaleEffect(1 + 0.06 * glow)
-                                .brightness(0.08 * glow)
-                        }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: columns), spacing: 4) {
+                    ForEach(photos, id: \.self) { id in
+                        AssetThumbnail(id: id, side: 64)
+                            .aspectRatio(1, contentMode: .fill)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .opacity(0.6)
                     }
                 }
+                .overlay {
+                    // The sweep moves only while the analysis really works (`ScanShowRule.animates`:
+                    // not with Reduce Motion, not in the background, not when the phone is hot).
+                    if model.scanShowAnimates(reduceMotion: reduceMotion) {
+                        MosaicSweep()
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .transition(.opacity)
             }
         }
         .animation(.smooth(duration: 0.6), value: photos.count)
+        // The photos are decoration; the progress card says what happens.
         .accessibilityHidden(true)
-    }
-
-    /// The light band: one pass across the six columns every 2.4 seconds.
-    private func sweepPosition(at date: Date) -> Double {
-        let period = 2.4
-        let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
-        return phase * Double(columns + 3) - 1.5
     }
 
     /// Trips found so far, newest first; each appears with a small spring.
@@ -103,5 +94,28 @@ struct ScanShow: View {
             }
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.3) : .spring(response: 0.45, dampingFraction: 0.7), value: trips.map(\.id))
+    }
+}
+
+/// A soft light band across the mosaic, one pass every 2.4 seconds: one repeating animation
+/// that the system runs by itself. It used to be a 10-per-second timeline that recomputed every
+/// tile, so the screen changed ten times a second during the first analysis.
+private struct MosaicSweep: View {
+    @State private var moving = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            LinearGradient(colors: [.white.opacity(0), .white.opacity(0.5), .white.opacity(0)],
+                           startPoint: .leading, endPoint: .trailing)
+                .frame(width: geometry.size.width * 0.35)
+                .offset(x: moving ? geometry.size.width : -geometry.size.width * 0.35)
+                .blendMode(.plusLighter)
+                .onAppear {
+                    withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) { moving = true }
+                }
+                .onDisappear { moving = false }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

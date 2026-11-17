@@ -12,8 +12,10 @@ enum BackgroundWork {
             let box = TaskBox(task: task)
             let work = Task { @MainActor in
                 let success = await AppModel.shared.runBackgroundRefinement()
+                // The next night is asked for before the task ends (Apple's order): once
+                // completed, iOS may suspend the app before a queued request is sent.
+                submitRefinement()
                 box.task.setTaskCompleted(success: success)
-                scheduleRefinement()
             }
             box.task.expirationHandler = { work.cancel() }
         }

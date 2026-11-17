@@ -848,12 +848,25 @@ final class AccessibilityUITests: XCTestCase {
         print("UI_STEP_MISSING system photo alert")
     }
 
+    /// The notification question comes a while after "Analyse starten" (never within the 8 s
+    /// this waited before: no run printed "notification alert"), and until it is answered it
+    /// takes every touch: in UI runs 44032718289 and 44038288087 it still covered the overview
+    /// when "Beispiel-Mediathek anlegen" was tapped, and no demo library was made. Looked for in
+    /// the springboard and in the app for up to 20 s; when it never came, that is said.
     private func allowNotificationsIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for label in ["Erlauben", "Allow"] {
-            let allow = springboard.buttons[label]
-            if allow.waitForExistence(timeout: 4) { allow.tap(); print("UI_STEP_OK notification alert"); return }
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            for source in [springboard, app] {
+                for label in ["Erlauben", "Allow"] where source.buttons[label].exists {
+                    source.buttons[label].tap()
+                    print("UI_STEP_OK notification alert")
+                    return
+                }
+            }
+            usleep(500_000)
         }
+        print("UI_FACT no notification alert within 20 s")
     }
 
     @discardableResult

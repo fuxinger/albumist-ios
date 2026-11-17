@@ -257,16 +257,16 @@ final class AccessibilityUITests: XCTestCase {
             var swipes = 0
             while !row.exists && swipes < 6 { app.swipeUp(); swipes += 1; sleep(1) }
             if tap(row, "\(tag) open suggestion", timeout: 10) {
-                _ = app.navigationBars[w.suggestionTitle].waitForExistence(timeout: 5)
+                let detailShown = app.navigationBars[w.suggestionTitle].waitForExistence(timeout: 5)
                 sleep(1)
                 check("\(tag) suggestion detail", english: english)
                 if !short {
                     app.swipeUp(); sleep(1)
                     check("\(tag) suggestion detail lower", english: english)
                 }
-                back(); sleep(1)
+                back("\(tag) suggestion detail", confirmed: detailShown); sleep(1)
             }
-            back(); sleep(1)
+            back("\(tag) suggestions", confirmed: false); sleep(1)
         }
 
         // The starter set opens the plan; going back selects nothing. Once it has been applied
@@ -275,7 +275,8 @@ final class AccessibilityUITests: XCTestCase {
         if !starter.waitForExistence(timeout: 8) {
             print("UI_STEP_SKIPPED \(tag) starter plan (no starter set on the overview)")
         } else if tap(starter, "\(tag) open starter plan", timeout: 10) {
-            if app.navigationBars[w.planTitle].waitForExistence(timeout: 20) {
+            let planShown = app.navigationBars[w.planTitle].waitForExistence(timeout: 20)
+            if planShown {
                 sleep(2)
                 check("\(tag) plan", english: english)
                 if !short {
@@ -293,14 +294,14 @@ final class AccessibilityUITests: XCTestCase {
                         if tap(receipt, "\(tag) open receipt", timeout: 10) {
                             sleep(2)
                             check("\(tag) receipt", english: english)
-                            back(); sleep(1)
+                            back("\(tag) receipt", confirmed: false); sleep(1)
                         }
                     } else {
                         XCTFail("The starter plan did not finish")
                     }
                 }
             }
-            back(); sleep(2)
+            back("\(tag) starter plan", confirmed: planShown); sleep(2)
         }
 
         // Travel atlas and the share image
@@ -315,7 +316,7 @@ final class AccessibilityUITests: XCTestCase {
                 if tap(country, "\(tag) open country", timeout: 10) {
                     sleep(2)
                     check("\(tag) country", english: english)
-                    back(); sleep(1)
+                    back("\(tag) country", confirmed: false); sleep(1)
                 }
                 app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
@@ -325,7 +326,7 @@ final class AccessibilityUITests: XCTestCase {
                     sleep(2)
                 }
             }
-            back(); sleep(1)
+            back("\(tag) atlas", confirmed: true); sleep(1)
         }
 
         // Tabs
@@ -362,7 +363,7 @@ final class AccessibilityUITests: XCTestCase {
                 if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
                     sleep(1)
                     check("\(tag) history", english: english)
-                    back(); sleep(1)
+                    back("\(tag) history", confirmed: false); sleep(1)
                 }
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
@@ -805,13 +806,17 @@ final class AccessibilityUITests: XCTestCase {
     /// tapped its "Fertig" (contrast run 44038288087: "close settings" missing, the screenshots
     /// show the sheet). Told by the bar's title, not the button's label: the back button of a
     /// screen opened from the settings is called "Einstellungen" too (UI run 44055738268).
-    private func back() {
+    /// `confirmed`: the walk saw the screen open (its bar or `opened`); finding the overview
+    /// instead means the screen closed by itself, which is a finding. Unconfirmed screens (only
+    /// the tap is known) are left alone there.
+    private func back(_ step: String, confirmed: Bool) {
         let bar = app.navigationBars.firstMatch
         let first = bar.buttons.element(boundBy: 0)
         guard first.exists else { return }
         if ["Übersicht", "Overview"].contains(bar.identifier) {
-            print("UI_FACT back: no back button, the overview is showing")
-            shot("a11y-x-back-on-overview")
+            print("UI_FACT back: no back button, the overview is showing (\(step))")
+            shot("a11y-x-back-on-overview-" + slug(step))
+            if confirmed { XCTFail("Closed by itself before going back: \(step)") }
             return
         }
         first.tap()

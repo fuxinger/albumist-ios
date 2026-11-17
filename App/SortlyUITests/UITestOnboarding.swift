@@ -128,9 +128,11 @@ enum UITestOnboarding {
         let unreadable: Int
         /// The image loads the app counted (the label's value in UI runs).
         let loads: String
+        /// The count was on screen but its snapshot failed three times: never taken as complete.
+        var readFailed = false
 
         /// Photos the analysis never came to; unreadable ones it tried and keeps for later.
-        var cutOff: Bool { analyzed + unreadable < photos }
+        var cutOff: Bool { readFailed || analyzed + unreadable < photos }
 
         var unreadableText: String {
             "\(unreadable) of \(photos) photos could not be read ('\(label)', \(loads))"
@@ -143,7 +145,20 @@ enum UITestOnboarding {
         // Read from one snapshot each: the count changes while the analysis runs, and reading
         // `label` of an element that has just changed is a hard test failure ("No matches
         // found", flow test 5 in UI run 44038288087, right after "checking again").
-        guard partial.waitForExistence(timeout: wait), let shot = try? partial.snapshot() else { return nil }
+        // A failed snapshot is tried again and never read as "every photo analysed" (it was:
+        // `try?` gave nil, which means complete).
+        guard partial.waitForExistence(timeout: wait) else { return nil }
+        var taken: (any XCUIElementSnapshot)?
+        for attempt in 1...3 {
+            if let snapshot = try? partial.snapshot() { taken = snapshot; break }
+            // The count went away between the tries: the analysis has finished.
+            if !partial.exists { return nil }
+            if attempt < 3 { usleep(500_000) }
+        }
+        guard let shot = taken else {
+            print("UI_FACT partial analysis: the count is on screen but could not be read three times")
+            return PartialAnalysis(label: "(not readable)", analyzed: 0, photos: 0, unreadable: 0, loads: "", readFailed: true)
+        }
         let label = shot.label
         func number(_ text: Substring) -> Int { Int(text.filter(\.isNumber)) ?? 0 }
         let parts = label.split(separator: " ")
@@ -160,7 +175,10 @@ enum UITestOnboarding {
     /// allowed), not something to repair with "Neu prüfen".
     static func expectCompleteAnalysis(_ app: XCUIApplication, in test: String) {
         guard let partial = partialAnalysis(app) else { return }
-        if partial.cutOff {
+        if partial.readFailed {
+            print("UI_STEP_MISSING \(test) complete analysis: count not readable")
+            XCTFail("\(test): the analysis card shows a partial count that could not be read")
+        } else if partial.cutOff {
             print("UI_STEP_MISSING \(test) complete analysis: '\(partial.label)'")
             XCTFail("\(test): the analysis ended early at '\(partial.label)' (\(partial.unreadable) unreadable, \(partial.loads)) although this test watched it finish")
         } else {
@@ -179,6 +197,11 @@ enum UITestOnboarding {
     /// once with their count instead of after a 20-minute wait.
     static func finishInterruptedAnalysis(_ app: XCUIApplication, in test: String) {
         guard let partial = partialAnalysis(app) else { return }
+        if partial.readFailed {
+            print("UI_STEP_MISSING \(test) partial count readable")
+            XCTFail("\(test): the analysis card shows a partial count that could not be read")
+            return
+        }
         guard partial.cutOff else {
             print("UI_STEP_MISSING \(test) readable demo photos: \(partial.unreadableText)")
             XCTFail("\(test): \(partial.unreadableText)")

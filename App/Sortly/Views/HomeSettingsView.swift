@@ -421,7 +421,7 @@ struct HomeSinceSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationRoot {
             Form {
                 Section {
                     LabeledContent("Ort", value: HomeText.short(candidate.components))

@@ -32,12 +32,22 @@ enum UITestStalls {
                 continue
             }
             let parts = line.split(separator: " ")
+            // "@ <pid> <process start> <app code reached>": `ui_tests.py` compares the start
+            // with the test's "UI_FACT clock … launch" when XCTest lost the app at a launch.
+            if parts.count == 4, parts[0] == "@", let started = Double(parts[2]), let reached = Double(parts[3]) {
+                print("UI_FACT app process \(parts[1]) started \(clock(started)) UTC, its code ran from \(clock(reached)) UTC")
+                continue
+            }
             guard parts.count == 2, let end = Double(parts[0]), let ms = Int(parts[1]), ms >= 2000 else { continue }
             let from = end - Double(ms) / 1000
-            let day = from.truncatingRemainder(dividingBy: 86_400)
-            let clock = String(format: "%02d:%02d:%04.1f", Int(day / 3600), Int(day.truncatingRemainder(dividingBy: 3600) / 60),
-                               day.truncatingRemainder(dividingBy: 60))
-            print("UI_FACT main stall \(String(format: "%.1f", Double(ms) / 1000)) s from \(clock) UTC")
+            print("UI_FACT main stall \(String(format: "%.1f", Double(ms) / 1000)) s from \(clock(from)) UTC")
         }
+    }
+
+    /// "HH:MM:SS.s" (UTC) of seconds since 1970, the clock of `UITestOnboarding.clock`.
+    private static func clock(_ seconds: Double) -> String {
+        let day = seconds.truncatingRemainder(dividingBy: 86_400)
+        return String(format: "%02d:%02d:%04.1f", Int(day / 3600), Int(day.truncatingRemainder(dividingBy: 3600) / 60),
+                      day.truncatingRemainder(dividingBy: 60))
     }
 }

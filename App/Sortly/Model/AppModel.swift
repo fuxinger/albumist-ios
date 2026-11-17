@@ -147,7 +147,8 @@ final class AppModel {
         func stepFinished(_ index: Int, succeeded: Bool, planID: SortlyID) {
             guard self.planID == planID else { return }
             if !succeeded { unsuccessfulSteps.insert(index) }
-            completedSteps = index + 1
+            // Never backwards, also if a step reports late.
+            completedSteps = max(completedSteps, index + 1)
         }
     }
 

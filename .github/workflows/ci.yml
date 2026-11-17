@@ -38,13 +38,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Navigation rule
-        # Navigation uses destination-based links only. A value-based link inside a screen that
-        # was itself pushed by a destination-based link leads nowhere (dead row, warning triangle).
-        run: |
-          if grep -rn "NavigationLink(value:" App/Sortly; then
-            echo "::error::Use NavigationLink { destination } label: { … } instead of NavigationLink(value:)"
-            exit 1
-          fi
+        # Screens opened in code are pushed by value onto a NavigationRoot's path (AppScreen).
+        # No navigationDestination(isPresented:/item:) (presented again and again, main thread
+        # stood up to 352 s), no NavigationLink(value:) (PushLink instead), and every stack is a
+        # NavigationRoot, so no pushed value leads nowhere (dead row, warning triangle).
+        run: python3 .github/scripts/navigation_rule.py .
       - name: Spinner rule
         # A bare spinner is an element with no description (accessibility audit, VoiceOver).
         run: python3 .github/scripts/spinner_rule.py .

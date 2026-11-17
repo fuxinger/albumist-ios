@@ -1,6 +1,9 @@
 import SwiftUI
 import UIKit
 
+/// The app's entry: launch set-up (background work, notifications, UI-run helpers), one
+/// `AppModel` and `Purchases` for the window, and what happens when the app comes on screen or
+/// goes to the background (the analysis goes on, the backup copy of the decisions is written).
 @main
 struct SortlyApp: App {
     @State private var model = AppModel.shared

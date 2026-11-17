@@ -31,7 +31,7 @@ struct PhotoViewer: View {
 
     var body: some View {
         let index = ids.firstIndex(of: current) ?? 0
-        NavigationStack {
+        NavigationRoot {
             TabView(selection: $current) {
                 ForEach(ids, id: \.self) { id in
                     ZoomablePhoto(id: id, label: label(for: id), pull: $pull) { dismiss() }

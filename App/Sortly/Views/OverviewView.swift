@@ -4,27 +4,6 @@ import SwiftUI
 import SortlyCore
 import SortlyEngine
 
-/// A screen pushed onto the overview tab's path (`OverviewView.path`).
-enum OverviewScreen: Hashable {
-    case proposals
-    case plan
-    /// The preview of the starter set; leaving it ends the preview selection.
-    case starterPlan
-    case atlas
-    /// Where Siri, Shortcuts, Spotlight or a card's button wants to go (`AppModel.route`).
-    case route(AppModel.Route)
-
-    @MainActor @ViewBuilder
-    var destination: some View {
-        switch self {
-        case .proposals: ProposalListView(area: nil)
-        case .plan, .starterPlan: PlanReviewView()
-        case .atlas: AtlasView()
-        case .route(let route): RouteDestination(route: route)
-        }
-    }
-}
-
 /// Overview (direction A): organized share, analysis state, open proposals, areas.
 struct OverviewView: View {
     @Environment(AppModel.self) private var model
@@ -33,15 +12,15 @@ struct OverviewView: View {
     /// The ring grows with the text size, so "100 %" still fits inside at the largest sizes.
     @ScaledMetric(relativeTo: .title3) private var ringSide: CGFloat = 84
     @State private var showSettings = false
-    /// The overview tab's navigation path (`MainTabs`). The suggestions, the plan, the starter
-    /// plan and the atlas are pushed onto it, not from a NavigationLink inside the condition
-    /// that shows its button: a run that starts while one is open (a check for new photos after
-    /// the library changed) hides the button, and a link that leaves the screen takes its
-    /// pushed screen with it (contrast UI run 44038288087: suggestions and atlas closed by
+    /// The overview tab's stack (`MainTabs`). The suggestions, the plan, the starter plan and
+    /// the atlas are pushed onto it, not from a NavigationLink inside the condition that shows
+    /// its button: a run that starts while one is open (a check for new photos after the
+    /// library changed) hides the button, and a link that leaves the screen takes its pushed
+    /// screen with it (contrast UI run 44038288087: suggestions and atlas closed by
     /// themselves). A path, not `navigationDestination(isPresented:)`: with four of those on
     /// this stack, the atlas in landscape was presented again and again for 352 s (UI run
-    /// 44055738268).
-    @Binding var path: [OverviewScreen]
+    /// 44055738268). See `AppScreen`.
+    @Environment(Navigator.self) private var navigator: Navigator?
     /// The starter set is selected only while its preview is open.
     @State private var starterSelection: AppModel.PreviewSelection?
 
@@ -72,14 +51,14 @@ struct OverviewView: View {
                 if model.history.isEmpty && model.acceptedProposals.isEmpty {
                     StarterSetCard { set in
                         starterSelection = model.selectForPreview(set.map { ($0, model.recommendedDecision(for: $0)) })
-                        path.append(.starterPlan)
+                        Navigator.push(.starterPlan, on: navigator)
                     }
                 }
                 // While the analysis runs, "Schon fertig … Ansehen" on its card leads there; when it
                 // has just finished, its card has "Vorschläge prüfen" (point 3, 4: not twice).
                 if !model.openProposals.isEmpty, !model.analysis.isRunning, model.analysisFinished == nil {
                     Button {
-                        path.append(.proposals)
+                        Navigator.push(.proposals, on: navigator)
                     } label: {
                         Text("\(model.openProposals.count) Vorschläge prüfen")
                     }
@@ -87,7 +66,7 @@ struct OverviewView: View {
                 }
                 if !model.proposalsToApply.isEmpty {
                     Button {
-                        path.append(.plan)
+                        Navigator.push(.plan, on: navigator)
                     } label: {
                         Text("\(model.proposalsToApply.count) ausgewählte Alben anlegen")
                     }
@@ -96,7 +75,7 @@ struct OverviewView: View {
                 #if targetEnvironment(simulator)
                 if !DemoLibrary.shared.isDone { DemoLibraryCard() }
                 #endif
-                AtlasTeaser(onOpen: { path.append(.atlas) })
+                AtlasTeaser(onOpen: { Navigator.push(.atlas, on: navigator) })
                 areasSection
             }
             .padding(.horizontal, Theme.Spacing.l)
@@ -113,9 +92,9 @@ struct OverviewView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            NavigationStack { SettingsView() }
+            NavigationRoot { SettingsView() }
         }
-        .onChange(of: path.contains(.starterPlan)) { _, showing in
+        .onChange(of: navigator?.path.contains(.starterPlan) ?? false) { _, showing in
             // Back without creating: the starter set is not selected any more.
             if !showing, let selection = starterSelection {
                 model.endPreview(selection)
@@ -325,9 +304,7 @@ struct OverviewView: View {
             VStack(spacing: 0) {
                 let areas = OrganizationArea.available.filter { model.settings.enabledAreas.contains($0) }
                 ForEach(Array(areas.enumerated()), id: \.element) { index, area in
-                    NavigationLink {
-                        ProposalListView(area: area)
-                    } label: {
+                    PushLink(.areaProposals(area), chevron: false) {
                         areaRow(area, proposals: byArea[area] ?? [])
                     }
                     .buttonStyle(.plain)

@@ -76,28 +76,25 @@ struct MainTabs: View {
     @Environment(AppModel.self) private var model
     @Environment(\.requestReview) private var requestReview
     @State private var tab: MainTab = .overview
-    /// The overview tab's screens (`OverviewScreen`).
-    @State private var overviewPath: [OverviewScreen] = []
+    /// The overview tab's stack, also for Siri, Shortcuts and Spotlight (`AppScreen`).
+    @State private var overviewNavigator = Navigator()
 
     enum MainTab: Hashable { case overview, library, albums, search }
 
     var body: some View {
         TabView(selection: $tab) {
             Tab("Übersicht", systemImage: "square.grid.2x2", value: MainTab.overview) {
-                NavigationStack(path: $overviewPath) {
-                    OverviewView(path: $overviewPath)
-                        .navigationDestination(for: OverviewScreen.self) { $0.destination }
-                }
+                NavigationRoot(overviewNavigator) { OverviewView() }
             }
             Tab("Mediathek", systemImage: "photo.on.rectangle", value: MainTab.library) {
-                NavigationStack { LibraryView() }
+                NavigationRoot { LibraryView() }
             }
             // The symbol Photos uses for albums (design review N1).
             Tab("Alben", systemImage: "rectangle.stack", value: MainTab.albums) {
-                NavigationStack { AlbumsView() }
+                NavigationRoot { AlbumsView() }
             }
             Tab(value: MainTab.search, role: .search) {
-                NavigationStack { SearchView() }
+                NavigationRoot { SearchView() }
             }
         }
         // iPad: tabs become a sidebar; iPhone: the Liquid Glass tab bar shrinks while scrolling.
@@ -109,7 +106,8 @@ struct MainTabs: View {
         .onChange(of: model.route, initial: true) { _, target in
             guard let target else { return }
             tab = .overview
-            overviewPath.append(.route(target))
+            // The same target twice in a row (a second tap on the card) opens it once.
+            if overviewNavigator.path.last != AppScreen.route(target) { overviewNavigator.push(.route(target)) }
             model.route = nil
         }
         // Each message brings its own title (design review W15), e.g. "Das hat nicht geklappt".

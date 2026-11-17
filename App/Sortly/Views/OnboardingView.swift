@@ -15,7 +15,7 @@ struct OnboardingView: View {
     @State private var trialYear: Int?
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack(path: $path) { // navigation-rule: own path (onboarding pages only, no PushLink)
             screen(welcome)
                 .navigationDestination(for: Step.self) { step in
                     switch step {

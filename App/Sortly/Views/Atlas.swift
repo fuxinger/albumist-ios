@@ -318,8 +318,9 @@ struct AtlasContent: View {
     var atlas: TravelAtlas
     var outlines: [AtlasOutlines.Country]
     var revealed: Int
-    /// Country tapped on the map; opens its photos like a tap in the list.
-    @State private var tappedCountry: String?
+    /// A country tapped on the map or in the list opens its photos, pushed onto the stack's
+    /// path (`AppScreen`), not with `navigationDestination(item:)`.
+    @Environment(Navigator.self) private var navigator: Navigator?
     @ScaledMetric(relativeTo: .largeTitle) private var numberSize: CGFloat = 56
 
     var body: some View {
@@ -328,7 +329,7 @@ struct AtlasContent: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             Card {
                 AtlasMap(outlines: outlines, highlighted: Set(shown), latest: revealed < order.count ? shown.last : nil) {
-                    tappedCountry = $0
+                    Navigator.push(.country(code: $0, year: atlas.year), on: navigator)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -374,10 +375,8 @@ struct AtlasContent: View {
             if !shown.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(shown.enumerated()), id: \.element) { index, code in
-                        // Destination-based link (see DECISIONS: no value-based links).
-                        NavigationLink {
-                            CountryPhotosView(code: code, year: atlas.year)
-                        } label: {
+                        // Pushed by value: the country may push its suggestion (`AppScreen`).
+                        PushLink(.country(code: code, year: atlas.year), chevron: false) {
                             HStack(spacing: Theme.Spacing.m) {
                                 Text(TravelAtlas.flag(code)).font(.title2).accessibilityHidden(true)
                                 Text(AtlasStyle.countryName(code))
@@ -407,9 +406,6 @@ struct AtlasContent: View {
                 .padding(.horizontal, Theme.Spacing.l)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
             }
-        }
-        .navigationDestination(item: $tappedCountry) { code in
-            CountryPhotosView(code: code, year: atlas.year)
         }
     }
 
@@ -593,7 +589,7 @@ struct ShareCardSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationRoot {
             VStack(spacing: Theme.Spacing.l) {
                 GeometryReader { proxy in
                     let scale = min(proxy.size.width / 720, proxy.size.height / 1280)

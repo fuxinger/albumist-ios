@@ -5,6 +5,7 @@ import SortlyEngine
 /// List of proposals, optionally for one area.
 struct ProposalListView: View {
     @Environment(AppModel.self) private var model
+    @Environment(Navigator.self) private var navigator: Navigator?
     var area: OrganizationArea?
 
     private var proposals: [AlbumProposal] {
@@ -30,12 +31,8 @@ struct ProposalListView: View {
 
     private func rows(_ items: [AlbumProposal]) -> some View {
         ForEach(items) { proposal in
-            // Destination-based link: this list is itself pushed by a destination-based
-            // link, and a value-based link here found no destination (row did nothing,
-            // a yellow warning triangle appeared on the way back).
-            NavigationLink {
-                ProposalDetailView(proposal: proposal)
-            } label: {
+            // Pushed by value (`AppScreen`): the suggestion may push its own preview.
+            PushLink(.proposal(ProposalRef(proposal))) {
                 ProposalRow(proposal: proposal)
             }
         }
@@ -84,8 +81,8 @@ struct ProposalListView: View {
         // Accepted suggestions are created together: the way there is always in reach.
         .safeAreaInset(edge: .bottom) {
             if !model.proposalsToApply.isEmpty {
-                NavigationLink {
-                    PlanReviewView()
+                Button {
+                    Navigator.push(.plan, on: navigator)
                 } label: {
                     Text("\(model.proposalsToApply.count) ausgewählte Alben anlegen")
                 }
@@ -161,8 +158,9 @@ struct ProposalDetailView: View {
     @State private var name = ""
     @State private var showAdjust = false
     @State private var suggesting = false
-    @State private var directPlan: ChangePlan?
-    @State private var showDirect = false
+    @Environment(Navigator.self) private var navigator: Navigator?
+    /// The preview of "Album anlegen", pushed onto the stack's path (`AppScreen`).
+    @State private var directPlan: PlanToken?
     @State private var preparing = false
     @State private var applied = false
     @State private var rejectingMatch = false
@@ -344,19 +342,16 @@ struct ProposalDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { name = model.userTitles[proposal.id] ?? "" }
         .sheet(isPresented: $showAdjust) {
-            NavigationStack { AdjustProposalView(proposal: proposal) }
+            NavigationRoot { AdjustProposalView(proposal: proposal) }
                 .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showWorkshop, onDismiss: { if reshaped { dismiss() } }) {
-            NavigationStack { TripWorkshopView(proposal: proposal) { reshaped = true } }
-        }
-        .navigationDestination(isPresented: $showDirect) {
-            PlanReviewView(prebuilt: directPlan)
+            NavigationRoot { TripWorkshopView(proposal: proposal) { reshaped = true } }
         }
         .onChange(of: model.execution.finished) { _, finished in
-            if showDirect && finished != nil { applied = true }
+            if showsDirect && finished != nil { applied = true }
         }
-        .onChange(of: showDirect) { _, showing in
+        .onChange(of: showsDirect) { _, showing in
             guard !showing else { return }
             if applied {
                 // Back from the finished preview: the suggestion is done, return to the list.
@@ -366,6 +361,7 @@ struct ProposalDetailView: View {
                 model.endPreview(selection)
             }
             previewSelection = nil
+            directPlan = nil
         }
     }
 
@@ -548,6 +544,12 @@ struct ProposalDetailView: View {
         .padding(.top, Theme.Spacing.s)
     }
 
+    /// The preview of "Album anlegen" is on the stack.
+    private var showsDirect: Bool {
+        guard let directPlan, let navigator else { return false }
+        return navigator.path.contains(.prebuiltPlan(directPlan))
+    }
+
     private func accept() {
         if proposal.requiresUserName { model.setUserTitle(name, for: proposal) }
         model.setDecision(recommended, for: proposal)
@@ -560,8 +562,9 @@ struct ProposalDetailView: View {
         preparing = true
         defer { preparing = false }
         if let plan = await model.singlePlan(for: proposal) {
-            directPlan = plan
-            showDirect = true
+            let token = PlanToken(plan)
+            directPlan = token
+            Navigator.push(.prebuiltPlan(token), on: navigator)
         } else {
             // Nothing to change (album already complete or kept as it is): the preview's pick
             // goes back at once.

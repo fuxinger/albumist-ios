@@ -18,8 +18,7 @@ struct PlanReceiptView: View {
     @State private var showAllAlbums = false
     @State private var confirmUndo = false
     /// "Erneut versuchen": the plan with what is missing, opened in the normal review.
-    @State private var retry: ChangePlan?
-    @State private var showRetry = false
+    @Environment(Navigator.self) private var navigator: Navigator?
     @State private var nothingToRetry = false
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     private let collapsedCount = 12
@@ -57,9 +56,12 @@ struct PlanReceiptView: View {
             receipt = loaded.plan
             undos = loaded.undos
             let inventory = model.inventory
-            shareText = await Task.detached(priority: .userInitiated) {
+            let text = await Task.detached(priority: .userInitiated) {
                 ReceiptText.text(loaded.plan, undo: loaded.undos.first, inventory: inventory)
             }.value
+            // A newer load (after an undo) or a closed screen keeps its own text.
+            guard !Task.isCancelled else { return }
+            shareText = text
         }
         .confirmationDialog("Diese Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
             Button("Rückgängig machen", role: .destructive) {
@@ -70,10 +72,6 @@ struct PlanReceiptView: View {
             }
         } message: {
             Text("Alben und Zuordnungen von Albumist werden entfernt. Deine Fotos bleiben unverändert.")
-        }
-        // On the list, not inside it: a destination inside a lazy list is ignored.
-        .navigationDestination(isPresented: $showRetry) {
-            if let retry { PlanReviewView(prebuilt: retry) }
         }
         .alert("Nichts mehr zu tun", isPresented: $nothingToRetry) {
             Button("OK", role: .cancel) {}
@@ -192,8 +190,8 @@ struct PlanReceiptView: View {
                 Button {
                     Task {
                         if let missing = await model.retryPlan(for: plan) {
-                            retry = missing
-                            showRetry = true
+                            // Pushed onto the stack's path (`AppScreen`).
+                            Navigator.push(.prebuiltPlan(PlanToken(missing)), on: navigator)
                         } else {
                             nothingToRetry = true
                         }

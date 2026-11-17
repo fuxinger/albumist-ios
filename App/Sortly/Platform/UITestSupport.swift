@@ -42,7 +42,8 @@ enum UITestSupport {
     static func moveConsoleToFile() {
         guard isRunning else { return }
         let path = NSTemporaryDirectory() + "albumist-console.log"
-        let file = open(path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
+        // Emptied at each launch: one run's lines only.
+        let file = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
         guard file >= 0 else { return }
         dup2(file, STDERR_FILENO)
         dup2(file, STDOUT_FILENO)
@@ -203,11 +204,30 @@ final class MainThreadWatch: @unchecked Sendable {
             FileManager.default.createFile(atPath: path, contents: nil)
             return FileHandle(forWritingAtPath: path)
         }
+        // When this process was started and when its own code got here, as
+        // "@ <pid> <start> <now>" (seconds since 1970): tells a launch that iOS began late
+        // from one the app made slow, when XCTest loses the app at a launch ("does not have a
+        // process ID", device test 04 of UI run 44066730498; `ui_tests.py`).
+        if let file {
+            let now = Date().timeIntervalSince1970
+            let started = Self.processStart() ?? now
+            file.write(Data(String(format: "@ %d %.1f %.1f\n", getpid(), started, now).utf8))
+        }
         lock.lock()
         stressLines = lines
         stressFile = file
         lock.unlock()
         start()
+    }
+
+    /// When the kernel started this process (seconds since 1970).
+    static func processStart() -> Double? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&name, u_int(name.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000
     }
 
     private func setActive(_ value: Bool) {

@@ -22,6 +22,8 @@ struct PlanReviewView: View {
     @State private var show: [SortingShow.Album]?
     /// What the screen shows of `model.plan`, made by `makeFacts()`.
     @State private var facts: PlanReviewFacts?
+    /// The plan and album list `facts` were made for.
+    @State private var factsMadeFor: FactsKey?
     /// Suggestions were selected when the facts were made ("Auswahl aufheben" is offered).
     @State private var hasSelection = false
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
@@ -37,6 +39,12 @@ struct PlanReviewView: View {
         var steps: Int
         var conflicts: Int
         var inventory: Int
+
+        /// The same plan (id, steps and conflicts), whatever the album list.
+        func samePlan(as other: FactsKey?) -> Bool {
+            guard let other else { return false }
+            return plan == other.plan && steps == other.steps && conflicts == other.conflicts
+        }
     }
 
     var body: some View {
@@ -56,7 +64,12 @@ struct PlanReviewView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     } else if model.execution.isRunning {
                         runningCard
-                    } else if loading || (model.plan != nil && facts?.planID != model.plan?.id) {
+                    } else if loading || (model.plan != nil && !factsKey.samePlan(as: factsMadeFor)) {
+                        // Facts of another plan (or of this plan before "Nur die Gratis-Alben"
+                        // or a change of steps) are never shown. After a change of the album
+                        // list alone the shown facts stay until the new ones are made, so the
+                        // screen neither jumps to the top nor takes away "Anlegen" while Photos
+                        // reports a change.
                         ProgressView("Plan wird erstellt").frame(maxWidth: .infinity).padding(.top, 60)
                     } else if let plan = model.plan, let facts {
                         planContent(plan, facts) {
@@ -114,6 +127,7 @@ struct PlanReviewView: View {
     /// Works out what the screen shows of the current plan, off the main thread.
     private func makeFacts() async {
         guard let plan = model.plan else { return }
+        let key = factsKey
         let inventory = model.inventory
         let order = MainThreadWatch.shared.section("plan review: order") {
             model.acceptedProposals.inDisplayOrder().map(\.id)
@@ -123,6 +137,7 @@ struct PlanReviewView: View {
         }.value
         guard !Task.isCancelled else { return }
         facts = made
+        factsMadeFor = key
         hasSelection = !order.isEmpty
     }
 
@@ -326,6 +341,7 @@ private struct ExecutionHaptics: ViewModifier {
 /// Result of an executed plan: what happened, a way to see it in Photos, and undo.
 struct ResultCard: View {
     @Environment(AppModel.self) private var model
+    @Environment(Navigator.self) private var navigator: Navigator?
     var plan: ChangePlan
     @State private var confirmUndo = false
     @State private var appeared = false
@@ -405,8 +421,9 @@ struct ResultCard: View {
                     .frame(maxWidth: .infinity)
                 }
             }
-            NavigationLink {
-                PlanReceiptView(plan: plan)
+            // Pushed by value (`AppScreen`): the receipt may push "Fehlendes erneut versuchen".
+            Button {
+                Navigator.push(.receipt(PlanToken(plan)), on: navigator)
             } label: {
                 Text("Alle Änderungen ansehen")
                     .font(.subheadline.weight(.semibold))

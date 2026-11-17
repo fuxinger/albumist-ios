@@ -609,7 +609,7 @@ struct AnalysisDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
+        NavigationRoot {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     TimelineView(.periodic(from: .now, by: 15)) { context in

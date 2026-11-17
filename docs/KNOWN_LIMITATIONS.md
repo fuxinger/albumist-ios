@@ -15,6 +15,13 @@
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.
 - Analyse auf Vorschaubildern; kleine Motive werden eventuell nicht erkannt.
 - Personen- und Haustiergruppen sind noch nicht umgesetzt (Bereich ausgeblendet).
+- Bildlabels gibt es nur, solange „Themen“ oder „Dokumente“ an ist; später eingeschaltet,
+  holt der nächste Lauf sie nach. Wer zwischen TestFlight-Builds mit und ohne diese Nachführung
+  (Datenbank-Version 5) hin und her wechselt: ein älterer Build öffnet die neuere Datenbank,
+  pflegt die Spalte `labels_version` aber nicht. Fotos, die unter dem älteren Build bearbeitet
+  wurden, behalten dann ihre alte Markierung und bekommen nach dem Zurückwechseln keine neuen
+  Labels; neue Fotos sind nicht betroffen (sie bekommen ihre Labels nachgeholt). Abhilfe:
+  „Analyse neu aufbauen“.
 
 ## Messenger-Herkunft
 iOS speichert keine verlässliche Quell-App. Albumist nutzt nur klare Hinweise (Messenger-

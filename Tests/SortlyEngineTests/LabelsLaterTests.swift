@@ -281,9 +281,141 @@ struct LabelsLaterTests {
         #expect(report.isComplete)
         #expect(report.labelsAdded == 5)
         #expect(try await s.store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion, labelsVersion: AnalysisPipeline.labelsVersion) == 0)
+        // The photo given up had a full look again (no result to add labels to), not labels only.
+        let afterEnabling = s.analyzer.requests.withLock { $0.filter { $0.0 == broken }.last?.1 }
+        #expect(afterEnabling?.featurePrint == true && afterEnabling?.classify == true)
         let calls = s.analyzer.requests.withLock { $0.count }
         _ = try await s.pipeline.run()
         #expect(s.analyzer.requests.withLock { $0.count } == calls)
+    }
+
+    /// A photo that only needs its labels and cannot be read now: tried again in later runs,
+    /// spaced out like any photo, and given up for its labels after as many tries. Its earlier
+    /// result stays byte for byte as it was all the while (review probe of 29b6e6c, M1/N4).
+    @Test func labelsOnlyFailuresAreCountedAndKeepTheEarlierResult() async throws {
+        let s = try Self.setup(photos: 6, screenshots: 0, labels: false)
+        _ = try await s.pipeline.run()
+        let broken = s.photos[3]
+        let earlier = try #require(try await s.store.rawResult(kind: "content", asset: broken))
+        s.analyzer.unreadable.withLock { $0 = [broken] }
+        await s.pipeline.update(settings: Self.settings(labels: true))
+
+        func tries() -> Int { s.analyzer.requests.withLock { $0.filter { $0.0 == broken && $0.1 == .labelsOnly }.count } }
+        func makeDue() async throws {
+            var tried = try #require(try await s.store.result(LabelAttempts.self, kind: "labels", asset: broken))
+            tried.lastAttempt = .distantPast
+            try await s.store.saveResult(tried, kind: "labels", asset: broken, version: AnalysisPipeline.labelsVersion)
+        }
+        for attempt in 1..<ContentAnalysis.maxFailedAttempts {
+            let report = try await s.pipeline.run()
+            #expect(report.pausedBecause == nil)
+            #expect(tries() == attempt)
+            #expect(try await s.store.labelsVersions()[broken] == 0, "not given up after \(attempt)")
+            #expect(try await s.store.result(LabelAttempts.self, kind: "labels", asset: broken)?.failedAttempts == attempt)
+            #expect(try await s.store.rawResult(kind: "content", asset: broken) == earlier)
+            // Right away again: not tried (spaced out like any photo that could not be read).
+            _ = try await s.pipeline.run()
+            #expect(tries() == attempt)
+            try await makeDue()
+        }
+        _ = try await s.pipeline.run()
+        #expect(tries() == ContentAnalysis.maxFailedAttempts)
+        #expect(try await s.store.labelsVersions()[broken] == AnalysisPipeline.labelsVersion)
+        #expect(try await s.store.rawResult(kind: "content", asset: broken) == earlier)
+        // Given up: never tried again, and every other photo has its labels.
+        _ = try await s.pipeline.run()
+        #expect(tries() == ContentAnalysis.maxFailedAttempts)
+        #expect(try await s.store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion, labelsVersion: AnalysisPipeline.labelsVersion) == 0)
+        #expect(s.analyzer.full == 6)
+    }
+
+    /// Readable again on a later try: the labels come, the count of failed tries goes.
+    @Test func labelsOnlyFailureThenReadable() async throws {
+        let s = try Self.setup(photos: 4, screenshots: 0, labels: false)
+        _ = try await s.pipeline.run()
+        let flaky = s.photos[1]
+        s.analyzer.unreadable.withLock { $0 = [flaky] }
+        await s.pipeline.update(settings: Self.settings(labels: true))
+        _ = try await s.pipeline.run()
+        #expect(try await s.store.labelsVersions()[flaky] == 0)
+        var tried = try #require(try await s.store.result(LabelAttempts.self, kind: "labels", asset: flaky))
+        tried.lastAttempt = .distantPast
+        try await s.store.saveResult(tried, kind: "labels", asset: flaky, version: AnalysisPipeline.labelsVersion)
+        s.analyzer.unreadable.withLock { $0 = [] }
+        let report = try await s.pipeline.run()
+        #expect(report.labelsAdded == 1)
+        #expect(try await s.store.labelsVersions()[flaky] == AnalysisPipeline.labelsVersion)
+        #expect(try await s.store.result(LabelAttempts.self, kind: "labels", asset: flaky) == nil)
+        #expect(try await s.store.result(ContentAnalysis.self, kind: "content", asset: flaky)?.labels.isEmpty == false)
+    }
+
+    /// "Themen" and "Dokumente" never look done while labels are missing: with the labelled
+    /// photos from the store, the status says the photos are still to be looked at for both,
+    /// until the run gave them their labels.
+    @Test func themenAndDokumenteArePendingWhileLabelsAreMissing() async throws {
+        let s = try Self.setup(labels: false)
+        _ = try await s.pipeline.run()
+        let on = Self.settings(labels: true, documents: true)
+        await s.pipeline.update(settings: on)
+
+        func derive(labelled: Bool) async throws -> DerivedLibraryStatus {
+            DerivedLibraryStatus.derive(
+                facts: try await s.pipeline.currentFacts(), snapshot: try await s.pipeline.latestProposals(), settings: on, overrides: OverrideSet(),
+                contents: try await s.store.results(ContentAnalysis.self, kind: "content"),
+                labelled: labelled ? try await s.store.labelledAssets(labelsVersion: AnalysisPipeline.labelsVersion) : nil,
+                managed: [], inventory: CollectionInventory(), scope: .all)
+        }
+        let before = try await derive(labelled: true)
+        for id in s.photos {
+            #expect(before.states[id]?.areas[.imageCategories] == .analysisPending)
+            #expect(before.states[id]?.areas[.documents] == .analysisPending)
+        }
+        // Without the labelled photos, as before: the content analysis alone counts.
+        let unknown = try await derive(labelled: false)
+        #expect(s.photos.allSatisfy { unknown.states[$0]?.areas[.imageCategories] != .analysisPending })
+
+        _ = try await s.pipeline.run()
+        let after = try await derive(labelled: true)
+        for id in s.photos {
+            #expect(after.states[id]?.areas[.imageCategories] != .analysisPending)
+            #expect(after.states[id]?.areas[.documents] != .analysisPending)
+        }
+        #expect(after.states == (try await derive(labelled: false)).states)
+    }
+
+    @Test func settingsChangesThatNeedARun() {
+        let off = Self.settings(labels: false)
+        #expect(AnalysisPipeline.settingsChangeNeedsRun(from: off, to: Self.settings(labels: true)))
+        #expect(AnalysisPipeline.settingsChangeNeedsRun(from: off, to: Self.settings(labels: false, documents: true)))
+        #expect(!AnalysisPipeline.settingsChangeNeedsRun(from: Self.settings(labels: true), to: off))
+        #expect(!AnalysisPipeline.settingsChangeNeedsRun(from: off, to: off))
+        // The text step newly on (nothing was read before).
+        var noText = off
+        noText.enabledAreas.subtract([.screenshots, .documents, .messenger])
+        #expect(!AnalysisPipeline.readsText(noText))
+        var screenshots = noText
+        screenshots.enabledAreas.insert(.screenshots)
+        #expect(AnalysisPipeline.settingsChangeNeedsRun(from: noText, to: screenshots))
+        var messenger = noText
+        messenger.enabledAreas.insert(.messenger)
+        #expect(AnalysisPipeline.settingsChangeNeedsRun(from: noText, to: messenger))
+        #expect(!AnalysisPipeline.settingsChangeNeedsRun(from: screenshots, to: noText))
+        // Online lookups allowed, hidden photos included.
+        var offline = off
+        offline.privacy.allowOnlineGeocoding = false
+        #expect(AnalysisPipeline.settingsChangeNeedsRun(from: offline, to: off))
+        #expect(!AnalysisPipeline.settingsChangeNeedsRun(from: off, to: offline))
+        var hidden = off
+        hidden.privacy.includeHiddenAssets = !off.privacy.includeHiddenAssets
+        #expect(AnalysisPipeline.settingsChangeNeedsRun(from: off, to: hidden) == hidden.privacy.includeHiddenAssets)
+        // Finer places: towns wanted where only countries were.
+        var countries = off
+        countries.enabledAreas.remove(.trips)
+        countries.places.levels = [.country]
+        var towns = countries
+        towns.places.levels = [.country, .locality]
+        #expect(AnalysisPipeline.settingsChangeNeedsRun(from: countries, to: towns))
+        #expect(!AnalysisPipeline.settingsChangeNeedsRun(from: towns, to: countries))
     }
 
     // MARK: Store

@@ -45,5 +45,7 @@ Idempotenzschlüssel (Plan-ID + Index + Inhalts-Hash).
   eingeschaltet, holt der nächste Lauf sie für genau diese Fotos nach (nur die Labels).
   Fotos älterer Versionen gelten nur dann als erledigt, wenn ihr gespeichertes Ergebnis
   mindestens ein Label hat; ob ein Foto ohne Labels mit eingeschalteter Erkennung angesehen
-  wurde, ist nicht bekannt, es wird einmal nachklassifiziert.
+  wurde, ist nicht bekannt, es wird einmal nachklassifiziert. Kann ein Foto beim Nachholen
+  nicht gelesen werden, zählt `analysis_results` (Art `labels`, `LabelAttempts`) die Versuche;
+  sein Inhaltsergebnis bleibt unverändert.
 Migrationen laufen nur vorwärts, jede in einer Transaktion.

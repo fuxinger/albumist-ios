@@ -57,22 +57,28 @@ public enum LibraryStatus {
         settings: OrganizationSettings,
         overrides: OverrideSet = OverrideSet(),
         contentAnalyzed: Set<AssetID>,
+        labelled: Set<AssetID>? = nil,
         organizedBySortly: [OrganizationArea: Set<AssetID>] = [:],
         calendar: Calendar = .sortlyDefault
     ) -> [AssetID: AssetOrganizationState] {
         computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                           contentAnalyzed: contentAnalyzed, organizedBySortly: organizedBySortly, calendar: calendar).states
+                           contentAnalyzed: contentAnalyzed, labelled: labelled, organizedBySortly: organizedBySortly, calendar: calendar).states
     }
 
     /// Where an album that fits a photo came from.
     private enum Source: Int { case own, standIn, dismissed }
 
+    /// `labelled`: the photos with their image labels (`SortlyStore.labelledAssets`). A photo
+    /// without them is not looked at yet for "Themen" and "Dokumente", also when its content
+    /// was analysed (while both were off): neither area looks done while labels are missing.
+    /// `nil`: not known, the content analysis alone counts (as before labels were tracked).
     public static func computeWithReasons(
         facts: [AssetFacts],
         snapshot: ProposalSnapshot?,
         settings: OrganizationSettings,
         overrides: OverrideSet = OverrideSet(),
         contentAnalyzed: Set<AssetID>,
+        labelled: Set<AssetID>? = nil,
         organizedBySortly: [OrganizationArea: Set<AssetID>] = [:],
         calendar: Calendar = .sortlyDefault
     ) -> (states: [AssetID: AssetOrganizationState], reasons: Reasons) {
@@ -118,6 +124,8 @@ public enum LibraryStatus {
 
         for f in facts {
             let analyzed = contentAnalyzed.contains(f.id)
+            // Labels known to be missing (only when the caller knows them).
+            let labelsMissing = labelled.map { !$0.contains(f.id) } ?? false
             // With suggestions made for this photo's part of the library, a photo without an album
             // in places or trips has none on purpose. Not a photo taken after the suggestions were
             // made: back from a trip, its photos count as unsorted until the next analysis has
@@ -158,10 +166,14 @@ public enum LibraryStatus {
                     a.applicable = f.asset.isScreenshotLike
                     a.analyzed = analyzed
                 case .imageCategories:
-                    a.applicable = !analyzed || !f.categories.isEmpty
-                    a.analyzed = analyzed
+                    let looked = analyzed && !labelsMissing
+                    a.applicable = !looked || !f.categories.isEmpty
+                    a.analyzed = looked
                 case .documents:
-                    a.applicable = f.document != nil
+                    // A photo without labels may still turn out to be a document (its labels
+                    // decide whether it is read): pending until it has them.
+                    a.applicable = f.document != nil || labelsMissing
+                    a.analyzed = f.document != nil || !labelsMissing
                 case .messenger:
                     a.applicable = f.messenger != nil
                 case .peopleAndPets:
@@ -295,6 +307,7 @@ public struct DerivedLibraryStatus: Sendable {
         settings: OrganizationSettings,
         overrides: OverrideSet,
         contents: [AssetID: ContentAnalysis],
+        labelled: Set<AssetID>? = nil,
         managed: [ManagedAlbumState],
         inventory: CollectionInventory,
         scope: OrganizationScope,
@@ -312,7 +325,8 @@ public struct DerivedLibraryStatus: Sendable {
         // also once that suggestion is no longer shown.
         let byAlbumist = LibraryStatus.organizedBySortly(managed, inventory: inventory, snapshot: snapshot)
         let (states, reasons) = LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                                                  contentAnalyzed: analyzed, organizedBySortly: byAlbumist, calendar: calendar)
+                                                                  contentAnalyzed: analyzed, labelled: labelled, organizedBySortly: byAlbumist,
+                                                                  calendar: calendar)
         result.states = states
         result.reasons = reasons
         // The trial year counts only its own photos (the ring said "839 von 5.683" over the

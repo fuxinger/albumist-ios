@@ -84,7 +84,7 @@ public actor SortlyStore: PlanJournal {
                     }
                     if row["modification_date"]?.double != a.modificationDate?.timeIntervalSince1970
                         || row["pixel_width"]?.int != a.pixelWidth || row["pixel_height"]?.int != a.pixelHeight {
-                        try db.execute("DELETE FROM analysis_results WHERE asset_id = ? AND kind IN ('content', 'text')", [id])
+                        try db.execute("DELETE FROM analysis_results WHERE asset_id = ? AND kind IN ('content', 'text', 'labels')", [id])
                         try db.execute("DELETE FROM text_plain WHERE asset_id = ?", [id])
                         // Its labels went with the result (the upsert below keeps this column).
                         try db.execute("UPDATE assets SET labels_version = 0 WHERE id = ?", [id])
@@ -235,6 +235,29 @@ public actor SortlyStore: PlanJournal {
             }
         }
         return out
+    }
+
+    /// Photos whose image labels are of at least `labelsVersion` (or given up as unreadable):
+    /// for the status of "Themen" and "Dokumente" (`LibraryStatus`), which must not count a
+    /// photo as looked at while its labels are still missing.
+    public func labelledAssets(labelsVersion: Int) throws -> Set<AssetID> {
+        Set(try db.query("SELECT id FROM assets WHERE labels_version >= ?", [.integer(Int64(labelsVersion))])
+            .compactMap { $0["id"]?.string.map { AssetID($0) } })
+    }
+
+    /// Removes the results of `kind` of these photos.
+    public func removeResults(kind: String, assets ids: [AssetID]) throws {
+        guard !ids.isEmpty else { return }
+        try db.transaction {
+            for id in ids {
+                try db.execute("DELETE FROM analysis_results WHERE asset_id = ? AND kind = ?", [.text(id.rawValue), .text(kind)])
+            }
+        }
+    }
+
+    /// The stored bytes of one result, as written. Tests and diagnostics.
+    public func rawResult(kind: String, asset: AssetID) throws -> Data? {
+        try db.query("SELECT payload FROM analysis_results WHERE kind = ? AND asset_id = ?", [.text(kind), .text(asset.rawValue)]).first?["payload"]?.data
     }
 
     /// The labels version of each photo (0: no labels computed). Tests and diagnostics.

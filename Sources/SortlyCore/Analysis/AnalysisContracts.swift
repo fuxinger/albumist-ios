@@ -171,6 +171,23 @@ public struct ContentAnalysis: Hashable, Sendable, Codable {
     }
 }
 
+/// Failed reads of a photo that only needed its labels (`ContentAnalysisRequest.labelsOnly`),
+/// stored apart from its content result (kind "labels"), which stays exactly as it was. Counted
+/// and spaced like `ContentAnalysis.failedAttempts`: given up for its labels after
+/// `ContentAnalysis.maxFailedAttempts` runs, at least `ContentAnalysis.retrySpacing` apart.
+public struct LabelAttempts: Hashable, Sendable, Codable {
+    public var failedAttempts: Int
+    public var lastAttempt: Date
+    public init(failedAttempts: Int, lastAttempt: Date) {
+        self.failedAttempts = failedAttempts
+        self.lastAttempt = lastAttempt
+    }
+
+    public func isDueForRetry(now: Date) -> Bool {
+        now.timeIntervalSince(lastAttempt) >= ContentAnalysis.retrySpacing
+    }
+}
+
 public struct ContentAnalysisRequest: Hashable, Sendable {
     public var classify = true
     public var detectFaces = false

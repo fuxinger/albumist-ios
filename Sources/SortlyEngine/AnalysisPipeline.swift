@@ -341,10 +341,27 @@ public actor AnalysisPipeline {
         settings.enabledAreas.contains(.imageCategories) || settings.enabledAreas.contains(.documents)
     }
 
-    /// A change of the settings that gives the image step work on photos analysed already
-    /// (their labels): the app starts a run after it, as after new photos.
+    /// Whether the text step runs: screenshots, documents and messenger pictures are read.
+    public static func readsText(_ settings: OrganizationSettings) -> Bool {
+        settings.enabledAreas.contains(.screenshots) || settings.enabledAreas.contains(.documents)
+            || settings.enabledAreas.contains(.messenger)
+    }
+
+    /// A change of the settings that gives a step work on photos read already: the app starts
+    /// a run after it, as after new photos. Any change that makes a step newly needed:
+    /// - labels wanted ("Themen" or "Dokumente" on): photos analysed without them get them,
+    /// - the text step on (screenshots, documents or messenger pictures): they are read,
+    /// - finer places (towns, also for trips) or online lookups allowed: places are resolved further,
+    /// - hidden photos included: they are read in and analysed.
+    /// Faces are not computed yet (`VisionAnalyzer`), so people and pets need no run here.
+    /// A change that only shows or hides suggestions needs none: the suggestions follow the
+    /// settings with the next run anyway.
     public static func settingsChangeNeedsRun(from old: OrganizationSettings, to new: OrganizationSettings) -> Bool {
-        !wantsLabels(old) && wantsLabels(new)
+        if !wantsLabels(old) && wantsLabels(new) { return true }
+        if !readsText(old) && readsText(new) { return true }
+        let before = PlaceResolutionPolicy(settings: old), after = PlaceResolutionPolicy(settings: new)
+        if after.deepestLevel > before.deepestLevel || (!before.onlineAllowed && after.onlineAllowed) { return true }
+        return !old.privacy.includeHiddenAssets && new.privacy.includeHiddenAssets
     }
 
     /// What runs without an explicit scope work on. First device test 15.11.: "nur 2026" at
@@ -587,6 +604,9 @@ public actor AnalysisPipeline {
         // The last photos looked at, for "Gerade angesehen" (no screenshots: account numbers,
         // ID cards would be shown large on the overview, B4).
         var lookedAt: [AssetID] = []
+        // Photos of this run that only need their labels: their failed reads count apart from
+        // their content result (`LabelAttempts`), also when the failure is noted a batch later.
+        var labelsOnlyIDs = Set<AssetID>()
         let analyzer = self.analyzer
         while true {
             if let reason = await shouldStop() { report.pausedBecause = reason; return report }
@@ -643,6 +663,16 @@ public actor AnalysisPipeline {
                 }
                 return false
             }
+            // Labels that could not be read a short while ago: not again in this run (like
+            // photos that could not be read at all, above).
+            var labelAttempts: [AssetID: LabelAttempts] = [:]
+            for id in labelsOnly.keys {
+                guard let tried = try await store.result(LabelAttempts.self, kind: "labels", asset: id) else { continue }
+                labelAttempts[id] = tried
+                if !tried.isDueForRetry(now: now()) { deferred.insert(id) }
+            }
+            batch.removeAll { labelsOnly[$0.id] != nil && deferred.contains($0.id) }
+            labelsOnlyIDs.formUnion(labelsOnly.keys)
             await analyzer.willAnalyze(Array(batch.prefix(2 * contentLanes)))
             try await withThrowingTaskGroup(of: (AssetSnapshot, Result<ContentAnalysis, any Error>).self) { group in
                 var inFlight = 0
@@ -689,7 +719,7 @@ public actor AnalysisPipeline {
                         }
                         // The analyzer works: the photos it failed on just before were the problem.
                         for id in suspects {
-                            if try await recordContentFailure(id) { finished.append(id) }
+                            if try await recordFailure(id, labelsOnly: labelsOnlyIDs.contains(id)) { finished.append(id) }
                         }
                         suspects = []
                     case .failure(let error):
@@ -708,7 +738,7 @@ public actor AnalysisPipeline {
                         } else if await accessChanged() {
                             // Not the photo: the access was taken away. Nothing is counted.
                             stopped = .accessRevoked
-                        } else if try await recordContentFailure(asset.id) {
+                        } else if try await recordFailure(asset.id, labelsOnly: labelsOnlyIDs.contains(asset.id)) {
                             // Not readable right now (no local preview yet, still syncing): tried
                             // again in later runs, and given up only after a few of them.
                             finished.append(asset.id)
@@ -718,10 +748,13 @@ public actor AnalysisPipeline {
             }
             // With labels wanted, every photo done here has its labels: looked at with them
             // asked for, labels stored before, or given up (not readable, also without labels).
-            // A photo that only needed its labels and could not be read now (it was before) is
-            // given up for them as well: its earlier result stays, nothing is tried every run.
+            // A photo that only needs its labels and cannot be read now (it was before) is tried
+            // again in later runs like any photo (`LabelAttempts`) and given up for its labels
+            // after as many; its earlier result stays as it is meanwhile and after.
             try await store.saveResults(results, kind: "content", version: Self.contentVersion, markingAnalyzed: finished,
                                         labelsVersion: labels)
+            let read = Set(results.map(\.0))
+            try await store.removeResults(kind: "labels", assets: labelAttempts.keys.filter(read.contains))
             if cancelled { throw CancellationError() }
             if cut {
                 // Goes on behind the last photo looked at (same order as the store's query);
@@ -859,6 +892,20 @@ public actor AnalysisPipeline {
         return attempts >= ContentAnalysis.maxFailedAttempts
     }
 
+    private func recordFailure(_ id: AssetID, labelsOnly: Bool) async throws -> Bool {
+        labelsOnly ? try await recordLabelsFailure(id) : try await recordContentFailure(id)
+    }
+
+    /// Counts a failed read against a photo that only needed its labels. Returns true when it
+    /// is given up for them. Its content result is not touched.
+    private func recordLabelsFailure(_ id: AssetID) async throws -> Bool {
+        let previous = try? await store.result(LabelAttempts.self, kind: "labels", asset: id)
+        let attempts = (previous?.failedAttempts ?? 0) + 1
+        try await store.saveResult(LabelAttempts(failedAttempts: attempts, lastAttempt: now()), kind: "labels", asset: id,
+                                   version: Self.labelsVersion)
+        return attempts >= ContentAnalysis.maxFailedAttempts
+    }
+
     private func resolvePlaces(
         _ all: [AssetSnapshot], trips: [Trip], frequent: [FrequentPlace], refining: Bool,
         onProgress: @escaping @Sendable (Progress) -> Void
@@ -933,9 +980,7 @@ public actor AnalysisPipeline {
         onProgress: @escaping @Sendable (Progress) -> Void
     ) async throws -> TextOutcome {
         var outcome = TextOutcome()
-        guard settings.enabledAreas.contains(.screenshots) || settings.enabledAreas.contains(.documents) || settings.enabledAreas.contains(.messenger) else {
-            return outcome
-        }
+        guard Self.readsText(settings) else { return outcome }
         // Masked first: a read that fails below writes the earlier result back, which must be
         // the masked one.
         try await remaskStoredTexts()

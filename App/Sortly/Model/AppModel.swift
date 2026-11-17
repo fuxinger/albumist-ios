@@ -762,7 +762,10 @@ final class AppModel {
 
     /// Reads the access again, e.g. after the user came back from the Settings app.
     func refreshAccess() async {
-        access = await library.access()
+        // Written only when it changed: screens call this whenever they appear, and every
+        // write draws again each screen that reads the access.
+        let current = await library.access()
+        if access != current { access = current }
         await restoreWaitingLibraryState()
         followAccess()
     }

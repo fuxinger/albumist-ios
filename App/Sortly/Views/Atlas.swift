@@ -74,7 +74,17 @@ struct AtlasMap: View {
     var latest: String? = nil
     /// Called with the visited country under the finger; nil = the map is not tappable.
     var onTapCountry: ((String) -> Void)? = nil
-    @State private var size: CGSize = .zero
+    /// The map's size, for finding the country under the finger. Kept in a box that SwiftUI
+    /// does not watch: as `@State`, each size the map reported drew it again. In landscape the
+    /// atlas screen drew the map 9,644 times in one 352 s stall of the main thread, right after
+    /// it opened (UI run 44055738268, accessibility test 4); this write was the only change the
+    /// map makes by itself.
+    @State private var measured = MeasuredSize()
+
+    /// A plain reference: writing it changes nothing on screen.
+    private final class MeasuredSize {
+        var size: CGSize = .zero
+    }
 
     private static func path(_ country: AtlasOutlines.Country, in size: CGSize) -> Path {
         let north = 83.0, south = -56.0
@@ -99,7 +109,7 @@ struct AtlasMap: View {
 
     /// The visited country at `location`; small countries get a few points of slack.
     private func country(at location: CGPoint) -> String? {
-        let paths = zip(outlines, countryPaths(in: size))
+        let paths = zip(outlines, countryPaths(in: measured.size))
             .filter { highlighted.contains($0.0.code) }
             .map { ($0.0.code, $0.1) }
         if let hit = paths.first(where: { $0.1.contains(location, eoFill: true) }) { return hit.0 }
@@ -127,7 +137,7 @@ struct AtlasMap: View {
             context.fill(recent, with: .color(AtlasStyle.latest), style: fill)
         }
         .aspectRatio(360 / 139, contentMode: .fit)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { measured.size = $0 }
         .onTapGesture(coordinateSpace: .local) { location in
             guard let onTapCountry, let code = country(at: location) else { return }
             onTapCountry(code)

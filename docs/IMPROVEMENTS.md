@@ -178,6 +178,7 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 |---|---|---|---|
 | ✅ | Name Albumist, neues Icon „Glass Stack“. | S | U |
 | ✅ | Berechtigungstext und alle anderen Texte sagen „Gerät“ statt „iPhone“ (iPad). | S | E1 Produkt |
+| ✅ | Fotozugriff-Text nennt auch das Schreiben (App Review 5.1.1(ii)): „Erst wenn du bestätigst, legt es Alben und Ordner in Fotos an und fügt Fotos hinzu oder nimmt sie aus Alben heraus“, Deutsch und Englisch; „Es werden keine Fotos hochgeladen“ statt „Nichts wird hochgeladen“ (der Apple-Geocoder bekommt Koordinaten). `docs/PRIVACY.md` beschreibt Schreiben, Beispielfotos und alle `UserDefaults`-Werte; Datenschutz-Manifest gegen den Code geprüft (UserDefaults CA92.1, Dateizeitstempel C617.1 passen; keine Systemstartzeit, kein Speicherplatz). `STATUS.md` verweist auf die gepflegten Dateien, `ROADMAP.md` nachgezogen (Branch `claude/quick-wins`). | S | Vorab-Prüfung 17.11. |
 | ✅ | Builds und Tests mit Xcode 27 auf iOS 27 (aktuelles iOS). | S | U |
 | ✅ | Erstes Ergebnis früh: Reisen, Länder und Orte erscheinen beim ersten Durchgang vor der Bildanalyse (statt nach Stunden). | M | E1 Produkt/Oberfläche |
 | ✅ | Startpaket: „Dein Startpaket“ mit den besten Alben (Reisen und Orte zuerst), ein Knopf „10 Alben kostenlos anlegen“; bei großen Plänen „Die ersten N jetzt kostenlos anlegen“. | M | E1 Produkt |

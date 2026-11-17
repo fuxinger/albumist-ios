@@ -26,7 +26,8 @@ final class ThumbnailCache {
         let scale = UITraitCollection.current.displayScale
         let size = CGSize(width: side * scale, height: side * scale)
         let image = await ThumbnailRequest.load(asset, size: size, manager: manager)
-        if let image {
+        // A cancelled request is not kept: what came back may not be the prepared thumbnail.
+        if let image, !Task.isCancelled {
             let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
             cache.setObject(image, forKey: key, cost: cost)
         }
@@ -206,7 +207,8 @@ enum ThumbnailRequest {
 
     nonisolated static func load(_ asset: Asset, size: CGSize, manager: Manager, contentMode: PHImageContentMode = .aspectFill) async -> UIImage? {
         let delivered = await request(asset, size: size, manager: manager, contentMode: contentMode)
-        guard let delivered, !Task.isCancelled else { return delivered }
+        // Cancelled: nothing, not the raw image (it can be the full original, see `prepared`).
+        guard let delivered, !Task.isCancelled else { return nil }
         return prepared(delivered, for: size, fill: contentMode == .aspectFill)
     }
 
@@ -274,12 +276,15 @@ struct AssetThumbnail: View {
     /// Which part stays visible when the photo is cropped; screenshots keep their top.
     var anchor: Alignment = .center
     @State private var image: UIImage?
+    /// The photo `image` shows: when the same view gets another `id` (a trip's cover), the old
+    /// photo is not shown while the new one loads.
+    @State private var loadedID: AssetID?
 
     var body: some View {
         Rectangle()
             .fill(Color(uiColor: .tertiarySystemFill))
             .overlay(alignment: anchor) {
-                if let image {
+                if let image, loadedID == id {
                     Image(uiImage: image).resizable().scaledToFill()
                 }
             }
@@ -289,6 +294,7 @@ struct AssetThumbnail: View {
                 // A cell that moved on to another photo keeps the new one's image.
                 guard !Task.isCancelled else { return }
                 image = loaded
+                loadedID = id
             }
             .accessibilityHidden(true)
     }

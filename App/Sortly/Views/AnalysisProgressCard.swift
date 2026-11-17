@@ -188,7 +188,11 @@ struct AnalysisProgressCard: View {
         .accessibilityAddTraits(isRunning ? .updatesFrequently : [])
         .accessibilityIdentifier("analysis.progress")
         .onChange(of: accessibilityValue, initial: true) { renewSpoken() }
-        .onChange(of: isRunning) { renewSpoken(now: true) }
+        // A new state or step is said at once, so the words and the spoken value agree.
+        .onChange(of: state.phase) { renewSpoken(now: true) }
+        .onChange(of: position?.step) { renewSpoken(now: true) }
+        // onDisappear drops a queued update: on return the value is taken afresh.
+        .onAppear { renewSpoken(now: true) }
         .onDisappear {
             spokenPending?.cancel()
             spokenPending = nil

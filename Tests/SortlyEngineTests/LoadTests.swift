@@ -265,9 +265,47 @@ struct LoadTests {
         let start = try #require(seen.first)
         print("LOAD_IMAGE_STEP " + seen.map { "\(ms($0.at - start.at)) ms \($0.progress.completed)\($0.progress.earlyProposals ? " early" : "")" }.joined(separator: " | "))
         let firstCount = try #require(seen.first { $0.progress.completed > start.progress.completed })
-        #expect(seen.contains { $0.progress.earlyProposals })
+        let early = try #require(seen.first { $0.progress.earlyProposals })
+        #expect(early.at - start.at < .seconds(5), "early suggestions \(ms(early.at - start.at)) ms after the step began")
         #expect(firstCount.at - start.at < .seconds(2), "first count \(ms(firstCount.at - start.at)) ms after the step began")
         let gaps = zip(seen, seen.dropFirst()).map { $1.at - $0.at }
         #expect(gaps.allSatisfy { $0 < .seconds(3) }, "longest gap \(ms(gaps.max() ?? .zero)) ms")
+    }
+
+    /// Review of 9ff0dfc: Pause while the early suggestions are made (2.8 s over these 50,000
+    /// photos) waited for them: 1.6 s at the first counted photo. Pause takes effect within a
+    /// second, at the report that starts the image step and at the first counted photo; the
+    /// early suggestions not done by then are dropped and made again by the next run.
+    @Test(arguments: [false, true]) func stressLibraryPauseDuringTheEarlySuggestions(atFirstCount: Bool) async throws {
+        let assets = Self.stressLibrary(50_000)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sortly-load-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = try SortlyStore(url: dir.appendingPathComponent("sortly.sqlite"))
+        let pipeline = AnalysisPipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: TimedAnalyzer(),
+                                        geocoder: OfflineGeocoder(), map: try WorldMapResource.load(), conditions: FakeConditions(),
+                                        settings: OrganizationSettings(), foregroundOnlineBudget: 60)
+        let control = AnalysisRunControl()
+        let pausedAt = Mutex<(at: ContinuousClock.Instant, completed: Int)?>(nil)
+        let start = Mutex<Int?>(nil)
+        let report = try await pipeline.run(control: control) { progress in
+            guard progress.stage == .content, pausedAt.withLock({ $0 }) == nil else { return }
+            let first = start.withLock { s -> Int in
+                if s == nil { s = progress.completed }
+                return s!
+            }
+            if !atFirstCount || progress.completed > first {
+                pausedAt.withLock { $0 = (.now, progress.completed) }
+                control.pause()
+            }
+        }
+        let ended = ContinuousClock.now
+        let paused = try #require(pausedAt.withLock { $0 })
+        let took = ended - paused.at
+        print("LOAD_PAUSE_EARLY \(atFirstCount ? "first count" : "step start") at \(paused.completed): \(took), early \(report.earlyProposals)")
+        #expect(report.pausedBecause == .userPaused)
+        #expect(took < .seconds(1), "Pause took \(took)")
+        await pipeline.waitForEarlyLeftBehind()
+        if !report.earlyProposals { #expect(try await pipeline.latestProposals() == nil) }
     }
 }

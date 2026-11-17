@@ -22,23 +22,43 @@ struct ImageStepStartTests {
         let store: SortlyStore
         let pipeline: AnalysisPipeline
         let photos: Int
+        let dogs: [AssetID]
     }
 
-    /// A home, a week in Rome, screenshots: trips and places for the early suggestions.
-    func setup() throws -> Setup {
+    /// A home, a week in Rome, screenshots of orders, a dog in Rome and at home: trips and places
+    /// for the early suggestions, image and text themes for the full set only (as PipelineTests).
+    /// `grace`: how long a stopping run waits for the early suggestions (the app's half second
+    /// by default).
+    func setup(grace: Duration = .milliseconds(500)) throws -> Setup {
         var lib = LibraryBuilder()
-        lib.daily(from: "2026-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-05-12", "2026-05-19")])
-        lib.daily(from: "2026-05-12", to: "2026-05-19", at: Fixture.Places.rome, perDay: 4, hour: 10)
-        for day in 1...5 { _ = lib.photo(at: Fixture.date("2026-06-0\(day) 20:00"), nil, subtypes: .screenshot) }
+        let home = lib.daily(from: "2026-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-05-12", "2026-05-19")])
+        let rome = lib.daily(from: "2026-05-12", to: "2026-05-19", at: Fixture.Places.rome, perDay: 4, hour: 10)
+        var screenshots: Set<AssetID> = []
+        for day in 1...5 { screenshots.insert(lib.photo(at: Fixture.date("2026-06-0\(day) 20:00"), nil, subtypes: .screenshot)) }
+        let dogs = Array(rome.prefix(10)) + Array(home.suffix(10))
+        let dogSet = Set(dogs), shots = screenshots
         var settings = OrganizationSettings()
         settings.titleLanguage = .german
+        settings.imageCategories.minPhotos = 10
         let store = try SortlyStore(url: nil)
         let pipeline = AnalysisPipeline(
-            store: store, reader: InMemoryLibraryReader(assets: lib.assets), analyzer: FakeContentAnalyzer(),
+            store: store, reader: InMemoryLibraryReader(assets: lib.assets),
+            analyzer: FakeContentAnalyzer(
+                labels: { dogSet.contains($0.id) ? [LabelScore("dog", 0.92)] : [] },
+                text: { shots.contains($0.id) ? "Ihre Bestellung Bestellnummer 302-1234567 Lieferung Sendungsverfolgung" : "" }
+            ),
             geocoder: FakeGeocoder(), map: Self.map, conditions: FakeConditions(), settings: settings,
-            calendar: Fixture.calendar, time: ManualTime().source, batchSize: 10
+            calendar: Fixture.calendar, time: ManualTime().source, batchSize: 10, earlyGraceOnStop: grace
         )
-        return Setup(store: store, pipeline: pipeline, photos: lib.assets.count)
+        return Setup(store: store, pipeline: pipeline, photos: lib.assets.count, dogs: dogs)
+    }
+
+    /// Suggestions that need the image or text analysis.
+    static func needsAnalysis(_ p: AlbumProposal) -> Bool {
+        switch p.kind {
+        case .imageCategory, .screenshotCategory, .documentCategory, .personOrPet, .personalCategory: true
+        default: false
+        }
     }
 
     struct Seen {
@@ -66,7 +86,7 @@ struct ImageStepStartTests {
             }
             guard first else { return }
             let deadline = Date().addingTimeInterval(30)
-            while seen.withLock({ $0.counted }) < 30, Date() < deadline { usleep(1_000) }
+            while seen.withLock({ $0.counted }) < 30, Date() < deadline { try? await Task.sleep(for: .milliseconds(1)) }
             seen.withLock { $0.countedWhileHeld = $0.counted }
         }
         let report = try await s.pipeline.run { progress in
@@ -97,11 +117,12 @@ struct ImageStepStartTests {
         #expect(try await s.pipeline.latestProposals()?.isEarly == false)
     }
 
-    /// Pause right when the image step begins, before any photo: the run waits for the early
-    /// suggestions before it ends, so a paused first run still offers trips and places, and
-    /// says so with the count it stopped at.
-    @Test func pauseBeforeTheFirstPhotoStillOffersTheEarlySuggestions() async throws {
-        let s = try setup()
+    /// Pause right when the image step begins, before any photo, with early suggestions that
+    /// are done within the time a stopping run waits for them (a small library: milliseconds;
+    /// the test waits as long as it takes, so the machine's load does not decide): the paused
+    /// first run offers trips and places, and says so with the count it stopped at.
+    @Test func pauseBeforeTheFirstPhotoOffersEarlySuggestionsThatAreDone() async throws {
+        let s = try setup(grace: .seconds(60))
         let control = AnalysisRunControl()
         let seen = Mutex<[AnalysisPipeline.Progress]>([])
         let report = try await s.pipeline.run(control: control) { progress in
@@ -124,6 +145,108 @@ struct ImageStepStartTests {
         #expect(!second.earlyProposals && !rest.withLock { $0 })
         #expect(second.contentAnalyzed == s.photos)
         #expect(try await s.pipeline.latestProposals()?.isEarly == false)
+    }
+
+    /// Review of 9ff0dfc: Pause waited for the early suggestions however long they took (at
+    /// 50,000 photos 1.6 s instead of a few ms; Pause must take effect within a second). Now a
+    /// stopping run waits half a second at most; early suggestions not done by then are
+    /// dropped unsaved, and the next run makes them again (there are still no suggestions).
+    /// What the user sees: Pause at once, "Schon fertig" stays empty until Fortsetzen.
+    /// Here the early suggestions are held until the run has returned, so a run that waited
+    /// for them would only end at the probe's deadline. (The second itself is measured in the
+    /// load test: in the parallel suite the machine's load decides the time.)
+    @Test func pauseDoesNotWaitForSlowEarlySuggestions() async throws {
+        let s = try setup()
+        let release = Mutex(false)
+        let letGo = Mutex(false)
+        await s.pipeline.setOffActorProbe {
+            guard !letGo.withLock({ $0 }) else { return }
+            let deadline = Date().addingTimeInterval(60)
+            while !release.withLock({ $0 }), Date() < deadline { try? await Task.sleep(for: .milliseconds(1)) }
+            if !release.withLock({ $0 }) { letGo.withLock { $0 = true } }
+        }
+        let control = AnalysisRunControl()
+        let saidEarly = Mutex(false)
+        let report = try await s.pipeline.run(control: control) { progress in
+            if progress.earlyProposals { saidEarly.withLock { $0 = true } }
+            if progress.stage == .content { control.pause() }
+        }
+        #expect(report.pausedBecause == .userPaused)
+        #expect(!letGo.withLock { $0 }, "the run waited for the early suggestions")
+        #expect(!report.earlyProposals)
+        release.withLock { $0 = true }
+        await s.pipeline.waitForEarlyLeftBehind()
+        // Dropped: nothing saved, nothing said after the run ended.
+        #expect(try await s.pipeline.latestProposals() == nil)
+        #expect(!saidEarly.withLock { $0 })
+        // Fortsetzen: the next run offers them beside its photos, then the full set.
+        await s.pipeline.setOffActorProbe(nil)
+        let said = Mutex(0)
+        let second = try await s.pipeline.run { progress in if progress.earlyProposals { said.withLock { $0 += 1 } } }
+        #expect(second.isComplete)
+        #expect(second.earlyProposals && said.withLock { $0 } == 1)
+        #expect(try await s.pipeline.latestProposals()?.isEarly == false)
+    }
+
+    /// Review of 9ff0dfc: made beside the photos, the early set read the labels of photos
+    /// already looked at and offered "Hunde" before the image analysis was done. An early set
+    /// has trips and places only, also on a first run that goes on after photos were analysed.
+    @Test func earlySetHasNoImageOrTextThemes() async throws {
+        let s = try setup()
+        // First run: the early suggestions are held until the run paused (they are dropped),
+        // after 100 photos with every dog among them (newest first).
+        let release = Mutex(false)
+        await s.pipeline.setOffActorProbe {
+            let deadline = Date().addingTimeInterval(30)
+            while !release.withLock({ $0 }), Date() < deadline { try? await Task.sleep(for: .milliseconds(1)) }
+        }
+        let control = AnalysisRunControl()
+        let first = try await s.pipeline.run(control: control) { progress in
+            if progress.stage == .content, progress.completed >= 100 { control.pause() }
+        }
+        release.withLock { $0 = true }
+        await s.pipeline.waitForEarlyLeftBehind()
+        await s.pipeline.setOffActorProbe(nil)
+        #expect(first.pausedBecause == .userPaused && !first.earlyProposals)
+        let labelled = try await s.store.results(ContentAnalysis.self, kind: "content")
+        try #require(s.dogs.allSatisfy { labelled[$0] != nil }, "the dogs were not analysed yet")
+        #expect(try await s.pipeline.latestProposals() == nil)
+        // Second run: its early set, read when it is said.
+        let again = AnalysisRunControl()
+        let second = try await s.pipeline.run(control: again) { progress in
+            if progress.earlyProposals { again.pause() }
+        }
+        #expect(second.earlyProposals)
+        let early = try #require(try await s.pipeline.latestProposals())
+        #expect(early.isEarly)
+        #expect(early.proposals.contains { $0.title.hasPrefix("Rom") })
+        let themes = early.proposals.filter(Self.needsAnalysis).map(\.title)
+        #expect(themes.isEmpty, "early set offers \(themes)")
+        // The full set has them.
+        let last = try await s.pipeline.run()
+        #expect(last.isComplete)
+        let full = try #require(try await s.pipeline.latestProposals())
+        #expect(full.proposals.contains { $0.title == "Hunde" })
+    }
+
+    /// Review of 9ff0dfc: an error in the early suggestions came out at the end of the image
+    /// step and failed a run that was otherwise complete (hours later on a large library). Now
+    /// the run goes on; the full set at its end replaces the early one, and the report says why
+    /// there was none.
+    @Test func failedEarlySuggestionsDoNotFailTheRun() async throws {
+        struct Broken: Error {}
+        let s = try setup()
+        await s.pipeline.setEarlyProbe { throw Broken() }
+        let saidEarly = Mutex(false)
+        let report = try await s.pipeline.run { progress in if progress.earlyProposals { saidEarly.withLock { $0 = true } } }
+        #expect(report.isComplete)
+        #expect(!report.earlyProposals)
+        #expect(report.earlyProposalsFailure != nil)
+        #expect(!saidEarly.withLock { $0 })
+        #expect(report.contentAnalyzed == s.photos)
+        let full = try #require(try await s.pipeline.latestProposals())
+        #expect(!full.isEarly)
+        #expect(full.proposals.contains { $0.title.hasPrefix("Rom") })
     }
 
     /// The overview's facts (`refreshDerived` after the early suggestions, and every 10 s per

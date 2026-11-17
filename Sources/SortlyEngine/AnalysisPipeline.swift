@@ -149,6 +149,9 @@ public actor AnalysisPipeline {
         public var completedStages: [Stage] = []
         /// Trips and places were offered before the image analysis was done (first run only).
         public var earlyProposals = false
+        /// The early suggestions failed (the error, for the diagnostic report). The run went
+        /// on without them: the full set at its end replaces them.
+        public var earlyProposalsFailure: String?
         public var pausedBecause: PauseReason?
         public var newOrChanged = 0
         public var removed = 0
@@ -312,9 +315,11 @@ public actor AnalysisPipeline {
         foregroundOnlineBudget: Int? = nil,
         contentLanes: Int = 4,
         textLanes: Int = 2,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        earlyGraceOnStop: Duration = .milliseconds(500)
     ) {
         self.now = now
+        self.earlyGraceOnStop = earlyGraceOnStop
         self.contentLanes = max(1, contentLanes)
         self.textLanes = max(1, textLanes)
         self.store = store
@@ -356,11 +361,14 @@ public actor AnalysisPipeline {
     public func pause() { activeControl?.pause() }
 
     private func beginRun() async {
-        guard runInProgress else {
+        if runInProgress {
+            await withCheckedContinuation { queuedRuns.append($0) }
+        } else {
             runInProgress = true
-            return
         }
-        await withCheckedContinuation { queuedRuns.append($0) }
+        // Early suggestions a stopped run left behind finish first (cancelled, they save
+        // nothing): nothing of them overlaps the next run's own writes.
+        await waitForEarlyLeftBehind()
     }
 
     private func endRun() {
@@ -535,7 +543,8 @@ public actor AnalysisPipeline {
         let inRange = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
         let contentBefore = max(0, inRange - contentTotal)
         // Every report of this step goes through here: the early suggestions are said with the
-        // newest one (`earlySuggestions`).
+        // newest one (`earlySuggestions`). Nothing of an earlier run's step.
+        contentShown = nil
         func sayContent(_ progress: Progress) {
             contentShown = progress
             onProgress(progress)
@@ -552,23 +561,39 @@ public actor AnalysisPipeline {
         // library, and the count stood at "0 von 50.246 Fotos" for 13 s meanwhile (stress run
         // 44116350940; 2.8 s on Linux over 50,000 photos, 0.25 s over 5,000). What grows with
         // the library runs off this actor (`offActor`), so the photos go on at their own pace.
-        var early: Task<EarlySuggestions, any Error>?
+        var early: (task: Task<EarlySuggestions, any Error>, done: EarlyDone)?
         if contentTotal > 0, try await latestProposals() == nil {
-            early = Task { [patternsGeneration, trips, frequent] in
-                try await self.earlySuggestions(all: all, inventory: inventory, trips: trips, frequent: frequent, scope: scope,
-                                                generation: patternsGeneration, onProgress: onProgress)
-            }
+            let done = EarlyDone()
+            early = (Task { [patternsGeneration, trips, frequent] in
+                defer { done.mark() }
+                return try await self.earlySuggestions(all: all, inventory: inventory, trips: trips, frequent: frequent, scope: scope,
+                                                       generation: patternsGeneration, onProgress: onProgress)
+            }, done)
         }
-        // Waited for wherever the image step ends (done, Pause, heat, no access): a run that
-        // stops early still offers them, and trips detected again with them (a change in "Dein
-        // Zuhause" meanwhile) are what the later steps use.
-        func settleEarly() async throws {
-            guard let task = early else { return }
+        // Waited for when the image step is done: trips detected again with them (a change in
+        // "Dein Zuhause" meanwhile) are what the later steps use. When the run stops (Pause,
+        // heat, no access, its time is up) they get half a second more: Pause must take effect
+        // within a second (at 50,000 photos they take 2.8 s on Linux). Not done by then, they
+        // are dropped unsaved (`abandonEarly`) and the next run makes them again, since there
+        // are still no suggestions. A failed early set is no reason to fail the run: the full
+        // set of step 7 replaces it (`Report.earlyProposalsFailure`).
+        // `stopping`: when the run saw the stop (the half second counts from then, so it runs
+        // beside the photos still in work); nil when the step is done.
+        func settleEarly(stopping: ContinuousClock.Instant?) async {
+            guard let (task, done) = early else { return }
             early = nil
-            let outcome = try await task.value
-            report.earlyProposals = true
-            if let fresh = outcome.fresh { (trips, frequent) = fresh }
-            patternsGeneration = outcome.generation
+            if let stopping, !(await done.wait(upTo: earlyGraceOnStop - (ContinuousClock.now - stopping))) {
+                abandonEarly(task)
+                return
+            }
+            do {
+                let outcome = try await task.value
+                report.earlyProposals = true
+                if let fresh = outcome.fresh { (trips, frequent) = fresh }
+                patternsGeneration = outcome.generation
+            } catch {
+                report.earlyProposalsFailure = String(describing: error)
+            }
         }
         do {
             // Photos still to analyse that have a result of this version already: their labels
@@ -590,8 +615,8 @@ public actor AnalysisPipeline {
             var lookedAt: [AssetID] = []
             let analyzer = self.analyzer
             while true {
-                if let reason = await shouldStop() { report.pausedBecause = reason; try await settleEarly(); return report }
-                if await accessChanged() { report.pausedBecause = .accessRevoked; try await settleEarly(); return report }
+                if let reason = await shouldStop() { report.pausedBecause = reason; await settleEarly(stopping: .now); return report }
+                if await accessChanged() { report.pausedBecause = .accessRevoked; await settleEarly(stopping: .now); return report }
                 // Deferred photos can come back only without a cursor (behind it they are past).
                 let limit = batchSize + (cursor == nil ? deferred.count : 0)
                 var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: limit, olderThan: cursor, within: range)
@@ -608,6 +633,7 @@ public actor AnalysisPipeline {
                 var results: [(AssetID, ContentAnalysis)] = []
                 var analyzed = 0
                 var stopped: PauseReason?
+                var stopSeen: ContinuousClock.Instant?
                 var cancelled = false
                 // Saved and shown at least once a second: a batch of 50 photos took 5 s, on a warm
                 // device 18 s, and the count stood still meanwhile (simulated full run). The photos
@@ -638,7 +664,7 @@ public actor AnalysisPipeline {
                         while stopped == nil, !cancelled, next < batch.count, inFlight < width {
                             if next > 0, now().timeIntervalSince(batchStart) >= 1 { cut = true; break }
                             let (reason, lanes) = await admission(lanes: contentLanes)
-                            if let reason { stopped = reason; break }
+                            if let reason { stopped = reason; stopSeen = .now; break }
                             width = lanes
                             guard inFlight < width else { break }
                             let asset = batch[next]
@@ -707,19 +733,17 @@ public actor AnalysisPipeline {
                 report.contentAnalyzed += analyzed
                 sayContent(Progress(stage: .content, completed: contentBefore + contentDone,
                                     total: contentBefore + max(contentTotal, contentDone), recent: lookedAt))
-                if let stopped { report.pausedBecause = stopped; try await settleEarly(); return report }
+                if let stopped { report.pausedBecause = stopped; await settleEarly(stopping: stopSeen ?? .now); return report }
             }
-            try await settleEarly()
+            await settleEarly(stopping: nil)
         } catch {
             // The run ends with an error (also when it was cancelled): the early suggestions are
-            // not saved any more if they have not been yet, and nothing of them runs on after it.
-            if let early {
-                early.cancel()
-                _ = try? await early.value
-            }
+            // not saved any more if they have not been yet.
+            if let early { abandonEarly(early.task) }
             throw error
         }
         report.completedStages.append(.content)
+        contentShown = nil
 
         // 5. Text
         let textStart = now()
@@ -1155,6 +1179,47 @@ public actor AnalysisPipeline {
         var generation: Int
     }
 
+    /// Set when the early suggestions' task has ended, so a stopping run can wait for them a
+    /// limited time (`run`).
+    final class EarlyDone: Sendable {
+        private let done = Mutex(false)
+        func mark() { done.withLock { $0 = true } }
+        /// Whether they ended within `limit` (at once when the run itself is cancelled).
+        func wait(upTo limit: Duration) async -> Bool {
+            let clock = ContinuousClock()
+            let deadline = clock.now + limit
+            while !done.withLock({ $0 }) {
+                guard clock.now < deadline, !Task.isCancelled else { return false }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return true
+        }
+    }
+
+    /// How long a stopping run waits for early suggestions that are not done yet (real time:
+    /// Pause must take effect within a second). Tests that check the early set after a stop
+    /// pass a long one: their simulated clocks reach a stop in far less real time than a device.
+    private let earlyGraceOnStop: Duration
+
+    /// Early suggestions of a run that stopped or failed before they were done: cancelled,
+    /// they neither save nor say anything (`makeProposals`, `earlySuggestions`). The next run
+    /// waits for them to end before it begins (`beginRun`).
+    private var earlyLeftBehind: [Task<EarlySuggestions, any Error>] = []
+
+    private func abandonEarly(_ task: Task<EarlySuggestions, any Error>) {
+        task.cancel()
+        earlyLeftBehind.append(task)
+    }
+
+    /// Also for tests: the early suggestions a stopped run left behind have ended.
+    func waitForEarlyLeftBehind() async {
+        while let task = earlyLeftBehind.popLast() { _ = try? await task.value }
+    }
+
+    /// Tests only: runs at the start of the early suggestions (a test makes them fail there).
+    private var earlyProbe: (@Sendable () throws -> Void)?
+    func setEarlyProbe(_ probe: (@Sendable () throws -> Void)?) { earlyProbe = probe }
+
     /// The early suggestions of a first run (trips, countries, places; see `run`), made beside
     /// the image step's first photos. Once they are saved, the step's newest report is said
     /// again with `earlyProposals`: the overview reads them then (review I2), and the count
@@ -1162,14 +1227,18 @@ public actor AnalysisPipeline {
     private func earlySuggestions(all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
                                   scope: OrganizationScope, generation: Int,
                                   onProgress: @escaping @Sendable (Progress) -> Void) async throws -> EarlySuggestions {
+        try earlyProbe?()
         var generation = generation
         var (trips, frequent) = (trips, frequent)
+        try Task.checkCancellation()
         let fresh = try await patternsAfterAHomeChange(since: &generation, all: all)
         if let fresh { (trips, frequent) = fresh }
         let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
         _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope,
-                                    early: true, homeChange: generation)
-        if var newest = contentShown {
+                                    early: true, homeChange: generation, abandonable: true)
+        // Left behind by a run that stopped meanwhile (and saved after all, if it was cancelled
+        // while saving): that run has said its last report.
+        if !Task.isCancelled, var newest = contentShown {
             newest.earlyProposals = true
             onProgress(newest)
         }
@@ -1182,15 +1251,15 @@ public actor AnalysisPipeline {
     private func offActor<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
         let probe = offActorProbe
         return await Task.detached(priority: Task.currentPriority) {
-            probe?()
+            await probe?()
             return work()
         }.value
     }
 
     /// Tests only: runs where `offActor` work runs, before it (a test holds it there and sees
     /// the image step go on).
-    private var offActorProbe: (@Sendable () -> Void)?
-    func setOffActorProbe(_ probe: (@Sendable () -> Void)?) { offActorProbe = probe }
+    private var offActorProbe: (@Sendable () async -> Void)?
+    func setOffActorProbe(_ probe: (@Sendable () async -> Void)?) { offActorProbe = probe }
 
     /// After a change in "Dein Zuhause" that no suggestions were made for yet
     /// (`PendingHomeChange`), whichever step makes them (`resuggest()`, a run, the early set):
@@ -1200,7 +1269,7 @@ public actor AnalysisPipeline {
     /// after that (the trips or the settings read here may be older than it) stays pending.
     private func makeProposals(
         all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
-        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false, homeChange: Int
+        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false, homeChange: Int, abandonable: Bool = false
     ) async throws -> ProposalSnapshot {
         let pending = try await pendingHomeChange()
         // The albums are read again: a plan applied while this run was busy (minutes or hours
@@ -1212,8 +1281,14 @@ public actor AnalysisPipeline {
             inventory = fresh
             try await store.saveInventory(fresh)
         }
-        let facts = try await currentFacts(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups)
+        // An early set has no image or text themes (`ProposalSnapshot.isEarly`), also when photos
+        // were analysed already (a first run paused in the image step): only the full set, made
+        // once every photo is looked at, offers those.
+        let facts = try await currentFacts(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups,
+                                           analysed: !early)
             .filter { scope.includes($0, calendar: calendar) }
+        // Dropped meanwhile: the suggestions (seconds over a large library) are not made at all.
+        if abandonable { try Task.checkCancellation() }
         let overrides = OverrideSet(try await store.overrides())
         let scopedIDs = Set(facts.map(\.id))
         let oftenHere = try await recurringPlaceReport()?.places ?? []
@@ -1228,6 +1303,7 @@ public actor AnalysisPipeline {
         )
         let engine = ProposalEngine(settings: settings, calendar: calendar)
         var suggestions = await offActor { engine.suggestions(for: analysis, overrides: overrides) }
+        if abandonable { try Task.checkCancellation() }
         // Chosen before a change in "Dein Zuhause": stays as the user chose it, in this and
         // every later run, until it is created or deselected.
         let decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
@@ -1254,10 +1330,11 @@ public actor AnalysisPipeline {
         if generation != albumGeneration {
             // A plan was applied while this ran: match against the albums as they are now, or
             // the suggestions would offer albums that were just created.
-            let now = try await store.loadInventory(), nowOverrides = OverrideSet(try await store.overrides())
-            let nowAssignments = Self.assignments(try await store.managedAlbums())
+            let albumsNow = try await store.loadInventory(), overridesNow = OverrideSet(try await store.overrides())
+            let assignmentsNow = Self.assignments(try await store.managedAlbums())
             matches = await offActor {
-                Self.match(found.open, dismissed: found.dismissed, against: now, overrides: nowOverrides, assignments: nowAssignments, trips: tripSets)
+                Self.match(found.open, dismissed: found.dismissed, against: albumsNow, overrides: overridesNow, assignments: assignmentsNow,
+                           trips: tripSets)
             }
         }
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
@@ -1275,8 +1352,8 @@ public actor AnalysisPipeline {
                 removing.insert(Key.pendingHomeChange)
             }
         }
-        // The early set of a run that ended with an error meanwhile is not saved (`run`).
-        if early { try Task.checkCancellation() }
+        // The early set of a run that stopped or failed meanwhile is not saved (`run`).
+        if abandonable { try Task.checkCancellation() }
         proposalsGeneration += 1
         try await store.setValues(values, removing: removing)
         return snapshot
@@ -1464,10 +1541,12 @@ public actor AnalysisPipeline {
     /// Assembled off this actor (`offActor`): the overview asks for the facts while a run goes
     /// on (`refreshDerived` after the early suggestions), and over 50,000 photos assembling
     /// them held the run's image step for about a second on Linux.
-    private func currentFacts(all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace], groups: [ObservationGroup]) async throws -> [AssetFacts] {
+    /// `analysed` false: without the labels and texts read so far (an early set, `makeProposals`).
+    private func currentFacts(all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace], groups: [ObservationGroup],
+                              analysed: Bool = true) async throws -> [AssetFacts] {
         let places = try await store.places()
-        let contents = try await store.results(ContentAnalysis.self, kind: "content")
-        let texts = try await store.results(TextResult.self, kind: "text")
+        let contents = analysed ? try await store.results(ContentAnalysis.self, kind: "content") : [:]
+        let texts = analysed ? try await store.results(TextResult.self, kind: "text") : [:]
         let home = try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
         return await offActor {
             FactsAssembler.assemble(assets: all, places: places, contents: contents, texts: texts, trips: trips,
@@ -1517,8 +1596,10 @@ public actor AnalysisPipeline {
         let inventory = try await store.loadInventory()
         let overrides = OverrideSet(try await store.overrides())
         let trips = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map { Set($0.allAssetIDs) }
-        snapshot.matches = Self.match(snapshot.proposals, dismissed: snapshot.dismissed, against: inventory, overrides: overrides,
-                                      assignments: Self.assignments(try await store.managedAlbums()), trips: trips)
+        let assignments = Self.assignments(try await store.managedAlbums()), found = snapshot
+        snapshot.matches = await offActor {
+            Self.match(found.proposals, dismissed: found.dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
+        }
         snapshot.matcherVersion = AlbumMatcher.version
         return snapshot
     }

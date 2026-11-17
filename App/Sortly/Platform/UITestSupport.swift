@@ -142,7 +142,7 @@ enum ProgressLineLog {
     }
 
     private static func write(_ text: String) {
-        file?.write(Data((text + "\n").utf8))
+        try? file?.write(contentsOf: Data((text + "\n").utf8))
     }
 }
 

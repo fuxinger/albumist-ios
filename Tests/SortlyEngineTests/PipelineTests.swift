@@ -49,7 +49,10 @@ struct PipelineTests {
         let conditions = FakeConditions(pauseAfterChecks: pauseAfter)
         let pipeline = AnalysisPipeline(
             store: store, reader: reader, analyzer: analyzer, geocoder: geocoder, map: Self.map,
-            conditions: conditions, settings: settings, calendar: Fixture.calendar, time: ManualTime().source, batchSize: batchSize
+            conditions: conditions, settings: settings, calendar: Fixture.calendar, time: ManualTime().source, batchSize: batchSize,
+            // A stop in the image step waits for the early set (see ImageStepStartTests for the
+            // real half second), so tests that pause there do not depend on the machine's load.
+            earlyGraceOnStop: .seconds(60)
         )
         return Setup(store: store, reader: reader, analyzer: analyzer, geocoder: geocoder, conditions: conditions, pipeline: pipeline, ids: (rome, screenshots, dogs))
     }

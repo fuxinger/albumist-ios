@@ -773,7 +773,11 @@ final class Sim: @unchecked Sendable {
         pipeline = AnalysisPipeline(
             store: store, reader: reader, analyzer: analyzer, geocoder: geocoder, map: FullRunDisplayTests.map,
             conditions: conditions, settings: settings, calendar: Fixture.calendar, time: clock.source,
-            foregroundOnlineBudget: 60, contentLanes: 4, textLanes: 2, now: { clock.date }
+            foregroundOnlineBudget: 60, contentLanes: 4, textLanes: 2, now: { clock.date },
+            // The simulated time runs far ahead of real time: a Pause at 20 % of the image step
+            // comes a few real milliseconds after it begins, and the early set it checks would
+            // depend on the test machine's load. The real half second is tested in ImageStepStartTests.
+            earlyGraceOnStop: .seconds(60)
         )
     }
 

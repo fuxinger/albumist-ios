@@ -178,7 +178,7 @@ final class MainThreadWatch: @unchecked Sendable {
             lock.lock()
             if !sections.isEmpty { sections.removeLast() }
             lock.unlock()
-            let took = Self.seconds(DispatchTime.now().uptimeNanoseconds - begin)
+            let took = Self.seconds(from: begin, to: DispatchTime.now().uptimeNanoseconds)
             if took >= 1 {
                 note("UI_MAIN_SLOW \(name) \(Self.text(took)) s")
             } else if took >= 0.25 {
@@ -193,7 +193,7 @@ final class MainThreadWatch: @unchecked Sendable {
             let before = DispatchTime.now().uptimeNanoseconds
             Thread.sleep(forTimeInterval: 0.2)
             let now = DispatchTime.now().uptimeNanoseconds
-            let slept = Self.seconds(now - before)
+            let slept = Self.seconds(from: before, to: now)
             if slept >= 1.5 {
                 note("UI_PROCESS_STALL the watch slept \(Self.text(slept)) s instead of 0.2 s from \(Self.clock(Date().timeIntervalSince1970 - slept)) UTC (the whole process got no time)")
             }
@@ -206,7 +206,7 @@ final class MainThreadWatch: @unchecked Sendable {
                 nextStuckReport = 10
                 inactiveInStall = !active
             }
-            let waited = pending.map { Self.seconds(now - $0) } ?? 0
+            let waited = pending.map { Self.seconds(from: $0, to: now) } ?? 0
             if waited >= 0.5 {
                 let path = sections.isEmpty ? "unmarked" : sections.map { $0.name }.joined(separator: ">")
                 if !seenInStall.contains(path) && seenInStall.count < 4 { seenInStall.append(path) }
@@ -215,7 +215,7 @@ final class MainThreadWatch: @unchecked Sendable {
             if stuck { nextStuckReport *= 2 }
             let since = askedWall
             let names = seenInStall.joined(separator: ", ")
-            let current = sections.last.map { "\($0.name) running for \(Self.text(Self.seconds(now - $0.began))) s" } ?? "no marked section"
+            let current = sections.last.map { "\($0.name) running for \(Self.text(Self.seconds(from: $0.began, to: now))) s" } ?? "no marked section"
             let inactive = inactiveInStall
             lock.unlock()
             if stuck {
@@ -235,7 +235,7 @@ final class MainThreadWatch: @unchecked Sendable {
         let names = seenInStall.isEmpty ? "unmarked" : seenInStall.joined(separator: ", ")
         let inactive = inactiveInStall
         askedAt = nil
-        let waited = asked.map { Self.seconds(now - $0) } ?? 0
+        let waited = asked.map { Self.seconds(from: $0, to: now) } ?? 0
         let stress = stressLines, file = stressFile
         if stress, waited > 1 { longestStall = max(longestStall, waited) }
         let longest = longestStall
@@ -267,7 +267,12 @@ final class MainThreadWatch: @unchecked Sendable {
         logger.fault("\(text, privacy: .public)")
     }
 
-    private static func seconds(_ nanoseconds: UInt64) -> Double { Double(nanoseconds) / 1_000_000_000 }
+    /// Never below zero: a time read before the lock can be older than a section the main
+    /// thread began meanwhile (an unsigned `now - began` trapped and ended the app in UI run
+    /// 43988095437).
+    private static func seconds(from start: UInt64, to end: UInt64) -> Double {
+        end > start ? Double(end - start) / 1_000_000_000 : 0
+    }
     private static func text(_ seconds: Double) -> String { String(format: "%.1f", seconds) }
 
     /// Time of day in UTC with tenths ("18:31:05.2"), as the UI tests print it (`UI_FACT clock`).

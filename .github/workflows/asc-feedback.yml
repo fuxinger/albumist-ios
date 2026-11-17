@@ -1,0 +1,98 @@
+name: TestFlight feedback
+
+# Fetches what testers send from TestFlight: feedback with screenshots and crash reports with
+# their crash logs (.github/scripts/asc_feedback.py, App Store Connect API). Daily at 06:00 UTC
+# (schedules only run from the default branch) and by hand. Same team key as the upload
+# (docs/TESTFLIGHT.md); it needs the role Admin, App Manager or Developer. Without the secrets
+# the run stops after one quick check.
+#
+# The schedule and the default are "counts": the job summary shows only how many feedback and
+# crash submissions each build has. No comment, device data, screenshot or crash log is fetched,
+# written or uploaded. "full" (comments, screenshots, crash logs in report.md inside an artifact
+# kept 7 days; the job summary, kept ~90 days, still shows only the counts) is refused by the
+# script itself unless the GitHub API reports this repository as private: while it is public,
+# anyone can read job summaries and any signed-in GitHub user can download artifacts, and
+# screenshots of a photo app may show the testers' own photos. The artifact is only uploaded
+# when the script says it ran full (step output mode=full), never because of the input alone.
+# API calls never follow redirects (asc_feedback.py).
+# GitHub turns the schedule off after 60 days without activity in a public repository; then
+# Actions > TestFlight feedback > "Enable workflow".
+#
+# Everything testers send is untrusted text. It only ever travels in files: never in ${{ }}
+# expressions, shell commands or the log (a log line starting with "::" would be a command).
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      report:
+        description: 'Inhalt: counts = nur Anzahlen je Build; full = Kommentare, Screenshots, Absturzprotokolle (nur bei privatem Repository)'
+        type: choice
+        options: [counts, full]
+        default: counts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asc-feedback
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    name: Fetch TestFlight feedback and crashes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: App Store Connect secrets present
+        id: secrets
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -n "$KEY_ID" ] && [ -n "$ISSUER_ID" ] && [ -n "$KEY_P8" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped: the App Store Connect secrets are not set (docs/TESTFLIGHT.md)."
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: App Store Connect key
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$KEY_P8" > "$RUNNER_TEMP/asc/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey.p8"
+      - name: Fetch feedback and crash logs
+        id: fetch
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          KEY_PATH: ${{ runner.temp }}/asc/AuthKey.p8
+          # Read by the script to ask GitHub whether the repository is private (mode full only).
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.report || 'counts' }}
+        run: |
+          python3 .github/scripts/asc_feedback.py --bundle-id app.albumist.ios \
+            --out "$RUNNER_TEMP/feedback" --summary "$GITHUB_STEP_SUMMARY" --mode "$MODE"
+      - name: Remove key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"
+      - name: Keep report, screenshots and crash logs
+        if: always() && steps.fetch.outputs.mode == 'full'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testflight-feedback
+          path: ${{ runner.temp }}/feedback
+          retention-days: 7
+          if-no-files-found: ignore
+          overwrite: true

@@ -146,6 +146,15 @@ struct LoadTests {
         let statusTime = clock.measure {
             states = LibraryStatus.compute(facts: facts, snapshot: snapshot, settings: OrganizationSettings(), contentAnalyzed: Set(assets.map(\.id)))
         }
+        // What refreshDerived works out off the main actor now (review of d612bc0: it was
+        // main-thread work), with every photo analysed.
+        let contents = Dictionary(uniqueKeysWithValues: assets.map { ($0.id, ContentAnalysis(labels: [])) })
+        var derived = DerivedLibraryStatus()
+        let derivedTime = clock.measure {
+            derived = DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: OrganizationSettings(), overrides: OverrideSet(),
+                                                  contents: contents, managed: [], inventory: CollectionInventory(albums), scope: .all)
+        }
+        #expect(derived.analyzed == assets.count)
         var atlas = TravelAtlas()
         let atlasTime = clock.measure { atlas = TravelAtlas.compute(facts: facts) }
         let overlapTime = clock.measure { _ = AlbumOverlapAnalyzer().suggestions(in: CollectionInventory(albums)) }
@@ -155,7 +164,7 @@ struct LoadTests {
 
         func ms(_ d: Duration) -> Int { Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000) }
         print("LOAD_TIMING photos \(assets.count) proposals \(snapshot?.proposals.count ?? 0) countries \(atlas.countryCodes.count) trips \(atlas.tripCount) states \(states.count)")
-        print("LOAD_TIMING first-run \(ms(full)) ms | second-run \(ms(again)) ms | facts \(ms(factsTime)) ms | status \(ms(statusTime)) ms | atlas \(ms(atlasTime)) ms | overlap \(ms(overlapTime)) ms | search \(ms(searchTime)) ms")
+        print("LOAD_TIMING first-run \(ms(full)) ms | second-run \(ms(again)) ms | facts \(ms(factsTime)) ms | status \(ms(statusTime)) ms | derived (off main) \(ms(derivedTime)) ms | atlas \(ms(atlasTime)) ms | overlap \(ms(overlapTime)) ms | search \(ms(searchTime)) ms")
         let peak = Self.peakMemoryMB()
         print("LOAD_MEMORY photos \(assets.count) peak \(peak.map { "\($0) MB" } ?? "unknown")")
         #expect(atlas.tripCount >= 25)

@@ -7,6 +7,7 @@ import contextlib
 import io
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -610,20 +611,62 @@ class WatchdogTests(unittest.TestCase):
 class GroupTests(unittest.TestCase):
     """The UI groups of ui.yml: every test runs in exactly one group (no test twice, none lost)."""
 
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+
+    def workflow(self):
+        return open(os.path.join(self.ROOT, ".github", "workflows", "ui.yml"), encoding="utf-8").read()
+
     def groups(self):
+        """{group: {field: value}} of the matrix; a folded value (`only: >-` and the lines below
+        it) is joined with spaces, as GitHub hands it to the job."""
         import re
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "workflows", "ui.yml")
-        text = open(path, encoding="utf-8").read()
+        text = self.workflow().split("include:", 1)[1].split("\n    env:", 1)[0]
         groups = {}
-        for block in re.split(r"\n\s*- group: ", text.split("include:", 1)[1].split("\n    env:", 1)[0])[1:]:
-            name = block.split("\n", 1)[0].strip()
-            fields = dict(re.findall(r"^\s*(only|skip|increase_contrast|reduce_motion|device): ?(.*)$", block, re.M))
-            groups[name] = {k: v.strip().strip("'") for k, v in fields.items()}
+        for block in re.split(r"\n\s*- group: ", text)[1:]:
+            lines = block.split("\n")
+            name, fields, i = lines[0].strip(), {}, 1
+            while i < len(lines):
+                m = re.match(r"^(\s*)(only|skip|increase_contrast|reduce_motion|device): ?(.*)$", lines[i])
+                i += 1
+                if not m:
+                    continue
+                value = m.group(3).strip()
+                if value in (">-", ">"):
+                    parts = []
+                    while i < len(lines) and lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) > len(m.group(1)):
+                        parts.append(lines[i].strip())
+                        i += 1
+                    value = " ".join(parts)
+                fields[m.group(2)] = value.strip("'")
+            groups[name] = fields
         return groups
 
-    def test_four_groups_and_the_contrast_job(self):
+    def ui_tests(self):
+        """Every test method of the SortlyUITests target, as "Class/test"."""
+        import glob
+        import re
+        tests = []
+        for path in sorted(glob.glob(os.path.join(self.ROOT, "App", "SortlyUITests", "*.swift"))):
+            current = None
+            for line in open(path, encoding="utf-8"):
+                cls = re.match(r"\s*(?:@\w+\s+)*(?:final\s+)?class\s+(\w+)\s*:\s*XCTestCase", line)
+                if cls:
+                    current = cls.group(1)
+                test = re.match(r"\s*(?:@\w+\s+)*func\s+(test\w*)\s*\(\s*\)", line)
+                if test and current:
+                    tests.append(f"{current}/{test.group(1)}")
+        return tests
+
+    @staticmethod
+    def selected(test, only, skip):
+        """Whether xcodebuild runs `test` with -only-testing `only` and -skip-testing `skip`."""
+        def hits(entries):
+            return any(test == e or test.startswith(e + "/") for e in entries)
+        return (not only or hits(only)) and not hits(skip)
+
+    def test_five_groups_and_the_contrast_job(self):
         groups = self.groups()
-        self.assertEqual(set(groups), {"flow-full", "flow-other", "accessibility", "contrast"})
+        self.assertEqual(set(groups), {"device", "flow-full", "flow-other", "accessibility", "contrast"})
         test5 = "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency"
         self.assertEqual(groups["contrast"]["only"], test5)
         self.assertEqual(groups["contrast"]["increase_contrast"], "true")
@@ -631,15 +674,75 @@ class GroupTests(unittest.TestCase):
         self.assertEqual(groups["contrast"]["device"], "se")
         self.assertEqual(groups["accessibility"]["skip"], test5)
         self.assertNotIn("increase_contrast", groups["accessibility"])
+        self.assertEqual(groups["device"]["device"], "pro")
+        self.assertNotIn("reduce_motion", groups["device"])
+
+    def test_at_most_four_groups_at_a_time(self):
+        # With CI's one macOS job, five macOS jobs at the peak; contrast (the shortest) waits.
+        import re
+        self.assertRegex(self.workflow(), r"\n      max-parallel: 4\n")
+        self.assertEqual(list(self.groups())[-1], "contrast")
 
     def test_other_flows_skip_exactly_what_the_others_run(self):
         groups = self.groups()
         others = set()
-        for name in ("flow-full", "accessibility", "contrast"):
+        for name in ("device", "flow-full", "accessibility", "contrast"):
             others |= set(groups[name]["only"].split())
         covered = {t for t in others if not any(t != o and t.startswith(o + "/") for o in others)}
         self.assertEqual(set(groups["flow-other"]["skip"].split()), covered)
         self.assertEqual(groups["flow-other"]["only"], "")
+
+    def test_every_ui_test_runs_in_exactly_one_group(self):
+        groups = self.groups()
+        tests = self.ui_tests()
+        self.assertGreater(len(tests), 20)
+        self.assertTrue(any(t.startswith("DeviceConditionUITests/") for t in tests))
+        classes = {t.split("/")[0] for t in tests}
+        for name, fields in groups.items():
+            for entry in fields["only"].split() + fields["skip"].split():
+                with self.subTest(group=name, entry=entry):
+                    # A renamed test would otherwise select nothing (or skip nothing) silently.
+                    self.assertIn(entry, tests if "/" in entry else classes)
+        for test in tests:
+            with self.subTest(test=test):
+                runs = [name for name, f in groups.items() if self.selected(test, f["only"].split(), f["skip"].split())]
+                self.assertEqual(len(runs), 1, f"{test} runs in {runs or 'no group'}")
+
+    def test_the_stress_run_is_not_part_of_the_ui_run(self):
+        # DeviceConditionUITests/test12 skips itself without SORTLY_STRESS_PHOTOS; only
+        # ui-stress.yml (started by hand) sets it.
+        self.assertNotIn("SORTLY_STRESS_PHOTOS", self.workflow())
+        stress = open(os.path.join(self.ROOT, ".github", "workflows", "ui-stress.yml"), encoding="utf-8").read()
+        self.assertIn("TEST_RUNNER_SORTLY_STRESS_PHOTOS", stress)
+        self.assertNotIn("pull_request", stress)
+        self.assertNotIn("push:", stress)
+        self.assertIn("toolchain.py xcode --runtime", stress)
+        self.assertIn("pick_simulator.py --role pro", stress)
+
+
+class HostGrantTests(unittest.TestCase):
+    """A test that reset the photo access asks the Mac to give it back (UI_HOST_GRANT_PHOTOS)."""
+
+    def test_requests_are_counted_per_line(self):
+        log = "x\nUI_HOST_GRANT_PHOTOS\nTest Case '-[SortlyUITests.DeviceConditionUITests test09]' started.\nUI_HOST_GRANT_PHOTOS\n"
+        self.assertEqual(ui_tests.host_grant_requests(log), 2)
+
+    def test_the_answer_is_not_a_request(self):
+        self.assertEqual(ui_tests.host_grant_requests("UI_HOST photo access granted\nUI_HOST_GRANT_PHOTOS_X\n"), 0)
+
+    def test_the_watcher_grants_once_per_request(self):
+        granted = []
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "log.txt")
+            with open(path, "w") as log:
+                log.write("UI_HOST_GRANT_PHOTOS\nhalf a li")
+            grants = ui_tests.HostGrants("U", path, interval=0.01, grant=lambda: granted.append(1))
+            grants.check()
+            with open(path, "a") as log:
+                log.write("ne\nUI_HOST_GRANT_PHOTOS\n")
+            grants.check()
+            grants.check()
+        self.assertEqual(len(granted), 2)
 
 
 if __name__ == "__main__":

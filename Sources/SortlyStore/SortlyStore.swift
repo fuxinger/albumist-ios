@@ -737,6 +737,23 @@ public actor SortlyStore: PlanJournal {
         return try StoredDefaults.decode(T.self, from: data, defaults: defaults, encoder: encoder, decoder: decoder)
     }
 
+    // MARK: - Identity
+
+    /// Not part of the safety copy (`keptValues`), not removed by a reset of the analysis.
+    static let identityKey = "identity.database"
+
+    /// A stamp made the first time this database is asked for it. What is kept outside the
+    /// database belongs to it only with the same stamp: the analysis marker lives in
+    /// UserDefaults, which a device backup restores, while the database folder is excluded
+    /// from backup (review of 9f0bc40: after a restore or on a new iPhone an empty database met
+    /// a stale "64 %"). `isNew`: the stamp was made just now.
+    public func identity() throws -> (id: String, isNew: Bool) {
+        if let id = try value(String.self, forKey: Self.identityKey) { return (id, false) }
+        let id = UUID().uuidString
+        try setValue(id, forKey: Self.identityKey)
+        return (id, true)
+    }
+
     // MARK: - Reset
 
     /// Deletes all local analysis data. Never touches the photo library (prompt §11).
@@ -752,9 +769,11 @@ public actor SortlyStore: PlanJournal {
             // otherwise the app would keep showing them until the next run finished.
             try db.execute("DELETE FROM settings WHERE key LIKE 'analysis.%'")
             if includingDecisions {
-                for table in ["overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media", "settings"] {
+                for table in ["overrides", "rules", "managed_albums", "plans", "plan_steps", "plan_media"] {
                     try db.execute("DELETE FROM \(table)")
                 }
+                // The database stays the same database: its stamp stays.
+                try db.execute("DELETE FROM settings WHERE key NOT LIKE 'identity.%'")
                 journalCache = [:]
             }
         }

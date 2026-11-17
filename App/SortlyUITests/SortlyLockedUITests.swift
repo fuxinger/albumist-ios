@@ -1,8 +1,8 @@
 import XCTest
 import UIKit
 
-/// The locked path of the one-time purchase, end to end (runs after SortlyFlowUITests, on the
-/// library and suggestions that run left behind). The app starts with `-SortlyUITestLocked`
+/// The locked path of the one-time purchase, end to end (on the demo library, created first
+/// when the test runs alone). The app starts with `-SortlyUITestLocked`
 /// and one free album left: a plan with more albums shows the unlock card instead of
 /// "Alben jetzt anlegen", "Die ersten 1 jetzt kostenlos anlegen" shrinks the plan to the free
 /// album, it runs, and afterwards no free album is left. The purchase sheet itself is not
@@ -105,7 +105,7 @@ final class SortlyLockedUITests: XCTestCase {
         sleep(1)
         var undone = 0
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for index in 0..<4 where undone < limit {
+        for index in 0..<(limit + 4) where undone < limit {
             let rows = app.buttons.matching(identifier: "history.row")
             guard index < rows.count else { break }
             rows.element(boundBy: index).tap()
@@ -143,8 +143,27 @@ final class SortlyLockedUITests: XCTestCase {
         if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
     }
 
+    /// CI runs groups of UI tests on separate simulators: when this test runs without the flow
+    /// before it, the demo library is created and analysed first (fast start, no onboarding).
+    private func prepareLibrary() {
+        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked", "-SortlyUITestFastStart"]
+        app.launch()
+        let deadline = Date().addingTimeInterval(900)
+        var streak = 0
+        while Date() < deadline && streak < 3 {
+            let ready = anything("Fotos analysiert").exists && !app.buttons["Pause"].exists
+                && !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists
+            streak = ready ? streak + 1 : 0
+            sleep(2)
+        }
+        print(streak >= 3 ? "UI_STEP_OK prepared (locked)" : "UI_STEP_MISSING prepared (locked)")
+        app.terminate()
+        app = XCUIApplication()
+    }
+
     func test7_LockedPlanOffersTheFreeAlbumsLeft() {
         continueAfterFailure = true
+        prepareLibrary()
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked",
                                "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "1"]
         app.launch()
@@ -162,7 +181,10 @@ final class SortlyLockedUITests: XCTestCase {
         if !apply.waitForExistence(timeout: 5) && !selectRecommended("open suggestions (locked)") {
             print("UI_FACT locked: nothing recommendable left, taking back the newest plans")
             let before = openSuggestionCount()
-            if takeBackNewestPlans(limit: 2) > 0 {
+            // Four: the newest plans need not come from suggestions (flow test 5 cuts off a
+            // new album of two photos when nothing recommended is left, and keeps and retries
+            // it: two plans whose undo brings no suggestion back, UI run 43949880264).
+            if takeBackNewestPlans(limit: 4) > 0 {
                 // The suggestions of the plans taken back return once the undo is stored and
                 // matched again; the count on the overview says when (run 43804947107 went on
                 // at once and found the one suggestion that was there before).

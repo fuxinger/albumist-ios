@@ -5,6 +5,13 @@ import SortlyEngine
 
 /// Final preview before anything changes (prompt §7, Schritt 8–10): summary, guarantees,
 /// conflicts, execution with progress, result and undo.
+///
+/// The body only reads what it shows. Everything worked out from the plan (summary, album
+/// list, conflict texts, free albums, the albums of the sorting show) is `PlanReviewFacts`,
+/// made off the main thread once per plan and album list; the step counter while the plan
+/// runs is drawn by `ExecutionProgressBar` alone. UI run 44038288087 saw the main thread busy
+/// for 52 and 68 s drawing this screen again and again, right after "Anlegen" in the
+/// add-to-album sheet.
 struct PlanReviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
@@ -13,44 +20,76 @@ struct PlanReviewView: View {
     @State private var loading = true
     /// Albums of the plan that is running, for the "photos fly into albums" show.
     @State private var show: [SortingShow.Album]?
+    /// What the screen shows of `model.plan`, made by `makeFacts()`.
+    @State private var facts: PlanReviewFacts?
+    /// The plan and album list `facts` were made for.
+    @State private var factsMadeFor: FactsKey?
+    /// Suggestions were selected when the facts were made ("Auswahl aufheben" is offered).
+    @State private var hasSelection = false
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
-    @State private var scroll = ScrollPosition(edge: .top)
     /// The screen loads once; coming back from another tab keeps the result and its undo.
     @State private var didLoad = false
+    private static let top = "plan.top"
+
+    /// The facts are made again for another plan, or when the albums in Photos changed.
+    private struct FactsKey: Equatable {
+        var plan: SortlyID?
+        var steps: Int
+        var conflicts: Int
+        var inventory: Int
+
+        /// The same plan (id, steps and conflicts), whatever the album list.
+        func samePlan(as other: FactsKey?) -> Bool {
+            guard let other else { return false }
+            return plan == other.plan && steps == other.steps && conflicts == other.conflicts
+        }
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                if let show {
-                    SortingShow(albums: show) {
-                        withAnimation(.smooth(duration: 0.45)) { self.show = nil }
+        let _ = MainThreadWatch.shared.count("plan review body")
+        // A reader, not `scrollPosition(_:)`: that binding is written by the scroll view while
+        // it moves, and each write drew the whole screen again.
+        ScrollViewReader { reader in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                    if let show {
+                        SortingShow(albums: show) {
+                            withAnimation(.smooth(duration: 0.45)) { self.show = nil }
+                        }
+                        .transition(.opacity)
+                    } else if let result = model.execution.finished, !model.execution.isRunning {
+                        ResultCard(plan: result)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    } else if model.execution.isRunning {
+                        runningCard
+                    } else if loading || (model.plan != nil && !factsKey.samePlan(as: factsMadeFor)) {
+                        // Facts of another plan (or of this plan before "Nur die Gratis-Alben"
+                        // or a change of steps) are never shown. After a change of the album
+                        // list alone the shown facts stay until the new ones are made, so the
+                        // screen neither jumps to the top nor takes away "Anlegen" while Photos
+                        // reports a change.
+                        ProgressView("Plan wird erstellt").frame(maxWidth: .infinity).padding(.top, 60)
+                    } else if let plan = model.plan, let facts {
+                        planContent(plan, facts) {
+                            reader.scrollTo(Self.top, anchor: .top)
+                        }
+                    } else {
+                        ContentUnavailableView("Nichts zu tun", systemImage: "checkmark.circle",
+                                               description: Text("Es gibt gerade keine ausgewählten Vorschläge."))
                     }
-                    .transition(.opacity)
-                } else if let result = model.execution.finished, !model.execution.isRunning {
-                    ResultCard(plan: result)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                } else if model.execution.isRunning {
-                    runningCard
-                } else if loading {
-                    ProgressView("Plan wird erstellt").frame(maxWidth: .infinity).padding(.top, 60)
-                } else if let plan = model.plan {
-                    planContent(plan)
-                } else {
-                    ContentUnavailableView("Nichts zu tun", systemImage: "checkmark.circle",
-                                           description: Text("Es gibt gerade keine ausgewählten Vorschläge."))
-                }
-                if let failure = model.execution.failure {
-                    Card {
-                        Label("Nicht alles hat geklappt", systemImage: "exclamationmark.triangle").font(.headline)
-                        Text(failure).font(.subheadline).foregroundStyle(.secondary)
+                    if let failure = model.execution.failure {
+                        Card {
+                            Label("Nicht alles hat geklappt", systemImage: "exclamationmark.triangle").font(.headline)
+                            Text(failure).font(.subheadline).foregroundStyle(.secondary)
+                        }
                     }
                 }
+                .padding(Theme.Spacing.l)
+                .id(Self.top)
             }
-            .padding(Theme.Spacing.l)
         }
-        .scrollPosition($scroll)
         .background(Theme.background)
         // One name for one step (design review W2): it is the preview of what changes.
         .navigationTitle("Vorschau")
@@ -63,24 +102,50 @@ struct PlanReviewView: View {
             guard !didLoad else { return }
             didLoad = true
             if !model.execution.isRunning {
-                // A new visit starts clean (the last result stays while the user only switched tabs).
-                model.execution.finished = nil
-                model.execution.failure = nil
+                // A new visit starts clean (the last result stays while the user only switched
+                // tabs). Written only when there is something to clear: every write redraws
+                // every screen that reads `execution`.
+                if model.execution.finished != nil { model.execution.finished = nil }
+                if model.execution.failure != nil { model.execution.failure = nil }
                 if let prebuilt { model.plan = prebuilt } else { await model.buildPlan() }
             }
             loading = false
         }
+        .task(id: factsKey) { await makeFacts() }
         .onChange(of: scenePhase) { _, phase in
             // Back from the Settings app: the full-access card disappears by itself.
             if phase == .active { Task { await model.refreshAccess() } }
         }
     }
 
+    private var factsKey: FactsKey {
+        let plan = model.plan
+        return FactsKey(plan: plan?.id, steps: plan?.steps.count ?? 0, conflicts: plan?.conflicts.count ?? 0,
+                        inventory: model.inventoryVersion)
+    }
+
+    /// Works out what the screen shows of the current plan, off the main thread.
+    private func makeFacts() async {
+        guard let plan = model.plan else { return }
+        let key = factsKey
+        let inventory = model.inventory
+        let order = MainThreadWatch.shared.section("plan review: order") {
+            model.acceptedProposals.inDisplayOrder().map(\.id)
+        }
+        let made = await Task.detached(priority: .userInitiated) {
+            PlanReviewFacts(plan: plan, inventory: inventory, order: order)
+        }.value
+        guard !Task.isCancelled else { return }
+        facts = made
+        factsMadeFor = key
+        hasSelection = !order.isEmpty
+    }
+
     // MARK: Plan
 
     @ViewBuilder
-    private func planContent(_ plan: ChangePlan) -> some View {
-        let summary = plan.summary
+    private func planContent(_ plan: ChangePlan, _ facts: PlanReviewFacts, scrollToTop: @escaping () -> Void) -> some View {
+        let summary = facts.summary
         Text("Das ändert sich in Fotos").font(.title2.weight(.bold)).accessibilityAddTraits(.isHeader)
         if plan.retries != nil {
             // "Fehlendes erneut versuchen" (I16): say that this is not the whole plan again.
@@ -102,8 +167,7 @@ struct PlanReviewView: View {
             if summary.deletedContainers > 0 { row("rectangle.stack.badge.minus", "Entfernte Alben", summary.deletedContainers) }
         }
 
-        let albumList = plan.albumPreview(inventory: model.inventory, order: model.acceptedProposals.inDisplayOrder().map(\.id))
-        if !albumList.isEmpty { PlanAlbumList(albums: albumList) }
+        if !facts.albums.isEmpty { PlanAlbumList(albums: facts.albums) }
 
         // Said as what does not happen (design review W1): "0 Originale gelöscht" left
         // "Originale gelöscht" in the mind when skimming or listening. A number only if a
@@ -123,18 +187,18 @@ struct PlanReviewView: View {
                 .font(.footnote).foregroundStyle(.secondary)
         }
 
-        if !plan.conflicts.isEmpty {
+        if !facts.conflicts.isEmpty {
             Card {
                 Label("Bitte prüfen", systemImage: "exclamationmark.triangle").font(.headline)
-                ForEach(Array(plan.conflicts.enumerated()), id: \.offset) { _, conflict in
-                    Text(ConflictText.text(conflict, inventory: model.inventory))
+                ForEach(Array(facts.conflicts.enumerated()), id: \.offset) { _, conflict in
+                    Text(ConflictText.text(conflict))
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             }
         }
 
-        let blocking = plan.conflicts.contains(where: \.isBlocking)
-        let albums = plan.freeAlbumUse(applied: false)
+        let blocking = facts.isBlocking
+        let albums = facts.freeAlbumUse
         if model.access == .limited && !UITestSupport.isRunning {
             FullAccessCard()
         } else if PlanGate.refusal(for: plan, interrupted: model.interruptedPlan) != nil {
@@ -154,11 +218,11 @@ struct PlanReviewView: View {
             UnlockCard(albumsInPlan: albums, onLimit: limitToFreeAlbums)
         } else {
             Button {
-                let albums = SortingShow.albums(from: plan, inventory: model.inventory)
+                let albums = SortingShow.albums(from: facts.filledAlbums)
                 if !albums.isEmpty {
                     withAnimation(.smooth(duration: 0.4)) {
                         show = albums
-                        scroll.scrollTo(edge: .top)
+                        scrollToTop()
                     }
                 }
                 Task { await model.execute(plan) }
@@ -168,7 +232,7 @@ struct PlanReviewView: View {
             .buttonStyle(PrimaryButtonStyle())
             // Not while a change in "Dein Zuhause" makes the suggestions again (the plan would
             // not start, after the fly animation).
-            .disabled(blocking || plan.steps.isEmpty || model.homeChangeRunning)
+            .disabled(blocking || facts.hasNoSteps || model.homeChangeRunning)
             .accessibilityIdentifier("plan.apply")
             if blocking {
                 Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")
@@ -179,7 +243,7 @@ struct PlanReviewView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }
-        if prebuilt == nil && !model.acceptedProposals.isEmpty {
+        if prebuilt == nil && hasSelection {
             // The way out: nothing selected, back to the open suggestions.
             Button("Auswahl aufheben") {
                 model.clearSelection()
@@ -231,12 +295,26 @@ struct PlanReviewView: View {
     private var runningCard: some View {
         Card {
             Text("Alben werden angelegt").font(.headline)
-            ProgressView(value: Double(model.execution.completedSteps), total: Double(max(1, model.execution.totalSteps)))
-                .tint(Theme.accent)
-            Text("\(model.execution.completedSteps) von \(model.execution.totalSteps) Schritten")
-                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+            ExecutionProgressBar(showsCount: true)
             Text("Du kannst die App dabei offen lassen. Bricht etwas ab, setzt Albumist beim nächsten Start sicher fort.")
                 .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// The progress bar of the running plan, with "N von M Schritten" when asked. A view of its
+/// own: it is the only part of a screen drawn again after every step (`AppModel.ExecutionProgress`).
+struct ExecutionProgressBar: View {
+    @Environment(AppModel.self) private var model
+    var showsCount = false
+
+    var body: some View {
+        let progress = model.executionProgress
+        ProgressView(value: Double(progress.completedSteps), total: Double(max(1, progress.totalSteps)))
+            .tint(Theme.accent)
+        if showsCount {
+            Text("\(progress.completedSteps) von \(progress.totalSteps) Schritten")
+                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
         }
     }
 }
@@ -263,6 +341,7 @@ private struct ExecutionHaptics: ViewModifier {
 /// Result of an executed plan: what happened, a way to see it in Photos, and undo.
 struct ResultCard: View {
     @Environment(AppModel.self) private var model
+    @Environment(Navigator.self) private var navigator: Navigator?
     var plan: ChangePlan
     @State private var confirmUndo = false
     @State private var appeared = false
@@ -342,8 +421,9 @@ struct ResultCard: View {
                     .frame(maxWidth: .infinity)
                 }
             }
-            NavigationLink {
-                PlanReceiptView(plan: plan)
+            // Pushed by value (`AppScreen`): the receipt may push "Fehlendes erneut versuchen".
+            Button {
+                Navigator.push(.receipt(PlanToken(plan)), on: navigator)
             } label: {
                 Text("Alle Änderungen ansehen")
                     .font(.subheadline.weight(.semibold))
@@ -383,8 +463,13 @@ struct ResultCard: View {
 
 enum ConflictText {
     static func text(_ conflict: PlanConflict, inventory: CollectionInventory) -> String {
-        func title(_ id: CollectionID) -> String { inventory[id]?.title ?? "?" }
-        switch conflict {
+        text(ResolvedConflict(conflict, inventory: inventory))
+    }
+
+    /// The text of a conflict whose album name was looked up before (`PlanReviewFacts`).
+    static func text(_ resolved: ResolvedConflict) -> String {
+        func title(_ id: CollectionID) -> String { resolved.albumTitle ?? "?" }
+        switch resolved.conflict {
         case .duplicatePlannedTitle(let title, _, _):
             return String(localized: "Zwei neue Alben heißen „\(title)“. Bitte benenne eines um.")
         case .titleExistsInFolder(let title, _):

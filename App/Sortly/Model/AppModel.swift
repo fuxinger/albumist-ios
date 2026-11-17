@@ -114,16 +114,42 @@ final class AppModel {
         var unreadable = 0
     }
 
+    /// Whether a plan runs and how it ended. The step counter is `ExecutionProgress`.
     struct ExecutionState: Equatable {
         var isRunning = false
-        /// The plan this state belongs to: progress of an earlier run never lands on a later one.
+        /// The plan this state belongs to.
         var planID: SortlyID?
-        var completedSteps = 0
-        var totalSteps = 0
         var finished: ChangePlan?
         var failure: String?
+    }
+
+    /// The steps of the running plan, apart from `ExecutionState`: they change after every
+    /// step, and every screen that reads `execution` (the plan preview, the add-to-album sheet,
+    /// the receipt, the settings) was drawn again each time. Only the progress bars and the
+    /// sorting show read this.
+    @MainActor @Observable
+    final class ExecutionProgress {
+        /// The plan these steps belong to: progress of an earlier run never lands on a later one.
+        private(set) var planID: SortlyID?
+        private(set) var completedSteps = 0
+        private(set) var totalSteps = 0
         /// Steps that failed or were skipped (the sorting show gives them no checkmark).
-        var unsuccessfulSteps: Set<Int> = []
+        private(set) var unsuccessfulSteps: Set<Int> = []
+
+        func start(planID: SortlyID, totalSteps: Int) {
+            self.planID = planID
+            completedSteps = 0
+            self.totalSteps = totalSteps
+            unsuccessfulSteps = []
+        }
+
+        /// Step `index` of plan `planID` has finished; ignored for any other plan.
+        func stepFinished(_ index: Int, succeeded: Bool, planID: SortlyID) {
+            guard self.planID == planID else { return }
+            if !succeeded { unsuccessfulSteps.insert(index) }
+            // Never backwards, also if a step reports late.
+            completedSteps = max(completedSteps, index + 1)
+        }
     }
 
     // MARK: State
@@ -216,7 +242,7 @@ final class AppModel {
         // Cache hits must still register the dependency, or views would never see new facts.
         access(keyPath: \.facts)
         if let cached = atlasCache[year ?? 0] { return cached }
-        let atlas = TravelAtlas.compute(facts: facts, year: year)
+        let atlas = MainThreadWatch.shared.section("travel atlas") { TravelAtlas.compute(facts: facts, year: year) }
         atlasCache[year ?? 0] = atlas
         return atlas
     }
@@ -224,7 +250,7 @@ final class AppModel {
     var atlasYears: [Int] {
         access(keyPath: \.facts)
         if let cached = atlasYearsCache { return cached }
-        let years = TravelAtlas.years(facts: facts)
+        let years = MainThreadWatch.shared.section("atlas years") { TravelAtlas.years(facts: facts) }
         atlasYearsCache = years
         return years
     }
@@ -237,7 +263,9 @@ final class AppModel {
     var factsByID: [AssetID: AssetFacts] {
         access(keyPath: \.facts)
         if let factsIndex { return factsIndex }
-        let index = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let index = MainThreadWatch.shared.section("facts by id") {
+            Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        }
         factsIndex = index
         return index
     }
@@ -246,7 +274,9 @@ final class AppModel {
     var creationDates: [AssetID: Date] {
         access(keyPath: \.facts)
         if let datesCache { return datesCache }
-        let dates = Dictionary(facts.compactMap { f in f.asset.creationDate.map { (f.id, $0) } }, uniquingKeysWith: { first, _ in first })
+        let dates = MainThreadWatch.shared.section("creation dates") {
+            Dictionary(facts.compactMap { f in f.asset.creationDate.map { (f.id, $0) } }, uniquingKeysWith: { first, _ in first })
+        }
         datesCache = dates
         return dates
     }
@@ -281,7 +311,7 @@ final class AppModel {
         let key = "\(code)|\(year ?? 0)"
         access(keyPath: \.facts)
         if let cached = countryCache[key] { return cached }
-        let photos = CountryPhotos.collect(countryCode: code, facts: facts, year: year)
+        let photos = MainThreadWatch.shared.section("country photos") { CountryPhotos.collect(countryCode: code, facts: facts, year: year) }
         countryCache[key] = photos
         return photos
     }
@@ -310,7 +340,10 @@ final class AppModel {
     var recount: RecountState? = RecountState.load() {
         didSet { RecountState.save(recount) }
     }
-    var inventory = CollectionInventory() { didSet { resetSearchIndex() } }
+    var inventory = CollectionInventory() { didSet { resetSearchIndex(); inventoryVersion &+= 1 } }
+    /// Counts changes of `inventory`: a screen that works something out from the inventory off
+    /// the main thread (the plan preview, `PlanReviewFacts`) watches this number instead.
+    private(set) var inventoryVersion = 0
     var mergeSuggestions: [AlbumOverlapAnalyzer.MergeSuggestion] = []
     /// Executed plans, newest first. Undo runs are not listed on their own; they mark the
     /// plan they took back (see `undonePlans`).
@@ -364,6 +397,8 @@ final class AppModel {
     @ObservationIgnored private var homeCandidatesCache: [HomeCandidate]?
     @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
     var execution = ExecutionState()
+    /// A constant: views observe its properties, not the model (see `ExecutionProgress`).
+    let executionProgress = ExecutionProgress()
     var message: AppMessage?
     /// Where Siri, Shortcuts or a Spotlight result wants to go; the overview opens it.
     var route: Route?
@@ -728,7 +763,10 @@ final class AppModel {
 
     /// Reads the access again, e.g. after the user came back from the Settings app.
     func refreshAccess() async {
-        access = await library.access()
+        // Written only when it changed: screens call this whenever they appear, and every
+        // write draws again each screen that reads the access.
+        let current = await library.access()
+        if access != current { access = current }
         await restoreWaitingLibraryState()
         followAccess()
     }
@@ -790,6 +828,12 @@ final class AppModel {
     /// (first device test 15.11.: shown once, then never again).
     /// `scope`: a new part of the library to work on; `nil` keeps the stored one.
     func startAnalysis(scope: OrganizationScope? = nil, mode: AnalysisPipeline.Mode = .incremental, userInitiated: Bool = false) {
+        MainThreadWatch.shared.section("start analysis") {
+            startAnalysisNow(scope: scope, mode: mode, userInitiated: userInitiated)
+        }
+    }
+
+    private func startAnalysisNow(scope: OrganizationScope?, mode: AnalysisPipeline.Mode, userInitiated: Bool) {
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
         // A change in "Dein Zuhause" is being applied: the run starts right after it, so it
         // never takes the run lock in the middle of the change. Several requests meanwhile are
@@ -1029,6 +1073,10 @@ final class AppModel {
 
     /// A run starts: everything the card measured for the run before is forgotten.
     private func beginCard() {
+        MainThreadWatch.shared.section("begin card") { beginCardNow() }
+    }
+
+    private func beginCardNow() {
         tickTask?.cancel()
         progressMailbox = ProgressMailbox()
         estimator.reset()
@@ -1078,6 +1126,10 @@ final class AppModel {
     /// One tick (every 250 ms while a run is busy, S2): takes the newest progress, measures the
     /// speed, moves the bar, and decides what the card says. Nothing here runs per report.
     private func tick(run: Int) {
+        MainThreadWatch.shared.section("analysis tick") { tickNow(run: run) }
+    }
+
+    private func tickNow(run: Int) {
         guard run == analysisGeneration, analysis.isRunning else { return }
         let now = ContinuousClock.now
         let taken = progressMailbox.take()
@@ -1374,13 +1426,16 @@ final class AppModel {
         do {
             // Results of an older matching version are matched again once (review 16.11.).
             let refresh = try await pipeline.refreshMatchesIfOutdated()
-            snapshot = refresh.snapshot
-            reopenAfterRecheck(refresh.reopened)
+            MainThreadWatch.shared.section("refresh: snapshot") {
+                snapshot = refresh.snapshot
+                reopenAfterRecheck(refresh.reopened)
+            }
             recheckedSuggestions = try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0
             recurringPlaceReport = try await pipeline.recurringPlaceReport()
             detectedHome = try await pipeline.detectedHome()
             homeChangeNotice = try await pipeline.homeChangeNotice()
-            facts = try await pipeline.currentFacts()
+            let newFacts = try await pipeline.currentFacts()
+            MainThreadWatch.shared.section("refresh: facts") { facts = newFacts }
             inventory = try await store.loadInventory()
             let inventory = inventory
             // Albumist's own albums overlap on purpose (a country holds its trips).
@@ -1411,21 +1466,26 @@ final class AppModel {
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
             guard derivedCalls.isNewest(call), scope == analysisScope else { return }
-            states = derived.states
-            statusReasons = derived.reasons
-            progress = derived.progress
-            leftOut = derived.leftOut
-            // Not with the early set of a first run (trips and places only): the count would
-            // be shown as final hours before the image analysis is done (review minor).
-            if recount != nil, (snapshot?.isEarly == false && !proposals.isEmpty)
-                || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
-                recount = nil
-            }
-            analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable)
+            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot) }
         } catch {
             message = .failure(error.localizedDescription)
         }
         SpotlightIndex.scheduleUpdate(self)
+    }
+
+    /// `snapshot`: the one the status was derived from (read before the await).
+    private func assignDerived(_ derived: DerivedLibraryStatus, snapshot: ProposalSnapshot?) {
+        states = derived.states
+        statusReasons = derived.reasons
+        progress = derived.progress
+        leftOut = derived.leftOut
+        // Not with the early set of a first run (trips and places only): the count would
+        // be shown as final hours before the image analysis is done (review minor).
+        if recount != nil, (snapshot?.isEarly == false && !proposals.isEmpty)
+            || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
+            recount = nil
+        }
+        analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable)
     }
 
     // MARK: Proposals and decisions
@@ -1952,7 +2012,9 @@ final class AppModel {
                 }
                 return ConfirmedProposal(proposal: proposal, decision: decision)
             }
-            plan = OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle).makePlan(from: confirmed, inventory: current, overrides: overrides)
+            plan = MainThreadWatch.shared.section("make plan") {
+                OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle).makePlan(from: confirmed, inventory: current, overrides: overrides)
+            }
         } catch {
             message = .failure(error.localizedDescription)
         }
@@ -2025,7 +2087,8 @@ final class AppModel {
         if confirmed.status == .draft { confirmed.status = .confirmed }
         if confirmed.confirmedAt == nil { confirmed.confirmedAt = Date() }
         let planID = confirmed.id
-        execution = ExecutionState(isRunning: true, planID: planID, completedSteps: 0, totalSteps: plan.steps.count)
+        executionProgress.start(planID: planID, totalSteps: plan.steps.count)
+        execution = ExecutionState(isRunning: true, planID: planID)
         // No auto-lock in the middle of a plan, and a little time to finish a step if the
         // user switches away (see `ExecutionGuard`).
         let keepAwake = ExecutionGuard()
@@ -2041,10 +2104,7 @@ final class AppModel {
                 if case .stepFinished(let index, let state) = event {
                     let succeeded: Bool = if case .succeeded = state { true } else { false }
                     Task { @MainActor in
-                        let model = AppModel.shared
-                        guard model.execution.planID == planID else { return }
-                        if !succeeded { model.execution.unsuccessfulSteps.insert(index) }
-                        model.execution.completedSteps = index + 1
+                        AppModel.shared.executionProgress.stepFinished(index, succeeded: succeeded, planID: planID)
                     }
                 }
             }
@@ -2528,7 +2588,9 @@ final class AppModel {
     /// Several undos when the first one was only partial: newest first.
     func receipt(for plan: ChangePlan) async -> (plan: PlanReceipt, undos: [PlanReceipt]) {
         let undos = (try? await store?.reverts(of: plan.id)) ?? []
-        return (PlanReceipt(plan: plan, inventory: inventory), undos.map { PlanReceipt(plan: $0, inventory: inventory) })
+        return MainThreadWatch.shared.section("receipt") {
+            (PlanReceipt(plan: plan, inventory: inventory), undos.map { PlanReceipt(plan: $0, inventory: inventory) })
+        }
     }
 
     /// "Ältere anzeigen" in the history.
@@ -2545,11 +2607,13 @@ final class AppModel {
         access(keyPath: \.settings)
         if let cached = bucketCache[bucket] { return cached }
         let resolver = resolver
-        let members = facts.filter { f in
-            guard let state = states[f.id] else { return bucket == .all }
-            return resolver.buckets(state).contains(bucket)
+        let members = MainThreadWatch.shared.section("library bucket") {
+            facts.filter { f in
+                guard let state = states[f.id] else { return bucket == .all }
+                return resolver.buckets(state).contains(bucket)
+            }
+            .sorted { ($0.asset.creationDate ?? .distantPast) > ($1.asset.creationDate ?? .distantPast) }
         }
-        .sorted { ($0.asset.creationDate ?? .distantPast) > ($1.asset.creationDate ?? .distantPast) }
         bucketCache[bucket] = members
         return members
     }
@@ -2710,9 +2774,11 @@ final class AppModel {
         // Foreground and background runs both have a task: waited for until they really
         // ended, not for a fixed time (audit 2, 4.1).
         await analysisTask?.value
-        AnalysisMarker.reset()
-        if progress.total > 0, recount == nil {
-            recount = RecountState(fully: progress.fully, total: progress.total)
+        MainThreadWatch.shared.section("rebuild: marker reset") {
+            AnalysisMarker.reset()
+            if progress.total > 0, recount == nil {
+                recount = RecountState(fully: progress.fully, total: progress.total)
+            }
         }
         do {
             // Through the pipeline: it waits for a run or a change in "Dein Zuhause" that is
@@ -2721,8 +2787,10 @@ final class AppModel {
         } catch {
             message = .failure(error.localizedDescription)
         }
-        snapshot = nil
-        SpotlightIndex.clear()
+        MainThreadWatch.shared.section("rebuild: clear snapshot and Spotlight") {
+            snapshot = nil
+            SpotlightIndex.clear()
+        }
         await refreshDerived()
         return true
     }

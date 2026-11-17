@@ -76,35 +76,39 @@ struct MainTabs: View {
     @Environment(AppModel.self) private var model
     @Environment(\.requestReview) private var requestReview
     @State private var tab: MainTab = .overview
+    /// The overview tab's stack, also for Siri, Shortcuts and Spotlight (`AppScreen`).
+    @State private var overviewNavigator = Navigator()
 
     enum MainTab: Hashable { case overview, library, albums, search }
 
     var body: some View {
         TabView(selection: $tab) {
             Tab("Übersicht", systemImage: "square.grid.2x2", value: MainTab.overview) {
-                NavigationStack {
-                    OverviewView()
-                        .navigationDestination(item: route) { RouteDestination(route: $0) }
-                }
+                NavigationRoot(overviewNavigator) { OverviewView() }
             }
             Tab("Mediathek", systemImage: "photo.on.rectangle", value: MainTab.library) {
-                NavigationStack { LibraryView() }
+                NavigationRoot { LibraryView() }
             }
             // The symbol Photos uses for albums (design review N1).
             Tab("Alben", systemImage: "rectangle.stack", value: MainTab.albums) {
-                NavigationStack { AlbumsView() }
+                NavigationRoot { AlbumsView() }
             }
             Tab(value: MainTab.search, role: .search) {
-                NavigationStack { SearchView() }
+                NavigationRoot { SearchView() }
             }
         }
         // iPad: tabs become a sidebar; iPhone: the Liquid Glass tab bar shrinks while scrolling.
         .tabViewStyle(.sidebarAdaptable)
         // UI tests tap every tab by name; a shrunken bar hides all but the current one.
         .tabBarMinimizeBehavior(UITestSupport.isRunning ? .never : .onScrollDown)
-        // Siri, Shortcuts and Spotlight open their target from the overview.
+        // Siri, Shortcuts, Spotlight and the analysis card's buttons open their target from
+        // the overview: pushed onto its path, and the route is taken.
         .onChange(of: model.route, initial: true) { _, target in
-            if target != nil { tab = .overview }
+            guard let target else { return }
+            tab = .overview
+            // The same target twice in a row (a second tap on the card) opens it once.
+            if overviewNavigator.path.last != AppScreen.route(target) { overviewNavigator.push(.route(target)) }
+            model.route = nil
         }
         // Each message brings its own title (design review W15), e.g. "Das hat nicht geklappt".
         .alert(model.message?.title ?? "", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } }),
@@ -116,10 +120,6 @@ struct MainTabs: View {
         // The App Store rating question: a moment after the user left the result of a plan that
         // made new albums, never at a start (`ReviewPrompt`, `ReviewPromptPolicy`).
         .task(id: ReviewPrompt.shared.due) { await askForRatingIfDue() }
-    }
-
-    private var route: Binding<AppModel.Route?> {
-        Binding(get: { model.route }, set: { model.route = $0 })
     }
 
     /// Waits until the screen after the result has settled, and briefly for the check for new

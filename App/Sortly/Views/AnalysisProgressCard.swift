@@ -12,6 +12,17 @@ struct AnalysisProgressCard: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var scenePhase
     @State private var showDetails = false
+    /// What VoiceOver and other assistive tools read from the progress element, renewed at
+    /// most once a second (`renewSpoken`). The visible count and bar keep moving with every
+    /// tick (4 per second); an accessibility tree that changed with them made every read of
+    /// the screen during the analysis slow (UI run 43979263666: 16 to 48 s on the simulator).
+    @State private var spokenValue = ""
+    @State private var spokenOverall = 0.0
+    @State private var spokenAt = Date.distantPast
+    @State private var spokenPending: Task<Void, Never>?
+    /// The newest value, kept without redrawing; the delayed renewal takes it from here (the
+    /// view it was started from holds the card state of that moment).
+    @State private var newest = NewestSpoken()
     var state: AnalysisCardState
 
     var body: some View {
@@ -169,13 +180,54 @@ struct AnalysisProgressCard: View {
                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
         }
         .accessibilityRepresentation {
-            ProgressView(value: model.analysis.shownOverall) { Text(title) }
+            ProgressView(value: spokenOverall) { Text(title) }
         }
         .accessibilityLabel(title)
-        .accessibilityValue(accessibilityValue)
-        .accessibilityAddTraits(.updatesFrequently)
+        .accessibilityValue(spokenValue)
+        // Only while something runs: a paused or waiting card does not change by itself.
+        .accessibilityAddTraits(isRunning ? .updatesFrequently : [])
         .accessibilityIdentifier("analysis.progress")
+        .onChange(of: accessibilityValue, initial: true) { renewSpoken() }
+        // A new state or step is said at once, so the words and the spoken value agree.
+        .onChange(of: state.phase) { renewSpoken(now: true) }
+        .onChange(of: position?.step) { renewSpoken(now: true) }
+        // onDisappear drops a queued update: on return the value is taken afresh.
+        .onAppear { renewSpoken(now: true) }
+        .onDisappear {
+            spokenPending?.cancel()
+            spokenPending = nil
+        }
     }
+
+    /// Takes the current value for assistive tools at once when a second has passed since the
+    /// last one (or `now`: a change of state is said right away), otherwise once that second is
+    /// over, with whatever the value is by then.
+    private func renewSpoken(now: Bool = false) {
+        newest.value = accessibilityValue
+        newest.overall = model.analysis.shownOverall
+        let wait = 1 - Date().timeIntervalSince(spokenAt)
+        guard !now, wait > 0 else {
+            spokenPending?.cancel()
+            spokenPending = nil
+            takeSpoken()
+            return
+        }
+        guard spokenPending == nil else { return }
+        spokenPending = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled else { return }
+            spokenPending = nil
+            takeSpoken()
+        }
+    }
+
+    private func takeSpoken() {
+        spokenValue = newest.value
+        spokenOverall = newest.overall
+        spokenAt = Date()
+    }
+
+    private var isRunning: Bool { if case .running = state { true } else { false } }
 
     private var isWaitingOrPaused: Bool {
         switch state {
@@ -287,9 +339,10 @@ struct AnalysisProgressCard: View {
                     .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                NavigationLink {
-                    ProposalListView(area: nil)
-                } label: {
+                // Opened from the overview's root (`MainTabs`, route `.proposals`): this row goes
+                // away when the step changes or the analysis pauses, and a link in it took its
+                // open list along (the overview's own links did, UI run 44038288087).
+                Button { model.route = .proposals } label: {
                     CardTextButton("Ansehen")
                 }
                 .accessibilityIdentifier("analysis.showDone")
@@ -525,9 +578,9 @@ struct AnalysisFinishedView: View {
                 .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if proposals > 0 {
-                NavigationLink {
-                    ProposalListView(area: nil)
-                } label: {
+                // Opened from the overview's root, as "Ansehen" above: the finish moment goes
+                // away by itself.
+                Button { model.route = .proposals } label: {
                     Text("Vorschläge prüfen")
                 }
                 .buttonStyle(PrimaryButtonStyle())
@@ -556,7 +609,7 @@ struct AnalysisDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
+        NavigationRoot {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     TimelineView(.periodic(from: .now, by: 15)) { context in
@@ -705,4 +758,11 @@ extension AnalysisCardState {
         case .finished: "finished"
         }
     }
+}
+
+/// See `AnalysisProgressCard.newest`.
+@MainActor
+private final class NewestSpoken {
+    var value = ""
+    var overall = 0.0
 }

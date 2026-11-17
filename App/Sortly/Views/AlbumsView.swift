@@ -7,8 +7,9 @@ import SortlyEngine
 struct AlbumsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
-    @State private var mergePlan: ChangePlan?
-    @State private var showMerge = false
+    /// The merge preview is pushed onto the tab's path (`AppScreen`), not presented with
+    /// `navigationDestination(isPresented:)`.
+    @Environment(Navigator.self) private var navigator: Navigator?
     /// The suggestion whose merge plan is being prepared: its row shows a spinner and the
     /// rows do not take a second tap meanwhile (design review N13).
     @State private var preparing: [CollectionID]?
@@ -34,9 +35,9 @@ struct AlbumsView: View {
                         Button {
                             preparing = suggestion.albumIDs
                             Task {
-                                mergePlan = await model.mergePlan(suggestion)
+                                let plan = await model.mergePlan(suggestion)
                                 preparing = nil
-                                showMerge = mergePlan != nil
+                                if let plan { Navigator.push(.prebuiltPlan(PlanToken(plan)), on: navigator) }
                             }
                         } label: {
                             HStack {
@@ -103,9 +104,6 @@ struct AlbumsView: View {
             }
         }
         .navigationTitle("Alben")
-        .navigationDestination(isPresented: $showMerge) {
-            PlanReviewView(prebuilt: mergePlan)
-        }
         .refreshable { await model.refreshDerived() }
     }
 }

@@ -166,7 +166,8 @@ final class AccessibilityUITests: XCTestCase {
             allowNotificationsIfAsked()
         }
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: welcome ? 30 : 5) {
+        let seeds = demo.waitForExistence(timeout: welcome ? 30 : 5)
+        if seeds {
             tap(demo, "seed demo library")
             XCTAssertTrue(UITestOnboarding.demoLibraryCreated(app), "Demo library not created")
         } else if checking {
@@ -174,6 +175,14 @@ final class AccessibilityUITests: XCTestCase {
             XCTFail("No \"Beispiel-Mediathek anlegen\" after the onboarding on a fresh simulator")
         }
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
+        let test = checking ? "accessibility test 1" : "accessibility"
+        if welcome || seeds {
+            // This test watched the analysis run to its end: a partial count now is an early stop.
+            UITestOnboarding.expectCompleteAnalysis(app, in: test)
+        } else {
+            // A relaunch into a library seeded earlier, whose analysis a restarted runner may have cut off.
+            UITestOnboarding.finishInterruptedAnalysis(app, in: test)
+        }
         return welcome
     }
 
@@ -248,16 +257,16 @@ final class AccessibilityUITests: XCTestCase {
             var swipes = 0
             while !row.exists && swipes < 6 { app.swipeUp(); swipes += 1; sleep(1) }
             if tap(row, "\(tag) open suggestion", timeout: 10) {
-                _ = app.navigationBars[w.suggestionTitle].waitForExistence(timeout: 5)
+                let detailShown = app.navigationBars[w.suggestionTitle].waitForExistence(timeout: 5)
                 sleep(1)
                 check("\(tag) suggestion detail", english: english)
                 if !short {
                     app.swipeUp(); sleep(1)
                     check("\(tag) suggestion detail lower", english: english)
                 }
-                back(); sleep(1)
+                back("\(tag) suggestion detail", confirmed: detailShown); sleep(1)
             }
-            back(); sleep(1)
+            back("\(tag) suggestions", confirmed: false); sleep(1)
         }
 
         // The starter set opens the plan; going back selects nothing. Once it has been applied
@@ -266,7 +275,8 @@ final class AccessibilityUITests: XCTestCase {
         if !starter.waitForExistence(timeout: 8) {
             print("UI_STEP_SKIPPED \(tag) starter plan (no starter set on the overview)")
         } else if tap(starter, "\(tag) open starter plan", timeout: 10) {
-            if app.navigationBars[w.planTitle].waitForExistence(timeout: 20) {
+            let planShown = app.navigationBars[w.planTitle].waitForExistence(timeout: 20)
+            if planShown {
                 sleep(2)
                 check("\(tag) plan", english: english)
                 if !short {
@@ -284,18 +294,18 @@ final class AccessibilityUITests: XCTestCase {
                         if tap(receipt, "\(tag) open receipt", timeout: 10) {
                             sleep(2)
                             check("\(tag) receipt", english: english)
-                            back(); sleep(1)
+                            back("\(tag) receipt", confirmed: false); sleep(1)
                         }
                     } else {
                         XCTFail("The starter plan did not finish")
                     }
                 }
             }
-            back(); sleep(2)
+            back("\(tag) starter plan", confirmed: planShown); sleep(2)
         }
 
         // Travel atlas and the share image
-        if tap(button(w.atlas), "\(tag) open atlas", timeout: 20) {
+        if tap(button(w.atlas), "\(tag) open atlas", timeout: 20), opened(app.navigationBars[w.atlas], "\(tag) atlas") {
             sleep(3)
             check("\(tag) atlas", english: english)
             if !short {
@@ -306,7 +316,7 @@ final class AccessibilityUITests: XCTestCase {
                 if tap(country, "\(tag) open country", timeout: 10) {
                     sleep(2)
                     check("\(tag) country", english: english)
-                    back(); sleep(1)
+                    back("\(tag) country", confirmed: false); sleep(1)
                 }
                 app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
@@ -316,7 +326,7 @@ final class AccessibilityUITests: XCTestCase {
                     sleep(2)
                 }
             }
-            back(); sleep(1)
+            back("\(tag) atlas", confirmed: true); sleep(1)
         }
 
         // Tabs
@@ -353,7 +363,7 @@ final class AccessibilityUITests: XCTestCase {
                 if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
                     sleep(1)
                     check("\(tag) history", english: english)
-                    back(); sleep(1)
+                    back("\(tag) history", confirmed: false); sleep(1)
                 }
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
@@ -388,8 +398,10 @@ final class AccessibilityUITests: XCTestCase {
         sleep(1)
         shot("a11y-" + slug(screen))
         let chrome = chromeFrames()
+        UITestOnboarding.clock("check start \(screen)")
         inspectTree(screen, chrome: chrome, english: english)
         audit(screen, chrome: chrome)
+        UITestOnboarding.clock("check end \(screen)")
         let failures = auditFailures + screenFailures
         if failures.isEmpty {
             print("A11Y_SCREEN_OK \(screen)")
@@ -690,8 +702,15 @@ final class AccessibilityUITests: XCTestCase {
     // MARK: Helpers (copied from SortlyFlowUITests, which another change owns)
 
     private func launch(english: Bool = false, textSize: String? = nil, dark: Bool = false) {
+        // The app's stalls and stacks of each launch (UITestStalls; the contrast run's long
+        // stalls before "close settings" had no stack, UI run 44012530107).
+        UITestStalls.report()
+        if !stallsReportedAtEnd {
+            stallsReportedAtEnd = true
+            addTeardownBlock { UITestStalls.report() }
+        }
         app = XCUIApplication()
-        var arguments = ["-SortlyUITestUnlocked"]
+        var arguments = ["-SortlyUITestUnlocked"] + UITestStalls.arguments(besides: [])
         arguments += english ? ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"] : ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE"]
         if let textSize { arguments += ["-UIPreferredContentSizeCategoryName", textSize] }
         accessibilitySize = textSize?.contains("Accessibility") ?? false
@@ -699,6 +718,8 @@ final class AccessibilityUITests: XCTestCase {
         app.launchArguments = arguments
         app.launch()
     }
+
+    private var stallsReportedAtEnd = false
 
     private func slug(_ text: String) -> String {
         text.lowercased().replacingOccurrences(of: " ", with: "-")
@@ -742,21 +763,63 @@ final class AccessibilityUITests: XCTestCase {
             XCTFail("Missing: \(step)")
             return false
         }
+        // Content under the tab bar also counts as hittable, but a tap there lands on the bar
+        // (contrast run 43918684247: the atlas teaser sat under the tab bar on a fresh simulator,
+        // the tap opened nothing, and `back()` then tapped the overview's settings button). The
+        // bar takes taps a little above its frame too: run 43945035122 tapped the teaser 6 pt
+        // above it (centre y 578, bar from 584) and the atlas did not open, so the centre has
+        // to be clear of the bar by the scroll edge it softens (see `chromeFrames`) and more.
         let bar = app.navigationBars.firstMatch
+        let tabs = app.tabBars.firstMatch
         var swipes = 0
         while swipes < 10 {
             let underBar = bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY
-            if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
+            let underTabs = tabs.exists && !tabs.frame.contains(element.frame) && element.frame.midY > tabs.frame.minY - 24
+            if underBar { app.swipeDown() } else if underTabs || !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
+        if tabs.exists, swipes > 0 || element.frame.maxY > tabs.frame.minY {
+            print("UI_FACT tap \(step): element \(element.frame), tab bar \(tabs.frame), \(swipes) swipes")
+        }
+        UITestOnboarding.clock("tap \(step)")
         element.tap()
         print("UI_STEP_OK \(step)")
         return true
     }
 
-    private func back() {
+    /// A screen that was tapped open is there. Only such a screen is left with `back()`: on the
+    /// overview the first button of the navigation bar is the settings button, and `back()`
+    /// there opened the settings in the middle of the walk (contrast run 43918684247).
+    private func opened(_ screen: XCUIElement, _ step: String) -> Bool {
+        guard screen.waitForExistence(timeout: 10) else {
+            print("UI_STEP_MISSING \(step) opened")
+            shot("a11y-x-missing-" + slug("\(step) opened"))
+            XCTFail("Not opened: \(step)")
+            return false
+        }
+        return true
+    }
+
+    /// Taps the back button. Never on the overview, whose first bar button is the settings
+    /// button: after the suggestions list had closed by itself, `back()` opened the settings,
+    /// and every later step of the contrast walk ran on the settings sheet until "settings"
+    /// tapped its "Fertig" (contrast run 44038288087: "close settings" missing, the screenshots
+    /// show the sheet). Told by the bar's title, not the button's label: the back button of a
+    /// screen opened from the settings is called "Einstellungen" too (UI run 44055738268).
+    /// `confirmed`: the walk saw the screen open (its bar or `opened`); finding the overview
+    /// instead means the screen closed by itself, which is a finding. Unconfirmed screens (only
+    /// the tap is known) are left alone there.
+    private func back(_ step: String, confirmed: Bool) {
         let bar = app.navigationBars.firstMatch
-        if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
+        let first = bar.buttons.element(boundBy: 0)
+        guard first.exists else { return }
+        if ["Übersicht", "Overview"].contains(bar.identifier) {
+            print("UI_FACT back: no back button, the overview is showing (\(step))")
+            shot("a11y-x-back-on-overview-" + slug(step))
+            if confirmed { XCTFail("Closed by itself before going back: \(step)") }
+            return
+        }
+        first.tap()
     }
 
     private func shot(_ name: String) {
@@ -803,12 +866,25 @@ final class AccessibilityUITests: XCTestCase {
         print("UI_STEP_MISSING system photo alert")
     }
 
+    /// The notification question comes a while after "Analyse starten" (never within the 8 s
+    /// this waited before: no run printed "notification alert"), and until it is answered it
+    /// takes every touch: in UI runs 44032718289 and 44038288087 it still covered the overview
+    /// when "Beispiel-Mediathek anlegen" was tapped, and no demo library was made. Looked for in
+    /// the springboard and in the app for up to 20 s; when it never came, that is said.
     private func allowNotificationsIfAsked() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for label in ["Erlauben", "Allow"] {
-            let allow = springboard.buttons[label]
-            if allow.waitForExistence(timeout: 4) { allow.tap(); print("UI_STEP_OK notification alert"); return }
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            for source in [springboard, app] {
+                for label in ["Erlauben", "Allow"] where source.buttons[label].exists {
+                    source.buttons[label].tap()
+                    print("UI_STEP_OK notification alert")
+                    return
+                }
+            }
+            usleep(500_000)
         }
+        print("UI_FACT no notification alert within 20 s")
     }
 
     @discardableResult
@@ -816,7 +892,9 @@ final class AccessibilityUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
         while Date() < deadline {
+            let asked = Date()
             streak = condition() ? streak + 1 : 0
+            UITestOnboarding.reportSlowCheck(since: asked)
             if streak >= stableChecks { return true }
             sleep(2)
         }
@@ -824,7 +902,11 @@ final class AccessibilityUITests: XCTestCase {
         return false
     }
 
+    /// The Pause button first: while the analysis runs it is there, and one query answers.
+    /// Every other query reads the whole screen, and during the analysis such a read held the
+    /// app's main thread for 16 to 48 s (UI run 43979263666: each long stall began within half
+    /// a second of a check of this wait).
     private var analysisIdle: Bool {
-        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists) && !app.buttons["Pause"].exists
+        !app.buttons["Pause"].exists && (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
     }
 }

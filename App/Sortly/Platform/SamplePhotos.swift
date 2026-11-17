@@ -153,7 +153,8 @@ final class SamplePhotos {
         defer { isRemoving = false }
         let storedIDs = record.ids
         do {
-            let present = Self.existing(storedIDs)
+            // Off the main thread: the lookup waits while Photos writes its database.
+            let present = await Task.detached(priority: .userInitiated) { Self.existing(storedIDs) }.value
             let inventory = try await model.library.currentInventory()
             let history = try await store.planHistory(limit: 1000)
             let sampleIDs: Set<AssetID> = Set(storedIDs.map { (id: String) -> AssetID in AssetID(id) })
@@ -177,7 +178,7 @@ final class SamplePhotos {
             }
             // Whatever is still there (the user deleted some in Photos already) is forgotten
             // only once it is really gone.
-            let still = Self.existing(storedIDs)
+            let still = await Task.detached(priority: .userInitiated) { Self.existing(storedIDs) }.value
             update { $0.keepOnly(still) }
             model.inventory = try await model.library.currentInventory()
             model.startAnalysis(userInitiated: true)

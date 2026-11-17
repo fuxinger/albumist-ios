@@ -20,9 +20,7 @@ struct CountryPhotosView: View {
             LazyVStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                 header(country)
                 if let proposal = model.countryProposal(for: country) {
-                    NavigationLink {
-                        ProposalDetailView(proposal: proposal)
-                    } label: {
+                    PushLink(.proposal(ProposalRef(proposal)), chevron: false) {
                         suggestion(proposal)
                     }
                     .buttonStyle(.plain)

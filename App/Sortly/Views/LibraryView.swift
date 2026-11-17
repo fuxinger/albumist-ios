@@ -23,6 +23,7 @@ struct LibraryView: View {
     private static let buckets: [InboxBucket] = [.unorganized, .suggestions, .uncertain, .organized, .ignored, .all]
 
     var body: some View {
+        let _ = MainThreadWatch.shared.count("library body")
         let members = model.bucketMembers(bucket)
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
@@ -113,9 +114,7 @@ struct LibraryView: View {
         } else {
             VStack(spacing: 0) {
                 ForEach(Array(open.enumerated()), id: \.element.id) { index, proposal in
-                    NavigationLink {
-                        ProposalDetailView(proposal: proposal)
-                    } label: {
+                    PushLink(.proposal(ProposalRef(proposal)), chevron: false) {
                         HStack {
                             ProposalRow(proposal: proposal)
                             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
@@ -303,7 +302,7 @@ struct AssetDetailView: View {
     var addToAlbum: () -> Void
 
     var body: some View {
-        NavigationStack {
+        NavigationRoot {
             List {
                 // The photo itself is behind this sheet, in the viewer (design review W12).
                 Section {
@@ -331,9 +330,7 @@ struct AssetDetailView: View {
                 if !suggestions.isEmpty {
                     Section {
                         ForEach(suggestions.prefix(6)) { proposal in
-                            NavigationLink {
-                                ProposalDetailView(proposal: proposal)
-                            } label: {
+                            PushLink(.proposal(ProposalRef(proposal))) {
                                 ProposalRow(proposal: proposal)
                             }
                         }
@@ -436,15 +433,21 @@ struct AddToAlbumSheet: View {
     var onDone: () -> Void
     @State private var newTitle = ""
     @State private var query = ""
-    @State private var plan: ChangePlan?
-    @State private var showPlan = false
+    /// The sheet's stack; the preview of the plan is pushed onto it as a value (`AppScreen`).
+    /// Not `navigationDestination(isPresented:)`: with it, the preview was presented again and
+    /// again, 11,062 times in one 36 s stall of the main thread (UI run 44055738268, device
+    /// test 05: "plan review body" counter, the stacks in SwiftUI's navigation updates).
+    @State private var navigator = Navigator()
+    @FocusState private var naming: Bool
 
     var body: some View {
-        NavigationStack {
+        let _ = MainThreadWatch.shared.count("add to album body")
+        NavigationRoot(navigator) {
             List {
                 Section {
                     HStack {
                         TextField("Name des neuen Albums", text: $newTitle)
+                            .focused($naming)
                             .submitLabel(.done)
                             .onSubmit { Task { await prepare(target: nil) } }
                         Button("Anlegen") { Task { await prepare(target: nil) } }
@@ -485,9 +488,6 @@ struct AddToAlbumSheet: View {
                     Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
                 }
             }
-            .navigationDestination(isPresented: $showPlan) {
-                PlanReviewView(prebuilt: plan)
-            }
             .onChange(of: model.execution.finished) { _, finished in
                 if finished != nil { onDone() }
             }
@@ -501,9 +501,17 @@ struct AddToAlbumSheet: View {
     }
 
     private func prepare(target: CollectionID?) async {
+        // The keyboard goes first, on this screen, and the preview slides in once it is down.
+        // In UI run 44038288087 (device test 05, two of three new albums) the main thread hung
+        // for 52 and 68 s right after "Anlegen": each stack that reached deep enough showed the
+        // keyboard's hiding laying out the sheet while the preview was pushed into it, and
+        // SwiftUI drawing that preview.
+        let hadKeyboard = naming
+        naming = false
         let title = target == nil ? newTitle.trimmingCharacters(in: .whitespaces) : nil
         guard let built = await model.manualPlan(assets: assets, target: target, newTitle: title) else { return }
-        plan = built
-        showPlan = true
+        // The keyboard takes about a quarter of a second to go down.
+        if hadKeyboard { try? await Task.sleep(for: .milliseconds(400)) }
+        navigator.path = [.prebuiltPlan(PlanToken(built))]
     }
 }

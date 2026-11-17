@@ -79,6 +79,7 @@ final class SortlyFlowUITests: XCTestCase {
             if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
+        UITestOnboarding.clock("tap \(step)")
         element.tap()
         print("UI_STEP_OK \(step)")
         return true
@@ -121,6 +122,8 @@ final class SortlyFlowUITests: XCTestCase {
     }
 
     private func audit(_ screen: String) {
+        UITestOnboarding.clock("audit start \(screen)")
+        defer { UITestOnboarding.clock("audit end \(screen)") }
         // The screen first comes to rest (a ring or count still moving after an analysis):
         // an audit of a screen in motion ends the whole test (see `UITestOnboarding`).
         // One snapshot per check (labels and frames); element addresses differ every time.
@@ -194,7 +197,9 @@ final class SortlyFlowUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
         while Date() < deadline {
+            let asked = Date()
             streak = condition() ? streak + 1 : 0
+            UITestOnboarding.reportSlowCheck(since: asked)
             if streak >= stableChecks { return true }
             sleep(2)
         }
@@ -204,9 +209,13 @@ final class SortlyFlowUITests: XCTestCase {
 
     /// The overview says the analysis is done ("Alle 412 Fotos analysiert", or "Analyse fertig"
     /// right after a long run) and nothing runs (no "Pause").
+    /// The Pause button first: while the analysis runs it is there, and one query answers.
+    /// Every other query reads the whole screen, and during the analysis such a read held the
+    /// app's main thread for 16 to 48 s (UI run 43979263666: each long stall began within half
+    /// a second of a check of this wait).
     private var analysisIdle: Bool {
-        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
-            && !app.buttons["Pause"].exists
+        !app.buttons["Pause"].exists
+            && (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
     }
 
     /// The card's progress element (one element, B1): value "120 von 412 Fotos, fertig gegen
@@ -811,13 +820,15 @@ final class SortlyFlowUITests: XCTestCase {
             photos.element(boundBy: 0).tap(); photos.element(boundBy: 1).tap()
             return tap(app.buttons["selection.ignore"], "ignore two photos (\(step))")
         }
-        // 1. Ignore, then "Widerrufen" in the note right after.
+        // 1. Ignore, then "Widerrufen" in the note right after. The note is tapped first and
+        // audited in 2.: it goes away by itself (20 s in UI runs, as with VoiceOver), and an
+        // audit that took 16 s left too little of that for the tap (UI run 44012530107).
+        let note = anything("2 Fotos ignoriert")
         if ignoreTwo("undo") {
-            let note = anything("2 Fotos ignoriert")
             let shown = note.waitForExistence(timeout: 5)
             print(shown ? "UI_STEP_OK ignore note" : "UI_STEP_MISSING ignore note")
             XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring")
-            shot("16a-ignore-note"); audit("ignore note")
+            shot("16a-ignore-note")
             if tap(app.buttons["ignore.undo"], "undo ignore") {
                 XCTAssertTrue(waitGone(note, timeout: 5), "The ignore note stayed after Widerrufen")
                 tap(app.buttons["Ignoriert"], "ignored area after undo")
@@ -829,8 +840,18 @@ final class SortlyFlowUITests: XCTestCase {
                 sleep(1)
             }
         }
-        // 2. Ignore again, then bring one back from "Ignoriert".
+        // 2. Ignore again: the note is audited and must then go away by itself. Then one
+        // photo is brought back from "Ignoriert".
         if ignoreTwo("unignore") {
+            let shown = note.waitForExistence(timeout: 5)
+            print(shown ? "UI_STEP_OK ignore note again" : "UI_STEP_MISSING ignore note again")
+            XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring again")
+            if shown {
+                audit("ignore note")
+                let expired = waitGone(note, timeout: 30)
+                print(expired ? "UI_STEP_OK ignore note went away by itself" : "UI_STEP_MISSING ignore note went away by itself")
+                XCTAssertTrue(expired, "The ignore note did not go away by itself")
+            }
             sleep(2)
             tap(app.buttons["Ignoriert"], "ignored area")
             sleep(2)
@@ -1321,8 +1342,15 @@ final class SortlyFlowUITests: XCTestCase {
             return
         }
         guard tap(app.buttons["plan.apply"], "start plan for interruption", timeout: 30) else { return }
+        // The app is closed only once the plan has left its preview (the sorting show or the
+        // running card instead of the button): a fixed 5 s after the tap closed it before the
+        // plan had started on a slow simulator, and no card came (UI run 44012530107).
+        let tapped = Date()
+        let left = waitGone(app.buttons["plan.apply"], timeout: 30)
+        print("UI_FACT plan left its preview: \(left) after \(Int(Date().timeIntervalSince(tapped))) s")
         sleep(5)
         print("UI_FACT plan running when the app was closed: \(anything("Alben werden angelegt").exists)")
+        shot("49-plan-before-close")
         app.terminate()
         sleep(2)
         launch()

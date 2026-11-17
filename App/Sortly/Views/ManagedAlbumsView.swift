@@ -6,8 +6,10 @@ import SortlyCore
 struct ManagedAlbumsView: View {
     @Environment(AppModel.self) private var model
     @State private var pending: ManagedAlbumState?
-    @State private var plan: ChangePlan?
-    @State private var showPlan = false
+    /// The removal preview is pushed onto the stack's path (`AppScreen`). With
+    /// `navigationDestination(isPresented:)` it was drawn 502 times in a 5.9 s stall (UI run
+    /// 44066730498, device test 08).
+    @Environment(Navigator.self) private var navigator: Navigator?
     /// The suggestions behind the album being removed; they are not offered again afterwards.
     @State private var removingSources: Set<SortlyID> = []
     @State private var nothingToDo = false
@@ -52,9 +54,6 @@ struct ManagedAlbumsView: View {
         } message: {
             Text("Die Fotos von Albumist sind schon nicht mehr in diesem Album.")
         }
-        .navigationDestination(isPresented: $showPlan) {
-            PlanReviewView(prebuilt: plan)
-        }
         .onChange(of: model.execution.finished) { _, finished in
             guard finished != nil, !removingSources.isEmpty else { return }
             let sources = removingSources
@@ -90,7 +89,6 @@ struct ManagedAlbumsView: View {
             return
         }
         removingSources = state.allSourceIDs
-        plan = removal
-        showPlan = true
+        Navigator.push(.prebuiltPlan(PlanToken(removal)), on: navigator)
     }
 }

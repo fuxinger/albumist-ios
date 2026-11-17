@@ -113,6 +113,10 @@ enum ContinuedAnalysis {
     /// (iOS starts these tasks from the foreground); repeated calls do nothing while a task
     /// runs or a request was made less than a minute ago.
     static func begin() {
+        MainThreadWatch.shared.section("background time request") { beginNow() }
+    }
+
+    private static func beginNow() {
         guard !isActive, UIApplication.shared.applicationState == .active else { return }
         if let lastRequest, Date().timeIntervalSince(lastRequest) < 60 { return }
         lastRequest = Date()

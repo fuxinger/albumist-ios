@@ -17,10 +17,19 @@ final class DeviceConditionUITests: XCTestCase {
     // MARK: Helpers (copied from SortlyFlowUITests, which stays as it is)
 
     private func launch(_ extra: [String] = []) {
+        UITestStalls.report()
+        if !stallsReportedAtEnd {
+            stallsReportedAtEnd = true
+            addTeardownBlock { UITestStalls.report() }
+        }
         app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + extra
+        let stalls = UITestStalls.arguments(besides: extra)
+        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
+        UITestOnboarding.clock("launch")
         app.launch()
     }
+
+    private var stallsReportedAtEnd = false
 
     /// A launch on a prepared simulator: the onboarding counts as done.
     private func start(_ extra: [String] = []) {
@@ -68,6 +77,7 @@ final class DeviceConditionUITests: XCTestCase {
             if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
+        UITestOnboarding.clock("tap \(step)")
         element.tap()
         print("UI_STEP_OK \(step)")
         return true
@@ -109,8 +119,13 @@ final class DeviceConditionUITests: XCTestCase {
     private func waitStable(_ what: String, timeout: TimeInterval, stableChecks: Int = 3, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
+        UITestOnboarding.clock("wait start \(what)")
+        defer { UITestOnboarding.clock("wait end \(what)") }
         while Date() < deadline {
-            streak = condition() ? streak + 1 : 0
+            let asked = Date()
+            let met = condition()
+            UITestOnboarding.reportSlowCheck(since: asked)
+            streak = met ? streak + 1 : 0
             if streak >= stableChecks { return true }
             sleep(2)
         }
@@ -163,6 +178,15 @@ final class DeviceConditionUITests: XCTestCase {
         return counts.total > 0 && counts.analysed == counts.total
     }
 
+    /// The headline says every photo is analysed, read until it does for up to 15 s: a snapshot
+    /// taken while the finished card replaces the running one reads nothing, and device test 03
+    /// failed on that although its screenshot a moment later showed "Alle 246 Fotos analysiert"
+    /// (UI run 44091312348). A count that stays short still fails, with what was read.
+    private func expectEveryPhotoAnalysed(_ context: String) {
+        let complete = waitStable("every photo analysed \(context)", timeout: 15, stableChecks: 1) { everyPhotoAnalysed }
+        XCTAssertTrue(complete, "Not every photo was analysed \(context): \(analysedPhotos().map { "\($0.analysed) of \($0.total)" } ?? "no count readable")")
+    }
+
     /// Every label inside `element`, read from one snapshot.
     private func allLabels(_ element: XCUIElement) -> String {
         guard let snapshot = try? element.snapshot() else { return "" }
@@ -211,7 +235,10 @@ final class DeviceConditionUITests: XCTestCase {
         start()
         onboardIfNeeded()
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists { demo.tap() }
+        if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists {
+            UITestOnboarding.clock("tap demo library")
+            demo.tap()
+        }
         let ready = waitStable("demo library analysed", timeout: 900) {
             (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
         }
@@ -262,18 +289,23 @@ final class DeviceConditionUITests: XCTestCase {
     @discardableResult
     private func grantFromHost() -> Bool {
         print("UI_HOST_GRANT_PHOTOS")
-        for _ in 0..<12 {
+        for attempt in 1...12 {
             sleep(5)
             start()
-            _ = waitStable("first screen after the grant", timeout: 15, stableChecks: 1) {
+            let shown = waitStable("first screen after the grant", timeout: 30, stableChecks: 1) {
                 app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists || button("Los geht").exists
             }
-            if !askAgain.exists && !toSettings.exists {
+            // Given back only when the app shows a screen with access (UI run 44022880773 counted
+            // a launch that showed none of these screens as given back, and the test then
+            // waited for an overview that did not come).
+            if shown, !askAgain.exists, !toSettings.exists {
                 print("UI_STEP_OK photo access given back from the Mac")
                 return true
             }
+            if !shown { shot("x-no-screen-after-grant-\(attempt)") }
         }
         print("UI_STEP_MISSING photo access given back from the Mac")
+        XCTFail("No screen with photo access after the grant from the Mac")
         return false
     }
 
@@ -600,7 +632,7 @@ final class DeviceConditionUITests: XCTestCase {
         let finished = waitStable("analysis finished after heat", timeout: 900) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not finish after the heat")
         print("UI_FACT after heat \(String(describing: analysedPhotos()))")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after the heat")
+        expectEveryPhotoAnalysed("after the heat")
         XCTAssertFalse(anything("Analyse pausiert").exists, "The analysis stopped for heat")
         shot("02-after-heat")
     }
@@ -629,7 +661,7 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(finished, "The analysis did not finish in Low Power Mode")
         XCTAssertFalse(pausedForLowPower, "Low Power Mode paused the analysis in the app")
         XCTAssertFalse(app.buttons["Fortsetzen"].exists, "The analysis waits for a tap after low battery")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after low battery")
+        expectEveryPhotoAnalysed("after low battery")
         shot("04-after-battery")
     }
 
@@ -683,7 +715,7 @@ final class DeviceConditionUITests: XCTestCase {
         }
         let finished = waitStable("analysis finished after relaunch", timeout: 120) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not finish after the app was opened again")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after the relaunch")
+        expectEveryPhotoAnalysed("after the relaunch")
         shot("07-done-after-relaunch")
     }
 
@@ -1017,6 +1049,7 @@ final class DeviceConditionUITests: XCTestCase {
         if !app.tabBars.firstMatch.waitForExistence(timeout: 10) { grantFromHost() }
         let back = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         print(back ? "UI_STEP_OK overview after access came back" : "UI_STEP_MISSING overview after access came back")
+        if !back { shot("x-no-overview-after-access") }
         XCTAssertTrue(back, "The app does not go on after access came back")
         // On a phone the analysis goes on by itself once access is back; UI runs start their
         // analyses themselves, so the app is opened once more and starts it as at launch.
@@ -1025,7 +1058,7 @@ final class DeviceConditionUITests: XCTestCase {
         record("after access came back")
         let finished = waitStable("analysis finished after access came back", timeout: 900) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not finish after access came back")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after access came back")
+        expectEveryPhotoAnalysed("after access came back")
         shot("20-access-back")
     }
 

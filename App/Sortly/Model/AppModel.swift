@@ -62,6 +62,8 @@ final class AppModel {
         /// The last run ended before it was done without the user pausing it: opening the
         /// app again goes on by itself.
         var needsResume = false
+        /// The analysis stands paused by the user (the paused card, "Fortsetzen").
+        var isPausedByUser: Bool { !isRunning && !needsResume && lastReport?.pausedBecause == .userPaused }
         /// The bar's six segments, fixed for the whole analysis (from the first run's workload,
         /// kept with the marker over Pause and restarts: progress display S6).
         var widths: StepWidths = .standard
@@ -370,7 +372,8 @@ final class AppModel {
     /// The part of the library Albumist works on: everything, or the trial year chosen at
     /// the start (kept for every later run).
     var analysisScope: OrganizationScope = .all
-    /// Photos changed while a run was busy: one more run follows when it ends.
+    /// Photos or the settings changed while a run was busy (`saveSettings`): one more run
+    /// follows when it ends, unless the user paused it.
     @ObservationIgnored var catchUpAfterRun = false
     /// The user's own trip splits and merges (I07), for the settings.
     private(set) var tripCorrections = TripCorrections()
@@ -816,8 +819,28 @@ final class AppModel {
         Task {
             try? await store?.setValue(settings, forKey: Key.settings)
             saveSafetyBackup()
-            await pipeline?.update(settings: settings)
+            // Compared with the settings the runs used until now: "Themen" or "Dokumente" turned
+            // on (labels for the photos analysed before), the text step, finer places, online
+            // lookups or hidden photos need a run.
+            if let previous = await pipeline?.update(settings: settings) {
+                runAfterSettingsChange(from: previous, to: settings)
+            }
             await refreshDerived()
+        }
+    }
+
+    /// Starts the run a settings change needs, or one more after the run in progress (as for
+    /// changes in Photos during a run). A Pause stays: "Fortsetzen" does the new work too
+    /// (`AnalysisPipeline.runAfterSettingsChange`).
+    private func runAfterSettingsChange(from previous: OrganizationSettings, to settings: OrganizationSettings) {
+        let next = AnalysisPipeline.runAfterSettingsChange(
+            from: previous, to: settings, running: analysis.isRunning,
+            pausedByUser: analysis.pausing || analysis.isPausedByUser,
+            mayStart: phase == .ready && access.canRead && !execution.isRunning && !analysisResetting)
+        switch next {
+        case .now: startAnalysis()
+        case .afterCurrentRun: catchUpAfterRun = true
+        case .whenResumed, .noRun: break
         }
     }
 
@@ -1268,7 +1291,7 @@ final class AppModel {
         ).slowerReason : nil
         i.appleWait = analysis.appleWait
         i.pausingFor = analysis.pausing ? pausingSince.map { now - $0 } ?? .zero : nil
-        i.pausedByUser = !analysis.isRunning && !analysis.needsResume && analysis.lastReport?.pausedBecause == .userPaused
+        i.pausedByUser = analysis.isPausedByUser
         i.pausedAt = analysis.stoppedAt
         i.finished = analysisFinished.map { (photos: $0.photos, proposals: $0.proposals) }
         let state = AnalysisCardState.resolve(i)
@@ -1459,9 +1482,14 @@ final class AppModel {
             // main-thread work at every call, a lead for the 7 s Pause tap of the stress run).
             let facts = facts, snapshot = snapshot, settings = settings
             let managed = managedAlbums, scope = analysisScope
-            let derived = await Task.detached(priority: .userInitiated) {
-                DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                            contents: contents, managed: managed, inventory: inventory, scope: scope)
+            let derived = try await Task.detached(priority: .userInitiated) {
+                // The photos with their image labels: "Themen" and "Dokumente" count a photo as
+                // looked at only once it has them (turned on after it was analysed). Read here,
+                // so the set (one id per photo) never passes through the main actor.
+                let labelled = try await store.labelledAssets(labelsVersion: AnalysisPipeline.labelsVersion)
+                return DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
+                                                   contents: contents, labelled: labelled, managed: managed, inventory: inventory,
+                                                   scope: scope)
             }.value
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
@@ -2518,7 +2546,7 @@ final class AppModel {
         lines.append(statusReasons.line)
         if let report = analysis.lastReport {
             let last = analysis.lastRun.map { iso.string(from: $0) } ?? "?"
-            lines.append("analysis last \(last), complete \(report.isComplete), paused \(report.pausedBecause?.rawValue ?? "no"), stages \(report.completedStages.count), content \(report.contentAnalyzed), text \(report.textRecognized), text waiting \(report.textWaitingForOriginal), text seconds \(Int(report.textSeconds)), places pending online \(report.placesPendingOnline), places throttled \(report.placesThrottled), analyzer failing \(report.analyzerUnavailable)")
+            lines.append("analysis last \(last), complete \(report.isComplete), paused \(report.pausedBecause?.rawValue ?? "no"), stages \(report.completedStages.count), content \(report.contentAnalyzed), labels only \(report.labelsAdded), text \(report.textRecognized), text waiting \(report.textWaitingForOriginal), text seconds \(Int(report.textSeconds)), places pending online \(report.placesPendingOnline), places throttled \(report.placesThrottled), analyzer failing \(report.analyzerUnavailable)")
         } else {
             lines.append("analysis not run in this session")
         }

@@ -140,15 +140,19 @@ enum UITestOnboarding {
     /// The partial count on the overview, or nil when every photo is analysed. German only.
     static func partialAnalysis(_ app: XCUIApplication, wait: TimeInterval = 3) -> PartialAnalysis? {
         let partial = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ von [0-9.]+ Fotos analysiert")).firstMatch
-        guard partial.waitForExistence(timeout: wait) else { return nil }
-        let label = partial.label
+        // Read from one snapshot each: the count changes while the analysis runs, and reading
+        // `label` of an element that has just changed is a hard test failure ("No matches
+        // found", flow test 5 in UI run 44038288087, right after "checking again").
+        guard partial.waitForExistence(timeout: wait), let shot = try? partial.snapshot() else { return nil }
+        let label = shot.label
         func number(_ text: Substring) -> Int { Int(text.filter(\.isNumber)) ?? 0 }
         let parts = label.split(separator: " ")
         let analyzed = parts.first.map(number) ?? 0
         let photos = parts.count > 2 ? number(parts[2]) : 0
         let note = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "konnten noch nicht gelesen")).firstMatch
-        let unreadable = note.exists ? (note.label.split(separator: " ").first.map(number) ?? 0) : 0
-        return PartialAnalysis(label: label, analyzed: analyzed, photos: photos, unreadable: unreadable, loads: (partial.value as? String) ?? "")
+        let noteLabel = note.exists ? (try? note.snapshot())?.label : nil
+        let unreadable = noteLabel.map { $0.split(separator: " ").first.map(number) ?? 0 } ?? 0
+        return PartialAnalysis(label: label, analyzed: analyzed, photos: photos, unreadable: unreadable, loads: (shot.value as? String) ?? "")
     }
 
     /// After a test watched the analysis finish in this app process, every photo must count as

@@ -339,9 +339,10 @@ struct AnalysisProgressCard: View {
                     .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                NavigationLink {
-                    ProposalListView(area: nil)
-                } label: {
+                // Opened from the overview's root (`MainTabs`, route `.proposals`): this row goes
+                // away when the step changes or the analysis pauses, and a link in it took its
+                // open list along (the overview's own links did, UI run 44038288087).
+                Button { model.route = .proposals } label: {
                     CardTextButton("Ansehen")
                 }
                 .accessibilityIdentifier("analysis.showDone")
@@ -577,9 +578,9 @@ struct AnalysisFinishedView: View {
                 .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if proposals > 0 {
-                NavigationLink {
-                    ProposalListView(area: nil)
-                } label: {
+                // Opened from the overview's root, as "Ansehen" above: the finish moment goes
+                // away by itself.
+                Button { model.route = .proposals } label: {
                     Text("Vorschläge prüfen")
                 }
                 .buttonStyle(PrimaryButtonStyle())

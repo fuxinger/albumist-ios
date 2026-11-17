@@ -13,7 +13,7 @@ struct AlbumsView: View {
     /// The suggestion whose merge plan is being prepared: its row shows a spinner and the
     /// rows do not take a second tap meanwhile (design review N13). Albums and folders do not
     /// open meanwhile either: the plan would be pushed above them (a destination link moves no
-    /// `Navigator.mark`); their hint says why they wait.
+    /// `Navigator.mark`). Their hint, and that of the other suggestions, says why they wait.
     @State private var preparing: [CollectionID]?
     /// A merge plan that was ready while another tab was chosen: offered again when this tab
     /// shows (`showWaiting()`).
@@ -62,6 +62,8 @@ struct AlbumsView: View {
                             }
                         }
                         .disabled(preparing != nil)
+                        // The row being prepared says so with its spinner.
+                        .accessibilityHint(preparing == suggestion.albumIDs ? Text(verbatim: "") : waitHint)
                     }
                 } header: {
                     Text("Ähnliche Alben")
@@ -120,8 +122,8 @@ struct AlbumsView: View {
         .refreshable { await model.refreshDerived() }
     }
 
-    /// Why albums and folders do not open while a merge preview is prepared (VoiceOver said
-    /// only "dimmed").
+    /// Why albums, folders and the other suggestions wait while a merge preview is prepared
+    /// (VoiceOver said only "dimmed").
     private var waitHint: Text {
         preparing == nil ? Text(verbatim: "") : Text("Vorschau wird vorbereitet")
     }

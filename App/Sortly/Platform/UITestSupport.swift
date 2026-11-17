@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import os
 import SortlyCore
@@ -125,6 +126,22 @@ final class MainThreadWatch: @unchecked Sendable {
     private var stressLines = false
     private var stressFile: FileHandle?
     private var longestStall: Double = 0
+    /// Serializes the writes into `stressFile` (the main thread's stall lines, the watch
+    /// thread's stack lines).
+    private let fileLock = NSLock()
+
+    // Main-thread stacks: taken by the watch thread while a ping waits (at 2 s and 5 s, then at
+    // every doubling), so a long stall says where the main thread was, not only how long.
+    /// The main thread's port and stack bounds, set in `start()` before the watch thread runs.
+    private var mainPort: mach_port_t = 0
+    private var stackLow: UInt = 0
+    private var stackHigh: UInt = 0
+    private static let maxFrames = 48
+    /// Filled while the main thread is suspended: nothing may be allocated then (the main thread
+    /// may hold the allocator's lock), so the buffer is made once.
+    private let frameBuffer = UnsafeMutablePointer<UInt>.allocate(capacity: MainThreadWatch.maxFrames)
+    /// Watch thread only: when the current ping's next stack is taken (seconds waited).
+    private var nextStackAt: Double = 2
 
     @MainActor
     func start() {
@@ -136,6 +153,10 @@ final class MainThreadWatch: @unchecked Sendable {
         let center = NotificationCenter.default
         _ = center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { [self] _ in setActive(true) }
         _ = center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: nil) { [self] _ in setActive(false) }
+        mainPort = mach_thread_self()
+        let main = pthread_self()
+        stackHigh = UInt(bitPattern: pthread_get_stackaddr_np(main))
+        stackLow = stackHigh - UInt(pthread_get_stacksize_np(main))
         let thread = Thread { [self] in watch() }
         thread.name = "Albumist main-thread watch"
         thread.qualityOfService = .userInteractive
@@ -206,6 +227,7 @@ final class MainThreadWatch: @unchecked Sendable {
                 askedWall = Date().timeIntervalSince1970
                 seenInStall = []
                 nextStuckReport = 10
+                nextStackAt = 2
                 inactiveInStall = !active
             }
             let waited = pending.map { Self.seconds(from: $0, to: now) } ?? 0
@@ -220,6 +242,10 @@ final class MainThreadWatch: @unchecked Sendable {
             let current = sections.last.map { "\($0.name) running for \(Self.text(Self.seconds(from: $0.began, to: now))) s" } ?? "no marked section"
             let inactive = inactiveInStall
             lock.unlock()
+            if pending != nil, waited >= nextStackAt {
+                nextStackAt = nextStackAt < 5 ? 5 : nextStackAt * 2
+                reportStack(waited: waited, since: since)
+            }
             if stuck {
                 note("UI_MAIN_STALL the main thread has not answered for \(Self.text(waited)) s, since \(Self.clock(since)) UTC, in \(names) (now \(current))\(Self.tag(inactive))")
             }
@@ -245,7 +271,9 @@ final class MainThreadWatch: @unchecked Sendable {
         guard asked != nil else { return }
         // Written only here, on the main thread.
         if waited > 0.5, let file {
+            fileLock.lock()
             file.write(Data(String(format: "%.3f %ld\n", Date().timeIntervalSince1970, Int(waited * 1000)).utf8))
+            fileLock.unlock()
         }
         if stress, waited > 1 {
             NSLog("UITEST_MAIN_BLOCKED %ld ms (longest %ld ms)", Int(waited * 1000), Int(longest * 1000))
@@ -258,6 +286,115 @@ final class MainThreadWatch: @unchecked Sendable {
     }
 
     private static func tag(_ inactive: Bool) -> String { inactive ? " (app not active)" : "" }
+
+    // MARK: Main-thread stacks
+
+    /// `UI_MAIN_STACK after 5.0 s of the stall from 18:31:05.2 UTC: <frames>` in the log (the
+    /// app's own frames only, so the line stays short), and the whole stack as a `#` line in
+    /// the runner's file when there is one (`-SortlyUITestWatchMainLog`; the device tests print
+    /// it as `UI_FACT main stack`, which the job log never cuts off).
+    private func reportStack(waited: Double, since: Double) {
+        guard let stack = captureMainStack() else { return }
+        let frames = stack.enumerated().map { Self.symbol($0.element, isReturnAddress: $0.offset > 0) }
+        let head = "after \(Self.text(waited)) s of the stall from \(Self.clock(since)) UTC"
+        let own = frames.filter { $0.hasPrefix("Sortly") }.prefix(8)
+        // In the log from 5 s on only: it keeps 40 of the app's lines, and the stall lines
+        // must not be pushed out by stacks.
+        if waited >= 5 { note("UI_MAIN_STACK \(head): \(own.isEmpty ? frames.prefix(6).joined(separator: " | ") : own.joined(separator: " | "))") }
+        lock.lock()
+        let file = stressFile
+        lock.unlock()
+        guard let file else { return }
+        fileLock.lock()
+        file.write(Data("# \(head): \(frames.joined(separator: " | "))\n".utf8))
+        fileLock.unlock()
+    }
+
+    /// The main thread's return addresses, read while it is suspended (frame records:
+    /// [previous frame pointer, return address], each one higher on the stack).
+    private func captureMainStack() -> [UInt]? {
+        guard mainPort != 0, thread_suspend(mainPort) == KERN_SUCCESS else { return nil }
+        var count = 0
+        var fp: UInt = 0
+        #if arch(arm64)
+        var state = arm_thread_state64_t()
+        var stateCount = mach_msg_type_number_t(MemoryLayout<arm_thread_state64_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &state) { pointer in
+            pointer.withMemoryRebound(to: natural_t.self, capacity: Int(stateCount)) {
+                thread_get_state(mainPort, thread_state_flavor_t(6) /* ARM_THREAD_STATE64 */, $0, &stateCount)
+            }
+        }
+        if result == KERN_SUCCESS {
+            frameBuffer[0] = Self.strip(UInt(state.__pc))
+            // The leaf may not have stored its frame yet: the link register is its caller.
+            frameBuffer[1] = Self.strip(UInt(state.__lr))
+            count = 2
+            fp = UInt(state.__fp)
+        }
+        #elseif arch(x86_64)
+        var state = x86_thread_state64_t()
+        var stateCount = mach_msg_type_number_t(MemoryLayout<x86_thread_state64_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &state) { pointer in
+            pointer.withMemoryRebound(to: natural_t.self, capacity: Int(stateCount)) {
+                thread_get_state(mainPort, thread_state_flavor_t(4) /* x86_THREAD_STATE64 */, $0, &stateCount)
+            }
+        }
+        if result == KERN_SUCCESS {
+            frameBuffer[0] = UInt(state.__rip)
+            count = 1
+            fp = UInt(state.__rbp)
+        }
+        #endif
+        while count > 0, count < Self.maxFrames, fp >= stackLow, fp + 16 <= stackHigh, fp % 8 == 0 {
+            guard let record = UnsafePointer<UInt>(bitPattern: fp) else { break }
+            let next = record[0]
+            let returnAddress = Self.strip(record[1])
+            if returnAddress == 0 { break }
+            frameBuffer[count] = returnAddress
+            count += 1
+            if next <= fp { break }
+            fp = next
+        }
+        thread_resume(mainPort)
+        return count > 0 ? Array(UnsafeBufferPointer(start: frameBuffer, count: count)) : nil
+    }
+
+    /// Pointer-authentication bits off a code address (none on the simulator; harmless).
+    private static func strip(_ address: UInt) -> UInt { address & 0x0000_7FFF_FFFF_FFFF }
+
+    /// "Sortly.debug.dylib AppModel.tick(run:) + 120", Swift names demangled.
+    private static func symbol(_ address: UInt, isReturnAddress: Bool) -> String {
+        // A return address points after the call; the call is one byte before.
+        let lookup = isReturnAddress && address > 0 ? address - 1 : address
+        var info = Dl_info()
+        guard let pointer = UnsafeRawPointer(bitPattern: lookup), dladdr(pointer, &info) != 0 else {
+            return String(format: "?? 0x%lx", address)
+        }
+        let image = info.dli_fname.map { (String(cString: $0) as NSString).lastPathComponent } ?? "??"
+        guard let name = info.dli_sname, let start = info.dli_saddr else {
+            return "\(image) +0x\(String(address - UInt(bitPattern: info.dli_fbase), radix: 16))"
+        }
+        let symbol = demangle(String(cString: name))
+        let short = symbol.count > 140 ? String(symbol.prefix(140)) + "…" : symbol
+        return "\(image) \(short) + \(address - UInt(bitPattern: start))"
+    }
+
+    private typealias Demangle = @convention(c) (UnsafePointer<CChar>?, Int, UnsafeMutablePointer<CChar>?,
+                                                 UnsafeMutablePointer<Int>?, UInt32) -> UnsafeMutablePointer<CChar>?
+
+    nonisolated(unsafe) private static let swiftDemangle: Demangle? = {
+        guard let handle = dlopen(nil, RTLD_NOW), let found = dlsym(handle, "swift_demangle") else { return nil }
+        return unsafeBitCast(found, to: Demangle.self)
+    }()
+
+    private static func demangle(_ name: String) -> String {
+        guard name.hasPrefix("$s") || name.hasPrefix("_$s"), let swiftDemangle else { return name }
+        return name.withCString { pointer in
+            guard let result = swiftDemangle(pointer, strlen(pointer), nil, nil, 0) else { return name }
+            defer { free(result) }
+            return String(cString: result)
+        }
+    }
 
     /// A line of another part of the app for the same log (UI runs only).
     func report(_ text: String) {

@@ -257,6 +257,12 @@ final class MainThreadWatch: @unchecked Sendable {
 
     private static func tag(_ inactive: Bool) -> String { inactive ? " (app not active)" : "" }
 
+    /// A line of another part of the app for the same log (UI runs only).
+    func report(_ text: String) {
+        guard UITestSupport.isRunning else { return }
+        note(text)
+    }
+
     private func note(_ text: String) {
         logger.fault("\(text, privacy: .public)")
     }

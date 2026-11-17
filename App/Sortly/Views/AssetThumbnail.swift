@@ -205,6 +205,37 @@ enum ThumbnailRequest {
     }
 
     nonisolated static func load(_ asset: Asset, size: CGSize, manager: Manager, contentMode: PHImageContentMode = .aspectFill) async -> UIImage? {
+        let delivered = await request(asset, size: size, manager: manager, contentMode: contentMode)
+        guard let delivered, !Task.isCancelled else { return delivered }
+        return prepared(delivered, for: size, fill: contentMode == .aspectFill)
+    }
+
+    /// The first thumbnail of a UI run that came much larger than asked was reported.
+    private static let oversizeReported = LockedBox(false)
+
+    /// The image as it will be drawn, made here and not on the main thread: an image much
+    /// larger than asked (Photos may hand out the original when it has no thumbnail, as on a
+    /// simulator whose previews fail) is scaled down, any other one decoded. Otherwise the
+    /// main thread decodes and scales each one while it draws the screen.
+    nonisolated private static func prepared(_ image: UIImage, for target: CGSize, fill: Bool) -> UIImage {
+        let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        guard pixels.width >= 1, pixels.height >= 1, target.width >= 1, target.height >= 1 else { return image }
+        let fx = target.width / pixels.width, fy = target.height / pixels.height
+        let factor = fill ? max(fx, fy) : min(fx, fy)
+        guard factor < 0.67 else { return image.preparingForDisplay() ?? image }
+        if UITestSupport.isRunning, !oversizeReported.value {
+            oversizeReported.value = true
+            MainThreadWatch.shared.report("UI_THUMB_OVERSIZE Photos delivered \(Int(pixels.width))x\(Int(pixels.height)) px for \(Int(target.width))x\(Int(target.height)) px; scaled down off the main thread")
+        }
+        let size = CGSize(width: max(1, (pixels.width * factor).rounded()), height: max(1, (pixels.height * factor).rounded()))
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
+    nonisolated private static func request(_ asset: Asset, size: CGSize, manager: Manager, contentMode: PHImageContentMode) async -> UIImage? {
         let state = State()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in

@@ -102,6 +102,50 @@ struct SlowedAnalyzer: ContentAnalyzing {
     }
 }
 
+// MARK: Progress line record
+
+/// UI runs only (`-SortlyUITestProgressLog <path>`): the analysis card's progress line as
+/// XCTest reads it (label and value of `analysis.progress`) each time it changes, as
+/// "<seconds since 1970> <line>" in that file of the test runner's, and "<seconds> -" when
+/// the card stops showing the line (the analysis ended, another tab). A launch appends
+/// "@ <pid> <seconds since 1970>" first, so the lines of a relaunch follow the ones before;
+/// `mark` adds "# <seconds since 1970> <what>" for a moment the line itself does not show.
+/// The stress test (DeviceConditionUITests test12) takes the longest still time from these
+/// times: its own reads of the card took 5–7 s each during the analysis (stress run
+/// 44116350940), so a still time measured from them was off by up to that much.
+@MainActor
+enum ProgressLineLog {
+    private static var file: FileHandle?
+    private static var last: String?
+
+    /// Whether lines are written (the card asks before it builds the line).
+    static var isOn: Bool { file != nil }
+
+    static func start(path: String) {
+        guard UITestSupport.isRunning, file == nil else { return }
+        if !FileManager.default.fileExists(atPath: path) { FileManager.default.createFile(atPath: path, contents: nil) }
+        guard let handle = FileHandle(forWritingAtPath: path) else { return }
+        _ = try? handle.seekToEnd()
+        file = handle
+        write(String(format: "@ %d %.3f", getpid(), Date().timeIntervalSince1970))
+    }
+
+    static func note(_ line: String) {
+        guard file != nil, line != last else { return }
+        last = line
+        write(String(format: "%.3f ", Date().timeIntervalSince1970) + line.replacingOccurrences(of: "\n", with: " "))
+    }
+
+    static func mark(_ what: String) {
+        guard file != nil else { return }
+        write(String(format: "# %.3f ", Date().timeIntervalSince1970) + what)
+    }
+
+    private static func write(_ text: String) {
+        file?.write(Data((text + "\n").utf8))
+    }
+}
+
 // MARK: Main-thread watch
 
 /// UI runs only (`-SortlyUITestUnlocked`): writes a fault to the system log when the main

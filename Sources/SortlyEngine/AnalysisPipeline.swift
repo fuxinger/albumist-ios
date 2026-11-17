@@ -120,6 +120,8 @@ public actor AnalysisPipeline {
         /// Said once, right after the first run saved its early suggestions (trips, places):
         /// the overview reads them now for "Schon fertig". The report that starts the image
         /// step comes before they are saved, so reading at that report found nothing (review I2).
+        /// They are made beside the first photos (see `run`): this report repeats the image
+        /// step's newest count, so the count never goes back.
         public var earlyProposals = false
         /// The places step's pass over the offline map: how many photos are checked so far.
         /// With towns on (the default) no place is final before its online lookup, so this is
@@ -145,7 +147,7 @@ public actor AnalysisPipeline {
 
     public struct Report: Sendable, Hashable {
         public var completedStages: [Stage] = []
-        /// Trips and places were offered before the image analysis (first run only).
+        /// Trips and places were offered before the image analysis was done (first run only).
         public var earlyProposals = false
         public var pausedBecause: PauseReason?
         public var newOrChanged = 0
@@ -284,6 +286,9 @@ public actor AnalysisPipeline {
     private var runOnWaiting: @Sendable (PauseReason?) -> Void = { _ in }
     /// The photo access the run in progress started with.
     private var runAccess: LibraryAccess = .notDetermined
+    /// The image step's newest report in the run in progress: the early suggestions are said
+    /// with it (`earlySuggestions`), so the count never goes back.
+    private var contentShown: Progress?
     /// A warm device: break after every photo. Waiting: how often the device is asked again.
     static let gentleBreak: Duration = .milliseconds(250)
     static let waitCheck: Duration = .seconds(2)
@@ -529,160 +534,190 @@ public actor AnalysisPipeline {
         // (first device test 15.11.: "1.450 von 14.332", then "2.700 von 12.708").
         let inRange = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
         let contentBefore = max(0, inRange - contentTotal)
+        // Every report of this step goes through here: the early suggestions are said with the
+        // newest one (`earlySuggestions`).
+        func sayContent(_ progress: Progress) {
+            contentShown = progress
+            onProgress(progress)
+        }
         // Said also when nothing is left to look at: every stage says when it begins, or the
         // card kept showing the stage before ("Orte werden bestimmt · 1.600 von 1.600") while
         // the run went on (device test 15.11.: "jetzt hängt es hier").
-        onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal))
+        sayContent(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal))
         // First results early: trips, countries and places need no image analysis. On a first
-        // run (no suggestions yet) they are offered right away instead of after the image
-        // analysis, which takes hours on a large library. The full set replaces them later;
+        // run (no suggestions yet) they are offered while the image analysis begins instead of
+        // after it, which takes hours on a large library. The full set replaces them later;
         // suggestion ids are stable, so decisions made in between stay valid.
+        // They are made beside the first photos, not before them: their work grows with the
+        // library, and the count stood at "0 von 50.246 Fotos" for 13 s meanwhile (stress run
+        // 44116350940; 2.8 s on Linux over 50,000 photos, 0.25 s over 5,000). What grows with
+        // the library runs off this actor (`offActor`), so the photos go on at their own pace.
+        var early: Task<EarlySuggestions, any Error>?
         if contentTotal > 0, try await latestProposals() == nil {
-            if let fresh = try await patternsAfterAHomeChange(since: &patternsGeneration, all: all) { (trips, frequent) = fresh }
-            let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
-            _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope,
-                                        early: true, homeChange: patternsGeneration)
-            report.earlyProposals = true
-            onProgress(Progress(stage: .content, completed: contentBefore, total: contentBefore + contentTotal,
-                                earlyProposals: true))
+            early = Task { [patternsGeneration, trips, frequent] in
+                try await self.earlySuggestions(all: all, inventory: inventory, trips: trips, frequent: frequent, scope: scope,
+                                                generation: patternsGeneration, onProgress: onProgress)
+            }
         }
-        // Photos still to analyse that have a result of this version already: their labels
-        // were saved by a run that ended before it marked them (or only their place or date
-        // changed since), so they are not looked at twice; or they could not be read before.
-        let stored = contentTotal > 0
-            ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion, within: range)
-            : [:]
-        var contentDone = 0
-        var cursor: AssetSnapshot?
-        // Photos that are not read in this run: they could not be read (tried again in a later
-        // run, spaced out), or the analyzer failed on them.
-        var deferred = Set<AssetID>()
-        // Analyzer errors in a row, not counted against the photos yet: only when a later photo
-        // works was it the photo. When every photo fails, the analyzer is the problem.
-        var suspects: [AssetID] = []
-        // The last photos looked at, for "Gerade angesehen" (no screenshots: account numbers,
-        // ID cards would be shown large on the overview, B4).
-        var lookedAt: [AssetID] = []
-        let analyzer = self.analyzer
-        while true {
-            if let reason = await shouldStop() { report.pausedBecause = reason; return report }
-            if await accessChanged() { report.pausedBecause = .accessRevoked; return report }
-            // Deferred photos can come back only without a cursor (behind it they are past).
-            let limit = batchSize + (cursor == nil ? deferred.count : 0)
-            var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: limit, olderThan: cursor, within: range)
-            if raw.isEmpty, cursor != nil {
-                // Past the oldest dated photo: one plain pass picks up photos without a date.
-                cursor = nil
-                raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: batchSize + deferred.count, within: range)
-            }
-            var batch = raw.filter { !deferred.contains($0.id) }
-            if batch.isEmpty { break }
-            if let last = raw.last, last.creationDate != nil { cursor = last }
-            var finished: [AssetID] = []
-            // Saved with the batch's marks in one transaction.
-            var results: [(AssetID, ContentAnalysis)] = []
-            var analyzed = 0
-            var stopped: PauseReason?
-            var cancelled = false
-            // Saved and shown at least once a second: a batch of 50 photos took 5 s, on a warm
-            // device 18 s, and the count stood still meanwhile (simulated full run). The photos
-            // after the cut stay for the next batch.
-            let batchStart = now()
-            var cut = false
-            var next = 0
-            // Decided without looking at the image: labels stored already, or a photo that
-            // could not be read a short while ago (not again in this run).
-            batch = batch.filter { asset in
-                guard let previous = stored[asset.id] else { return true }
-                if previous.failedAttempts == nil {
-                    finished.append(asset.id)
-                } else if !previous.isDueForRetry(now: now()) {
-                    deferred.insert(asset.id)
-                } else {
-                    return true
+        // Waited for wherever the image step ends (done, Pause, heat, no access): a run that
+        // stops early still offers them, and trips detected again with them (a change in "Dein
+        // Zuhause" meanwhile) are what the later steps use.
+        func settleEarly() async throws {
+            guard let task = early else { return }
+            early = nil
+            let outcome = try await task.value
+            report.earlyProposals = true
+            if let fresh = outcome.fresh { (trips, frequent) = fresh }
+            patternsGeneration = outcome.generation
+        }
+        do {
+            // Photos still to analyse that have a result of this version already: their labels
+            // were saved by a run that ended before it marked them (or only their place or date
+            // changed since), so they are not looked at twice; or they could not be read before.
+            let stored = contentTotal > 0
+                ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion, within: range)
+                : [:]
+            var contentDone = 0
+            var cursor: AssetSnapshot?
+            // Photos that are not read in this run: they could not be read (tried again in a later
+            // run, spaced out), or the analyzer failed on them.
+            var deferred = Set<AssetID>()
+            // Analyzer errors in a row, not counted against the photos yet: only when a later photo
+            // works was it the photo. When every photo fails, the analyzer is the problem.
+            var suspects: [AssetID] = []
+            // The last photos looked at, for "Gerade angesehen" (no screenshots: account numbers,
+            // ID cards would be shown large on the overview, B4).
+            var lookedAt: [AssetID] = []
+            let analyzer = self.analyzer
+            while true {
+                if let reason = await shouldStop() { report.pausedBecause = reason; try await settleEarly(); return report }
+                if await accessChanged() { report.pausedBecause = .accessRevoked; try await settleEarly(); return report }
+                // Deferred photos can come back only without a cursor (behind it they are past).
+                let limit = batchSize + (cursor == nil ? deferred.count : 0)
+                var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: limit, olderThan: cursor, within: range)
+                if raw.isEmpty, cursor != nil {
+                    // Past the oldest dated photo: one plain pass picks up photos without a date.
+                    cursor = nil
+                    raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: batchSize + deferred.count, within: range)
                 }
-                return false
-            }
-            await analyzer.willAnalyze(Array(batch.prefix(2 * contentLanes)))
-            try await withThrowingTaskGroup(of: (AssetSnapshot, Result<ContentAnalysis, any Error>).self) { group in
-                var inFlight = 0
-                var width = contentLanes
-                while true {
-                    // Fill the lanes. Heat, low battery or Pause are checked before every
-                    // photo, so a stop takes effect within one photo per lane.
-                    while stopped == nil, !cancelled, next < batch.count, inFlight < width {
-                        if next > 0, now().timeIntervalSince(batchStart) >= 1 { cut = true; break }
-                        let (reason, lanes) = await admission(lanes: contentLanes)
-                        if let reason { stopped = reason; break }
-                        width = lanes
-                        guard inFlight < width else { break }
-                        let asset = batch[next]
-                        if next + 2 * contentLanes < batch.count {
-                            await analyzer.willAnalyze([batch[next + 2 * contentLanes]])
-                        }
-                        next += 1
-                        inFlight += 1
-                        group.addTask {
-                            do {
-                                return (asset, .success(try await analyzer.analyzeContent(asset, request: peopleRequest)))
-                            } catch {
-                                return (asset, .failure(error))
-                            }
-                        }
-                    }
-                    guard let (asset, outcome) = try await group.next() else { break }
-                    inFlight -= 1
-                    switch outcome {
-                    case .success(let result):
-                        results.append((asset.id, result))
+                var batch = raw.filter { !deferred.contains($0.id) }
+                if batch.isEmpty { break }
+                if let last = raw.last, last.creationDate != nil { cursor = last }
+                var finished: [AssetID] = []
+                // Saved with the batch's marks in one transaction.
+                var results: [(AssetID, ContentAnalysis)] = []
+                var analyzed = 0
+                var stopped: PauseReason?
+                var cancelled = false
+                // Saved and shown at least once a second: a batch of 50 photos took 5 s, on a warm
+                // device 18 s, and the count stood still meanwhile (simulated full run). The photos
+                // after the cut stay for the next batch.
+                let batchStart = now()
+                var cut = false
+                var next = 0
+                // Decided without looking at the image: labels stored already, or a photo that
+                // could not be read a short while ago (not again in this run).
+                batch = batch.filter { asset in
+                    guard let previous = stored[asset.id] else { return true }
+                    if previous.failedAttempts == nil {
                         finished.append(asset.id)
-                        analyzed += 1
-                        if !asset.isScreenshotLike {
-                            lookedAt.append(asset.id)
-                            if lookedAt.count > 3 { lookedAt.removeFirst() }
-                        }
-                        // The analyzer works: the photos it failed on just before were the problem.
-                        for id in suspects {
-                            if try await recordContentFailure(id) { finished.append(id) }
-                        }
-                        suspects = []
-                    case .failure(let error):
+                    } else if !previous.isDueForRetry(now: now()) {
                         deferred.insert(asset.id)
-                        if error is CancellationError || Task.isCancelled {
-                            // Stopped, not unreadable: what is done stays done, the rest waits.
-                            cancelled = true
-                        } else if !(error is AnalysisError) {
-                            suspects.append(asset.id)
-                            if suspects.count >= Self.analyzerFailureLimit, stopped == nil {
-                                // Vision itself fails: going through every photo would mark all
-                                // of them as unreadable. The run ends; the photos wait untouched.
-                                report.analyzerUnavailable = true
-                                stopped = .timeBudget
+                    } else {
+                        return true
+                    }
+                    return false
+                }
+                await analyzer.willAnalyze(Array(batch.prefix(2 * contentLanes)))
+                try await withThrowingTaskGroup(of: (AssetSnapshot, Result<ContentAnalysis, any Error>).self) { group in
+                    var inFlight = 0
+                    var width = contentLanes
+                    while true {
+                        // Fill the lanes. Heat, low battery or Pause are checked before every
+                        // photo, so a stop takes effect within one photo per lane.
+                        while stopped == nil, !cancelled, next < batch.count, inFlight < width {
+                            if next > 0, now().timeIntervalSince(batchStart) >= 1 { cut = true; break }
+                            let (reason, lanes) = await admission(lanes: contentLanes)
+                            if let reason { stopped = reason; break }
+                            width = lanes
+                            guard inFlight < width else { break }
+                            let asset = batch[next]
+                            if next + 2 * contentLanes < batch.count {
+                                await analyzer.willAnalyze([batch[next + 2 * contentLanes]])
                             }
-                        } else if await accessChanged() {
-                            // Not the photo: the access was taken away. Nothing is counted.
-                            stopped = .accessRevoked
-                        } else if try await recordContentFailure(asset.id) {
-                            // Not readable right now (no local preview yet, still syncing): tried
-                            // again in later runs, and given up only after a few of them.
+                            next += 1
+                            inFlight += 1
+                            group.addTask {
+                                do {
+                                    return (asset, .success(try await analyzer.analyzeContent(asset, request: peopleRequest)))
+                                } catch {
+                                    return (asset, .failure(error))
+                                }
+                            }
+                        }
+                        guard let (asset, outcome) = try await group.next() else { break }
+                        inFlight -= 1
+                        switch outcome {
+                        case .success(let result):
+                            results.append((asset.id, result))
                             finished.append(asset.id)
+                            analyzed += 1
+                            if !asset.isScreenshotLike {
+                                lookedAt.append(asset.id)
+                                if lookedAt.count > 3 { lookedAt.removeFirst() }
+                            }
+                            // The analyzer works: the photos it failed on just before were the problem.
+                            for id in suspects {
+                                if try await recordContentFailure(id) { finished.append(id) }
+                            }
+                            suspects = []
+                        case .failure(let error):
+                            deferred.insert(asset.id)
+                            if error is CancellationError || Task.isCancelled {
+                                // Stopped, not unreadable: what is done stays done, the rest waits.
+                                cancelled = true
+                            } else if !(error is AnalysisError) {
+                                suspects.append(asset.id)
+                                if suspects.count >= Self.analyzerFailureLimit, stopped == nil {
+                                    // Vision itself fails: going through every photo would mark all
+                                    // of them as unreadable. The run ends; the photos wait untouched.
+                                    report.analyzerUnavailable = true
+                                    stopped = .timeBudget
+                                }
+                            } else if await accessChanged() {
+                                // Not the photo: the access was taken away. Nothing is counted.
+                                stopped = .accessRevoked
+                            } else if try await recordContentFailure(asset.id) {
+                                // Not readable right now (no local preview yet, still syncing): tried
+                                // again in later runs, and given up only after a few of them.
+                                finished.append(asset.id)
+                            }
                         }
                     }
                 }
+                try await store.saveResults(results, kind: "content", version: Self.contentVersion, markingAnalyzed: finished)
+                if cancelled { throw CancellationError() }
+                if cut {
+                    // Goes on behind the last photo looked at (same order as the store's query);
+                    // without a date, from the start of the photos still to analyse.
+                    let last = batch[next - 1]
+                    cursor = last.creationDate != nil ? last : nil
+                }
+                contentDone += finished.count
+                report.contentAnalyzed += analyzed
+                sayContent(Progress(stage: .content, completed: contentBefore + contentDone,
+                                    total: contentBefore + max(contentTotal, contentDone), recent: lookedAt))
+                if let stopped { report.pausedBecause = stopped; try await settleEarly(); return report }
             }
-            try await store.saveResults(results, kind: "content", version: Self.contentVersion, markingAnalyzed: finished)
-            if cancelled { throw CancellationError() }
-            if cut {
-                // Goes on behind the last photo looked at (same order as the store's query);
-                // without a date, from the start of the photos still to analyse.
-                let last = batch[next - 1]
-                cursor = last.creationDate != nil ? last : nil
+            try await settleEarly()
+        } catch {
+            // The run ends with an error (also when it was cancelled): the early suggestions are
+            // not saved any more if they have not been yet, and nothing of them runs on after it.
+            if let early {
+                early.cancel()
+                _ = try? await early.value
             }
-            contentDone += finished.count
-            report.contentAnalyzed += analyzed
-            onProgress(Progress(stage: .content, completed: contentBefore + contentDone,
-                                total: contentBefore + max(contentTotal, contentDone), recent: lookedAt))
-            if let stopped { report.pausedBecause = stopped; return report }
+            throw error
         }
         report.completedStages.append(.content)
 
@@ -1113,6 +1148,50 @@ public actor AnalysisPipeline {
         return groups
     }
 
+    /// What the early suggestions of a first run found besides the suggestions: the trips
+    /// detected again after a change in "Dein Zuhause" (nil: none) and its generation.
+    struct EarlySuggestions: Sendable {
+        var fresh: (trips: [Trip], frequent: [FrequentPlace])?
+        var generation: Int
+    }
+
+    /// The early suggestions of a first run (trips, countries, places; see `run`), made beside
+    /// the image step's first photos. Once they are saved, the step's newest report is said
+    /// again with `earlyProposals`: the overview reads them then (review I2), and the count
+    /// stays where it is.
+    private func earlySuggestions(all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
+                                  scope: OrganizationScope, generation: Int,
+                                  onProgress: @escaping @Sendable (Progress) -> Void) async throws -> EarlySuggestions {
+        var generation = generation
+        var (trips, frequent) = (trips, frequent)
+        let fresh = try await patternsAfterAHomeChange(since: &generation, all: all)
+        if let fresh { (trips, frequent) = fresh }
+        let groups = try await store.value([ObservationGroup].self, forKey: Key.groups) ?? []
+        _ = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope,
+                                    early: true, homeChange: generation)
+        if var newest = contentShown {
+            newest.earlyProposals = true
+            onProgress(newest)
+        }
+        return EarlySuggestions(fresh: fresh, generation: generation)
+    }
+
+    /// Work that grows with the library (the facts of every photo, the suggestions, the
+    /// matching), done off this actor: over 50,000 photos it takes seconds, and the image step
+    /// of the run goes on meanwhile (`run`). The work itself is plain computation on copies.
+    private func offActor<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        let probe = offActorProbe
+        return await Task.detached(priority: Task.currentPriority) {
+            probe?()
+            return work()
+        }.value
+    }
+
+    /// Tests only: runs where `offActor` work runs, before it (a test holds it there and sees
+    /// the image step go on).
+    private var offActorProbe: (@Sendable () -> Void)?
+    func setOffActorProbe(_ probe: (@Sendable () -> Void)?) { offActorProbe = probe }
+
     /// After a change in "Dein Zuhause" that no suggestions were made for yet
     /// (`PendingHomeChange`), whichever step makes them (`resuggest()`, a run, the early set):
     /// the suggestions the user chose before the change keep their content (`HeldSuggestions`),
@@ -1147,7 +1226,8 @@ public actor AnalysisPipeline {
             recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) },
             home: try await homeSettings()
         )
-        var suggestions = ProposalEngine(settings: settings, calendar: calendar).suggestions(for: analysis, overrides: overrides)
+        let engine = ProposalEngine(settings: settings, calendar: calendar)
+        var suggestions = await offActor { engine.suggestions(for: analysis, overrides: overrides) }
         // Chosen before a change in "Dein Zuhause": stays as the user chose it, in this and
         // every later run, until it is created or deselected.
         let decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
@@ -1167,14 +1247,18 @@ public actor AnalysisPipeline {
             }
         }
         let tripSets = trips.map { Set($0.allAssetIDs) }
-        var matches = Self.match(suggestions.open, dismissed: suggestions.dismissed, against: inventory, overrides: overrides,
-                                 assignments: Self.assignments(try await store.managedAlbums()), trips: tripSets)
+        let found = suggestions, assignments = Self.assignments(try await store.managedAlbums()), albums = inventory
+        var matches = await offActor {
+            Self.match(found.open, dismissed: found.dismissed, against: albums, overrides: overrides, assignments: assignments, trips: tripSets)
+        }
         if generation != albumGeneration {
             // A plan was applied while this ran: match against the albums as they are now, or
             // the suggestions would offer albums that were just created.
-            matches = Self.match(suggestions.open, dismissed: suggestions.dismissed, against: try await store.loadInventory(),
-                                 overrides: OverrideSet(try await store.overrides()), assignments: Self.assignments(try await store.managedAlbums()),
-                                 trips: tripSets)
+            let now = try await store.loadInventory(), nowOverrides = OverrideSet(try await store.overrides())
+            let nowAssignments = Self.assignments(try await store.managedAlbums())
+            matches = await offActor {
+                Self.match(found.open, dismissed: found.dismissed, against: now, overrides: nowOverrides, assignments: nowAssignments, trips: tripSets)
+            }
         }
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
         let snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
@@ -1191,6 +1275,8 @@ public actor AnalysisPipeline {
                 removing.insert(Key.pendingHomeChange)
             }
         }
+        // The early set of a run that ended with an error meanwhile is not saved (`run`).
+        if early { try Task.checkCancellation() }
         proposalsGeneration += 1
         try await store.setValues(values, removing: removing)
         return snapshot
@@ -1375,18 +1461,18 @@ public actor AnalysisPipeline {
         )
     }
 
+    /// Assembled off this actor (`offActor`): the overview asks for the facts while a run goes
+    /// on (`refreshDerived` after the early suggestions), and over 50,000 photos assembling
+    /// them held the run's image step for about a second on Linux.
     private func currentFacts(all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace], groups: [ObservationGroup]) async throws -> [AssetFacts] {
-        FactsAssembler.assemble(
-            assets: all,
-            places: try await store.places(),
-            contents: try await store.results(ContentAnalysis.self, kind: "content"),
-            texts: try await store.results(TextResult.self, kind: "text"),
-            trips: trips,
-            frequentPlaces: frequent,
-            groups: groups,
-            inventory: inventory,
-            home: try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
-        )
+        let places = try await store.places()
+        let contents = try await store.results(ContentAnalysis.self, kind: "content")
+        let texts = try await store.results(TextResult.self, kind: "text")
+        let home = try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
+        return await offActor {
+            FactsAssembler.assemble(assets: all, places: places, contents: contents, texts: texts, trips: trips,
+                                    frequentPlaces: frequent, groups: groups, inventory: inventory, home: home)
+        }
     }
 
     /// The remembered identities, updated with this run's trips. Identities of trips that are

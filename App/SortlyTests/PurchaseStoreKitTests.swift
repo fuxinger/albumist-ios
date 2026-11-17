@@ -31,14 +31,14 @@ struct PurchaseStoreKitTests {
     /// product with another price, as App Store Connect sets it for the launch week.
     ///
     /// Every test starts the same way, whatever ran before it: the StoreKit test environment
-    /// is ready (brought up once per run, with a listener on StoreKit's updates from then on,
-    /// see `StoreKitEnvironment`), no StoreKit step of an earlier test is still running
-    /// (one its test gave up on would otherwise act on this test's session, CI run
-    /// 43949938467), and the new session holds nothing and StoreKit lists no unlock. That read
-    /// of the list stays although it comes before the test's purchase: a purchase of an earlier
-    /// test still in the list would let the checks after a restart, on a second device or
-    /// after a restore pass without this test's purchase. The run's listener runs before it,
-    /// as the app's does before the app reads the list (`StoreKitRunListener`).
+    /// is ready (brought up once per run, see `StoreKitEnvironment`), no StoreKit step of an
+    /// earlier test is still running (one its test gave up on would otherwise act on this
+    /// test's session, CI run 43949938467), and the new session holds nothing and StoreKit
+    /// lists no unlock. That read of the list stays although it comes before the test's
+    /// purchase: a purchase of an earlier test still in the list would let the checks after a
+    /// restart, on a second device or after a restore pass without this test's purchase. A read
+    /// before a purchase is what exposes StoreKit's late update for the first purchase after
+    /// it (see `StoreKitEnvironment`); the bring-up makes that purchase before any test does.
     func session(price: String? = nil) async throws -> PurchaseTestStore {
         try await StoreKitEnvironment.ready()
         try await StoreKitSteps.shared.waitUntilIdle(seconds: 60)
@@ -826,19 +826,30 @@ struct StoreKitStepTimedOut: Error, CustomStringConvertible {
 /// The StoreKit test environment, brought up once per test run before the first test uses it,
 /// and handed to the tests only once it answers the way they need it.
 ///
-/// First the run's listener on StoreKit's updates starts (`StoreKitRunListener`), before
-/// StoreKit's list is read for the first time, as in the app. Then the test session is set up
-/// and the product loaded (on a just-booted simulator the first set-up once did not answer
-/// within 30 s, CI run 43949938467). Then the round trip of a purchase test is made until
-/// `promptInARow` in a row are prompt: a new session that holds nothing, StoreKit's list read
-/// until it shows no unlock (as `session()` does before every test), a purchase in the
-/// session, the list shows it, the transaction finished (the app finishes its purchases), the
-/// session cleared, the list no longer shows it. Prompt: every step within a fifth of what a
-/// test allows for it (`RoundTrip`). A wait for the list stops after `waitCap`; that round trip
-/// is not prompt, and the next one starts with a new session. Each round trip is printed with
-/// its times and what the run's listener heard. The bring-up ends unready only when `budget`
-/// runs out (a step that never answers included) or a session holds transactions where it
-/// must be empty (new, or just cleared); then every test that needs StoreKit fails with
+/// As the CI logs show it, StoreKit's list of entitlements follows state on the test
+/// process's side, which catches up with a purchase made in the session only when StoreKit's
+/// update notification for it arrives. For the first purchase after a read of the list that
+/// notification can come 10 to 15 s late, after cold and after fast starts. CI run
+/// 44157630387: the first round trip's purchase showed in the list after 15,316 ms, exactly
+/// when the run's listener heard its update (listening for 20.7 s by then), the next two
+/// within 10 ms. Before 9536ba7 the first read of the list came after the first purchase,
+/// and that purchase was listed at once in 22 of 22 runs; since `session()` reads the list
+/// before every test, the first purchase after that read was missing in 3 of 6 runs. So the
+/// round trips below make that first purchase, before any test does.
+///
+/// First a listener on StoreKit's updates starts for the whole run (`StoreKitRunListener`, a
+/// diagnostic). Then the test session is set up and the product loaded (on a just-booted
+/// simulator the first set-up once did not answer within 30 s, CI run 43949938467). Then the
+/// round trip of a purchase test is made until `promptInARow` in a row are prompt: a new
+/// session that holds nothing, StoreKit's list read until it shows no unlock (as `session()`
+/// does before every test), a purchase in the session, the list shows it, the transaction
+/// finished the way the app finishes a purchase (on its own, not awaited), the session
+/// cleared, the list no longer shows it. Prompt: every step within a fifth of what a test
+/// allows for it (`RoundTrip`). A wait for the list stops after `waitCap`; that round trip is
+/// not prompt, and the next one starts with a new session. Each round trip is printed with its
+/// times and what the run's listener heard. The bring-up ends unready only when `budget` runs
+/// out, a step does not answer, or a session holds transactions where it must be empty (new,
+/// or just cleared); then every test that needs StoreKit fails with
 /// `StoreKitEnvironmentFailure`, never passes.
 ///
 /// The round trips involve StoreKit and the test session only, never the app's purchase code,
@@ -852,9 +863,9 @@ enum StoreKitEnvironment {
     nonisolated static let waitCap: Double = 30
     /// Prompt round trips in a row before the tests start.
     nonisolated static let promptInARow = 3
-    /// From the start of the run's listener to the first read of StoreKit's list: a listener
-    /// registers with StoreKit on its own schedule and gives no signal when it listens
-    /// (purchaseFromAnotherDeviceOrBeforeReinstallIsRestored waits as long for the app's).
+    /// From the start of the run's listener to the first round trip, so that it hears that
+    /// purchase: a listener registers with StoreKit on its own schedule and gives no signal when
+    /// it listens (one started right before a purchase missed it, CI run 43773400300).
     nonisolated static let listenerLead: Double = 5
     private static var bringingUp: Task<BringUp, Never>?
     /// The round trips the bring-up made until the environment was ready (for messages).
@@ -959,7 +970,7 @@ enum StoreKitEnvironment {
                     throw StoreKitEnvironmentFailure(description: "not \(promptInARow) prompt round trips in a row within \(Int(budget)) s (\(trips) round trips, each in the trace)")
                 }
                 trips += 1
-                let trip = try await roundTrip(url, unlock, until: deadline)
+                let trip = try await roundTrip(trips, url, unlock, until: deadline)
                 inARow = trip.isPrompt ? inARow + 1 : 0
                 storeKitTrace("StoreKit round trip \(trips) at \(elapsed()) ms: \(trip)")
             }
@@ -974,11 +985,12 @@ enum StoreKitEnvironment {
     }
 
     /// One round trip the way a purchase test makes it. A wait for StoreKit's list stops after
-    /// `waitCap` (that round trip is not prompt; the next one starts over with a new session).
-    /// The calls on the session queue may take what is left of the budget: the queue is serial,
-    /// so a call that hangs holds up every later one anyway. Each step is timed inside the
-    /// session-queue call or the off-main step itself.
-    nonisolated private static func roundTrip(_ url: URL, _ unlock: String, until deadline: Date) async throws -> RoundTrip {
+    /// `waitCap` (that round trip is not prompt; the next one starts over with a new session);
+    /// the step around it gives up 2 s later, so only a read that does not return ends the
+    /// bring-up there. The calls on the session queue may take what is left of the budget: the
+    /// queue is serial, so a call that hangs holds up every later one anyway. Each step is timed
+    /// inside the session-queue call or the off-main step itself.
+    nonisolated private static func roundTrip(_ number: Int, _ url: URL, _ unlock: String, until deadline: Date) async throws -> RoundTrip {
         func left() -> Double { max(1, deadline.timeIntervalSinceNow) }
         func cap() -> Double { min(waitCap, max(0, deadline.timeIntervalSinceNow)) }
         var trip = RoundTrip()
@@ -992,7 +1004,7 @@ enum StoreKitEnvironment {
         let held = try await onSessionQueue("round trip: read the new session", seconds: left()) { store.session.allTransactions().count }
         guard held == 0 else { throw StoreKitEnvironmentFailure(description: "a new session already holds \(held) transactions") }
         let emptyWait = cap()
-        let empty = try await within("round trip: StoreKit lists no unlock", seconds: left()) {
+        let empty = try await within("round trip: StoreKit lists no unlock", seconds: emptyWait + 2) {
             await StoreKitEnvironment.readUntil(listed: false, unlock, seconds: emptyWait)
         }
         trip.noUnlock = empty
@@ -1006,17 +1018,19 @@ enum StoreKitEnvironment {
         }
         trip.buy = buy
         let listedWait = cap()
-        let listed = try await within("round trip: StoreKit lists the purchase", seconds: left()) {
+        let listed = try await within("round trip: StoreKit lists the purchase", seconds: listedWait + 2) {
             await StoreKitEnvironment.readUntil(listed: true, unlock, seconds: listedWait)
         }
         trip.listed = listed
         if let entry = listed.entry {
-            // As the app does with a purchase: finished once it is delivered.
+            // Finished the way the app finishes a purchase: on its own, not awaited (the first
+            // one took 26.5 s in CI run 44157630387; no test waits for the app's either). Not a
+            // counted step, so it holds up neither the bring-up nor the next `session()`.
             let transaction = entry.unsafePayloadValue
-            trip.finish = try await within("round trip: finish the transaction", seconds: left()) { () async -> Double in
+            Task.detached {
                 let start = Date()
                 await transaction.finish()
-                return Date().timeIntervalSince(start)
+                storeKitTrace("StoreKit round trip \(number): finish ended after \(Int(Date().timeIntervalSince(start) * 1000)) ms")
             }
         }
         let (after, clear) = try await onSessionQueue("round trip: clear the session", seconds: left()) { () -> (Int, Double) in
@@ -1029,7 +1043,7 @@ enum StoreKitEnvironment {
         guard after == 0 else { throw StoreKitEnvironmentFailure(description: "the session still holds \(after) transactions after clearing") }
         if listed.reached {
             let goneWait = cap()
-            trip.gone = try await within("round trip: StoreKit lists no unlock after the clear", seconds: left()) {
+            trip.gone = try await within("round trip: StoreKit lists no unlock after the clear", seconds: goneWait + 2) {
                 await StoreKitEnvironment.readUntil(listed: false, unlock, seconds: goneWait)
             }
         }
@@ -1046,18 +1060,13 @@ struct StoreKitEnvironmentFailure: Error, CustomStringConvertible {
 }
 
 /// A listener on StoreKit's updates (`Transaction.updates`) for the whole test run,
-/// independent of the app's code, started by the bring-up before StoreKit's list is read for
-/// the first time.
-///
-/// The app listens from its launch on (`SortlyApp` starts `Purchases.shared`); the test host
-/// does not (`Purchases.hostsUnitTests`), so until a test started a listener nothing in the
-/// test process listened. Before 9536ba7 no test read StoreKit's list before the run's first
-/// purchase, and that purchase was in the list in every run (22 of 22, second review 17.11.,
-/// slow runs included). Since then `session()` reads the list before every test, and the first
-/// purchase was missing in 3 of 6 runs (43969714929, 44130064334, and 44143994365, which was
-/// up within 2.6 s), every later one was there. So the list is now first read as in the app,
-/// with a listener running. It prints every update with the time it arrived and finishes
-/// nothing: where a test starts the app's listener, that one does.
+/// independent of the app's code: a diagnostic. It prints every update with the time it
+/// arrived, and each round trip and a session purchase StoreKit never lists say what it heard
+/// after the buy, so the log shows whether StoreKit's list waited for the update (CI run
+/// 44157630387: list and listener both 15,316 ms after the buy). It does not make the update
+/// come sooner: it had been listening for 20.7 s then. The bring-up starts it first, at least
+/// `StoreKitEnvironment.listenerLead` before the first round trip. It finishes nothing: where
+/// a test starts the app's listener, that one does.
 final class StoreKitRunListener: @unchecked Sendable {
     static let shared = StoreKitRunListener()
     private let lock = NSLock()
@@ -1118,8 +1127,8 @@ struct ListWait: Sendable, CustomStringConvertible {
 private struct RoundTrip: Sendable, CustomStringConvertible {
     /// A fifth of what a test allows for the same step: set-up 30 s, no unlock in StoreKit's
     /// list 15 s (`session()`), buy 20 s, the purchase in the list 10 s (`entitlement(for:)`),
-    /// clear 60 s (the next test waits that long for it). The finish counts for nothing: no test
-    /// waits for it (the app finishes on its own).
+    /// clear 60 s (the next test waits that long for it). The finish is not part of it: it runs
+    /// on its own, as the app's does, and prints its time when it ends.
     static let setUpLimit: Double = 6
     static let noUnlockLimit: Double = 3
     static let buyLimit: Double = 4
@@ -1130,7 +1139,6 @@ private struct RoundTrip: Sendable, CustomStringConvertible {
     var noUnlock: ListWait?
     var buy: Double?
     var listed: ListWait?
-    var finish: Double?
     var clear: Double?
     var gone: ListWait?
     var heard = "nothing"
@@ -1145,8 +1153,7 @@ private struct RoundTrip: Sendable, CustomStringConvertible {
         var steps = ["session \(Self.ms(setUp)) ms"]
         if let noUnlock { steps.append("no unlock in the list \(noUnlock)") }
         if let buy { steps.append("buy \(Self.ms(buy)) ms") }
-        if let listed { steps.append("purchase in the list \(listed)") }
-        if let finish { steps.append("finish \(Self.ms(finish)) ms") }
+        if let listed { steps.append("purchase in the list \(listed)" + (listed.reached ? ", finish started" : "")) }
         if let clear { steps.append("clear \(Self.ms(clear)) ms") }
         if let gone { steps.append("no unlock after the clear \(gone)") }
         let listener = buy == nil ? "" : "; run listener heard \(heard)"

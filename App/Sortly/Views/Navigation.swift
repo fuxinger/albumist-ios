@@ -108,7 +108,22 @@ struct ProposalScreen: View {
 /// The path of one navigation stack, in the environment of every screen on it.
 @MainActor @Observable
 final class Navigator {
-    var path: [AppScreen] = []
+    var path: [AppScreen] = [] {
+        didSet { if path != oldValue { changes &+= 1 } }
+    }
+    /// Counts the changes of `path`: a push and the pop after it are two, although the path is
+    /// the same again (`mark`).
+    @ObservationIgnored private var changes = 0
+
+    /// Where the stack stands, read when work starts on the screen on top. The same mark later
+    /// means nothing was pushed or popped meanwhile (Back, a screen from Siri, Back and the same
+    /// screen opened again), so that screen is still the one on top. Read from the navigator,
+    /// not from onAppear/onDisappear, which a swipe back that is called off may leave unpaired.
+    var mark: Mark { Mark(changes: changes) }
+
+    struct Mark: Equatable {
+        fileprivate let changes: Int
+    }
 
     /// Pushes `screen`, unless it is already on top (a second tap on the same row, the map or
     /// a link pushes nothing more).
@@ -127,16 +142,31 @@ final class Navigator {
         navigator.push(screen)
     }
 
+    /// What became of a screen pushed at the end of work (`push(_:on:ifStill:visible:)`).
+    enum Outcome {
+        /// Pushed: the screen that asked was showing on top of an unchanged stack.
+        case pushed
+        /// Not yet: the stack is unchanged, but the screen that asked is not showing, because
+        /// the user chose another tab (SwiftUI's TabView calls onDisappear on the tab the user
+        /// leaves). That screen keeps the result and pushes it when it shows again, if the
+        /// result is still current then (`AlbumsView`, `ProposalDetailView`, `PlanReceiptView`).
+        case waiting
+        /// Not pushed: something was pushed or popped since the work started, so the result
+        /// has no place on this stack any more.
+        case dropped
+    }
+
     /// The end of work that started on a screen (a plan being built) pushes its result only if
-    /// that screen is still showing and on top: `visible` (its onAppear/onDisappear; a
-    /// destination link opened above it or Back makes it false) and the path still `before`,
-    /// as read when the work started. Otherwise the result is not pushed, as with the old
-    /// `navigationDestination(isPresented:)` of a screen that had gone. Returns whether it pushed.
+    /// that screen is still on top of its stack and showing: the stack's `mark` still `before`,
+    /// as read when the work started, and `visible` (the screen's onAppear/onDisappear; another
+    /// tab makes it false). Otherwise the result is not pushed, as with the old
+    /// `navigationDestination(isPresented:)` of a screen that had gone, or waits (`Outcome`).
     @discardableResult
-    static func push(_ screen: AppScreen, on navigator: Navigator?, ifStill before: [AppScreen]?, visible: Bool) -> Bool {
-        guard visible, let navigator, navigator.path == before else { return false }
+    static func push(_ screen: AppScreen, on navigator: Navigator?, ifStill before: Mark?, visible: Bool) -> Outcome {
+        guard let navigator, let before, navigator.mark == before else { return .dropped }
+        guard visible else { return .waiting }
         navigator.push(screen)
-        return true
+        return .pushed
     }
 }
 

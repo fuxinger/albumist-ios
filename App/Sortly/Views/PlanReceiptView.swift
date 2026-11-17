@@ -22,8 +22,19 @@ struct PlanReceiptView: View {
     /// "Fehlendes erneut versuchen" is building its plan: the button waits (a second tap
     /// pushed a second preview).
     @State private var retrying = false
-    /// On screen and on top: a plan that is ready after Back is not pushed.
+    /// On screen: a plan that is ready while another tab is chosen waits for this receipt
+    /// (`Navigator.push(_:on:ifStill:visible:)`, `waiting`).
     @State private var visible = false
+    /// A plan of "Fehlendes erneut versuchen" that was ready while another tab was chosen:
+    /// pushed when this receipt shows again, if it is still current (`showWaiting()`).
+    @State private var waiting: WaitingRetry?
+
+    private struct WaitingRetry {
+        let plan: ChangePlan
+        let before: Navigator.Mark?
+        /// The album list when the retry was tapped (`AppModel.inventoryVersion`).
+        let inventory: Int
+    }
     @State private var nothingToRetry = false
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     private let collapsedCount = 12
@@ -47,6 +58,7 @@ struct PlanReceiptView: View {
         .onAppear {
             visible = true
             ReviewPrompt.shared.screenAppeared()
+            showWaiting()
         }
         .onDisappear {
             visible = false
@@ -201,14 +213,22 @@ struct PlanReceiptView: View {
             }
             if canRepair(receipt) {
                 Button {
+                    // The tap is on this screen, so it is showing, whatever a swipe back that
+                    // was called off did to `visible`.
+                    visible = true
+                    waiting = nil
                     retrying = true
-                    let before = navigator?.path
+                    let before = navigator?.mark
+                    let inventory = model.inventoryVersion
                     Task {
                         defer { retrying = false }
                         if let missing = await model.retryPlan(for: plan) {
                             // Pushed onto the stack's path (`AppScreen`), if this receipt is
-                            // still the screen on top.
-                            Navigator.push(.prebuiltPlan(PlanToken(missing)), on: navigator, ifStill: before, visible: visible)
+                            // still the screen on top; ready while another tab is chosen, it
+                            // waits for this receipt.
+                            if Navigator.push(.prebuiltPlan(PlanToken(missing)), on: navigator, ifStill: before, visible: visible) == .waiting {
+                                waiting = WaitingRetry(plan: missing, before: before, inventory: inventory)
+                            }
                         } else if visible {
                             nothingToRetry = true
                         }
@@ -227,6 +247,18 @@ struct PlanReceiptView: View {
                 Text("Erneut versuchen legt nur an, was fehlt; nichts wird doppelt angelegt, und du siehst vorher, was passiert. Du kannst es auch so lassen: Das Erledigte bleibt, und die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
             }
         }
+    }
+
+    /// The plan of "Fehlendes erneut versuchen" that was ready while another tab was chosen, now
+    /// that this receipt shows again: pushed if nothing was pushed or popped on this stack, the
+    /// album list was not read again (after a plan, an undo, an analysis or a refresh it may
+    /// differ) and no plan runs. Otherwise it is dropped, and the button makes a new one. Taken
+    /// once, never pushed twice.
+    private func showWaiting() {
+        guard let ready = waiting else { return }
+        waiting = nil
+        guard model.inventoryVersion == ready.inventory, !model.execution.isRunning else { return }
+        Navigator.push(.prebuiltPlan(PlanToken(ready.plan)), on: navigator, ifStill: ready.before, visible: true)
     }
 
     /// Only plans that changed the library and were not taken back can be completed.

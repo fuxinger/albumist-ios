@@ -161,8 +161,15 @@ struct ProposalDetailView: View {
     @Environment(Navigator.self) private var navigator: Navigator?
     /// The preview of "Album anlegen", pushed onto the stack's path (`AppScreen`).
     @State private var directPlan: PlanToken?
-    /// On screen and on top: a plan that is ready after Back is not pushed.
+    /// On screen: a plan that is ready while another tab is chosen waits for this screen
+    /// (`Navigator.push(_:on:ifStill:visible:)`, `waiting`).
     @State private var visible = false
+    /// A preview of "Album anlegen" that was ready while another tab was chosen: pushed when
+    /// this screen shows again, if it is still current (`showWaiting()`). Its pick for the
+    /// preview is undone while it waits, so nothing stays selected that the user did not choose.
+    @State private var waiting: WaitingPlan?
+    /// "Album anlegen" is making its preview. The photos do not open meanwhile: the preview
+    /// would be pushed while the user goes back from them.
     @State private var preparing = false
     @State private var applied = false
     @State private var rejectingMatch = false
@@ -210,6 +217,7 @@ struct ProposalDetailView: View {
                                   portrait: [.screenshots, .documents, .messenger].contains(proposal.kind.area))
                 }
                 .buttonStyle(.plain)
+                .disabled(preparing)
                 .accessibilityLabel(Text("Alle \(model.members(of: proposal).count) Fotos ansehen"))
                 // The cover's colours glow behind the photos and end just below them, so the
                 // text under them sits on the plain background. Behind the text, XCTest's
@@ -345,6 +353,7 @@ struct ProposalDetailView: View {
         .onAppear {
             visible = true
             name = model.userTitles[proposal.id] ?? ""
+            showWaiting()
         }
         .onDisappear { visible = false }
         .sheet(isPresented: $showAdjust) {
@@ -517,6 +526,9 @@ struct ProposalDetailView: View {
                 if needsChoice {
                     showAdjust = true
                 } else {
+                    // The tap is on this screen, so it is showing, whatever a swipe back that
+                    // was called off did to `visible`.
+                    visible = true
                     Task { await applyNow() }
                 }
             } label: {
@@ -563,22 +575,76 @@ struct ProposalDetailView: View {
 
     /// Applies this one suggestion right away (preview, then the album exists in Photos).
     private func applyNow() async {
+        waiting = nil
         if proposal.requiresUserName { model.setUserTitle(name, for: proposal) }
-        previewSelection = model.selectForPreview([(proposal, recommended)])
+        let chosen = recommended
+        let previous = model.decisions[proposal.id]
+        previewSelection = model.selectForPreview([(proposal, chosen)])
+        let basis = planBasis
         preparing = true
         defer { preparing = false }
-        let before = navigator?.path
+        let before = navigator?.mark
         let plan = await model.singlePlan(for: proposal)
-        if let plan, Navigator.push(.prebuiltPlan(PlanToken(plan)), on: navigator, ifStill: before, visible: visible) {
+        var outcome = Navigator.Outcome.dropped
+        if let plan { outcome = Navigator.push(.prebuiltPlan(PlanToken(plan)), on: navigator, ifStill: before, visible: visible) }
+        if let plan, outcome == .pushed {
             directPlan = PlanToken(plan)
-        } else {
-            // Nothing to change (album already complete or kept as it is), or the user left
-            // this screen while the plan was made: the preview's pick goes back at once, and
-            // nothing is pushed above the screen the user went to.
-            if let selection = previewSelection { model.endPreview(selection) }
-            previewSelection = nil
-            if plan == nil && visible { dismiss() }
+            return
         }
+        // Nothing to change (album already complete or kept as it is), or the user left this
+        // screen while the plan was made: the preview's pick goes back at once, and nothing is
+        // pushed above the screen the user went to. A plan that was ready while another tab was
+        // chosen waits for this screen without the pick, which `showWaiting()` makes again.
+        if let selection = previewSelection { model.endPreview(selection) }
+        previewSelection = nil
+        if let plan, outcome == .waiting {
+            waiting = WaitingPlan(token: PlanToken(plan), before: before, chosen: chosen, previous: previous, basis: basis)
+        }
+        if plan == nil && visible { dismiss() }
+    }
+
+    /// The preview of "Album anlegen" that was ready while another tab was chosen, now that
+    /// this screen shows again: pushed, with its pick made again, if nothing was pushed or
+    /// popped on this stack, nothing the plan was made from changed (`PlanBasis`), the
+    /// suggestion's decision is still the one from before the pick, and no plan runs. Otherwise
+    /// it is dropped, and "Album anlegen" makes a new one. Taken once, never pushed twice.
+    private func showWaiting() {
+        guard let ready = waiting else { return }
+        waiting = nil
+        guard let navigator, navigator.mark == ready.before, planBasis == ready.basis,
+              model.decisions[proposal.id] == ready.previous, !model.execution.isRunning else { return }
+        previewSelection = model.selectForPreview([(proposal, ready.chosen)])
+        Navigator.push(.prebuiltPlan(ready.token), on: navigator, ifStill: ready.before, visible: true)
+        directPlan = ready.token
+    }
+
+    /// A preview of "Album anlegen" kept for this screen (`waiting`).
+    private struct WaitingPlan {
+        let token: PlanToken
+        let before: Navigator.Mark?
+        /// The decision the preview selects, and the one it replaced.
+        let chosen: ProposalDecision
+        let previous: ProposalDecision?
+        let basis: PlanBasis
+    }
+
+    /// What a plan of this suggestion is made from, as far as the app can see it changing: the
+    /// suggestion as the analysis has it now, the photos taken out of it, its name, the album
+    /// list (`AppModel.inventoryVersion`) and the folder for new albums.
+    private struct PlanBasis: Equatable {
+        let proposal: AlbumProposal?
+        let removed: Set<AssetID>?
+        let title: String?
+        let inventory: Int
+        let rootFolder: String
+    }
+
+    private var planBasis: PlanBasis {
+        PlanBasis(proposal: model.proposals.first { $0.id == proposal.id },
+                  removed: model.removedFromProposals[proposal.id],
+                  title: model.userTitles[proposal.id],
+                  inventory: model.inventoryVersion,
+                  rootFolder: model.settings.rootFolderTitle)
     }
 
     /// Photos still missing in the album the user chose (not necessarily Albumist's first candidate).

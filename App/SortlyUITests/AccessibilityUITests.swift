@@ -291,8 +291,7 @@ final class AccessibilityUITests: XCTestCase {
                         sleep(2)
                         check("\(tag) result", english: english)
                         let receipt = app.buttons["result.receipt"]
-                        let resultBar = barTitle()
-                        if tap(receipt, "\(tag) open receipt", timeout: 10) {
+                        if let resultBar = tapToOpen(receipt, "\(tag) open receipt", timeout: 10) {
                             let receiptShown = barChanged(from: resultBar, "\(tag) receipt")
                             sleep(2)
                             check("\(tag) receipt", english: english)
@@ -315,8 +314,7 @@ final class AccessibilityUITests: XCTestCase {
                 check("\(tag) atlas lower", english: english)
                 // A country: its photo colours sit behind the title and caption.
                 let country = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", w.country)).firstMatch
-                let atlasBar = barTitle()
-                if tap(country, "\(tag) open country", timeout: 10) {
+                if let atlasBar = tapToOpen(country, "\(tag) open country", timeout: 10) {
                     let countryShown = barChanged(from: atlasBar, "\(tag) country")
                     sleep(2)
                     check("\(tag) country", english: english)
@@ -364,8 +362,7 @@ final class AccessibilityUITests: XCTestCase {
                 // Design review W16: history and undo on their own screen. Opened first, from
                 // the top of the list: after scrolling down and back the first row was not in
                 // the tree again (UI run 43773339053, "history" missing).
-                let settingsBar = barTitle()
-                if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
+                if let settingsBar = tapToOpen(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
                     let historyShown = barChanged(from: settingsBar, "\(tag) history")
                     sleep(1)
                     check("\(tag) history", english: english)
@@ -761,14 +758,21 @@ final class AccessibilityUITests: XCTestCase {
         return button
     }
 
+    /// `element` is there within `timeout`; otherwise a failure ("Missing: step") with a screenshot.
     @discardableResult
-    private func tap(_ element: XCUIElement, _ step: String, timeout: TimeInterval = 15) -> Bool {
+    private func found(_ element: XCUIElement, _ step: String, timeout: TimeInterval) -> Bool {
         guard element.waitForExistence(timeout: timeout) else {
             print("UI_STEP_MISSING \(step)")
             shot("a11y-x-missing-" + slug(step))
             XCTFail("Missing: \(step)")
             return false
         }
+        return true
+    }
+
+    @discardableResult
+    private func tap(_ element: XCUIElement, _ step: String, timeout: TimeInterval = 15) -> Bool {
+        guard found(element, step, timeout: timeout) else { return false }
         // Content under the tab bar also counts as hittable, but a tap there lands on the bar
         // (contrast run 43918684247: the atlas teaser sat under the tab bar on a fresh simulator,
         // the tap opened nothing, and `back()` then tapped the overview's settings button). The
@@ -828,21 +832,49 @@ final class AccessibilityUITests: XCTestCase {
         first.tap()
     }
 
-    /// The title of the navigation bar on screen ("" when there is none), from one snapshot.
-    private func barTitle() -> String {
-        (try? app.navigationBars.firstMatch.snapshot())?.identifier ?? ""
+    /// The title of the navigation bar on screen, from one snapshot; nil when it cannot be told:
+    /// the snapshot failed (a busy app answers late), no bar was found, or the bar has no title.
+    /// Never "": as a baseline, "" made any later read count as a change, and the walk went back
+    /// from a screen that had never opened.
+    private func barTitle() -> String? {
+        guard let title = (try? app.navigationBars.firstMatch.snapshot())?.identifier, !title.isEmpty else { return nil }
+        return title
+    }
+
+    /// Taps `element`, which should open a screen of its own, and returns the bar's title from
+    /// before the tap (read up to three times), to compare with (`barChanged`). Nil when the
+    /// element is missing (a failure, as with `tap`) or the title stays unknown: then no later
+    /// read could tell whether the tap opened a screen, so the walk leaves this step out (tap,
+    /// check and back) and says so, instead of guessing. The element is still looked for then,
+    /// so a missing one fails all the same. The steps around it run as before.
+    private func tapToOpen(_ element: XCUIElement, _ step: String, timeout: TimeInterval) -> String? {
+        for read in 1...3 {
+            if let title = barTitle() { return tap(element, step, timeout: timeout) ? title : nil }
+            if read < 3 { sleep(1) }
+        }
+        print("UI_FACT \(step): bar title unreadable before the tap (3 reads), not tapped")
+        found(element, step, timeout: timeout)
+        return nil
     }
 
     /// After a tap: a screen of its own opened (the bar's title changed within 5 s). Only then
     /// does the walk go back from it; otherwise `back()` would leave the screen below (the one
-    /// the tap was on) and report it as closed by itself.
+    /// the tap was on) and report it as closed by itself. Only a title that was read and differs
+    /// counts: a read that fails is no change, and while no read succeeds the wait goes on for
+    /// up to 20 s.
     private func barChanged(from title: String, _ step: String) -> Bool {
-        let deadline = Date().addingTimeInterval(5)
+        let start = Date()
+        var last: String?
         repeat {
-            if barTitle() != title { return true }
+            last = barTitle()
+            if let last, last != title { return true }
             usleep(300_000)
-        } while Date() < deadline
-        print("UI_FACT \(step): the tap opened no screen of its own (bar still '\(title)')")
+        } while Date().timeIntervalSince(start) < (last == nil ? 20 : 5)
+        if last == nil {
+            print("UI_FACT \(step): bar title unreadable after the tap, not going back")
+        } else {
+            print("UI_FACT \(step): the tap opened no screen of its own (bar still '\(title)')")
+        }
         return false
     }
 

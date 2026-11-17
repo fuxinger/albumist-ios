@@ -10,12 +10,23 @@ struct AlbumsView: View {
     /// The merge preview is pushed onto the tab's path (`AppScreen`), not presented with
     /// `navigationDestination(isPresented:)`.
     @Environment(Navigator.self) private var navigator: Navigator?
-    /// On screen and on top: a merge plan that is ready after Back or after a folder was
-    /// opened is not pushed (`Navigator.push(_:on:ifStill:visible:)`).
+    /// On screen: a merge plan that is ready while another tab is chosen waits for this screen
+    /// (`Navigator.push(_:on:ifStill:visible:)`, `waiting`).
     @State private var visible = false
     /// The suggestion whose merge plan is being prepared: its row shows a spinner and the
-    /// rows do not take a second tap meanwhile (design review N13).
+    /// rows do not take a second tap meanwhile (design review N13). Albums and folders do not
+    /// open meanwhile either: the plan would be pushed while the user goes back from one.
     @State private var preparing: [CollectionID]?
+    /// A merge plan that was ready while another tab was chosen: pushed when this screen shows
+    /// again, if it is still current (`showWaiting()`).
+    @State private var waiting: WaitingMerge?
+
+    private struct WaitingMerge {
+        let plan: ChangePlan
+        let before: Navigator.Mark?
+        /// The album list when the merge was tapped (`AppModel.inventoryVersion`).
+        let inventory: Int
+    }
 
     private var topLevel: [CollectionSnapshot] {
         model.inventory.collections.values
@@ -36,13 +47,19 @@ struct AlbumsView: View {
                 Section {
                     ForEach(suggestions, id: \.albumIDs) { suggestion in
                         Button {
+                            // The tap is on this screen, so it is showing, whatever a swipe
+                            // back that was called off did to `visible`.
+                            visible = true
+                            waiting = nil
                             preparing = suggestion.albumIDs
-                            let before = navigator?.path
+                            let before = navigator?.mark
+                            let inventory = model.inventoryVersion
                             Task {
                                 let plan = await model.mergePlan(suggestion)
                                 preparing = nil
-                                if let plan {
-                                    Navigator.push(.prebuiltPlan(PlanToken(plan)), on: navigator, ifStill: before, visible: visible)
+                                guard let plan else { return }
+                                if Navigator.push(.prebuiltPlan(PlanToken(plan)), on: navigator, ifStill: before, visible: visible) == .waiting {
+                                    waiting = WaitingMerge(plan: plan, before: before, inventory: inventory)
                                 }
                             }
                         } label: {
@@ -75,6 +92,7 @@ struct AlbumsView: View {
                 Section {
                     ForEach(fromSortly.sorted(by: Self.order)) { collection in
                         CollectionRow(collection: collection)
+                            .disabled(preparing != nil)
                     }
                 } header: {
                     Text("Von Albumist angelegt oder ergänzt")
@@ -106,13 +124,28 @@ struct AlbumsView: View {
                 }
                 ForEach(topLevel) { collection in
                     CollectionRow(collection: collection)
+                        .disabled(preparing != nil)
                 }
             }
         }
         .navigationTitle("Alben")
-        .onAppear { visible = true }
+        .onAppear {
+            visible = true
+            showWaiting()
+        }
         .onDisappear { visible = false }
         .refreshable { await model.refreshDerived() }
+    }
+
+    /// The merge plan that was ready while another tab was chosen, now that this screen shows
+    /// again: pushed if nothing was pushed or popped on this stack, the album list was not read
+    /// again (after a plan, an analysis or a refresh it may differ) and no plan runs. Otherwise
+    /// it is dropped, and a tap on the suggestion makes a new one. Taken once, never pushed twice.
+    private func showWaiting() {
+        guard let ready = waiting else { return }
+        waiting = nil
+        guard model.inventoryVersion == ready.inventory, !model.execution.isRunning else { return }
+        Navigator.push(.prebuiltPlan(PlanToken(ready.plan)), on: navigator, ifStill: ready.before, visible: true)
     }
 }
 

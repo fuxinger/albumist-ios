@@ -154,6 +154,8 @@ public actor AnalysisPipeline {
         public var placesPendingOnline = 0
         public var onlineRequests = 0
         public var contentAnalyzed = 0
+        /// Of `contentAnalyzed`: photos analysed before that got only their labels now.
+        public var labelsAdded = 0
         public var textRecognized = 0
         public var textWaitingForOriginal = 0
         /// How long reading the texts took in this run (diagnostic report: photos per minute).
@@ -171,6 +173,12 @@ public actor AnalysisPipeline {
     }
 
     public static let contentVersion = 1
+    /// Version of the image labels a photo has (`assets.labels_version`; 0: none). Labels are
+    /// asked for only while "Themen" or "Dokumente" is on (`wantsLabels`). Turned on later,
+    /// the photos analysed without them get their labels in the image step of the next run,
+    /// and only those (no second full look, no text read again). The store's migration 5
+    /// marks photos of earlier versions that have labels with 1.
+    public static let labelsVersion = 1
     /// 2: screenshot categories with whole-word flight rules and short keywords as whole words
     /// (first device test 15.11.); every stored screenshot is read once more.
     public static let textVersion = 2
@@ -326,6 +334,18 @@ public actor AnalysisPipeline {
     }
 
     public func update(settings: OrganizationSettings) { self.settings = settings }
+
+    /// Whether the image step asks for labels: they serve "Themen" and "Dokumente" (and the
+    /// search for things in photos, "Hund", "Rechnung").
+    public static func wantsLabels(_ settings: OrganizationSettings) -> Bool {
+        settings.enabledAreas.contains(.imageCategories) || settings.enabledAreas.contains(.documents)
+    }
+
+    /// A change of the settings that gives the image step work on photos analysed already
+    /// (their labels): the app starts a run after it, as after new photos.
+    public static func settingsChangeNeedsRun(from old: OrganizationSettings, to new: OrganizationSettings) -> Bool {
+        !wantsLabels(old) && wantsLabels(new)
+    }
 
     /// What runs without an explicit scope work on. First device test 15.11.: "nur 2026" at
     /// the start applied to the first run only; every later run suggested the whole library.
@@ -496,6 +516,8 @@ public actor AnalysisPipeline {
 
         // The photos this run analyses: all of them, or one year and the trips that touch it.
         let range = Self.dateRange(of: scope, calendar: calendar)
+        // Read once: the workload said below and the image step count the same photos.
+        let labels = Self.wantsLabels(settings) ? Self.labelsVersion : nil
         let scoped: [AssetSnapshot]
         if let range {
             let inYear = Set(all.filter { $0.creationDate.map(range.contains) ?? false }.map(\.id))
@@ -505,7 +527,7 @@ public actor AnalysisPipeline {
             scoped = all
         }
         onProgress(Progress(stage: .patterns, completed: grouped.of, total: grouped.of,
-                            workload: try await workload(all: all, scoped: scoped, range: range)))
+                            workload: try await workload(all: all, scoped: scoped, range: range, labels: labels)))
 
         // 3. Places
         let placeOutcome = try await resolvePlaces(scoped, trips: trips, frequent: frequent, refining: mode == .refinement, onProgress: onProgress)
@@ -519,12 +541,14 @@ public actor AnalysisPipeline {
 
         // 4. Content
         let peopleRequest = ContentAnalysisRequest(
-            classify: settings.enabledAreas.contains(.imageCategories) || settings.enabledAreas.contains(.documents),
+            classify: labels != nil,
             detectFaces: settings.people.faceGroupingEnabled && settings.enabledAreas.contains(.peopleAndPets),
             detectAnimals: settings.people.petGroupingEnabled && settings.enabledAreas.contains(.peopleAndPets),
             featurePrint: true
         )
-        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, within: range)
+        // With labels wanted, also the photos analysed while they were not: only their labels
+        // are asked for (`labelsOnly` below). Each counts as one photo, like a full look.
+        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range)
         // Shown over the whole library: after a pause the count goes on from what is done
         // (first device test 15.11.: "1.450 von 14.332", then "2.700 von 12.708").
         let inRange = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
@@ -569,11 +593,13 @@ public actor AnalysisPipeline {
             if await accessChanged() { report.pausedBecause = .accessRevoked; return report }
             // Deferred photos can come back only without a cursor (behind it they are past).
             let limit = batchSize + (cursor == nil ? deferred.count : 0)
-            var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: limit, olderThan: cursor, within: range)
+            var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, limit: limit,
+                                                            olderThan: cursor, within: range)
             if raw.isEmpty, cursor != nil {
                 // Past the oldest dated photo: one plain pass picks up photos without a date.
                 cursor = nil
-                raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, limit: batchSize + deferred.count, within: range)
+                raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
+                                                            limit: batchSize + deferred.count, within: range)
             }
             var batch = raw.filter { !deferred.contains($0.id) }
             if batch.isEmpty { break }
@@ -590,11 +616,25 @@ public actor AnalysisPipeline {
             let batchStart = now()
             var cut = false
             var next = 0
+            // Photos analysed already that only need their labels ("Themen" or "Dokumente"
+            // turned on since): the earlier result, which gets the labels of a look that asks
+            // for nothing else. Their marks are set like those of a full look.
+            // A photo given up as unreadable has no result to add to: it gets one more full look
+            // (given up again if it still cannot be read).
+            var labelsOnly = labels == nil ? [:]
+                : try await store.analyzedResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion, of: batch.map(\.id))
+                    .filter { $0.value.failedAttempts == nil }
             // Decided without looking at the image: labels stored already, or a photo that
             // could not be read a short while ago (not again in this run).
             batch = batch.filter { asset in
                 guard let previous = stored[asset.id] else { return true }
                 if previous.failedAttempts == nil {
+                    // Read before, but without labels (stored while they were not wanted):
+                    // only the labels are asked for. A photo that has labels keeps them.
+                    if labels != nil, previous.labels.isEmpty {
+                        labelsOnly[asset.id] = previous
+                        return true
+                    }
                     finished.append(asset.id)
                 } else if !previous.isDueForRetry(now: now()) {
                     deferred.insert(asset.id)
@@ -622,9 +662,14 @@ public actor AnalysisPipeline {
                         }
                         next += 1
                         inFlight += 1
+                        let earlier = labelsOnly[asset.id]
                         group.addTask {
                             do {
-                                return (asset, .success(try await analyzer.analyzeContent(asset, request: peopleRequest)))
+                                guard let earlier else {
+                                    return (asset, .success(try await analyzer.analyzeContent(asset, request: peopleRequest)))
+                                }
+                                let fresh = try await analyzer.analyzeContent(asset, request: .labelsOnly)
+                                return (asset, .success(earlier.addingLabels(of: fresh)))
                             } catch {
                                 return (asset, .failure(error))
                             }
@@ -637,6 +682,7 @@ public actor AnalysisPipeline {
                         results.append((asset.id, result))
                         finished.append(asset.id)
                         analyzed += 1
+                        if labelsOnly[asset.id] != nil { report.labelsAdded += 1 }
                         if !asset.isScreenshotLike {
                             lookedAt.append(asset.id)
                             if lookedAt.count > 3 { lookedAt.removeFirst() }
@@ -670,7 +716,12 @@ public actor AnalysisPipeline {
                     }
                 }
             }
-            try await store.saveResults(results, kind: "content", version: Self.contentVersion, markingAnalyzed: finished)
+            // With labels wanted, every photo done here has its labels: looked at with them
+            // asked for, labels stored before, or given up (not readable, also without labels).
+            // A photo that only needed its labels and could not be read now (it was before) is
+            // given up for them as well: its earlier result stays, nothing is tried every run.
+            try await store.saveResults(results, kind: "content", version: Self.contentVersion, markingAnalyzed: finished,
+                                        labelsVersion: labels)
             if cancelled { throw CancellationError() }
             if cut {
                 // Goes on behind the last photo looked at (same order as the store's query);
@@ -772,7 +823,7 @@ public actor AnalysisPipeline {
 
     /// How much work this run has (see `AnalysisWorkload`): the amounts over the part of the
     /// library the run works on, and what is still to do in the image and text steps.
-    private func workload(all: [AssetSnapshot], scoped: [AssetSnapshot], range: Range<Date>?) async throws -> AnalysisWorkload {
+    private func workload(all: [AssetSnapshot], scoped: [AssetSnapshot], range: Range<Date>?, labels: Int?) async throws -> AnalysisWorkload {
         let photos = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
         let screenshots = scoped.filter(\.isScreenshotLike)
         let read = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
@@ -789,7 +840,7 @@ public actor AnalysisPipeline {
             photos: photos,
             located: located.count,
             screenshots: screenshots.count,
-            contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, within: range),
+            contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range),
             textLeft: screenshots.filter { read[$0.id] == nil }.count,
             placesLeft: placesLeft
         )

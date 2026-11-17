@@ -86,6 +86,8 @@ public actor SortlyStore: PlanJournal {
                         || row["pixel_width"]?.int != a.pixelWidth || row["pixel_height"]?.int != a.pixelHeight {
                         try db.execute("DELETE FROM analysis_results WHERE asset_id = ? AND kind IN ('content', 'text')", [id])
                         try db.execute("DELETE FROM text_plain WHERE asset_id = ?", [id])
+                        // Its labels went with the result (the upsert below keeps this column).
+                        try db.execute("UPDATE assets SET labels_version = 0 WHERE id = ?", [id])
                     }
                 }
                 try db.execute("""
@@ -157,9 +159,11 @@ public actor SortlyStore: PlanJournal {
     /// where it stopped instead of skipping every already-analyzed photo again: without it a
     /// first run over 100,000 photos spent about 18 s in this query alone.
     /// `within`: only photos taken in this time (a trial run over one year).
-    public func assetsNeedingAnalysis(version: Int, limit: Int, olderThan last: AssetSnapshot? = nil, within range: Range<Date>? = nil) throws -> [AssetSnapshot] {
-        var filter = "analysis_version < ?"
-        var values: [SQLValue] = [.integer(Int64(version))]
+    /// `labelsVersion`: also the photos whose image labels are older than this (asked for
+    /// only while labels are wanted: "Themen" or "Dokumente" on). `nil`: labels are not wanted.
+    public func assetsNeedingAnalysis(version: Int, labelsVersion: Int? = nil, limit: Int, olderThan last: AssetSnapshot? = nil,
+                                      within range: Range<Date>? = nil) throws -> [AssetSnapshot] {
+        var (filter, values) = Self.needingAnalysis(version: version, labelsVersion: labelsVersion)
         if let range {
             filter += " AND creation_date >= ? AND creation_date < ?"
             values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
@@ -174,18 +178,27 @@ public actor SortlyStore: PlanJournal {
         return try db.query("SELECT * FROM assets WHERE \(filter) ORDER BY creation_date DESC, id DESC LIMIT ?", values + [.integer(Int64(limit))]).map(Self.asset)
     }
 
-    public func countNeedingAnalysis(version: Int, within range: Range<Date>? = nil) throws -> Int {
-        guard let range else {
-            return try db.query("SELECT COUNT(*) AS n FROM assets WHERE analysis_version < ?", [.integer(Int64(version))]).first?["n"]?.int ?? 0
+    /// See `assetsNeedingAnalysis` (the same photos).
+    public func countNeedingAnalysis(version: Int, labelsVersion: Int? = nil, within range: Range<Date>? = nil) throws -> Int {
+        var (filter, values) = Self.needingAnalysis(version: version, labelsVersion: labelsVersion)
+        if let range {
+            filter += " AND creation_date >= ? AND creation_date < ?"
+            values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
         }
-        return try db.query("SELECT COUNT(*) AS n FROM assets WHERE analysis_version < ? AND creation_date >= ? AND creation_date < ?",
-                            [.integer(Int64(version)), .real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]).first?["n"]?.int ?? 0
+        return try db.query("SELECT COUNT(*) AS n FROM assets WHERE \(filter)", values).first?["n"]?.int ?? 0
+    }
+
+    private static func needingAnalysis(version: Int, labelsVersion: Int?) -> (filter: String, values: [SQLValue]) {
+        guard let labelsVersion else { return ("analysis_version < ?", [.integer(Int64(version))]) }
+        return ("(analysis_version < ? OR labels_version < ?)", [.integer(Int64(version)), .integer(Int64(labelsVersion))])
     }
 
     /// The results of one batch and the photos it is done with, in one transaction: one write
     /// per batch instead of one per photo, and a batch is either stored with its marks or not
     /// at all (a run ended in between does it again).
-    public func saveResults<T: Encodable>(_ results: [(AssetID, T)], kind: String, version: Int, markingAnalyzed done: [AssetID]) throws {
+    /// `labelsVersion`: the photos in `done` also have their image labels (of this version).
+    public func saveResults<T: Encodable>(_ results: [(AssetID, T)], kind: String, version: Int, markingAnalyzed done: [AssetID],
+                                          labelsVersion: Int? = nil) throws {
         guard !results.isEmpty || !done.isEmpty else { return }
         try db.transaction {
             for (asset, value) in results {
@@ -194,9 +207,43 @@ public actor SortlyStore: PlanJournal {
                 ])
             }
             for id in done {
-                try db.execute("UPDATE assets SET analysis_version = ? WHERE id = ?", [.integer(Int64(version)), .text(id.rawValue)])
+                if let labelsVersion {
+                    try db.execute("UPDATE assets SET analysis_version = ?, labels_version = ? WHERE id = ?",
+                                   [.integer(Int64(version)), .integer(Int64(labelsVersion)), .text(id.rawValue)])
+                } else {
+                    try db.execute("UPDATE assets SET analysis_version = ? WHERE id = ?", [.integer(Int64(version)), .text(id.rawValue)])
+                }
             }
         }
+    }
+
+    /// Of `ids`, the photos whose analysis is current (at least `version`), with their result
+    /// of `kind`: in the image step, the photos that only need their labels (`labelsVersion`).
+    public func analyzedResults<T: Decodable>(_ type: T.Type, kind: String, version: Int, of ids: [AssetID]) throws -> [AssetID: T] {
+        guard !ids.isEmpty else { return [:] }
+        var out: [AssetID: T] = [:]
+        // In chunks: SQLite allows a limited number of parameters per statement.
+        for start in stride(from: 0, to: ids.count, by: 500) {
+            let chunk = ids[start..<min(ids.count, start + 500)]
+            let marks = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
+            let rows = try db.query("""
+                SELECT r.asset_id, r.payload FROM analysis_results r JOIN assets a ON a.id = r.asset_id
+                WHERE r.kind = ? AND a.analysis_version >= ? AND r.asset_id IN (\(marks))
+                """, [.text(kind), .integer(Int64(version))] + chunk.map { .text($0.rawValue) })
+            for r in rows {
+                if let id = r["asset_id"]?.string, let v = try decode(T.self, r["payload"]) { out[AssetID(id)] = v }
+            }
+        }
+        return out
+    }
+
+    /// The labels version of each photo (0: no labels computed). Tests and diagnostics.
+    public func labelsVersions() throws -> [AssetID: Int] {
+        var out: [AssetID: Int] = [:]
+        for r in try db.query("SELECT id, labels_version FROM assets") {
+            if let id = r["id"]?.string { out[AssetID(id)] = r["labels_version"]?.int ?? 0 }
+        }
+        return out
     }
 
     public func markAnalyzed(_ ids: [AssetID], version: Int) throws {
@@ -764,7 +811,7 @@ public actor SortlyStore: PlanJournal {
             for table in ["analysis_results", "asset_places", "place_cache", "analysis_progress", "text_plain"] {
                 try db.execute("DELETE FROM \(table)")
             }
-            try db.execute("UPDATE assets SET analysis_version = 0")
+            try db.execute("UPDATE assets SET analysis_version = 0, labels_version = 0")
             // Results computed from the analysis (trips, places, groups, suggestions) go too,
             // otherwise the app would keep showing them until the next run finished.
             try db.execute("DELETE FROM settings WHERE key LIKE 'analysis.%'")

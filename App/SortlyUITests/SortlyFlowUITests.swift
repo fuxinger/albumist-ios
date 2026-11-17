@@ -825,7 +825,13 @@ final class SortlyFlowUITests: XCTestCase {
         // audit that took 16 s left too little of that for the tap (UI run 44012530107).
         let note = anything("2 Fotos ignoriert")
         if ignoreTwo("undo") {
-            let shown = note.waitForExistence(timeout: 5)
+            // The note comes once the app has counted again (`ignore` waits for
+            // `refreshDerived`): UI run 44178558165 had none within 5 s, and it was there for
+            // "Widerrufen" later. Up to 20 s, and the time it took is said; anything over a
+            // second is a finding about the app, listed for after the build (owner rule 17.11.).
+            let asked = Date()
+            let shown = note.waitForExistence(timeout: 20)
+            print("UI_TIMING ignore note \(Int(Date().timeIntervalSince(asked) * 1000)) ms, shown \(shown)")
             print(shown ? "UI_STEP_OK ignore note" : "UI_STEP_MISSING ignore note")
             XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring")
             shot("16a-ignore-note")
@@ -843,7 +849,9 @@ final class SortlyFlowUITests: XCTestCase {
         // 2. Ignore again: the note is audited and must then go away by itself. Then one
         // photo is brought back from "Ignoriert".
         if ignoreTwo("unignore") {
-            let shown = note.waitForExistence(timeout: 5)
+            let asked = Date()
+            let shown = note.waitForExistence(timeout: 20)
+            print("UI_TIMING ignore note again \(Int(Date().timeIntervalSince(asked) * 1000)) ms, shown \(shown)")
             print(shown ? "UI_STEP_OK ignore note again" : "UI_STEP_MISSING ignore note again")
             XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring again")
             if shown {

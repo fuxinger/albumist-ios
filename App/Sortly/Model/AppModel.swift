@@ -794,6 +794,12 @@ final class AppModel {
     /// (first device test 15.11.: shown once, then never again).
     /// `scope`: a new part of the library to work on; `nil` keeps the stored one.
     func startAnalysis(scope: OrganizationScope? = nil, mode: AnalysisPipeline.Mode = .incremental, userInitiated: Bool = false) {
+        MainThreadWatch.shared.section("start analysis") {
+            startAnalysisNow(scope: scope, mode: mode, userInitiated: userInitiated)
+        }
+    }
+
+    private func startAnalysisNow(scope: OrganizationScope?, mode: AnalysisPipeline.Mode, userInitiated: Bool) {
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
         // A change in "Dein Zuhause" is being applied: the run starts right after it, so it
         // never takes the run lock in the middle of the change. Several requests meanwhile are
@@ -1033,6 +1039,10 @@ final class AppModel {
 
     /// A run starts: everything the card measured for the run before is forgotten.
     private func beginCard() {
+        MainThreadWatch.shared.section("begin card") { beginCardNow() }
+    }
+
+    private func beginCardNow() {
         tickTask?.cancel()
         progressMailbox = ProgressMailbox()
         estimator.reset()
@@ -1382,8 +1392,10 @@ final class AppModel {
         do {
             // Results of an older matching version are matched again once (review 16.11.).
             let refresh = try await pipeline.refreshMatchesIfOutdated()
-            snapshot = refresh.snapshot
-            reopenAfterRecheck(refresh.reopened)
+            MainThreadWatch.shared.section("refresh: snapshot") {
+                snapshot = refresh.snapshot
+                reopenAfterRecheck(refresh.reopened)
+            }
             recheckedSuggestions = try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0
             recurringPlaceReport = try await pipeline.recurringPlaceReport()
             detectedHome = try await pipeline.detectedHome()
@@ -1420,21 +1432,26 @@ final class AppModel {
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
             guard derivedCalls.isNewest(call), scope == analysisScope else { return }
-            states = derived.states
-            statusReasons = derived.reasons
-            progress = derived.progress
-            leftOut = derived.leftOut
-            // Not with the early set of a first run (trips and places only): the count would
-            // be shown as final hours before the image analysis is done (review minor).
-            if recount != nil, (snapshot?.isEarly == false && !proposals.isEmpty)
-                || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
-                recount = nil
-            }
-            analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable)
+            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot) }
         } catch {
             message = .failure(error.localizedDescription)
         }
         SpotlightIndex.scheduleUpdate(self)
+    }
+
+    /// `snapshot`: the one the status was derived from (read before the await).
+    private func assignDerived(_ derived: DerivedLibraryStatus, snapshot: ProposalSnapshot?) {
+        states = derived.states
+        statusReasons = derived.reasons
+        progress = derived.progress
+        leftOut = derived.leftOut
+        // Not with the early set of a first run (trips and places only): the count would
+        // be shown as final hours before the image analysis is done (review minor).
+        if recount != nil, (snapshot?.isEarly == false && !proposals.isEmpty)
+            || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
+            recount = nil
+        }
+        analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable)
     }
 
     // MARK: Proposals and decisions
@@ -2725,9 +2742,11 @@ final class AppModel {
         // Foreground and background runs both have a task: waited for until they really
         // ended, not for a fixed time (audit 2, 4.1).
         await analysisTask?.value
-        AnalysisMarker.reset()
-        if progress.total > 0, recount == nil {
-            recount = RecountState(fully: progress.fully, total: progress.total)
+        MainThreadWatch.shared.section("rebuild: marker reset") {
+            AnalysisMarker.reset()
+            if progress.total > 0, recount == nil {
+                recount = RecountState(fully: progress.fully, total: progress.total)
+            }
         }
         do {
             // Through the pipeline: it waits for a run or a change in "Dein Zuhause" that is
@@ -2736,8 +2755,10 @@ final class AppModel {
         } catch {
             message = .failure(error.localizedDescription)
         }
-        snapshot = nil
-        SpotlightIndex.clear()
+        MainThreadWatch.shared.section("rebuild: clear snapshot and Spotlight") {
+            snapshot = nil
+            SpotlightIndex.clear()
+        }
         await refreshDerived()
         return true
     }

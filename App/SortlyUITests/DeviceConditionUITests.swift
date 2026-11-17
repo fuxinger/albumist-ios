@@ -245,12 +245,33 @@ final class DeviceConditionUITests: XCTestCase {
             UITestOnboarding.clock("tap demo library")
             demo.tap()
         }
+        // UI run 44144000817: test07 waited the full 900 s right after test05 and nothing said
+        // what the overview showed. The state is now printed every 60 s and at the end, with a
+        // screenshot when it never got ready.
+        var lastState = Date.distantPast
         let ready = waitStable("demo library analysed", timeout: 900) {
-            (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
+            let met = (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
+            if !met && Date().timeIntervalSince(lastState) >= 60 {
+                lastState = Date()
+                printPrepareState()
+            }
+            return met
+        }
+        if !ready {
+            printPrepareState()
+            shot("prepare-not-ready")
         }
         print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
         XCTAssertTrue(ready, "The demo library was not created and analysed")
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
+    }
+
+    /// What `prepare` waits on, in one line: the headline, "Pause", "Fortsetzen", the seeding
+    /// text and the card's progress element.
+    private func printPrepareState() {
+        let headline = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ OR label == %@", "Fotos analysiert", "Analyse aktuell")).firstMatch
+        let label = (try? headline.snapshot().label) ?? "none"
+        print("UI_FACT prepare state: headline '\(label)', Pause \(app.buttons["Pause"].exists), Fortsetzen \(app.buttons["Fortsetzen"].exists), seeding \(anything("Beispielfotos werden angelegt").exists), progress '\(progressText() ?? "none")'")
     }
 
     private enum PhotoChoice { case full, limited, deny }

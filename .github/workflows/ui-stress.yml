@@ -15,6 +15,10 @@ name: UI stress
 # .github/scripts/ui_tests.py like every UI group: same retry rule for a lost simulator, and
 # the photo access is given back from the Mac when the test asks (UI_HOST_GRANT_PHOTOS).
 on:
+  # Pushing to claude/stress-run starts the run with the defaults, because a workflow that is
+  # not on main cannot be started by hand.
+  push:
+    branches: [claude/stress-run]
   workflow_dispatch:
     inputs:
       photos:
@@ -41,7 +45,7 @@ concurrency:
 
 jobs:
   stress:
-    name: UI stress ${{ inputs.photos }} photos
+    name: UI stress ${{ inputs.photos || '50000' }} photos
     runs-on: xcode-27
     # Build ~10 min, simulator ~5 min, creating 50,000 photos ~30 min, measuring `minutes`;
     # the pass itself is stopped after 130 min so the diagnostics below still run.
@@ -83,8 +87,8 @@ jobs:
         env:
           UDID: ${{ steps.sim.outputs.udid }}
           # xcodebuild hands TEST_RUNNER_* variables to the tests without the prefix.
-          TEST_RUNNER_SORTLY_STRESS_PHOTOS: ${{ inputs.photos }}
-          TEST_RUNNER_SORTLY_STRESS_MINUTES: ${{ inputs.minutes }}
+          TEST_RUNNER_SORTLY_STRESS_PHOTOS: ${{ inputs.photos || '50000' }}
+          TEST_RUNNER_SORTLY_STRESS_MINUTES: ${{ inputs.minutes || '45' }}
         run: |
           set +e
           XCTESTRUN=$(ls build/dd/Build/Products/*.xctestrun 2>/dev/null | head -1)
@@ -140,7 +144,7 @@ jobs:
       - name: Job summary
         if: always()
         env:
-          PHOTOS: ${{ inputs.photos }}
+          PHOTOS: ${{ inputs.photos || '50000' }}
         run: |
           args=()
           for log in build/*-log.txt; do [ -f "$log" ] && args+=(--swift-log "$log"); done

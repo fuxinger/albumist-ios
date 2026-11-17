@@ -14,6 +14,13 @@ on:
         description: Also build the simulator app and upload it to Appetize
         type: boolean
         default: false
+  # testflight.yml runs CI for the commit it uploads, in the same run (release: true).
+  workflow_call:
+    inputs:
+      release:
+        description: Called by testflight.yml (own concurrency group, the iOS job always runs)
+        type: boolean
+        default: false
 
 # Read-only token: no job writes to the repository.
 permissions:
@@ -24,10 +31,12 @@ env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
 
-# A new push to the same branch or PR cancels the run of the previous one. CI is not in the Mac
-# queue of the UI runs and stress passes (ui.yml, "concurrency"); see the ios job.
+# A new push to the same branch or PR cancels the run of the previous one. Called by
+# testflight.yml, CI has a group of its own for that TestFlight run, so a push to main never
+# cancels the tests of a build. CI is not in the Mac queue of the UI runs and stress passes
+# (ui.yml, "concurrency"); see the ios job.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ inputs.release && format('testflight-ci-{0}', github.run_id) || format('ci-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
@@ -63,8 +72,10 @@ jobs:
   changes:
     # Decides whether the macOS job has to run: it is skipped when only *.md / docs/ changed
     # since the last commit whose iOS tests passed (pull_request path filters cannot do this,
-    # they look at the whole PR diff).
+    # they look at the whole PR diff). Not in a TestFlight run: there the iOS job always runs,
+    # so the run tests the commit it uploads itself.
     name: Changes
+    if: ${{ !inputs.release }}
     uses: ./.github/workflows/changes.yml
     permissions:
       contents: read

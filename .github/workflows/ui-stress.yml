@@ -8,7 +8,8 @@ name: UI stress
 #
 # Which pass when (rule of the owner, 17.11.):
 #   - before each TestFlight build: the small pass, 10,000 photos and 15 min of measuring
-#     (~45 min in all). These are the defaults of a run by hand:
+#     (~45 min in all). Every TestFlight run calls this workflow for its commit and uploads
+#     only when the pass is green (testflight.yml). The same pass by hand (the defaults):
 #       gh workflow run ui-stress.yml --ref BRANCH
 #   - weekly at night and before the App Store launch: the full pass, 50,000 photos and 45 min
 #     of measuring (~1.5 h, up to ~2.5 h when creating the photos is slow). The schedule below
@@ -50,6 +51,13 @@ on:
         description: Minutes of analysis measured after the photos are created; 45 for the full pass
         type: string
         default: '15'
+  # testflight.yml runs the small pass for the commit it uploads, in the same run.
+  workflow_call:
+    inputs:
+      release:
+        description: Called by testflight.yml (own concurrency group, outside the Mac queue)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -58,8 +66,8 @@ env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
   # The size of this pass. A run by hand takes its inputs (defaults: the small pass before each
-  # TestFlight build); a scheduled run has no inputs (they are empty then) and is the full pass.
-  # The job name below repeats this fallback.
+  # TestFlight build); a scheduled run has no inputs (they are empty then) and is the full pass;
+  # a TestFlight run passes neither and gets the small pass. The job name repeats this fallback.
   STRESS_PHOTOS: ${{ inputs.photos || (github.event_name == 'schedule' && '50000' || '10000') }}
   STRESS_MINUTES: ${{ inputs.minutes || (github.event_name == 'schedule' && '45' || '15') }}
 
@@ -67,9 +75,10 @@ env:
 # time across all branches. A running pass is never cancelled; at most one run waits, and a
 # run that joins later takes its place (the waiting one is cancelled and has to be started
 # again). So start a pass by hand when nothing else waits; the weekly pass starts when the
-# queue is usually empty.
+# queue is usually empty. The pass of a TestFlight run has a group of its own for that run,
+# like its UI flow: the queue never holds or replaces it.
 concurrency:
-  group: mac-queue
+  group: ${{ inputs.release && format('testflight-stress-{0}', github.run_id) || 'mac-queue' }}
   cancel-in-progress: false
 
 jobs:

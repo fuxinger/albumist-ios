@@ -53,6 +53,13 @@ on:
   pull_request:
     paths-ignore: ['**.md']
   workflow_dispatch:
+  # testflight.yml runs the UI flow for the commit it uploads, in the same run (release: true).
+  workflow_call:
+    inputs:
+      release:
+        description: Called by testflight.yml (own concurrency group, outside the Mac queue)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -71,11 +78,10 @@ env:
 #     and between UI runs and stress passes, and a run replaced like that has to be started
 #     again ("Re-run all jobs") once the queue is free. The agent rule "only one Mac-heavy
 #     strand at a time" (for the owner to add to the project rules) keeps that rare.
-# Not in the queue, so never kept waiting or replaced by another branch's run:
-#   - the release branch: UI runs on main or claude/sortly-app, and those of the pull request
-#     from claude/sortly-app, keep their own group per ref as before (one runs, the newest
-#     waits). The TestFlight and release gate (ci_gate.py) waits for exactly these runs; a
-#     replaced one would stop the upload.
+# Not in the queue, so never kept waiting or replaced by another run:
+#   - the UI flow of a TestFlight run (testflight.yml calls this workflow with release: true):
+#     a group of its own for that run, because a replaced or cancelled UI part would stop the
+#     upload. Start TestFlight when the queue is idle; then it is the one Mac-heavy strand.
 #   - CI's macOS job (ci.yml), the quick verdict of every push (one Mac, ~20 min): in this
 #     group it would wait behind the UI run of its own commit (about an hour), and while it
 #     waits the next run to join, e.g. the UI run of the next push, would cancel it.
@@ -84,9 +90,7 @@ env:
 # analysis). With one group for all branches, cancel-in-progress would cancel whatever runs,
 # another branch's run too.
 concurrency:
-  group: >-
-    ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/sortly-app'
-    || github.head_ref == 'claude/sortly-app') && format('ui-{0}', github.ref) || 'mac-queue' }}
+  group: ${{ inputs.release && format('testflight-ui-{0}', github.run_id) || 'mac-queue' }}
   cancel-in-progress: false
 
 jobs:

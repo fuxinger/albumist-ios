@@ -1,9 +1,10 @@
 # Albumist auf dem eigenen iPhone: TestFlight einrichten
 
 Mit TestFlight läuft Albumist als echte App auf dem iPhone, mit der echten Mediathek und ohne
-Zeitlimit. Jede neue Version kommt danach von selbst: GitHub baut sie, signiert sie und lädt sie
-zu TestFlight hoch (`.github/workflows/testflight.yml`). Alles hier geht vom Windows-PC im
-Browser oder vom iPhone aus; ein Mac ist nicht nötig.
+Zeitlimit. Eine neue Version testet, baut, signiert und lädt GitHub zu TestFlight hoch, sobald
+jemand den Lauf startet: Actions > **TestFlight** > Run workflow auf `main`
+(`.github/workflows/testflight.yml`). Alles hier geht vom Windows-PC im Browser oder vom iPhone
+aus; ein Mac ist nicht nötig.
 
 ## 1. Apple Developer Program beitreten (einmalig, 99 € im Jahr)
 
@@ -45,7 +46,8 @@ https://github.com/fuxinger/sortly-ios/settings/secrets/actions > **New reposito
 | `ASC_KEY_P8` | Inhalt der .p8-Datei (mit Editor öffnen, alles kopieren, auch die Zeilen BEGIN und END) |
 | `APPLE_TEAM_ID` | Team-ID |
 
-Danach baut GitHub bei jeder neuen Version automatisch einen TestFlight-Build.
+Danach baut GitHub einen TestFlight-Build, sobald jemand Actions > **TestFlight** > Run workflow
+auf `main` startet.
 
 ## 5. Auf dem iPhone installieren
 
@@ -103,35 +105,36 @@ Actions > **TestFlight feedback** > Run workflow.
   Externe Tester per Link brauchen eine kurze Beta-Prüfung beim ersten Build.
 - Ein TestFlight-Build läuft 90 Tage.
 - Die Bundle-ID `app.albumist.ios` lässt sich nach dem ersten Hochladen nicht mehr ändern.
-- Ablauf in GitHub: sobald CI für den Commit grün ist, baut ein Mac schon das Archiv; signiert
-  und hochgeladen wird erst, wenn auch der UI-Lauf genau dieses Commits grün ist, und nur ein
-  Archiv genau dieses Commits. Ohne UI-Lauf auf diesem Commit gibt es keinen Upload (und kein
-  Release): der UI-Lauf startet nur für Pull Requests, auf deren letztem Commit.
-- Von selbst lädt nur ein Push auf `claude/sortly-app` hoch. Ein Merge in `main` startet keinen
-  Build (16.11.: das Zusammenführen der Webseite startete sonst einen Build mit altem App-Stand).
-  `main` wird von Hand freigegeben: Actions > **UI flow** > Run workflow für `main`, wenn grün:
-  Actions > **TestFlight** > Run workflow für `main`; die Prüfung wartet nach grünem CI
-  15 Minuten auf einen UI-Lauf und meldet sonst „no UI flow run“.
-- Ändert ein Push seit dem letzten hochgeladenen Build (Git-Tag `build-<Nummer>`) nur die
-  Webseite (`website/`) oder Dokumente (`docs/`, `*.md`), startet kein Build
-  (`.github/scripts/app_changed.py`). Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl,
-  den Lauf mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
-  Archiv nicht mehr und schlägt absichtlich fehl.
-- Härtetest (Regel Fuchs, 17.11.2026): vor jedem TestFlight-Build läuft der kleine Durchgang mit
-  10.000 Fotos und 15 Minuten Messung (rund 45 Minuten): Actions > **UI stress** > Run workflow
-  auf dem Stand, der hochgeladen werden soll, Vorgaben unverändert lassen (oder
-  `gh workflow run ui-stress.yml --ref <Zweig>`). Der volle Durchgang mit 50.000 Fotos läuft nur
-  wöchentlich nachts (Sonntag 00:40 UTC, erst wenn der Workflow in `main` ist) und vor dem Start
-  im App Store.
+- Ablauf in GitHub (ein Lauf, Profi-Analyse, 17.11.2026): Actions > **TestFlight** > Run workflow
+  auf `main` (oder `gh workflow run testflight.yml --ref main`). Der Lauf prüft genau diesen
+  Commit selbst: erst CI (Regeln, Kern-Tests, iOS-Tests auf einem Mac), dann nebeneinander die
+  UI-Tests und den kleinen Härtetest. Nur wenn alles grün ist, baut ein Mac das Archiv, prüft
+  es, signiert es beim Export und lädt es hoch; danach bekommt der Commit das Git-Tag
+  `build-<Nummer>`, und „Was testen“ wird gesetzt. Rund zwei Stunden. Kein Teil wartet auf
+  andere Läufe.
+- Nichts startet von selbst, kein Push und kein Merge in `main` (16.11.: das Zusammenführen der
+  Webseite startete sonst einen Build mit altem App-Stand). Bis der Zweig `claude/sortly-app`
+  stillgelegt ist (Profi-Analyse Top 1), geht der Lauf auch dort, ebenfalls nur von Hand.
+- Schlägt ein Teil fehl (Test rot, Simulator-Ausfall, Hochladen), den Lauf mit **Re-run failed
+  jobs** neu starten; es gibt kein Archiv mehr, das zwischen zwei Jobs verloren gehen kann.
+  Notfall: **force** lädt ohne Tests hoch.
+- Härtetest (Regel Fuchs, 17.11.2026): vor jedem TestFlight-Build der kleine Durchgang mit
+  10.000 Fotos und 15 Minuten Messung (rund 45 Minuten). Er läuft im TestFlight-Lauf neben den
+  UI-Tests und muss grün sein, sonst wird nicht hochgeladen. Von Hand: Actions > **UI stress** >
+  Run workflow, Vorgaben unverändert lassen (oder `gh workflow run ui-stress.yml --ref <Zweig>`).
+  Der volle Durchgang mit 50.000 Fotos läuft nur wöchentlich nachts (Sonntag 00:40 UTC, erst wenn
+  der Workflow in `main` ist) und vor dem Start im App Store.
 - Mac-Warteschlange (Profi-Analyse, 17.11.2026): UI-Läufe und Härtetests aller Zweige laufen
   nacheinander, nie zwei zugleich. Es wartet höchstens einer; startet ein weiterer, ersetzt er den
-  wartenden, der dann als „abgebrochen“ erscheint und später neu gestartet werden muss. Läufe auf
-  `main` und `claude/sortly-app` (auch im Pull Request von `claude/sortly-app`) stehen nicht in
-  dieser Schlange, denn auf sie wartet der Upload: Läufe anderer Zweige halten sie nicht auf und
-  ersetzen sie nicht (je Zweig läuft wie bisher einer, und der neueste wartet).
+  wartenden, der dann als „abgebrochen“ erscheint und später neu gestartet werden muss. Ein
+  TestFlight-Lauf steht nicht in dieser Schlange: seine UI-Tests und sein Härtetest gehören nur zu
+  ihm, nichts hält sie auf oder ersetzt sie. Darum TestFlight starten, wenn die Schlange leer ist.
+- Eine GitHub-Version (Workflow **Release**) braucht weiter einen grünen CI-Lauf und einen grünen
+  Lauf **UI flow** genau dieses Commits; die Tests im TestFlight-Lauf zählen dafür nicht
+  (`.github/scripts/ci_gate.py`).
 - Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,
   daneben die Build-Nummer `CFBundleVersion` und das Xcode `DTXcodeBuild`). Vor dem Hochladen prüft
-  der Lauf alle drei und dass jede Datei der App Byte für Byte die archivierte ist (Liste aller
-  Dateien mit SHA-256, verglichen vor dem Signieren, weil das Signieren die App-Datei ändert). Gebaut wird mit dem festgelegten Xcode aus
+  der Lauf alle drei. Archiv und Export laufen im selben Job auf demselben Mac, dazwischen wird
+  nichts weitergereicht. Gebaut wird mit dem festgelegten Xcode aus
   `.github/toolchain.json`, nie mit einer Beta. Nach dem Hochladen trägt der Commit das Git-Tag
   `build-<Nummer>` (`git show build-41` zeigt den Code von Build 41).

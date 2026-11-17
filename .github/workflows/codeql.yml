@@ -6,8 +6,8 @@ name: CodeQL
 #   - swift: needs a real build on macOS, so it runs nightly and on pull requests only when a
 #     push changed Swift sources since the last analysed commit.
 # Sources/CSQLite is a module map and a header shim with no C code, so c-cpp is not analysed.
-# Not part of the TestFlight gate (ci_gate.py only looks at CI and the UI flow): a finding never
-# blocks a build for the testers; it is reviewed in the Security tab.
+# Not part of a TestFlight run (testflight.yml runs CI, the UI flow and the stress pass): a
+# finding never blocks a build for the testers; it is reviewed in the Security tab.
 on:
   pull_request:
     paths-ignore: ['**.md']

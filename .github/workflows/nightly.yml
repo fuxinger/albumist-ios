@@ -157,8 +157,9 @@ jobs:
           retention-days: 7
 
   # TODO(ui.yml): the UI flow in English and on a second device size (test plan A11, A16).
-  # ui.yml has no `workflow_call` trigger yet (another change is turning it into a parallel
-  # matrix). Once it accepts inputs, add here, without touching ui.yml from this file:
+  # ui.yml can be called now (`workflow_call`, testflight.yml uses it), but its only input is
+  # `release`. Once it also takes ref, language and device, add here (a call without
+  # release: true joins the Mac queue, see ui.yml):
   #
   # ui-english:
   #   needs: pick

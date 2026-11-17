@@ -123,11 +123,17 @@ Actions > **TestFlight feedback** > Run workflow.
   bekommt oder stillgelegt ist (Profi-Analyse Top 1). Mit der neuen Datei geht der Lauf auch
   dort nur von Hand.
 - Ist ein Test rot: den Fehler beheben und einen **neuen** Lauf starten (wackelnde Tests werden
-  gezählt und behoben, nie versteckt). **Re-run failed jobs** nur, wenn die Technik versagt hat:
-  Runner weg oder nicht gestartet, Simulator nicht hochgefahren oder verloren, Hochladen zu App
-  Store Connect abgebrochen. Der Upload-Job eines solchen Versuchs listet alles, was in früheren
-  Versuchen desselben Laufs fehlschlug, als Warnung und in seiner Zusammenfassung. Die gebauten
-  UI-Tests bleiben dafür 3 Tage liegen; danach einen neuen Lauf starten.
+  gezählt und behoben, nie versteckt). Ein roter Test wird nie per Wiederholung grün: der
+  Upload-Job eines späteren Versuchs liest alle Schritte der früheren Versuche und lädt nicht
+  hoch, wenn einer in einem Test, einer Regel, einem Bau oder beim Archiv scheiterte
+  (`.github/scripts/earlier_attempts.py`). **Re-run failed jobs** hilft nur, wenn die Technik
+  versagt hat: Runner oder Container nicht gestartet, Simulator nicht hochgefahren, gebaute Tests
+  oder Checkout nicht angekommen, Hochladen zu App Store Connect abgebrochen. Solche Ausfälle
+  stehen als Warnung in der Zusammenfassung des Upload-Jobs und in der Nachricht des Tags
+  („attempt 2; earlier attempts: …“). Kann der Upload-Job die früheren Versuche nicht lesen
+  (GitHub-API antwortet nicht), lädt er ebenfalls nicht hoch; dann nur ihn wiederholen. Die
+  gebauten UI-Tests bleiben für **Re-run failed jobs** 3 Tage liegen; danach einen neuen Lauf
+  starten.
 - Notfall: **force** lädt ohne Tests hoch. So ein Build ist überall als „FORCED – untested“
   markiert: in der Zusammenfassung des Upload-Jobs, in der Nachricht des Tags `build-<Nummer>`
   und als erste Zeile von „Was testen“.

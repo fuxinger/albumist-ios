@@ -87,8 +87,8 @@ env:
 #     seen in a real run: check on the first TestFlight run that its UI flow and stress pass
 #     do not wait for "mac-queue".
 #   - the weekly full stress pass (ui-stress.yml, group "stress-weekly").
-#   - pull requests from forks: a group per pull request ("ui-fork-<ref>"), so that a run from
-#     outside the repository can neither replace nor hold up the runs in the queue.
+#   - pull requests from forks: one group of their own ("ui-fork"), so that a run from outside
+#     the repository can neither replace nor hold up the runs in the queue.
 #   - CI's macOS job (ci.yml), the quick verdict of every push (one Mac, ~20 min): in this
 #     group it would wait behind the UI run of its own commit (about an hour), and while it
 #     waits the next run to join, e.g. the UI run of the next push, would cancel it.
@@ -99,7 +99,7 @@ env:
 concurrency:
   group: >-
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ui-{0}', github.run_id)
-    || (github.event.pull_request.head.repo.fork && format('ui-fork-{0}', github.ref) || 'mac-queue') }}
+    || (github.event.pull_request.head.repo.fork && 'ui-fork' || 'mac-queue') }}
   cancel-in-progress: false
 
 jobs:
@@ -302,6 +302,8 @@ jobs:
           name: sorting-show-video
           path: build/sorting-show.mp4
           retention-days: 14
+          # "Re-run failed jobs" uploads it again under the same name.
+          overwrite: true
       - name: Upload results
         # Crash logs, screens and attachments of a failed test are in the result bundles.
         if: failure()
@@ -315,13 +317,16 @@ jobs:
             sim-boot.log
           retention-days: 7
           if-no-files-found: ignore
+          # "Re-run failed jobs" uploads it again under the same name.
+          overwrite: true
       - name: Keep the retry record for the run summary
         # build/flaky-*.json: repeats after a simulator failure and the tests that passed only
-        # on them (ui_tests.py); the summary job below counts them over all groups.
+        # on them (ui_tests.py); the summary job below counts them over all groups. One record
+        # per attempt: "Re-run failed jobs" keeps the earlier attempt's record next to its own.
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ui-flaky-${{ matrix.group }}
+          name: ui-flaky-${{ matrix.group }}-attempt-${{ github.run_attempt }}
           path: build/flaky-*.json
           retention-days: 14
           if-no-files-found: ignore
@@ -343,13 +348,14 @@ jobs:
         with:
           sparse-checkout: .github
           persist-credentials: false
-      - name: Retry records of the groups
+      - name: Download retry records
+        # ui-flaky-<group>-attempt-<n>, every attempt's own (not merged: the records of one group
+        # have the same file name in every attempt).
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ui-flaky-*
           path: flaky
-          merge-multiple: true
       - name: Count repeats and flaky tests
         run: |
-          shopt -s nullglob
-          python3 .github/scripts/ui_tests.py flaky-summary flaky/*.json >> "$GITHUB_STEP_SUMMARY"
+          mapfile -t records < <(find flaky -name 'flaky-*.json' 2>/dev/null | sort)
+          python3 .github/scripts/ui_tests.py flaky-summary "${records[@]}" >> "$GITHUB_STEP_SUMMARY"

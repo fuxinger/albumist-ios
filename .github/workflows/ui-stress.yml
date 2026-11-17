@@ -243,11 +243,11 @@ jobs:
         # build/flaky-stress.json (ui_tests.py): a repeat after a simulator failure and whether
         # test12 passed only on it. A TestFlight run counts it with the UI groups' records
         # ("Repeats and flaky tests" in testflight.yml); a pass on its own shows it in this
-        # job's summary.
+        # job's summary. One record per attempt, like the UI groups' (ui.yml).
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: flaky-stress
+          name: flaky-stress-attempt-${{ github.run_attempt }}
           path: build/flaky-*.json
           retention-days: 14
           if-no-files-found: ignore
@@ -265,3 +265,5 @@ jobs:
             sim-boot.log
           retention-days: 7
           if-no-files-found: ignore
+          # "Re-run failed jobs" uploads it again under the same name.
+          overwrite: true

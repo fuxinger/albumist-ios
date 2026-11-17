@@ -192,6 +192,8 @@ jobs:
           name: localizations
           path: build/loc
           retention-days: 7
+          # "Re-run failed jobs" may upload it again under the same name.
+          overwrite: true
       - name: Job summary
         if: always()
         run: |
@@ -207,6 +209,8 @@ jobs:
             build-log.txt
             build/TestResults.xcresult
           retention-days: 7
+          # "Re-run failed jobs" uploads it again under the same name.
+          overwrite: true
 
   simulator:
     # Manual only (workflow_dispatch input "appetize"): builds the simulator app and uploads it
@@ -248,6 +252,8 @@ jobs:
           name: Sortly-simulator-app
           path: build/Sortly-simulator.zip
           retention-days: 30
+          # "Re-run failed jobs" may upload it again under the same name.
+          overwrite: true
       - name: Upload to Appetize for browser testing
         # Runs only when the repository has the secret APPETIZE_TOKEN. Keeps one app
         # (note "sortly-ci") and updates it, so the test link stays the same.

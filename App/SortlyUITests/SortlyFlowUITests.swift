@@ -1342,8 +1342,15 @@ final class SortlyFlowUITests: XCTestCase {
             return
         }
         guard tap(app.buttons["plan.apply"], "start plan for interruption", timeout: 30) else { return }
+        // The app is closed only once the plan has left its preview (the sorting show or the
+        // running card instead of the button): a fixed 5 s after the tap closed it before the
+        // plan had started on a slow simulator, and no card came (UI run 44012530107).
+        let tapped = Date()
+        let left = waitGone(app.buttons["plan.apply"], timeout: 30)
+        print("UI_FACT plan left its preview: \(left) after \(Int(Date().timeIntervalSince(tapped))) s")
         sleep(5)
         print("UI_FACT plan running when the app was closed: \(anything("Alben werden angelegt").exists)")
+        shot("49-plan-before-close")
         app.terminate()
         sleep(2)
         launch()

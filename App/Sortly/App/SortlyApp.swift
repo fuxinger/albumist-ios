@@ -8,6 +8,8 @@ struct SortlyApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // UI runs only: a full console pipe held the main thread (see the function).
+        UITestSupport.moveConsoleToFile()
         BackgroundWork.register()
         UITestSupport.prepareLaunch()
         // Before launch ends, so the tap on "Analyse fertig" that opened the app arrives.

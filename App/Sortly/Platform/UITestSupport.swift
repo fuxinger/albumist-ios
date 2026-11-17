@@ -29,6 +29,26 @@ enum UITestSupport {
     /// "Neu aufbauen" after a start error, to test that the decisions come back.
     static let rebuildsDatabase: Bool = isRunning && ProcessInfo.processInfo.arguments.contains("-SortlyUITestRebuildDatabase")
 
+    /// UI runs only, first thing at launch: the app's stderr and stdout go into a file in its
+    /// tmp folder instead of the pipe the test runner gave it. In a UI run every os_log line
+    /// is also written to stderr, XCTest's own snapshot code on the main thread logs too, and
+    /// that pipe was emptied only slowly (presumably by the runner, which waits for that very
+    /// snapshot meanwhile): the main thread stood in `writev` (stacks of UI run 44032718289:
+    /// `XCElementSnapshot elementType` > `_os_log_impl_mirror_to_stderr` > `writev`) until the
+    /// query timed out, the "Failed to get matching snapshots" of the UI tests. A file never
+    /// makes a writer wait. The system log (`log stream`, where the workflow reads the app's
+    /// lines) is not affected. A phone without a debugger never mirrors the log, so this
+    /// never happens to a user.
+    static func moveConsoleToFile() {
+        guard isRunning else { return }
+        let path = NSTemporaryDirectory() + "albumist-console.log"
+        let file = open(path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
+        guard file >= 0 else { return }
+        dup2(file, STDERR_FILENO)
+        dup2(file, STDOUT_FILENO)
+        close(file)
+    }
+
     /// `-SortlyUITestSlowAnalysis`: every photo takes a little longer, so a UI test can leave
     /// the app and switch tabs while the analysis is still busy (first device test 15.11.).
     static let slowsAnalysis: Bool = isRunning && ProcessInfo.processInfo.arguments.contains("-SortlyUITestSlowAnalysis")

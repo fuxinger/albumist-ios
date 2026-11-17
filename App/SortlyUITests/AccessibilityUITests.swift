@@ -799,9 +799,20 @@ final class AccessibilityUITests: XCTestCase {
         return true
     }
 
+    /// Taps the back button. Never the overview's settings button, its first bar button: after
+    /// the suggestions list had closed by itself, `back()` opened the settings, and every later
+    /// step of the contrast walk ran on the settings sheet until "settings" tapped its "Fertig"
+    /// (contrast run 44038288087: "close settings" missing, the screenshots show the sheet).
     private func back() {
         let bar = app.navigationBars.firstMatch
-        if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
+        let first = bar.buttons.element(boundBy: 0)
+        guard first.exists else { return }
+        if ["Einstellungen", "Settings"].contains(first.label) {
+            print("UI_FACT back: no back button, the overview is showing")
+            shot("a11y-x-back-on-overview")
+            return
+        }
+        first.tap()
     }
 
     private func shot(_ name: String) {

@@ -23,10 +23,11 @@ name: UI stress
 # skips itself, because only this workflow sets SORTLY_STRESS_PHOTOS.
 #
 # The test tries Pause a tenth into the image step. The simulator analyses about 1.75 photos/s
-# there (stress run 43833158673: 5,042 photos in 48 min), so with 10,000 photos Pause comes at
-# about minute 12 to 13 of the 15 (later on a slow simulator, then not at all: no line
-# "UI_TIMING stress pause" in the log), and with 50,000 photos only after about 60 min: the
-# 45-minute full pass measures speed, stills, answers and memory, but not Pause.
+# there (stress runs 43833158673: 5,042 photos in 48 min; 44116350940: 3,419 in 31 min), so
+# with 10,000 photos Pause comes at about minute 12 to 13 of the 15 (later on a slow simulator,
+# then not at all: no line "UI_TIMING stress pause" in the log), and with 50,000 photos only
+# after about 60 min: the 45-minute full pass measures speed, stills, answers and memory, but
+# not Pause.
 #
 # One macOS job (builds the tests itself), with the pinned Xcode and runtime and the pinned
 # Pro simulator (.github/toolchain.json, pick_simulator.py --role pro). It runs through
@@ -36,7 +37,8 @@ on:
   schedule:
     # Sunday 00:40 UTC = 01:40 in Berlin in winter, 02:40 in summer (cron has no time zones):
     # the full pass (a scheduled run has no inputs, see STRESS_PHOTOS below). Usually done by
-    # about 03:10 Berlin time in winter (04:10 in summer); the job ends 170 min after its start
+    # about 03:20 Berlin time in winter (04:20 in summer; stress run 44116350940 took 1 h 40 min:
+    # build 9, creating 23, measuring 45, diagnostics 14); the job ends 170 min after its start
     # at the latest.
     - cron: '40 0 * * 0'
   workflow_dispatch:

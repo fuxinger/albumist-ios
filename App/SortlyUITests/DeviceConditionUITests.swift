@@ -17,41 +17,19 @@ final class DeviceConditionUITests: XCTestCase {
     // MARK: Helpers (copied from SortlyFlowUITests, which stays as it is)
 
     private func launch(_ extra: [String] = []) {
-        Self.reportStalls()
+        UITestStalls.report()
         if !stallsReportedAtEnd {
             stallsReportedAtEnd = true
-            addTeardownBlock { DeviceConditionUITests.reportStalls() }
+            addTeardownBlock { UITestStalls.report() }
         }
         app = XCUIApplication()
-        let stalls = extra.contains("-SortlyUITestWatchMainLog") ? [] : ["-SortlyUITestWatchMainLog", Self.testStalls]
+        let stalls = UITestStalls.arguments(besides: extra)
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
+        UITestOnboarding.clock("launch")
         app.launch()
     }
 
     private var stallsReportedAtEnd = false
-
-    /// The app's main-thread stalls in every test, not only the stress run: the job log keeps
-    /// at most 40 of the app's own lines, and the stalls of a later test were cut off there
-    /// (test02, UI run 44002652481, a snapshot timeout with no stall line to compare). The app
-    /// writes each stall over half a second into this file (-SortlyUITestWatchMainLog, anew
-    /// at every launch).
-    private nonisolated static var testStalls: String { NSTemporaryDirectory() + "device-main-stalls.txt" }
-
-    /// The stalls of 2 s or more since the last launch, as `UI_FACT main stall 3.2 s from
-    /// 18:31:05.2 UTC` (the clock of `UI_MAIN_STALL` and of `UI_FACT slow query`).
-    private nonisolated static func reportStalls() {
-        guard let text = try? String(contentsOfFile: testStalls, encoding: .utf8) else { return }
-        try? FileManager.default.removeItem(atPath: testStalls)
-        for line in text.split(separator: "\n") {
-            let parts = line.split(separator: " ")
-            guard parts.count == 2, let end = Double(parts[0]), let ms = Int(parts[1]), ms >= 2000 else { continue }
-            let from = end - Double(ms) / 1000
-            let day = from.truncatingRemainder(dividingBy: 86_400)
-            let clock = String(format: "%02d:%02d:%04.1f", Int(day / 3600), Int(day.truncatingRemainder(dividingBy: 3600) / 60),
-                               day.truncatingRemainder(dividingBy: 60))
-            print("UI_FACT main stall \(String(format: "%.1f", Double(ms) / 1000)) s from \(clock) UTC")
-        }
-    }
 
     /// A launch on a prepared simulator: the onboarding counts as done.
     private func start(_ extra: [String] = []) {
@@ -99,6 +77,7 @@ final class DeviceConditionUITests: XCTestCase {
             if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
+        UITestOnboarding.clock("tap \(step)")
         element.tap()
         print("UI_STEP_OK \(step)")
         return true
@@ -140,6 +119,8 @@ final class DeviceConditionUITests: XCTestCase {
     private func waitStable(_ what: String, timeout: TimeInterval, stableChecks: Int = 3, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
+        UITestOnboarding.clock("wait start \(what)")
+        defer { UITestOnboarding.clock("wait end \(what)") }
         while Date() < deadline {
             let asked = Date()
             let met = condition()
@@ -245,7 +226,10 @@ final class DeviceConditionUITests: XCTestCase {
         start()
         onboardIfNeeded()
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists { demo.tap() }
+        if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists {
+            UITestOnboarding.clock("tap demo library")
+            demo.tap()
+        }
         let ready = waitStable("demo library analysed", timeout: 900) {
             (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
         }

@@ -701,8 +701,15 @@ final class AccessibilityUITests: XCTestCase {
     // MARK: Helpers (copied from SortlyFlowUITests, which another change owns)
 
     private func launch(english: Bool = false, textSize: String? = nil, dark: Bool = false) {
+        // The app's stalls and stacks of each launch (UITestStalls; the contrast run's long
+        // stalls before "close settings" had no stack, UI run 44012530107).
+        UITestStalls.report()
+        if !stallsReportedAtEnd {
+            stallsReportedAtEnd = true
+            addTeardownBlock { UITestStalls.report() }
+        }
         app = XCUIApplication()
-        var arguments = ["-SortlyUITestUnlocked"]
+        var arguments = ["-SortlyUITestUnlocked"] + UITestStalls.arguments(besides: [])
         arguments += english ? ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"] : ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE"]
         if let textSize { arguments += ["-UIPreferredContentSizeCategoryName", textSize] }
         accessibilitySize = textSize?.contains("Accessibility") ?? false
@@ -710,6 +717,8 @@ final class AccessibilityUITests: XCTestCase {
         app.launchArguments = arguments
         app.launch()
     }
+
+    private var stallsReportedAtEnd = false
 
     private func slug(_ text: String) -> String {
         text.lowercased().replacingOccurrences(of: " ", with: "-")

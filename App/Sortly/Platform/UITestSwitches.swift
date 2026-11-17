@@ -86,7 +86,8 @@ extension UITestSupport {
 
     /// `-SortlyUITestWatchMainLog <path>`: every stall over half a second also goes into this
     /// file of the test runner's ("<end as seconds since 1970> <ms>"), so the stress test can
-    /// assert that the main thread was free when Pause was tapped.
+    /// assert that the main thread was free when Pause was tapped, and every device test can
+    /// print its stalls (alone it writes the file without the `UITEST_MAIN_BLOCKED` lines).
     static let watchMainLog = value("-SortlyUITestWatchMainLog")
 
     // MARK: Writing
@@ -154,7 +155,9 @@ extension UITestSupport {
     static func prepareLaunch() {
         #if DEBUG
         if fastStart { AppModel.shared.onboardingDone = true }
-        if watchesMain { MainThreadWatch.shared.watchForStress(log: watchMainLog) }
+        if watchesMain || watchMainLog != nil {
+            MainThreadWatch.shared.watchForStress(log: watchMainLog, lines: watchesMain)
+        }
         #endif
     }
 

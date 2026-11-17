@@ -146,14 +146,16 @@ final class MainThreadWatch: @unchecked Sendable {
     /// above, `UITEST_MAIN_BLOCKED <ms> ms (longest <ms> ms)` for every stall over a second, and
     /// with `-SortlyUITestWatchMainLog <path>` every stall over half a second as
     /// "<end as seconds since 1970> <ms>" in that file of the test runner's.
+    /// `lines: false` (only `-SortlyUITestWatchMainLog`, every DeviceConditionUITests launch):
+    /// the file without the `UITEST_MAIN_BLOCKED` lines.
     @MainActor
-    func watchForStress(log path: String?) {
+    func watchForStress(log path: String?, lines: Bool = true) {
         let file = path.flatMap { path -> FileHandle? in
             FileManager.default.createFile(atPath: path, contents: nil)
             return FileHandle(forWritingAtPath: path)
         }
         lock.lock()
-        stressLines = true
+        stressLines = lines
         stressFile = file
         lock.unlock()
         start()

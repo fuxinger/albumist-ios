@@ -425,12 +425,15 @@ struct AtlasContent: View {
 struct AtlasTeaser: View {
     @Environment(AppModel.self) private var model
     @State private var outlines: [AtlasOutlines.Country] = []
+    /// Opens the atlas. The overview pushes it, so it stays open while the teaser goes away
+    /// for a moment (the atlas is worked out again during a run).
+    var onOpen: () -> Void
 
     var body: some View {
         let atlas = model.travelAtlas()
         if !atlas.countryCodes.isEmpty {
-            NavigationLink {
-                AtlasView()
+            Button {
+                onOpen()
             } label: {
                 Card {
                     AtlasMap(outlines: outlines, highlighted: atlas.countryCodes)

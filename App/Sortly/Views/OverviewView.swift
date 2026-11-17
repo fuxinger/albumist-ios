@@ -14,6 +14,14 @@ struct OverviewView: View {
     @State private var showSettings = false
     /// Lives here, not in the starter card: the card disappears once its albums are accepted.
     @State private var showStarterPlan = false
+    // The screens these open are pushed from here, not from a NavigationLink inside the
+    // condition that shows its button: a run that starts while one is open (a check for new
+    // photos after the library changed) hides the button, and a link that leaves the screen
+    // takes its pushed screen with it. The user landed back on the overview while reading
+    // the suggestions (contrast UI run 44038288087: suggestions and atlas closed by themselves).
+    @State private var showProposals = false
+    @State private var showPlan = false
+    @State private var showAtlas = false
     /// The starter set is selected only while its preview is open.
     @State private var starterSelection: AppModel.PreviewSelection?
 
@@ -49,16 +57,16 @@ struct OverviewView: View {
                 // While the analysis runs, "Schon fertig … Ansehen" on its card leads there; when it
                 // has just finished, its card has "Vorschläge prüfen" (point 3, 4: not twice).
                 if !model.openProposals.isEmpty, !model.analysis.isRunning, model.analysisFinished == nil {
-                    NavigationLink {
-                        ProposalListView(area: nil)
+                    Button {
+                        showProposals = true
                     } label: {
                         Text("\(model.openProposals.count) Vorschläge prüfen")
                     }
                     .buttonStyle(PrimaryButtonStyle())
                 }
                 if !model.proposalsToApply.isEmpty {
-                    NavigationLink {
-                        PlanReviewView()
+                    Button {
+                        showPlan = true
                     } label: {
                         Text("\(model.proposalsToApply.count) ausgewählte Alben anlegen")
                     }
@@ -67,7 +75,7 @@ struct OverviewView: View {
                 #if targetEnvironment(simulator)
                 if !DemoLibrary.shared.isDone { DemoLibraryCard() }
                 #endif
-                AtlasTeaser()
+                AtlasTeaser(onOpen: { showAtlas = true })
                 areasSection
             }
             .padding(.horizontal, Theme.Spacing.l)
@@ -87,6 +95,9 @@ struct OverviewView: View {
             NavigationStack { SettingsView() }
         }
         .navigationDestination(isPresented: $showStarterPlan) { PlanReviewView() }
+        .navigationDestination(isPresented: $showProposals) { ProposalListView(area: nil) }
+        .navigationDestination(isPresented: $showPlan) { PlanReviewView() }
+        .navigationDestination(isPresented: $showAtlas) { AtlasView() }
         .onChange(of: showStarterPlan) { _, showing in
             // Back without creating: the starter set is not selected any more.
             if !showing, let selection = starterSelection {

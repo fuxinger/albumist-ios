@@ -280,18 +280,23 @@ final class DeviceConditionUITests: XCTestCase {
     @discardableResult
     private func grantFromHost() -> Bool {
         print("UI_HOST_GRANT_PHOTOS")
-        for _ in 0..<12 {
+        for attempt in 1...12 {
             sleep(5)
             start()
-            _ = waitStable("first screen after the grant", timeout: 15, stableChecks: 1) {
+            let shown = waitStable("first screen after the grant", timeout: 30, stableChecks: 1) {
                 app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists || button("Los geht").exists
             }
-            if !askAgain.exists && !toSettings.exists {
+            // Given back only when the app shows a screen with access (UI run 44022880773 counted
+            // a launch that showed none of these screens as given back, and the test then
+            // waited for an overview that did not come).
+            if shown, !askAgain.exists, !toSettings.exists {
                 print("UI_STEP_OK photo access given back from the Mac")
                 return true
             }
+            if !shown { shot("x-no-screen-after-grant-\(attempt)") }
         }
         print("UI_STEP_MISSING photo access given back from the Mac")
+        XCTFail("No screen with photo access after the grant from the Mac")
         return false
     }
 
@@ -1035,6 +1040,7 @@ final class DeviceConditionUITests: XCTestCase {
         if !app.tabBars.firstMatch.waitForExistence(timeout: 10) { grantFromHost() }
         let back = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         print(back ? "UI_STEP_OK overview after access came back" : "UI_STEP_MISSING overview after access came back")
+        if !back { shot("x-no-overview-after-access") }
         XCTAssertTrue(back, "The app does not go on after access came back")
         // On a phone the analysis goes on by itself once access is back; UI runs start their
         // analyses themselves, so the app is opened once more and starts it as at launch.

@@ -23,6 +23,7 @@ struct LibraryView: View {
     private static let buckets: [InboxBucket] = [.unorganized, .suggestions, .uncertain, .organized, .ignored, .all]
 
     var body: some View {
+        let _ = MainThreadWatch.shared.count("library body")
         let members = model.bucketMembers(bucket)
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
@@ -438,13 +439,16 @@ struct AddToAlbumSheet: View {
     @State private var query = ""
     @State private var plan: ChangePlan?
     @State private var showPlan = false
+    @FocusState private var naming: Bool
 
     var body: some View {
+        let _ = MainThreadWatch.shared.count("add to album body")
         NavigationStack {
             List {
                 Section {
                     HStack {
                         TextField("Name des neuen Albums", text: $newTitle)
+                            .focused($naming)
                             .submitLabel(.done)
                             .onSubmit { Task { await prepare(target: nil) } }
                         Button("Anlegen") { Task { await prepare(target: nil) } }
@@ -501,8 +505,17 @@ struct AddToAlbumSheet: View {
     }
 
     private func prepare(target: CollectionID?) async {
+        // The keyboard goes first, on this screen, and the preview slides in once it is down.
+        // In UI run 44038288087 (device test 05, two of three new albums) the main thread hung
+        // for 52 and 68 s right after "Anlegen": each stack that reached deep enough showed the
+        // keyboard's hiding laying out the sheet while the preview was pushed into it, and
+        // SwiftUI drawing that preview.
+        let hadKeyboard = naming
+        naming = false
         let title = target == nil ? newTitle.trimmingCharacters(in: .whitespaces) : nil
         guard let built = await model.manualPlan(assets: assets, target: target, newTitle: title) else { return }
+        // The keyboard takes about a quarter of a second to go down.
+        if hadKeyboard { try? await Task.sleep(for: .milliseconds(400)) }
         plan = built
         showPlan = true
     }

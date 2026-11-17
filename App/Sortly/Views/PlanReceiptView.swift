@@ -10,6 +10,8 @@ struct PlanReceiptView: View {
     @State private var receipt: PlanReceipt?
     /// Undos of this plan, newest first (more than one when the first was only partial).
     @State private var undos: [PlanReceipt] = []
+    /// The text of "Liste teilen", made with the receipt (it was made again at every redraw).
+    @State private var shareText: String?
     private var undo: PlanReceipt? { undos.first }
     /// Taken back only in part: the rest can be taken back again (audit 2, 1.6).
     private var partlyUndone: Bool { (undo.map { !$0.isComplete } ?? false) && !model.undonePlans.contains(plan.id) }
@@ -41,9 +43,9 @@ struct PlanReceiptView: View {
         .onAppear { ReviewPrompt.shared.screenAppeared() }
         .onDisappear { ReviewPrompt.shared.screenDisappeared() }
         .toolbar {
-            if let receipt {
+            if receipt != nil, let shareText {
                 ToolbarItem(placement: .primaryAction) {
-                    ShareLink(item: ReceiptText.text(receipt, undo: undo, inventory: model.inventory)) {
+                    ShareLink(item: shareText) {
                         Label("Liste teilen", systemImage: "square.and.arrow.up")
                     }
                 }
@@ -54,6 +56,10 @@ struct PlanReceiptView: View {
             let loaded = await model.receipt(for: plan)
             receipt = loaded.plan
             undos = loaded.undos
+            let inventory = model.inventory
+            shareText = await Task.detached(priority: .userInitiated) {
+                ReceiptText.text(loaded.plan, undo: loaded.undos.first, inventory: inventory)
+            }.value
         }
         .confirmationDialog("Diese Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
             Button("Rückgängig machen", role: .destructive) {

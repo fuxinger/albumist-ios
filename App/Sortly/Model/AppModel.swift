@@ -114,16 +114,41 @@ final class AppModel {
         var unreadable = 0
     }
 
+    /// Whether a plan runs and how it ended. The step counter is `ExecutionProgress`.
     struct ExecutionState: Equatable {
         var isRunning = false
-        /// The plan this state belongs to: progress of an earlier run never lands on a later one.
+        /// The plan this state belongs to.
         var planID: SortlyID?
-        var completedSteps = 0
-        var totalSteps = 0
         var finished: ChangePlan?
         var failure: String?
+    }
+
+    /// The steps of the running plan, apart from `ExecutionState`: they change after every
+    /// step, and every screen that reads `execution` (the plan preview, the add-to-album sheet,
+    /// the receipt, the settings) was drawn again each time. Only the progress bars and the
+    /// sorting show read this.
+    @MainActor @Observable
+    final class ExecutionProgress {
+        /// The plan these steps belong to: progress of an earlier run never lands on a later one.
+        private(set) var planID: SortlyID?
+        private(set) var completedSteps = 0
+        private(set) var totalSteps = 0
         /// Steps that failed or were skipped (the sorting show gives them no checkmark).
-        var unsuccessfulSteps: Set<Int> = []
+        private(set) var unsuccessfulSteps: Set<Int> = []
+
+        func start(planID: SortlyID, totalSteps: Int) {
+            self.planID = planID
+            completedSteps = 0
+            self.totalSteps = totalSteps
+            unsuccessfulSteps = []
+        }
+
+        /// Step `index` of plan `planID` has finished; ignored for any other plan.
+        func stepFinished(_ index: Int, succeeded: Bool, planID: SortlyID) {
+            guard self.planID == planID else { return }
+            if !succeeded { unsuccessfulSteps.insert(index) }
+            completedSteps = index + 1
+        }
     }
 
     // MARK: State
@@ -314,7 +339,10 @@ final class AppModel {
     var recount: RecountState? = RecountState.load() {
         didSet { RecountState.save(recount) }
     }
-    var inventory = CollectionInventory() { didSet { resetSearchIndex() } }
+    var inventory = CollectionInventory() { didSet { resetSearchIndex(); inventoryVersion &+= 1 } }
+    /// Counts changes of `inventory`: a screen that works something out from the inventory off
+    /// the main thread (the plan preview, `PlanReviewFacts`) watches this number instead.
+    private(set) var inventoryVersion = 0
     var mergeSuggestions: [AlbumOverlapAnalyzer.MergeSuggestion] = []
     /// Executed plans, newest first. Undo runs are not listed on their own; they mark the
     /// plan they took back (see `undonePlans`).
@@ -368,6 +396,8 @@ final class AppModel {
     @ObservationIgnored private var homeCandidatesCache: [HomeCandidate]?
     @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
     var execution = ExecutionState()
+    /// A constant: views observe its properties, not the model (see `ExecutionProgress`).
+    let executionProgress = ExecutionProgress()
     var message: AppMessage?
     /// Where Siri, Shortcuts or a Spotlight result wants to go; the overview opens it.
     var route: Route?
@@ -2053,7 +2083,8 @@ final class AppModel {
         if confirmed.status == .draft { confirmed.status = .confirmed }
         if confirmed.confirmedAt == nil { confirmed.confirmedAt = Date() }
         let planID = confirmed.id
-        execution = ExecutionState(isRunning: true, planID: planID, completedSteps: 0, totalSteps: plan.steps.count)
+        executionProgress.start(planID: planID, totalSteps: plan.steps.count)
+        execution = ExecutionState(isRunning: true, planID: planID)
         // No auto-lock in the middle of a plan, and a little time to finish a step if the
         // user switches away (see `ExecutionGuard`).
         let keepAwake = ExecutionGuard()
@@ -2069,10 +2100,7 @@ final class AppModel {
                 if case .stepFinished(let index, let state) = event {
                     let succeeded: Bool = if case .succeeded = state { true } else { false }
                     Task { @MainActor in
-                        let model = AppModel.shared
-                        guard model.execution.planID == planID else { return }
-                        if !succeeded { model.execution.unsuccessfulSteps.insert(index) }
-                        model.execution.completedSteps = index + 1
+                        AppModel.shared.executionProgress.stepFinished(index, succeeded: succeeded, planID: planID)
                     }
                 }
             }

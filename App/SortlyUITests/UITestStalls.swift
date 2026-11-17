@@ -16,13 +16,19 @@ enum UITestStalls {
 
     /// The stalls of 2 s or more since the last launch, as `UI_FACT main stall 3.2 s from
     /// 18:31:05.2 UTC` (the clock of `UI_MAIN_STALL` and of `UI_FACT slow query`), and each stack
-    /// as `UI_FACT main stack after 5.0 s of the stall from …: frame | frame | …`.
+    /// as `UI_FACT main stack after 5.0 s of the stall from …: frame | frame | …`, and the marked
+    /// work the main thread did in it as `UI_FACT main work in the stall of …: name 12x 0.3 s, …`
+    /// (`MainThreadWatch.count` and `section`).
     static func report() {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return }
         try? FileManager.default.removeItem(atPath: path)
         for line in text.split(separator: "\n") {
             if line.hasPrefix("# ") {
                 print("UI_FACT main stack \(line.dropFirst(2))")
+                continue
+            }
+            if line.hasPrefix("% ") {
+                print("UI_FACT main work \(line.dropFirst(2))")
                 continue
             }
             let parts = line.split(separator: " ")

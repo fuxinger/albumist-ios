@@ -26,6 +26,7 @@ struct OverviewView: View {
     @State private var starterSelection: AppModel.PreviewSelection?
 
     var body: some View {
+        let _ = MainThreadWatch.shared.count("overview body")
         ScrollView {
             VStack(spacing: Theme.Spacing.m) {
                 if let interrupted = model.interruptedPlan {
@@ -484,8 +485,7 @@ struct InterruptedPlanCard: View {
                 .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if model.execution.isRunning {
-                ProgressView(value: Double(model.execution.completedSteps), total: Double(max(1, model.execution.totalSteps)))
-                    .tint(Theme.accent)
+                ExecutionProgressBar()
             } else {
                 // The ways out (I16). An interrupted undo cannot itself be taken back (Photos
                 // cannot bring deleted albums back): it can only go on or stay as it is.

@@ -149,14 +149,22 @@ final class MainThreadWatch: @unchecked Sendable {
     /// Serializes the writes into `stressFile` (the main thread's stall lines, the watch
     /// thread's stack lines).
     private let fileLock = NSLock()
+    /// Marked work done on the main thread since the current ping was sent: how often, and for
+    /// how long (uptime ns; 0 for `count`). Written to the runner's file after a stall of 2 s
+    /// or more, so a stall says whether one piece of work was slow or a view was drawn again
+    /// and again (UI run 44038288087: 68 s in SwiftUI updates of the plan preview).
+    private var workInPing: [String: (count: Int, nanoseconds: UInt64)] = [:]
 
-    // Main-thread stacks: taken by the watch thread while a ping waits (at 2 s and 5 s, then at
-    // every doubling), so a long stall says where the main thread was, not only how long.
+    // Main-thread stacks: taken by the watch thread while a ping waits (at 2 s, then every
+    // 5 s, at most `maxStacks`), so a long stall says where the main thread was, not only how long.
     /// The main thread's port and stack bounds, set in `start()` before the watch thread runs.
     private var mainPort: mach_port_t = 0
     private var stackLow: UInt = 0
     private var stackHigh: UInt = 0
-    private static let maxFrames = 48
+    private static let maxFrames = 64
+    private static let maxStacks = 14
+    /// Watch thread only: stacks taken for the current ping.
+    private var stacksInPing = 0
     /// Filled while the main thread is suspended: nothing may be allocated then (the main thread
     /// may hold the allocator's lock), so the buffer is made once.
     private let frameBuffer = UnsafeMutablePointer<UInt>.allocate(capacity: MainThreadWatch.maxFrames)
@@ -218,10 +226,13 @@ final class MainThreadWatch: @unchecked Sendable {
         sections.append((name, begin))
         lock.unlock()
         defer {
+            let end = DispatchTime.now().uptimeNanoseconds
             lock.lock()
             if !sections.isEmpty { sections.removeLast() }
+            let before = workInPing[name] ?? (0, 0)
+            workInPing[name] = (before.count + 1, before.nanoseconds + (end > begin ? end - begin : 0))
             lock.unlock()
-            let took = Self.seconds(from: begin, to: DispatchTime.now().uptimeNanoseconds)
+            let took = Self.seconds(from: begin, to: end)
             if took >= 1 {
                 note("UI_MAIN_SLOW \(name) \(Self.text(took)) s")
             } else if took >= 0.25 {
@@ -229,6 +240,17 @@ final class MainThreadWatch: @unchecked Sendable {
             }
         }
         return try body()
+    }
+
+    /// Counts a piece of main-thread work that is too small to time, such as a view's body:
+    /// a stall line then says how often it ran while the main thread did not answer.
+    /// Costs nothing outside UI runs.
+    func count(_ name: String) {
+        guard UITestSupport.isRunning else { return }
+        lock.lock()
+        let before = workInPing[name] ?? (0, 0)
+        workInPing[name] = (before.count + 1, before.nanoseconds)
+        lock.unlock()
     }
 
     private func watch() {
@@ -248,6 +270,8 @@ final class MainThreadWatch: @unchecked Sendable {
                 seenInStall = []
                 nextStuckReport = 10
                 nextStackAt = 2
+                stacksInPing = 0
+                workInPing = [:]
                 inactiveInStall = !active
             }
             let waited = pending.map { Self.seconds(from: $0, to: now) } ?? 0
@@ -262,8 +286,9 @@ final class MainThreadWatch: @unchecked Sendable {
             let current = sections.last.map { "\($0.name) running for \(Self.text(Self.seconds(from: $0.began, to: now))) s" } ?? "no marked section"
             let inactive = inactiveInStall
             lock.unlock()
-            if pending != nil, waited >= nextStackAt {
-                nextStackAt = nextStackAt < 5 ? 5 : nextStackAt * 2
+            if pending != nil, waited >= nextStackAt, stacksInPing < Self.maxStacks {
+                nextStackAt = nextStackAt < 5 ? 5 : nextStackAt + 5
+                stacksInPing += 1
                 reportStack(waited: waited, since: since)
             }
             if stuck {
@@ -287,12 +312,20 @@ final class MainThreadWatch: @unchecked Sendable {
         let stress = stressLines, file = stressFile
         if stress, waited > 1 { longestStall = max(longestStall, waited) }
         let longest = longestStall
+        let work = workInPing
         lock.unlock()
         guard asked != nil else { return }
         // Written only here, on the main thread.
         if waited > 0.5, let file {
+            var lines = String(format: "%.3f %ld\n", Date().timeIntervalSince1970, Int(waited * 1000))
+            if waited >= 2, !work.isEmpty {
+                let parts = work.sorted { ($0.value.nanoseconds, $0.value.count) > ($1.value.nanoseconds, $1.value.count) }.prefix(12).map { name, value in
+                    value.nanoseconds > 0 ? "\(name) \(value.count)x \(Self.text(Double(value.nanoseconds) / 1e9)) s" : "\(name) \(value.count)x"
+                }
+                lines += "% in the stall of \(Self.text(waited)) s from \(Self.clock(since)) UTC: \(parts.joined(separator: ", "))\n"
+            }
             fileLock.lock()
-            file.write(Data(String(format: "%.3f %ld\n", Date().timeIntervalSince1970, Int(waited * 1000)).utf8))
+            file.write(Data(lines.utf8))
             fileLock.unlock()
         }
         if stress, waited > 1 {

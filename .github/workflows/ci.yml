@@ -82,23 +82,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install SQLite headers
         run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev python3 > /dev/null
-      - name: Content-based file times (lets the build cache work, see the script)
-        run: python3 .github/scripts/stable_mtimes.py .
-      - name: Toolchain
-        id: toolchain
-        run: echo "id=$(swift --version 2>&1 | head -1 | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
-      # SwiftPM's .build from an earlier run. The key only picks the starting point: the
-      # compiler still checks every source (content-based times), so a stale entry costs time,
-      # never correctness. The nightly run builds without any cache.
-      - name: Build cache
-        # Off since 16.11.: a restored cache hid a change in SortlyCore (CI 43796841063: 'AlbumMatcher has no member tiedWithBest' although Linux built it). Back on only with a proven fix.
-        if: ${{ false }}
-        id: cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .build
-          key: spm-linux-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
-          restore-keys: spm-linux-${{ steps.toolchain.outputs.id }}-
       - name: Build and test
         run: |
           set -o pipefail
@@ -115,23 +98,6 @@ jobs:
         run: |
           python3 .github/scripts/test_summary.py summary --title "Core tests (Linux)" \
             --swift-log core-linux.log --swift-log load.log --load-log load.log >> "$GITHUB_STEP_SUMMARY" || true
-      # Saved also when a test failed: the build products are valid either way, and the next
-      # run (usually the fix) starts from them.
-      - name: Save build cache
-        if: ${{ false }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .build
-          key: ${{ steps.cache.outputs.cache-primary-key }}
-
-  names:
-    # App name candidates against the App Store (the API is only reachable from CI).
-    name: App name check
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: python3 .github/scripts/name_check.py docs/launch/name-candidates.txt
 
   ios:
     name: iOS build and tests (macOS)
@@ -149,37 +115,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select pinned Xcode
-        id: xcode
         # Xcode and simulator runtime pinned in .github/toolchain.json; the job stops when the
-        # image lacks them. The id output (Xcode version and build) is part of the cache key:
-        # products of another compiler are never reused.
-        run: |
-          python3 .github/scripts/toolchain.py xcode --runtime
-          # Files restored from the cache have new inode numbers; without this Xcode's build
-          # system would treat all of them as changed and rebuild everything.
-          defaults write com.apple.dt.XCBuild IgnoreFileSystemDeviceInodeChanges -bool YES
+        # image lacks them.
+        run: python3 .github/scripts/toolchain.py xcode --runtime
       - name: Generate Xcode project
         if: hashFiles('App/project.yml') != ''
         run: |
           brew install xcodegen
           cd App && xcodegen generate
-      - name: Content-based file times (lets the build cache work, see the script)
-        run: python3 .github/scripts/stable_mtimes.py .
-      # DerivedData (app, package and SDK modules) and SwiftPM's .build from an earlier run.
-      # The key only picks the starting point; the build system still checks every input, and
-      # source files carry content-based times, so a changed file is always recompiled. The
-      # nightly run builds without any cache to catch an incremental-build problem within a day.
-      - name: Build cache
-        # Off since 16.11.: a restored cache hid a change in SortlyCore (CI 43796841063: 'AlbumMatcher has no member tiedWithBest' although Linux built it). Back on only with a proven fix.
-        if: ${{ false }}
-        id: cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/Library/Developer/Xcode/DerivedData
-            .build
-          key: ios-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**', 'App/**') }}
-          restore-keys: ios-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-
       - name: Pick simulator
         if: hashFiles('App/project.yml') != ''
         id: sim
@@ -250,19 +193,6 @@ jobs:
             build-log.txt
             build/TestResults.xcresult
           retention-days: 7
-      # Saved also when a test failed: the build products are valid either way, and the next
-      # run (usually the fix) starts from them. Logs and the index are left out.
-      - name: Keep the build cache small
-        if: ${{ false }}
-        run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
-      - name: Save build cache
-        if: ${{ false }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/Library/Developer/Xcode/DerivedData
-            .build
-          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   simulator:
     # Manual only (workflow_dispatch input "appetize"): builds the simulator app and uploads it

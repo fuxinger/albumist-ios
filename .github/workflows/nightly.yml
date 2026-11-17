@@ -4,8 +4,8 @@ name: Nightly
 #   - the random-library stress test with many seeds (SORTLY_STRESS_SEEDS, 16 per push),
 #   - the large-library load tests (20,000 / 100,000 photos, journal with 200 albums) on Linux
 #     and macOS,
-#   - a clean build without any cache (catches a problem of the incremental cache in CI within
-#     a day), with the app tests in the simulator.
+#   - a build in fresh DerivedData with the app tests in the simulator (CI builds without a
+#     cache too: its cache steps, off since 16.11., were removed on 17.11., Profi-Analyse Top 10).
 # Scheduled workflows only run from the default branch's copy of this file, so this starts once
 # it is on main. It tests the development branch (see "Pick the commit").
 on:

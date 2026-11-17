@@ -190,30 +190,13 @@ jobs:
         id: xcode
         # The pinned release Xcode (.github/toolchain.json), never a beta: App Store Connect
         # refuses beta builds. The id output names it in build-info.txt.
-        run: |
-          python3 .github/scripts/toolchain.py xcode
-          # Files restored from the cache have new inode numbers; without this Xcode's build
-          # system would treat all of them as changed.
-          defaults write com.apple.dt.XCBuild IgnoreFileSystemDeviceInodeChanges -bool YES
+        run: python3 .github/scripts/toolchain.py xcode
       - name: Paths
         run: echo "ARCHIVE=$RUNNER_TEMP/Albumist.xcarchive" >> "$GITHUB_ENV"
       - name: Generate Xcode project
         run: |
           brew install xcodegen
           cd App && xcodegen generate
-      - name: Content-based file times (lets the build cache work, see the script)
-        run: python3 .github/scripts/stable_mtimes.py .
-      # DerivedData of the previous archive (Release, device): package and SDK modules that did
-      # not change are reused. The key only picks the starting point; every input is still
-      # checked and changed files always recompile. Signing happens in the export, not here.
-      - name: Build cache
-        # Off since 16.11.: a restored cache hid a change in SortlyCore (CI 43796841063: 'AlbumMatcher has no member tiedWithBest' although Linux built it). Back on only with a proven fix.
-        if: ${{ false }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/Library/Developer/Xcode/DerivedData
-          key: archive-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'App/**') }}
-          restore-keys: archive-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-
       # The archive is built unsigned: automatic signing would want a development profile,
       # and Apple only makes one when an iPhone is registered to the team. The export (upload
       # job) signs for the App Store with Apple's cloud-managed distribution certificate (needs
@@ -263,9 +246,6 @@ jobs:
           retention-days: 1
           compression-level: 0
           overwrite: true
-      - name: Keep the build cache small
-        if: ${{ false }}
-        run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
 
   upload:
     name: Upload to TestFlight

@@ -106,8 +106,14 @@ struct MainTabs: View {
         .onChange(of: model.route, initial: true) { _, target in
             guard let target else { return }
             tab = .overview
-            // The same target twice in a row (a second tap on the card) opens it once.
-            if overviewNavigator.path.last != AppScreen.route(target) { overviewNavigator.push(.route(target)) }
+            // A suggestion that exists opens like one from a list (`ProposalScreen`: it stays
+            // when the analysis drops it while its preview is open). The same target twice in a
+            // row, or a suggestion already on top, opens once (`Navigator.push`).
+            if case .suggestion(let id) = target, let found = model.proposals.first(where: { $0.id == id }) {
+                overviewNavigator.push(.proposal(ProposalRef(found)))
+            } else {
+                overviewNavigator.push(.route(target))
+            }
             model.route = nil
         }
         // Each message brings its own title (design review W15), e.g. "Das hat nicht geklappt".

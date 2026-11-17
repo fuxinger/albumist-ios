@@ -161,6 +161,8 @@ struct ProposalDetailView: View {
     @Environment(Navigator.self) private var navigator: Navigator?
     /// The preview of "Album anlegen", pushed onto the stack's path (`AppScreen`).
     @State private var directPlan: PlanToken?
+    /// On screen and on top: a plan that is ready after Back is not pushed.
+    @State private var visible = false
     @State private var preparing = false
     @State private var applied = false
     @State private var rejectingMatch = false
@@ -340,7 +342,11 @@ struct ProposalDetailView: View {
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle("Vorschlag")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { name = model.userTitles[proposal.id] ?? "" }
+        .onAppear {
+            visible = true
+            name = model.userTitles[proposal.id] ?? ""
+        }
+        .onDisappear { visible = false }
         .sheet(isPresented: $showAdjust) {
             NavigationRoot { AdjustProposalView(proposal: proposal) }
                 .presentationDetents([.medium, .large])
@@ -561,16 +567,17 @@ struct ProposalDetailView: View {
         previewSelection = model.selectForPreview([(proposal, recommended)])
         preparing = true
         defer { preparing = false }
-        if let plan = await model.singlePlan(for: proposal) {
-            let token = PlanToken(plan)
-            directPlan = token
-            Navigator.push(.prebuiltPlan(token), on: navigator)
+        let before = navigator?.path
+        let plan = await model.singlePlan(for: proposal)
+        if let plan, Navigator.push(.prebuiltPlan(PlanToken(plan)), on: navigator, ifStill: before, visible: visible) {
+            directPlan = PlanToken(plan)
         } else {
-            // Nothing to change (album already complete or kept as it is): the preview's pick
-            // goes back at once.
+            // Nothing to change (album already complete or kept as it is), or the user left
+            // this screen while the plan was made: the preview's pick goes back at once, and
+            // nothing is pushed above the screen the user went to.
             if let selection = previewSelection { model.endPreview(selection) }
             previewSelection = nil
-            dismiss()
+            if plan == nil && visible { dismiss() }
         }
     }
 

@@ -291,10 +291,12 @@ final class AccessibilityUITests: XCTestCase {
                         sleep(2)
                         check("\(tag) result", english: english)
                         let receipt = app.buttons["result.receipt"]
+                        let resultBar = barTitle()
                         if tap(receipt, "\(tag) open receipt", timeout: 10) {
+                            let receiptShown = barChanged(from: resultBar, "\(tag) receipt")
                             sleep(2)
                             check("\(tag) receipt", english: english)
-                            back("\(tag) receipt", confirmed: false); sleep(1)
+                            if receiptShown { back("\(tag) receipt", confirmed: true); sleep(1) }
                         }
                     } else {
                         XCTFail("The starter plan did not finish")
@@ -313,10 +315,12 @@ final class AccessibilityUITests: XCTestCase {
                 check("\(tag) atlas lower", english: english)
                 // A country: its photo colours sit behind the title and caption.
                 let country = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", w.country)).firstMatch
+                let atlasBar = barTitle()
                 if tap(country, "\(tag) open country", timeout: 10) {
+                    let countryShown = barChanged(from: atlasBar, "\(tag) country")
                     sleep(2)
                     check("\(tag) country", english: english)
-                    back("\(tag) country", confirmed: false); sleep(1)
+                    if countryShown { back("\(tag) country", confirmed: true); sleep(1) }
                 }
                 app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
@@ -360,10 +364,12 @@ final class AccessibilityUITests: XCTestCase {
                 // Design review W16: history and undo on their own screen. Opened first, from
                 // the top of the list: after scrolling down and back the first row was not in
                 // the tree again (UI run 43773339053, "history" missing).
+                let settingsBar = barTitle()
                 if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
+                    let historyShown = barChanged(from: settingsBar, "\(tag) history")
                     sleep(1)
                     check("\(tag) history", english: english)
-                    back("\(tag) history", confirmed: false); sleep(1)
+                    if historyShown { back("\(tag) history", confirmed: true); sleep(1) }
                 }
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
@@ -820,6 +826,24 @@ final class AccessibilityUITests: XCTestCase {
             return
         }
         first.tap()
+    }
+
+    /// The title of the navigation bar on screen ("" when there is none), from one snapshot.
+    private func barTitle() -> String {
+        (try? app.navigationBars.firstMatch.snapshot())?.identifier ?? ""
+    }
+
+    /// After a tap: a screen of its own opened (the bar's title changed within 5 s). Only then
+    /// does the walk go back from it; otherwise `back()` would leave the screen below (the one
+    /// the tap was on) and report it as closed by itself.
+    private func barChanged(from title: String, _ step: String) -> Bool {
+        let deadline = Date().addingTimeInterval(5)
+        repeat {
+            if barTitle() != title { return true }
+            usleep(300_000)
+        } while Date() < deadline
+        print("UI_FACT \(step): the tap opened no screen of its own (bar still '\(title)')")
+        return false
     }
 
     private func shot(_ name: String) {

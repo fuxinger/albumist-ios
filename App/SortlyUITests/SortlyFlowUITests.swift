@@ -209,9 +209,13 @@ final class SortlyFlowUITests: XCTestCase {
 
     /// The overview says the analysis is done ("Alle 412 Fotos analysiert", or "Analyse fertig"
     /// right after a long run) and nothing runs (no "Pause").
+    /// The Pause button first: while the analysis runs it is there, and one query answers.
+    /// Every other query reads the whole screen, and during the analysis such a read held the
+    /// app's main thread for 16 to 48 s (UI run 43979263666: each long stall began within half
+    /// a second of a check of this wait).
     private var analysisIdle: Bool {
-        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
-            && !app.buttons["Pause"].exists
+        !app.buttons["Pause"].exists
+            && (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
     }
 
     /// The card's progress element (one element, B1): value "120 von 412 Fotos, fertig gegen

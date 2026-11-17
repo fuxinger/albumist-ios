@@ -55,8 +55,9 @@ enum UITestOnboarding {
         func anything(_ text: String) -> Bool {
             app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
         }
-        return (anything("Fotos analysiert") || anything("Analyse aktuell") || anything("Analyse fertig"))
-            && !app.buttons["Pause"].exists
+        // The Pause button first: one query while the analysis runs (see SortlyFlowUITests).
+        return !app.buttons["Pause"].exists
+            && (anything("Fotos analysiert") || anything("Analyse aktuell") || anything("Analyse fertig"))
     }
 
     /// Onboarding, demo library and first analysis, when the app still shows its welcome

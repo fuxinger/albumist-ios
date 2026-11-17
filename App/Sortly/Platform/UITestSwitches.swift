@@ -90,6 +90,13 @@ extension UITestSupport {
     /// print its stalls (alone it writes the file without the `UITEST_MAIN_BLOCKED` lines).
     static let watchMainLog = value("-SortlyUITestWatchMainLog")
 
+    /// `-SortlyUITestProgressLog <path>`: every change of the analysis card's progress line
+    /// (the label and value XCTest reads) goes into this file of the test runner's with its
+    /// time (`ProgressLineLog`), so the stress test measures how long the line stood still
+    /// from the app's own clock instead of from its reads, which took 5–7 s each while the
+    /// analysis ran (stress run 44116350940).
+    static let progressLog = value("-SortlyUITestProgressLog")
+
     // MARK: Writing
 
     /// `-SortlyUITestDeletionFault declined|ignored`: the first deletion of albums in this
@@ -158,6 +165,7 @@ extension UITestSupport {
         if watchesMain || watchMainLog != nil {
             MainThreadWatch.shared.watchForStress(log: watchMainLog, lines: watchesMain)
         }
+        if let progressLog { ProgressLineLog.start(path: progressLog) }
         #endif
     }
 

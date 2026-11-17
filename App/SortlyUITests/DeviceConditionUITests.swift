@@ -25,9 +25,15 @@ final class DeviceConditionUITests: XCTestCase {
         app = XCUIApplication()
         let stalls = UITestStalls.arguments(besides: extra)
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
+        launchExtra = extra
         UITestOnboarding.clock("launch")
         app.launch()
     }
+
+    /// The test's own arguments of the last launch: the onboarding helpers open the app again
+    /// with them. They opened it as a fast start, and test 10 (empty library, own database) then
+    /// ran on the demo library after the photo access had to be given back (UI run 44108052342).
+    private var launchExtra: [String] = []
 
     private var stallsReportedAtEnd = false
 
@@ -259,6 +265,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// it), if one of them shows; afterwards the app has full access. A denied access cannot be
     /// given back inside the app: the workflow gives it back from the Mac (`grantFromHost`).
     private func onboardIfNeeded(attempt: Int = 1) {
+        let extra = launchExtra
         let welcome = button("Los geht")
         _ = waitStable("first screen", timeout: 20, stableChecks: 1) {
             welcome.exists || app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists
@@ -273,11 +280,12 @@ final class DeviceConditionUITests: XCTestCase {
         // question, access denied), and every later test of the group ran without photos.
         if attempt < 3, !app.tabBars.firstMatch.exists, toSettings.waitForExistence(timeout: 3) {
             print("UI_FACT photo access denied: given back from the Mac")
-            grantFromHost()
+            grantFromHost(relaunchWith: extra)
             onboardIfNeeded(attempt: attempt + 1)
         } else if asked {
-            // Opened once more, so the fast start runs as with access (demo library, if missing).
-            start()
+            // Opened once more, so the launch runs as with access (the fast start's demo
+            // library, if missing), with the test's own arguments.
+            launch(extra)
         }
     }
 
@@ -286,12 +294,13 @@ final class DeviceConditionUITests: XCTestCase {
     /// Settings app's first page, not on Albumist's. The test asks with a log line; the
     /// workflow, which follows the log, grants the access with `simctl privacy` and the app is
     /// opened again. (Run in Xcode without the workflow, nobody answers and this returns false.)
+    /// `relaunchWith`: the test's own launch arguments (nil: a fast start).
     @discardableResult
-    private func grantFromHost() -> Bool {
+    private func grantFromHost(relaunchWith extra: [String]? = nil) -> Bool {
         print("UI_HOST_GRANT_PHOTOS")
         for attempt in 1...12 {
             sleep(5)
-            start()
+            if let extra { launch(extra) } else { start() }
             let shown = waitStable("first screen after the grant", timeout: 30, stableChecks: 1) {
                 app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists || button("Los geht").exists
             }
@@ -326,14 +335,24 @@ final class DeviceConditionUITests: XCTestCase {
         tap(app.buttons["Weiter"], "areas")
         sleep(1)
         // "Weiter" before the iOS question (plugin review K5; it said "Zugriff erlauben" before).
+        var answered = false
         if askAgain.waitForExistence(timeout: 5) {
             askAgain.tap()
-            answerPhotoQuestion(choice)
+            answered = answerPhotoQuestion(choice)
         }
         guard choice != .deny else { return false }
         // With access granted the app moves on by itself; "Weiter" when it had been granted before.
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline && !button("Analyse starten").exists {
+            // iOS answered "denied" without asking (CI after an access reset, also one left
+            // by an earlier test): the caller gives the access back from the Mac and walks
+            // the onboarding again (`onboardIfNeeded`), instead of failing on a missing
+            // "Analyse starten" (test 10 in UI run 44108052342). After a question this test
+            // answered, the screen is the app's doing and stays a failure below.
+            if !answered, toSettings.exists {
+                print("UI_FACT onboarding: photo access denied without a question")
+                return false
+            }
             let next = app.buttons["Weiter"]
             if next.exists && next.isHittable { next.tap() }
             sleep(1)
@@ -1045,8 +1064,10 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(asks, "After access was taken away the app does not ask for it again")
         XCTAssertEqual(app.state, .runningForeground, "The app ended after access was taken away")
         if asks { grantOnNoAccessScreen(.full) }
-        // Without the iOS question in CI the answer is "denied": given back from the Mac.
-        if !app.tabBars.firstMatch.waitForExistence(timeout: 10) { grantFromHost() }
+        // Without the iOS question in CI the answer is "denied": given back from the Mac. When
+        // that failed (recorded by `grantFromHost`), nothing after it can pass: the test ends
+        // here instead of waiting 17 more minutes for an analysis without access (44108052342).
+        if !app.tabBars.firstMatch.waitForExistence(timeout: 10), !grantFromHost() { return }
         let back = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         print(back ? "UI_STEP_OK overview after access came back" : "UI_STEP_MISSING overview after access came back")
         if !back { shot("x-no-overview-after-access") }
@@ -1221,13 +1242,14 @@ final class DeviceConditionUITests: XCTestCase {
 
         // 2. Measuring
         try? FileManager.default.removeItem(atPath: mainStalls)
+        try? FileManager.default.removeItem(atPath: progressRecord)
         print("UI_STRESS_PHASE measure")
         // The image step runs at about 1.7 photos/s in the simulator (stress run 43833158673):
         // 50,000 photos would take 8 h. The run measures for SORTLY_STRESS_MINUTES (45) and
         // reports how far it got; the simulator's speed is not a device's.
         let minutes = ProcessInfo.processInfo.environment["SORTLY_STRESS_MINUTES"].flatMap { Int($0) } ?? 45
         let arguments = ["-SortlyUITestICloudOnly", "-SortlyUITestOffline", "-SortlyUITestWatchMain",
-                         "-SortlyUITestWatchMainLog", mainStalls]
+                         "-SortlyUITestWatchMainLog", mainStalls, "-SortlyUITestProgressLog", progressRecord]
         start(arguments + ["-SortlyUITestRebuildDatabase"])
         let analysisBegan = Date()
         var lastLine = ""
@@ -1267,34 +1289,123 @@ final class DeviceConditionUITests: XCTestCase {
                 }
                 let known = stepCounts[progress.step]
                 stepCounts[progress.step] = (known?.first ?? progress.done, progress.done, known?.firstAt ?? now, now)
-                // Pause once, a tenth into the image step; then Fortsetzen.
-                if !paused, progress.step == 4, progress.total > 0, progress.done >= progress.total / 10 {
+                // Pause once early in the image step, after 200 photos of it or 2 min, whichever
+                // comes first; then Fortsetzen. It waited for a tenth of the step, which the
+                // simulator never reached with 50,000 photos (3,419 in 45 min, stress run
+                // 44116350940), so Pause was not measured at that size.
+                if !paused, progress.step == 4, progress.total > 0, progress.done < progress.total, let step = stepCounts[4],
+                   progress.done - step.first >= 200 || now.timeIntervalSince(step.firstAt) >= 120 {
                     paused = true
+                    print("UI_FACT stress pause after \(progress.done - step.first) photos and \(Int(now.timeIntervalSince(step.firstAt))) s of the image step")
                     measurePauseAndResume()
                     lastChange = Date()
                 }
             }
             return analysisIdle
         }
+        let measureEnded = Date()
         print("UI_TIMING stress analysis \(elapsed(analysisBegan)) s, app ended \(ended) times")
         for (step, c) in stepCounts.sorted(by: { $0.key < $1.key }) {
             let seconds = c.lastAt.timeIntervalSince(c.firstAt)
             let rate = seconds > 0 ? Double(c.last - c.first) / seconds : 0
             print("UI_TIMING stress step \(step): \(c.last - c.first) in \(Int(seconds)) s (\(String(format: "%.1f", rate))/s)")
         }
-        print("UI_TIMING stress longest still line \(Int(longestStill.seconds)) s: '\(longestStill.line)'")
+        // The still time from the app's own record of the line (`-SortlyUITestProgressLog`); the
+        // one from this test's reads is a cross-check: they took up to 7 s each in stress run
+        // 44116350940, and a time between two rounds of reads is off by up to a round either way.
+        let recorded = longestStillInRecord(from: analysisBegan, to: measureEnded)
+        if let recorded {
+            print("UI_TIMING stress longest still line \(String(format: "%.1f", recorded.seconds)) s (app record, \(recorded.lines) lines) from \(UITestOnboarding.clockText(recorded.since)) UTC: '\(recorded.line)'")
+        } else {
+            print("UI_FACT stress: no progress record from the app; this test's reads are the measure")
+        }
+        print("UI_TIMING stress longest still line \(String(format: "%.1f", longestStill.seconds)) s (XCTest reads, cross-check): '\(longestStill.line)'")
+        printImageStepStart()
         print("UI_TIMING stress slowest answer \(String(format: "%.1f", slowestAnswer)) s")
         print("UI_FACT stress result \(String(describing: analysedPhotos()))")
         shot("26-stress-done")
         if !finished { print("UI_FACT stress measured \(minutes) min; the analysis was not finished then (simulator speed)") }
         XCTAssertEqual(ended, 0, "The app ended during the analysis")
-        XCTAssertLessThanOrEqual(longestStill.seconds, 10, "The progress line stood still \(Int(longestStill.seconds)) s at '\(longestStill.line)'")
+        let still = recorded.map { (seconds: $0.seconds, line: $0.line) } ?? longestStill
+        XCTAssertLessThanOrEqual(still.seconds, 10, "The progress line stood still \(String(format: "%.1f", still.seconds)) s at '\(still.line)'")
         XCTAssertLessThan(slowestAnswer, 10, "The app took \(Int(slowestAnswer)) s to answer")
         let opened = Date()
         tabButton("Mediathek").tap()
         let listed = libraryPhotos.firstMatch.waitForExistence(timeout: 60)
-        print("UI_TIMING stress library tab \(String(format: "%.1f", Date().timeIntervalSince(opened))) s (\(listed))")
+        let shown = Date()
+        print("UI_TIMING stress library tab \(String(format: "%.1f", shown.timeIntervalSince(opened))) s (\(listed))")
+        // How much of that was the app's main thread (the rest is XCTest's tap and reads).
+        if let stalls = mainStallsOverlapping(opened, shown) {
+            print("UI_TIMING stress library tab: main-thread stalls over 0.5 s \(stalls.map { "\($0.ms) ms" })")
+        }
         shot("27-stress-library")
+        // The measured launch's stalls of 2 s or more, with stacks (its own file, not the one
+        // `UITestStalls.report()` prints at every launch).
+        UITestStalls.report(mainStalls)
+    }
+
+    /// The card's progress line as the app recorded it (`-SortlyUITestProgressLog`): every change
+    /// with the app's own time, appended by each launch of the measurement.
+    private var progressRecord: String { NSTemporaryDirectory() + "stress-progress-line.txt" }
+
+    /// The record's lines between `from` and `to`: (time, line), the line nil at a relaunch
+    /// ("@ …") and "-" where the card stopped showing it; the line shown when `from` came is
+    /// the first one, from `from` on. Marks ("# …") come separately.
+    private func readProgressRecord(from: Date, to: Date) -> (lines: [(at: Date, line: String?)], marks: [(at: Date, what: String)])? {
+        guard let text = try? String(contentsOfFile: progressRecord, encoding: .utf8) else { return nil }
+        var lines: [(at: Date, line: String?)] = []
+        var marks: [(at: Date, what: String)] = []
+        for row in text.split(separator: "\n") {
+            let fields = row.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            if fields.first == "@" {
+                if fields.count == 3, let t = Double(fields[2]) { lines.append((Date(timeIntervalSince1970: t), nil)) }
+            } else if fields.first == "#" {
+                if fields.count == 3, let t = Double(fields[1]) { marks.append((Date(timeIntervalSince1970: t), fields[2])) }
+            } else if let t = Double(fields[0]), fields.count >= 2 {
+                lines.append((Date(timeIntervalSince1970: t), fields.dropFirst().joined(separator: " ")))
+            }
+        }
+        var window = lines.filter { $0.at >= from && $0.at <= to }
+        if let before = lines.last(where: { $0.at < from }) { window.insert((from, before.line), at: 0) }
+        return (window, marks.filter { $0.at >= from && $0.at <= to })
+    }
+
+    /// The longest time the line stood still between `from` and `to` while the analysis
+    /// worked, from the app's record (nil: no record, or no line in it). A line that says
+    /// nothing runs (paused, pausing, waiting for the device, finished) and the time without a
+    /// line do not count; a relaunch ends the line before it (an ended app fails on its own).
+    private func longestStillInRecord(from: Date, to: Date) -> (seconds: Double, line: String, since: Date, lines: Int)? {
+        guard let record = readProgressRecord(from: from, to: to) else { return nil }
+        let rows = record.lines
+        let resting = ["Analyse pausiert", "Wird angehalten", "Wartet", "Analyse fertig", "-"]
+        var longest: (seconds: Double, line: String, since: Date, lines: Int)?
+        var counted = 0
+        for (i, row) in rows.enumerated() {
+            guard let line = row.line else { continue }
+            counted += 1
+            if resting.contains(where: { line.hasPrefix($0) }) { continue }
+            let end = i + 1 < rows.count ? rows[i + 1].at : to
+            let seconds = end.timeIntervalSince(row.at)
+            if seconds > (longest?.seconds ?? -1) { longest = (seconds, line, row.at, 0) }
+        }
+        guard counted > 0, var result = longest else { return nil }
+        result.lines = counted
+        return result
+    }
+
+    /// The start of the image step as the app recorded it: when "Schritt 4" was first shown,
+    /// the next lines, and the app's marks (when the early suggestions were saved).
+    private func printImageStepStart() {
+        guard let record = readProgressRecord(from: .distantPast, to: .distantFuture) else { return }
+        if let first = record.lines.firstIndex(where: { $0.line?.contains("Schritt 4 von") ?? false }) {
+            let begin = record.lines[first].at
+            for row in record.lines[first..<min(record.lines.count, first + 6)] {
+                print("UI_FACT stress record +\(String(format: "%.1f", row.at.timeIntervalSince(begin))) s: '\(row.line ?? "(relaunch)")'")
+            }
+            for mark in record.marks {
+                print("UI_FACT stress record \(String(format: "%+.1f", mark.at.timeIntervalSince(begin))) s from step 4: \(mark.what)")
+            }
+        }
     }
 
     /// The app's main-thread stalls over 0.5 s ("<end, s since 1970> <ms>"), written by the

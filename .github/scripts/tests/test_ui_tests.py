@@ -790,5 +790,40 @@ class LostAppTests(unittest.TestCase):
         self.assertEqual(ui_tests.lost_app_at_launch("Test Case '-[A.B test01]' passed (1.0 seconds).\n"), [])
 
 
+class GrantPhotosTests(unittest.TestCase):
+    def run_grant(self, codes):
+        calls = []
+
+        def fake(command, timeout, quiet):
+            calls.append((command, timeout))
+            code = codes[len(calls) - 1]
+            return code, "" if code == 0 else "timed out after 90 s: xcrun simctl privacy"
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            granted = ui_tests.grant_photos("U", run=fake)
+        return granted, calls, out.getvalue()
+
+    def test_a_working_grant_is_one_call(self):
+        granted, calls, out = self.run_grant([0])
+        self.assertTrue(granted)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], ["xcrun", "simctl", "privacy", "U", "grant", "photos", ui_tests.BUNDLE_ID])
+        self.assertIn("UI_HOST photo access granted", out)
+
+    def test_a_hung_grant_is_tried_once_more_and_said(self):
+        granted, calls, out = self.run_grant([124, 0])
+        self.assertTrue(granted)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("UI_HOST photo access grant failed (exit 124", out)
+        self.assertIn("attempt 2 of 2", out)
+
+    def test_two_failures_are_said_and_not_hidden(self):
+        granted, calls, out = self.run_grant([124, 1])
+        self.assertFalse(granted)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("UI_HOST photo access NOT granted after 2 attempts", out)
+
+
 if __name__ == "__main__":
     unittest.main()

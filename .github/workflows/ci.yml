@@ -33,10 +33,13 @@ env:
 
 # A new push to the same branch or PR cancels the run of the previous one. Called by
 # testflight.yml, CI has a group of its own for that TestFlight run, so a push to main never
-# cancels the tests of a build. CI is not in the Mac queue of the UI runs and stress passes
-# (ui.yml, "concurrency"); see the ios job.
+# cancels the tests of a build: release: true says so, and github.workflow, the caller's name
+# "TestFlight" in a called workflow, is a second guard. CI is not in the Mac queue of the UI
+# runs and stress passes (ui.yml, "concurrency"); see the ios job.
 concurrency:
-  group: ${{ inputs.release && format('testflight-ci-{0}', github.run_id) || format('ci-{0}', github.ref) }}
+  group: >-
+    ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ci-{0}', github.run_id)
+    || format('ci-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:

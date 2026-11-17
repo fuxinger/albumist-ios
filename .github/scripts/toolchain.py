@@ -1,7 +1,6 @@
 """Selects the pinned Xcode on a Mac job and checks it, or stops the job.
 
 Usage: python3 .github/scripts/toolchain.py xcode [--runtime]
-       python3 .github/scripts/toolchain.py id      (prints the id below, nothing else)
 
 Every Mac job calls this instead of picking "the newest Xcode" (which on image xcode-27-arm64
 20261112 is a beta, and a beta build is refused by App Store Connect). It:
@@ -10,8 +9,7 @@ Every Mac job calls this instead of picking "the newest Xcode" (which on image x
   - runs `sudo xcode-select -s` on it and checks `xcodebuild -version` for the pinned version
     and build number (a symlink or an updated app with the same path fails here);
   - with --runtime, also checks that the pinned iOS simulator runtime (identifier and build) is
-    installed and available, for the jobs that test on a simulator;
-  - writes `id=<Xcode version and build>` to $GITHUB_OUTPUT (cache keys, build-info.txt).
+    installed and available, for the jobs that test on a simulator.
 """
 from __future__ import annotations
 
@@ -58,14 +56,7 @@ def fail(message: str) -> int:
     return 1
 
 
-def xcode_id(pin: dict) -> str:
-    return f"Xcode-{pin['version']}-{pin['build']}"
-
-
 def main(argv: list[str]) -> int:
-    if argv[:1] == ["id"]:
-        print(xcode_id(pins()["xcode"]))
-        return 0
     if not argv or argv[0] != "xcode":
         print(__doc__)
         return 2
@@ -89,9 +80,6 @@ def main(argv: list[str]) -> int:
         if problem:
             return fail(problem)
         print(f"iOS simulator runtime {toolchain['runtime']['identifier']} {toolchain['runtime']['build']}")
-    if os.environ.get("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-            out.write(f"id={xcode_id(pin)}\n")
     return 0
 
 

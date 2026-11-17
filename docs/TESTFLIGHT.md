@@ -110,25 +110,47 @@ Actions > **TestFlight feedback** > Run workflow.
   Commit selbst: erst CI (Regeln, Kern-Tests, iOS-Tests auf einem Mac), dann nebeneinander die
   UI-Tests und den kleinen Härtetest. Nur wenn alles grün ist, baut ein Mac das Archiv, prüft
   es, signiert es beim Export und lädt es hoch; danach bekommt der Commit das Git-Tag
-  `build-<Nummer>`, und „Was testen“ wird gesetzt. Rund zwei Stunden. Kein Teil wartet auf
-  andere Läufe.
+  `build-<Nummer>`, und „Was testen“ wird gesetzt. Zwei bis zweieinhalb Stunden bis zum
+  Hochladen (die UI-Tests allein 75–100 Minuten), danach bis zu 50 Minuten, bis „Was testen“
+  steht. Kein Teil wartet auf andere Läufe. Ein zweiter TestFlight-Lauf wartet, bis der erste
+  ganz fertig ist, „Was testen“ eingeschlossen. Wiederholungen nach einem Simulator-Ausfall und
+  Tests, die erst in der Wiederholung grün wurden, zählt der Job „Repeats and flaky tests“ für
+  UI-Tests und Härtetest zusammen.
 - Nichts startet von selbst, kein Push und kein Merge in `main` (16.11.: das Zusammenführen der
-  Webseite startete sonst einen Build mit altem App-Stand). Bis der Zweig `claude/sortly-app`
-  stillgelegt ist (Profi-Analyse Top 1), geht der Lauf auch dort, ebenfalls nur von Hand.
-- Schlägt ein Teil fehl (Test rot, Simulator-Ausfall, Hochladen), den Lauf mit **Re-run failed
-  jobs** neu starten; es gibt kein Archiv mehr, das zwischen zwei Jobs verloren gehen kann.
-  Notfall: **force** lädt ohne Tests hoch.
+  Webseite startete sonst einen Build mit altem App-Stand). Das gilt für jeden Zweig mit der
+  neuen `testflight.yml`. `claude/sortly-app` hat noch die alte Fassung mit Push-Auslöser: dort
+  startet jeder Push einen Lauf, der nach grünem CI hochlädt, bis der Zweig die neue Datei
+  bekommt oder stillgelegt ist (Profi-Analyse Top 1). Mit der neuen Datei geht der Lauf auch
+  dort nur von Hand.
+- Ist ein Test rot: den Fehler beheben und einen **neuen** Lauf starten (wackelnde Tests werden
+  gezählt und behoben, nie versteckt). **Re-run failed jobs** nur, wenn die Technik versagt hat:
+  Runner weg oder nicht gestartet, Simulator nicht hochgefahren oder verloren, Hochladen zu App
+  Store Connect abgebrochen. Der Upload-Job eines solchen Versuchs listet alles, was in früheren
+  Versuchen desselben Laufs fehlschlug, als Warnung und in seiner Zusammenfassung. Die gebauten
+  UI-Tests bleiben dafür 3 Tage liegen; danach einen neuen Lauf starten.
+- Notfall: **force** lädt ohne Tests hoch. So ein Build ist überall als „FORCED – untested“
+  markiert: in der Zusammenfassung des Upload-Jobs, in der Nachricht des Tags `build-<Nummer>`
+  und als erste Zeile von „Was testen“.
 - Härtetest (Regel Fuchs, 17.11.2026): vor jedem TestFlight-Build der kleine Durchgang mit
   10.000 Fotos und 15 Minuten Messung (rund 45 Minuten). Er läuft im TestFlight-Lauf neben den
-  UI-Tests und muss grün sein, sonst wird nicht hochgeladen. Von Hand: Actions > **UI stress** >
+  UI-Tests und muss grün sein, sonst wird nicht hochgeladen; grün heißt, test12 ist
+  durchgelaufen (ein übersprungener test12 zählt als Fehler). Von Hand: Actions > **UI stress** >
   Run workflow, Vorgaben unverändert lassen (oder `gh workflow run ui-stress.yml --ref <Zweig>`).
   Der volle Durchgang mit 50.000 Fotos läuft nur wöchentlich nachts (Sonntag 00:40 UTC, erst wenn
-  der Workflow in `main` ist) und vor dem Start im App Store.
+  der Workflow in `main` ist; in einer eigenen Gruppe, die Mac-Warteschlange ersetzt ihn nie) und
+  vor dem Start im App Store. Der letzte volle Durchgang, Lauf 44116350940 (17.11.), ist
+  **fehlgeschlagen**: zu Beginn von Schritt 4 stand die Fortschrittszeile 13,7 s still (Grenze
+  10 s). Die Korrektur liegt auf `claude/ui-fix` (9ff0dfc); ein neuer voller Durchgang damit
+  steht aus.
 - Mac-Warteschlange (Profi-Analyse, 17.11.2026): UI-Läufe und Härtetests aller Zweige laufen
   nacheinander, nie zwei zugleich. Es wartet höchstens einer; startet ein weiterer, ersetzt er den
   wartenden, der dann als „abgebrochen“ erscheint und später neu gestartet werden muss. Ein
   TestFlight-Lauf steht nicht in dieser Schlange: seine UI-Tests und sein Härtetest gehören nur zu
   ihm, nichts hält sie auf oder ersetzt sie. Darum TestFlight starten, wenn die Schlange leer ist.
+  Ebenfalls außerhalb: der wöchentliche volle Härtetest und Pull Requests aus Forks (je eine
+  eigene Gruppe). **Beim ersten TestFlight-Lauf prüfen**, dass UI-Tests und Härtetest nicht auf
+  `mac-queue` warten (ihre Gruppen heißen `testflight-ui-<Lauf-ID>` und
+  `testflight-stress-<Lauf-ID>`); in echt gelaufen ist das noch nicht.
 - Eine GitHub-Version (Workflow **Release**) braucht weiter einen grünen CI-Lauf und einen grünen
   Lauf **UI flow** genau dieses Commits; die Tests im TestFlight-Lauf zählen dafür nicht
   (`.github/scripts/ci_gate.py`).
@@ -137,4 +159,26 @@ Actions > **TestFlight feedback** > Run workflow.
   der Lauf alle drei. Archiv und Export laufen im selben Job auf demselben Mac, dazwischen wird
   nichts weitergereicht. Gebaut wird mit dem festgelegten Xcode aus
   `.github/toolchain.json`, nie mit einer Beta. Nach dem Hochladen trägt der Commit das Git-Tag
-  `build-<Nummer>` (`git show build-41` zeigt den Code von Build 41).
+  `build-<Nummer>` (`git show build-41` zeigt den Code von Build 41 und in der Nachricht des
+  Tags, ob die Tests liefen).
+
+## Freigabe vor dem Hochladen (geplant, Schritte für den Besitzer)
+
+Noch nicht eingerichtet, und `testflight.yml` nutzt es noch nicht. Ziel: den Schlüssel für App
+Store Connect bekommt nur ein Lauf auf `main` (bis zur Stilllegung auch `claude/sortly-app`), und
+erst, wenn du ihn freigegeben hast.
+
+1. https://github.com/fuxinger/sortly-ios/settings/environments > **New environment**, Name
+   `testflight`.
+2. **Required reviewers**: dich selbst eintragen. „Prevent self-review“ aus lassen, sonst kannst
+   du deine eigenen Läufe nicht freigeben.
+3. **Deployment branches and tags** > Selected branches and tags: `main` und `claude/sortly-app`.
+4. **Environment secrets**: die vier Secrets aus Abschnitt 4 dort noch einmal anlegen
+   (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `APPLE_TEAM_ID`).
+5. Einem Agenten sagen, dass die Umgebung steht. Er trägt `environment: testflight` bei den Jobs
+   von `testflight.yml` ein, die den Schlüssel lesen. Danach fragt GitHub bei jedem Lauf um
+   Freigabe, einmal je solchem Job (mindestens vor dem Hochladen und vor „Was testen“).
+6. Erst dann die vier Repository-Secrets löschen. Vorher bedenken: der tägliche Feedback-Abruf
+   (`asc-feedback.yml`) liest mit denselben drei ASC-Secrets und würde mit der Freigabe-Pflicht
+   jeden Morgen auf dich warten. Für ihn einen eigenen Schlüssel mit Rolle **Developer** als
+   Repository-Secrets anlegen (oder eine zweite Umgebung ohne Prüfer).

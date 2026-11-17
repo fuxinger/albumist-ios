@@ -3,7 +3,9 @@
   python3 testflight_notes.py text  --notes docs/TESTFLIGHT_NOTES.md --build 28 --sha abc1234
       Prints the text: the part of the notes file between the markers
       <!-- testflight:start --> and <!-- testflight:end -->, as plain text, plus a line with the
-      build number and commit. At most 4000 characters (App Store Connect's limit).
+      build number and commit. At most 4000 characters (App Store Connect's limit). With
+      --forced (a build uploaded by testflight.yml's emergency "force", without any test) the
+      text starts with a warning for the testers and the last line says "FORCED – untested".
   python3 testflight_notes.py upload --notes ... --build 28 --sha ... --bundle-id app.albumist.ios
       Waits (bounded) until App Store Connect knows the build, then writes the text into the
       build's German beta localization (creates it if missing). Same API key as the upload:
@@ -26,10 +28,14 @@ import urllib.request
 
 ASC = "https://api.appstoreconnect.apple.com/v1"
 LIMIT = 4000
+FORCED_MARK = "FORCED – untested"
+FORCED_WARNING = (f"NOTFALL-BUILD OHNE TESTS ({FORCED_MARK}): Dieser Build kam ohne die automatischen "
+                  "Tests zu TestFlight. Rechne mit Fehlern und melde alles, was dir auffällt.")
 
 
-def render(notes_path, build, sha):
-    source = open(notes_path, encoding="utf-8").read()
+def render(notes_path, build, sha, forced=False):
+    with open(notes_path, encoding="utf-8") as f:
+        source = f.read()
     match = re.search(r"<!--\s*testflight:start\s*-->(.*?)<!--\s*testflight:end\s*-->", source, re.S)
     body = match.group(1) if match else source
     lines = []
@@ -42,6 +48,9 @@ def render(notes_path, build, sha):
         lines.append(line.rstrip())
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
     footer = f"\n\nBuild {build} · {sha[:7]}"
+    if forced:
+        text = f"{FORCED_WARNING}\n\n{text}"
+        footer += f" · {FORCED_MARK}"
     if len(text) + len(footer) > LIMIT:
         text = text[: LIMIT - len(footer) - 1].rstrip() + "…"
     return text + footer
@@ -89,7 +98,7 @@ def call(method, path, body=None, **params):
 
 
 def upload(args):
-    text = render(args.notes, args.build, args.sha)
+    text = render(args.notes, args.build, args.sha, args.forced)
     print("WHAT_TO_TEST\n" + text + "\n")
     deadline = time.monotonic() + args.wait_minutes * 60
     last_error = ""
@@ -141,9 +150,10 @@ def main():
     parser.add_argument("--sha", required=True)
     parser.add_argument("--bundle-id", default="app.albumist.ios")
     parser.add_argument("--wait-minutes", type=float, default=40)
+    parser.add_argument("--forced", action="store_true", help="the build was uploaded without tests (force)")
     args = parser.parse_args()
     if args.command == "text":
-        print(render(args.notes, args.build, args.sha))
+        print(render(args.notes, args.build, args.sha, args.forced))
         return 0
     return upload(args)
 

@@ -48,7 +48,8 @@ name: UI flow
 # when a group fails. Nothing is repeated silently: every repeat, every test that passed only
 # on it and every failed boot attempt is a FLAKY... line in the group's log and job summary
 # and goes into build/flaky-GROUP.json; 4. "UI summary" (Linux) counts them over all groups
-# and lists the rows the tap-through sweep did not tap (UI_SWEEP_SKIP, also in that JSON).
+# and lists the rows the tap-through sweep did not tap (UI_SWEEP_SKIP, also in that JSON). In a
+# TestFlight run, testflight.yml does that instead, together with the stress pass's record.
 on:
   pull_request:
     paths-ignore: ['**.md']
@@ -79,9 +80,15 @@ env:
 #     again ("Re-run all jobs") once the queue is free. The agent rule "only one Mac-heavy
 #     strand at a time" (for the owner to add to the project rules) keeps that rare.
 # Not in the queue, so never kept waiting or replaced by another run:
-#   - the UI flow of a TestFlight run (testflight.yml calls this workflow with release: true):
-#     a group of its own for that run, because a replaced or cancelled UI part would stop the
-#     upload. Start TestFlight when the queue is idle; then it is the one Mac-heavy strand.
+#   - the UI flow of a TestFlight run (testflight.yml calls this workflow with release: true;
+#     github.workflow is then the caller's name "TestFlight", a second guard below): a group
+#     of its own for that run, because a replaced or cancelled UI part would stop the upload.
+#     Start TestFlight when the queue is idle; then it is the one Mac-heavy strand. Not yet
+#     seen in a real run: check on the first TestFlight run that its UI flow and stress pass
+#     do not wait for "mac-queue".
+#   - the weekly full stress pass (ui-stress.yml, group "stress-weekly").
+#   - pull requests from forks: a group per pull request ("ui-fork-<ref>"), so that a run from
+#     outside the repository can neither replace nor hold up the runs in the queue.
 #   - CI's macOS job (ci.yml), the quick verdict of every push (one Mac, ~20 min): in this
 #     group it would wait behind the UI run of its own commit (about an hour), and while it
 #     waits the next run to join, e.g. the UI run of the next push, would cancel it.
@@ -90,7 +97,9 @@ env:
 # analysis). With one group for all branches, cancel-in-progress would cancel whatever runs,
 # another branch's run too.
 concurrency:
-  group: ${{ inputs.release && format('testflight-ui-{0}', github.run_id) || 'mac-queue' }}
+  group: >-
+    ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ui-{0}', github.run_id)
+    || (github.event.pull_request.head.repo.fork && format('ui-fork-{0}', github.ref) || 'mac-queue') }}
   cancel-in-progress: false
 
 jobs:
@@ -146,7 +155,9 @@ jobs:
         with:
           name: ui-products
           path: ui-products.tgz
-          retention-days: 1
+          # "Re-run failed jobs" of a group (after a runner or simulator failure) downloads
+          # these again from the first attempt: 3 days for that, not just one.
+          retention-days: 3
           compression-level: 0
           overwrite: true
 
@@ -154,8 +165,10 @@ jobs:
     name: UI ${{ matrix.title }}
     needs: build
     runs-on: xcode-27
-    # A group takes 25-65 min; a repeat after a simulator failure can add up to its length.
-    timeout-minutes: 120
+    # A group takes 25-65 min with 5-7 min of simulator setup; a repeat after a simulator
+    # failure (erase, boot, the tests that did not pass) can add up to its length again, so the
+    # longest group with a full repeat needs about 135 min.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       # Four groups + CI's macOS job = five macOS jobs at the peak (see the top of this file).
@@ -319,8 +332,10 @@ jobs:
     # the groups decide that. Nothing that was repeated stays hidden in a single job's log, and
     # neither does a row the tap-through sweep (UI test 3) left out: the records carry its
     # UI_SWEEP_SKIP lines, listed here per group (a real row taken for a section header shows).
+    # In a TestFlight run, testflight.yml counts these records together with the stress pass's
+    # ("Repeats and flaky tests"), so this job is left out there.
     needs: ui
-    if: ${{ always() && needs.ui.result != 'skipped' }}
+    if: ${{ always() && needs.ui.result != 'skipped' && !inputs.release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

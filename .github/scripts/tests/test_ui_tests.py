@@ -710,7 +710,7 @@ class GroupTests(unittest.TestCase):
 
     def test_the_stress_run_is_not_part_of_the_ui_run(self):
         # DeviceConditionUITests/test12 skips itself without SORTLY_STRESS_PHOTOS; only
-        # ui-stress.yml (started by hand) sets it.
+        # ui-stress.yml (by hand, weekly and in every TestFlight run) sets it.
         self.assertNotIn("SORTLY_STRESS_PHOTOS", self.workflow())
         stress = open(os.path.join(self.ROOT, ".github", "workflows", "ui-stress.yml"), encoding="utf-8").read()
         self.assertIn("TEST_RUNNER_SORTLY_STRESS_PHOTOS", stress)

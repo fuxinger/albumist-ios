@@ -171,7 +171,9 @@ struct ProposalDetailView: View {
     @State private var preparing = false
     @State private var applied = false
     @State private var rejectingMatch = false
-    /// Set by "Album anlegen" for its preview only; undone when the user comes back without creating.
+    /// Set by "Album anlegen" for its preview only; given back when the preview leaves the path
+    /// (`Navigator.onLeave`) or is not shown (`endSelection()`). A suggestion whose album was
+    /// created stays done.
     @State private var previewSelection: AppModel.PreviewSelection?
     @State private var explainReliability = false
     @State private var showWorkshop = false
@@ -368,15 +370,11 @@ struct ProposalDetailView: View {
         }
         .onChange(of: showsDirect) { _, showing in
             guard !showing else { return }
-            if applied {
-                // Back from the finished preview: the suggestion is done, return to the list.
-                dismiss()
-            } else if let selection = previewSelection {
-                // Back without creating: the suggestion is not selected.
-                model.endPreview(selection)
-            }
+            // Its pick went back with the preview (`offer`, `Navigator.onLeave`).
             previewSelection = nil
             directPlan = nil
+            // Back from the finished preview: the suggestion is done, return to the list.
+            if applied { dismiss() }
         }
     }
 
@@ -616,6 +614,13 @@ struct ProposalDetailView: View {
             if previewSelection == nil { previewSelection = model.selectForPreview([(proposal, ready.chosen)]) }
             if Navigator.push(.prebuiltPlan(ready.token), on: navigator, ifStill: ready.request.mark) == .pushed {
                 directPlan = ready.token
+                // The pick goes back when the preview leaves the path, also when this screen
+                // goes along without seeing it (a pop to the root or back to an earlier screen,
+                // the sheet closed), and after a plan whose step for this suggestion failed
+                // (an applied suggestion was cleared by the execution and stays as it is).
+                if let navigator, let selection = previewSelection {
+                    navigator.onLeave(.prebuiltPlan(ready.token)) { [model] in model.endPreview(selection) }
+                }
                 return
             }
             verdict = .gone

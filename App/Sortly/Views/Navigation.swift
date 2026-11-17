@@ -19,7 +19,10 @@ import SortlyCore
 /// destination did nothing). Plain `NavigationLink { destination }` stays for screens that
 /// open nothing in code (photos, albums, folders, settings pages). A screen that opens a
 /// preview after building its plan and also holds such links (albums and folders under
-/// "Alben", a suggestion's photos) turns them off while the plan is built.
+/// "Alben", a suggestion's photos) turns them off while the plan is built. What a screen hands
+/// to a screen it pushes and takes back when that one goes (a preview's pick) is tied to the
+/// pushed screen (`Navigator.onLeave`): a pop to the root or back to an earlier screen takes the
+/// screen that pushed along without telling it.
 enum AppScreen: Hashable {
     /// All suggestions, or those of one area.
     case proposals
@@ -111,7 +114,11 @@ struct ProposalScreen: View {
 @MainActor @Observable
 final class Navigator {
     var path: [AppScreen] = [] {
-        didSet { if path != oldValue { changes &+= 1 } }
+        didSet {
+            guard path != oldValue else { return }
+            changes &+= 1
+            runLeaving()
+        }
     }
     /// Counts the changes of `path`: a push and the pop after it are two, although the path is
     /// the same again (`mark`). Asking for the screen on top again counts too (`push(_:)`).
@@ -133,6 +140,32 @@ final class Navigator {
     }
 
     func disappeared() { showing = false }
+
+    /// What runs when a screen leaves the path (`onLeave(_:perform:)`), by screen.
+    @ObservationIgnored private var leaving: [AppScreen: [@MainActor () -> Void]] = [:]
+
+    /// Runs `action` once `screen` is no longer on the path: Back from it, a pop to the root
+    /// (its tab tapped again) or back to an earlier screen (a long press on Back), also when the
+    /// screen that pushed it goes along, and when the whole stack goes (its sheet closed). For
+    /// what a screen hands to the screen it pushes and must take back (a preview's pick): the
+    /// screen that pushed may be gone before it could see its preview leave.
+    func onLeave(_ screen: AppScreen, perform action: @escaping @MainActor () -> Void) {
+        leaving[screen, default: []].append(action)
+    }
+
+    private func runLeaving() {
+        guard !leaving.isEmpty else { return }
+        for screen in leaving.keys.filter({ !path.contains($0) }) {
+            for action in leaving.removeValue(forKey: screen) ?? [] { action() }
+        }
+    }
+
+    /// The stack goes with its screens (its sheet closed): what waits for them to leave runs
+    /// now, on the main actor.
+    deinit {
+        let actions = leaving.values.flatMap { $0 }
+        if !actions.isEmpty { Task { @MainActor in for action in actions { action() } } }
+    }
 
     /// Where the stack stands, read when work starts on the screen on top. The same mark later
     /// means nothing was pushed or popped meanwhile (Back, a screen from Siri, Back and the same

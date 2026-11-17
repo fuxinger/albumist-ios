@@ -2,7 +2,7 @@ import Testing
 import SortlyCore
 @testable import Sortly
 
-/// `Navigator`: what moves a stack's mark, and what becomes of a screen pushed at the end of work.
+/// `Navigator`: its mark, screens pushed at the end of work, and what runs when a screen leaves.
 /// From the second review of 6a1969b (Navigation.swift).
 @MainActor
 struct NavigatorTests {
@@ -64,6 +64,61 @@ struct NavigatorTests {
         #expect(Navigator.push(.atlas, on: second, ifStill: first.mark) == .dropped)
         #expect(second.path.isEmpty)
     }
+
+    /// What waits for a screen (`onLeave`) runs once it leaves the path, not while screens come
+    /// and go above it or its tab is left and chosen again, and only once.
+    @Test func whatWaitsForAScreenRunsWhenItLeaves() {
+        let navigator = Navigator()
+        navigator.appeared()
+        let left = Counter()
+        navigator.push(.proposals)
+        navigator.push(.plan)
+        navigator.onLeave(.plan) { left.count += 1 }
+        navigator.push(.history)
+        navigator.disappeared()
+        navigator.appeared()
+        navigator.path.removeLast()
+        #expect(left.count == 0)
+        navigator.path.removeLast()
+        #expect(left.count == 1)
+        navigator.push(.plan)
+        navigator.path.removeLast()
+        #expect(left.count == 1)
+    }
+
+    /// "Album anlegen", then the suggestion and its preview popped together (the tab tapped
+    /// again, a long press on Back): the suggestion's screen never sees its preview leave, and
+    /// the pick goes back all the same. `.plan` stands in for the preview: `.prebuiltPlan`
+    /// needs a `ChangePlan`, whose initializer the app tests cannot reach.
+    @Test func aPopToTheRootGivesThePreviewsPickBack() {
+        let model = AppModel()
+        let a = AlbumProposal(id: SortlyID("a"), kind: .trip, title: "a", assetIDs: [])
+        let navigator = Navigator()
+        navigator.appeared()
+        navigator.push(.proposal(ProposalRef(a)))
+        let selection = model.selectForPreview([(a, .createNew(title: nil, folderPath: nil))])
+        navigator.push(.plan)
+        navigator.onLeave(.plan) { model.endPreview(selection) }
+        navigator.path = []
+        #expect(model.decisions[a.id] == nil)
+    }
+
+    /// The whole stack goes while the preview shows (its sheet closed): what waited runs on the
+    /// main actor right after.
+    @Test func whatWaitsRunsWhenTheStackGoes() async {
+        let left = Counter()
+        do {
+            let navigator = Navigator()
+            navigator.push(.plan)
+            navigator.onLeave(.plan) { left.count += 1 }
+        }
+        for _ in 0..<100 where left.count == 0 { await Task.yield() }
+        #expect(left.count == 1)
+    }
+}
+
+@MainActor private final class Counter {
+    var count = 0
 }
 
 /// `AppModel.selectForPreview` and `endPreview`: nothing stays selected that the user never

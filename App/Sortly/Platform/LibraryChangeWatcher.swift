@@ -18,6 +18,9 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
         registered = true
         // Off the main thread: registering talks to the Photos service, which can keep a caller
         // waiting while it sets up or writes the library (a fresh simulator, new photos).
+        // A change in the moment before the registration lands is not reported; the analysis
+        // that follows a start (at launch, SortlyApp; after access is granted, the first run)
+        // reads the library itself and so covers it.
         DispatchQueue.global(qos: .utility).async { [self] in
             PHPhotoLibrary.shared().register(self)
         }

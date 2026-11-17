@@ -820,13 +820,15 @@ final class SortlyFlowUITests: XCTestCase {
             photos.element(boundBy: 0).tap(); photos.element(boundBy: 1).tap()
             return tap(app.buttons["selection.ignore"], "ignore two photos (\(step))")
         }
-        // 1. Ignore, then "Widerrufen" in the note right after.
+        // 1. Ignore, then "Widerrufen" in the note right after. The note is tapped first and
+        // audited in 2.: it goes away by itself (20 s in UI runs, as with VoiceOver), and an
+        // audit that took 16 s left too little of that for the tap (UI run 44012530107).
+        let note = anything("2 Fotos ignoriert")
         if ignoreTwo("undo") {
-            let note = anything("2 Fotos ignoriert")
             let shown = note.waitForExistence(timeout: 5)
             print(shown ? "UI_STEP_OK ignore note" : "UI_STEP_MISSING ignore note")
             XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring")
-            shot("16a-ignore-note"); audit("ignore note")
+            shot("16a-ignore-note")
             if tap(app.buttons["ignore.undo"], "undo ignore") {
                 XCTAssertTrue(waitGone(note, timeout: 5), "The ignore note stayed after Widerrufen")
                 tap(app.buttons["Ignoriert"], "ignored area after undo")
@@ -838,8 +840,18 @@ final class SortlyFlowUITests: XCTestCase {
                 sleep(1)
             }
         }
-        // 2. Ignore again, then bring one back from "Ignoriert".
+        // 2. Ignore again: the note is audited and must then go away by itself. Then one
+        // photo is brought back from "Ignoriert".
         if ignoreTwo("unignore") {
+            let shown = note.waitForExistence(timeout: 5)
+            print(shown ? "UI_STEP_OK ignore note again" : "UI_STEP_MISSING ignore note again")
+            XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring again")
+            if shown {
+                audit("ignore note")
+                let expired = waitGone(note, timeout: 30)
+                print(expired ? "UI_STEP_OK ignore note went away by itself" : "UI_STEP_MISSING ignore note went away by itself")
+                XCTAssertTrue(expired, "The ignore note did not go away by itself")
+            }
             sleep(2)
             tap(app.buttons["Ignoriert"], "ignored area")
             sleep(2)

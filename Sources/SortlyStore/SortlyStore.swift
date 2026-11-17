@@ -188,6 +188,20 @@ public actor SortlyStore: PlanJournal {
         return try db.query("SELECT COUNT(*) AS n FROM assets WHERE \(filter)", values).first?["n"]?.int ?? 0
     }
 
+    /// Of `countNeedingAnalysis(version:labelsVersion:within:)`: the photos analysed already (at
+    /// least `version`) whose image labels are older than `labelsVersion`, the ones the image
+    /// step gives only their labels. For the analysis card, which names this work apart from new
+    /// photos; a photo given up as unreadable is counted here too (it gets a full look instead).
+    public func countNeedingLabelsOnly(version: Int, labelsVersion: Int, within range: Range<Date>? = nil) throws -> Int {
+        var filter = "analysis_version >= ? AND labels_version < ?"
+        var values: [SQLValue] = [.integer(Int64(version)), .integer(Int64(labelsVersion))]
+        if let range {
+            filter += " AND creation_date >= ? AND creation_date < ?"
+            values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
+        }
+        return try db.query("SELECT COUNT(*) AS n FROM assets WHERE \(filter)", values).first?["n"]?.int ?? 0
+    }
+
     private static func needingAnalysis(version: Int, labelsVersion: Int?) -> (filter: String, values: [SQLValue]) {
         guard let labelsVersion else { return ("analysis_version < ?", [.integer(Int64(version))]) }
         return ("(analysis_version < ? OR labels_version < ?)", [.integer(Int64(version)), .integer(Int64(labelsVersion))])

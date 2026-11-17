@@ -511,3 +511,327 @@ struct LabelsLaterTests {
         #expect(try await reopened.labelsVersions().values.allSatisfy { $0 == AnalysisPipeline.labelsVersion })
     }
 }
+
+/// The app side of "Themen" or "Dokumente" turned on later (review of the labels fix): a change
+/// of the settings starts the run it needs, or one more after the run in progress, and never
+/// undoes a Pause; the analysis card and the overview call the labels a run gives what they
+/// are, not new photos (M2).
+@Suite("Labels turned on later: the run after the change, and its words")
+struct LabelsLaterFollowUpTests {
+    typealias T = LabelsLaterTests
+
+    /// The workloads and the image step's counts of one run.
+    final class Reports: Sendable {
+        let workloads = Mutex<[AnalysisWorkload]>([])
+        let content = Mutex<[(completed: Int, total: Int)]>([])
+        var onProgress: @Sendable (AnalysisPipeline.Progress) -> Void {
+            { p in
+                if let w = p.workload { self.workloads.withLock { $0.append(w) } }
+                if p.stage == .content { self.content.withLock { $0.append((p.completed, p.total)) } }
+            }
+        }
+        var workload: AnalysisWorkload? { workloads.withLock { $0.last } }
+    }
+
+    static func pipeline(_ lib: LibraryBuilder, labels: Bool) throws -> (AnalysisPipeline, InMemoryLibraryReader, SortlyStore) {
+        let store = try SortlyStore(url: nil)
+        let reader = InMemoryLibraryReader(assets: lib.assets)
+        let pipeline = AnalysisPipeline(
+            store: store, reader: reader, analyzer: T.Analyzer(), geocoder: FakeGeocoder(), map: T.map, conditions: FakeConditions(),
+            settings: T.settings(labels: labels), calendar: Fixture.calendar, time: ManualTime().source, batchSize: 50)
+        return (pipeline, reader, store)
+    }
+
+    // MARK: The run after a change of the settings
+
+    @Test func aSettingsChangeStartsTheRunItNeeds() {
+        let off = T.settings(labels: false), on = T.settings(labels: true)
+        func next(_ old: OrganizationSettings, _ new: OrganizationSettings, running: Bool = false, paused: Bool = false,
+                  mayStart: Bool = true) -> AnalysisPipeline.RunAfterSettingsChange {
+            AnalysisPipeline.runAfterSettingsChange(from: old, to: new, running: running, pausedByUser: paused, mayStart: mayStart)
+        }
+        // Nothing new for photos read already: no run, whatever the state.
+        var renamed = on
+        renamed.rootFolderTitle = "Albumist"
+        for running in [false, true] {
+            #expect(next(on, off, running: running) == .noRun)
+            #expect(next(off, off, running: running) == .noRun)
+            #expect(next(on, renamed, running: running) == .noRun)
+        }
+        // "Themen" on: a run now, or one more after the run in progress (it decided at its start
+        // whether it gives labels).
+        #expect(next(off, on) == .now)
+        #expect(next(off, on, running: true) == .afterCurrentRun)
+        // A run that is busy gets one more after it also while none may start right now: the
+        // catch-up after the run checks again.
+        #expect(next(off, on, running: true, mayStart: false) == .afterCurrentRun)
+        // Paused by the user, also while the run finishes after Pause: nothing starts by itself.
+        #expect(next(off, on, paused: true) == .whenResumed)
+        #expect(next(off, on, running: true, paused: true) == .whenResumed)
+        // No run may start now (introduction, no photo access, a plan, a rebuild): one follows anyway.
+        #expect(next(off, on, mayStart: false) == .noRun)
+        // Every change `settingsChangeNeedsRun` names, the same way.
+        var withHidden = off, withoutHidden = off
+        withHidden.privacy.includeHiddenAssets = true
+        withoutHidden.privacy.includeHiddenAssets = false
+        #expect(next(withoutHidden, withHidden) == .now)
+        #expect(next(withHidden, withoutHidden) == .noRun)
+        #expect(next(withoutHidden, withHidden, running: true) == .afterCurrentRun)
+    }
+
+    /// The pipeline says which settings the runs used until the change: every edit in the
+    /// settings saves (each letter of the folder name), and only a real change needs a run.
+    @Test func updateReturnsTheSettingsItReplaces() async throws {
+        let s = try T.setup(photos: 3, screenshots: 0, labels: false)
+        let on = T.settings(labels: true)
+        let first = await s.pipeline.update(settings: on)
+        #expect(first == T.settings(labels: false))
+        #expect(AnalysisPipeline.settingsChangeNeedsRun(from: first, to: on))
+        let again = await s.pipeline.update(settings: on)
+        #expect(again == on)
+        #expect(!AnalysisPipeline.settingsChangeNeedsRun(from: again, to: on))
+        #expect(await s.pipeline.settings == on)
+    }
+
+    /// "Themen" turned on while a run is busy: that run decided before its image step that it
+    /// gives no labels, so the change needs one more run after it, and that one gives them.
+    @Test func turnedOnDuringARunTheRunAfterItGivesTheLabels() async throws {
+        let s = try T.setup(photos: 12, screenshots: 0, labels: false)
+        let on = T.settings(labels: true)
+        final class Change: Sendable { let task = Mutex<Task<OrganizationSettings, Never>?>(nil) }
+        let change = Change()
+        let pipeline = s.pipeline
+        let report = try await pipeline.run(onProgress: { p in
+            guard p.stage == .content else { return }
+            change.task.withLock { task in
+                if task == nil { task = Task { await pipeline.update(settings: on) } }
+            }
+        })
+        #expect(report.isComplete)
+        #expect(report.labelsAdded == 0)
+        #expect(s.analyzer.classifyingRequests == 0)
+        let task = try #require(change.task.withLock { $0 })
+        let previous = await task.value
+        #expect(previous == T.settings(labels: false))
+        #expect(try await s.store.labelsVersions().values.allSatisfy { $0 == 0 })
+        // Told while the run was busy: one more run after it.
+        #expect(AnalysisPipeline.runAfterSettingsChange(from: previous, to: on, running: true, pausedByUser: false, mayStart: true)
+            == .afterCurrentRun)
+        let after = try await pipeline.run()
+        #expect(after.isComplete)
+        #expect(after.labelsAdded == 12)
+        #expect(after.newPhotosAnalyzed == 0)
+        #expect(try await s.store.labelsVersions().values.allSatisfy { $0 == AnalysisPipeline.labelsVersion })
+        #expect(try await T.dogSearch(pipeline).isEmpty == false)
+    }
+
+    // MARK: Labels said apart from new photos
+
+    @Test func storeCountsThePhotosThatOnlyNeedTheirLabels() async throws {
+        let store = try SortlyStore(url: nil)
+        var lib = LibraryBuilder()
+        let a = lib.photo(at: Fixture.date("2025-03-01 10:00"), Fixture.Places.munichHome)
+        let b = lib.photo(at: Fixture.date("2026-03-01 10:00"), Fixture.Places.munichHome)
+        let c = lib.photo(at: Fixture.date("2026-03-02 10:00"), Fixture.Places.munichHome)
+        _ = lib.photo(at: Fixture.date("2026-03-03 10:00"), Fixture.Places.munichHome)
+        _ = try await store.upsertAssets(lib.assets)
+        // a and b analysed without labels, c with them; the fourth is new.
+        try await store.saveResults([(a, ContentAnalysis()), (b, ContentAnalysis())], kind: "content", version: 1, markingAnalyzed: [a, b])
+        try await store.saveResults([(c, ContentAnalysis(labels: [LabelScore("dog", 0.9)]))], kind: "content", version: 1,
+                                    markingAnalyzed: [c], labelsVersion: 1)
+        #expect(try await store.countNeedingLabelsOnly(version: 1, labelsVersion: 1) == 2)
+        #expect(try await store.countNeedingAnalysis(version: 1, labelsVersion: 1) == 3)
+        let year = Fixture.date("2026-01-01 00:00")..<Fixture.date("2027-01-01 00:00")
+        #expect(try await store.countNeedingLabelsOnly(version: 1, labelsVersion: 1, within: year) == 1)
+        // A newer analysis version: they need a full look, not their labels only.
+        #expect(try await store.countNeedingLabelsOnly(version: 2, labelsVersion: 1) == 0)
+    }
+
+    /// The workload says the photos that get only their labels apart (they are in `contentLeft`
+    /// too), and the report counts only the others as new photos.
+    @Test func workloadAndReportSayTheLabelsApartFromNewPhotos() async throws {
+        var lib = LibraryBuilder()
+        for i in 0..<20 { _ = lib.photo(at: Fixture.date("2026-03-01 10:00").addingTimeInterval(Double(i) * 7_200), Fixture.Places.munichHome) }
+        let (pipeline, reader, _) = try Self.pipeline(lib, labels: false)
+        let first = Reports()
+        let one = try await pipeline.run(onProgress: first.onProgress)
+        #expect(one.newPhotosAnalyzed == 20 && one.labelsAdded == 0)
+        #expect(first.workload?.labelsLeft == 0)
+
+        // Three new photos, and "Themen" on.
+        for i in 0..<3 { _ = lib.photo(at: Fixture.date("2026-04-01 10:00").addingTimeInterval(Double(i) * 7_200), Fixture.Places.munichHome) }
+        await reader.set(assets: lib.assets)
+        await pipeline.update(settings: T.settings(labels: true))
+        let second = Reports()
+        let two = try await pipeline.run(onProgress: second.onProgress)
+        let workload = try #require(second.workload)
+        #expect(workload.labelsLeft == 20)
+        #expect(workload.contentLeft == 23)
+        #expect(two.contentAnalyzed == 23)
+        #expect(two.labelsAdded == 20)
+        #expect(two.newPhotosAnalyzed == 3)
+
+        // Nothing left: no labels left in the next workload either.
+        let third = Reports()
+        let three = try await pipeline.run(onProgress: third.onProgress)
+        #expect(third.workload?.labelsLeft == 0 && third.workload?.contentLeft == 0)
+        #expect(three.newPhotosAnalyzed == 0 && three.labelsAdded == 0)
+    }
+
+    // MARK: The phase label of a run that goes on (M2)
+
+    /// The first analysis stopped at 40 % with "Themen" off, then turned on: the run that goes
+    /// on has much more work, all of it labels for the photos analysed before. Its phase is
+    /// "Fotos werden für die neuen Bereiche angesehen", no longer "Neue Fotos werden analysiert";
+    /// number and widths are those of the phase as before.
+    @Test func labelsForAreasTurnedOnAreNamedForTheNewAreas() {
+        // 5,683 photos, stopped in the image step at 2,273: 3,410 photos and 200 screenshots left.
+        let leftThen = 3_410 + 200
+        func stopped() -> ResumedRun { ResumedRun(stage: 4, completed: 2_273, shown: 0.40, left: leftThen, photos: 5_683) }
+        let turnedOn = AnalysisWorkload(photos: 5_683, located: 4_000, screenshots: 300, contentLeft: 3_410 + 2_273, textLeft: 200,
+                                        labelsLeft: 2_273)
+        var run = stopped()
+        let runStarts = run.workload(turnedOn, remaining: 900)
+        #expect(runStarts)
+        #expect(run.newWork == .newAreas)
+        // The same work not said apart (before the fix): "Neue Fotos werden analysiert".
+        var unsaid = turnedOn
+        unsaid.labelsLeft = 0
+        var before = stopped()
+        let beforeStarts = before.workload(unsaid, remaining: 900)
+        #expect(beforeStarts)
+        #expect(before.newWork == .newPhotos)
+        #expect(run.ownStart == before.ownStart)
+        #expect(run.shown(running: true, catchingUp: false, overall: 0.1, stopped: nil)
+            == before.shown(running: true, catchingUp: false, overall: 0.1, stopped: nil))
+
+        // A few new photos came in as well: still mostly labels.
+        let few = AnalysisWorkload(photos: 5_783, located: 4_000, screenshots: 300, contentLeft: 3_410 + 100 + 2_273, textLeft: 200,
+                                   labelsLeft: 2_273)
+        var withFew = stopped()
+        let withFewStarts = withFew.workload(few, remaining: 900)
+        #expect(withFewStarts && withFew.newWork == .newAreas)
+        // More new photos than labels: "Neue Fotos werden analysiert".
+        let many = AnalysisWorkload(photos: 8_683, located: 6_000, screenshots: 300, contentLeft: 3_410 + 3_000 + 2_273, textLeft: 200,
+                                    labelsLeft: 2_273)
+        var withMany = stopped()
+        let withManyStarts = withMany.workload(many, remaining: 1_200)
+        #expect(withManyStarts && withMany.newWork == .newPhotos)
+        // An update of the analysis is named first, as before.
+        var updated = ResumedRun(stage: 4, completed: 2_273, shown: 0.40, left: leftThen, photos: 5_683, updated: true)
+        let updatedStarts = updated.workload(turnedOn, remaining: 900)
+        #expect(updatedStarts && updated.newWork == .afterUpdate)
+        // Stopped at 20 %: not much more work, no phase and no label (the value goes on from the floor).
+        var early = ResumedRun(stage: 4, completed: 1_137, shown: 0.20, left: 4_546 + 200, photos: 5_683)
+        let early20 = AnalysisWorkload(photos: 5_683, located: 4_000, screenshots: 300, contentLeft: 4_546 + 1_137, textLeft: 200,
+                                       labelsLeft: 1_137)
+        let earlyStarts = early.workload(early20, remaining: 900)
+        #expect(!earlyStarts && early.newWork == nil)
+    }
+
+    /// A run that already showed "Neue Fotos werden analysiert" and stopped near the end:
+    /// "Themen" on gives it labels it cannot move through. Its next phase is named for the new
+    /// areas, not "Weitere neue Fotos werden analysiert" (M2); new photos after that phase are
+    /// new photos again (a title shown is never shown again).
+    @Test func aPhaseShownBeforeGoesOnUnderTheRightTitle() {
+        let labels = AnalysisWorkload(photos: 50_800, located: 30_000, screenshots: 2_000, contentLeft: 1_600, textLeft: 0, labelsLeft: 1_600)
+        var afterNewPhotos = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, newWork: .newPhotos)
+        let afterNewPhotosStarts = afterNewPhotos.workload(labels, remaining: 300)
+        #expect(afterNewPhotosStarts)
+        #expect(afterNewPhotos.newWork == .newAreas)
+        var afterMore = ResumedRun(stage: 5, completed: 1_000, shown: 0.98, left: 0, photos: 50_800, newWork: .moreNewPhotos)
+        let afterMoreStarts = afterMore.workload(labels, remaining: 300)
+        #expect(afterMoreStarts && afterMore.newWork == .newAreas)
+        // Stopped near the end of a phase for the new areas with 1,200 labels left; 400 new
+        // photos came in: the phase that starts is about them.
+        let newPhotos = AnalysisWorkload(photos: 51_200, located: 30_000, screenshots: 2_000, contentLeft: 1_600, textLeft: 0, labelsLeft: 1_200)
+        var afterAreas = ResumedRun(stage: 4, completed: 49_000, shown: 0.98, left: 1_200, photos: 50_800, newWork: .newAreas)
+        let afterAreasStarts = afterAreas.workload(newPhotos, remaining: 300)
+        #expect(afterAreasStarts)
+        #expect(afterAreas.newWork == .newPhotos)
+        // With room to move nothing starts again, whatever the work (as for every label).
+        var roomy = ResumedRun(stage: 4, completed: 20_000, shown: 0.60, left: 1_200, photos: 50_800, newWork: .newAreas)
+        let roomyStarts = roomy.workload(newPhotos, remaining: 300)
+        #expect(!roomyStarts && roomy.newWork == .newAreas)
+    }
+
+    /// The label only names the work: with the labels said apart or not, a phase starts in the
+    /// same runs with the same number, labels only ever change the title, and a title shown is
+    /// never the title of the next phase.
+    @Test func theLabelChangesNeitherThePhaseNorItsNumber() {
+        let shownLabels: [ResumedRun.NewWork?] = [nil, .newPhotos, .moreNewPhotos, .afterUpdate, .afterUpdateAgain, .newAreas]
+        var cases = 0
+        for shown in [0.40, 0.97] {
+            for leftThen in [0, 900, 3_600] {
+                for content in [500, 1_600, 6_000] {
+                    for labels in [0, 300, 1_600, 4_000] where labels <= content {
+                        for newWork in shownLabels {
+                            for updated in [false, true] {
+                                for remaining in [nil, 120.0, 3_000.0] as [Double?] {
+                                    let w = AnalysisWorkload(photos: 50_000, located: 30_000, screenshots: 2_000, contentLeft: content,
+                                                             textLeft: 200, labelsLeft: labels)
+                                    var plain = w
+                                    plain.labelsLeft = 0
+                                    var with = ResumedRun(stage: 4, completed: 100, shown: shown, left: leftThen, photos: 50_000,
+                                                          updated: updated, newWork: newWork)
+                                    var without = with
+                                    let a = with.workload(w, remaining: remaining)
+                                    let b = without.workload(plain, remaining: remaining)
+                                    let what = "shown \(shown) left \(leftThen) content \(content) labels \(labels) \(String(describing: newWork)) updated \(updated) remaining \(String(describing: remaining))"
+                                    #expect(a == b, "\(what)")
+                                    #expect(with.ownStart == without.ownStart, "\(what)")
+                                    #expect(with.shown(running: true, catchingUp: false, overall: 0.3, stopped: nil)
+                                        == without.shown(running: true, catchingUp: false, overall: 0.3, stopped: nil), "\(what)")
+                                    if a, let newWork { #expect(with.newWork != newWork, "\(what)") }
+                                    if labels == 0 { #expect(with.newWork == without.newWork, "\(what)") }
+                                    if with.newWork == .newAreas, with.newWork != newWork { #expect(labels > 0 && !updated, "\(what)") }
+                                    cases += 1
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        #expect(cases > 1_000)
+    }
+
+    /// M2 end to end: the first analysis paused at about 40 % with "Themen" off, then turned on.
+    /// The workload of the run that goes on, as the pipeline says it, names the phase for the
+    /// new areas.
+    @Test func firstAnalysisPausedThenThemenOnIsNamedForTheNewAreas() async throws {
+        var lib = LibraryBuilder()
+        for i in 0..<1_500 {
+            _ = lib.photo(at: Fixture.date("2024-01-01 10:00").addingTimeInterval(Double(i) * 3_600), Fixture.Places.munichHome)
+        }
+        let (pipeline, _, store) = try Self.pipeline(lib, labels: false)
+        let control = AnalysisRunControl()
+        let first = Reports()
+        let paused = try await pipeline.run(control: control, onProgress: { p in
+            first.onProgress(p)
+            if p.stage == .content, p.completed >= 600 { control.pause() }
+        })
+        #expect(paused.pausedBecause == .userPaused)
+        let reached = try #require(first.content.withLock { $0.last })
+        #expect(reached.completed >= 600 && reached.completed < 1_500)
+        let workloadThen = try #require(first.workload)
+        // What the marker keeps (`AnalysisMarker.left`).
+        let leftThen = workloadThen.heavyLeft(at: .content, completed: reached.completed, total: reached.total)
+
+        await pipeline.update(settings: T.settings(labels: true))
+        let second = Reports()
+        let rest = try await pipeline.run(onProgress: second.onProgress)
+        #expect(rest.isComplete)
+        let workload = try #require(second.workload)
+        #expect(workload.labelsLeft == reached.completed)
+        #expect(workload.contentLeft == 1_500)
+        #expect(rest.labelsAdded == reached.completed)
+        #expect(rest.newPhotosAnalyzed == 1_500 - reached.completed)
+        var run = ResumedRun(stage: AnalysisPipeline.Stage.content.number, completed: reached.completed, shown: 0.40,
+                             left: leftThen, photos: 1_500)
+        let runStarts = run.workload(workload)
+        #expect(runStarts)
+        #expect(run.newWork == .newAreas)
+        #expect(try await store.labelsVersions().values.allSatisfy { $0 == AnalysisPipeline.labelsVersion })
+    }
+}

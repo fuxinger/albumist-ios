@@ -90,14 +90,20 @@ public struct AnalysisWorkload: Sendable, Hashable, Codable {
     /// review of ee36188: counting every located photo made the time left far too long).
     /// `nil`: not known, all located photos count.
     public var placesLeft: Int?
+    /// Of `contentLeft`: photos analysed already that get only their image labels, because
+    /// "Themen" or "Dokumente" was turned on after they were analysed. Said apart so a run that
+    /// goes on names this work for what it is (`ResumedRun.NewWork.newAreas`), not as new photos.
+    public var labelsLeft: Int
 
-    public init(photos: Int, located: Int, screenshots: Int, contentLeft: Int, textLeft: Int, placesLeft: Int? = nil) {
+    public init(photos: Int, located: Int, screenshots: Int, contentLeft: Int, textLeft: Int, placesLeft: Int? = nil,
+                labelsLeft: Int = 0) {
         self.photos = photos
         self.located = located
         self.screenshots = screenshots
         self.contentLeft = contentLeft
         self.textLeft = textLeft
         self.placesLeft = placesLeft.map { min(located, max(0, $0)) }
+        self.labelsLeft = min(max(0, contentLeft), max(0, labelsLeft))
     }
 
     /// All items of a step (for the widths: the counts are over the whole library too).
@@ -617,6 +623,11 @@ public struct ResumedRun: Sendable, Equatable {
         /// The app's analysis changed again during a phase "Analyse nach Update" whose number
         /// could no longer move visibly ("Analyse nach erneutem Update", review of ee36188).
         case afterUpdateAgain
+        /// "Themen" or "Dokumente" was turned on since: photos analysed before get the image
+        /// labels these areas need ("Fotos werden für die neuen Bereiche angesehen"; review of
+        /// the labels fix, M2: this work was called "Neue Fotos werden analysiert", or "Weitere
+        /// neue Fotos werden analysiert" in a run that already showed that phase).
+        case newAreas
     }
 
     /// "Much more work": more than this times the work left when the run stopped …
@@ -806,7 +817,9 @@ public struct ResumedRun: Sendable, Equatable {
 
     /// The workload (said once, after the trips step), with the time left by the estimate
     /// now (`remaining`). A phase of its own starts, "Analyse nach Update" when the app's
-    /// analysis changed since, otherwise "Neue Fotos werden analysiert",
+    /// analysis changed since, "Fotos werden für die neuen Bereiche angesehen" when the work
+    /// added is mostly labels for areas turned on since (`addsMostlyLabels`), otherwise "Neue
+    /// Fotos werden analysiert",
     /// - with much more work left than when the run stopped (`isMuchMore`), or
     /// - with more work than then, near the cap, when the number could only move slower than
     ///   the visible pace from where it stands to 99 % (`movesTooSlowly`, reviews of c772325
@@ -816,18 +829,23 @@ public struct ResumedRun: Sendable, Equatable {
     /// werden analysiert", "Analyse nach erneutem Update"; review of c772325: never again under
     /// the title already shown), alternating with the first.
     /// The label appears only now, together with the phase's own number (review of 0305d20).
+    /// The label only names the work: whether a phase starts, its number and its widths do not
+    /// depend on it.
     /// `true`: the phase starts now.
     public mutating func workload(_ workload: AnalysisWorkload, remaining: Double? = nil) -> Bool {
         guard !ownStart, let leftThen else { return false }
         let work = workload.contentLeft + workload.textLeft
         let tooSlow = work > leftThen && remaining.map { Self.movesTooSlowly(from: spread, remaining: $0) } == true
-        let cause: NewWork = updated ? .afterUpdate : .newPhotos
+        let cause: NewWork = updated ? .afterUpdate
+            : addsMostlyLabels(workload, work: work, leftThen: leftThen) ? .newAreas : .newPhotos
         let label: NewWork
         if let shownLabel = newWork {
             guard tooSlow else { return false }
             switch (cause, shownLabel) {
             case (.afterUpdate, .afterUpdate): label = .afterUpdateAgain
             case (.afterUpdate, _): label = .afterUpdate
+            // Never the title shown: after "neue Bereiche" the cause is never the labels again.
+            case (.newAreas, _): label = .newAreas
             case (_, .newPhotos): label = .moreNewPhotos
             default: label = .newPhotos
             }
@@ -838,6 +856,20 @@ public struct ResumedRun: Sendable, Equatable {
         newWork = label
         ownStart = true
         return true
+    }
+
+    /// The work added since the stop is mostly labels: "Themen" or "Dokumente" was turned on
+    /// since, and the photos analysed before that get only their labels now
+    /// (`AnalysisWorkload.labelsLeft`) are at least as many as the rest of what was added (new
+    /// photos, screenshots to read). Not when the phase shown is about them already: their
+    /// labels were part of the work left then, so what was added is something else.
+    /// How many labels were left at the stop itself is not known (a run that stopped while
+    /// catching up labels without a phase of its own): its labels count as added, and a phase
+    /// that new photos started then may be named after the labels it also gives.
+    func addsMostlyLabels(_ workload: AnalysisWorkload, work: Int, leftThen: Int) -> Bool {
+        let labels = workload.labelsLeft
+        guard labels > 0, newWork != .newAreas else { return false }
+        return labels >= work - labels - leftThen
     }
 
     /// Every report of the run until it is back: `true` for the first one at or past the

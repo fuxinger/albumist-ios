@@ -156,6 +156,11 @@ public actor AnalysisPipeline {
         public var contentAnalyzed = 0
         /// Of `contentAnalyzed`: photos analysed before that got only their labels now.
         public var labelsAdded = 0
+        /// Of `contentAnalyzed`: the photos looked at in full, without those that only got
+        /// their labels ("Themen" or "Dokumente" turned on later). The overview calls only these
+        /// new photos (review of the labels fix, M2: "Beim Prüfen 5.683 neue Fotos analysiert"
+        /// after "Themen" was turned on, with no new photo at all).
+        public var newPhotosAnalyzed: Int { max(0, contentAnalyzed - labelsAdded) }
         public var textRecognized = 0
         public var textWaitingForOriginal = 0
         /// How long reading the texts took in this run (diagnostic report: photos per minute).
@@ -333,7 +338,14 @@ public actor AnalysisPipeline {
         self.foregroundOnlineBudget = foregroundOnlineBudget
     }
 
-    public func update(settings: OrganizationSettings) { self.settings = settings }
+    /// Takes the user's settings and returns the ones they replace: the app compares the two
+    /// (`runAfterSettingsChange`), against what the runs really used until now.
+    @discardableResult
+    public func update(settings: OrganizationSettings) -> OrganizationSettings {
+        let previous = self.settings
+        self.settings = settings
+        return previous
+    }
 
     /// Whether the image step asks for labels: they serve "Themen" and "Dokumente" (and the
     /// search for things in photos, "Hund", "Rechnung").
@@ -362,6 +374,38 @@ public actor AnalysisPipeline {
         let before = PlaceResolutionPolicy(settings: old), after = PlaceResolutionPolicy(settings: new)
         if after.deepestLevel > before.deepestLevel || (!before.onlineAllowed && after.onlineAllowed) { return true }
         return !old.privacy.includeHiddenAssets && new.privacy.includeHiddenAssets
+    }
+
+    /// What follows a change of the settings in the app (`AppModel.saveSettings`), decided once
+    /// the pipeline has the new ones (`update(settings:)` returns the old ones).
+    public enum RunAfterSettingsChange: Sendable, Equatable {
+        /// Nothing starts: the change gives no step new work, or no run may start now and one
+        /// follows anyway. The introduction ends with the first analysis; photo access that
+        /// comes back, a plan that is being written and "Analyse neu aufbauen" each end with a
+        /// run; and every run reads the settings it runs with.
+        case noRun
+        /// A run starts now.
+        case now
+        /// A run is busy and may have read the settings before the change (labels are decided
+        /// after the trips step, hidden photos with the library read): one more run follows when
+        /// it ends. One, however many changes come meanwhile (`AppModel.catchUpAfterRun`, as for
+        /// changes in Photos during a run).
+        case afterCurrentRun
+        /// The user paused the analysis, or tapped Pause and the run is finishing the photos in
+        /// work: nothing starts by itself, a change of the settings never undoes a Pause.
+        /// "Fortsetzen" does the new work with the rest (it reads the new settings).
+        case whenResumed
+    }
+
+    /// `running`: a run is busy. `pausedByUser`: see `RunAfterSettingsChange.whenResumed`.
+    /// `mayStart`: a run may start now (past the introduction, photos readable, no plan being
+    /// written, no rebuild of the analysis).
+    public static func runAfterSettingsChange(from old: OrganizationSettings, to new: OrganizationSettings,
+                                              running: Bool, pausedByUser: Bool, mayStart: Bool) -> RunAfterSettingsChange {
+        guard settingsChangeNeedsRun(from: old, to: new) else { return .noRun }
+        if pausedByUser { return .whenResumed }
+        if running { return .afterCurrentRun }
+        return mayStart ? .now : .noRun
     }
 
     /// What runs without an explicit scope work on. First device test 15.11.: "nur 2026" at
@@ -869,13 +913,19 @@ public actor AnalysisPipeline {
             guard let place = places[asset.id] else { return true }
             return wantsTown && place.precisionMeters == nil
         }.count
+        // Of the photos still to look at: those analysed already that get only their labels.
+        var labelsLeft = 0
+        if let labels {
+            labelsLeft = try await store.countNeedingLabelsOnly(version: Self.contentVersion, labelsVersion: labels, within: range)
+        }
         return AnalysisWorkload(
             photos: photos,
             located: located.count,
             screenshots: screenshots.count,
             contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range),
             textLeft: screenshots.filter { read[$0.id] == nil }.count,
-            placesLeft: placesLeft
+            placesLeft: placesLeft,
+            labelsLeft: labelsLeft
         )
     }
 

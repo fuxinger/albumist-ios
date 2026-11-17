@@ -247,11 +247,16 @@ struct OverviewView: View {
         }
         if let report = model.analysis.lastReport, model.analysis.lastRun != nil, model.analysis.kind == .check {
             // What "Neu prüfen" found, so a check that ends after a few seconds is clearly done.
+            // Photos that only got their labels ("Themen" or "Dokumente" turned on) are no new
+            // photos (review of the labels fix, M2).
             Group {
-                if report.contentAnalyzed > 0 {
-                    Text("Beim Prüfen \(report.contentAnalyzed) neue Fotos analysiert.")
-                } else if report.newOrChanged == 0 && report.removed == 0 {
+                if report.newPhotosAnalyzed > 0 {
+                    Text("Beim Prüfen \(report.newPhotosAnalyzed) neue Fotos analysiert.")
+                } else if report.labelsAdded == 0 && report.newOrChanged == 0 && report.removed == 0 {
                     Text("Beim Prüfen keine neuen Fotos gefunden.")
+                }
+                if report.labelsAdded > 0 {
+                    Text("Beim Prüfen \(report.labelsAdded) Fotos für die neuen Bereiche angesehen.")
                 }
             }
             .font(.footnote).foregroundStyle(.secondary)

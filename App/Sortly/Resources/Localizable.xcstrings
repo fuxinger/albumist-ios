@@ -6843,6 +6843,16 @@
         }
       }
     },
+    "Fotos werden für die neuen Bereiche angesehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Looking at photos for the new areas"
+          }
+        }
+      }
+    },
     "Neue Fotos werden analysiert" : {
       "localizations" : {
         "en" : {
@@ -6999,6 +7009,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Last checked %@"
+          }
+        }
+      }
+    },
+    "Beim Prüfen %lld Fotos für die neuen Bereiche angesehen." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Looked at %lld photo for the new areas in this check."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Looked at %lld photos for the new areas in this check."
+                }
+              }
+            }
+          }
+        },
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Beim Prüfen %lld Foto für die neuen Bereiche angesehen."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Beim Prüfen %lld Fotos für die neuen Bereiche angesehen."
+                }
+              }
+            }
           }
         }
       }

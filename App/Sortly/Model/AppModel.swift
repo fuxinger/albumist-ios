@@ -1545,31 +1545,41 @@ final class AppModel {
     }
 
     /// Decisions set only for a preview opened straight from a button ("Dein Startpaket",
-    /// "Album anlegen"), with what was there before.
+    /// "Album anlegen"), with what was there before. `marks`: this preview set the suggestion's
+    /// preview-only mark (`previewOnly`); a preview opened while another one has the suggestion
+    /// selected ("Album anlegen" of a suggestion from the starter set) leaves the mark to it.
     struct PreviewSelection {
-        fileprivate var entries: [(proposal: AlbumProposal, previous: ProposalDecision?, chosen: ProposalDecision)]
+        fileprivate var entries: [(proposal: AlbumProposal, previous: ProposalDecision?, chosen: ProposalDecision, marks: Bool)]
     }
 
     /// Selects suggestions for a preview. Leaving the preview without creating anything must
     /// undo this with `endPreview(_:)`: nothing may stay selected that the user never chose
     /// (Fuchs, 14.11.: "Ich hatte aber noch nichts ausgewählt").
     func selectForPreview(_ items: [(AlbumProposal, ProposalDecision)]) -> PreviewSelection {
-        let entries = items.map { (proposal: $0.0, previous: decisions[$0.0.id], chosen: $0.1) }
+        var selection = PreviewSelection(entries: [])
         // In memory only: if the app is closed during the preview, nothing stays selected.
-        for e in entries {
-            if previewOnly[e.proposal.id] == nil { previewOnly[e.proposal.id] = .some(e.previous) }
-            decisions[e.proposal.id] = e.chosen
+        for (proposal, chosen) in items {
+            let previous = decisions[proposal.id]
+            let marks = previewOnly[proposal.id] == nil
+            if marks { previewOnly[proposal.id] = .some(previous) }
+            decisions[proposal.id] = chosen
+            selection.entries.append((proposal: proposal, previous: previous, chosen: chosen, marks: marks))
         }
-        return PreviewSelection(entries: entries)
+        return selection
     }
 
     /// Back from a preview: decisions that are still the preview's own go back to what they
-    /// were. Applied suggestions were already cleared by the execution and stay as they are.
+    /// were, the last pick first. Applied suggestions were already cleared by the execution and
+    /// stay as they are. The mark goes only with the preview that set it: back from "Album
+    /// anlegen" inside the starter set's preview, the suggestion is the starter set's pick again,
+    /// and leaving the starter set then gives it back (it stayed "Ausgewählt" and was saved).
     func endPreview(_ selection: PreviewSelection) {
-        for e in selection.entries {
-            // Chosen on purpose meanwhile (or already applied and cleared): stays as it is.
-            guard previewOnly.removeValue(forKey: e.proposal.id) != nil, decisions[e.proposal.id] == e.chosen else { continue }
-            decisions[e.proposal.id] = e.previous
+        for e in selection.entries.reversed() {
+            let id = e.proposal.id
+            // Chosen on purpose meanwhile (its mark is gone), applied and cleared, or picked
+            // otherwise by another preview since: stays as it is.
+            if previewOnly[id] != nil, decisions[id] == e.chosen { decisions[id] = e.previous }
+            if e.marks { previewOnly[id] = nil }
         }
     }
 

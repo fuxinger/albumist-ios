@@ -348,7 +348,9 @@ final class AppModel {
     /// "Analyse neu aufbauen" removes the proposals, and photos in the user's own matching
     /// albums count as sorted only through them: the ring fell to 0 % until new proposals came
     /// (device test 15.11., "Und oben null"). The last count stays on screen, marked as being
-    /// recounted, until the first new proposals exist or the analysis ends.
+    /// recounted, until the first new proposals exist or the analysis ends; also while the
+    /// photos analysed before "Themen" or "Dokumente" became a main area get their labels, until
+    /// each was looked at once (`RecountState`, its rules in SortlyEngine).
     var recount: RecountState? = RecountState.load() {
         didSet { RecountState.save(recount) }
     }
@@ -430,7 +432,18 @@ final class AppModel {
     /// Offline country outlines, also used for the shareable travel atlas.
     private(set) var worldMap: OfflineWorldMap?
     private var pipeline: AnalysisPipeline?
-    private var analysisTask: Task<Void, Never>?
+    private var analysisTask: Task<Void, Never>? {
+        // The run before may still be at its end when the next one starts (the end of a run
+        // starts the follow-up, `AnalysisRunEnd`): kept, so whoever waits for the runs waits for
+        // both (`analysisTasksEnded`; third review of the labels fix, finding 4).
+        didSet {
+            guard let before = oldValue, before != analysisTask else { return }
+            let older = earlierAnalysisTasks
+            earlierAnalysisTasks = Task { await before.value; await older?.value }
+        }
+    }
+    /// The tasks of the runs before `analysisTask`, as one (see there).
+    @ObservationIgnored private var earlierAnalysisTasks: Task<Void, Never>?
     /// The run in progress: Pause reaches exactly this run, at once (no hop to the pipeline,
     /// so a Pause during the start of a run is not lost and a late one stops no later run).
     @ObservationIgnored private var analysisControl: AnalysisRunControl?
@@ -812,10 +825,9 @@ final class AppModel {
             // Stored first: whichever run starts next (this one, a catch-up, the next launch)
             // works on the new part, also if another run slips in before ours.
             try? await pipeline?.setScope(scope)
-            if analysis.isRunning {
-                analysisControl?.pause()
-                await analysisTask?.value
-            }
+            if analysis.isRunning { analysisControl?.pause() }
+            // Also the end of a run that started the one in progress, or that is still at its end.
+            await analysisTasksEnded()
             // Changed again meanwhile: that call starts its own run.
             guard analysisScope == scope else { return }
             // Only now: late progress of the old run cannot mark the new part as half done.
@@ -1044,8 +1056,9 @@ final class AppModel {
     private func follow(_ next: AnalysisRunEnd.Next, after run: Int) {
         switch next {
         case .nothing: break
-        // Checked again: the refinement's end waited for the overview meanwhile. A run that
-        // may not start now is due anyway (after the plan, the rebuild, with the access back).
+        // The ends here do it themselves: a run in the app starts it at once, the refinement in
+        // its own window (`refine`). Checked again all the same: a run that may not start now is
+        // due anyway (after the plan, the rebuild, with the access back).
         case .followUp: if runMayStartNow { startAnalysis() }
         case .catchUp: LibraryChangeWatcher.shared.scheduleCatchUp()
         case .retry: retryUnattendedRun(after: run)
@@ -1065,6 +1078,15 @@ final class AppModel {
                   phase == .ready, access.canRead, !execution.isRunning, !analysisResetting else { return }
             startAnalysis()
         }
+    }
+
+    /// Until the run in progress and the ends of the runs before it are done: a follow-up starts
+    /// while the end of the run before still refreshes the overview and writes the safety copy
+    /// (third review of the labels fix, finding 4: "Analyse neu aufbauen" and another part of the
+    /// library waited for the follow-up only).
+    private func analysisTasksEnded() async {
+        await analysisTask?.value
+        await earlierAnalysisTasks?.value
     }
 
     /// Progress of the running analysis, taken from the mailbox by the tick. A count never goes
@@ -1452,63 +1474,102 @@ final class AppModel {
     func runBackgroundRefinement() async -> Bool {
         let (succeeded, next) = await refine()
         // What the end of the refinement asked for, once it has ended (`analysis.isRunning` is
-        // false again): a change of the settings it missed starts one more run, changes in Photos
-        // meanwhile get their pass. Before, only runs in the app took that request, and a change
-        // during the refinement waited for some later run (second review of the labels fix,
-        // finding 3).
+        // false again): changes in Photos meanwhile get their pass. Before, only runs in the app
+        // took that request, and a change during the refinement waited for some later run
+        // (second review of the labels fix, finding 3). A change of the settings it missed was
+        // done in this same window (`refine`).
         follow(next, after: analysisGeneration)
         return succeeded
     }
 
     /// The refinement itself: whether it went through, and what follows it (`AnalysisRunEnd`,
     /// decided like the end of a run in the app; a run cut off goes on in the next window).
+    /// A pass that missed a change of the settings is followed by one more right away, in this
+    /// same window: it has the charging time, and nothing runs on after the window (third review
+    /// of the labels fix, finding 3: started after the window, that run had no time to work in and
+    /// went on only when the app was opened). At most three passes; what is left then goes on in
+    /// the next window or when the app is opened (`needsResume`).
     private func refine() async -> (succeeded: Bool, next: AnalysisRunEnd.Next) {
         if phase == .loading { await bootstrap() }
+        var outcome: (succeeded: Bool, next: AnalysisRunEnd.Next) = (false, .nothing)
+        var generation: Int?
+        for _ in 0..<3 {
+            guard let pass = await refinePass(after: generation) else { break }
+            outcome = (pass.succeeded, pass.next)
+            generation = pass.generation
+            guard pass.next == .followUp else { return outcome }
+        }
+        if outcome.next == .followUp { outcome.next = .nothing }
+        return outcome
+    }
+
+    /// One run of the refinement; `nil` when none starts. `after`: the generation of the pass
+    /// before it, for one more pass only while no other run came in between (a run from the app
+    /// reads the settings anew, and its own end decides what follows: also a Pause tapped on it).
+    private func refinePass(after previous: Int?) async -> (succeeded: Bool, next: AnalysisRunEnd.Next, generation: Int)? {
         // A run from the app that iOS held in the background goes on while this charging
         // window keeps the app awake, instead of the window being handed back at once. It is
-        // not ended when the window closes; it is held again and goes on later.
-        while analysis.isRunning, !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(5))
-        }
-        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return (false, .nothing) }
+        // not ended when the window closes; it is held again and goes on later. Its end is waited
+        // for too: begun during it, this run made it skip its "Analyse fertig" (third review of
+        // the labels fix, finding 6).
+        await runsEnded()
+        if let previous, analysisGeneration != previous { return nil }
+        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return nil }
         analysis.isRunning = true
         updateCard()
-        defer {
-            analysis.isRunning = false
-            analysis.pausing = false
-            updateCard()
-        }
         // Late progress of the run before must not show up during this one.
         analysisGeneration += 1
+        let generation = analysisGeneration
         let control = AnalysisRunControl()
         analysisControl = control
-        defer { if analysisControl === control { analysisControl = nil } }
         // Held like a foreground run, so "Analyse neu aufbauen" can wait until this run has
         // really ended before it clears the tables (audit 2, 4.1).
         let run = Task { try await pipeline.run(mode: .refinement, control: control) }
         analysisTask = Task { await withTaskCancellationHandler { _ = try? await run.value } onCancel: { run.cancel() } }
         // `nil`: cut off (iOS ended the background time); what was analysed stays analysed.
         let report = try? await withTaskCancellationHandler { try await run.value } onCancel: { run.cancel() }
+        // Decided at once, and the run ends here, before anything is awaited (as a run in the
+        // app does): a Pause tapped until now is in the decision, and after it no run is shown
+        // that a Pause could be meant for (third review of the labels fix, finding 1: tapped while
+        // the overview was refreshed, the Pause was lost and one more run started).
+        if analysisControl === control { analysisControl = nil }
         let end = AnalysisRunEnd(report: report, settings: settings, pauseTapped: control.isPaused,
                                  catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow, background: true)
         catchUpAfterRun = false
-        guard let ran = report, let ended = end.report else { return (false, end.next) }
-        analysis.lastReport = ended
-        if end.isFinished, analysis.outcome.refined(with: ended) {
-            // Complete now: nothing to go on with (review of c772325: the card read 100 %
-            // and then "Macht da weiter · 37 %" from the marker of the run before).
-            AnalysisMarker.finished()
-            analysis.needsResume = false
-            analysis.resumeFrom = nil
-            analysis.resumed = nil
-        } else if ended.isComplete {
-            // A change of the settings it missed: not done. The run after it does that work,
-            // right away, or when the app is opened if no run may start now.
-            analysis.needsResume = true
+        if let ended = end.report {
+            analysis.lastReport = ended
+            if end.isFinished, analysis.outcome.refined(with: ended) {
+                // Complete now: nothing to go on with (review of c772325: the card read 100 %
+                // and then "Macht da weiter · 37 %" from the marker of the run before).
+                AnalysisMarker.finished()
+                analysis.resumeFrom = nil
+                analysis.resumed = nil
+            }
         }
+        // Finished: nothing to go on with; paused by the user: the Pause stays; a change of the
+        // settings it missed: not done (the next pass, or the app when opened); cut off or
+        // stopped by the device: as it was.
+        analysis.needsResume = end.needsResume(afterRefinement: analysis.needsResume)
+        analysis.isRunning = false
+        analysis.pausing = false
+        updateCard()
+        guard let ran = report else { return (false, end.next, generation) }
         await refreshDerived()
         saveSafetyBackup(immediately: true)
-        return (ran.pausedBecause == nil, end.next)
+        return (ran.pausedBecause == nil, end.next, generation)
+    }
+
+    /// Until no run is busy and the end of the last one is done too (its overview refresh, its
+    /// "Analyse fertig"), or the refinement's window ends.
+    private func runsEnded() async {
+        while !Task.isCancelled {
+            if analysis.isRunning {
+                try? await Task.sleep(for: .seconds(5))
+                continue
+            }
+            await analysisTasksEnded()
+            if !analysis.isRunning { return }
+        }
     }
 
     func refreshDerived() async {
@@ -1553,15 +1614,14 @@ final class AppModel {
             let managed = managedAlbums, scope = analysisScope
             let derived = try await Task.detached(priority: .userInitiated) {
                 // The analysed photos still without their image labels ("Themen" or "Dokumente"
-                // turned on since): counted apart on the overview. Read here, so the set never
-                // passes through the main actor; only while one of the two is on, and only those
+                // turned on since): counted apart on the overview, and the ring holds its count
+                // until each was looked at once (`RecountState`). Read here, so the sets never
+                // pass through the main actor; only while one of the two is on, and only those
                 // photos, none once they are caught up (second review of the labels fix, 11).
-                let labelsMissing = AnalysisPipeline.wantsLabels(settings)
-                    ? try await store.unlabelledAssets(version: AnalysisPipeline.contentVersion,
-                                                       labelsVersion: AnalysisPipeline.labelsVersion)
-                    : []
+                let labels = try await AnalysisPipeline.photosWaitingForLabels(in: store, settings: settings)
                 return DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                                   contents: contents, labelsMissing: labelsMissing, managed: managed,
+                                                   contents: contents, labelsMissing: labels.missing,
+                                                   labelsRetrying: labels.retrying, managed: managed,
                                                    inventory: inventory, scope: scope)
             }.value
             // A newer call started meanwhile, or the part of the library changed: this result
@@ -1578,14 +1638,20 @@ final class AppModel {
     private func assignDerived(_ derived: DerivedLibraryStatus, snapshot: ProposalSnapshot?) {
         states = derived.states
         statusReasons = derived.reasons
+        let shown = progress
         progress = derived.progress
         leftOut = derived.leftOut
-        // Not with the early set of a first run (trips and places only): the count would
-        // be shown as final hours before the image analysis is done (review minor).
-        if recount != nil, (snapshot?.isEarly == false && !proposals.isEmpty)
-            || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
-            recount = nil
-        }
+        // The ring's count held while it is made anew: after "Analyse neu aufbauen", and while
+        // the photos analysed before "Themen" or "Dokumente" became a main area get their labels
+        // (`RecountState`; third review of the labels fix, finding 2: the sorted count fell photo
+        // by photo). Not ended by the early set of a first run (trips and places only): the count
+        // would be shown as final hours before the image analysis is done (review minor). Nor by
+        // the report of the run before "Analyse neu aufbauen": its own refresh ended the hold at
+        // once when that run was complete.
+        let held = RecountState.next(recount, shown: shown, derived: derived, settings: settings,
+                                     newSuggestions: snapshot?.isEarly == false && !proposals.isEmpty,
+                                     ended: (analysis.isRunning || analysisResetting) ? nil : analysis.lastReport)
+        if held != recount { recount = held }
         analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable,
                                         labelsMissing: derived.labelsMissing)
     }
@@ -2161,7 +2227,15 @@ final class AppModel {
         return true
     }
 
-    private func releaseExecution() { executionClaimed = false }
+    /// The claim ends. A run that ended while this plan held it and could not go on then (a
+    /// change of the settings it missed, `AnalysisRunEnd`; a retry that found the plan busy) goes
+    /// on now, not only when the app is opened next (third review of the labels fix, finding 5:
+    /// "So lassen", a refused plan or a missing write access ended the claim without a run). A
+    /// plan that ran started its run already (`run(_:)`); a Pause stays (`needsResume` is false).
+    private func releaseExecution() {
+        executionClaimed = false
+        if analysis.needsResume, !analysis.isRunning, runMayStartNow { startAnalysis() }
+    }
 
     /// Runs a plan; the caller holds the execution claim. `resume`: an interrupted plan that
     /// was confirmed before (its free albums were checked then).
@@ -2874,11 +2948,16 @@ final class AppModel {
             analysisTask?.cancel()
         }
         // Foreground and background runs both have a task: waited for until they really
-        // ended, not for a fixed time (audit 2, 4.1).
-        await analysisTask?.value
+        // ended, not for a fixed time (audit 2, 4.1); also the end of a run that started the
+        // one in progress (finding 4 of the third review of the labels fix).
+        await analysisTasksEnded()
         MainThreadWatch.shared.section("rebuild: marker reset") {
             AnalysisMarker.reset()
-            if progress.total > 0, recount == nil {
+            // A count held for the labels is held on for the rebuild: with the labels gone, that
+            // hold would end at once and show the 0 % it is there to keep away.
+            if let held = recount {
+                if held.isForLabels { recount = RecountState(fully: held.fully, total: held.total) }
+            } else if progress.total > 0 {
                 recount = RecountState(fully: progress.fully, total: progress.total)
             }
         }
@@ -2898,11 +2977,9 @@ final class AppModel {
     }
 }
 
-/// The ring's last count while "Analyse neu aufbauen" builds the proposals again.
-struct RecountState: Codable, Equatable {
-    var fully: Int
-    var total: Int
-
+/// The ring's last count while it is made anew (`RecountState` in SortlyEngine, where its rules
+/// are tested): kept across launches.
+extension RecountState {
     private static let key = "overview.recount"
 
     static func load() -> RecountState? {

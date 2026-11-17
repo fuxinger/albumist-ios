@@ -90,6 +90,19 @@ public struct AnalysisRunEnd: Sendable, Equatable {
     /// never "Analyse fertig".
     public var needsResume: Bool { !isFinished && report?.pausedBecause != .userPaused }
 
+    /// The overnight refinement's `needsResume` after this end, from the one before it:
+    /// - finished: nothing to go on with;
+    /// - paused by the user (Pause tapped while the app was open): the Pause stays, "Fortsetzen"
+    ///   goes on (third review of the labels fix, finding 1: before, a refinement paused that way
+    ///   left the value as it was, and an unfinished analysis went on by itself);
+    /// - a change of the settings it missed: not done; one more pass in the same window
+    ///   (`AppModel.refine`), or the app goes on with it when opened;
+    /// - cut off by iOS or stopped by the device: as it was; the next window goes on.
+    public func needsResume(afterRefinement before: Bool) -> Bool {
+        if isFinished || report?.pausedBecause == .userPaused { return false }
+        return report?.isComplete == true ? true : before
+    }
+
     /// What is left once the end of the run has waited for the overview to refresh (`AppModel`):
     /// the finish moment, and a pass or a retry later (a follow-up started before the wait).
     /// Nothing when another run started meanwhile (`isNewest` false: the follow-up, a change of

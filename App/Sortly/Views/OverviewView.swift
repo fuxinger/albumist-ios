@@ -120,10 +120,19 @@ struct OverviewView: View {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                         Text("Wird neu gezählt")
                             .font(.headline)
-                        Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt mit den ersten Vorschlägen.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                        Group {
+                            if recount.isForLabels {
+                                // Photos analysed before "Themen" or "Dokumente" became a main area
+                                // get their labels: the count would fall photo by photo meanwhile
+                                // (`RecountState`).
+                                Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt, sobald die Fotos für die neuen Bereiche angesehen sind.")
+                            } else {
+                                Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt mit den ersten Vorschlägen.")
+                            }
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                     }
                     .accessibilityElement(children: .combine)
                 } else {
@@ -343,7 +352,9 @@ struct OverviewView: View {
         let text = VStack(alignment: .leading, spacing: 2) {
             Text(area.title).font(.body.weight(.medium))
             Group {
-                if proposals.isEmpty, model.recount != nil {
+                // While the labels come in, only the new areas wait for suggestions.
+                if proposals.isEmpty, let recount = model.recount,
+                   !recount.isForLabels || area == .imageCategories || area == .documents {
                     Text("Wird neu berechnet")
                 } else if proposals.isEmpty {
                     Text("Noch keine Vorschläge")

@@ -263,6 +263,17 @@ public actor SortlyStore: PlanJournal {
             .compactMap { $0["id"]?.string.map { AssetID($0) } })
     }
 
+    /// Of `unlabelledAssets(version:labelsVersion:)`, the photos that have a result of `kind`:
+    /// with the image step's failed tries for labels, the photos whose labels could not be read
+    /// yet and wait for their retry. Through the results of that kind: usually none or a handful.
+    public func unlabelledAssets(version: Int, labelsVersion: Int, withResult kind: String) throws -> Set<AssetID> {
+        Set(try db.query("""
+            SELECT a.id FROM analysis_results r JOIN assets a ON a.id = r.asset_id
+            WHERE r.kind = ? AND a.labels_version < ? AND a.analysis_version >= ?
+            """, [.text(kind), .integer(Int64(labelsVersion)), .integer(Int64(version))])
+            .compactMap { $0["id"]?.string.map { AssetID($0) } })
+    }
+
     /// Removes the results of `kind` of these photos.
     public func removeResults(kind: String, assets ids: [AssetID]) throws {
         guard !ids.isEmpty else { return }

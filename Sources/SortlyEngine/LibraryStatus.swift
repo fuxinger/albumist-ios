@@ -300,6 +300,10 @@ public struct DerivedLibraryStatus: Sendable {
     /// is (no number goes back), and "Alle 5.683 Fotos analysiert" alone no longer reads as done
     /// for these areas (second review of the labels fix). 0 while both areas are off.
     public var labelsMissing = 0
+    /// Of `labelsMissing`, the photos not looked at for their labels yet; the others could not
+    /// be read and wait for their retry. While any is left, the ring's count does not fall
+    /// (`RecountState`, third review of the labels fix, finding 2).
+    public var labelsUntried = 0
 
     public init() {}
 
@@ -310,6 +314,7 @@ public struct DerivedLibraryStatus: Sendable {
         overrides: OverrideSet,
         contents: [AssetID: ContentAnalysis],
         labelsMissing: Set<AssetID> = [],
+        labelsRetrying: Set<AssetID> = [],
         managed: [ManagedAlbumState],
         inventory: CollectionInventory,
         scope: OrganizationScope,
@@ -353,9 +358,12 @@ public struct DerivedLibraryStatus: Sendable {
         }
         // Over the set from the store (empty once the labels are caught up), not over every
         // photo; of the analysed photos only (one not readable yet is said as such).
+        // `labelsRetrying`: of them, those whose labels could not be read yet
+        // (`AnalysisPipeline.photosWaitingForLabels`).
         if AnalysisPipeline.wantsLabels(settings) {
-            result.labelsMissing = labelsMissing.reduce(0) { n, id in
-                n + (analyzed.contains(id) && scopedIDs?.contains(id) != false ? 1 : 0)
+            for id in labelsMissing where analyzed.contains(id) && scopedIDs?.contains(id) != false {
+                result.labelsMissing += 1
+                if !labelsRetrying.contains(id) { result.labelsUntried += 1 }
             }
         }
         return result

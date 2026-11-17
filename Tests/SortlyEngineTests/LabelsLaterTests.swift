@@ -22,6 +22,10 @@ struct LabelsLaterTests {
         let requests = Mutex<[(AssetID, ContentAnalysisRequest)]>([])
         let textCalls = Mutex<[AssetID]>([])
         let unreadable = Mutex<Set<AssetID>>([])
+        /// Photos the analyzer itself fails on (not `AnalysisError`): counted against a photo only
+        /// once a photo after it works.
+        let failing = Mutex<Set<AssetID>>([])
+        struct VisionFailed: Error {}
         let delay: Duration
         init(delay: Duration = .zero) { self.delay = delay }
 
@@ -31,6 +35,7 @@ struct LabelsLaterTests {
             requests.withLock { $0.append((asset.id, request)) }
             if delay > .zero { try await Task.sleep(for: delay) } else { await Task.yield() }
             if unreadable.withLock({ $0.contains(asset.id) }) { throw AnalysisError.unreadable }
+            if failing.withLock({ $0.contains(asset.id) }) { throw VisionFailed() }
             let labels = !request.classify ? []
                 : Self.isReceipt(asset.id) ? [LabelScore("receipt", 0.9, isPrecise: true)] : [LabelScore("dog", 0.9, isPrecise: true)]
             // Only a full look has a feature print (the labels-only look asks for none).
@@ -423,6 +428,204 @@ struct LabelsLaterTests {
                                            organizedBySortly: [.trips: [a, b]])
         let ring = resolver.progress(states.values)
         #expect(ring.fully == 2 && ring.total == 2 && ring.partially == 0)
+    }
+
+    /// Third review of the labels fix, finding 2: photos sorted by their trip, then "Themen" made a
+    /// main area. As their labels come in, a photo with a theme needs a theme album too, and the
+    /// sorted count fell photo by photo. From the first refresh that would show it fall, the ring
+    /// holds the count it showed ("Wird neu gezählt · Zuletzt 30 von 30 sortiert") until every
+    /// photo was looked at once, also across a Pause; then it shows the new count. A photo whose
+    /// labels could not be read holds nothing.
+    @Test func theRingHoldsItsCountWhileTheLabelsComeIn() async throws {
+        let s = try Self.setup(photos: 30, screenshots: 0, labels: false, delay: .milliseconds(2))
+        let first = try await s.pipeline.run()
+        var on = Self.settings(labels: true)
+        on.primaryAreas = [.trips, .imageCategories]
+        await s.pipeline.update(settings: on)
+        let resolver = OrganizationStatusResolver(primaryAreas: on.primaryAreas)
+        func status() async throws -> DerivedLibraryStatus {
+            let labels = try await AnalysisPipeline.photosWaitingForLabels(in: s.store, settings: on)
+            let contents = try await s.store.results(ContentAnalysis.self, kind: "content")
+            let facts = try await s.pipeline.currentFacts().map { f -> AssetFacts in
+                var f = f
+                f.tripID = SortlyID("trip")
+                return f
+            }
+            var status = DerivedLibraryStatus.derive(facts: facts, snapshot: nil, settings: on, overrides: OverrideSet(),
+                                                     contents: contents, labelsMissing: labels.missing, labelsRetrying: labels.retrying,
+                                                     managed: [], inventory: CollectionInventory(), scope: .all)
+            // Every photo is in its trip's album, put there by Albumist.
+            let analysed = Set(contents.filter { $0.value.failedAttempts == nil }.keys)
+            let states = LibraryStatus.compute(facts: facts, snapshot: nil, settings: on, contentAnalyzed: analysed,
+                                               organizedBySortly: [.trips: Set(s.photos)])
+            status.progress = resolver.progress(states.values)
+            return status
+        }
+        // What the overview shows after each refresh (`AppModel.assignDerived`): the count held,
+        // or the ring's own.
+        var hold: RecountState?
+        var shown = OrganizationStatusResolver.Progress()
+        var seen: [Int] = []
+        func assign(_ status: DerivedLibraryStatus, ended: AnalysisPipeline.Report?) {
+            hold = RecountState.next(hold, shown: shown, derived: status, settings: on, newSuggestions: true, ended: ended)
+            shown = status.progress
+            seen.append(hold?.fully ?? status.progress.fully)
+        }
+
+        // Turned on: the photos without their labels stay sorted, nothing falls, nothing is held.
+        let before = try await status()
+        #expect(before.labelsMissing == 30 && before.labelsUntried == 30)
+        #expect(before.progress.fully == 30 && before.progress.total == 30)
+        assign(before, ended: first)
+        #expect(hold == nil)
+
+        // Paused part way through the labels.
+        let control = AnalysisRunControl()
+        let paused = try await s.pipeline.run(control: control, onProgress: { p in
+            if p.stage == .content, p.completed >= 12 { control.pause() }
+        })
+        #expect(paused.pausedBecause == .userPaused)
+        let halfway = try await status()
+        #expect(halfway.labelsUntried > 0 && halfway.labelsUntried < 30)
+        // Without the hold the ring would fall now: the dogs need a theme album.
+        #expect(halfway.progress.fully < 30)
+        assign(halfway, ended: paused)
+        #expect(hold == RecountState(fully: 30, total: 30, labels: true))
+        // Refreshed again while paused, and while the next run is busy: still held.
+        assign(halfway, ended: paused)
+        assign(halfway, ended: nil)
+        #expect(hold == RecountState(fully: 30, total: 30, labels: true))
+
+        // The rest; one photo cannot be read now: it waits for its retry and holds nothing.
+        let broken = try #require(try await AnalysisPipeline.photosWaitingForLabels(in: s.store, settings: on).missing
+            .sorted { $0.rawValue < $1.rawValue }.first)
+        s.analyzer.unreadable.withLock { $0 = [broken] }
+        let rest = try await s.pipeline.run()
+        #expect(rest.isComplete)
+        let after = try await status()
+        #expect(after.labelsMissing == 1 && after.labelsUntried == 0)
+        assign(after, ended: rest)
+        #expect(hold == nil)
+        // On screen: 30 while the labels came in, then the new count, for what "Themen" asks now.
+        #expect(seen == [30, 30, 30, 30, after.progress.fully])
+        #expect(after.progress.fully < 30 && after.progress.total == 30)
+    }
+
+    /// A photo the analyzer fails on last in a run has no attempt noted (no photo after it showed
+    /// the analyzer working, so it is not counted against the photo): it stays not looked at for
+    /// its labels, and it held the ring for good. The run went through with the labels asked for,
+    /// so each photo was looked at once: the hold ends with it, and none begins again over that
+    /// photo, also not while the next run is busy (the count does not fall).
+    @Test func aPhotoTheAnalyzerFailedOnLastHoldsTheRingNoLonger() async throws {
+        let s = try Self.setup(photos: 1, screenshots: 0, labels: false)
+        let first = try await s.pipeline.run()
+        #expect(first.isComplete && first.settingsUsed.labels == false)
+        var on = Self.settings(labels: true)
+        on.primaryAreas = [.trips, .imageCategories]
+        await s.pipeline.update(settings: on)
+        s.analyzer.failing.withLock { $0 = Set(s.photos) }
+        let run = try await s.pipeline.run()
+        #expect(run.isComplete && run.settingsUsed.labels == true && run.labelsAdded == 0)
+        let labels = try await AnalysisPipeline.photosWaitingForLabels(in: s.store, settings: on)
+        let contents = try await s.store.results(ContentAnalysis.self, kind: "content")
+        let status = DerivedLibraryStatus.derive(facts: try await s.pipeline.currentFacts(), snapshot: nil, settings: on,
+                                                 overrides: OverrideSet(), contents: contents, labelsMissing: labels.missing,
+                                                 labelsRetrying: labels.retrying, managed: [], inventory: CollectionInventory(),
+                                                 scope: .all)
+        // No attempt noted: as far as the store knows, the photo was not looked at yet.
+        #expect(status.labelsMissing == 1 && status.labelsUntried == 1)
+        // A count shown before that is higher than the ring's own now.
+        var higher = status.progress
+        higher.fully += 1
+        higher.total = max(higher.total, higher.fully)
+        let held = RecountState(fully: higher.fully, total: higher.total, labels: true)
+        func next(_ current: RecountState?, shown: OrganizationStatusResolver.Progress = higher,
+                  ended: AnalysisPipeline.Report?) -> RecountState? {
+            RecountState.next(current, shown: shown, derived: status, settings: on, newSuggestions: false, ended: ended)
+        }
+        // A run that did not ask for the labels (they were turned on after it) leaves it held.
+        #expect(next(held, ended: first) == held)
+        // This run asked for them: the hold ends, and none begins again over that photo.
+        #expect(next(held, ended: run) == nil)
+        #expect(next(nil, ended: run) == nil)
+        // While the next run is busy, the count as it was: nothing held.
+        #expect(next(nil, shown: status.progress, ended: nil) == nil)
+    }
+
+    /// The hold's rules (`RecountState.next`): "Analyse neu aufbauen" as before; the labels hold
+    /// only where the ring counts "Themen" or "Dokumente", only for photos not looked at yet, and
+    /// only once the count would fall.
+    @Test func theRingsHoldRules() {
+        var themen = Self.settings(labels: true)
+        themen.primaryAreas = [.trips, .imageCategories]
+        var notMain = Self.settings(labels: true, documents: true)
+        notMain.primaryAreas = [.trips, .places]
+        var documents = Self.settings(labels: true, documents: true)
+        documents.primaryAreas = [.documents]
+        var shown = OrganizationStatusResolver.Progress()
+        shown.total = 200
+        shown.fully = 120
+        var waiting = DerivedLibraryStatus()
+        waiting.labelsMissing = 50
+        waiting.labelsUntried = 40
+        waiting.progress.total = 190
+        waiting.progress.fully = 110
+        var retrying = waiting
+        retrying.labelsUntried = 0
+        var rising = waiting
+        rising.progress.fully = 125
+        let none = DerivedLibraryStatus()
+        // Reports of runs that ended: through or paused, with the labels asked for or not.
+        func report(complete: Bool, labels: Bool) -> AnalysisPipeline.Report {
+            var report = AnalysisPipeline.Report()
+            report.completedStages = complete ? AnalysisPipeline.Stage.allCases : [.inventory, .patterns]
+            if !complete { report.pausedBecause = .userPaused }
+            report.settingsUsed.labels = labels
+            return report
+        }
+        let withoutLabels = report(complete: true, labels: false)
+        let through = report(complete: true, labels: true)
+        let paused = report(complete: false, labels: true)
+        func next(_ current: RecountState?, _ derived: DerivedLibraryStatus, _ settings: OrganizationSettings,
+                  shown: OrganizationStatusResolver.Progress = shown, suggestions: Bool = false,
+                  ended: AnalysisPipeline.Report? = nil) -> RecountState? {
+            RecountState.next(current, shown: shown, derived: derived, settings: settings, newSuggestions: suggestions, ended: ended)
+        }
+        let labels = RecountState(fully: 120, total: 200, labels: true)
+        // Begins when the count would fall, with the count on screen; not while it does not fall,
+        // nor with nothing shown yet (the first refresh after a launch: the next one compares).
+        #expect(next(nil, waiting, themen) == labels)
+        #expect(next(nil, waiting, documents, ended: withoutLabels) == labels)
+        #expect(next(nil, rising, themen) == nil)
+        #expect(next(nil, waiting, themen, shown: .init()) == nil)
+        // Not where the ring does not count the two areas, nor for photos waiting for a retry.
+        #expect(next(nil, waiting, notMain) == nil)
+        #expect(next(nil, retrying, themen) == nil)
+        // Held until every photo was looked at once: new suggestions, a Pause, a count that rises
+        // or a finished run that did not ask for the labels (turned on after it) do not end it.
+        #expect(next(labels, waiting, themen, suggestions: true, ended: withoutLabels) == labels)
+        #expect(next(labels, waiting, themen, ended: paused) == labels)
+        #expect(next(labels, rising, themen) == labels)
+        #expect(next(labels, retrying, themen, ended: withoutLabels) == nil)
+        #expect(next(labels, waiting, notMain) == nil)
+        // A run that went through with the labels asked for looked at each photo once: one it
+        // could not settle (the analyzer failed on it last) holds nothing, and no hold begins.
+        #expect(next(labels, waiting, themen, ended: through) == nil)
+        #expect(next(nil, waiting, themen, ended: through) == nil)
+        // "Analyse neu aufbauen": until the first new suggestions or the end of the analysis
+        // (`ended` is nil during the rebuild's own refresh: the run before it is no end).
+        let rebuild = RecountState(fully: 300, total: 400)
+        #expect(!rebuild.isForLabels)
+        #expect(next(rebuild, none, themen) == rebuild)
+        #expect(next(rebuild, none, themen, ended: paused) == rebuild)
+        #expect(next(rebuild, none, themen, suggestions: true) == nil)
+        #expect(next(rebuild, none, themen, ended: through) == nil)
+        // Labels still to come then: the same count, held on for them.
+        #expect(next(rebuild, waiting, themen, ended: withoutLabels) == RecountState(fully: 300, total: 400, labels: true))
+        #expect(next(rebuild, waiting, themen, ended: through) == nil)
+        // A hold stored by an earlier version reads as the rebuild's.
+        let stored = try? JSONDecoder().decode(RecountState.self, from: Data(#"{"fully":3,"total":4}"#.utf8))
+        #expect(stored == RecountState(fully: 3, total: 4))
     }
 
     /// "Dokumente" as a main area during a first analysis: a photo not analysed yet is not

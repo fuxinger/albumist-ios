@@ -7703,6 +7703,16 @@
         }
       }
     },
+    "Zuletzt %@ von %@ sortiert. Die neue Zahl kommt, sobald die Fotos für die neuen Bereiche angesehen sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last count: %1$@ of %2$@ sorted. The new number arrives once the photos have been looked at for the new areas."
+          }
+        }
+      }
+    },
     "Wird neu berechnet" : {
       "localizations" : {
         "en" : {

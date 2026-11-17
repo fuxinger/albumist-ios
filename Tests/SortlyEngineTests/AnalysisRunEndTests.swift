@@ -119,6 +119,52 @@ struct AnalysisRunEndTests {
         #expect(Self.end(nil, catchUp: true, background: true).next == .catchUp)
     }
 
+    /// Third review, finding 1: the refinement decides its end as soon as its run returns, with
+    /// the Pause tapped until then. Paused by the user, the analysis stays paused (before, an
+    /// unfinished one went on by itself); the other ends set `needsResume` as before.
+    @Test func aPauseDuringTheRefinementStays() {
+        let late = Self.end(Self.complete(Self.off), pauseTapped: true, background: true)
+        #expect(late.report?.pausedBecause == .userPaused && late.next == .nothing && !late.isFinished)
+        var paused = Self.complete(Self.off)
+        paused.pausedBecause = .userPaused
+        for before in [false, true] {
+            #expect(!late.needsResume(afterRefinement: before))
+            #expect(!Self.end(paused, pauseTapped: true, background: true).needsResume(afterRefinement: before))
+            // Finished: nothing to go on with. A change it missed: not done.
+            #expect(!Self.end(Self.complete(Self.on), background: true).needsResume(afterRefinement: before))
+            #expect(Self.end(Self.complete(Self.off), background: true).needsResume(afterRefinement: before))
+            // Cut off by iOS or stopped by the device: as it was.
+            var hot = Self.complete(Self.on)
+            hot.pausedBecause = .thermal
+            #expect(Self.end(hot, background: true).needsResume(afterRefinement: before) == before)
+            #expect(Self.end(nil, background: true).needsResume(afterRefinement: before) == before)
+        }
+    }
+
+    /// Third review, finding 3: "Themen" turned on while the overnight refinement runs, after it
+    /// decided on labels. Its end asks for one more run, which the app makes a second pass of the
+    /// refinement in the same window (`AppModel.refine`): that pass gives the labels and is finished.
+    @Test func theRefinementDoesAChangeItMissedInASecondPass() async throws {
+        let s = try T.setup(photos: 12, screenshots: 0, labels: false)
+        _ = try await s.pipeline.run()
+        let pipeline = s.pipeline
+        final class Change: Sendable { let task = Mutex<Task<OrganizationSettings, Never>?>(nil) }
+        let change = Change()
+        let first = try await pipeline.run(mode: .refinement, onProgress: { p in
+            guard p.stage == .content else { return }
+            change.task.withLock { task in
+                if task == nil { task = Task { await pipeline.update(settings: Self.on) } }
+            }
+        })
+        _ = await change.task.withLock { $0 }?.value
+        let end = Self.end(first, background: true)
+        #expect(end.next == .followUp && !end.isFinished && end.needsResume(afterRefinement: false))
+        let second = try await pipeline.run(mode: .refinement)
+        #expect(second.labelsAdded == 12)
+        let done = Self.end(second, background: true)
+        #expect(done.isFinished && done.next == .nothing && !done.needsResume(afterRefinement: true))
+    }
+
     /// Finding 4: another run started while this one's end waited for the overview (a change
     /// of the settings, "Neu prüfen"): no finish moment and nothing scheduled from the older run.
     @Test func anEndThatWaitedLeavesTheNewerRunAlone() {
@@ -260,30 +306,23 @@ struct AnalysisRunEndTests {
         #expect(w(content: 2_000, labels: 1_000).isMostlyLabels)
     }
 
-    /// Finding 9: a marker with the new label is read by older builds (TestFlight back to an
-    /// earlier build) instead of being dropped whole; this build reads the label back.
-    @Test func olderBuildsReadAMarkerWithTheNewLabel() throws {
-        struct OlderPoint: Codable {
-            enum NewWork: String, Codable { case newPhotos, afterUpdate, moreNewPhotos, afterUpdateAgain }
-            var stage: Int
-            var newWork: NewWork?
+    /// Finding 9: the label "für die neuen Bereiche" is kept in the marker as one an older build
+    /// knows ("Neue Fotos") plus a flag it ignores, and read back from the two. The marker itself
+    /// (`AnalysisMarker.Point`) is the app's: its round trip and an older build reading it are in
+    /// the app's tests (`AnalysisMarkerLabelTests`, third review, 7: not a copy of it here).
+    @Test func theMarkerKeepsTheNewLabelInWordsOlderBuildsKnow() {
+        let all: [ResumedRun.NewWork] = [.newAreas, .newPhotos, .moreNewPhotos, .afterUpdate, .afterUpdateAgain]
+        for label in all {
+            #expect(label.markerValue != .newAreas)
+            #expect(ResumedRun.NewWork.fromMarker(label.markerValue, flag: label.markerFlag) == label)
+            #expect((label.markerFlag != nil) == (label == .newAreas))
         }
-        struct Point: Codable {
-            var stage: Int
-            var newWork: ResumedRun.NewWork?
-            var newAreas: Bool?
+        #expect(ResumedRun.NewWork.newAreas.markerValue == .newPhotos)
+        // A marker without the flag (an older build wrote it) reads as it is.
+        for label in all where label != .newAreas {
+            #expect(ResumedRun.NewWork.fromMarker(label, flag: nil) == label)
         }
-        for label in [ResumedRun.NewWork.newAreas, .newPhotos, .moreNewPhotos, .afterUpdate, .afterUpdateAgain] {
-            let data = try JSONEncoder().encode(Point(stage: 4, newWork: label.markerValue, newAreas: label.markerFlag))
-            let older = try JSONDecoder().decode(OlderPoint.self, from: data)
-            #expect(older.newWork?.rawValue == label.markerValue.rawValue)
-            let back = try JSONDecoder().decode(Point.self, from: data)
-            #expect(ResumedRun.NewWork.fromMarker(back.newWork, flag: back.newAreas) == label)
-        }
-        // A marker of an older build reads as it is.
-        let old = try JSONEncoder().encode(OlderPoint(stage: 4, newWork: .moreNewPhotos))
-        let read = try JSONDecoder().decode(Point.self, from: old)
-        #expect(ResumedRun.NewWork.fromMarker(read.newWork, flag: read.newAreas) == .moreNewPhotos)
+        #expect(ResumedRun.NewWork.fromMarker(nil, flag: nil) == nil)
     }
 
     // MARK: Store

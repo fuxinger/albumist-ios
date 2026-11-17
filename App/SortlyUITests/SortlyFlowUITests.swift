@@ -863,8 +863,17 @@ final class SortlyFlowUITests: XCTestCase {
                 if ignored > 0 { photos.element(boundBy: 0).tap() }
                 // No red, destructive look for a step that can be taken back.
                 if tap(app.buttons["selection.unignore"], "unignore one photo") {
-                    sleep(2)
-                    XCTAssertEqual(photos.count, max(0, ignored - 1), "Nicht mehr ignorieren did not bring the photo back")
+                    // The list follows once the app has counted again (`refreshDerived`), which
+                    // took more than the 2 s waited here before on a busy simulator (UI run
+                    // 44164854295: still 2 after 2 s). Up to 15 s, and the time it took is said.
+                    let asked = Date()
+                    var left = photos.count
+                    while left != max(0, ignored - 1) && Date().timeIntervalSince(asked) < 15 {
+                        sleep(1)
+                        left = photos.count
+                    }
+                    print("UI_TIMING unignore one photo \(Int(Date().timeIntervalSince(asked) * 1000)) ms, \(left) left")
+                    XCTAssertEqual(left, max(0, ignored - 1), "Nicht mehr ignorieren did not bring the photo back")
                 }
             }
             // The other one through the photo's own detail.

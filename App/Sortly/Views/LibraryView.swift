@@ -437,13 +437,20 @@ struct AddToAlbumSheet: View {
     var onDone: () -> Void
     @State private var newTitle = ""
     @State private var query = ""
-    @State private var plan: ChangePlan?
-    @State private var showPlan = false
+    /// The preview of the plan, pushed as a value. Not `navigationDestination(isPresented:)`:
+    /// with it, the preview was presented again and again, 11,062 times in one 36 s stall of
+    /// the main thread (UI run 44055738268, device test 05: "plan review body" counter, the
+    /// stacks in SwiftUI's navigation updates).
+    @State private var path: [ManualPlan] = []
     @FocusState private var naming: Bool
+
+    struct ManualPlan: Hashable {
+        let plan: ChangePlan
+    }
 
     var body: some View {
         let _ = MainThreadWatch.shared.count("add to album body")
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section {
                     HStack {
@@ -489,9 +496,7 @@ struct AddToAlbumSheet: View {
                     Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
                 }
             }
-            .navigationDestination(isPresented: $showPlan) {
-                PlanReviewView(prebuilt: plan)
-            }
+            .navigationDestination(for: ManualPlan.self) { PlanReviewView(prebuilt: $0.plan) }
             .onChange(of: model.execution.finished) { _, finished in
                 if finished != nil { onDone() }
             }
@@ -516,7 +521,6 @@ struct AddToAlbumSheet: View {
         guard let built = await model.manualPlan(assets: assets, target: target, newTitle: title) else { return }
         // The keyboard takes about a quarter of a second to go down.
         if hadKeyboard { try? await Task.sleep(for: .milliseconds(400)) }
-        plan = built
-        showPlan = true
+        path = [ManualPlan(plan: built)]
     }
 }

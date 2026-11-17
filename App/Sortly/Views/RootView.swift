@@ -76,15 +76,17 @@ struct MainTabs: View {
     @Environment(AppModel.self) private var model
     @Environment(\.requestReview) private var requestReview
     @State private var tab: MainTab = .overview
+    /// The overview tab's screens (`OverviewScreen`).
+    @State private var overviewPath: [OverviewScreen] = []
 
     enum MainTab: Hashable { case overview, library, albums, search }
 
     var body: some View {
         TabView(selection: $tab) {
             Tab("Übersicht", systemImage: "square.grid.2x2", value: MainTab.overview) {
-                NavigationStack {
-                    OverviewView()
-                        .navigationDestination(item: route) { RouteDestination(route: $0) }
+                NavigationStack(path: $overviewPath) {
+                    OverviewView(path: $overviewPath)
+                        .navigationDestination(for: OverviewScreen.self) { $0.destination }
                 }
             }
             Tab("Mediathek", systemImage: "photo.on.rectangle", value: MainTab.library) {
@@ -102,9 +104,13 @@ struct MainTabs: View {
         .tabViewStyle(.sidebarAdaptable)
         // UI tests tap every tab by name; a shrunken bar hides all but the current one.
         .tabBarMinimizeBehavior(UITestSupport.isRunning ? .never : .onScrollDown)
-        // Siri, Shortcuts and Spotlight open their target from the overview.
+        // Siri, Shortcuts, Spotlight and the analysis card's buttons open their target from
+        // the overview: pushed onto its path, and the route is taken.
         .onChange(of: model.route, initial: true) { _, target in
-            if target != nil { tab = .overview }
+            guard let target else { return }
+            tab = .overview
+            overviewPath.append(.route(target))
+            model.route = nil
         }
         // Each message brings its own title (design review W15), e.g. "Das hat nicht geklappt".
         .alert(model.message?.title ?? "", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } }),
@@ -116,10 +122,6 @@ struct MainTabs: View {
         // The App Store rating question: a moment after the user left the result of a plan that
         // made new albums, never at a start (`ReviewPrompt`, `ReviewPromptPolicy`).
         .task(id: ReviewPrompt.shared.due) { await askForRatingIfDue() }
-    }
-
-    private var route: Binding<AppModel.Route?> {
-        Binding(get: { model.route }, set: { model.route = $0 })
     }
 
     /// Waits until the screen after the result has settled, and briefly for the check for new

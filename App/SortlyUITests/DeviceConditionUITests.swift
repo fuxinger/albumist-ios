@@ -178,6 +178,15 @@ final class DeviceConditionUITests: XCTestCase {
         return counts.total > 0 && counts.analysed == counts.total
     }
 
+    /// The headline says every photo is analysed, read until it does for up to 15 s: a snapshot
+    /// taken while the finished card replaces the running one reads nothing, and device test 03
+    /// failed on that although its screenshot a moment later showed "Alle 246 Fotos analysiert"
+    /// (UI run 44091312348). A count that stays short still fails, with what was read.
+    private func expectEveryPhotoAnalysed(_ context: String) {
+        let complete = waitStable("every photo analysed \(context)", timeout: 15, stableChecks: 1) { everyPhotoAnalysed }
+        XCTAssertTrue(complete, "Not every photo was analysed \(context): \(analysedPhotos().map { "\($0.analysed) of \($0.total)" } ?? "no count readable")")
+    }
+
     /// Every label inside `element`, read from one snapshot.
     private func allLabels(_ element: XCUIElement) -> String {
         guard let snapshot = try? element.snapshot() else { return "" }
@@ -623,7 +632,7 @@ final class DeviceConditionUITests: XCTestCase {
         let finished = waitStable("analysis finished after heat", timeout: 900) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not finish after the heat")
         print("UI_FACT after heat \(String(describing: analysedPhotos()))")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after the heat")
+        expectEveryPhotoAnalysed("after the heat")
         XCTAssertFalse(anything("Analyse pausiert").exists, "The analysis stopped for heat")
         shot("02-after-heat")
     }
@@ -652,7 +661,7 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(finished, "The analysis did not finish in Low Power Mode")
         XCTAssertFalse(pausedForLowPower, "Low Power Mode paused the analysis in the app")
         XCTAssertFalse(app.buttons["Fortsetzen"].exists, "The analysis waits for a tap after low battery")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after low battery")
+        expectEveryPhotoAnalysed("after low battery")
         shot("04-after-battery")
     }
 
@@ -706,7 +715,7 @@ final class DeviceConditionUITests: XCTestCase {
         }
         let finished = waitStable("analysis finished after relaunch", timeout: 120) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not finish after the app was opened again")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after the relaunch")
+        expectEveryPhotoAnalysed("after the relaunch")
         shot("07-done-after-relaunch")
     }
 
@@ -1049,7 +1058,7 @@ final class DeviceConditionUITests: XCTestCase {
         record("after access came back")
         let finished = waitStable("analysis finished after access came back", timeout: 900) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not finish after access came back")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after access came back")
+        expectEveryPhotoAnalysed("after access came back")
         shot("20-access-back")
     }
 

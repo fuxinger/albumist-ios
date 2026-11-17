@@ -123,6 +123,12 @@ Actions > **TestFlight feedback** > Run workflow.
   `gh workflow run ui-stress.yml --ref <Zweig>`). Der volle Durchgang mit 50.000 Fotos läuft nur
   wöchentlich nachts (Sonntag 00:40 UTC, erst wenn der Workflow in `main` ist) und vor dem Start
   im App Store.
+- Mac-Warteschlange (Profi-Analyse, 17.11.2026): UI-Läufe und Härtetests aller Zweige laufen
+  nacheinander, nie zwei zugleich. Es wartet höchstens einer; startet ein weiterer, ersetzt er den
+  wartenden, der dann als „abgebrochen“ erscheint und später neu gestartet werden muss. Läufe auf
+  `main` und `claude/sortly-app` (auch im Pull Request von `claude/sortly-app`) stehen nicht in
+  dieser Schlange, denn auf sie wartet der Upload: Läufe anderer Zweige halten sie nicht auf und
+  ersetzen sie nicht (je Zweig läuft wie bisher einer, und der neueste wartet).
 - Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,
   daneben die Build-Nummer `CFBundleVersion` und das Xcode `DTXcodeBuild`). Vor dem Hochladen prüft
   der Lauf alle drei und dass jede Datei der App Byte für Byte die archivierte ist (Liste aller

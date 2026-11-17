@@ -63,8 +63,13 @@ env:
   STRESS_PHOTOS: ${{ inputs.photos || (github.event_name == 'schedule' && '50000' || '10000') }}
   STRESS_MINUTES: ${{ inputs.minutes || (github.event_name == 'schedule' && '45' || '15') }}
 
+# In the Mac queue with the UI runs (see ui.yml, "concurrency"): one UI run or stress pass at a
+# time across all branches. A running pass is never cancelled; at most one run waits, and a
+# run that joins later takes its place (the waiting one is cancelled and has to be started
+# again). So start a pass by hand when nothing else waits; the weekly pass starts when the
+# queue is usually empty.
 concurrency:
-  group: ui-stress-${{ github.ref }}
+  group: mac-queue
   cancel-in-progress: false
 
 jobs:

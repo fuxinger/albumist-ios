@@ -19,6 +19,11 @@ struct PlanReceiptView: View {
     @State private var confirmUndo = false
     /// "Erneut versuchen": the plan with what is missing, opened in the normal review.
     @Environment(Navigator.self) private var navigator: Navigator?
+    /// "Fehlendes erneut versuchen" is building its plan: the button waits (a second tap
+    /// pushed a second preview).
+    @State private var retrying = false
+    /// On screen and on top: a plan that is ready after Back is not pushed.
+    @State private var visible = false
     @State private var nothingToRetry = false
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     private let collapsedCount = 12
@@ -39,8 +44,14 @@ struct PlanReceiptView: View {
         .navigationBarTitleDisplayMode(.inline)
         // Opened from the result, the receipt belongs to it: the App Store rating question
         // waits until the user has left both (`ReviewPrompt`).
-        .onAppear { ReviewPrompt.shared.screenAppeared() }
-        .onDisappear { ReviewPrompt.shared.screenDisappeared() }
+        .onAppear {
+            visible = true
+            ReviewPrompt.shared.screenAppeared()
+        }
+        .onDisappear {
+            visible = false
+            ReviewPrompt.shared.screenDisappeared()
+        }
         .toolbar {
             if receipt != nil, let shareText {
                 ToolbarItem(placement: .primaryAction) {
@@ -53,6 +64,8 @@ struct PlanReceiptView: View {
         // Reloaded after an undo, also after one that was only partial.
         .task(id: "\(model.undonePlans.contains(plan.id))-\(model.execution.finished?.id.rawValue ?? "")") {
             let loaded = await model.receipt(for: plan)
+            // A newer load (after an undo) has started: this older one writes nothing.
+            guard !Task.isCancelled else { return }
             receipt = loaded.plan
             undos = loaded.undos
             let inventory = model.inventory
@@ -188,18 +201,22 @@ struct PlanReceiptView: View {
             }
             if canRepair(receipt) {
                 Button {
+                    retrying = true
+                    let before = navigator?.path
                     Task {
+                        defer { retrying = false }
                         if let missing = await model.retryPlan(for: plan) {
-                            // Pushed onto the stack's path (`AppScreen`).
-                            Navigator.push(.prebuiltPlan(PlanToken(missing)), on: navigator)
-                        } else {
+                            // Pushed onto the stack's path (`AppScreen`), if this receipt is
+                            // still the screen on top.
+                            Navigator.push(.prebuiltPlan(PlanToken(missing)), on: navigator, ifStill: before, visible: visible)
+                        } else if visible {
                             nothingToRetry = true
                         }
                     }
                 } label: {
                     Label("Fehlendes erneut versuchen", systemImage: "arrow.clockwise")
                 }
-                .disabled(model.execution.isRunning)
+                .disabled(model.execution.isRunning || retrying)
                 .accessibilityIdentifier("receipt.retry")
             }
             DiagnosticShareRow()

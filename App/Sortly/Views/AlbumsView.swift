@@ -10,6 +10,9 @@ struct AlbumsView: View {
     /// The merge preview is pushed onto the tab's path (`AppScreen`), not presented with
     /// `navigationDestination(isPresented:)`.
     @Environment(Navigator.self) private var navigator: Navigator?
+    /// On screen and on top: a merge plan that is ready after Back or after a folder was
+    /// opened is not pushed (`Navigator.push(_:on:ifStill:visible:)`).
+    @State private var visible = false
     /// The suggestion whose merge plan is being prepared: its row shows a spinner and the
     /// rows do not take a second tap meanwhile (design review N13).
     @State private var preparing: [CollectionID]?
@@ -34,10 +37,13 @@ struct AlbumsView: View {
                     ForEach(suggestions, id: \.albumIDs) { suggestion in
                         Button {
                             preparing = suggestion.albumIDs
+                            let before = navigator?.path
                             Task {
                                 let plan = await model.mergePlan(suggestion)
                                 preparing = nil
-                                if let plan { Navigator.push(.prebuiltPlan(PlanToken(plan)), on: navigator) }
+                                if let plan {
+                                    Navigator.push(.prebuiltPlan(PlanToken(plan)), on: navigator, ifStill: before, visible: visible)
+                                }
                             }
                         } label: {
                             HStack {
@@ -104,6 +110,8 @@ struct AlbumsView: View {
             }
         }
         .navigationTitle("Alben")
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
         .refreshable { await model.refreshDerived() }
     }
 }

@@ -38,6 +38,22 @@ enum AppScreen: Hashable {
     case managedAlbums
     case history
 
+    /// The same screen as `other`: equal, or the same suggestion opened from a list and from
+    /// Siri, Shortcuts or Spotlight.
+    func isSame(as other: AppScreen) -> Bool {
+        if self == other { return true }
+        guard let id = suggestionID else { return false }
+        return id == other.suggestionID
+    }
+
+    private var suggestionID: SortlyID? {
+        switch self {
+        case .proposal(let ref): ref.proposal.id
+        case .route(.suggestion(let id)): id
+        default: nil
+        }
+    }
+
     @MainActor @ViewBuilder
     var destination: some View {
         switch self {
@@ -56,16 +72,15 @@ enum AppScreen: Hashable {
     }
 }
 
-/// A plan on a path. Equal only to itself (one push), so comparing paths never compares the
-/// steps of two plans.
+/// A plan on a path, compared by the plan's id, so comparing paths never compares the steps
+/// of two plans, and a second tap on the same plan's link is recognised (`Navigator.push`).
 struct PlanToken: Hashable {
     let plan: ChangePlan
-    private let push = UUID()
 
     init(_ plan: ChangePlan) { self.plan = plan }
 
-    static func == (a: PlanToken, b: PlanToken) -> Bool { a.push == b.push }
-    func hash(into hasher: inout Hasher) { hasher.combine(push) }
+    static func == (a: PlanToken, b: PlanToken) -> Bool { a.plan.id == b.plan.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(plan.id) }
 }
 
 /// A suggestion on a path, compared by its id.
@@ -95,7 +110,12 @@ struct ProposalScreen: View {
 final class Navigator {
     var path: [AppScreen] = []
 
-    func push(_ screen: AppScreen) { path.append(screen) }
+    /// Pushes `screen`, unless it is already on top (a second tap on the same row, the map or
+    /// a link pushes nothing more).
+    func push(_ screen: AppScreen) {
+        if let last = path.last, last.isSame(as: screen) { return }
+        path.append(screen)
+    }
 
     /// Pushes `screen` onto the stack of the screen that asks. Every stack is a
     /// `NavigationRoot`; a screen without a navigator is a programming error.
@@ -106,24 +126,34 @@ final class Navigator {
         }
         navigator.push(screen)
     }
+
+    /// The end of work that started on a screen (a plan being built) pushes its result only if
+    /// that screen is still showing and on top: `visible` (its onAppear/onDisappear; a
+    /// destination link opened above it or Back makes it false) and the path still `before`,
+    /// as read when the work started. Otherwise the result is not pushed, as with the old
+    /// `navigationDestination(isPresented:)` of a screen that had gone. Returns whether it pushed.
+    @discardableResult
+    static func push(_ screen: AppScreen, on navigator: Navigator?, ifStill before: [AppScreen]?, visible: Bool) -> Bool {
+        guard visible, let navigator, navigator.path == before else { return false }
+        navigator.push(screen)
+        return true
+    }
 }
 
 /// A navigation stack with a path of `AppScreen`s, their destinations and its `Navigator` in
 /// the environment. Each stack owns its navigator (a sheet starts empty every time it opens);
 /// the overview tab passes its own, which Siri, Shortcuts and Spotlight push onto.
 struct NavigationRoot<Root: View>: View {
-    @State private var own = Navigator()
-    private let shared: Navigator?
+    @State private var navigator: Navigator
     private let root: Root
 
     init(_ navigator: Navigator? = nil, @ViewBuilder root: () -> Root) {
-        shared = navigator
+        _navigator = State(initialValue: navigator ?? Navigator())
         self.root = root()
     }
 
     var body: some View {
-        let navigator = shared ?? own
-        NavigationStack(path: Bindable(navigator).path) {
+        NavigationStack(path: $navigator.path) {
             root.navigationDestination(for: AppScreen.self) { $0.destination }
         }
         .environment(navigator)
@@ -133,12 +163,13 @@ struct NavigationRoot<Root: View>: View {
 /// A row that pushes `screen` and looks like a navigation link: its label, then a chevron.
 struct PushLink<Label: View>: View {
     @Environment(Navigator.self) private var navigator: Navigator?
-    private let screen: AppScreen
+    /// Made at the tap, not at every drawing (a history row's plan token).
+    private let screen: () -> AppScreen
     private let chevron: Bool
     private let label: Label
 
     /// `chevron: false` where the label draws its own.
-    init(_ screen: AppScreen, chevron: Bool = true, @ViewBuilder label: () -> Label) {
+    init(_ screen: @autoclosure @escaping () -> AppScreen, chevron: Bool = true, @ViewBuilder label: () -> Label) {
         self.screen = screen
         self.chevron = chevron
         self.label = label()
@@ -146,7 +177,7 @@ struct PushLink<Label: View>: View {
 
     var body: some View {
         Button {
-            Navigator.push(screen, on: navigator)
+            Navigator.push(screen(), on: navigator)
         } label: {
             HStack(spacing: Theme.Spacing.s) {
                 label.frame(maxWidth: .infinity, alignment: .leading)

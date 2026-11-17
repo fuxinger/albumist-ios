@@ -39,13 +39,15 @@ struct ScanShow: View {
                         AssetThumbnail(id: id, side: 64)
                             .aspectRatio(1, contentMode: .fill)
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .compositingGroup() // fade photo and its placeholder as one
                             .opacity(0.6)
                     }
                 }
                 .overlay {
                     // The sweep moves only while the analysis really works (`ScanShowRule.animates`:
                     // not with Reduce Motion, not in the background, not when the phone is hot).
-                    if model.scanShowAnimates(reduceMotion: reduceMotion) {
+                    // Not in UI runs either, like the atlas reveal: the screen then comes to rest.
+                    if model.scanShowAnimates(reduceMotion: reduceMotion), !UITestSupport.isRunning {
                         MosaicSweep()
                     }
                 }

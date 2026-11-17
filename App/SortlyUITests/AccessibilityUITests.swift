@@ -168,8 +168,9 @@ final class AccessibilityUITests: XCTestCase {
         let demo = button("Beispiel-Mediathek anlegen")
         let seeds = demo.waitForExistence(timeout: welcome ? 30 : 5)
         if seeds {
-            tap(demo, "seed demo library")
-            XCTAssertTrue(UITestOnboarding.demoLibraryCreated(app), "Demo library not created")
+            if seedDemoLibrary(demo) {
+                XCTAssertTrue(UITestOnboarding.demoLibraryCreated(app), "Demo library not created")
+            }
         } else if checking {
             print("UI_STEP_MISSING demo button")
             XCTFail("No \"Beispiel-Mediathek anlegen\" after the onboarding on a fresh simulator")
@@ -759,6 +760,65 @@ final class AccessibilityUITests: XCTestCase {
             tries += 1
         }
         return button
+    }
+
+    /// Taps "Beispiel-Mediathek anlegen" and checks that the seeding started: its progress text
+    /// shows, or the button is gone, within 20 s. Accessibility run 44144000817: at the largest
+    /// text the demo card's button was still 2 pt above the tab bar after 10 swipes
+    /// (element y 582, bar from 584), the tap landed on the bar, nothing was seeded, the test
+    /// waited 600 s and tests 2 to 4 then ran on the simulator's 6 photos ("Missing: open
+    /// suggestions"). A tap that started nothing is said with the button's state and repeated
+    /// on the part of the button clear of the bars, at most 3 times; then the test fails at once.
+    private func seedDemoLibrary(_ demo: XCUIElement) -> Bool {
+        let seeding = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Beispielfotos werden angelegt")).firstMatch
+        for attempt in 1...3 {
+            if attempt == 1 {
+                tap(demo, "seed demo library")
+            } else if !tapClearOfBars(demo, "seed demo library, attempt \(attempt)") {
+                break
+            }
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline {
+                if seeding.exists || !demo.exists { return true }
+                sleep(2)
+            }
+            let tabs = app.tabBars.firstMatch
+            print("UI_FACT seed demo library attempt \(attempt): nothing started; button enabled \(demo.isEnabled), hittable \(demo.isHittable), frame \(demo.frame), tab bar \(tabs.exists ? "\(tabs.frame)" : "none")")
+        }
+        print("UI_STEP_MISSING seed demo library started")
+        shot("a11y-x-missing-seed-demo-library")
+        XCTFail("Tapping \"Beispiel-Mediathek anlegen\" started no seeding")
+        return false
+    }
+
+    /// Scrolls `element` up by short drags above the tab bar until at least 30 pt of it are clear
+    /// of both bars, then taps the middle of that part. False when it never got clear.
+    private func tapClearOfBars(_ element: XCUIElement, _ step: String) -> Bool {
+        guard element.exists else { return false }
+        let window = app.windows.firstMatch.frame
+        let bar = app.navigationBars.firstMatch
+        let tabs = app.tabBars.firstMatch
+        func band() -> (top: CGFloat, bottom: CGFloat) {
+            let frame = element.frame
+            let top = max(frame.minY, bar.exists ? bar.frame.maxY + 8 : window.minY + 60)
+            let bottom = min(frame.maxY, tabs.exists ? tabs.frame.minY - 24 : window.maxY - 24)
+            return (top, bottom)
+        }
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        var drags = 0
+        while band().bottom - band().top < 30 && drags < 6 {
+            let from = (tabs.exists ? tabs.frame.minY : window.maxY) - 40
+            origin.withOffset(CGVector(dx: window.midX, dy: from))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.midX, dy: from - 220)))
+            drags += 1
+            sleep(1)
+        }
+        let clear = band()
+        print("UI_FACT tap \(step): element \(element.frame), clear band \(Int(clear.top))-\(Int(clear.bottom)), \(drags) drags")
+        guard clear.bottom - clear.top >= 30 else { return false }
+        UITestOnboarding.clock("tap \(step)")
+        origin.withOffset(CGVector(dx: element.frame.midX, dy: (clear.top + clear.bottom) / 2)).tap()
+        return true
     }
 
     @discardableResult

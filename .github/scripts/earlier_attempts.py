@@ -3,9 +3,12 @@
 The owner's rule: flaky tests are counted and fixed, never hidden. So a red test is never re-run
 to green: after a red test the fix goes into a new commit and a NEW run. "Re-run failed jobs" is
 only for a failure of the machinery, a step in MACHINERY_STEPS or with a MACHINERY_PREFIXES name:
-a runner or container that did not start, a simulator that did not boot, an artifact or a
-checkout that did not arrive, an upload to App Store Connect that broke off. Every other failed
-step blocks: tests, lint rules, builds, the archive and its check, the pinned toolchain.
+a runner or container that did not start, a simulator that did not boot, an artifact, a checkout
+or XcodeGen (Homebrew) that did not arrive, an upload to App Store Connect that broke off. Every
+other step that did not pass blocks: tests, lint rules, builds, the archive and its check, the
+pinned toolchain, the project generation. It goes by the step, not by the cause: a step stopped
+by a cancel or a timeout, or one a lost runner left unfinished, counts like a failed one (a test
+that was stopped did not pass). A job that never ran a step (no runner) counts as machinery.
 
   python3 .github/scripts/earlier_attempts.py --attempt 3 [--forced] jobs-1.json jobs-2.json
 
@@ -27,7 +30,7 @@ import sys
 
 MACHINERY_STEPS = {
     "Set up job", "Initialize containers", "Stop containers", "Complete job",
-    "Install SQLite headers",
+    "Install SQLite headers", "Install XcodeGen",
     "Boot simulator (in the background)", "Wait for the simulator",
     "Unpack build products", "Keep the retry record for the run summary",
     # This check itself: it fails on what it finds in an earlier attempt (found again from
@@ -36,6 +39,7 @@ MACHINERY_STEPS = {
 }
 MACHINERY_PREFIXES = ("Upload ", "Download ", "Post ", "Run actions/checkout@")
 NOT_PASSED = ("failure", "timed_out", "cancelled")
+PASSED_STEP = ("success", "skipped", "neutral")
 
 
 def is_machinery(step: str) -> bool:
@@ -53,10 +57,11 @@ def command(kind: str, title: str, message: str) -> str:
 
 
 def failed_steps(job: dict) -> list[str]:
-    """The steps a job did not pass. A job that failed or timed out also counts its cancelled
-    steps (a timeout cancels the running step); a job cancelled from outside does not."""
-    counted = ("failure", "cancelled") if job.get("conclusion") in ("failure", "timed_out") else ("failure",)
-    return [s.get("name", "?") for s in job.get("steps") or [] if s.get("conclusion") in counted]
+    """The steps a job did not pass: failed, cancelled (a cancel or a timeout stops the running
+    step) or started and never finished (a runner lost in the middle of it). Steps that never
+    ran are "skipped" or not listed, and a job that never started has no steps (CI 43763857204)."""
+    return [s.get("name", "?") for s in job.get("steps") or []
+            if s.get("conclusion") not in PASSED_STEP and (s.get("conclusion") or s.get("started_at"))]
 
 
 def earlier_failures(attempts: list[tuple[int, dict]]) -> list[dict]:
@@ -79,7 +84,7 @@ def earlier_failures(attempts: list[tuple[int, dict]]) -> list[dict]:
             row["attempts"].append(attempt)
             row["results"].append(job["conclusion"])
             row["steps"] += [s for s in steps if s not in row["steps"]]
-            # No failed step at all: the job ended outside its steps (runner lost or never there).
+            # No step that did not pass: the job ended outside its steps (no runner, or lost between two).
             row["machinery"] = row["machinery"] and all(is_machinery(s) for s in steps)
     return list(rows.values())
 

@@ -129,10 +129,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode
+      - name: Install XcodeGen
+        # Its own step: a failed Homebrew download is machinery for "Re-run failed jobs"
+        # (earlier_attempts.py); a failed project generation is not.
+        run: brew install xcodegen
       - name: Build for testing
         run: |
           set +e
-          brew install xcodegen
           cd App && xcodegen generate
           xcodebuild build-for-testing \
             -project Sortly.xcodeproj \

@@ -34,10 +34,13 @@ name: TestFlight
 #     job of a later attempt stops when an earlier attempt failed in a test, a rule, a build or
 #     the archive (.github/scripts/earlier_attempts.py).
 #   - "Re-run failed jobs" only for a failure of the machinery: a runner or container that did
-#     not start, a simulator that did not boot, build products or a checkout that did not
-#     arrive, an upload to App Store Connect that broke off. The upload job of such an attempt
-#     lists every earlier failure as a warning and in its summary, and the tag message names
-#     them. The UI build products are kept 3 days for this.
+#     not start, a simulator that did not boot, build products, a checkout or XcodeGen
+#     (Homebrew) that did not arrive, an upload to App Store Connect that broke off. The check
+#     goes by the step that did not pass, not by the cause: a runner lost or a run cancelled in
+#     the middle of a test step (e.g. "Run UI tests"), or a hiccup in "Select pinned Xcode" or
+#     "Generate Xcode project", needs a new run too. The upload job of an allowed re-run lists
+#     every earlier failure as a warning and in its summary, and the tag message names them.
+#     The UI build products are kept 3 days for this.
 #   - "force" (emergency) uploads without any test; the build is marked "FORCED – untested" in
 #     the upload job's summary, the tag message and the first line of "Was testen".
 #
@@ -230,10 +233,12 @@ jobs:
             echo "KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8"
             echo "EXPORT_OPTIONS=$RUNNER_TEMP/ExportOptions.plist"
           } >> "$GITHUB_ENV"
+      - name: Install XcodeGen
+        # Its own step: a failed Homebrew download is machinery for "Re-run failed jobs"
+        # (earlier_attempts.py); a failed project generation is not.
+        run: brew install xcodegen
       - name: Generate Xcode project
-        run: |
-          brew install xcodegen
-          cd App && xcodegen generate
+        run: cd App && xcodegen generate
       # The archive is built unsigned: automatic signing would want a development profile,
       # and Apple only makes one when an iPhone is registered to the team. The export below
       # signs for the App Store with Apple's cloud-managed distribution certificate (needs the

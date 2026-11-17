@@ -14,10 +14,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import earlier_attempts  # noqa: E402
 
 
-def job(name, conclusion, failed=(), cancelled=(), start="2026-11-17T10:00:00Z", end="2026-11-17T11:00:00Z"):
+def job(name, conclusion, failed=(), cancelled=(), skipped=(), start="2026-11-17T10:00:00Z", end="2026-11-17T11:00:00Z"):
     steps = [{"name": "Set up job", "conclusion": "success"}]
     steps += [{"name": s, "conclusion": "failure"} for s in failed]
     steps += [{"name": s, "conclusion": "cancelled"} for s in cancelled]
+    steps += [{"name": s, "conclusion": "skipped"} for s in skipped]
     return {"name": name, "conclusion": conclusion, "started_at": start, "completed_at": end, "steps": steps}
 
 
@@ -49,7 +50,7 @@ class FailureTests(unittest.TestCase):
     def test_machinery_steps(self):
         for step in ("Set up job", "Initialize containers", "Boot simulator (in the background)",
                      "Wait for the simulator", "Download build products", "Unpack build products",
-                     "Upload to TestFlight", "Upload results", "Post Run actions/checkout@abc",
+                     "Install XcodeGen", "Upload to TestFlight", "Upload results", "Post Run actions/checkout@abc",
                      "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "Earlier attempts of this run"):
             with self.subTest(step=step):
                 self.assertTrue(earlier_attempts.is_machinery(step))
@@ -57,15 +58,45 @@ class FailureTests(unittest.TestCase):
             with self.subTest(step=step):
                 self.assertFalse(earlier_attempts.is_machinery(step))
 
-    def test_a_timeout_counts_the_cancelled_step_a_cancelled_run_does_not(self):
-        timed_out = earlier_attempts.earlier_failures(
-            [(1, {"jobs": [job("UI flow / UI full flow and video", "failure", cancelled=["Run UI tests"])]})])
-        self.assertEqual(timed_out[0]["steps"], ["Run UI tests"])
-        self.assertFalse(timed_out[0]["machinery"])
-        stopped = earlier_attempts.earlier_failures(
-            [(1, {"jobs": [job("UI flow / UI full flow and video", "cancelled", cancelled=["Run UI tests"])]})])
-        self.assertEqual(stopped[0]["steps"], [])
-        self.assertTrue(stopped[0]["machinery"])
+    def test_a_cancelled_or_unfinished_step_counts_like_a_failed_one(self):
+        flow = "UI flow / UI full flow and video"
+        cases = {
+            # A timeout (the job fails) or a cancel stops the running test: it did not pass.
+            "timeout in a test": (job(flow, "failure", cancelled=["Run UI tests"]), ["Run UI tests"], False),
+            "cancel in a test": (job(flow, "cancelled", cancelled=["Run UI tests"]), ["Run UI tests"], False),
+            # A cancel while the simulator boots; the steps after it never ran ("skipped").
+            "cancel in the boot": (job(flow, "cancelled", cancelled=["Wait for the simulator"], skipped=["Run UI tests"]),
+                                   ["Wait for the simulator"], True),
+            # A runner lost in the middle of a test leaves the step started and unfinished; a
+            # step that never started is not counted.
+            "runner lost in a test": ({"name": flow, "conclusion": "failure", "steps": [
+                {"name": "Set up job", "conclusion": "success", "started_at": "2026-11-17T10:00:00Z"},
+                {"name": "Run UI tests", "conclusion": None, "started_at": "2026-11-17T10:05:00Z"},
+                {"name": "Upload results", "conclusion": None, "started_at": None}]}, ["Run UI tests"], False),
+        }
+        for case, (answer, steps, machinery) in cases.items():
+            with self.subTest(case=case):
+                rows = earlier_attempts.earlier_failures([(1, {"jobs": [answer]})])
+                self.assertEqual(rows[0]["steps"], steps)
+                self.assertEqual(rows[0]["machinery"], machinery)
+
+    def test_a_cancelled_ci_run_as_the_api_gives_it(self):
+        # CI 43763857204 (cancelled by a newer push): a Linux job stopped in "Initialize
+        # containers" (the rest "skipped"), one stopped in its check, a Mac job that never
+        # started (no steps at all).
+        rows = earlier_attempts.earlier_failures([(1, {"jobs": [
+            job("Core tests (Linux)", "cancelled", cancelled=["Initialize containers"],
+                skipped=["Run actions/checkout@v5", "Install SQLite headers", "Build and test"]),
+            job("App name check", "cancelled",
+                cancelled=["Run python3 .github/scripts/name_check.py docs/launch/name-candidates.txt"]),
+            {"name": "iOS build and tests (macOS)", "conclusion": "cancelled", "started_at": "2026-11-15T21:28:18Z",
+             "completed_at": "2026-11-15T21:28:28Z"},
+        ]})])
+        self.assertEqual([(r["job"], r["steps"], r["machinery"]) for r in rows], [
+            ("Core tests (Linux)", ["Initialize containers"], True),
+            ("App name check", ["Run python3 .github/scripts/name_check.py docs/launch/name-candidates.txt"], False),
+            ("iOS build and tests (macOS)", [], True),
+        ])
 
     def test_a_job_without_a_failed_step_is_the_runner(self):
         rows = earlier_attempts.earlier_failures([(1, {"jobs": [job("Stress pass / UI stress 10000 photos", "failure")]})])

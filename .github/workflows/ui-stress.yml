@@ -134,10 +134,13 @@ jobs:
           [ -n "$UDID" ] || { echo "no simulator"; exit 1; }
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           nohup python3 .github/scripts/ui_tests.py boot --udid "$UDID" --ready-file sim-ready > sim-boot.log 2>&1 &
+      - name: Install XcodeGen
+        # Its own step: a failed Homebrew download is machinery for "Re-run failed jobs"
+        # (earlier_attempts.py); a failed project generation is not.
+        run: brew install xcodegen
       - name: Build for testing
         run: |
           set +e
-          brew install xcodegen
           cd App && xcodegen generate
           xcodebuild build-for-testing \
             -project Sortly.xcodeproj \

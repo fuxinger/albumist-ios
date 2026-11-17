@@ -127,13 +127,16 @@ Actions > **TestFlight feedback** > Run workflow.
   Upload-Job eines späteren Versuchs liest alle Schritte der früheren Versuche und lädt nicht
   hoch, wenn einer in einem Test, einer Regel, einem Bau oder beim Archiv scheiterte
   (`.github/scripts/earlier_attempts.py`). **Re-run failed jobs** hilft nur, wenn die Technik
-  versagt hat: Runner oder Container nicht gestartet, Simulator nicht hochgefahren, gebaute Tests
-  oder Checkout nicht angekommen, Hochladen zu App Store Connect abgebrochen. Solche Ausfälle
-  stehen als Warnung in der Zusammenfassung des Upload-Jobs und in der Nachricht des Tags
-  („attempt 2; earlier attempts: …“). Kann der Upload-Job die früheren Versuche nicht lesen
-  (GitHub-API antwortet nicht), lädt er ebenfalls nicht hoch; dann nur ihn wiederholen. Die
-  gebauten UI-Tests bleiben für **Re-run failed jobs** 3 Tage liegen; danach einen neuen Lauf
-  starten.
+  versagt hat: Runner oder Container nicht gestartet, Simulator nicht hochgefahren, gebaute Tests,
+  Checkout oder XcodeGen (Homebrew, Schritt „Install XcodeGen“) nicht angekommen, Hochladen zu
+  App Store Connect abgebrochen. Maßgeblich ist der Schritt, nicht die Ursache: geht der Runner
+  mitten in einem Testschritt verloren (etwa „Run UI tests“), wird der Lauf dort abgebrochen
+  oder hakt „Select pinned Xcode“ oder „Generate Xcode project“, braucht es ebenfalls einen
+  neuen Lauf. Erlaubte Ausfälle stehen als Warnung in der Zusammenfassung des Upload-Jobs und in
+  der Nachricht des Tags („attempt 2; earlier attempts: …“). Kann der Upload-Job die früheren
+  Versuche nicht lesen (GitHub-API antwortet nicht), lädt er ebenfalls nicht hoch; dann nur ihn
+  wiederholen. Die gebauten UI-Tests bleiben für **Re-run failed jobs** 3 Tage liegen; danach
+  einen neuen Lauf starten.
 - Notfall: **force** lädt ohne Tests hoch. So ein Build ist überall als „FORCED – untested“
   markiert: in der Zusammenfassung des Upload-Jobs, in der Nachricht des Tags `build-<Nummer>`
   und als erste Zeile von „Was testen“.

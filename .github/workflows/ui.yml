@@ -34,8 +34,8 @@ name: UI flow
 #      repository has; accepted on 16.11. Contrast is listed last, so it is the group that
 #      waits: it starts when the first group (the full flow, ~32 min) is done and ends with
 #      the others.
-#      The 50,000-photo stress run is not part of this run: .github/workflows/ui-stress.yml,
-#      started by hand.
+#      The stress pass is not part of this run: .github/workflows/ui-stress.yml (10,000 photos
+#      before each TestFlight build, 50,000 weekly at night and before the App Store launch).
 #
 # Each group runs through .github/scripts/ui_tests.py: a pass that the simulator service lost
 # (an explicit "Error returned in reply from CoreSimulatorService", "Timed out waiting for AX

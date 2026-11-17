@@ -117,6 +117,12 @@ Actions > **TestFlight feedback** > Run workflow.
   (`.github/scripts/app_changed.py`). Das Archiv wird am Ende des Laufs gelöscht. Schlägt nur das Hochladen fehl,
   den Lauf mit **Re-run all jobs** neu starten (baut das Archiv neu); „Re-run failed jobs“ findet das
   Archiv nicht mehr und schlägt absichtlich fehl.
+- Härtetest (Regel Fuchs, 17.11.2026): vor jedem TestFlight-Build läuft der kleine Durchgang mit
+  10.000 Fotos und 15 Minuten Messung (rund 45 Minuten): Actions > **UI stress** > Run workflow
+  auf dem Stand, der hochgeladen werden soll, Vorgaben unverändert lassen (oder
+  `gh workflow run ui-stress.yml --ref <Zweig>`). Der volle Durchgang mit 50.000 Fotos läuft nur
+  wöchentlich nachts (Sonntag 00:40 UTC, erst wenn der Workflow in `main` ist) und vor dem Start
+  im App Store.
 - Welcher Commit in einem Build steckt: die App trägt ihn in ihrer Info.plist (`AlbumistCommit`,
   daneben die Build-Nummer `CFBundleVersion` und das Xcode `DTXcodeBuild`). Vor dem Hochladen prüft
   der Lauf alle drei und dass jede Datei der App Byte für Byte die archivierte ist (Liste aller

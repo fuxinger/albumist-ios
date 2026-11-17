@@ -8,6 +8,15 @@
   Begriffe gegen Vision, Texte. Läuft im iOS-27-Simulator auf GitHub Actions (Image `xcode-27`).
 - **Kein Test auf echten Geräten** bisher: Es steht weder ein Mac noch ein iPhone mit
   Entwicklerzugang zur Verfügung. Das wird in TestFlight nachgeholt.
+- **Härtetest im Simulator** (`.github/workflows/ui-stress.yml`, UI-Test
+  `DeviceConditionUITests/test12`): legt viele Fotos an (nur in iCloud, offline) und misst die
+  Analyse: Tempo je Schritt, Pause, längster Stillstand der Anzeige, langsamste Antwort, Speicher.
+  Regel (Fuchs, 17.11.2026): **vor jedem TestFlight-Build** der kleine Durchgang mit 10.000 Fotos
+  und 15 Minuten Messung (rund 45 Minuten, die Vorgaben des Workflows); der **volle Durchgang**
+  mit 50.000 Fotos und 45 Minuten Messung nur **wöchentlich nachts** (Zeitplan Sonntag 00:40 UTC;
+  läuft erst, wenn der Workflow in `main` ist) und **vor dem Start im App Store**. Pause prüft der
+  Test nach einem Zehntel der Bildinhalte: beim kleinen Durchgang etwa in Minute 12–13, beim vollen
+  erst nach rund 60 Minuten, also dort nicht (Simulator ~1,75 Fotos/s).
 
 ## Abnahmeszenarien (automatisiert)
 | Szenario | Test |

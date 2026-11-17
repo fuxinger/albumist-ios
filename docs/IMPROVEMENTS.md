@@ -86,6 +86,12 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | 💡 | Bereits im Ordner „Albumist“ angelegte Alben auf Wunsch herausholen (Ordner auflösen). | M | Fuchs 15.11. |
 | 💡 | Bedienungshilfen-Prüfung meldet zu wenig Kontrast bei den großen Glas-Knöpfen. Gemessen: Weiß auf Petrol 6:1, also bestanden; vermutlich misst die Prüfung den Glas-Effekt mit. Auf echtem Gerät nachprüfen. | S | T 14.11. |
 
+## Bau-Strecke (Profi-Analyse 16.11., Beschlüsse Fuchs 17.11.)
+
+| Status | Punkt | Aufwand | Quelle |
+|---|---|---|---|
+| 🔜 Zeitplan läuft ab Merge in `main` | Härtetest-Regel: vor jedem TestFlight-Build der kleine Durchgang (10.000 Fotos, 15 Min. gemessen, ~45 Min.; die Vorgaben von `ui-stress.yml`), der volle (50.000 Fotos, 45 Min., ~1,5–2,5 Std.) nur wöchentlich nachts (Sonntag 00:40 UTC = 01:40 Uhr Winterzeit, 02:40 Uhr Sommerzeit) und vor dem App-Store-Start. Ein Zeitplan-Lauf hat keine Eingaben und nimmt 50.000/45, ein Lauf von Hand seine Eingaben; ungültige Werte brechen vor dem Bauen ab. Der Wachhund richtet sich nach der Größe (10.000/15: 48 Min., 50.000/45: 130 Min. wie bisher). Grenze des Tests (nicht geändert): Pause kommt nach einem Zehntel der Bildinhalte, im Simulator (~1,75 Fotos/s) beim kleinen Durchgang etwa in Minute 12–13 von 15, beim vollen erst nach ~60 Min., also nie innerhalb der 45 Min. Soll der volle Durchgang Pause messen: 70 Min. statt 45 oder Pause im Test nach fester Zahl (Entscheidung offen). | S | Fuchs 17.11. |
+
 ## Aus dem Bedienungstest (B)
 
 | Status | Punkt | Aufwand | Quelle |

@@ -623,6 +623,32 @@ def host_grant_requests(text: str) -> int:
     return sum(1 for line in text.split("\n") if HOST_GRANT.search(line))
 
 
+GRANT_TRIES = 2
+GRANT_TIMEOUT = 90
+
+
+def grant_photos(udid: str, run=sh, tries: int = GRANT_TRIES, timeout: float = GRANT_TIMEOUT) -> bool:
+    """`simctl privacy grant photos`, tried again once with a fresh call when it fails.
+
+    UI run 44108052342 (device test 09): the call hung until its 120 s timeout, and the app's
+    launches in that time waited for it (one began 55 s late, 4 s after the call was killed),
+    so the access stayed taken away and test 09 and, through it, test 10 failed. A normal grant
+    takes about a second. Every try is in the log ("UI_HOST ... attempt N of M"); the tests'
+    own checks decide as before (a grant that never came stays a red test)."""
+    for attempt in range(1, tries + 1):
+        started = time.monotonic()
+        code, output = run(["xcrun", "simctl", "privacy", udid, "grant", "photos", BUNDLE_ID], timeout=timeout, quiet=True)
+        took = time.monotonic() - started
+        if code == 0:
+            print(f"UI_HOST photo access granted ({took:.0f} s, attempt {attempt} of {tries})", flush=True)
+            return True
+        detail = " ".join(output.split())[:200]
+        print(f"UI_HOST photo access grant failed (exit {code}, {took:.0f} s, attempt {attempt} of {tries})"
+              + (f": {detail}" if detail else ""), flush=True)
+    print(f"UI_HOST photo access NOT granted after {tries} attempts; the test that asked will fail on it", flush=True)
+    return False
+
+
 class HostGrants(threading.Thread):
     """Gives the photo access back from the Mac each time a test asks (UI_HOST_GRANT_PHOTOS,
     DeviceConditionUITests.grantFromHost): the CI simulator shows no iOS question after an
@@ -637,8 +663,7 @@ class HostGrants(threading.Thread):
         self.tail = ""
 
     def grant_photos(self) -> None:
-        code, _ = sh(["xcrun", "simctl", "privacy", self.udid, "grant", "photos", BUNDLE_ID], timeout=120, quiet=True)
-        print("UI_HOST photo access granted" if code == 0 else f"UI_HOST photo access grant failed (exit {code})", flush=True)
+        grant_photos(self.udid)
 
     def check(self) -> None:
         """Reads what was added to the log since the last call; one grant per complete request line."""

@@ -1267,6 +1267,7 @@ final class AppModel {
         // at least every 10 s (`AnalysisCardState.earlyLookInterval`: 50,000 photos, every 100 s).
         if taken.earlyProposals {
             lastEarlyLook = now
+            ProgressLineLog.mark("early suggestions saved")
             Task { await refreshDerived() }
         } else if snapshot == nil, analysis.stage == .content, earlyLookTask == nil,
                   lastEarlyLook.map({ now - $0 >= AnalysisCardState.earlyLookInterval(photos: analysis.total) }) ?? true {

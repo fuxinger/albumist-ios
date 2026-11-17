@@ -56,11 +56,26 @@ Das Reise-Atlas-Bild wird auf dem Gerät gerendert und über das iOS-Teilen-Men�
 Es enthält Länder, Zahlen und optional ein Foto vom Lieblingsziel (vor dem Teilen sichtbar und
 abschaltbar). Das gerenderte Bild hat keine EXIF- oder GPS-Daten.
 
+## Absturz- und Hängerberichte (MetricKit)
+iOS schreibt nach einem Hänger, Absturz, zu hoher CPU- oder Schreiblast und einem langsamen Start
+einen Bericht über die App und gibt ihn ihr beim nächsten Start (`MXDiagnosticPayload`), dazu
+einmal am Tag Kennzahlen (Startzeiten, Hängerzeit, Beendigungsgründe; `MXMetricPayload`).
+Albumist legt sie in *Application Support/Albumist Diagnostics* ab (gleicher Dateischutz,
+nicht im Backup), höchstens 20 Berichte, 10 Tageswerte und 3 MB, die ältesten fallen weg
+(`MetricKitArchive`). Inhalt: Aufrufstapel als Programmdatei + Versatz mit UUID (ohne
+Symbole), App- und iOS-Version, Gerätemodell, Regionsformat, Dauer bzw. Ausnahme und Signal.
+Vor dem Speichern entfernt: Meldungstext und Argumente einer Objective-C-Ausnahme
+(`composedMessage`, `arguments`) und die Speicherkarte um einen Fehlzugriff
+(`virtualMemoryRegionInfo`), weil beide einen Dateinamen enthalten könnten. Keine Fotos,
+keine Orte. Die Berichte verlassen das Gerät nur in der Diagnose, die der Nutzer selbst teilt
+(lesbare Zeilen und das bereinigte JSON am Ende). Kein Required-Reason-API betroffen
+(keine Dateizeitstempel, Datum steht im Dateinamen).
+
 ## Sicherheitsprüfung (14.11.2026)
 | Bereich | Ergebnis |
 |---|---|
 | Netzwerk | Kein eigener Netzwerkcode (`URLSession` o. ä. kommt nicht vor). Nur Apple-Dienste: Geocoder (abschaltbar), iCloud-Fotos (Zustimmung), StoreKit. |
-| Diagnose | Nur auf Wunsch über das Teilen-Menü: App- und iOS-Version, Gerätemodell, Fotozugriff, Zahlen und Zustände der letzten Pläne mit Fehlercodes. Keine Fotos, Album- oder Ortsnamen, keine Foto-Kennungen. |
+| Diagnose | Nur auf Wunsch über das Teilen-Menü: App- und iOS-Version, Gerätemodell, Fotozugriff, Zahlen und Zustände der letzten Pläne mit Fehlercodes, dazu die Absturz- und Hängerberichte, die iOS über die App schreibt (MetricKit, siehe unten). Keine Fotos, Album- oder Ortsnamen, keine Foto-Kennungen. |
 | Speicherung | Datenbank verschlüsselt (Dateischutz), nicht im Backup, keine Bildkopien, sensible Texte nicht gespeichert, Kontonummern maskiert. Nur die Entscheidungen liegen als kleine Kopie im Geräte-Backup. |
 | SQL | Nur gebundene Parameter, keine zusammengesetzten SQL-Texte aus Nutzereingaben. |
 | Käufe | Nur von Apple signierte Transaktionen (`.verified`) schalten frei; Test-Freischaltung existiert nur in Debug-Builds. |

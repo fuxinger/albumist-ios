@@ -10,6 +10,8 @@ struct SortlyApp: App {
     init() {
         BackgroundWork.register()
         UITestSupport.prepareLaunch()
+        // Hang and crash reports from iOS for the diagnostic report (registers in the background).
+        MetricKitLog.start()
         // Before launch ends, so the tap on "Analyse fertig" that opened the app arrives.
         NotificationRouter.register()
     }

@@ -199,7 +199,7 @@ struct SettingsView: View {
             } header: {
                 Text("Über")
             } footer: {
-                Text("Die Diagnose hilft bei Problemen. Sie enthält nur Zustände und Zahlen, keine Fotos, Albumnamen oder Orte, und du siehst sie vor dem Senden.")
+                Text("Die Diagnose hilft bei Problemen. Sie enthält nur Zustände, Zahlen und die Absturz- und Hängerberichte, die iOS über Albumist schreibt, keine Fotos, Albumnamen oder Orte, und du siehst sie vor dem Senden.")
             }
         }
         .navigationTitle("Einstellungen")
@@ -377,7 +377,7 @@ struct PrivacyView: View {
             Section("Was dein Gerät verlässt") {
                 Text("Nur wenn „Orte online genauer bestimmen“ eingeschaltet ist, schickt iOS Koordinaten an Apple, um Ortsnamen zu finden. Fotos verlassen dein Gerät nie.")
                 Text("Käufe laufen über Apple. Albumist sieht keine Zahlungsdaten.")
-                Text("Die Diagnose nur, wenn du sie selbst teilst: Zustände und Zahlen, keine Fotos, Namen oder Orte.")
+                Text("Die Diagnose nur, wenn du sie selbst teilst: Zustände, Zahlen und Absturzberichte von iOS über Albumist, keine Fotos, Namen oder Orte.")
             }
             Section("Löschen") {
                 Text("„Analyse neu aufbauen“ löscht alle Analysedaten, deine Entscheidungen bleiben. Wenn du die App löschst, ist alles weg, auch die Kopie. Deine Alben in Fotos bleiben.")

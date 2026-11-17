@@ -2438,7 +2438,8 @@ final class AppModel {
     }
 
     /// A text for support: app, device, photo access and the state of every recent plan, with
-    /// counts and reason codes only. No album names, places or photos (I16).
+    /// counts and reason codes only. No album names, places or photos (I16). At the end the
+    /// hang and crash reports iOS wrote about the app (MetricKit, `MetricKitLog`).
     func diagnosticReport(device: String, system: String) async -> String {
         let iso = ISO8601DateFormatter()
         var lines = ["Albumist diagnostic report", "created \(iso.string(from: Date()))", ""]
@@ -2484,6 +2485,9 @@ final class AppModel {
         if let failure = execution.failure { lines.append("last execution failure: \(PlanDiagnostics.reasonCode(failure))") }
         if let deletion = DeletionLog.last { lines.append("last deletion \(deletion)") }
         lines += BackgroundRunLog.summary
+        // Hangs and crashes iOS recorded (MetricKit), last because of the JSON at its end.
+        lines.append("")
+        lines += await MetricKitLog.reportLines()
         return lines.joined(separator: "\n")
     }
 

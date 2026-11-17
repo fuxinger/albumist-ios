@@ -1891,22 +1891,22 @@
         }
       }
     },
-    "Die Diagnose hilft bei Problemen. Sie enthält nur Zustände und Zahlen, keine Fotos, Albumnamen oder Orte, und du siehst sie vor dem Senden." : {
+    "Die Diagnose hilft bei Problemen. Sie enthält nur Zustände, Zahlen und die Absturz- und Hängerberichte, die iOS über Albumist schreibt, keine Fotos, Albumnamen oder Orte, und du siehst sie vor dem Senden." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Diagnostics help with problems. They contain only states and numbers, no photos, album names or places, and you see them before sending."
+            "value" : "Diagnostics help with problems. They contain only states, numbers and the crash and hang reports iOS writes about Albumist, no photos, album names or places, and you see them before sending."
           }
         }
       }
     },
-    "Die Diagnose nur, wenn du sie selbst teilst: Zustände und Zahlen, keine Fotos, Namen oder Orte." : {
+    "Die Diagnose nur, wenn du sie selbst teilst: Zustände, Zahlen und Absturzberichte von iOS über Albumist, keine Fotos, Namen oder Orte." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Diagnostics only when you share them yourself: states and numbers, no photos, names or places."
+            "value" : "Diagnostics only when you share them yourself: states, numbers and crash reports from iOS about Albumist, no photos, names or places."
           }
         }
       }

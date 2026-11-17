@@ -143,8 +143,9 @@ final class SortlySearchUITests: XCTestCase {
         return false
     }
 
+    /// The Pause button first: one query while the analysis runs (see SortlyFlowUITests).
     private var analysisIdle: Bool {
-        (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists) && !app.buttons["Pause"].exists
+        !app.buttons["Pause"].exists && (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
     }
 
     // MARK: Search helpers

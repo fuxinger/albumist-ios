@@ -18,9 +18,9 @@ struct SettingsView: View {
             // Undo first and on its own screen (design review W16: the history sat between
             // privacy and the purchase, the seventh of twelve sections).
             Section {
-                NavigationLink {
-                    HistoryView()
-                } label: {
+                // Pushed by value (`AppScreen`), like the screens behind it: a receipt pushes
+                // "Fehlendes erneut versuchen".
+                PushLink(.history) {
                     LabeledContent {
                         if model.interruptedPlan != nil { Text("Unterbrochen") }
                     } label: {
@@ -100,9 +100,8 @@ struct SettingsView: View {
                     }
                 }
                 Toggle("Foto in mehreren Alben erlauben", isOn: $model.settings.allowMultipleAssignments)
-                NavigationLink {
-                    ManagedAlbumsView()
-                } label: {
+                // Pushed by value: it pushes the preview of a removal (`AppScreen`).
+                PushLink(.managedAlbums) {
                     LabeledContent("Alben von Albumist", value: model.managedAlbums.count.formatted())
                 }
             }
@@ -287,9 +286,7 @@ struct HistoryRow: View {
     var plan: ChangePlan
 
     var body: some View {
-        NavigationLink {
-            PlanReceiptView(plan: plan)
-        } label: {
+        PushLink(.receipt(PlanToken(plan))) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text((plan.confirmedAt ?? plan.createdAt).formatted(date: .abbreviated, time: .shortened))

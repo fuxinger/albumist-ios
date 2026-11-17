@@ -4,6 +4,13 @@
 Alle Analysen laufen auf dem Gerät. Albumist lädt keine Fotos hoch, hat keinen Server, kein
 Konto, keine Werbung, kein Tracking und keine Analyse-SDKs.
 
+Albumist liest die Mediathek, um Alben vorzuschlagen, und schreibt erst, wenn der Nutzer einen
+Plan bestätigt: Es legt Alben und Ordner in Fotos an, benennt und verschiebt sie, fügt Fotos zu
+Alben hinzu oder nimmt sie aus Alben heraus; „Rückgängig machen“ entfernt die Alben wieder, die
+Albumist angelegt hat. Originale werden nie verändert. Fotos fügt Albumist nur auf Wunsch hinzu
+(„Mit Beispielfotos ausprobieren“) und löscht nur diese eigenen Beispielfotos, mit der
+Löschabfrage von iOS.
+
 ## Speicherorte
 Eine SQLite-Datenbank in *Application Support/Albumist* mit Metadaten, Analyseergebnissen,
 erkanntem Text (nur für die Suche) und Entscheidungen. Der ganze Ordner ist vom iCloud-Backup
@@ -16,8 +23,11 @@ Eine kleine Kopie nur der Entscheidungen liegt in *Application Support/Albumist 
 Einstellungen, eigene Namen, Reise-Kennungen, die von Albumist angelegten Alben und der Verlauf
 (Album- und Foto-Kennungen, Albumtitel). Kein erkannter Text, keine Analyseergebnisse (Orte,
 Koordinaten, Bildinhalte), keine Bilder. Sie verlässt das Gerät nur mit dem Backup des Nutzers.
-Es werden **keine Bildkopien** gespeichert. Wenige Einstellungen liegen in `UserDefaults`
-(Onboarding erledigt, Zahl der Gratis-Alben, Zeitpunkt des letzten Scans).
+Es werden **keine Bildkopien** gespeichert. Wenige Werte liegen in `UserDefaults`
+(Onboarding erledigt, Zahl der verbrauchten Gratis-Alben mit den Kennungen der bekannten
+Kauf-Transaktionen, Stand einer unterbrochenen Analyse, Stand der Bewertungsfrage,
+Diagnose-Zähler für den Diagnosebericht ohne Foto- oder Albumnamen und die Kennungen der von
+Albumist angelegten Beispielfotos, damit „Beispielfotos wieder entfernen“ genau diese findet).
 Für Spotlight und Siri legt Albumist im lokalen Spotlight-Index des iPhones nur Ländernamen mit
 Fotoanzahl und die Titel offener Vorschläge ab (kein erkannter Text, keine Bilder, keine
 Koordinaten). Der Index wird nach jeder Analyse ersetzt und ist nach „Analyse zurücksetzen“ leer.
@@ -31,7 +41,11 @@ Die Analyse liest den vollen Text, gespeichert wird nur eine verkleinerte Fassun
 - „Analyse neu aufbauen“ löscht den gesamten Suchindex.
 
 ## Berechtigungen
-- Fotos (voll oder ausgewählte Fotos). Ohne Zugriff funktioniert die App nicht.
+- Fotos, Lesen und Schreiben (voll oder ausgewählte Fotos). Lesen für die Vorschläge; Schreiben
+  (Alben und Ordner anlegen, Fotos hinzufügen oder aus Alben nehmen) erst nach Bestätigung und
+  nur mit vollem Zugriff. Ohne Zugriff funktioniert die App nicht. Der Berechtigungstext
+  (`NSPhotoLibraryUsageDescription`, Deutsch in `App/project.yml`, Englisch in
+  `App/Sortly/Resources/InfoPlist.xcstrings`) nennt beides.
 - Keine Standortberechtigung: Orte stammen aus den GPS-Daten der Fotos.
 - Hintergrundverarbeitung (nachts beim Laden) und Fortsetzen der Analyse im Hintergrund mit
   Fortschritt auf dem Sperrbildschirm (`BGContinuedProcessingTask`, vom Nutzer gestartet).
@@ -64,7 +78,7 @@ abschaltbar). Das gerenderte Bild hat keine EXIF- oder GPS-Daten.
 | Speicherung | Datenbank verschlüsselt (Dateischutz), nicht im Backup, keine Bildkopien, sensible Texte nicht gespeichert, Kontonummern maskiert. Nur die Entscheidungen liegen als kleine Kopie im Geräte-Backup. |
 | SQL | Nur gebundene Parameter, keine zusammengesetzten SQL-Texte aus Nutzereingaben. |
 | Käufe | Nur von Apple signierte Transaktionen (`.verified`) schalten frei; Test-Freischaltung existiert nur in Debug-Builds. |
-| Fotos | Geschlossene Operationsmenge: Alben/Ordner anlegen, ergänzen, umbenennen, verschieben; Mitgliedschaften entfernen. Es gibt keinen Code, der Medien löscht oder verändert. |
+| Fotos | Geschlossene Operationsmenge: Alben/Ordner anlegen, ergänzen, umbenennen, verschieben; Mitgliedschaften entfernen; beim Rückgängigmachen die eigenen Alben löschen. Kein Code verändert Medien. Medien angelegt und gelöscht werden nur die eigenen Beispielfotos (`SamplePhotos`, auf Wunsch, Löschen mit der iOS-Abfrage); die allgemeine Schreib-Schnittstelle (`PhotoKitLibrary`) kann keine Medien löschen. |
 | Protokolle | Keine Logausgaben mit Fotodaten oder Texten. |
 | Demo-Mediathek | Nur im Simulator enthalten (`#if targetEnvironment(simulator)`), nie in App-Store-Builds. |
-| Datenschutz-Manifest | Keine erhobenen Daten, kein Tracking; begründete API-Nutzung: UserDefaults (CA92.1), Dateizeitstempel (C617.1, SQLite). |
+| Datenschutz-Manifest | Keine erhobenen Daten, kein Tracking; begründete API-Nutzung: UserDefaults (CA92.1), Dateizeitstempel (C617.1: Änderungsdatum der eigenen Entscheidungs-Kopie `decisions.json` im App-Container). |

@@ -17,10 +17,25 @@ final class DeviceConditionUITests: XCTestCase {
     // MARK: Helpers (copied from SortlyFlowUITests, which stays as it is)
 
     private func launch(_ extra: [String] = []) {
+        UITestStalls.report()
+        if !stallsReportedAtEnd {
+            stallsReportedAtEnd = true
+            addTeardownBlock { UITestStalls.report() }
+        }
         app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + extra
+        let stalls = UITestStalls.arguments(besides: extra)
+        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
+        launchExtra = extra
+        UITestOnboarding.clock("launch")
         app.launch()
     }
+
+    /// The test's own arguments of the last launch: the onboarding helpers open the app again
+    /// with them. They opened it as a fast start, and test 10 (empty library, own database) then
+    /// ran on the demo library after the photo access had to be given back (UI run 44108052342).
+    private var launchExtra: [String] = []
+
+    private var stallsReportedAtEnd = false
 
     /// A launch on a prepared simulator: the onboarding counts as done.
     private func start(_ extra: [String] = []) {
@@ -68,6 +83,7 @@ final class DeviceConditionUITests: XCTestCase {
             if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
+        UITestOnboarding.clock("tap \(step)")
         element.tap()
         print("UI_STEP_OK \(step)")
         return true
@@ -109,8 +125,13 @@ final class DeviceConditionUITests: XCTestCase {
     private func waitStable(_ what: String, timeout: TimeInterval, stableChecks: Int = 3, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
+        UITestOnboarding.clock("wait start \(what)")
+        defer { UITestOnboarding.clock("wait end \(what)") }
         while Date() < deadline {
-            streak = condition() ? streak + 1 : 0
+            let asked = Date()
+            let met = condition()
+            UITestOnboarding.reportSlowCheck(since: asked)
+            streak = met ? streak + 1 : 0
             if streak >= stableChecks { return true }
             sleep(2)
         }
@@ -163,6 +184,15 @@ final class DeviceConditionUITests: XCTestCase {
         return counts.total > 0 && counts.analysed == counts.total
     }
 
+    /// The headline says every photo is analysed, read until it does for up to 15 s: a snapshot
+    /// taken while the finished card replaces the running one reads nothing, and device test 03
+    /// failed on that although its screenshot a moment later showed "Alle 246 Fotos analysiert"
+    /// (UI run 44091312348). A count that stays short still fails, with what was read.
+    private func expectEveryPhotoAnalysed(_ context: String) {
+        let complete = waitStable("every photo analysed \(context)", timeout: 15, stableChecks: 1) { everyPhotoAnalysed }
+        XCTAssertTrue(complete, "Not every photo was analysed \(context): \(analysedPhotos().map { "\($0.analysed) of \($0.total)" } ?? "no count readable")")
+    }
+
     /// Every label inside `element`, read from one snapshot.
     private func allLabels(_ element: XCUIElement) -> String {
         guard let snapshot = try? element.snapshot() else { return "" }
@@ -211,7 +241,10 @@ final class DeviceConditionUITests: XCTestCase {
         start()
         onboardIfNeeded()
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists { demo.tap() }
+        if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists {
+            UITestOnboarding.clock("tap demo library")
+            demo.tap()
+        }
         let ready = waitStable("demo library analysed", timeout: 900) {
             (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
         }
@@ -232,6 +265,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// it), if one of them shows; afterwards the app has full access. A denied access cannot be
     /// given back inside the app: the workflow gives it back from the Mac (`grantFromHost`).
     private func onboardIfNeeded(attempt: Int = 1) {
+        let extra = launchExtra
         let welcome = button("Los geht")
         _ = waitStable("first screen", timeout: 20, stableChecks: 1) {
             welcome.exists || app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists
@@ -246,11 +280,12 @@ final class DeviceConditionUITests: XCTestCase {
         // question, access denied), and every later test of the group ran without photos.
         if attempt < 3, !app.tabBars.firstMatch.exists, toSettings.waitForExistence(timeout: 3) {
             print("UI_FACT photo access denied: given back from the Mac")
-            grantFromHost()
+            grantFromHost(relaunchWith: extra)
             onboardIfNeeded(attempt: attempt + 1)
         } else if asked {
-            // Opened once more, so the fast start runs as with access (demo library, if missing).
-            start()
+            // Opened once more, so the launch runs as with access (the fast start's demo
+            // library, if missing), with the test's own arguments.
+            launch(extra)
         }
     }
 
@@ -259,21 +294,27 @@ final class DeviceConditionUITests: XCTestCase {
     /// Settings app's first page, not on Albumist's. The test asks with a log line; the
     /// workflow, which follows the log, grants the access with `simctl privacy` and the app is
     /// opened again. (Run in Xcode without the workflow, nobody answers and this returns false.)
+    /// `relaunchWith`: the test's own launch arguments (nil: a fast start).
     @discardableResult
-    private func grantFromHost() -> Bool {
+    private func grantFromHost(relaunchWith extra: [String]? = nil) -> Bool {
         print("UI_HOST_GRANT_PHOTOS")
-        for _ in 0..<12 {
+        for attempt in 1...12 {
             sleep(5)
-            start()
-            _ = waitStable("first screen after the grant", timeout: 15, stableChecks: 1) {
+            if let extra { launch(extra) } else { start() }
+            let shown = waitStable("first screen after the grant", timeout: 30, stableChecks: 1) {
                 app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists || button("Los geht").exists
             }
-            if !askAgain.exists && !toSettings.exists {
+            // Given back only when the app shows a screen with access (UI run 44022880773 counted
+            // a launch that showed none of these screens as given back, and the test then
+            // waited for an overview that did not come).
+            if shown, !askAgain.exists, !toSettings.exists {
                 print("UI_STEP_OK photo access given back from the Mac")
                 return true
             }
+            if !shown { shot("x-no-screen-after-grant-\(attempt)") }
         }
         print("UI_STEP_MISSING photo access given back from the Mac")
+        XCTFail("No screen with photo access after the grant from the Mac")
         return false
     }
 
@@ -294,14 +335,24 @@ final class DeviceConditionUITests: XCTestCase {
         tap(app.buttons["Weiter"], "areas")
         sleep(1)
         // "Weiter" before the iOS question (plugin review K5; it said "Zugriff erlauben" before).
+        var answered = false
         if askAgain.waitForExistence(timeout: 5) {
             askAgain.tap()
-            answerPhotoQuestion(choice)
+            answered = answerPhotoQuestion(choice)
         }
         guard choice != .deny else { return false }
         // With access granted the app moves on by itself; "Weiter" when it had been granted before.
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline && !button("Analyse starten").exists {
+            // iOS answered "denied" without asking (CI after an access reset, also one left
+            // by an earlier test): the caller gives the access back from the Mac and walks
+            // the onboarding again (`onboardIfNeeded`), instead of failing on a missing
+            // "Analyse starten" (test 10 in UI run 44108052342). After a question this test
+            // answered, the screen is the app's doing and stays a failure below.
+            if !answered, toSettings.exists {
+                print("UI_FACT onboarding: photo access denied without a question")
+                return false
+            }
             let next = app.buttons["Weiter"]
             if next.exists && next.isHittable { next.tap() }
             sleep(1)
@@ -600,7 +651,7 @@ final class DeviceConditionUITests: XCTestCase {
         let finished = waitStable("analysis finished after heat", timeout: 900) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not finish after the heat")
         print("UI_FACT after heat \(String(describing: analysedPhotos()))")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after the heat")
+        expectEveryPhotoAnalysed("after the heat")
         XCTAssertFalse(anything("Analyse pausiert").exists, "The analysis stopped for heat")
         shot("02-after-heat")
     }
@@ -629,7 +680,7 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(finished, "The analysis did not finish in Low Power Mode")
         XCTAssertFalse(pausedForLowPower, "Low Power Mode paused the analysis in the app")
         XCTAssertFalse(app.buttons["Fortsetzen"].exists, "The analysis waits for a tap after low battery")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after low battery")
+        expectEveryPhotoAnalysed("after low battery")
         shot("04-after-battery")
     }
 
@@ -683,7 +734,7 @@ final class DeviceConditionUITests: XCTestCase {
         }
         let finished = waitStable("analysis finished after relaunch", timeout: 120) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not finish after the app was opened again")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after the relaunch")
+        expectEveryPhotoAnalysed("after the relaunch")
         shot("07-done-after-relaunch")
     }
 
@@ -1013,10 +1064,13 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(asks, "After access was taken away the app does not ask for it again")
         XCTAssertEqual(app.state, .runningForeground, "The app ended after access was taken away")
         if asks { grantOnNoAccessScreen(.full) }
-        // Without the iOS question in CI the answer is "denied": given back from the Mac.
-        if !app.tabBars.firstMatch.waitForExistence(timeout: 10) { grantFromHost() }
+        // Without the iOS question in CI the answer is "denied": given back from the Mac. When
+        // that failed (recorded by `grantFromHost`), nothing after it can pass: the test ends
+        // here instead of waiting 17 more minutes for an analysis without access (44108052342).
+        if !app.tabBars.firstMatch.waitForExistence(timeout: 10), !grantFromHost() { return }
         let back = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         print(back ? "UI_STEP_OK overview after access came back" : "UI_STEP_MISSING overview after access came back")
+        if !back { shot("x-no-overview-after-access") }
         XCTAssertTrue(back, "The app does not go on after access came back")
         // On a phone the analysis goes on by itself once access is back; UI runs start their
         // analyses themselves, so the app is opened once more and starts it as at launch.
@@ -1025,7 +1079,7 @@ final class DeviceConditionUITests: XCTestCase {
         record("after access came back")
         let finished = waitStable("analysis finished after access came back", timeout: 900) { analysisIdle }
         XCTAssertTrue(finished, "The analysis did not finish after access came back")
-        XCTAssertTrue(everyPhotoAnalysed, "Not every photo was analysed after access came back")
+        expectEveryPhotoAnalysed("after access came back")
         shot("20-access-back")
     }
 

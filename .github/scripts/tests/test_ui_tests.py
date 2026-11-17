@@ -745,5 +745,85 @@ class HostGrantTests(unittest.TestCase):
         self.assertEqual(len(granted), 2)
 
 
+# Device test 04 of UI run 44066730498: XCTest lost the app at a relaunch (no crash report).
+LOST_APP_LOG = """Test Case '-[SortlyUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete]' started.
+UI_FACT app process 30001 started 11:03:22.5 UTC, its code ran from 11:03:23.4 UTC
+UI_FACT atlas offline Dein Reise-Atlas, 12 Länder · 0 Städte · 12 Reisen
+UI_FACT clock 11:06:36.3 launch
+<unknown>:0: error: -[SortlyUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete] : Application 'app.albumist.ios' does not have a process ID
+{record}UI_FACT main stall 2.6 s from 11:07:36.6 UTC
+Test Case '-[SortlyUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete]' failed (372.873 seconds).
+Test Case '-[SortlyUITests.DeviceConditionUITests test06_DiskFullDuringAnalysisAndPlan]' started.
+UI_FACT app process 30003 started 11:09:36.0 UTC, its code ran from 11:09:37.0 UTC
+Test Case '-[SortlyUITests.DeviceConditionUITests test06_DiskFullDuringAnalysisAndPlan]' passed (60.000 seconds).
+** TEST EXECUTE FAILED **
+"""
+
+
+class LostAppTests(unittest.TestCase):
+    def log(self, record=""):
+        return LOST_APP_LOG.replace("{record}", record)
+
+    def test_a_late_process_start_points_at_the_simulator_and_stays_red(self):
+        log = self.log("UI_FACT app process 30002 started 11:07:35.1 UTC, its code ran from 11:07:36.0 UTC\n")
+        verdict, reasons = ui_tests.decide(65, log)
+        self.assertEqual(verdict, "fail")
+        self.assertIn("XCTest lost the app at a launch: no crash report, the simulator started the app process 59 s "
+                      "after the launch request (simulator/XCTest side)", reasons)
+
+    def test_a_prompt_process_start_points_at_the_app(self):
+        log = self.log("UI_FACT app process 30002 started 11:06:38.0 UTC, its code ran from 11:07:36.0 UTC\n")
+        self.assertEqual(ui_tests.lost_app_at_launch(log),
+                         ["XCTest lost the app at a launch: the app process started after 2 s but did not come up (app side)"])
+
+    def test_a_crash_report_points_at_the_app(self):
+        log = self.log("UI_FACT app process 30002 started 11:07:35.1 UTC, its code ran from 11:07:36.0 UTC\n")
+        self.assertEqual(ui_tests.lost_app_at_launch(log, ["/x/Sortly-2026-11-17-110700.ips"]),
+                         ["XCTest lost the app at a launch, and a crash report was written (app side)"])
+
+    def test_without_a_record_the_cause_stays_open(self):
+        # The record of the earlier process (before the launch) and of the next test do not count.
+        self.assertEqual(ui_tests.lost_app_at_launch(self.log()),
+                         ["XCTest lost the app at a launch: no crash report, no launch record of a new app process (cause open)"])
+
+    def test_nothing_lost_says_nothing(self):
+        self.assertEqual(ui_tests.lost_app_at_launch("Test Case '-[A.B test01]' passed (1.0 seconds).\n"), [])
+
+
+class GrantPhotosTests(unittest.TestCase):
+    def run_grant(self, codes):
+        calls = []
+
+        def fake(command, timeout, quiet):
+            calls.append((command, timeout))
+            code = codes[len(calls) - 1]
+            return code, "" if code == 0 else "timed out after 90 s: xcrun simctl privacy"
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            granted = ui_tests.grant_photos("U", run=fake)
+        return granted, calls, out.getvalue()
+
+    def test_a_working_grant_is_one_call(self):
+        granted, calls, out = self.run_grant([0])
+        self.assertTrue(granted)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], ["xcrun", "simctl", "privacy", "U", "grant", "photos", ui_tests.BUNDLE_ID])
+        self.assertIn("UI_HOST photo access granted", out)
+
+    def test_a_hung_grant_is_tried_once_more_and_said(self):
+        granted, calls, out = self.run_grant([124, 0])
+        self.assertTrue(granted)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("UI_HOST photo access grant failed (exit 124", out)
+        self.assertIn("attempt 2 of 2", out)
+
+    def test_two_failures_are_said_and_not_hidden(self):
+        granted, calls, out = self.run_grant([124, 1])
+        self.assertFalse(granted)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("UI_HOST photo access NOT granted after 2 attempts", out)
+
+
 if __name__ == "__main__":
     unittest.main()

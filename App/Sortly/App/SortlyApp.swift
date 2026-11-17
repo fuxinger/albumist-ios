@@ -1,6 +1,9 @@
 import SwiftUI
 import UIKit
 
+/// The app's entry: launch set-up (background work, notifications, UI-run helpers), one
+/// `AppModel` and `Purchases` for the window, and what happens when the app comes on screen or
+/// goes to the background (the analysis goes on, the backup copy of the decisions is written).
 @main
 struct SortlyApp: App {
     @State private var model = AppModel.shared
@@ -8,10 +11,14 @@ struct SortlyApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // UI runs only: a full console pipe held the main thread (see the function).
+        UITestSupport.moveConsoleToFile()
         BackgroundWork.register()
         UITestSupport.prepareLaunch()
         // Before launch ends, so the tap on "Analyse fertig" that opened the app arrives.
         NotificationRouter.register()
+        // UI runs only: says in the log when the main thread or the whole app stood still.
+        MainThreadWatch.shared.start()
     }
 
     var body: some Scene {

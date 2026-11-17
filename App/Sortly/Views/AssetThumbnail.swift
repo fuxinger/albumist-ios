@@ -22,18 +22,12 @@ final class ThumbnailCache {
     func image(for id: AssetID, side: CGFloat) async -> UIImage? {
         let key = "\(id.rawValue)#\(Int(side))" as NSString
         if let cached = cache.object(forKey: key) { return cached }
-        let asset: PHAsset
-        if let known = assets.object(forKey: id.rawValue as NSString) {
-            asset = known
-        } else {
-            guard let fetched = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject else { return nil }
-            assets.setObject(fetched, forKey: id.rawValue as NSString)
-            asset = fetched
-        }
+        guard let asset = await photoAsset(for: id) else { return nil }
         let scale = UITraitCollection.current.displayScale
         let size = CGSize(width: side * scale, height: side * scale)
-        let image = await ThumbnailRequest.load(ThumbnailRequest.Asset(asset), size: size, manager: manager)
-        if let image {
+        let image = await ThumbnailRequest.load(asset, size: size, manager: manager)
+        // A cancelled request is not kept: what came back may not be the prepared thumbnail.
+        if let image, !Task.isCancelled {
             let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
             cache.setObject(image, forKey: key, cost: cost)
         }
@@ -43,15 +37,97 @@ final class ThumbnailCache {
     /// A large version for the full-screen viewer: not kept in the cache (a few of them would
     /// push out hundreds of thumbnails), and only what is on the device (no download).
     func largeImage(for id: AssetID, pixels: CGSize) async -> UIImage? {
-        let asset: PHAsset
-        if let known = assets.object(forKey: id.rawValue as NSString) {
-            asset = known
-        } else {
-            guard let fetched = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject else { return nil }
-            assets.setObject(fetched, forKey: id.rawValue as NSString)
-            asset = fetched
+        guard let asset = await photoAsset(for: id) else { return nil }
+        return await ThumbnailRequest.load(asset, size: pixels, manager: manager, contentMode: .aspectFit)
+    }
+
+    /// The PhotoKit asset of `id`, looked up once and then kept. The lookup never runs on the
+    /// main thread: it reads the Photos database, and while Photos writes to it (new photos,
+    /// the albums of a plan) each lookup waits. On the main actor every thumbnail on screen
+    /// waited in turn: UI run 43930277920 measured the main thread blocked for up to 65 s
+    /// right after a plan ran (the sorting show prefetches its photos while Photos writes),
+    /// and the UI tests' accessibility queries timed out.
+    ///
+    /// Lookups wait in a queue and run one batch at a time (one fetch for all waiting ids), so a
+    /// screen full of thumbnails costs one database read and never a pile of blocked threads.
+    /// Each id is looked up once even if several cells ask; an id whose cells all went away
+    /// before its batch ran is skipped; an id Photos does not know is not asked again for a
+    /// few seconds (a deleted photo stays deleted, and a cell that asks again soon gets the
+    /// same answer).
+    private func photoAsset(for id: AssetID) async -> ThumbnailRequest.Asset? {
+        let key = id.rawValue
+        // The empty id is the placeholder of cards that have no photo yet.
+        guard !key.isEmpty else { return nil }
+        if let known = assets.object(forKey: key as NSString) { return ThumbnailRequest.Asset(known) }
+        if let since = missing[key], ContinuousClock.now - since < Self.missingKept { return nil }
+        nextToken &+= 1
+        let token = nextToken
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                self.enqueue(key, token: token, continuation)
+            }
+        } onCancel: {
+            Task { @MainActor in self.stopWaiting(for: key, token: token) }
         }
-        return await ThumbnailRequest.load(ThumbnailRequest.Asset(asset), size: pixels, manager: manager, contentMode: .aspectFit)
+    }
+
+    private struct Waiter {
+        let token: UInt64
+        let continuation: CheckedContinuation<ThumbnailRequest.Asset?, Never>
+    }
+    /// Cells waiting for an asset, by id; every waiter is resumed exactly once, always here
+    /// on the main actor and after leaving this list.
+    private var waiting: [String: [Waiter]] = [:]
+    /// Ids not yet in a batch, in the order they were asked for.
+    private var queued: [String] = []
+    private var lookingUp = false
+    private var nextToken: UInt64 = 0
+    private var missing: [String: ContinuousClock.Instant] = [:]
+    private static let missingKept = Duration.seconds(5)
+    /// One fetch reads at most this many ids, so a long wait for Photos stays one wait.
+    private static let batchLimit = 400
+
+    private func enqueue(_ key: String, token: UInt64, _ continuation: CheckedContinuation<ThumbnailRequest.Asset?, Never>) {
+        if Task.isCancelled {
+            continuation.resume(returning: nil)
+            return
+        }
+        if waiting[key] == nil { queued.append(key) }
+        waiting[key, default: []].append(Waiter(token: token, continuation: continuation))
+        guard !lookingUp else { return }
+        lookingUp = true
+        Task { await lookUpWaiting() }
+    }
+
+    private func stopWaiting(for key: String, token: UInt64) {
+        guard var waiters = waiting[key], let index = waiters.firstIndex(where: { $0.token == token }) else { return }
+        let waiter = waiters.remove(at: index)
+        waiting[key] = waiters.isEmpty ? nil : waiters
+        waiter.continuation.resume(returning: nil)
+    }
+
+    private func lookUpWaiting() async {
+        while !queued.isEmpty {
+            var seen = Set<String>()
+            let wanted = queued.filter { waiting[$0] != nil && seen.insert($0).inserted }
+            let ids = Array(wanted.prefix(Self.batchLimit))
+            queued = Array(wanted.dropFirst(Self.batchLimit))
+            guard !ids.isEmpty else { continue }
+            let found = await ThumbnailRequest.lookUp(ids)
+            let now = ContinuousClock.now
+            if missing.count > 1000 { missing = missing.filter { now - $0.value < Self.missingKept } }
+            for id in ids {
+                let asset = found[id]
+                if let asset {
+                    assets.setObject(asset.value, forKey: id as NSString)
+                    missing[id] = nil
+                } else {
+                    missing[id] = now
+                }
+                for waiter in waiting.removeValue(forKey: id) ?? [] { waiter.continuation.resume(returning: asset) }
+            }
+        }
+        lookingUp = false
     }
 }
 
@@ -66,6 +142,26 @@ enum ThumbnailRequest {
     struct Asset: @unchecked Sendable {
         let value: PHAsset
         init(_ value: PHAsset) { self.value = value }
+    }
+
+    /// Asset lookups wait while Photos writes its database, so they run on their own serial
+    /// queue: neither the main thread nor the few threads of Swift's shared pool (the analysis
+    /// runs there) wait for them, and only one thread ever does.
+    private static let lookups = DispatchQueue(label: "app.albumist.thumbnail-lookup", qos: .userInitiated)
+
+    /// The assets Photos knows among `ids`, by local identifier, in one fetch.
+    nonisolated static func lookUp(_ ids: [String]) async -> [String: Asset] {
+        await withCheckedContinuation { continuation in
+            lookups.async {
+                let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+                var found: [String: Asset] = [:]
+                for index in 0..<result.count {
+                    let asset = result.object(at: index)
+                    found[asset.localIdentifier] = Asset(asset)
+                }
+                continuation.resume(returning: found)
+            }
+        }
     }
 
     private final class State: @unchecked Sendable {
@@ -110,6 +206,38 @@ enum ThumbnailRequest {
     }
 
     nonisolated static func load(_ asset: Asset, size: CGSize, manager: Manager, contentMode: PHImageContentMode = .aspectFill) async -> UIImage? {
+        let delivered = await request(asset, size: size, manager: manager, contentMode: contentMode)
+        // Cancelled: nothing, not the raw image (it can be the full original, see `prepared`).
+        guard let delivered, !Task.isCancelled else { return nil }
+        return prepared(delivered, for: size, fill: contentMode == .aspectFill)
+    }
+
+    /// The first thumbnail of a UI run that came much larger than asked was reported.
+    private static let oversizeReported = LockedBox(false)
+
+    /// The image as it will be drawn, made here and not on the main thread: an image much
+    /// larger than asked (Photos may hand out the original when it has no thumbnail, as on a
+    /// simulator whose previews fail) is scaled down, any other one decoded. Otherwise the
+    /// main thread decodes and scales each one while it draws the screen.
+    nonisolated private static func prepared(_ image: UIImage, for target: CGSize, fill: Bool) -> UIImage {
+        let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        guard pixels.width >= 1, pixels.height >= 1, target.width >= 1, target.height >= 1 else { return image }
+        let fx = target.width / pixels.width, fy = target.height / pixels.height
+        let factor = fill ? max(fx, fy) : min(fx, fy)
+        guard factor < 0.67 else { return image.preparingForDisplay() ?? image }
+        if UITestSupport.isRunning, !oversizeReported.value {
+            oversizeReported.value = true
+            MainThreadWatch.shared.report("UI_THUMB_OVERSIZE Photos delivered \(Int(pixels.width))x\(Int(pixels.height)) px for \(Int(target.width))x\(Int(target.height)) px; scaled down off the main thread")
+        }
+        let size = CGSize(width: max(1, (pixels.width * factor).rounded()), height: max(1, (pixels.height * factor).rounded()))
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
+    nonisolated private static func request(_ asset: Asset, size: CGSize, manager: Manager, contentMode: PHImageContentMode) async -> UIImage? {
         let state = State()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
@@ -148,17 +276,26 @@ struct AssetThumbnail: View {
     /// Which part stays visible when the photo is cropped; screenshots keep their top.
     var anchor: Alignment = .center
     @State private var image: UIImage?
+    /// The photo `image` shows: when the same view gets another `id` (a trip's cover), the old
+    /// photo is not shown while the new one loads.
+    @State private var loadedID: AssetID?
 
     var body: some View {
         Rectangle()
             .fill(Color(uiColor: .tertiarySystemFill))
             .overlay(alignment: anchor) {
-                if let image {
+                if let image, loadedID == id {
                     Image(uiImage: image).resizable().scaledToFill()
                 }
             }
             .clipped()
-            .task(id: id) { image = await ThumbnailCache.shared.image(for: id, side: side) }
+            .task(id: id) {
+                let loaded = await ThumbnailCache.shared.image(for: id, side: side)
+                // A cell that moved on to another photo keeps the new one's image.
+                guard !Task.isCancelled else { return }
+                image = loaded
+                loadedID = id
+            }
             .accessibilityHidden(true)
     }
 }

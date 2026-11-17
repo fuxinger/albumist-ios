@@ -52,7 +52,10 @@ targets:
         # späteren Version"); landscape and iPad were never tested (plugin review W5).
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-        NSPhotoLibraryUsageDescription: "Albumist liest deine Fotos nur auf diesem Gerät, um Alben vorzuschlagen. Nichts wird hochgeladen, Originale werden nie verändert."
+        # Read and write (PHAccessLevel.readWrite): the app reads to suggest and, after the user
+        # confirms a plan, creates albums and folders and adds or removes album memberships
+        # (App Review 5.1.1(ii): the purpose string names both). English: InfoPlist.xcstrings.
+        NSPhotoLibraryUsageDescription: "Albumist liest deine Fotos nur auf diesem Gerät, um Alben vorzuschlagen. Erst wenn du bestätigst, legt es Alben und Ordner in Fotos an und fügt Fotos hinzu oder nimmt sie aus Alben heraus. Es werden keine Fotos hochgeladen, Originale werden nie verändert."
         UIBackgroundModes:
           - processing
         BGTaskSchedulerPermittedIdentifiers:

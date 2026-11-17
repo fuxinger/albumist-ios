@@ -19,6 +19,10 @@ enum LedgerKeychain {
     }
 
     static func load() -> FreeAlbumLedger? {
+        MainThreadWatch.shared.section("keychain read") { loadNow() }
+    }
+
+    private static func loadNow() -> FreeAlbumLedger? {
         var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -29,6 +33,10 @@ enum LedgerKeychain {
 
     /// Readable after the first unlock, so a plan that finishes in the background can count.
     static func save(_ ledger: FreeAlbumLedger) {
+        MainThreadWatch.shared.section("keychain write") { saveNow(ledger) }
+    }
+
+    private static func saveNow(_ ledger: FreeAlbumLedger) {
         guard let data = try? JSONEncoder().encode(ledger) else { return }
         let attributes: [String: Any] = [kSecValueData as String: data,
                                          kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]

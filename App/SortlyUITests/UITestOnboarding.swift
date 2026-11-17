@@ -55,8 +55,9 @@ enum UITestOnboarding {
         func anything(_ text: String) -> Bool {
             app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
         }
-        return (anything("Fotos analysiert") || anything("Analyse aktuell") || anything("Analyse fertig"))
-            && !app.buttons["Pause"].exists
+        // The Pause button first: one query while the analysis runs (see SortlyFlowUITests).
+        return !app.buttons["Pause"].exists
+            && (anything("Fotos analysiert") || anything("Analyse aktuell") || anything("Analyse fertig"))
     }
 
     /// Onboarding, demo library and first analysis, when the app still shows its welcome
@@ -74,13 +75,17 @@ enum UITestOnboarding {
         }
         guard button("Los geht").waitForExistence(timeout: 10) else {
             let demo = button("Beispiel-Mediathek anlegen")
-            guard demo.waitForExistence(timeout: 5) else { return false }
+            guard demo.waitForExistence(timeout: 5) else {
+                finishInterruptedAnalysis(app, in: test)
+                return false
+            }
             print("UI_FACT \(test): past the onboarding without the demo library, creating it first")
             demo.tap()
             XCTAssertTrue(demoLibraryCreated(app), "\(test): demo library not created")
             let idle = waitStable(timeout: 1200) { analysisIdle(app) }
             print(idle ? "UI_STEP_OK \(test) demo library" : "UI_STEP_MISSING \(test) demo library")
             XCTAssertTrue(idle, "\(test): the analysis of the demo library did not finish")
+            expectCompleteAnalysis(app, in: test)
             return true
         }
         print("UI_FACT \(test): the app is at its welcome screen, onboarding first")
@@ -110,7 +115,118 @@ enum UITestOnboarding {
         let idle = waitStable(timeout: 1200) { analysisIdle(app) }
         print(idle ? "UI_STEP_OK \(test) onboarding and demo library" : "UI_STEP_MISSING \(test) onboarding and demo library")
         XCTAssertTrue(idle, "\(test): the analysis of the demo library did not finish")
+        expectCompleteAnalysis(app, in: test)
         return true
+    }
+
+    /// What the analysis card says when not every photo counts as analysed: "58 von 246 Fotos
+    /// analysiert", and possibly "12 Fotos konnten noch nicht gelesen werden" below it.
+    struct PartialAnalysis {
+        let label: String
+        let analyzed: Int
+        let photos: Int
+        let unreadable: Int
+        /// The image loads the app counted (the label's value in UI runs).
+        let loads: String
+        /// The count was on screen but its snapshot failed three times: never taken as complete.
+        var readFailed = false
+
+        /// Photos the analysis never came to; unreadable ones it tried and keeps for later.
+        var cutOff: Bool { readFailed || analyzed + unreadable < photos }
+
+        var unreadableText: String {
+            "\(unreadable) of \(photos) photos could not be read ('\(label)', \(loads))"
+        }
+    }
+
+    /// The partial count on the overview, or nil when every photo is analysed. German only.
+    static func partialAnalysis(_ app: XCUIApplication, wait: TimeInterval = 3) -> PartialAnalysis? {
+        let partial = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+ von [0-9.]+ Fotos analysiert")).firstMatch
+        // Read from one snapshot each: the count changes while the analysis runs, and reading
+        // `label` of an element that has just changed is a hard test failure ("No matches
+        // found", flow test 5 in UI run 44038288087, right after "checking again").
+        // A failed snapshot is tried again and never read as "every photo analysed" (it was:
+        // `try?` gave nil, which means complete).
+        guard partial.waitForExistence(timeout: wait) else { return nil }
+        var taken: (any XCUIElementSnapshot)?
+        for attempt in 1...3 {
+            if let snapshot = try? partial.snapshot() { taken = snapshot; break }
+            // The count went away between the tries: the analysis has finished.
+            if !partial.exists { return nil }
+            if attempt < 3 { usleep(500_000) }
+        }
+        guard let shot = taken else {
+            print("UI_FACT partial analysis: the count is on screen but could not be read three times")
+            return PartialAnalysis(label: "(not readable)", analyzed: 0, photos: 0, unreadable: 0, loads: "", readFailed: true)
+        }
+        let label = shot.label
+        func number(_ text: Substring) -> Int { Int(text.filter(\.isNumber)) ?? 0 }
+        let parts = label.split(separator: " ")
+        let analyzed = parts.first.map(number) ?? 0
+        let photos = parts.count > 2 ? number(parts[2]) : 0
+        let note = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "konnten noch nicht gelesen")).firstMatch
+        let noteLabel = note.exists ? (try? note.snapshot())?.label : nil
+        let unreadable = noteLabel.map { $0.split(separator: " ").first.map(number) ?? 0 } ?? 0
+        return PartialAnalysis(label: label, analyzed: analyzed, photos: photos, unreadable: unreadable, loads: (shot.value as? String) ?? "")
+    }
+
+    /// After a test watched the analysis finish in this app process, every photo must count as
+    /// analysed: a partial count is an analysis that stopped early and said "fertig" (never
+    /// allowed), not something to repair with "Neu prüfen".
+    static func expectCompleteAnalysis(_ app: XCUIApplication, in test: String) {
+        guard let partial = partialAnalysis(app) else { return }
+        if partial.readFailed {
+            print("UI_STEP_MISSING \(test) complete analysis: count not readable")
+            XCTFail("\(test): the analysis card shows a partial count that could not be read")
+        } else if partial.cutOff {
+            print("UI_STEP_MISSING \(test) complete analysis: '\(partial.label)'")
+            XCTFail("\(test): the analysis ended early at '\(partial.label)' (\(partial.unreadable) unreadable, \(partial.loads)) although this test watched it finish")
+        } else {
+            print("UI_STEP_MISSING \(test) readable demo photos: \(partial.unreadableText)")
+            XCTFail("\(test): \(partial.unreadableText)")
+        }
+    }
+
+    /// Only for a relaunch into a library seeded earlier (no welcome screen, no demo button):
+    /// an analysis cut off by a restarted test runner (the app was ended in the middle of it)
+    /// does not go on by itself in UI runs, which start no analysis at launch. The card says
+    /// "58 von 246 Fotos analysiert" with "Neu prüfen", and `analysisIdle` takes that as done
+    /// (run 43918684247: the runner was restarted in accessibility test 1, and tests 2 to 4
+    /// found "No suggestions yet"). "Neu prüfen" analyses the rest, as a user would. Photos that
+    /// could not be read are no cut-off: checking again would not change them, so they fail at
+    /// once with their count instead of after a 20-minute wait.
+    static func finishInterruptedAnalysis(_ app: XCUIApplication, in test: String) {
+        guard let partial = partialAnalysis(app) else { return }
+        if partial.readFailed {
+            print("UI_STEP_MISSING \(test) partial count readable")
+            XCTFail("\(test): the analysis card shows a partial count that could not be read")
+            return
+        }
+        guard partial.cutOff else {
+            print("UI_STEP_MISSING \(test) readable demo photos: \(partial.unreadableText)")
+            XCTFail("\(test): \(partial.unreadableText)")
+            return
+        }
+        print("UI_FACT \(test): the analysis was cut off at '\(partial.label)' (\(partial.unreadable) unreadable), checking again")
+        let again = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Neu prüfen")).firstMatch
+        guard again.waitForExistence(timeout: 5) else {
+            print("UI_STEP_MISSING \(test) check again after a cut-off analysis")
+            XCTFail("\(test): an analysis was cut off and the overview offers no \"Neu prüfen\"")
+            return
+        }
+        // Below other cards the button can sit under the tab bar, where a tap lands on the bar.
+        let tabs = app.tabBars.firstMatch
+        var swipes = 0
+        while swipes < 4, tabs.exists, again.frame.maxY > tabs.frame.minY {
+            app.swipeUp()
+            swipes += 1
+        }
+        again.tap()
+        // Idle with a count that no longer leaves photos out (unreadable ones are judged below).
+        let done = waitStable(timeout: 1200) { analysisIdle(app) && partialAnalysis(app, wait: 0)?.cutOff != true }
+        print(done ? "UI_STEP_OK \(test) cut-off analysis finished" : "UI_STEP_MISSING \(test) cut-off analysis finished")
+        XCTAssertTrue(done, "\(test): the cut-off analysis did not finish after \"Neu prüfen\"")
+        if done { expectCompleteAnalysis(app, in: test) }
     }
 
     private static func allowPhotosIfAsked(_ app: XCUIApplication) {
@@ -138,8 +254,10 @@ enum UITestOnboarding {
     static func demoLibraryCreated(_ app: XCUIApplication, timeout: TimeInterval = 600) -> Bool {
         let seeding = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Beispielfotos werden angelegt")).firstMatch
         let offer = app.buttons["Beispiel-Mediathek anlegen"]
+        let started = Date()
         let created = waitStable(timeout: timeout, interval: 5) { !seeding.exists && !offer.exists }
         if !created { print("UI_STEP_MISSING demo library created (timeout \(Int(timeout)) s)") }
+        print("UI_TIMING demo library \(Int(Date().timeIntervalSince(started))) s")
         return created
     }
 
@@ -148,10 +266,36 @@ enum UITestOnboarding {
         let deadline = Date().addingTimeInterval(timeout)
         var streak = 0
         while Date() < deadline {
+            let asked = Date()
             streak = condition() ? streak + 1 : 0
+            reportSlowCheck(since: asked)
             if streak >= 3 { return true }
             sleep(interval)
         }
         return false
+    }
+
+    /// One check (a few queries) normally answers in well under a second. A slow one is printed
+    /// with the time, so a run whose queries time out shows whether the answers slowed down
+    /// first or stopped at once (compare `UI_MAIN_STALL` / `UI_PROCESS_STALL` from the app).
+    static func reportSlowCheck(since asked: Date) {
+        let took = Date().timeIntervalSince(asked)
+        if took >= 5 { print("UI_FACT slow query: a check took \(Int(took)) s, from \(clockText(asked)) UTC") }
+    }
+
+    /// `UI_FACT clock 18:31:05.2 <event>`: the time of a test step in UTC, on the clock the app's
+    /// `UI_MAIN_STALL` lines use (`MainThreadWatch.clock`), so a stall can be put next to the
+    /// step, the tap or the accessibility audit that ran then.
+    static func clock(_ event: String) {
+        // UI_FACT: the job log keeps only some prefixes of the test output (ui_tests.py
+        // REPORT), and prints them after the test, so the time has to be in the line.
+        print("UI_FACT clock \(clockText(Date())) \(event)")
+    }
+
+    static func clockText(_ date: Date) -> String {
+        let day = date.timeIntervalSince1970.truncatingRemainder(dividingBy: 86_400)
+        let hours = Int(day / 3600), minutes = Int(day.truncatingRemainder(dividingBy: 3600) / 60)
+        let rest = day.truncatingRemainder(dividingBy: 60)
+        return String(format: "%02d:%02d:%04.1f", hours, minutes, rest)
     }
 }

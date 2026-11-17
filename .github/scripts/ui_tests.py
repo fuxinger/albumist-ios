@@ -50,7 +50,15 @@ the first test started (two checks 20 s apart); the UI_WATCHDOG line it leaves i
 one of the infrastructure failures above, and the stop counts as FLAKY_BOOT. It never stops a
 pass in which a test has started (the log is read again right before the stop, so a test that
 started while simctl was being asked counts too).
-Anything else is never repeated: a real failure stays red. A pass that ran no test at all
+Anything else is never repeated: a real failure stays red. That includes XCTest losing the
+app at a launch ("Application ... does not have a process ID", device test 04 of UI run
+44066730498): it is never repeated, but the verdict says which side it points at
+(`lost_app_at_launch`), from the crash reports and the app's own launch record (the device
+tests print "UI_FACT app process P started T UTC" from the file the app writes at launch):
+a crash report means the app crashed; a process that started 30 s or more after the test's
+"UI_FACT clock T launch" means the simulator began the launch late (simulator/XCTest side);
+a process that started at once means the app itself did not come up in time (app side);
+without a record of a new process the cause stays open. A pass that ran no test at all
 fails (a renamed test would otherwise make an empty, green selection), and a repeat whose
 selection would be empty is not started (only possible when every --only entry is a single
 test; a class or skip-only selection always starts the repeat, see `retry_arguments`). Both passes keep their own log and result bundle
@@ -206,6 +214,51 @@ def bundle_findings(tests: dict) -> list[str]:
     return findings
 
 
+LOST_APP = re.compile(r"does not have a process ID")
+LAUNCH_CLOCK = re.compile(r"UI_FACT clock (\d\d):(\d\d):(\d\d(?:\.\d)?) launch\b")
+APP_PROCESS = re.compile(r"UI_FACT app process (\d+) started (\d\d):(\d\d):(\d\d(?:\.\d)?) UTC")
+LATE_START = 30.0
+
+
+def lost_app_at_launch(log: str, crash_reports: list[str] | None = None) -> list[str]:
+    """Which side a lost app at a launch points at (see the module text); [] when none was lost.
+
+    Always a reason for "fail" (it is added to the real reasons, never repeated)."""
+    def seconds(match: re.Match, first: int) -> float:
+        return int(match.group(first)) * 3600 + int(match.group(first + 1)) * 60 + float(match.group(first + 2))
+
+    lines = [line for line in log.splitlines() if not DATA_LINE.search(line)]
+    reasons: list[str] = []
+    for index, line in enumerate(lines):
+        if not (LOST_APP.search(line) and strong_real(line)):
+            continue
+        launch = None
+        for earlier in reversed(lines[:index]):
+            if STARTED.search(earlier):
+                break
+            launch = launch or LAUNCH_CLOCK.search(earlier)
+        process = None
+        for later in lines[index + 1:]:
+            if STARTED.search(later):
+                break
+            process = process or APP_PROCESS.search(later)
+        if crash_reports:
+            reason = "XCTest lost the app at a launch, and a crash report was written (app side)"
+        elif launch and process:
+            late = (seconds(process, 2) - seconds(launch, 1)) % 86_400
+            if late >= LATE_START:
+                reason = (f"XCTest lost the app at a launch: no crash report, the simulator started the app "
+                          f"process {late:.0f} s after the launch request (simulator/XCTest side)")
+            else:
+                reason = (f"XCTest lost the app at a launch: the app process started after {late:.0f} s "
+                          f"but did not come up (app side)")
+        else:
+            reason = "XCTest lost the app at a launch: no crash report, no launch record of a new app process (cause open)"
+        if reason not in reasons:
+            reasons.append(reason)
+    return reasons
+
+
 def decide(status: int, log: str, crash_reports: list[str] | None = None, probe: str = "",
            bundle: list[str] | None = None) -> tuple[str, list[str]]:
     """("pass" | "retry" | "fail", reasons) for one finished pass.
@@ -222,6 +275,7 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
             return "fail", ["no test ran (a renamed test, or a selection that matches nothing)"]
         return "pass", []
     real, infra = scan(log)
+    real += [reason for reason in lost_app_at_launch(log, crash_reports) if reason not in real]
     if crash_reports:
         real.append("crash report " + ", ".join(os.path.basename(p) for p in crash_reports))
     real += list(bundle or [])
@@ -569,6 +623,32 @@ def host_grant_requests(text: str) -> int:
     return sum(1 for line in text.split("\n") if HOST_GRANT.search(line))
 
 
+GRANT_TRIES = 2
+GRANT_TIMEOUT = 90
+
+
+def grant_photos(udid: str, run=sh, tries: int = GRANT_TRIES, timeout: float = GRANT_TIMEOUT) -> bool:
+    """`simctl privacy grant photos`, tried again once with a fresh call when it fails.
+
+    UI run 44108052342 (device test 09): the call hung until its 120 s timeout, and the app's
+    launches in that time waited for it (one began 55 s late, 4 s after the call was killed),
+    so the access stayed taken away and test 09 and, through it, test 10 failed. A normal grant
+    takes about a second. Every try is in the log ("UI_HOST ... attempt N of M"); the tests'
+    own checks decide as before (a grant that never came stays a red test)."""
+    for attempt in range(1, tries + 1):
+        started = time.monotonic()
+        code, output = run(["xcrun", "simctl", "privacy", udid, "grant", "photos", BUNDLE_ID], timeout=timeout, quiet=True)
+        took = time.monotonic() - started
+        if code == 0:
+            print(f"UI_HOST photo access granted ({took:.0f} s, attempt {attempt} of {tries})", flush=True)
+            return True
+        detail = " ".join(output.split())[:200]
+        print(f"UI_HOST photo access grant failed (exit {code}, {took:.0f} s, attempt {attempt} of {tries})"
+              + (f": {detail}" if detail else ""), flush=True)
+    print(f"UI_HOST photo access NOT granted after {tries} attempts; the test that asked will fail on it", flush=True)
+    return False
+
+
 class HostGrants(threading.Thread):
     """Gives the photo access back from the Mac each time a test asks (UI_HOST_GRANT_PHOTOS,
     DeviceConditionUITests.grantFromHost): the CI simulator shows no iOS question after an
@@ -583,8 +663,7 @@ class HostGrants(threading.Thread):
         self.tail = ""
 
     def grant_photos(self) -> None:
-        code, _ = sh(["xcrun", "simctl", "privacy", self.udid, "grant", "photos", BUNDLE_ID], timeout=120, quiet=True)
-        print("UI_HOST photo access granted" if code == 0 else f"UI_HOST photo access grant failed (exit {code})", flush=True)
+        grant_photos(self.udid)
 
     def check(self) -> None:
         """Reads what was added to the log since the last call; one grant per complete request line."""

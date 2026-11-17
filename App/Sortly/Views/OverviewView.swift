@@ -12,12 +12,20 @@ struct OverviewView: View {
     /// The ring grows with the text size, so "100 %" still fits inside at the largest sizes.
     @ScaledMetric(relativeTo: .title3) private var ringSide: CGFloat = 84
     @State private var showSettings = false
-    /// Lives here, not in the starter card: the card disappears once its albums are accepted.
-    @State private var showStarterPlan = false
+    /// The overview tab's stack (`MainTabs`). The suggestions, the plan, the starter plan and
+    /// the atlas are pushed onto it, not from a NavigationLink inside the condition that shows
+    /// its button: a run that starts while one is open (a check for new photos after the
+    /// library changed) hides the button, and a link that leaves the screen takes its pushed
+    /// screen with it (contrast UI run 44038288087: suggestions and atlas closed by
+    /// themselves). A path, not `navigationDestination(isPresented:)`: with four of those on
+    /// this stack, the atlas in landscape was presented again and again for 352 s (UI run
+    /// 44055738268). See `AppScreen`.
+    @Environment(Navigator.self) private var navigator: Navigator?
     /// The starter set is selected only while its preview is open.
     @State private var starterSelection: AppModel.PreviewSelection?
 
     var body: some View {
+        let _ = MainThreadWatch.shared.count("overview body")
         ScrollView {
             VStack(spacing: Theme.Spacing.m) {
                 if let interrupted = model.interruptedPlan {
@@ -43,22 +51,22 @@ struct OverviewView: View {
                 if model.history.isEmpty && model.acceptedProposals.isEmpty {
                     StarterSetCard { set in
                         starterSelection = model.selectForPreview(set.map { ($0, model.recommendedDecision(for: $0)) })
-                        showStarterPlan = true
+                        Navigator.push(.starterPlan, on: navigator)
                     }
                 }
                 // While the analysis runs, "Schon fertig … Ansehen" on its card leads there; when it
                 // has just finished, its card has "Vorschläge prüfen" (point 3, 4: not twice).
                 if !model.openProposals.isEmpty, !model.analysis.isRunning, model.analysisFinished == nil {
-                    NavigationLink {
-                        ProposalListView(area: nil)
+                    Button {
+                        Navigator.push(.proposals, on: navigator)
                     } label: {
                         Text("\(model.openProposals.count) Vorschläge prüfen")
                     }
                     .buttonStyle(PrimaryButtonStyle())
                 }
                 if !model.proposalsToApply.isEmpty {
-                    NavigationLink {
-                        PlanReviewView()
+                    Button {
+                        Navigator.push(.plan, on: navigator)
                     } label: {
                         Text("\(model.proposalsToApply.count) ausgewählte Alben anlegen")
                     }
@@ -67,7 +75,7 @@ struct OverviewView: View {
                 #if targetEnvironment(simulator)
                 if !DemoLibrary.shared.isDone { DemoLibraryCard() }
                 #endif
-                AtlasTeaser()
+                AtlasTeaser(onOpen: { Navigator.push(.atlas, on: navigator) })
                 areasSection
             }
             .padding(.horizontal, Theme.Spacing.l)
@@ -84,10 +92,9 @@ struct OverviewView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            NavigationStack { SettingsView() }
+            NavigationRoot { SettingsView() }
         }
-        .navigationDestination(isPresented: $showStarterPlan) { PlanReviewView() }
-        .onChange(of: showStarterPlan) { _, showing in
+        .onChange(of: navigator?.path.contains(.starterPlan) ?? false) { _, showing in
             // Back without creating: the starter set is not selected any more.
             if !showing, let selection = starterSelection {
                 model.endPreview(selection)
@@ -297,9 +304,7 @@ struct OverviewView: View {
             VStack(spacing: 0) {
                 let areas = OrganizationArea.available.filter { model.settings.enabledAreas.contains($0) }
                 ForEach(Array(areas.enumerated()), id: \.element) { index, area in
-                    NavigationLink {
-                        ProposalListView(area: area)
-                    } label: {
+                    PushLink(.areaProposals(area), chevron: false) {
                         areaRow(area, proposals: byArea[area] ?? [])
                     }
                     .buttonStyle(.plain)
@@ -473,8 +478,7 @@ struct InterruptedPlanCard: View {
                 .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if model.execution.isRunning {
-                ProgressView(value: Double(model.execution.completedSteps), total: Double(max(1, model.execution.totalSteps)))
-                    .tint(Theme.accent)
+                ExecutionProgressBar()
             } else {
                 // The ways out (I16). An interrupted undo cannot itself be taken back (Photos
                 // cannot bring deleted albums back): it can only go on or stay as it is.

@@ -140,7 +140,7 @@ enum SpotlightIndex {
             let suggestions = IntentData.suggestions(model)
             let countries = IntentData.countries(model)
             await replace(suggestions: suggestions, countries: countries)
-            SortlyShortcuts.updateAppShortcutParameters()
+            MainThreadWatch.shared.section("shortcut parameters") { SortlyShortcuts.updateAppShortcutParameters() }
         }
     }
 
@@ -149,7 +149,7 @@ enum SpotlightIndex {
         pending?.cancel()
         pending = Task {
             await replace(suggestions: [], countries: [])
-            SortlyShortcuts.updateAppShortcutParameters()
+            MainThreadWatch.shared.section("shortcut parameters") { SortlyShortcuts.updateAppShortcutParameters() }
         }
     }
 

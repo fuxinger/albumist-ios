@@ -25,9 +25,15 @@ final class DeviceConditionUITests: XCTestCase {
         app = XCUIApplication()
         let stalls = UITestStalls.arguments(besides: extra)
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
+        launchExtra = extra
         UITestOnboarding.clock("launch")
         app.launch()
     }
+
+    /// The test's own arguments of the last launch: the onboarding helpers open the app again
+    /// with them. They opened it as a fast start, and test 10 (empty library, own database) then
+    /// ran on the demo library after the photo access had to be given back (UI run 44108052342).
+    private var launchExtra: [String] = []
 
     private var stallsReportedAtEnd = false
 
@@ -259,6 +265,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// it), if one of them shows; afterwards the app has full access. A denied access cannot be
     /// given back inside the app: the workflow gives it back from the Mac (`grantFromHost`).
     private func onboardIfNeeded(attempt: Int = 1) {
+        let extra = launchExtra
         let welcome = button("Los geht")
         _ = waitStable("first screen", timeout: 20, stableChecks: 1) {
             welcome.exists || app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists
@@ -273,11 +280,12 @@ final class DeviceConditionUITests: XCTestCase {
         // question, access denied), and every later test of the group ran without photos.
         if attempt < 3, !app.tabBars.firstMatch.exists, toSettings.waitForExistence(timeout: 3) {
             print("UI_FACT photo access denied: given back from the Mac")
-            grantFromHost()
+            grantFromHost(relaunchWith: extra)
             onboardIfNeeded(attempt: attempt + 1)
         } else if asked {
-            // Opened once more, so the fast start runs as with access (demo library, if missing).
-            start()
+            // Opened once more, so the launch runs as with access (the fast start's demo
+            // library, if missing), with the test's own arguments.
+            launch(extra)
         }
     }
 
@@ -286,12 +294,13 @@ final class DeviceConditionUITests: XCTestCase {
     /// Settings app's first page, not on Albumist's. The test asks with a log line; the
     /// workflow, which follows the log, grants the access with `simctl privacy` and the app is
     /// opened again. (Run in Xcode without the workflow, nobody answers and this returns false.)
+    /// `relaunchWith`: the test's own launch arguments (nil: a fast start).
     @discardableResult
-    private func grantFromHost() -> Bool {
+    private func grantFromHost(relaunchWith extra: [String]? = nil) -> Bool {
         print("UI_HOST_GRANT_PHOTOS")
         for attempt in 1...12 {
             sleep(5)
-            start()
+            if let extra { launch(extra) } else { start() }
             let shown = waitStable("first screen after the grant", timeout: 30, stableChecks: 1) {
                 app.tabBars.firstMatch.exists || askAgain.exists || toSettings.exists || button("Los geht").exists
             }
@@ -326,14 +335,24 @@ final class DeviceConditionUITests: XCTestCase {
         tap(app.buttons["Weiter"], "areas")
         sleep(1)
         // "Weiter" before the iOS question (plugin review K5; it said "Zugriff erlauben" before).
+        var answered = false
         if askAgain.waitForExistence(timeout: 5) {
             askAgain.tap()
-            answerPhotoQuestion(choice)
+            answered = answerPhotoQuestion(choice)
         }
         guard choice != .deny else { return false }
         // With access granted the app moves on by itself; "Weiter" when it had been granted before.
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline && !button("Analyse starten").exists {
+            // iOS answered "denied" without asking (CI after an access reset, also one left
+            // by an earlier test): the caller gives the access back from the Mac and walks
+            // the onboarding again (`onboardIfNeeded`), instead of failing on a missing
+            // "Analyse starten" (test 10 in UI run 44108052342). After a question this test
+            // answered, the screen is the app's doing and stays a failure below.
+            if !answered, toSettings.exists {
+                print("UI_FACT onboarding: photo access denied without a question")
+                return false
+            }
             let next = app.buttons["Weiter"]
             if next.exists && next.isHittable { next.tap() }
             sleep(1)
@@ -1045,8 +1064,10 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(asks, "After access was taken away the app does not ask for it again")
         XCTAssertEqual(app.state, .runningForeground, "The app ended after access was taken away")
         if asks { grantOnNoAccessScreen(.full) }
-        // Without the iOS question in CI the answer is "denied": given back from the Mac.
-        if !app.tabBars.firstMatch.waitForExistence(timeout: 10) { grantFromHost() }
+        // Without the iOS question in CI the answer is "denied": given back from the Mac. When
+        // that failed (recorded by `grantFromHost`), nothing after it can pass: the test ends
+        // here instead of waiting 17 more minutes for an analysis without access (44108052342).
+        if !app.tabBars.firstMatch.waitForExistence(timeout: 10), !grantFromHost() { return }
         let back = app.tabBars.firstMatch.waitForExistence(timeout: 30)
         print(back ? "UI_STEP_OK overview after access came back" : "UI_STEP_MISSING overview after access came back")
         if !back { shot("x-no-overview-after-access") }

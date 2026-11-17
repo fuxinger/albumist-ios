@@ -31,7 +31,7 @@ struct PurchaseStoreKitTests {
     /// product with another price, as App Store Connect sets it for the launch week.
     ///
     /// Every test starts the same way, whatever ran before it: the StoreKit test environment
-    /// is up (brought up once per run, see `StoreKitEnvironment`), no StoreKit step of an
+    /// is ready (brought up once per run, see `StoreKitEnvironment`), no StoreKit step of an
     /// earlier test is still running (one its test gave up on would otherwise act on this
     /// test's session, CI run 43949938467), and the new session holds nothing and StoreKit
     /// lists no unlock.
@@ -185,6 +185,9 @@ struct PurchaseStoreKitTests {
         var products: [String] = []
         var whilePurchasing: [Bool] = []
         var answer: () throws -> Product.PurchaseResult = { .userCancelled }
+        /// Set when the session made the purchase but StoreKit never listed it: the test
+        /// environment did not deliver it, the app's code had no part in that.
+        var environment: String?
     }
 
     /// Buys the way StoreKitTest documents it for unit tests: through the test session, in
@@ -211,11 +214,14 @@ struct PurchaseStoreKitTests {
             storeKitTrace("session buy \(id): done, session holds \(held)")
             // StoreKit answers with the purchase as the app's own entitlement (a verified
             // transaction), the same value `Product.purchase()` hands back.
+            let asked = Date()
             guard let result = await Self.entitlement(for: id) else {
-                storeKitTrace("session buy \(id): no entitlement for it")
+                let waited = Int(Date().timeIntervalSince(asked) * 1000)
+                seen.environment = "StoreKit test environment not ready: the session holds \(held), StoreKit's list did not show it within \(waited) ms"
+                storeKitTrace("session buy \(id): not in StoreKit's list after \(waited) ms (test environment not ready)")
                 throw StoreKitError.unknown
             }
-            storeKitTrace("session buy \(id): entitlement found, verified \(Self.isVerified(result))")
+            storeKitTrace("session buy \(id): entitlement found after \(Int(Date().timeIntervalSince(asked) * 1000)) ms, verified \(Self.isVerified(result))")
             return .success(result)
         }
         return seen
@@ -265,6 +271,19 @@ struct PurchaseStoreKitTests {
         storeKitTrace("\(step): unlocked \(purchases.isUnlocked), message \(purchases.lastError ?? "none")")
     }
 
+    /// `purchaseStep` with the purchase made in the test session (`buyThroughSession`), for the
+    /// tests that expect the purchase call itself to unlock. When StoreKit never listed the
+    /// session's purchase, the first issue of the test names that cause (CI run 44130064334
+    /// reported only "purchases.isUnlocked"). The app's code has no part in that wait, so this
+    /// only names the cause: every expectation after it still runs, and the app's error
+    /// message fails `lastError == nil` in these tests either way.
+    func purchaseInSession(_ purchases: Purchases, _ store: PurchaseTestStore, _ step: String) async throws -> Seen {
+        let seen = buyThroughSession(purchases, store)
+        try await purchaseStep(purchases, step)
+        if let failure = seen.environment { Issue.record(StoreKitEnvironmentNotReady(description: failure)) }
+        return seen
+    }
+
     // MARK: Product and price
 
     @Test func productAndPriceComeFromStoreKit() async throws {
@@ -308,8 +327,7 @@ struct PurchaseStoreKitTests {
         #expect(!purchases.allows(albums: Purchases.freeAlbumLimit + 1))
         // The product was never loaded (a start without network): buying loads it first.
         #expect(purchases.product == nil)
-        let seen = buyThroughSession(purchases, store)
-        try await purchaseStep(purchases, "purchase")
+        let seen = try await purchaseInSession(purchases, store, "purchase")
         #expect(seen.products == [Purchases.unlockProductID])
         #expect(seen.whilePurchasing == [true])
         let afterPurchase = await describe(store)
@@ -665,8 +683,7 @@ struct PurchaseStoreKitTests {
         let recorded = try await transactions(store)
         #expect(recorded.isEmpty)
         // The next try works.
-        _ = buyThroughSession(purchases, store)
-        try await purchaseStep(purchases, "purchase after the failure")
+        _ = try await purchaseInSession(purchases, store, "purchase after the failure")
         #expect(purchases.isUnlocked, "message: \(purchases.lastError ?? "none")")
         #expect(purchases.lastError == nil)
     }
@@ -790,29 +807,50 @@ struct StoreKitStepTimedOut: Error, CustomStringConvertible {
     let description: String
 }
 
-/// The StoreKit test environment, brought up once per test run before the first test uses it.
+/// The StoreKit test environment, brought up once per test run before the first test uses it,
+/// and handed to the tests only once it answers the way they need it.
 ///
-/// CI run 43949938467 (job 133593104236): the simulator is booted by `xcodebuild test` right
-/// before the tests, and the suite's very first call, the session set-up of the first test,
-/// did not answer within 30 s. The tests after it still met a slow environment (a session
-/// buy that did not answer within 20 s), and from the fourth test on every step answered at
-/// once again: the environment was slow to come up, not broken. The whole app test run took
-/// 187 s there and 23 s in the re-run. Measured here in CI run 43969714929: the first session
-/// set-up on the fresh simulator took 18.5 s and finished, loading the product 0.6 s, a buy
-/// 0.15 s. So the first set-up gets a budget for a cold simulator, once, and the time it
-/// took is printed; after it, every step of a test keeps its own limit (30 s, a buy 20 s).
+/// `xcodebuild test` boots the simulator right before the tests, and a just-booted simulator
+/// can leave StoreKit slow for a minute or more. CI run 43949938467: the first session set-up
+/// did not answer within 30 s. CI runs 43969714929 and 44130064334: the first set-up took
+/// 18.5 s and 17.9 s and finished, the product loaded, and still the first test's purchase
+/// was not in StoreKit's list after 10 s (it was later in the same test). So coming up is not
+/// enough. All nine CI runs since 15.11. whose app tests took over 100 s had StoreKit lag
+/// somewhere (a purchase missing from the list, updates that reached no listener, steps that
+/// hung); none of the runs whose bring-up took 1.5 to 5 s had any.
 ///
-/// No purchase here: in that run a warm-up buy (cleared again) left StoreKit's own state
-/// behind (the next purchase, again transaction #0, was missing from the list for 10 s and
-/// no update reached any listener for a while), so every purchase stays inside its test.
+/// The environment is ready when it makes the round trip of a purchase test promptly,
+/// `promptInARow` times in a row: a new session that holds nothing, StoreKit's list read
+/// until it shows no unlock (every test reads it before it buys), a purchase in the session,
+/// the list shows it, the session cleared, the list no longer shows it. Each round trip is
+/// printed with its times. After that every test keeps its own limits (30 s a step, a buy
+/// 20 s, StoreKit's list 10 s). If the environment does not get there within `budget`, every
+/// test that needs StoreKit fails with `StoreKitEnvironmentNotReady`.
+///
+/// The round trips involve StoreKit and the test session only, never the app's purchase code,
+/// and every test still starts with an empty session and no unlock in StoreKit's list
+/// (`session()`), so they cannot make an app failure pass; they buy and clear exactly as every
+/// test after the first one does. 2d812ff removed the warm-up purchase of 9536ba7, blaming it
+/// for the missing purchase in 43969714929; 44130064334 failed the same way without it, and
+/// that warm-up purchase had itself taken 2.5 s to show in the list: the environment was
+/// still slow when the tests started.
 @MainActor
 enum StoreKitEnvironment {
-    /// For the first set-up on a just-booted simulator only (18.5 s measured on an idle one;
-    /// over 30 s while the other suites ran alongside).
-    static let budget: Double = 180
+    /// For the whole bring-up, a just-booted simulator included (StoreKit lagged for over a
+    /// minute in the slow runs; a fast start is ready within seconds).
+    static let budget: Double = 300
+    /// A round trip is prompt when StoreKit's list shows the purchase, and after the clear no
+    /// longer shows it, within this many seconds each: a fifth of what a test allows (10 s).
+    /// In 43969714929 the warm-up purchase took 2.5 s, the next purchase over 10 s. A warm
+    /// environment is not instant either (a purchase after an earlier read was missing on the
+    /// first read in the fast run 43772050228), but a fast run's purchases all fit in a few
+    /// seconds together.
+    static let prompt: Double = 2
+    /// Prompt round trips in a row before the tests start.
+    static let promptInARow = 3
     private static var bringingUp: Task<String?, Never>?
 
-    /// Throws, for every test, why the environment did not come up (the first failure, once).
+    /// Throws, for every test, why the environment is not ready (the first failure, once).
     static func ready() async throws {
         let task: Task<String?, Never>
         if let running = bringingUp {
@@ -821,7 +859,7 @@ enum StoreKitEnvironment {
             task = Task { await StoreKitEnvironment.bringUp() }
             bringingUp = task
         }
-        if let failure = await task.value { throw StoreKitStepTimedOut(description: failure) }
+        if let failure = await task.value { throw StoreKitEnvironmentNotReady(description: failure) }
     }
 
     /// No transactions, no dialogs, German storefront.
@@ -845,17 +883,26 @@ enum StoreKitEnvironment {
     /// Reads StoreKit's list until it does (or does not) list the product; false if it still
     /// shows the other state after `seconds`.
     nonisolated static func waitUntil(listed: Bool, _ id: String, seconds: Double) async -> Bool {
-        let deadline = Date().addingTimeInterval(seconds)
-        while await StoreKitEnvironment.lists(id) != listed {
-            if Date() > deadline { return false }
-            try? await Task.sleep(for: .milliseconds(200))
-        }
-        return true
+        await StoreKitEnvironment.readsUntil(listed: listed, id, seconds: seconds) != nil
     }
 
-    /// nil when the environment is up, otherwise why not.
+    /// Like `waitUntil`: how many reads it took, nil if the list still showed the other state
+    /// after `seconds`.
+    nonisolated static func readsUntil(listed: Bool, _ id: String, seconds: Double) async -> Int? {
+        let deadline = Date().addingTimeInterval(seconds)
+        var reads = 1
+        while await StoreKitEnvironment.lists(id) != listed {
+            if Date() > deadline { return nil }
+            try? await Task.sleep(for: .milliseconds(200))
+            reads += 1
+        }
+        return reads
+    }
+
+    /// nil when the environment is ready, otherwise why not.
     private static func bringUp() async -> String? {
         let started = Date()
+        let deadline = started.addingTimeInterval(StoreKitEnvironment.budget)
         var done: [String] = []
         func elapsed() -> Int { Int(Date().timeIntervalSince(started) * 1000) }
         func left() -> Double { max(1, StoreKitEnvironment.budget - Date().timeIntervalSince(started)) }
@@ -885,14 +932,97 @@ enum StoreKitEnvironment {
                 try await Task.sleep(for: .milliseconds(500))
             }
             done.append("product \(elapsed()) ms")
-            storeKitTrace("StoreKit test environment up after \(elapsed()) ms (\(done.joined(separator: ", ")))")
+            storeKitTrace("StoreKit test environment up after \(elapsed()) ms (\(done.joined(separator: ", "))); round trips until \(StoreKitEnvironment.promptInARow) in a row are prompt (within \(Int(StoreKitEnvironment.prompt * 1000)) ms)")
+            var trips = 0
+            var inARow = 0
+            while inARow < StoreKitEnvironment.promptInARow {
+                if trips > 0 {
+                    guard Date() < deadline else {
+                        throw StoreKitEnvironmentNotReady(description: "not \(StoreKitEnvironment.promptInARow) prompt round trips in a row within \(Int(StoreKitEnvironment.budget)) s (\(trips) round trips, each in the trace)")
+                    }
+                    try await Task.sleep(for: .seconds(1))
+                }
+                trips += 1
+                let trip = try await StoreKitEnvironment.roundTrip(url, unlock, until: deadline)
+                let isPrompt = trip.listed <= StoreKitEnvironment.prompt && trip.gone <= StoreKitEnvironment.prompt
+                inARow = isPrompt ? inARow + 1 : 0
+                storeKitTrace("StoreKit round trip \(trips) at \(elapsed()) ms: \(trip), \(isPrompt ? "prompt" : "not prompt")")
+            }
+            done.append("\(trips) round trips \(elapsed()) ms")
+            storeKitTrace("StoreKit test environment ready after \(elapsed()) ms (\(done.joined(separator: ", ")))")
             return nil
         } catch {
-            let failure = "StoreKit test environment not up after \(elapsed()) ms (done: \(done.isEmpty ? "nothing" : done.joined(separator: ", "))): \(error); host \(Bundle.main.bundleIdentifier ?? "-")"
+            let failure = "StoreKit test environment not ready after \(elapsed()) ms (done: \(done.isEmpty ? "nothing" : done.joined(separator: ", "))): \(error); host \(Bundle.main.bundleIdentifier ?? "-")"
             storeKitTrace(failure)
             return failure
         }
     }
+
+    /// One round trip the way a purchase test makes it (see above). Every step may take what is
+    /// left of the budget; how long StoreKit's list took decides whether it was prompt.
+    private static func roundTrip(_ url: URL, _ unlock: String, until deadline: Date) async throws -> RoundTrip {
+        func left() -> Double { max(1, deadline.timeIntervalSinceNow) }
+        let start = Date()
+        let store = try await onSessionQueue("round trip: set up a session", seconds: left()) {
+            let session = try SKTestSession(contentsOf: url)
+            StoreKitEnvironment.configure(session)
+            return PurchaseTestStore(session)
+        }
+        let setUp = Date().timeIntervalSince(start)
+        let held = try await onSessionQueue("round trip: read the new session", seconds: left()) { store.session.allTransactions().count }
+        guard held == 0 else { throw StoreKitEnvironmentNotReady(description: "a new session already holds \(held) transactions") }
+        let emptyWait = left()
+        guard try await within("round trip: StoreKit lists no unlock", seconds: emptyWait + 1, { await StoreKitEnvironment.waitUntil(listed: false, unlock, seconds: emptyWait) }) else {
+            throw StoreKitEnvironmentNotReady(description: "StoreKit still listed the unlock after a new session was cleared")
+        }
+        try await onSessionQueue("round trip: buy in the session", seconds: left()) { try store.session.buyProduct(productIdentifier: unlock) }
+        let bought = Date()
+        let listedWait = left()
+        guard let listedReads = try await within("round trip: StoreKit lists the purchase", seconds: listedWait + 1, { await StoreKitEnvironment.readsUntil(listed: true, unlock, seconds: listedWait) }) else {
+            throw StoreKitEnvironmentNotReady(description: "StoreKit did not list the session's purchase within the budget")
+        }
+        let listed = Date().timeIntervalSince(bought)
+        let after = try await onSessionQueue("round trip: clear the session", seconds: left()) {
+            store.session.clearTransactions()
+            return store.session.allTransactions().count
+        }
+        guard after == 0 else { throw StoreKitEnvironmentNotReady(description: "the session still holds \(after) transactions after clearing") }
+        let cleared = Date()
+        let goneWait = left()
+        guard let goneReads = try await within("round trip: StoreKit lists no unlock after the clear", seconds: goneWait + 1, { await StoreKitEnvironment.readsUntil(listed: false, unlock, seconds: goneWait) }) else {
+            throw StoreKitEnvironmentNotReady(description: "StoreKit still listed the purchase after the session was cleared")
+        }
+        return RoundTrip(setUp: setUp, listed: listed, listedReads: listedReads, gone: Date().timeIntervalSince(cleared), goneReads: goneReads)
+    }
+}
+
+/// Why the StoreKit test environment is not fit for the purchase tests: thrown by every test
+/// that needs StoreKit when the bring-up failed, and recorded by a test whose session purchase
+/// never reached StoreKit's list (`purchaseInSession`). Such a run fails with this reason, not
+/// only with the app's state afterwards.
+struct StoreKitEnvironmentNotReady: Error, CustomStringConvertible {
+    let description: String
+}
+
+/// What one round trip of the bring-up measured (seconds).
+private struct RoundTrip: Sendable, CustomStringConvertible {
+    let setUp: Double
+    let listed: Double
+    let listedReads: Int
+    let gone: Double
+    let goneReads: Int
+
+    var description: String {
+        "session \(Self.ms(setUp)) ms, purchase listed after \(Self.ms(listed)) ms (reads: \(listedReads)), gone after the clear \(Self.ms(gone)) ms (reads: \(goneReads))"
+    }
+
+    private static func ms(_ seconds: Double) -> Int { Int(seconds * 1000) }
+}
+
+/// One attempt to load the unlock product during the bring-up.
+private struct ProductLoad: Sendable {
+    let count: Int
+    let error: String?
 }
 
 /// Every StoreKit step that started and has not ended, also one whose test stopped waiting
@@ -974,12 +1104,6 @@ func startOnSessionQueue(_ step: String, _ call: @escaping @Sendable () -> Void)
 /// test with the step's name instead of stopping the whole test run. The step counts as
 /// running (`StoreKitSteps`) until it really ends. Blocking calls of the test session go
 /// through `onSessionQueue` instead.
-/// One attempt to load the unlock product during the bring-up.
-private struct ProductLoad: Sendable {
-    let count: Int
-    let error: String?
-}
-
 func within<T: Sendable>(_ step: String, seconds: Double = 30, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
     let token = StoreKitSteps.shared.begin(step)
     return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in

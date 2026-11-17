@@ -7093,6 +7093,106 @@
         }
       }
     },
+    "Beim Prüfen %lld neue Fotos analysiert und %lld weitere für die neuen Bereiche angesehen." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Prüfen %#@new@ analysiert und %#@more@ für die neuen Bereiche angesehen."
+          },
+          "substitutions" : {
+            "new" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg neues Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg neue Fotos"
+                    }
+                  }
+                }
+              }
+            },
+            "more" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg weiteres"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg weitere"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analyzed %#@new@ and looked at %#@more@ for the new areas in this check."
+          },
+          "substitutions" : {
+            "new" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photos"
+                    }
+                  }
+                }
+              }
+            },
+            "more" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg more"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg more"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Beim Prüfen keine neuen Fotos gefunden." : {
       "localizations" : {
         "en" : {
@@ -7136,6 +7236,46 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "%lld Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Für die neuen Bereiche fehlen noch %lld Fotos." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Für die neuen Bereiche fehlt noch %lld Foto."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Für die neuen Bereiche fehlen noch %lld Fotos."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo still to look at for the new areas."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos still to look at for the new areas."
                 }
               }
             }

@@ -251,11 +251,15 @@ public actor SortlyStore: PlanJournal {
         return out
     }
 
-    /// Photos whose image labels are of at least `labelsVersion` (or given up as unreadable):
-    /// for the status of "Themen" and "Dokumente" (`LibraryStatus`), which must not count a
-    /// photo as looked at while its labels are still missing.
-    public func labelledAssets(labelsVersion: Int) throws -> Set<AssetID> {
-        Set(try db.query("SELECT id FROM assets WHERE labels_version >= ?", [.integer(Int64(labelsVersion))])
+    /// Photos analysed already (at least `version`) whose image labels are older than
+    /// `labelsVersion`: the ones "Themen" and "Dokumente" still wait for, counted on the overview
+    /// (`DerivedLibraryStatus.labelsMissing`). Through `idx_assets_labels`: no rows once the labels
+    /// are caught up (second review of the labels fix: every labelled photo was read at every
+    /// refresh of the overview, 94 ms for 100,000 photos on the actor the analysis writes through).
+    /// A photo given up as unreadable for its labels is marked and not among them.
+    public func unlabelledAssets(version: Int, labelsVersion: Int) throws -> Set<AssetID> {
+        Set(try db.query("SELECT id FROM assets WHERE labels_version < ? AND analysis_version >= ?",
+                         [.integer(Int64(labelsVersion)), .integer(Int64(version))])
             .compactMap { $0["id"]?.string.map { AssetID($0) } })
     }
 

@@ -92,7 +92,14 @@ final class AppModel {
         var isComplete: Bool { outcome.isComplete(running: isRunning) }
         /// The label of a phase of its own ("Neue Fotos werden analysiert", "Analyse nach
         /// Update"): much more work than when the run it goes on from stopped (`ResumedRun`).
-        var newWork: ResumedRun.NewWork? { resumed?.newWork }
+        /// A check whose work is mostly image labels for photos analysed before ("Themen" or
+        /// "Dokumente" turned on since) is named for that too (second review of the labels fix,
+        /// finding 7: right after "Alle 5.683 Fotos analysiert" it said "Bildinhalte werden
+        /// erkannt · 0 von 5.683").
+        var newWork: ResumedRun.NewWork? {
+            if let newWork = resumed?.newWork { return newWork }
+            return kind == .check && workload?.isMostlyLabels == true ? .newAreas : nil
+        }
         /// The bar's value: never below where the interrupted run had got to, unless a phase
         /// of its own started (`ResumedRun`). A run that ended shows where it stopped (the
         /// paused card said "0 %" or the value the run started from, stress run 43833158673).
@@ -114,6 +121,9 @@ final class AppModel {
         var analyzed = 0
         /// Not readable yet (no local preview, still syncing): tried again in later runs.
         var unreadable = 0
+        /// Analysed before "Themen" or "Dokumente" was turned on, still without their image
+        /// labels: said apart, the analysed count stays (`DerivedLibraryStatus.labelsMissing`).
+        var labelsMissing = 0
     }
 
     /// Whether a plan runs and how it ended. The step counter is `ExecutionProgress`.
@@ -372,8 +382,10 @@ final class AppModel {
     /// The part of the library Albumist works on: everything, or the trial year chosen at
     /// the start (kept for every later run).
     var analysisScope: OrganizationScope = .all
-    /// Photos or the settings changed while a run was busy (`saveSettings`): one more run
-    /// follows when it ends, unless the user paused it.
+    /// Photos changed while a run was busy (`LibraryChangeWatcher`): one more pass follows when
+    /// it ends, unless the user paused it. Taken by the end of every run, in the app and the
+    /// overnight refinement (`AnalysisRunEnd`). A change of the settings needs no request: the
+    /// end of the run compares what the run read with the settings then.
     @ObservationIgnored var catchUpAfterRun = false
     /// The user's own trip splits and merges (I07), for the settings.
     private(set) var tripCorrections = TripCorrections()
@@ -829,19 +841,26 @@ final class AppModel {
         }
     }
 
-    /// Starts the run a settings change needs, or one more after the run in progress (as for
-    /// changes in Photos during a run). A Pause stays: "Fortsetzen" does the new work too
-    /// (`AnalysisPipeline.runAfterSettingsChange`).
+    /// Starts the run a settings change needs. A run in progress is not asked for anything: its
+    /// end compares what it read with the settings then and starts one more run right away if
+    /// it missed the change (`AnalysisRunEnd`). A Pause stays: "Fortsetzen" does the new work
+    /// too (`AnalysisPipeline.runAfterSettingsChange`). Started like a tap (the change is the
+    /// user's): background time for a long run, and the retries count from nothing again.
     private func runAfterSettingsChange(from previous: OrganizationSettings, to settings: OrganizationSettings) {
         let next = AnalysisPipeline.runAfterSettingsChange(
             from: previous, to: settings, running: analysis.isRunning,
-            pausedByUser: analysis.pausing || analysis.isPausedByUser,
-            mayStart: phase == .ready && access.canRead && !execution.isRunning && !analysisResetting)
+            pausedByUser: analysis.pausing || analysis.isPausedByUser, mayStart: runMayStartNow)
         switch next {
-        case .now: startAnalysis()
-        case .afterCurrentRun: catchUpAfterRun = true
-        case .whenResumed, .noRun: break
+        case .now: startAnalysis(userInitiated: true)
+        case .afterCurrentRun, .whenResumed, .noRun: break
         }
+    }
+
+    /// A run may start now by itself: past the introduction, the photos readable, no plan claimed
+    /// or being written (claimed before its first await, `isRunning` follows later: review of
+    /// the labels fix, finding 10), no rebuild of the analysis. Each of those ends with a run.
+    private var runMayStartNow: Bool {
+        phase == .ready && access.canRead && !executionClaimed && !execution.isRunning && !analysisResetting
     }
 
     // MARK: Analysis
@@ -881,7 +900,7 @@ final class AppModel {
         analysis.resumed = analysis.resumeFrom.map {
             ResumedRun(stage: $0.stage, completed: $0.completed, shown: $0.overall, left: $0.left, photos: $0.photos,
                        seconds: $0.secondsLeft, updated: $0.version.map { $0 != AnalysisPipeline.analysisVersion } ?? false,
-                       newWork: $0.newWork, caughtUp: $0.caughtUp)
+                       newWork: ResumedRun.NewWork.fromMarker($0.newWork, flag: $0.newAreas), caughtUp: $0.caughtUp)
         }
         analysis.workload = nil
         analysis.libraryPhotos = nil
@@ -932,7 +951,6 @@ final class AppModel {
                     // order the pipeline said them (see `ProgressMailbox.wait`).
                     mailbox.wait(reason)
                 })
-                analysis.lastReport = report
                 analysis.lastRun = Date()
                 finished = report
             } catch is CancellationError {
@@ -942,35 +960,55 @@ final class AppModel {
                 message = .failure(error.localizedDescription)
             }
             if analysisControl === control { analysisControl = nil }
-            // This run's own outcome (nil when it threw): the 100 % follows only this.
-            analysis.outcome.ended(with: finished)
+            // What follows this run (`AnalysisRunEnd`; second review of the labels fix): decided
+            // against the settings it really read. A change it missed is never followed by
+            // "Analyse fertig" but by one more run right away; a Pause tapped too late to stop it
+            // keeps that work for "Fortsetzen"; changes in Photos meanwhile get their pass. The
+            // request for that pass is taken here, whatever follows.
+            let end = AnalysisRunEnd(report: finished, settings: settings, pauseTapped: control.isPaused,
+                                     catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow)
+            catchUpAfterRun = false
+            if let report = end.report { analysis.lastReport = report }
+            // This run's own outcome (nil when it threw): the 100 % follows only a finished analysis.
+            analysis.outcome.ended(with: end.isFinished ? end.report : nil)
             BackgroundRunLog.runEnded(paused: finished?.pausedBecause?.rawValue,
                                       complete: finished?.isComplete == true,
                                       analyzerFailing: finished?.analyzerUnavailable == true,
                                       stage: analysis.stage?.number)
             // Ended early without the user's Pause (an error, the app's time ran out, the photo
-            // access was changed in Settings): the next time the app is opened it goes on by
-            // itself; with the access back, from where it was. Set before isRunning, so the Lock
-            // Screen reads how this run ended, not the run before (ContinuedAnalysis.ending).
-            let reason = finished?.pausedBecause
+            // access was changed in Settings), or with work left that goes on by itself: the next
+            // time the app is opened it goes on by itself; with the access back, from where it
+            // was. Set before isRunning, so the Lock Screen reads how this run ended, not the run
+            // before (ContinuedAnalysis.ending), and never "Analyse fertig" while work is left.
+            let reason = end.report?.pausedBecause
             // The last reports of this run, before it is shown as ended.
             tick(run: generation)
-            let celebrate = AnalysisCardState.celebratesFinish(isComplete: finished?.isComplete == true,
+            let celebrate = AnalysisCardState.celebratesFinish(isComplete: end.isFinished,
                                                                wasQuickCheck: !runShowedBar,
                                                                ranFor: ContinuousClock.now - runClockStart)
             analysis.stoppedAt = analysis.position
-            analysis.needsResume = finished == nil || (reason != nil && reason != .userPaused)
+            analysis.needsResume = end.needsResume
             analysis.isRunning = false
             analysis.pausing = false
             analysis.stage = nil
             analysis.waiting = nil
             analysis.appleWait = false
             endCard()
-            if finished?.isComplete == true {
+            if end.isFinished {
                 AnalysisMarker.finished()
                 analysis.resumeFrom = nil
                 analysis.resumed = nil
+            } else if end.report?.isComplete == true, analysis.kind == .check {
+                // A check that missed a change of the settings: the run after it is a check too,
+                // named for its work, not one that goes on from this check's position.
+                AnalysisMarker.unfinished = nil
+                analysis.resumeFrom = nil
+                analysis.resumed = nil
             }
+            // A change of the settings this run missed: one more run right away, which reads the
+            // library and the settings anew (before: "Analyse fertig", and the next run about
+            // 20 s later, in the background only once the app was opened again).
+            if end.next == .followUp { startAnalysis() }
             if reason == .accessRevoked {
                 // Shown as it is now (limited or none), so the overview offers the way back.
                 access = await library.access()
@@ -978,11 +1016,16 @@ final class AppModel {
             await refreshDerived()
             // Trip identities (names and corrections stay with their trip) are kept in the copy.
             saveSafetyBackup()
-            // "Analyse fertig" only when it really finished (not paused, stopped or failed), and
-            // not for a quick check (point 4): in the app the card, outside it the notification.
-            // Outside the app also the notification; the card shows the moment once the app
-            // is on screen again.
-            if celebrate, !Task.isCancelled {
+            // Another run started while this end waited (the follow-up, a change of the settings,
+            // "Neu prüfen"): it shows its own state, and nothing of this run is said or scheduled
+            // over it (second review of the labels fix, finding 4: this run's "Analyse fertig"
+            // landed on the next run's card).
+            let settled = end.afterWait(isNewest: analysisGeneration == generation)
+            // "Analyse fertig" only when the analysis really finished (not paused, stopped,
+            // failed, or with a change of the settings left), and not for a quick check
+            // (point 4): in the app the card, outside it the notification. Outside the app also
+            // the notification; the card shows the moment once the app is on screen again.
+            if settled.finishMoment, celebrate, !Task.isCancelled {
                 analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
                 updateCard()
                 if UIApplication.shared.applicationState != .active {
@@ -990,14 +1033,22 @@ final class AppModel {
                 }
             }
             BackgroundWork.scheduleRefinement()
-            if finished?.isComplete == true { unattendedRetries = 0 }
-            // Photos changed in Photos while this ran (new pictures, an album): one more pass.
-            if catchUpAfterRun {
-                catchUpAfterRun = false
-                if reason != .userPaused { LibraryChangeWatcher.shared.scheduleCatchUp() }
-            } else if analysis.needsResume {
-                retryUnattendedRun(after: generation)
-            }
+            if end.isFinished { unattendedRetries = 0 }
+            follow(settled.next, after: generation)
+        }
+    }
+
+    /// What the end of a run asked for (`AnalysisRunEnd.Next`), once that run has ended: one
+    /// more run now, a pass after changes in Photos (after the usual gap), or the run again a
+    /// little later. The same for runs in the app and the overnight refinement.
+    private func follow(_ next: AnalysisRunEnd.Next, after run: Int) {
+        switch next {
+        case .nothing: break
+        // Checked again: the refinement's end waited for the overview meanwhile. A run that
+        // may not start now is due anyway (after the plan, the rebuild, with the access back).
+        case .followUp: if runMayStartNow { startAnalysis() }
+        case .catchUp: LibraryChangeWatcher.shared.scheduleCatchUp()
+        case .retry: retryUnattendedRun(after: run)
         }
     }
 
@@ -1080,7 +1131,7 @@ final class AppModel {
                     ?? carried?.left,
                 photos: carried?.photos ?? analysis.libraryPhotos,
                 version: carried?.version ?? AnalysisPipeline.analysisVersion,
-                newWork: analysis.newWork,
+                newWork: analysis.newWork?.markerValue, newAreas: analysis.newWork?.markerFlag,
                 completed: held != nil ? held?.completed : progress.completed,
                 total: held != nil ? held?.total : progress.total,
                 secondsLeft: estimator.estimatedRemaining.map { Double($0.components.seconds) }
@@ -1398,6 +1449,19 @@ final class AppModel {
 
     /// Called by the background task while charging.
     func runBackgroundRefinement() async -> Bool {
+        let (succeeded, next) = await refine()
+        // What the end of the refinement asked for, once it has ended (`analysis.isRunning` is
+        // false again): a change of the settings it missed starts one more run, changes in Photos
+        // meanwhile get their pass. Before, only runs in the app took that request, and a change
+        // during the refinement waited for some later run (second review of the labels fix,
+        // finding 3).
+        follow(next, after: analysisGeneration)
+        return succeeded
+    }
+
+    /// The refinement itself: whether it went through, and what follows it (`AnalysisRunEnd`,
+    /// decided like the end of a run in the app; a run cut off goes on in the next window).
+    private func refine() async -> (succeeded: Bool, next: AnalysisRunEnd.Next) {
         if phase == .loading { await bootstrap() }
         // A run from the app that iOS held in the background goes on while this charging
         // window keeps the app awake, instead of the window being handed back at once. It is
@@ -1405,7 +1469,7 @@ final class AppModel {
         while analysis.isRunning, !Task.isCancelled {
             try? await Task.sleep(for: .seconds(5))
         }
-        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return false }
+        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return (false, .nothing) }
         analysis.isRunning = true
         updateCard()
         defer {
@@ -1422,24 +1486,28 @@ final class AppModel {
         // really ended before it clears the tables (audit 2, 4.1).
         let run = Task { try await pipeline.run(mode: .refinement, control: control) }
         analysisTask = Task { await withTaskCancellationHandler { _ = try? await run.value } onCancel: { run.cancel() } }
-        do {
-            let report = try await withTaskCancellationHandler { try await run.value } onCancel: { run.cancel() }
-            analysis.lastReport = report
-            if analysis.outcome.refined(with: report) {
-                // Complete now: nothing to go on with (review of c772325: the card read 100 %
-                // and then "Macht da weiter · 37 %" from the marker of the run before).
-                AnalysisMarker.finished()
-                analysis.needsResume = false
-                analysis.resumeFrom = nil
-                analysis.resumed = nil
-            }
-            await refreshDerived()
-            saveSafetyBackup(immediately: true)
-            return report.pausedBecause == nil
-        } catch {
-            // Cut off (iOS ended the background time): what was analysed stays analysed.
-            return false
+        // `nil`: cut off (iOS ended the background time); what was analysed stays analysed.
+        let report = try? await withTaskCancellationHandler { try await run.value } onCancel: { run.cancel() }
+        let end = AnalysisRunEnd(report: report, settings: settings, pauseTapped: control.isPaused,
+                                 catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow, background: true)
+        catchUpAfterRun = false
+        guard let ran = report, let ended = end.report else { return (false, end.next) }
+        analysis.lastReport = ended
+        if end.isFinished, analysis.outcome.refined(with: ended) {
+            // Complete now: nothing to go on with (review of c772325: the card read 100 %
+            // and then "Macht da weiter · 37 %" from the marker of the run before).
+            AnalysisMarker.finished()
+            analysis.needsResume = false
+            analysis.resumeFrom = nil
+            analysis.resumed = nil
+        } else if ended.isComplete {
+            // A change of the settings it missed: not done. The run after it does that work,
+            // right away, or when the app is opened if no run may start now.
+            analysis.needsResume = true
         }
+        await refreshDerived()
+        saveSafetyBackup(immediately: true)
+        return (ran.pausedBecause == nil, end.next)
     }
 
     func refreshDerived() async {
@@ -1483,13 +1551,17 @@ final class AppModel {
             let facts = facts, snapshot = snapshot, settings = settings
             let managed = managedAlbums, scope = analysisScope
             let derived = try await Task.detached(priority: .userInitiated) {
-                // The photos with their image labels: "Themen" and "Dokumente" count a photo as
-                // looked at only once it has them (turned on after it was analysed). Read here,
-                // so the set (one id per photo) never passes through the main actor.
-                let labelled = try await store.labelledAssets(labelsVersion: AnalysisPipeline.labelsVersion)
+                // The analysed photos still without their image labels ("Themen" or "Dokumente"
+                // turned on since): counted apart on the overview. Read here, so the set never
+                // passes through the main actor; only while one of the two is on, and only those
+                // photos, none once they are caught up (second review of the labels fix, 11).
+                let labelsMissing = AnalysisPipeline.wantsLabels(settings)
+                    ? try await store.unlabelledAssets(version: AnalysisPipeline.contentVersion,
+                                                       labelsVersion: AnalysisPipeline.labelsVersion)
+                    : []
                 return DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                                   contents: contents, labelled: labelled, managed: managed, inventory: inventory,
-                                                   scope: scope)
+                                                   contents: contents, labelsMissing: labelsMissing, managed: managed,
+                                                   inventory: inventory, scope: scope)
             }.value
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
@@ -1513,7 +1585,8 @@ final class AppModel {
             || (!analysis.isRunning && analysis.lastReport?.isComplete == true) {
             recount = nil
         }
-        analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable)
+        analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable,
+                                        labelsMissing: derived.labelsMissing)
     }
 
     // MARK: Proposals and decisions

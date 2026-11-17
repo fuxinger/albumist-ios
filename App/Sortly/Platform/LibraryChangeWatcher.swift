@@ -72,6 +72,9 @@ final class LibraryChangeWatcher: NSObject, PHPhotoLibraryChangeObserver {
         // The sample photos start one analysis after the last chunk, and after a removal.
         if SamplePhotos.shared.isAdding || SamplePhotos.shared.isRemoving { return false }
         // During a change in "Dein Zuhause" startAnalysis queues the run behind it.
+        // Paused by the user: a change in Photos (iCloud syncing) never undoes the Pause;
+        // "Fortsetzen" reads the library anew (second review of the labels fix, finding 12).
         return model.phase == .ready && model.access.canRead && !model.execution.isRunning && !model.analysis.isRunning
+            && !model.analysis.isPausedByUser
     }
 }

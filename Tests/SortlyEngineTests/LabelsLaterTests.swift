@@ -67,7 +67,7 @@ struct LabelsLaterTests {
     }
 
     static func setup(photos count: Int = 30, screenshots shots: Int = 3, labels: Bool, store: SortlyStore? = nil,
-                      delay: Duration = .zero, conditions: FakeConditions = FakeConditions()) throws -> Setup {
+                      delay: Duration = .zero, conditions: any AnalysisConditions = FakeConditions()) throws -> Setup {
         var lib = LibraryBuilder()
         var photos: [AssetID] = []
         for i in 0..<count {
@@ -349,38 +349,109 @@ struct LabelsLaterTests {
         #expect(try await s.store.result(ContentAnalysis.self, kind: "content", asset: flaky)?.labels.isEmpty == false)
     }
 
-    /// "Themen" and "Dokumente" never look done while labels are missing: with the labelled
-    /// photos from the store, the status says the photos are still to be looked at for both,
-    /// until the run gave them their labels.
-    @Test func themenAndDokumenteArePendingWhileLabelsAreMissing() async throws {
+    /// "Themen" and "Dokumente" turned on after the analysis, both as main areas: until the
+    /// run gave the photos their labels, neither area counts them (the sorted count does not
+    /// fall, the total does not shrink as the labels come in: second review of the labels fix),
+    /// and the overview counts them apart (`labelsMissing`). Then the areas count as they apply.
+    @Test func photosWaitingForLabelsAreCountedApart() async throws {
         let s = try Self.setup(labels: false)
         _ = try await s.pipeline.run()
-        let on = Self.settings(labels: true, documents: true)
+        var off = Self.settings(labels: false)
+        off.primaryAreas = [.trips, .places]
+        var on = Self.settings(labels: true, documents: true)
+        on.primaryAreas = [.trips, .places, .imageCategories, .documents]
         await s.pipeline.update(settings: on)
 
-        func derive(labelled: Bool) async throws -> DerivedLibraryStatus {
-            DerivedLibraryStatus.derive(
-                facts: try await s.pipeline.currentFacts(), snapshot: try await s.pipeline.latestProposals(), settings: on, overrides: OverrideSet(),
-                contents: try await s.store.results(ContentAnalysis.self, kind: "content"),
-                labelled: labelled ? try await s.store.labelledAssets(labelsVersion: AnalysisPipeline.labelsVersion) : nil,
-                managed: [], inventory: CollectionInventory(), scope: .all)
+        func derive(_ settings: OrganizationSettings, scope: OrganizationScope = .all) async throws -> DerivedLibraryStatus {
+            let missing = AnalysisPipeline.wantsLabels(settings)
+                ? try await s.store.unlabelledAssets(version: AnalysisPipeline.contentVersion, labelsVersion: AnalysisPipeline.labelsVersion)
+                : []
+            return DerivedLibraryStatus.derive(
+                facts: try await s.pipeline.currentFacts(), snapshot: try await s.pipeline.latestProposals(), settings: settings,
+                overrides: OverrideSet(), contents: try await s.store.results(ContentAnalysis.self, kind: "content"),
+                labelsMissing: missing, managed: [], inventory: CollectionInventory(), scope: scope)
         }
-        let before = try await derive(labelled: true)
+        let before = try await derive(off)
+        let waiting = try await derive(on)
+        #expect(before.labelsMissing == 0)
+        // Every photo analysed before waits for its labels; the analysed count stays.
+        #expect(waiting.labelsMissing == s.photos.count + s.screenshots.count)
+        #expect(waiting.analyzed == before.analyzed)
+        // The photos count in the ring as before the areas were turned on. The screenshots were
+        // read as documents by their text (the text step read them, "Screenshots" is on): they
+        // count for "Dokumente" right away, so the total grows and the sorted count stays.
+        let ringOff = OrganizationStatusResolver(primaryAreas: off.primaryAreas)
+        let ringOn = OrganizationStatusResolver(primaryAreas: on.primaryAreas)
+        #expect(ringOn.progress(s.photos.compactMap { waiting.states[$0] }) == ringOff.progress(s.photos.compactMap { before.states[$0] }))
+        #expect(waiting.progress.total == before.progress.total + s.screenshots.count)
+        #expect(waiting.progress.fully >= before.progress.fully)
         for id in s.photos {
-            #expect(before.states[id]?.areas[.imageCategories] == .analysisPending)
-            #expect(before.states[id]?.areas[.documents] == .analysisPending)
+            #expect(waiting.states[id]?.areas[.imageCategories] == .notApplicable)
+            #expect(waiting.states[id]?.areas[.documents] == .notApplicable)
         }
-        // Without the labelled photos, as before: the content analysis alone counts.
-        let unknown = try await derive(labelled: false)
-        #expect(s.photos.allSatisfy { unknown.states[$0]?.areas[.imageCategories] != .analysisPending })
+        // Only the chosen part of the library (the photos are from March 2026, the screenshots from February).
+        let march = try await derive(on, scope: .year(2026))
+        #expect(march.labelsMissing == s.photos.count + s.screenshots.count)
+        let otherYear = try await derive(on, scope: .year(2025))
+        #expect(otherYear.labelsMissing == 0)
 
         _ = try await s.pipeline.run()
-        let after = try await derive(labelled: true)
+        let after = try await derive(on)
+        #expect(after.labelsMissing == 0)
+        // Each photo counts now: a dog for "Themen", a receipt for "Dokumente" (its text is read
+        // once its labels say it is one).
         for id in s.photos {
-            #expect(after.states[id]?.areas[.imageCategories] != .analysisPending)
-            #expect(after.states[id]?.areas[.documents] != .analysisPending)
+            let areas = after.states[id]?.areas
+            #expect(areas?[Analyzer.isReceipt(id) ? .documents : .imageCategories] != .notApplicable)
         }
-        #expect(after.states == (try await derive(labelled: false)).states)
+        #expect(after.progress.total >= waiting.progress.total + s.photos.count)
+        #expect(after.progress.fully >= waiting.progress.fully)
+    }
+
+    /// The reviewer's case: two photos sorted into their trip's album, then "Dokumente" and
+    /// "Themen" made main areas while their labels are missing. They stay sorted (before:
+    /// "0 von 2 sortiert, dazu 2 teilweise").
+    @Test func sortedPhotosStaySortedWhileTheirLabelsAreMissing() {
+        var lib = LibraryBuilder()
+        let a = lib.photo(at: Fixture.date("2026-03-01 10:00"), Fixture.Places.munichHome)
+        let b = lib.photo(at: Fixture.date("2026-03-02 10:00"), Fixture.Places.munichHome)
+        let facts = lib.assets.map { AssetFacts(asset: $0, tripID: SortlyID("trip")) }
+        var settings = Self.settings(labels: true, documents: true)
+        settings.primaryAreas = [.trips, .documents, .imageCategories]
+        let resolver = OrganizationStatusResolver(primaryAreas: settings.primaryAreas)
+        let states = LibraryStatus.compute(facts: facts, snapshot: nil, settings: settings, contentAnalyzed: [a, b],
+                                           organizedBySortly: [.trips: [a, b]])
+        let ring = resolver.progress(states.values)
+        #expect(ring.fully == 2 && ring.total == 2 && ring.partially == 0)
+    }
+
+    /// "Dokumente" as a main area during a first analysis: a photo not analysed yet is not
+    /// counted for it, so the total only grows as documents are found (the second review saw it
+    /// shrink while the labels came in).
+    @Test func theTotalWithDocumentsAsAMainAreaOnlyGrows() async throws {
+        var settings = Self.settings(labels: true, documents: true)
+        settings.primaryAreas = [.documents]
+        let s = try Self.setup(labels: true)
+        await s.pipeline.update(settings: settings)
+        let resolver = OrganizationStatusResolver(primaryAreas: settings.primaryAreas)
+        func total() async throws -> Int {
+            let contents = try await s.store.results(ContentAnalysis.self, kind: "content")
+            let analysed = Set(contents.filter { $0.value.failedAttempts == nil }.keys)
+            let states = LibraryStatus.compute(facts: try await s.pipeline.currentFacts(), snapshot: try await s.pipeline.latestProposals(),
+                                               settings: settings, contentAnalyzed: analysed)
+            return resolver.progress(states.values).total
+        }
+        let control = AnalysisRunControl()
+        let reached = Mutex(0)
+        _ = try await s.pipeline.run(control: control, onProgress: { p in
+            if p.stage == .content, p.completed >= 14 { reached.withLock { $0 = p.completed }; control.pause() }
+        })
+        let halfway = try await total()
+        _ = try await s.pipeline.run()
+        let done = try await total()
+        #expect(reached.withLock { $0 } >= 14)
+        #expect(done >= halfway)
+        #expect(done > 0)
     }
 
     @Test func settingsChangesThatNeedARun() {
@@ -506,6 +577,11 @@ struct LabelsLaterTests {
         #expect(requests[noResult]?.featurePrint == true && requests[noResult]?.classify == true)
         #expect(requests[givenUp]?.featurePrint == true && requests[givenUp]?.classify == true)
         #expect(requests[fresh]?.featurePrint == true && requests[fresh]?.classify == true)
+        // The one given up gets its look for the labels: analysed before, so no new photo
+        // (second review of the labels fix, nit: it was counted as one). The workload counted it
+        // with the labels too.
+        #expect(report.labelsAdded == 2)
+        #expect(report.newPhotosAnalyzed == 2)
         let kept = try #require(try await reopened.result(ContentAnalysis.self, kind: "content", asset: without))
         #expect(kept.featurePrint == Embedding([0, 1]) && kept.aestheticsScore == 0.5 && !kept.labels.isEmpty)
         #expect(try await reopened.labelsVersions().values.allSatisfy { $0 == AnalysisPipeline.labelsVersion })

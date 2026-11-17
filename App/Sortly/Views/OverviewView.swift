@@ -248,18 +248,27 @@ struct OverviewView: View {
         if let report = model.analysis.lastReport, model.analysis.lastRun != nil, model.analysis.kind == .check {
             // What "Neu prüfen" found, so a check that ends after a few seconds is clearly done.
             // Photos that only got their labels ("Themen" or "Dokumente" turned on) are no new
-            // photos (review of the labels fix, M2).
+            // photos (review of the labels fix, M2); both in one line (second review, nit).
             Group {
-                if report.newPhotosAnalyzed > 0 {
+                if report.newPhotosAnalyzed > 0 && report.labelsAdded > 0 {
+                    Text("Beim Prüfen \(report.newPhotosAnalyzed) neue Fotos analysiert und \(report.labelsAdded) weitere für die neuen Bereiche angesehen.")
+                } else if report.newPhotosAnalyzed > 0 {
                     Text("Beim Prüfen \(report.newPhotosAnalyzed) neue Fotos analysiert.")
-                } else if report.labelsAdded == 0 && report.newOrChanged == 0 && report.removed == 0 {
-                    Text("Beim Prüfen keine neuen Fotos gefunden.")
-                }
-                if report.labelsAdded > 0 {
+                } else if report.labelsAdded > 0 {
                     Text("Beim Prüfen \(report.labelsAdded) Fotos für die neuen Bereiche angesehen.")
+                } else if report.newOrChanged == 0 && report.removed == 0 {
+                    Text("Beim Prüfen keine neuen Fotos gefunden.")
                 }
             }
             .font(.footnote).foregroundStyle(.secondary)
+        }
+        if counts.labelsMissing > 0 {
+            // Analysed before "Themen" or "Dokumente" was turned on and still without their image
+            // labels (no run yet, or a read that failed waits for its retry): said apart, the
+            // count above stays (second review of the labels fix, finding 6).
+            Label("Für die neuen Bereiche fehlen noch \(counts.labelsMissing) Fotos.", systemImage: "hourglass")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         if counts.unreadable > 0 {
             Label("\(counts.unreadable) Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal.", systemImage: "exclamationmark.icloud")

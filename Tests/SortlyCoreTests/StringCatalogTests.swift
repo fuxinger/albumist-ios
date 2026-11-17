@@ -63,6 +63,8 @@ struct StringCatalogTests {
         "%lld Tage mit Fotos",
         // A check that gave photos analysed before their labels ("Themen" or "Dokumente" on).
         "Beim Prüfen %lld Fotos für die neuen Bereiche angesehen.",
+        "Beim Prüfen %lld neue Fotos analysiert und %lld weitere für die neuen Bereiche angesehen.",
+        "Für die neuen Bereiche fehlen noch %lld Fotos.",
     ]
 
     @Test(arguments: countStrings)

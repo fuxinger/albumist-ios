@@ -154,7 +154,9 @@ public actor AnalysisPipeline {
         public var placesPendingOnline = 0
         public var onlineRequests = 0
         public var contentAnalyzed = 0
-        /// Of `contentAnalyzed`: photos analysed before that got only their labels now.
+        /// Of `contentAnalyzed`: photos analysed before that got their labels now: only their
+        /// labels, or one more full look for a photo given up before (it has nothing to add the
+        /// labels to). Either way no new photo (second review of the labels fix, nit).
         public var labelsAdded = 0
         /// Of `contentAnalyzed`: the photos looked at in full, without those that only got
         /// their labels ("Themen" or "Dokumente" turned on later). The overview calls only these
@@ -171,6 +173,9 @@ public actor AnalysisPipeline {
         public var analyzerUnavailable = false
         /// Apple's geocoder kept refusing: the remaining town names wait for a later run.
         public var placesThrottled = false
+        /// The settings this run read for its work, each where it read it: a change after that
+        /// point is decided at the run's end (`AnalysisRunEnd`).
+        public var settingsUsed = SettingsUsed()
 
         public var isComplete: Bool { pausedBecause == nil && completedStages.count == Stage.allCases.count }
 
@@ -369,11 +374,47 @@ public actor AnalysisPipeline {
     /// A change that only shows or hides suggestions needs none: the suggestions follow the
     /// settings with the next run anyway.
     public static func settingsChangeNeedsRun(from old: OrganizationSettings, to new: OrganizationSettings) -> Bool {
-        if !wantsLabels(old) && wantsLabels(new) { return true }
-        if !readsText(old) && readsText(new) { return true }
-        let before = PlaceResolutionPolicy(settings: old), after = PlaceResolutionPolicy(settings: new)
-        if after.deepestLevel > before.deepestLevel || (!before.onlineAllowed && after.onlineAllowed) { return true }
-        return !old.privacy.includeHiddenAssets && new.privacy.includeHiddenAssets
+        SettingsUsed(old).needsRun(for: new)
+    }
+
+    /// The settings a run read for its work, each at the point where it read it
+    /// (`Report.settingsUsed`): hidden photos with the library read, labels after the trips
+    /// step, places and texts at the start of their steps. `nil`: the run did not get there.
+    /// A change before that point is taken in by the run itself; one after it is decided at the
+    /// run's end against these (`AnalysisRunEnd`, second review of the labels fix: a change
+    /// during the library read was already used by the run, and one more run was redundant).
+    public struct SettingsUsed: Sendable, Hashable {
+        /// Labels asked for (`wantsLabels`).
+        public var labels: Bool?
+        /// The text step ran (`readsText`).
+        public var text: Bool?
+        /// How far places were resolved, and whether online lookups were allowed then.
+        public var places: PlaceResolutionPolicy?
+        /// Hidden photos read in.
+        public var hidden: Bool?
+
+        /// Nothing read yet.
+        public init() {}
+
+        /// All of it as these settings ask for.
+        public init(_ settings: OrganizationSettings) {
+            labels = AnalysisPipeline.wantsLabels(settings)
+            text = AnalysisPipeline.readsText(settings)
+            places = PlaceResolutionPolicy(settings: settings)
+            hidden = settings.privacy.includeHiddenAssets
+        }
+
+        /// The settings `new` give a step work that a run with these did not do (the rules of
+        /// `settingsChangeNeedsRun`).
+        public func needsRun(for new: OrganizationSettings) -> Bool {
+            if labels == false && AnalysisPipeline.wantsLabels(new) { return true }
+            if text == false && AnalysisPipeline.readsText(new) { return true }
+            if let places {
+                let after = PlaceResolutionPolicy(settings: new)
+                if after.deepestLevel > places.deepestLevel || (!places.onlineAllowed && after.onlineAllowed) { return true }
+            }
+            return hidden == false && new.privacy.includeHiddenAssets
+        }
     }
 
     /// What follows a change of the settings in the app (`AppModel.saveSettings`), decided once
@@ -386,10 +427,9 @@ public actor AnalysisPipeline {
         case noRun
         /// A run starts now.
         case now
-        /// A run is busy and may have read the settings before the change (labels are decided
-        /// after the trips step, hidden photos with the library read): one more run follows when
-        /// it ends. One, however many changes come meanwhile (`AppModel.catchUpAfterRun`, as for
-        /// changes in Photos during a run).
+        /// A run is busy: nothing starts now. Its end compares what it read
+        /// (`Report.settingsUsed`) with the settings then and starts one more run right away if
+        /// it missed a change (`AnalysisRunEnd`); one, however many changes come meanwhile.
         case afterCurrentRun
         /// The user paused the analysis, or tapped Pause and the run is finishing the photos in
         /// work: nothing starts by itself, a change of the settings never undoes a Pause.
@@ -537,8 +577,10 @@ public actor AnalysisPipeline {
         // taken as the library: nothing is removed (review of 9f0bc40: a user who paused again
         // and again started from nothing each time).
         let assets: [AssetSnapshot]
+        let includeHidden = settings.privacy.includeHiddenAssets
+        report.settingsUsed.hidden = includeHidden
         do {
-            assets = try await reader.fetchAssets(includeHidden: settings.privacy.includeHiddenAssets,
+            assets = try await reader.fetchAssets(includeHidden: includeHidden,
                                                   knownDetails: try await store.assetsWithFileDetails()) { read, total in
                 onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
                 return !control.isPaused
@@ -579,6 +621,7 @@ public actor AnalysisPipeline {
         let range = Self.dateRange(of: scope, calendar: calendar)
         // Read once: the workload said below and the image step count the same photos.
         let labels = Self.wantsLabels(settings) ? Self.labelsVersion : nil
+        report.settingsUsed.labels = labels != nil
         let scoped: [AssetSnapshot]
         if let range {
             let inYear = Set(all.filter { $0.creationDate.map(range.contains) ?? false }.map(\.id))
@@ -591,6 +634,8 @@ public actor AnalysisPipeline {
                             workload: try await workload(all: all, scoped: scoped, range: range, labels: labels)))
 
         // 3. Places
+        // What `resolvePlaces` reads first thing (same moment, no wait in between).
+        report.settingsUsed.places = PlaceResolutionPolicy(settings: settings)
         let placeOutcome = try await resolvePlaces(scoped, trips: trips, frequent: frequent, refining: mode == .refinement, onProgress: onProgress)
         report.placesResolved = placeOutcome.resolved
         report.placesPendingOnline = placeOutcome.pendingOnline.count
@@ -685,9 +730,9 @@ public actor AnalysisPipeline {
             // for nothing else. Their marks are set like those of a full look.
             // A photo given up as unreadable has no result to add to: it gets one more full look
             // (given up again if it still cannot be read).
-            var labelsOnly = labels == nil ? [:]
+            let analysedBefore = labels == nil ? [:]
                 : try await store.analyzedResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion, of: batch.map(\.id))
-                    .filter { $0.value.failedAttempts == nil }
+            var labelsOnly = analysedBefore.filter { $0.value.failedAttempts == nil }
             // Decided without looking at the image: labels stored already, or a photo that
             // could not be read a short while ago (not again in this run).
             batch = batch.filter { asset in
@@ -756,7 +801,7 @@ public actor AnalysisPipeline {
                         results.append((asset.id, result))
                         finished.append(asset.id)
                         analyzed += 1
-                        if labelsOnly[asset.id] != nil { report.labelsAdded += 1 }
+                        if labelsOnly[asset.id] != nil || analysedBefore[asset.id] != nil { report.labelsAdded += 1 }
                         if !asset.isScreenshotLike {
                             lookedAt.append(asset.id)
                             if lookedAt.count > 3 { lookedAt.removeFirst() }
@@ -816,6 +861,8 @@ public actor AnalysisPipeline {
 
         // 5. Text
         let textStart = now()
+        // What `recognizeText` reads first thing (same moment, no wait in between).
+        report.settingsUsed.text = Self.readsText(settings)
         let textOutcome = try await recognizeText(scoped, onProgress: onProgress)
         report.textSeconds = now().timeIntervalSince(textStart)
         report.textRecognized = textOutcome.recognized

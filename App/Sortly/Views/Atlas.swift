@@ -656,17 +656,39 @@ struct ShareCardImage: Transferable {
 
     /// Loads the cover photo in good quality from the device only (no iCloud download).
     /// Nonisolated: PhotoKit may call the result handler on a background queue.
+    /// A cover Photos does not hand over within 15 s (Photos stuck) is left out: the card is
+    /// shared without it instead of the share button waiting for good (app-speed, 18.11.2026).
     nonisolated static func loadCover(_ id: AssetID) async -> UIImage? {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject else { return nil }
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
         options.resizeMode = .exact
         options.isNetworkAccessAllowed = false
+        let once = CoverAnswer()
         return await withCheckedContinuation { continuation in
-            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 1080, height: 1080),
-                                                  contentMode: .aspectFill, options: options) { image, _ in
-                continuation.resume(returning: image)
+            let request = PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 1080, height: 1080),
+                                                                contentMode: .aspectFill, options: options) { image, _ in
+                if once.first() { continuation.resume(returning: image) }
             }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 15) {
+                guard once.first() else { return }
+                PHImageManager.default().cancelImageRequest(request)
+                continuation.resume(returning: nil)
+            }
+        }
+    }
+}
+
+/// The cover request is answered once: by Photos or by the time limit, whichever comes first.
+private final class CoverAnswer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var answered = false
+
+    func first() -> Bool {
+        lock.withLock {
+            guard !answered else { return false }
+            answered = true
+            return true
         }
     }
 }

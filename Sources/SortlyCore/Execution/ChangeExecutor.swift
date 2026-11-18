@@ -182,6 +182,14 @@ public actor ChangeExecutor {
             let state: StepState
             do {
                 state = try await perform(index, plan: &plan, reconcile: wasRunning, available: available)
+            } catch let notResponding as PhotosNotResponding {
+                // Photos did not answer (app-speed, docs/DECISIONS.md): the outcome of this step
+                // is not known, Photos may still carry it out. It is neither done nor failed: it
+                // stays journaled as running, with its intent, like a step the app was closed in,
+                // and the run stops here. The ways out of an interrupted plan settle it later
+                // from what the library shows then.
+                try await store.save(plan)
+                throw notResponding
             } catch {
                 await settleAfterError(step, plan: &plan)
                 state = .failed(reason: String(describing: error))
@@ -531,14 +539,31 @@ public actor ChangeExecutor {
             try await store.save(plan)
             if !allowed.isEmpty {
                 // Said per step below, from what the library shows afterwards.
-                do { try await library.deleteCollections(allowed.sorted()) } catch { deletionError = error }
+                do {
+                    try await library.deleteCollections(allowed.sorted())
+                } catch let notResponding as PhotosNotResponding {
+                    throw notResponding
+                } catch {
+                    deletionError = error
+                }
             }
             // Taking Albumist's photos out of a kept album needs no question from iOS: it
             // runs even when the deletion was declined or not carried out, and a failure here
             // is only this album's.
             for (i, k) in kept.sorted(by: { $0.key < $1.key }) where !k.ours.isEmpty {
-                do { try await library.removeAssets(k.ours, from: k.album) } catch { states[i] = .failed(reason: String(describing: error)) }
+                do {
+                    try await library.removeAssets(k.ours, from: k.album)
+                } catch let notResponding as PhotosNotResponding {
+                    throw notResponding
+                } catch {
+                    states[i] = .failed(reason: String(describing: error))
+                }
             }
+        } catch let notResponding as PhotosNotResponding {
+            // As in `execute`: the deletion may still happen (iOS may still be asking the
+            // user). The steps stay running, with what goes written down, and the run stops.
+            try await store.save(plan)
+            throw notResponding
         } catch {
             for i in indices { states[i] = .failed(reason: String(describing: error)) }
         }

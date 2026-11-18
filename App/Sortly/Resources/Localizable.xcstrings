@@ -12092,6 +12092,76 @@
           }
         }
       }
+    },
+    "Fotos antwortet gerade nicht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos isn’t responding right now"
+          }
+        }
+      }
+    },
+    "Albumist wartet auf die Fotos-App und versucht es sonst gleich noch einmal. Du musst nichts tun." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is waiting for the Photos app and will otherwise try again shortly. You don’t need to do anything."
+          }
+        }
+      }
+    },
+    "Jetzt versuchen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try Now"
+          }
+        }
+      }
+    },
+    "Analyse jetzt erneut versuchen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try the analysis again now"
+          }
+        }
+      }
+    },
+    "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als zurückgenommen. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos isn’t responding right now. What Albumist was about to change counts neither as done nor as undone. As soon as Photos responds again, you can continue from the overview."
+          }
+        }
+      }
+    },
+    "Fotos antwortet gerade nicht. Albumist versucht es gleich noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos isn’t responding right now. Albumist will try again shortly."
+          }
+        }
+      }
+    },
+    "Fotos antwortet gerade nicht. Albumist wartet noch." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos isn’t responding right now. Albumist is still waiting."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

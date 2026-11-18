@@ -469,6 +469,10 @@ final class AppModel {
     /// Runs in a row that ended early by themselves (an error, Vision failing): tried again
     /// a little later instead of only at the next start of the app.
     @ObservationIgnored private var unattendedRetries = 0
+    /// The last run ended because Photos did not answer (`PhotosNotResponding`): the card says
+    /// "Fotos antwortet gerade nicht" until the next run starts, and that run comes by itself
+    /// (`retryUnattendedRun`).
+    @ObservationIgnored private var photosRetryDue = false
     /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile. Observed: the
     /// suggestion's "Ja, hier bin ich öfter" says why it waits.
     private(set) var analysisResetting = false
@@ -917,6 +921,7 @@ final class AppModel {
             return
         }
         analysis.isRunning = true
+        photosRetryDue = false
         analysis.needsResume = false
         analysis.pausing = false
         analysis.stage = nil
@@ -985,6 +990,10 @@ final class AppModel {
             } catch is CancellationError {
                 // Stopped on purpose ("Analyse neu aufbauen", a new scope): not an error to show
                 // (plugin review N3: "Swift.CancellationError error 1").
+            } catch is PhotosNotResponding {
+                // Photos did not answer (app-speed): said on the card, not in an alert, and the
+                // run comes again by itself. Nothing of it counts as done.
+                photosRetryDue = true
             } catch {
                 message = .failure(error.localizedDescription)
             }
@@ -1086,6 +1095,18 @@ final class AppModel {
     /// goes on a little later, a few times, instead of waiting until the app is opened again.
     /// Nothing happens when another run started meanwhile or the user paused.
     private func retryUnattendedRun(after run: Int) {
+        // Photos did not answer: tried again every minute, for as long as that lasts. A try
+        // never sends a second call while the first still hangs (`PhotosDeadline`), so it costs
+        // nothing; the card says "Fotos antwortet gerade nicht" meanwhile.
+        if photosRetryDue {
+            Task {
+                try? await Task.sleep(for: Self.photosRetryDelay)
+                guard analysisGeneration == run, analysis.needsResume, !analysis.isRunning,
+                      phase == .ready, access.canRead, !execution.isRunning, !analysisResetting else { return }
+                startAnalysis()
+            }
+            return
+        }
         guard unattendedRetries < 2 else { return }
         unattendedRetries += 1
         let delay = 30 * unattendedRetries
@@ -1096,6 +1117,9 @@ final class AppModel {
             startAnalysis()
         }
     }
+
+    /// The next try after Photos did not answer.
+    static let photosRetryDelay: Duration = .seconds(60)
 
     /// Until the run in progress and the ends of the runs before it are done: a follow-up starts
     /// while the end of the run before still refreshes the overview and writes the safety copy
@@ -1381,6 +1405,8 @@ final class AppModel {
             isLowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
         ).slowerReason : nil
         i.appleWait = analysis.appleWait
+        // Photos has had no answer for 10 s or more (still waiting), or the run ended on it.
+        i.photosNotResponding = photosRetryDue || (analysis.isRunning && PhotoKitLibrary.deadline.slowFor() != nil)
         i.pausingFor = analysis.pausing ? pausingSince.map { now - $0 } ?? .zero : nil
         i.pausedByUser = analysis.isPausedByUser
         i.pausedAt = analysis.stoppedAt
@@ -2351,6 +2377,8 @@ final class AppModel {
     /// (an album changed since the preview, access reduced) says which, in the words of the
     /// review screen, instead of "SortlyCore.ChangeExecutor.ExecutionError error 1".
     private func failureText(_ error: any Error) -> String {
+        // Photos did not answer a change in time: said as such (`PhotosNotResponding`'s text);
+        // the plan stays open in the overview, neither done nor undone.
         if let stopped = error as? ChangeExecutor.ExecutionError, case .blocked(let conflicts) = stopped, !conflicts.isEmpty {
             return conflicts.prefix(3).map { ConflictText.text($0, inventory: inventory) }.joined(separator: "\n")
         }

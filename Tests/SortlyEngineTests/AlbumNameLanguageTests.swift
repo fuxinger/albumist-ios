@@ -18,11 +18,12 @@ struct AlbumNameLanguageTests {
     }
 
     static func run(_ assets: [AssetSnapshot], geocoder: FakeGeocoder = FakeGeocoder(),
-                    levels: [PlaceLevel] = [.country, .administrativeArea]) throws -> Run {
+                    levels: [PlaceLevel] = [.country, .administrativeArea],
+                    store: SortlyStore? = nil, language: TitleLanguage = .german) throws -> Run {
         var settings = OrganizationSettings()
-        settings.titleLanguage = .german
+        settings.titleLanguage = language
         settings.places.levels = levels
-        let store = try SortlyStore(url: nil)
+        let store = try store ?? SortlyStore(url: nil)
         let reader = InMemoryLibraryReader(assets: assets)
         let pipeline = AnalysisPipeline(
             store: store, reader: reader, analyzer: FakeContentAnalyzer(), geocoder: geocoder, map: PipelineTests.map,
@@ -170,7 +171,7 @@ struct AlbumNameLanguageTests {
     }
 
     /// Two trips to Rome (an album for the town) and to Lake Garda and Venice (one for Veneto).
-    static func townsAndRegions() throws -> Run {
+    static func townsAndRegions(store: SortlyStore? = nil, language: TitleLanguage = .german) throws -> Run {
         var lib = LibraryBuilder()
         _ = lib.daily(from: "2025-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1,
                       skipping: [("2025-05-10", "2025-05-17"), ("2025-09-10", "2025-09-17"), ("2026-04-01", "2026-04-08"), ("2026-06-01", "2026-06-08")])
@@ -181,6 +182,84 @@ struct AlbumNameLanguageTests {
         _ = lib.daily(from: "2026-06-01", to: "2026-06-08", at: venice, perDay: 4, hour: 10)
         let geocoder = FakeGeocoder(answers: FakeGeocoder.defaultAnswers
             + [(venice, PlaceComponents(isoCountryCode: "IT", country: "Italy", administrativeArea: "Veneto", locality: "Venedig"))])
-        return try Self.run(lib.assets, geocoder: geocoder, levels: [.country, .administrativeArea, .locality])
+        return try Self.run(lib.assets, geocoder: geocoder, levels: [.country, .administrativeArea, .locality], store: store, language: language)
+    }
+
+    // MARK: Third review: the key table is the user's, not the analysis's
+
+    /// German, then English, "Nicht jetzt" on a region and a town; returns their ids and all ids.
+    static func decidedInEnglish() async throws -> (run: Run, ids: [String: SortlyID], region: SortlyID, town: SortlyID) {
+        var run = try Self.townsAndRegions()
+        #expect(try await run.pipeline.run().isComplete)
+        let german = try await Self.placeIDs(run)
+        run.settings.titleLanguage = .english
+        await run.pipeline.update(settings: run.settings)
+        #expect(try await run.pipeline.run().isComplete)
+        #expect(try await Self.placeIDs(run) == german, "after the switch")
+        let region = try #require(german.first { $0.key.hasPrefix("administrativeArea") }?.value)
+        let town = try #require(german.first { $0.key.hasPrefix("locality") }?.value)
+        try await run.store.addOverride(UserOverride(scope: .source(region), decision: .rejectProposal))
+        try await run.store.addOverride(UserOverride(scope: .source(town), decision: .rejectProposal))
+        return (run, german, region, town)
+    }
+
+    static func expectDecisionsKept(_ run: Run, ids: [String: SortlyID], region: SortlyID, town: SortlyID,
+                                    _ comment: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let after = try await Self.placeIDs(run)
+        #expect(after == ids, "\(comment): the ids changed", sourceLocation: sourceLocation)
+        let snapshot = try #require(try await run.pipeline.latestProposals(), sourceLocation: sourceLocation)
+        let open = Set(snapshot.proposals.map(\.id))
+        // The suggestions holding the same photos, whatever id they have now.
+        let decided = ids.filter { $0.value == region || $0.value == town }.compactMap { after[$0.key] }
+        #expect(decided.count == 2 && open.isDisjoint(with: decided), "\(comment): a suggestion the user put aside is open again",
+                sourceLocation: sourceLocation)
+    }
+
+    /// Third review of P1-12: the table was stored as `analysis.regionKeys`, which "Analyse neu
+    /// aufbauen" deletes. Rebuilt in English, every region got its English name as key: new
+    /// ids, and a region the user put aside ("Nicht jetzt") was an open suggestion again.
+    @Test func aRebuildKeepsTheIDsAndDecisions() async throws {
+        let (run, ids, region, town) = try await Self.decidedInEnglish()
+        try await run.pipeline.resetAnalysis()
+        #expect(try await run.pipeline.run().isComplete)
+        try await Self.expectDecisionsKept(run, ids: ids, region: region, town: town, "after a rebuild")
+    }
+
+    /// The same for a restore from the safety copy (a rebuilt database, a restored or new
+    /// iPhone): the copy left out `analysis.*`, so the table did not come back.
+    @Test func aRestoreFromTheSafetyCopyKeepsTheIDsAndDecisions() async throws {
+        let (old, ids, region, town) = try await Self.decidedInEnglish()
+        let backup = try await old.store.safetyBackup()
+        let fresh = try SortlyStore(url: nil)
+        #expect(try await fresh.restore(backup, includingLibraryState: true))
+        let run = try Self.townsAndRegions(store: fresh, language: .english)
+        #expect(try await run.pipeline.run().isComplete)
+        try await Self.expectDecisionsKept(run, ids: ids, region: region, town: town, "after a restore")
+    }
+
+    /// An install that stored the table as `analysis.regionKeys` gets it moved once, regions no
+    /// photo is in at the moment included.
+    @Test func theTableStoredWithTheAnalysisIsMovedOnce() async throws {
+        let run = try Self.townsAndRegions()
+        #expect(try await run.pipeline.run().isComplete)
+        var table = try #require(try await run.store.value(OfflineWorldMap.RegionKeys.self, forKey: AnalysisPipeline.Key.regionKeys))
+        table.keys["XX|XX-01|nowhere"] = "nirgendwo"
+        try await run.store.removeValue(forKey: AnalysisPipeline.Key.regionKeys)
+        try await run.store.setValue(table, forKey: "analysis.regionKeys")
+        #expect(try await run.pipeline.run().isComplete)
+        #expect(try await run.store.value(OfflineWorldMap.RegionKeys.self, forKey: AnalysisPipeline.Key.regionKeys) == table)
+        #expect(try await run.store.value(OfflineWorldMap.RegionKeys.self, forKey: "analysis.regionKeys") == nil)
+    }
+
+    /// A table this build cannot read (damage, a newer version) never stops an analysis; the
+    /// keys the stored places carry make it anew, so the ids stay.
+    @Test func anUnreadableTableDoesNotStopTheAnalysis() async throws {
+        let run = try Self.townsAndRegions()
+        #expect(try await run.pipeline.run().isComplete)
+        let ids = try await Self.placeIDs(run)
+        try await run.store.setValue("garbage", forKey: AnalysisPipeline.Key.regionKeys)
+        #expect(try await run.pipeline.run().isComplete)
+        #expect(try await Self.placeIDs(run) == ids)
+        #expect(try await run.store.value(OfflineWorldMap.RegionKeys.self, forKey: AnalysisPipeline.Key.regionKeys) != nil)
     }
 }

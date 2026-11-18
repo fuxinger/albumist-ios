@@ -224,8 +224,12 @@ public actor AnalysisPipeline {
         static let textMaskVersion = "analysis.textMaskVersion"
         /// The language the stored places' countries and regions are named in (review P1-12).
         static let placesLanguage = "analysis.placesLanguage"
-        /// The region part of place keys, fixed per region (`OfflineWorldMap.RegionKeys`).
-        static let regionKeys = "analysis.regionKeys"
+        /// The region part of place keys, fixed per region (`OfflineWorldMap.RegionKeys`). The
+        /// user's decisions hang on the ids made from it, so it is kept like them: "Analyse neu
+        /// aufbauen" leaves it and the safety copy carries it (third review of P1-12).
+        static let regionKeys = "user.regionKeys"
+        /// Where 638ff85 stored the table; moved to `regionKeys` once.
+        static let regionKeysBefore = "analysis.regionKeys"
         static let proposals = "analysis.proposals"
         /// Photos taken where the user lives (`TripAnalysis.atHome`), from the last analysis.
         static let home = "analysis.home"
@@ -1161,11 +1165,23 @@ public actor AnalysisPipeline {
         guard let map, !places.isEmpty else { return [:] }
         let renamer = regionRenamer ?? map.renamer(to: .german)
         regionRenamer = renamer
-        var keys = try await store.value(OfflineWorldMap.RegionKeys.self, forKey: Key.regionKeys) ?? OfflineWorldMap.RegionKeys()
+        var keys = try await regionKeys()
         let before = keys
         let changed = keys.fix(places, with: renamer)
         if keys != before { try await store.setValue(keys, forKey: Key.regionKeys) }
         return changed
+    }
+
+    /// The library's region keys. A table this build cannot read counts as none: the keys the
+    /// stored places carry outweigh names when it is made anew (`RegionKeys.fix`), so the ids
+    /// stay. The table under its first key is moved over once.
+    private func regionKeys() async throws -> OfflineWorldMap.RegionKeys {
+        if let keys = try await readable({ try await store.value(OfflineWorldMap.RegionKeys.self, forKey: Key.regionKeys) }) { return keys }
+        guard let earlier = try await readable({ try await store.value(OfflineWorldMap.RegionKeys.self, forKey: Key.regionKeysBefore) }) else {
+            return OfflineWorldMap.RegionKeys()
+        }
+        try await store.setValues([Key.regionKeys: earlier], removing: [Key.regionKeysBefore])
+        return earlier
     }
 
     private func renamePlaces(to language: TitleLanguage) async throws {

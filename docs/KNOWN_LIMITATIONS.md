@@ -27,7 +27,11 @@
   (heute nur beim Start, `AppModel`), den Zwischenspeicher der Ortssuche je Sprache führen und
   die gespeicherten Städte zum erneuten Nachfragen vormerken (Netz und Apples Drosselung, eine
   Entscheidung für Fuchs). Die Kennungen von Städten und Regionen hängen nicht an der Sprache
-  (fester Regionsschlüssel je Mediathek, zweite Prüfung). Offen: eine Region, die die
+  (fester Regionsschlüssel je Mediathek, zweite Prüfung; seit der dritten Prüfung als
+  Entscheidung gespeichert, `user.regionKeys`: er übersteht „Analyse neu aufbauen“ und kommt
+  mit der Sicherheitskopie zurück). Die Tabelle zählt wie die Reise-Kennungen
+  (`user.tripIdentities`) als Inhalt der Sicherheitskopie, auch wenn der Nutzer noch nichts
+  entschieden hat. Offen: eine Region, die die
   Offline-Karte nicht kennt (Apple nennt sie anders als die Karte), behält ihren Namen als
   Schlüssel; bei ihr und bei Städten, die Apple nach einem Neustart in der anderen Sprache
   nennt („Rom“/„Rome“), entsteht nach einem Sprachwechsel eine neue Kennung.

@@ -14,10 +14,12 @@ run-name: >-
 #   - big (the default; every build for testers and the App Store): CI, the UI flow with every
 #     group, the small stress pass, the UI gate over every group.
 #   - small (the daily build for the owner's own iPhone; daily-build.yml starts it each morning
-#     when the app changed, and it can be started by hand): CI and the two short UI groups
-#     flow-full and contrast (about 18 min each), the UI gate over those two. No stress pass and
-#     no other UI group. The run name, the tag message and "Was testen" say "small gate"; such a
-#     build is not given to testers.
+#     when the app changed, and it can be started by hand): CI, the two short UI groups
+#     flow-full and contrast (about 18 min each), the small stress pass, the UI gate over those
+#     two groups. No other UI group. The run name, the tag message and "Was testen" say "small
+#     gate"; such a build is not given to testers.
+#   The stress pass belongs to both gates: the owner's rule 17.11. and his decision 4 want it
+#   before every upload, and the daily build can upload (after his click).
 # Either way the upload waits for the owner (the owner's decision 5 of 18.11.2026): the upload job
 # runs in the GitHub environment "testflight-upload", whose required reviewer is the owner, and
 # the four App Store Connect secrets are environment secrets there, so only that job can read
@@ -31,14 +33,14 @@ run-name: >-
 #      this check is what keeps an upload from starting without the owner. It reads no secret.
 #   2. Tests: CI (ci.yml) with the app rules, the Linux core tests and then, on one Mac, the
 #      iOS build, core and app tests. Its iOS job always runs here.
-#   3. Then side by side: the UI flow (ui.yml, at most four Macs) and, with the big gate, the
-#      small stress pass (ui-stress.yml with photos 10000 and minutes 15; the owner's rule 17.11.:
-#      before each TestFlight build for testers). Five Macs at the peak. The big gate runs the UI
-#      flow with groups "auto" (input ui_groups): only the groups that have no green result yet
-#      for exactly this app and their own test code (the owner's rule 17.11.: a test-only change
-#      reruns only the groups it touches, any app change everything; ui.yml "UI plan"); the small
-#      gate runs its two groups. "Repeats and flaky tests" then counts the simulator repeats and
-#      the flaky tests of both in one table.
+#   3. Then side by side: the UI flow (ui.yml, at most four Macs) and the small stress pass
+#      (ui-stress.yml with photos 10000 and minutes 15; the owner's rule 17.11.: before each
+#      TestFlight build), with either gate. Five Macs at the peak (small gate: three). The big
+#      gate runs the UI flow with groups "auto" (input ui_groups): only the groups that have no
+#      green result yet for exactly this app and their own test code (the owner's rule 17.11.: a
+#      test-only change reruns only the groups it touches, any app change everything; ui.yml "UI
+#      plan"); the small gate runs its two groups. "Repeats and flaky tests" then counts the
+#      simulator repeats and the flaky tests of both in one table.
 #   3b. UI gate (Linux): every UI group of the gate must be green for exactly this app
 #      fingerprint and its own test fingerprint, from this run or an earlier one, and none may be
 #      red for that pair (a red is fixed, never re-run to green; .github/scripts/ui_evidence.py
@@ -55,9 +57,9 @@ run-name: >-
 #   5. The commit gets the annotated git tag build-<number>; its message names the gate.
 # Big gate: two to two and a half hours until the approval when every UI group runs (CI ~20 min,
 # UI flow 75-100 min observed); after a test-only change only the touched groups run, and the
-# stress pass (~45 min) sets the time. Small gate: about 45 min (CI ~20, UI build ~2, its two
-# groups ~18 side by side). After the click: archive and upload ~15-20 min, "Was testen" mostly
-# a few minutes more (at most 20).
+# stress pass (~45 min) sets the time. Small gate: about 70 min (CI ~20, then the stress pass
+# ~45 sets the time; its two UI groups, ~20 with their build, run beside it). After the click:
+# archive and upload ~15-20 min, "Was testen" mostly a few minutes more (at most 20).
 #
 # Every part tests this run's commit (github.sha); only a UI group may instead be covered by an
 # earlier green result for a byte-identical app and the same test code of that group (3b; the
@@ -103,7 +105,7 @@ on:
   workflow_dispatch:
     inputs:
       gate:
-        description: 'Gate: big (for testers and the App Store: every UI group, stress pass) or small (daily build only for the owner: CI and the UI groups flow-full and contrast)'
+        description: 'Gate: big (for testers and the App Store: every UI group, stress pass) or small (daily build only for the owner: CI, the UI groups flow-full and contrast, stress pass)'
         type: choice
         options: [big, small]
         default: big
@@ -207,10 +209,9 @@ jobs:
 
   stress:
     name: Stress pass
-    needs: [check, tests]
-    # The big gate only (the owner's rule 17.11.: before each build for testers); the small gate
-    # of the daily build has none (the owner's decision 10 of 18.11.2026).
-    if: needs.check.outputs.gate == 'big'
+    # Both gates (the owner's rule 17.11. and decision 4: before every upload, the daily build
+    # included, as it can upload after his click).
+    needs: tests
     uses: ./.github/workflows/ui-stress.yml
     with:
       release: true
@@ -251,14 +252,13 @@ jobs:
     # groups or a reused earlier result), none red for that pair; see .github/scripts/
     # ui_evidence.py. Big gate: every group; small gate: its two (--groups). Linux, before the Mac
     # job. If the API does not answer it fails; re-run this job then (earlier_attempts.py counts
-    # it as machinery: it decides from the results alone). The stress pass must be green, or, with
-    # the small gate only, skipped.
+    # it as machinery: it decides from the results alone). The stress pass must be green with
+    # either gate.
     name: UI gate (every group of the gate green for this app and its test code)
     needs: [check, tests, ui, stress]
     if: >-
       ${{ !cancelled() && needs.check.outputs.ready == 'true' && needs.tests.result == 'success'
-      && needs.ui.result == 'success'
-      && (needs.stress.result == 'success' || (needs.check.outputs.gate == 'small' && needs.stress.result == 'skipped')) }}
+      && needs.ui.result == 'success' && needs.stress.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # actions: read for the runs and jobs, checks: read for the flaky warnings of reused jobs.
@@ -289,12 +289,11 @@ jobs:
   release:
     name: Archive and upload to TestFlight
     needs: [check, tests, ui, stress, ui-gate]
-    # The tests, the UI flow, the stress pass and the UI gate of this run must all be green;
-    # nothing skips them. Only the small gate has no stress pass (skipped there, never failed).
+    # The tests, the UI flow, the stress pass and the UI gate of this run must all be green, with
+    # either gate; nothing skips them.
     if: >-
       ${{ !cancelled() && needs.check.outputs.ready == 'true' && needs.tests.result == 'success'
-      && needs.ui.result == 'success' && needs.ui-gate.result == 'success'
-      && (needs.stress.result == 'success' || (needs.check.outputs.gate == 'small' && needs.stress.result == 'skipped')) }}
+      && needs.ui.result == 'success' && needs.stress.result == 'success' && needs.ui-gate.result == 'success' }}
     # The owner's approval (decision 5 of 18.11.2026): the job waits until the environment's
     # required reviewer approves it, and only then gets its secrets (the four App Store Connect
     # secrets are environment secrets there, docs/launch/FREIGABE_EINRICHTEN.md). The only job of
@@ -488,7 +487,7 @@ jobs:
         run: |
           about="TestFlight build $GITHUB_RUN_NUMBER of $GITHUB_SHA (run $GITHUB_RUN_ID, attempt ${ATTEMPT:-$GITHUB_RUN_ATTEMPT}${EARLIER:+; $EARLIER}${UI_GATE:+; $UI_GATE})"
           if [ "$GATE" = small ]; then
-            message="$about: small gate (daily build for the owner, not for testers): CI and the UI groups of the small gate green, no stress pass"
+            message="$about: small gate (daily build for the owner, not for testers): CI, the UI groups of the small gate and the stress pass green"
           else
             message="$about: CI, UI flow and stress pass green"
           fi

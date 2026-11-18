@@ -10,11 +10,12 @@ name: Daily build
 #     it and replace one that waits there);
 #   - the app changed since the last uploaded build (app fingerprint, ui_groups.py; docs, tests
 #     and the pipeline do not count), and no TestFlight run tested exactly this commit yet.
-# The TestFlight run then tests main with the small gate (CI and the UI groups flow-full and
-# contrast, about 45 min) and its upload job waits for the owner's click like every upload: the
-# daily build never uploads by itself. This job reads no secret, runs on Linux (a minute) and
-# only starts the run; testflight.yml does everything else, so build numbers, tags and the one
-# TestFlight run at a time stay as they are.
+# The TestFlight run then tests main with the small gate (CI, the UI groups flow-full and
+# contrast and the small stress pass, about 70 min; the stress pass runs before every upload,
+# the owner's rule 17.11. and decision 4) and its upload job waits for the owner's click like
+# every upload: the daily build never uploads by itself. This job reads no secret, runs on Linux
+# (a minute) and only starts the run; testflight.yml does everything else, so build numbers, tags
+# and the one TestFlight run at a time stay as they are.
 #
 # Not part of nightly.yml on purpose: its jobs are the unchanged control run for the StoreKit
 # "no product" case of 18.11. (see its comment), and a TestFlight build needs testflight.yml's own

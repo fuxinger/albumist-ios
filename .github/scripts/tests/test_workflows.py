@@ -267,17 +267,22 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertEqual(job_field(text, "tests", "if"), "needs.check.outputs.ready == 'true'")
         for job in ("ui", "stress"):
             self.assertIn("tests", [need.strip() for need in job_field(text, job, "needs").split(",")])
-        # The two gates (the owner's decision 10 of 18.11.2026): the stress pass runs with the big
-        # gate, and the only "or" before the upload lets it be skipped with the small gate alone.
-        # The check job turns the input into big or small and stops on anything else.
-        self.assertEqual(job_field(text, "stress", "if"), "needs.check.outputs.gate == 'big'")
-        small = "(needs.stress.result == 'success' || (needs.check.outputs.gate == 'small' && needs.stress.result == 'skipped'))"
-        for job, needed in (("ui-gate", ("tests", "ui")), ("release", ("tests", "ui", "ui-gate"))):
+        # The two gates (the owner's decision 10 of 18.11.2026) differ only in the UI groups: the
+        # stress pass runs before every upload, also before the daily build with the small gate
+        # (the owner's rule of 17.11. and decision 4), so it has no condition of its own and the
+        # UI gate and the upload need it green with either gate. The check job turns the input
+        # into big or small and stops on anything else.
+        self.assertEqual(job_field(text, "stress", "if"), "")
+        stress = job_blocks(text)["stress"]
+        self.assertNotIn("gate", stress)  # the same small pass with either gate
+        self.assertIn("photos: '10000'", stress)
+        self.assertIn("minutes: '15'", stress)
+        for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "ui-gate"))):
             with self.subTest(job=job):
                 rule = job_field(text, job, "if")
-                self.assertEqual(rule.count(small), 1, rule)
-                self.assertNotIn("||", rule.replace(small, ""))
+                self.assertNotIn("||", rule)
                 self.assertNotIn("inputs.", rule)
+                self.assertNotIn("gate", rule.replace("needs.ui-gate.result", ""))
                 self.assertIn("needs.check.outputs.ready == 'true'", rule)
                 for need in needed:
                     self.assertIn(f"needs.{need}.result == 'success'", rule)

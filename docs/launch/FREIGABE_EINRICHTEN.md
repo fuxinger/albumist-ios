@@ -117,7 +117,7 @@ Gut zu wissen:
 - **Bitte am selben Tag entscheiden** (freigeben oder ablehnen). Solange ein Lauf wartet, startet
   kein anderer TestFlight-Lauf, auch kein täglicher Build. Nach 30 Tagen bricht GitHub ihn selbst
   ab.
-- Der tägliche Build wartet morgens ab etwa 5:30 Uhr (im Sommer 6:30 Uhr) auf dich, aber nur an
+- Der tägliche Build wartet morgens ab etwa 6 Uhr (im Sommer 7 Uhr) auf dich, aber nur an
   Tagen, an denen sich die App geändert hat.
 - **Die Freigabe gibst nur du.** Kein Agent gibt sie für dich.
 - **Nur solange das Repository öffentlich ist:** Den Prüfer für eine Umgebung bietet GitHub ohne
@@ -130,7 +130,7 @@ Gut zu wissen:
 
 Entweder auf den nächsten täglichen Build warten, oder: **Actions** > **TestFlight** > **Run
 workflow**, Zweig `main`, im Feld „Gate“ `small` wählen (das geht am schnellsten). Der erste Job
-„Upload approval“ wird grün und nennt dich als Prüfer. Rund 45 Minuten später wartet der Lauf auf
+„Upload approval“ wird grün und nennt dich als Prüfer. Rund 70 Minuten später wartet der Lauf auf
 deine Freigabe.
 
 Steht im ersten Job stattdessen „No upload: the approval is not set up“, fehlt Schritt 1 oder 2.

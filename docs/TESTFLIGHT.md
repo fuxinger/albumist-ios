@@ -111,20 +111,20 @@ Actions > **TestFlight feedback** > Run workflow.
 - Ein TestFlight-Build läuft 90 Tage.
 - Die Bundle-ID `app.albumist.ios` lässt sich nach dem ersten Hochladen nicht mehr ändern.
 - Ablauf in GitHub (ein Lauf, Profi-Analyse, 17.11.2026): Actions > **TestFlight** > Run workflow
-  auf `main` (oder `gh workflow run testflight.yml --ref main`). Der Lauf prüft genau diesen
-  Commit selbst: erst CI (Regeln, Kern-Tests, iOS-Tests auf einem Mac), dann nebeneinander die
-  UI-Tests und den kleinen Härtetest (kleines Tor: Abschnitt „Zwei Tore“). Nur wenn alles grün
-  ist und du freigegeben hast (`docs/launch/FREIGABE_EINRICHTEN.md`), baut ein Mac das Archiv,
-  prüft es, signiert es beim Export, lädt es hoch und setzt „Was testen“; danach bekommt der
-  Commit das Git-Tag `build-<Nummer>`. Zwei bis zweieinhalb Stunden bis zur Freigabe, wenn
-  alle UI-Gruppen laufen (die UI-Tests allein 75–100 Minuten); laufen nur einzelne Gruppen oder
-  keine (Abschnitt „UI-Tests: nur betroffene Gruppen“), bestimmt der Härtetest (rund 45 Minuten)
-  die Dauer; mit dem kleinen Tor rund 45 Minuten. Nach der Freigabe 15–20 Minuten bis zum
-  Hochladen, „Was testen“ setzt derselbe Job meist wenige Minuten danach (höchstens 20). Kein Teil
-  wartet auf andere Läufe. Ein zweiter TestFlight-Lauf wartet, bis der erste ganz fertig ist, auch
-  während der erste auf deine Freigabe wartet. Wiederholungen nach einem Simulator-Ausfall und
-  Tests, die erst in der Wiederholung grün wurden, zählt der Job „Repeats and flaky tests“ für
-  UI-Tests und Härtetest zusammen.
+  auf `main` (oder `gh workflow run testflight.yml --ref main`). Der Lauf prüft genau diesen Commit
+  selbst: erst CI (Regeln, Kern-Tests, iOS-Tests auf einem Mac), dann nebeneinander die UI-Tests
+  (kleines Tor: nur zwei Gruppen, Abschnitt „Zwei Tore“) und den kleinen Härtetest, bei beiden
+  Toren. Nur wenn alles grün ist und du freigegeben hast (`docs/launch/FREIGABE_EINRICHTEN.md`),
+  baut ein Mac das Archiv, prüft es, signiert es beim Export, lädt es hoch und setzt „Was testen“;
+  danach bekommt der Commit das Git-Tag `build-<Nummer>`. Zwei bis zweieinhalb Stunden bis zur
+  Freigabe, wenn alle UI-Gruppen laufen (die UI-Tests allein 75–100 Minuten); laufen nur einzelne
+  Gruppen oder keine (Abschnitt „UI-Tests: nur betroffene Gruppen“), bestimmt der Härtetest (rund 45
+  Minuten) die Dauer, ebenso beim kleinen Tor: rund 70 Minuten bis zur Freigabe. Nach der Freigabe
+  15–20 Minuten bis zum Hochladen, „Was testen“ setzt derselbe Job meist wenige Minuten danach
+  (höchstens 20). Kein Teil wartet auf andere Läufe. Ein zweiter TestFlight-Lauf wartet, bis der
+  erste ganz fertig ist, auch während der erste auf deine Freigabe wartet. Wiederholungen nach einem
+  Simulator-Ausfall und Tests, die erst in der Wiederholung grün wurden, zählt der Job „Repeats and
+  flaky tests“ für UI-Tests und Härtetest zusammen.
 - Kein Push und kein Merge in `main` startet einen Build (16.11.: das Zusammenführen der
   Webseite startete sonst einen Build mit altem App-Stand). Von selbst startet nur der tägliche
   Build mit kleinem Tor (`daily-build.yml`, Abschnitt „Zwei Tore“), und auch er lädt erst nach
@@ -157,9 +157,9 @@ Actions > **TestFlight feedback** > Run workflow.
   UI-Tor. Ein Test in `.github/scripts/tests/test_workflows.py` schlägt fehl, sobald ein
   Workflow wieder eine Eingabe oder ein Skript einen Schalter zum Überspringen bekommt. Die
   einzige Wahl ist das Tor (groß oder klein, beide von Fuchs beschlossen, Abschnitt „Zwei Tore“).
-- Härtetest (Regel Fuchs, 17.11.2026): vor jedem TestFlight-Build mit großem Tor (für Tester und
-  App Store) der kleine Durchgang mit 10.000 Fotos und 15 Minuten Messung (rund 45 Minuten); der
-  tägliche Build mit kleinem Tor hat ihn nicht (Abschnitt „Zwei Tore“, offene Frage dort). Er
+- Härtetest (Regel Fuchs, 17.11.2026, und Entscheidung 4): vor jedem TestFlight-Build, mit beiden
+  Toren, der kleine Durchgang mit 10.000 Fotos und 15 Minuten Messung (rund 45 Minuten); auch vor
+  dem täglichen Build mit kleinem Tor, denn er lädt nach deiner Freigabe hoch. Er
   läuft im TestFlight-Lauf neben den UI-Tests und muss grün sein, sonst wird nicht hochgeladen;
   grün heißt, test12 ist durchgelaufen (ein übersprungener test12 zählt als Fehler). Von Hand:
   Actions > **UI stress** > Run workflow, Vorgaben unverändert lassen (oder `gh workflow run
@@ -456,8 +456,8 @@ brauchen sie nicht.
 | CI | Regeln, Kern-Tests Linux, iOS-Bau mit Kern- und App-Tests auf dem Mac | gleich |
 | UI-Tests | nur die zwei kurzen Gruppen `flow-full` (ganzer Ablauf mit Video) und `contrast` (Kontrast), je Job rund 18 Minuten, nebeneinander | alle Gruppen (`auto`: jede ohne Grün für genau diese App und ihren Testcode) |
 | UI-Tor | diese zwei Gruppen grün für genau diese App und ihren Testcode, keine davon je rot dafür | alle Gruppen, gleiche Regeln |
-| Härtetest 10.000 Fotos | nein | ja |
-| Bis zur Freigabe | rund 45 Minuten | 2–2,5 Stunden (ohne UI-Gruppen rund 65 Minuten) |
+| Härtetest 10.000 Fotos | ja (vor jedem Upload: Regel 17.11., Entscheidung 4), neben den zwei Gruppen | ja |
+| Bis zur Freigabe | rund 70 Minuten (CI rund 20, dann bestimmt der Härtetest mit rund 45 die Dauer) | 2–2,5 Stunden (ohne UI-Gruppen rund 65–70 Minuten wie das kleine Tor) |
 | Hochladen | erst nach deiner Freigabe | erst nach deiner Freigabe |
 | Erkennbar an | Laufname „TestFlight daily build (small gate, only for the owner)“, Nachricht des Tags, letzte Zeile von „Was testen“ | Laufname „TestFlight“ |
 | Für wen | nur dich (interne Tests); nicht an externe Tester geben | Tester und App Store |
@@ -475,16 +475,12 @@ brauchen sie nicht.
   trotzdem. **Grenze:** hast du einen Build abgelehnt und kommt danach nur Doku dazu, bietet der
   nächste Morgen dieselbe App noch einmal an (einmal ablehnen genügt).
 - Der tägliche Build achtet nicht auf die Mac-Warteschlange (eigene Gruppen wie jeder
-  TestFlight-Lauf); er braucht höchstens zwei Macs zugleich, um 03:30 UTC sind die nächtlichen
-  Läufe meist fertig.
+  TestFlight-Lauf); er braucht höchstens drei Macs zugleich (zwei UI-Gruppen und den Härtetest), um
+  03:30 UTC sind die nächtlichen Läufe meist fertig.
 - **Nicht in `nightly.yml`**: dessen Jobs sind seit 18.11. bewusst unverändert der Vergleichslauf
   für den StoreKit-Fall („no product“), und ein TestFlight-Build braucht die Laufnummern von
   `testflight.yml` (Build-Nummer) und dessen Gruppe `testflight`.
-- Kleines Tor heißt hier „CI und zwei kurze Bildschirm-Tests“, rund 45 Minuten; die
-  Fable-Analyse (P6-02) wünscht höchstens 20. Kürzer wird es erst mit den Plänen für kürzere
-  UI-Tests (`docs/TEST_PLAN.md`).
-- **Offene Frage an Fuchs (Härtetest):** Deine Regel vom 17.11. („vor jedem TestFlight-Build der
-  Härtetest“) gilt jetzt für das große Tor; der tägliche Build hat ihn nicht, so wie Entscheidung
-  10 das kleine Tor beschreibt. Entscheidung 4 („Härtetest vor jedem Upload so lassen“) liest sich
-  anders. Soll er auch vor jedem täglichen Build laufen, ist das eine kleine Änderung in `testflight.yml`;
-  der tägliche Build dauert dann rund 70 statt 45 Minuten.
+- **Kleines Tor = CI + `flow-full` + `contrast` + Härtetest**, rund 70 Minuten bis zur Freigabe. Den
+  Härtetest verlangen deine Regel vom 17.11. und Entscheidung 4 vor jedem Upload, und auch der
+  tägliche Build kann nach deinem Klick hochladen. Die Dauer bestimmt darum der Härtetest (rund 45
+  Minuten nach CI), nicht die UI-Tests; die Fable-Analyse (P6-02) wünschte höchstens 20 Minuten.

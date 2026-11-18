@@ -288,6 +288,10 @@ final class AccessibilityUITests: XCTestCase {
             print("UI_STEP_SKIPPED \(tag) starter plan (no starter set on the overview)")
         } else if tap(starter, "\(tag) open starter plan", timeout: 10) {
             let planShown = app.navigationBars[w.planTitle].waitForExistence(timeout: 20)
+            // A tap on the clear part of a row (largest text) that missed would otherwise pass
+            // silently: the plan has to be open.
+            print(planShown ? "UI_STEP_OK \(tag) starter plan opened" : "UI_STEP_MISSING \(tag) starter plan opened")
+            XCTAssertTrue(planShown, "Not opened: \(tag) starter plan (the tap landed elsewhere)")
             if planShown {
                 sleep(2)
                 check("\(tag) plan", english: english)
@@ -799,9 +803,6 @@ final class AccessibilityUITests: XCTestCase {
         return false
     }
 
-    /// Scrolls `element` by short drags (up above the tab bar, or down below the navigation bar
-    /// for an element under it) until at least 30 pt of it are clear of both bars, then taps the
-    /// middle of that part. False when it never got clear.
     /// The part of `element` clear of both bars (top and bottom; empty or negative when none).
     private func clearBand(_ element: XCUIElement) -> (top: CGFloat, bottom: CGFloat) {
         let window = app.windows.firstMatch.frame
@@ -813,6 +814,9 @@ final class AccessibilityUITests: XCTestCase {
         return (top, bottom)
     }
 
+    /// Scrolls `element` by short drags (up above the tab bar, or down below the navigation bar
+    /// for an element under it) until at least 30 pt of it are clear of both bars, then taps the
+    /// middle of that part. False when it never got clear.
     private func tapClearOfBars(_ element: XCUIElement, _ step: String) -> Bool {
         guard element.exists else { return false }
         let window = app.windows.firstMatch.frame

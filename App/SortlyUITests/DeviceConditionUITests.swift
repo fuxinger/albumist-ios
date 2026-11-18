@@ -255,6 +255,16 @@ final class DeviceConditionUITests: XCTestCase {
         return moved
     }
 
+    /// The end of a condition test: the analysis still runs or every photo is analysed. An idle
+    /// card with photos left ("180 von 246 Fotos analysiert") is a run that said "fertig" too
+    /// early while the test watched it.
+    private func expectRunningOrComplete(_ context: String) {
+        let running = analysisRunning
+        let complete = !running && everyPhotoAnalysed
+        print(running || complete ? "UI_STEP_OK analysis running or complete \(context)" : "UI_STEP_MISSING analysis running or complete \(context)")
+        XCTAssertTrue(running || complete, "The analysis stopped with photos left \(context): \(analysedPhotos().map { "\($0.analysed) of \($0.total)" } ?? "no count readable")")
+    }
+
     /// Waits until the image step (4) runs, where most of the time goes.
     @discardableResult
     private func waitForImageStep(_ what: String) -> Bool {
@@ -648,7 +658,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// read the running card's title, which the sorting show covers, so it said nothing. Now:
     /// - between the tap and the end only two queries by identifier: the preview's button is
     ///   gone (the plan started) and no result is shown (it is not done); that is asserted;
-    /// - the first change gets 5 s from the tap (it goes through at once), and after the
+    /// - the first change gets 5 s from the start of the plan (it goes through at once), and after the
     ///   relaunch the card must say that some but not all steps are done, so "Rest anlegen"
     ///   and "Alles zurücknehmen" run on a real half-done plan;
     /// - when the plan was over anyway (its result showed, or no card came after an end later
@@ -665,14 +675,17 @@ final class DeviceConditionUITests: XCTestCase {
             let tapped = Date()
             guard tap(apply, "start \(name)", timeout: 5) else { return nil }
             let started = waitGone(apply, timeout: 10)
+            let left = Date()
             guard started else {
                 print("UI_STEP_MISSING \(name) started")
                 shot("x-plan-not-started-\(name.replacingOccurrences(of: " ", with: "-"))")
                 XCTFail("The plan for \(name) did not start: \"Jetzt umsetzen\" is still there 10 s after the tap")
                 return nil
             }
-            // The first change (the album) goes through at once; the next waits 30 s.
-            let waited = Date().timeIntervalSince(tapped)
+            // The first change (the album) goes through at once; the next waits 30 s. Counted
+            // from the moment the preview left (the plan started), not from the tap: a slow tap
+            // while the sorting show starts would leave "Erledigt: 0 von N" (review of a26e8bc).
+            let waited = Date().timeIntervalSince(left)
             if waited < 5 { usleep(UInt32((5 - waited) * 1_000_000)) }
             let finished = app.buttons["result.receipt"].exists
             UITestOnboarding.clock("end the app during \(name)")
@@ -772,6 +785,7 @@ final class DeviceConditionUITests: XCTestCase {
         expectAnalysisGoesOn("after the heat")
         XCTAssertFalse(anything("Analyse pausiert").exists, "The analysis stopped for heat")
         shot("02-after-heat")
+        expectRunningOrComplete("at the end of the heat")
     }
 
     /// A nearly empty battery makes the analysis wait with its own words (not "warm"); Low
@@ -806,6 +820,7 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertFalse(pausedForLowPower, "Low Power Mode paused the analysis in the app")
         XCTAssertFalse(app.buttons["Fortsetzen"].exists, "The analysis waits for a tap after low battery")
         shot("04-after-battery")
+        expectRunningOrComplete("at the end of low battery and Low Power Mode")
     }
 
     // MARK: 3 Background time over, app ended
@@ -860,6 +875,7 @@ final class DeviceConditionUITests: XCTestCase {
             record("after relaunch, running")
         }
         shot("07-running-after-relaunch")
+        expectRunningOrComplete("at the end, after the relaunch")
     }
 
     // MARK: 4 Unreadable, iCloud only, offline
@@ -1013,6 +1029,8 @@ final class DeviceConditionUITests: XCTestCase {
         app.activate()
         expectAnalysisGoesOn("after the disk had space again", dismissing: true)
         shot("11-after-disk-full-analysis")
+        // Before the plan part, which ends the app (a UI run does not resume at launch).
+        expectRunningOrComplete("after the disk had space again")
 
         start(["-SortlyUITestDiskFull", "plan"])
         let title = "Testalbum Speicher"
@@ -1213,6 +1231,7 @@ final class DeviceConditionUITests: XCTestCase {
         // none looked at twice, is DeviceConditionRunTests.accessTakenAwayThenBackEndsWithEveryPhoto.
         expectAnalysisGoesOn("after access came back")
         shot("20-access-back")
+        expectRunningOrComplete("at the end, after access came back")
     }
 
     /// Full photo access again through the onboarding.

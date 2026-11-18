@@ -47,21 +47,23 @@ struct PreviewSensitiveDocumentTests {
     static func day(_ n: Int) -> Date { start.addingTimeInterval(Double(n) * 86_400) }
 
     func photo(_ id: AssetID, _ day: Int) -> AssetFacts {
-        AssetFacts(asset: AssetSnapshot(id: id, creationDate: Self.day(day)))
+        AssetFacts(asset: AssetSnapshot(id: id, creationDate: Self.day(day)), contentKnown: true)
     }
     /// A photographed bank card: the image analysis took it for a utility picture, its text
     /// was read and stored with the card number masked; no document type was recognised.
     func card(_ id: AssetID, _ day: Int) -> AssetFacts {
         AssetFacts(asset: AssetSnapshot(id: id, creationDate: Self.day(day)),
                    recognizedText: TextMinimizer.storable("DKB\nVisa Debit\n4111 1111 1111 1111\nMAX MUSTERMANN"),
-                   looksLikeDocument: true)
+                   looksLikeDocument: true, contentKnown: true)
     }
     func screenshot(_ id: AssetID, _ day: Int) -> AssetFacts {
-        AssetFacts(asset: AssetSnapshot(id: id, subtypes: .screenshot, creationDate: Self.day(day)), recognizedText: "Bestellung versandt")
+        AssetFacts(asset: AssetSnapshot(id: id, subtypes: .screenshot, creationDate: Self.day(day)), recognizedText: "Bestellung versandt",
+                   contentKnown: true)
     }
     func statement(_ id: AssetID, _ day: Int, _ sensitivity: DocumentSensitivity) -> AssetFacts {
         AssetFacts(asset: AssetSnapshot(id: id, creationDate: Self.day(day)),
-                   document: DocumentInfo(type: .letter, typeReliability: .likely, keywords: [], sensitivity: sensitivity))
+                   document: DocumentInfo(type: .letter, typeReliability: .likely, keywords: [], sensitivity: sensitivity),
+                   contentKnown: true)
     }
     func dates(_ facts: [AssetFacts]) -> [AssetID: Date] {
         Dictionary(uniqueKeysWithValues: facts.compactMap { f in f.asset.creationDate.map { (f.id, $0) } })
@@ -80,7 +82,11 @@ struct PreviewSensitiveDocumentTests {
         #expect(PreviewRank(transfer) == .sensitive)               // the masked IBAN
         var whiteboard = photo("board", 0)
         whiteboard.looksLikeDocument = true
+        // Taken for a document, but no text explains it (second review): hidden.
+        #expect(PreviewRank(whiteboard) == .sensitive)
+        whiteboard.document = DocumentInfo(type: .letter, typeReliability: .plausible, keywords: [], sensitivity: .normal)
         #expect(PreviewRank(whiteboard) == .document)
+        #expect(PreviewRank(AssetFacts(asset: AssetSnapshot(id: "new"))) == .unknown)   // not analysed yet
         let ranks = PreviewRank.ranks(of: [photo("p", 0), card("card", 1), screenshot("shot", 2)])
         #expect(ranks == ["card": .sensitive, "shot": .document])  // ordinary photos are left out
     }
@@ -251,13 +257,14 @@ struct PreviewSensitiveDocumentTests {
         let rome = PlaceComponents(isoCountryCode: "IT", country: "Italien", locality: "Rom")
         func trip(_ id: AssetID, _ day: Int, pixels: Int) -> AssetFacts {
             AssetFacts(asset: AssetSnapshot(id: id, creationDate: Self.day(day), pixelWidth: pixels, pixelHeight: pixels),
-                       place: rome, placeSource: .gpsReverseGeocoded, tripID: SortlyID("rom"))
+                       place: rome, placeSource: .gpsReverseGeocoded, tripID: SortlyID("rom"), contentKnown: true)
         }
         var bigCard = trip("card", 3, pixels: 8000)  // the largest picture of the trip
         bigCard.recognizedText = TextMinimizer.storable("Visa 4111 1111 1111 1111")
         bigCard.looksLikeDocument = true
         var ticket = trip("ticket", 4, pixels: 6000)
         ticket.looksLikeDocument = true
+        ticket.document = DocumentInfo(type: .ticket, typeReliability: .likely, keywords: [], sensitivity: .normal)
         let facts = [trip("r1", 1, pixels: 3000), trip("r2", 2, pixels: 4000), bigCard, ticket]
         #expect(TravelAtlas.compute(facts: facts, minimumPhotosPerCountry: 1).favoriteTripCover == "r2")
         #expect(TravelAtlas.compute(facts: [bigCard, ticket], minimumPhotosPerCountry: 1).favoriteTripCover == nil)
@@ -266,5 +273,135 @@ struct PreviewSensitiveDocumentTests {
         #expect(CountryPhotos.collect(countryCode: "IT", facts: [trip("r1", 1, pixels: 1), ticket]).cover == "r1")
         #expect(CountryPhotos.collect(countryCode: "IT", facts: [bigCard, ticket]).cover == "ticket")
         #expect(CountryPhotos.collect(countryCode: "IT", facts: [bigCard]).cover == nil)
+    }
+}
+
+/// Second review of the build 36 fix: what the text step makes of a card, an ID or a medical
+/// paper that names no document type, and that previews and covers stay the same from launch
+/// to launch.
+@Suite("Preview photos: second review")
+struct PreviewSecondReviewTests {
+    @Test func aCardOrIDWithoutADocumentTypeIsAnOtherSensitiveDocument() throws {
+        let analyzer = DocumentAnalyzer()
+        let card = try #require(analyzer.analyze(text: "DKB\nVisa Debit\nMAX MUSTERMANN\nVALID THRU 12/28"))
+        #expect(card.type == .other && card.sensitivity == .financial)
+        let passport = try #require(analyzer.analyze(text: "REISEPASS PASSPORT\nName/Surname MUSTERMANN\nGeburtsdatum/Date of birth 01.01.1980"))
+        #expect(passport.type == .other && passport.sensitivity == .identity)
+        // Nothing more is kept of them than the kind: no subject, sender, number or amount.
+        #expect(card.subject == nil && card.merchant == nil && card.totalAmount == nil && card.keywords.isEmpty)
+        // Never an album of their own: "Sonstige Dokumente" is never suggested, and the type is uncertain.
+        #expect(card.typeReliability == .uncertain)
+        // A plain text without document or card words is still no document.
+        #expect(analyzer.analyze(text: "Schöner Sonnenuntergang am Großen Arber") == nil)
+        // A receipt paid by girocard stays a receipt of normal sensitivity (its album is unchanged).
+        let receipt = try #require(analyzer.analyze(text: "Kassenbon\nSumme EUR 12,40\ngirocard\nMwSt 7%"))
+        #expect(receipt.type == .receipt && receipt.sensitivity == .normal)
+        // What is stored of the text does not change: masked as before.
+        #expect(TextMinimizer.storable("DKB Visa Debit 4111 1111 1111 1111") == "DKB Visa Debit •••• ••••")
+    }
+
+    @Test func equalDatesGiveTheSamePreviewWhateverTheOrder() {
+        // Twenty photos in bursts of four with the very same second, plus a document and a card.
+        let base = Date(timeIntervalSince1970: 1_750_000_000)
+        var dates: [AssetID: Date] = [:]
+        for i in 0..<20 { dates[AssetID(String(format: "b%02d", i))] = base.addingTimeInterval(Double(i / 4) * 3600) }
+        dates["doc"] = base.addingTimeInterval(3600)
+        dates["card"] = base.addingTimeInterval(7200)
+        let ranks: [AssetID: PreviewRank] = ["doc": .document, "card": .sensitive]
+        let ids = Array(dates.keys)
+        let first = PreviewPicker.pick(ids.sorted(), dates: dates, cover: nil, count: 8, ranks: ranks)
+        #expect(first.count == 8 && !first.contains("card") && !first.contains("doc"))
+        for _ in 0..<20 {
+            #expect(PreviewPicker.pick(ids.shuffled(), dates: dates, cover: nil, count: 8, ranks: ranks) == first)
+            #expect(PreviewPicker.pick(Set(ids.shuffled()), dates: dates, cover: nil, count: 3, ranks: ranks)
+                    == PreviewPicker.pick(ids.sorted(), dates: dates, cover: nil, count: 3, ranks: ranks))
+            #expect(PreviewPicker.firstSuited(PreviewPicker.chronological(ids.shuffled(), dates: dates), count: 2, ranks: ranks)
+                    == ["b00", "b01"])
+            #expect(PreviewPicker.newest(ids.shuffled(), dates: dates, ranks: ranks) == "b16")   // equal dates: the smallest id, as `newest` says
+        }
+    }
+
+    /// The cover is the same in every launch, not only within one: Swift's sets iterate in
+    /// another order in every process, so the choice must not depend on it.
+    @Test func theCoverOfAFixedSuggestionIsPinned() {
+        let members = Set((0..<12).map { AssetID(String(format: "z%02d", $0)) } + ["card", "shot"])
+        let ranks: [AssetID: PreviewRank] = ["card": .sensitive, "shot": .document]
+        let id = SortlyID.stable("frequent", "zwiesel")
+        #expect(PreviewPicker.cover(members, preferred: "card", proposal: id, ranks: ranks) == "z05")
+        #expect(PreviewPicker.cover(members, preferred: "shot", proposal: id, ranks: ranks) == "z05")
+        #expect(PreviewPicker.cover(["card", "shot", "receipt"], preferred: "card", proposal: id,
+                                    ranks: ["card": .sensitive, "shot": .document, "receipt": .document]) == "receipt")
+    }
+
+    @Test func analysedPhotosWinOverPhotosNotAnalysedYet() {
+        let base = Date(timeIntervalSince1970: 1_750_000_000)
+        let ids: [AssetID] = (0..<10).map { AssetID("u\($0)") } + ["p1", "p2", "doc"]
+        var dates: [AssetID: Date] = [:]
+        for (i, id) in ids.enumerated() { dates[id] = base.addingTimeInterval(Double(i) * 3600) }
+        var ranks = Dictionary(uniqueKeysWithValues: (0..<10).map { (AssetID("u\($0)"), PreviewRank.unknown) })
+        ranks["doc"] = .document
+        let proposal = SortlyID("s")
+        // Both analysed photos first, unknown ones for the rest, the document last of all.
+        let preview = PreviewPicker.pick(ids, dates: dates, cover: nil, count: 4, ranks: ranks)
+        #expect(preview.count == 4 && preview.contains("p1") && preview.contains("p2") && !preview.contains("doc"))
+        #expect(preview == PreviewPicker.chronological(preview, dates: dates))
+        #expect(PreviewPicker.pick(["u1", "doc", "u2"], dates: dates, cover: nil, count: 2, ranks: ranks) == ["u1", "u2"])
+        // The cover: an analysed photo, also when the suggestion's own is not analysed yet.
+        let cover = PreviewPicker.cover(Set(ids), preferred: "u3", proposal: proposal, ranks: ranks)
+        #expect(cover == "p1" || cover == "p2")
+        // Nothing analysed yet: the suggestion's own cover.
+        #expect(PreviewPicker.cover(Set(ids.prefix(10)), preferred: "u3", proposal: proposal, ranks: ranks) == "u3")
+        #expect(PreviewPicker.cover(["u1", "doc"], preferred: "doc", proposal: proposal, ranks: ranks) == "u1")
+        #expect(PreviewPicker.newest(ids, dates: dates, ranks: ranks) == "p2")
+        #expect(PreviewPicker.firstSuited(ids, count: 3, ranks: ranks) == ["p1", "p2", "u0"])
+        #expect(PreviewPicker.firstSuited(["doc", "u5"], count: 1, ranks: ranks) == ["u5"])
+        // The mosaic: from each stretch an analysed photo where it has one.
+        let library: [AssetID] = (0..<60).map { AssetID("m\($0)") }
+        var mosaicRanks = Dictionary(uniqueKeysWithValues: library.map { ($0, PreviewRank.unknown) })
+        for i in [5, 35, 55] { mosaicRanks[library[i]] = nil }   // three analysed photos
+        mosaicRanks[library[0]] = .document
+        let mosaic = PreviewPicker.evenly(library, count: 3, ranks: mosaicRanks) { $0 }
+        #expect(mosaic == ["m5", "m35", "m55"])
+    }
+
+    @Test func theSharedAtlasImageUsesOnlyAnalysedPhotos() {
+        let rome = PlaceComponents(isoCountryCode: "IT", country: "Italien", locality: "Rom")
+        func trip(_ id: AssetID, pixels: Int, analysed: Bool) -> AssetFacts {
+            AssetFacts(asset: AssetSnapshot(id: id, creationDate: Date(timeIntervalSince1970: 1_750_000_000), pixelWidth: pixels, pixelHeight: pixels),
+                       place: rome, placeSource: .gpsReverseGeocoded, tripID: SortlyID("rom"), contentKnown: analysed)
+        }
+        // The largest picture is not analysed yet: it could be the card.
+        let facts = [trip("small", pixels: 1000, analysed: true), trip("big", pixels: 8000, analysed: false)]
+        #expect(TravelAtlas.compute(facts: facts, minimumPhotosPerCountry: 1).favoriteTripCover == "small")
+        #expect(TravelAtlas.compute(facts: [facts[1]], minimumPhotosPerCountry: 1).favoriteTripCover == nil)
+    }
+
+    @Test func storedTextsThatShowACardOrAStatement() {
+        for text in ["IBAN ••••", "Visa Debit", "DKB girocard", "BIC: BYLADEM1001", "Kontostand 12,00 EUR", "VALID THRU 12/28",
+                     "Kreditkartenabrechnung", "4111 •••• ••••"] {
+            #expect(TextMinimizer.looksSensitive(text), "\(text)")
+        }
+        for text in ["", "Public transport in the Republic", "Urlaub im Libanon", "Revisaa", "Bestellung versandt"] {
+            #expect(!TextMinimizer.looksSensitive(text), "\(text)")
+        }
+        // Worked out with the text, also when the text changes afterwards.
+        var facts = AssetFacts(asset: AssetSnapshot(id: "x"), recognizedText: "Bestellung versandt", contentKnown: true)
+        #expect(!facts.textLooksSensitive)
+        facts.recognizedText = "Visa Debit"
+        #expect(facts.textLooksSensitive && PreviewRank(facts) == .sensitive)
+    }
+
+    /// `.other` only keeps a picture out of previews: the search does not find a card or an ID
+    /// as a document (it did not before either).
+    @Test func anOtherDocumentIsNoDocumentForTheSearch() {
+        let now = Date(timeIntervalSince1970: 1_750_000_000)
+        let card = AssetFacts(asset: AssetSnapshot(id: "card", creationDate: now),
+                              document: DocumentInfo(type: .other, typeReliability: .uncertain, keywords: [], sensitivity: .financial),
+                              contentKnown: true)
+        let letter = AssetFacts(asset: AssetSnapshot(id: "letter", creationDate: now),
+                                document: DocumentInfo(type: .letter, typeReliability: .likely, keywords: [], sensitivity: .normal),
+                                contentKnown: true)
+        let hits = SearchIndex(facts: [card, letter], calendar: Fixture.calendar).search("Dokumente", now: now).ids
+        #expect(Set(hits) == ["letter"])
     }
 }

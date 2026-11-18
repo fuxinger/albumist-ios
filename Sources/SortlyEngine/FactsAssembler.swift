@@ -103,7 +103,9 @@ public enum FactsAssembler {
                 recognizedText: recognized,
                 keywords: Set(content?.labels.filter { $0.confidence >= 0.5 }.map(\.identifier) ?? []),
                 atHome: home.contains(asset.id),
-                looksLikeDocument: content?.isDocumentLike ?? false
+                looksLikeDocument: content?.isDocumentLike ?? false,
+                // A failed read says nothing about the picture: it stays unknown.
+                contentKnown: content.map { $0.failedAttempts == nil } ?? false
             )
         }
     }

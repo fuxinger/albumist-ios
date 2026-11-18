@@ -45,6 +45,22 @@ public enum TextMinimizer {
         storedText.contains(cardMask) || storedText.contains(ibanMask)
     }
 
+    /// Whether a stored text (`storable`) shows that the picture is a bank card, a statement, a
+    /// banking app or another sensitive paper: a masked card number or IBAN, a financial,
+    /// identity or medical word, or a card word ("Visa Debit", "girocard"; `DocumentAnalyzer.
+    /// paymentCardKeywords`). Worked out once where the facts are assembled
+    /// (`AssetFacts.textLooksSensitive`), off the main thread, in one pass over the text's bytes:
+    /// a library has thousands of stored texts. Such a picture is never a preview.
+    public static func looksSensitive(_ storedText: String) -> Bool {
+        guard !storedText.isEmpty else { return false }
+        return SensitiveWords.all.occurs(in: storedText)
+    }
+
+    /// Whether lower-cased `text` has a card word (`DocumentAnalyzer.paymentCardKeywords`).
+    static func namesPaymentCard(_ text: String) -> Bool {
+        SensitiveWords.cards.occurs(in: text)
+    }
+
     // MARK: Masks
 
     /// Raised when the masks change, so texts stored by an older version are masked again
@@ -152,5 +168,61 @@ public enum TextMinimizer {
             }
         }
         return sum % 10 == 0
+    }
+}
+
+/// Words searched for in a text in one pass over its UTF-8 bytes, ignoring case for ASCII and
+/// German letters. Words of four letters or fewer count only as whole words ("bic", "visa",
+/// "iban": not in "public", "Revisaa" or "Libanon"); longer ones anywhere, as
+/// `DocumentAnalyzer` matches them.
+struct SensitiveWords: Sendable {
+    /// The words by their first byte (256 entries: a table, no hashing per byte).
+    private let byFirstByte: [[(bytes: [UInt8], whole: Bool)]]
+
+    init(_ words: [String]) {
+        var index = [[(bytes: [UInt8], whole: Bool)]](repeating: [], count: 256)
+        for word in words {
+            let bytes = Array(word.lowercased().utf8)
+            guard let first = bytes.first else { continue }
+            index[Int(first)].append((bytes, word.count <= 4))
+        }
+        byFirstByte = index
+    }
+
+    /// Masked numbers, every sensitivity word of `DocumentAnalyzer` and the card words.
+    static let all = SensitiveWords([TextMinimizer.cardMask, TextMinimizer.ibanMask]
+                                    + DocumentAnalyzer.sensitivityKeywords.flatMap(\.1) + DocumentAnalyzer.paymentCardKeywords)
+    static let cards = SensitiveWords(DocumentAnalyzer.paymentCardKeywords)
+
+    func occurs(in text: String) -> Bool {
+        var bytes = Array(text.utf8)
+        // Lower case: ASCII, and the upper-case letters of Latin-1 (Ä, Ö, Ü, É …) after 0xC3.
+        for i in bytes.indices {
+            let b = bytes[i]
+            if b >= 0x41 && b <= 0x5A {
+                bytes[i] = b + 0x20
+            } else if i > 0, bytes[i - 1] == 0xC3, b >= 0x80, b <= 0x9E, b != 0x97 {
+                bytes[i] = b + 0x20
+            }
+        }
+        return bytes.withUnsafeBufferPointer { text in
+            func isLetter(_ i: Int) -> Bool {
+                guard i >= 0, i < text.count else { return false }
+                let b = text[i]
+                return (b >= 0x61 && b <= 0x7A) || b >= 0x80
+            }
+            for start in text.indices {
+                let candidates = byFirstByte[Int(text[start])]
+                if candidates.isEmpty { continue }
+                for (word, whole) in candidates where start + word.count <= text.count {
+                    var same = true
+                    for k in 1..<max(word.count, 1) where text[start + k] != word[k] { same = false; break }
+                    guard same else { continue }
+                    if whole && (isLetter(start - 1) || isLetter(start + word.count)) { continue }
+                    return true
+                }
+            }
+            return false
+        }
     }
 }

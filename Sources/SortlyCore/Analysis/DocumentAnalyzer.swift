@@ -72,6 +72,16 @@ public struct DocumentAnalyzer: Sendable {
         (.financial, ["kontoauszug", "iban", "bic", "lohnabrechnung", "gehaltsabrechnung", "kreditkarte", "steuerbescheid", "kontostand", "bank statement", "salary"]),
     ]
 
+    /// Words printed on a bank card or naming one ("Visa Debit", "girocard", "VALID THRU").
+    /// They do not make a document sensitive where it has a type (a receipt paid by girocard
+    /// stays a receipt and keeps its album): they name a card where no document type was
+    /// recognised (`analyze` → `.other`), and keep a picture out of previews (`PreviewRank`,
+    /// `TextMinimizer.looksSensitive`). Words of four letters or fewer count as whole words only.
+    static let paymentCardKeywords = [
+        "visa", "mastercard", "maestro", "girocard", "debit", "kreditkarte", "debitkarte", "credit card", "debit card",
+        "american express", "amex", "valid thru", "valid through", "card number", "kartennummer", "cvc", "cvv",
+    ]
+
     static let knownMerchants = [
         "amazon", "ikea", "mediamarkt", "media markt", "saturn", "zalando", "otto", "lidl", "aldi", "rewe", "edeka", "dm", "rossmann",
         "obi", "bauhaus", "hornbach", "apple", "deutsche bahn", "db fernverkehr", "lufthansa", "ryanair", "easyjet", "booking.com",
@@ -91,8 +101,15 @@ public struct DocumentAnalyzer: Sendable {
         if amount != nil { scores[.invoice, default: 0] += scores[.invoice] != nil ? 1 : 0; scores[.receipt, default: 0] += scores[.receipt] != nil ? 1 : 0 }
 
         guard let best = scores.max(by: { ($0.value, $0.key.rawValue) < ($1.value, $1.key.rawValue) }) else {
-            // Text but no document markers: only report if it looks like a letter-sized text block.
-            return nil
+            // No document type, but a card, a statement, an ID or a medical paper (second review
+            // of the build 36 fix): reported as `.other` with its sensitivity so the picture is
+            // never a preview. Nothing else of it is kept (no subject, sender, number or amount),
+            // and `.other` never becomes an album of its own (`ProposalEngine`). What is stored of
+            // the text is decided apart from this (`TextMinimizer.storable`) and does not change.
+            var sensitivity = TextMinimizer.sensitivity(of: rawText)
+            if Self.containsIBAN(rawText) || TextMinimizer.namesPaymentCard(rawText) { sensitivity = max(sensitivity, .financial) }
+            guard sensitivity > .normal else { return nil }
+            return DocumentInfo(type: .other, typeReliability: .uncertain, keywords: [], sensitivity: sensitivity)
         }
         let reliability: Reliability = best.value >= 3 ? .likely : (best.value == 2 ? .plausible : .uncertain)
 

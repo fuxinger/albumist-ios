@@ -5,36 +5,55 @@ import Foundation
 /// is ever left out of an album or suggestion because of it; it only decides what is shown for
 /// one (owner's iPhone, build 36: "Häufiger Ort in Zwiesel" showed a bank card with a readable
 /// card number among its eight preview photos).
+/// When in doubt a picture is hidden: privacy wins over a full preview (second review).
 public enum PreviewRank: Int, Comparable, Sendable {
-    /// An ordinary photo or video.
+    /// An ordinary photo or video the image analysis has looked at.
     case photo
-    /// A screenshot, or a photo the analysis took for a document, receipt, card or ticket:
-    /// shown only when there are too few ordinary photos.
+    /// Not looked at by the image analysis yet (or it could not read it): nothing says whether
+    /// it is a card. Shown only when there are too few analysed ordinary photos, and never in
+    /// the shared atlas image.
+    case unknown
+    /// A screenshot, or a picture the analysis took for a document whose text explains it as a
+    /// harmless one (a letter, a ticket, a receipt): shown only when there are too few photos.
     case document
-    /// A sensitive document: a bank card or statement (a card number or IBAN was masked in its
-    /// text, or its document facts say financial), an ID or a medical paper. Never shown as a
+    /// A sensitive document: a bank card or statement, an ID or a medical paper, or a picture
+    /// the image analysis took for a document that its text does not explain. Never shown as a
     /// preview, cover or in the sorting show; with too few other photos fewer tiles are shown.
     case sensitive
 
     public static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
 
-    /// From what the analysis stored: the document facts of a read text (their sensitivity),
-    /// the stored text itself (IBANs and card numbers are masked in it), screenshot categories,
-    /// and whether the image analysis took the picture for a document.
+    /// From what the analysis stored:
+    /// - sensitive: document facts that say financial, ID or medical; a stored text with a
+    ///   masked card number or IBAN, or with a financial or card word (`AssetFacts.
+    ///   textLooksSensitive`: "Visa Debit" on a card whose number is on the back or was not
+    ///   read); a picture the image analysis took for a document (no screenshot) without any
+    ///   document facts: its text is not read yet, unreadable (glare, an angle), or names no
+    ///   document type (an ID or medical paper, whose text is not stored).
+    /// - document: screenshots, and documents their text explains.
+    /// - unknown: not looked at by the image analysis yet.
+    /// Cheap: no text is read here, so a whole library is ranked in no noticeable time.
     public init(_ facts: AssetFacts) {
-        if (facts.document?.sensitivity ?? .normal) >= .financial
-            || facts.recognizedText.map(TextMinimizer.showsMaskedNumber) == true {
+        if (facts.document?.sensitivity ?? .normal) >= .financial || facts.textLooksSensitive {
+            self = .sensitive
+        } else if facts.looksLikeDocument && !facts.asset.isScreenshotLike && facts.document == nil
+                    && facts.textCategories.isEmpty {
             self = .sensitive
         } else if facts.asset.isScreenshotLike || facts.looksLikeDocument || facts.document != nil
                     || !facts.textCategories.isEmpty {
             self = .document
+        } else if !facts.contentKnown {
+            self = .unknown
         } else {
             self = .photo
         }
     }
 
+    /// The ranks a preview takes from, best first: sensitive documents never.
+    static let shown: [PreviewRank] = [.photo, .unknown, .document]
+
     /// The rank of every photo of `facts` that is not an ordinary photo. A photo missing from
-    /// the result ranks `.photo`, so most libraries keep this small.
+    /// the result ranks `.photo`, so most analysed libraries keep this small.
     public static func ranks(of facts: some Sequence<AssetFacts>) -> [AssetID: PreviewRank] {
         var ranks: [AssetID: PreviewRank] = [:]
         for f in facts {
@@ -92,7 +111,15 @@ public enum PreviewPicker {
     /// covers of their own. Never a sensitive document; `nil` when every photo is one.
     public static func cover(_ ids: some Collection<AssetID>, preferred: AssetID?, proposal: SortlyID,
                              ranks: [AssetID: PreviewRank]) -> AssetID? {
-        if let preferred, ranks[preferred] ?? .photo == .photo, ids.contains(preferred) { return preferred }
+        if let preferred, ids.contains(preferred) {
+            switch ranks[preferred] ?? .photo {
+            case .photo: return preferred
+            // Not analysed yet, and no analysed ordinary photo to prefer (before the image
+            // analysis, every photo): its own cover, without going through all of them twice.
+            case .unknown where !ids.contains(where: { ranks[$0] == nil }): return preferred
+            default: break
+            }
+        }
         let suited = bestSuited(ids, ranks: ranks)
         if let preferred, suited.contains(preferred) { return preferred }
         return AlbumProposal.cover(for: proposal, from: Set(suited))
@@ -107,11 +134,20 @@ public enum PreviewPicker {
         var ordered = chronological(ids, dates: dates)
         if !ranks.isEmpty { ordered.removeAll { ranks[$0] == .sensitive } }
         guard count > 0, ordered.count > count else { return ordered }
-        let photos = ranks.isEmpty ? ordered : ordered.filter { ranks[$0] ?? .photo == .photo }
-        if photos.count >= count { return spread(photos, dates: dates, cover: cover, count: count) }
-        // Every ordinary photo, and documents spread over the tiles that are left.
-        let documents = ordered.filter { ranks[$0] == .document }
-        return chronological(photos + spread(documents, dates: dates, cover: cover, count: count - photos.count), dates: dates)
+        if ranks.isEmpty { return spread(ordered, dates: dates, cover: cover, count: count) }
+        // Analysed ordinary photos first; then photos not analysed yet, then documents, each
+        // spread over the tiles the better ones left.
+        var chosen: [AssetID] = []
+        for rank in PreviewRank.shown {
+            let members = ordered.filter { ranks[$0] ?? .photo == rank }
+            let left = count - chosen.count
+            if members.count >= left {
+                let spreadOut = spread(members, dates: dates, cover: cover, count: left)
+                return chosen.isEmpty ? spreadOut : chronological(chosen + spreadOut, dates: dates)
+            }
+            chosen += members
+        }
+        return chronological(chosen, dates: dates)
     }
 
     /// `count` of `ordered` (oldest first) spread evenly over their time, with `cover` when it
@@ -140,33 +176,29 @@ public enum PreviewPicker {
         return indices.map { ordered[$0] }
     }
 
-    /// The first `count` of `ids`, in their order, that suit a showcase best: ordinary photos,
-    /// then documents and screenshots when there are too few; never sensitive documents. For a
-    /// cover taken from a list (a planned album, a day of a trip) and the sorting show.
+    /// The first `count` of `ids`, in their order, that suit a showcase best: analysed ordinary
+    /// photos, then photos not analysed yet, then documents and screenshots when there are too
+    /// few; never sensitive documents. For a cover taken from a list (a planned album, a day of
+    /// a trip) and the sorting show.
     public static func firstSuited(_ ids: some Sequence<AssetID>, count: Int, ranks: [AssetID: PreviewRank]) -> [AssetID] {
         guard count > 0 else { return [] }
-        var photos: [AssetID] = []
-        var documents: [AssetID] = []
+        // Per rank of `PreviewRank.shown`: photos, not analysed yet, documents.
+        var found: [[AssetID]] = [[], [], []]
         for id in ids {
-            switch ranks[id] ?? .photo {
-            case .photo:
-                photos.append(id)
-                if photos.count == count { return photos }
-            case .document:
-                if documents.count < count { documents.append(id) }
-            case .sensitive:
-                continue
-            }
+            let rank = ranks[id] ?? .photo
+            guard let tier = PreviewRank.shown.firstIndex(of: rank) else { continue }
+            if found[tier].count < count { found[tier].append(id) }
+            if tier == 0 && found[0].count == count { return found[0] }
         }
-        return photos + documents.prefix(count - photos.count)
+        return Array(found.joined().prefix(count))
     }
 
     /// `count` photos spread evenly over `items` in their order (the scan show's mosaic over the
     /// whole library): from each of `count` stretches its first ordinary photo (the last one
-    /// from the last stretch), or a document or screenshot when the stretch has no photo; a
-    /// stretch of only sensitive documents is left out. Looks only at the items it needs, not
-    /// at the whole library. Without ranks exactly as before: every `count`-th item, first and
-    /// last included.
+    /// from the last stretch), or else its first photo not analysed yet, then document or
+    /// screenshot; a stretch of only sensitive documents is left out. Looks at no more than
+    /// `stretchLimit` items of a stretch, not at the whole library. Without ranks exactly as
+    /// before: every `count`-th item, first and last included.
     public static func evenly<C: RandomAccessCollection>(_ items: C, count: Int, ranks: [AssetID: PreviewRank],
                                                           id: (C.Element) -> AssetID) -> [AssetID] where C.Index == Int {
         guard count > 0, !items.isEmpty else { return [] }
@@ -174,15 +206,18 @@ public enum PreviewPicker {
         guard n > count else { return items.map(id).filter { ranks[$0] != .sensitive } }
         let starts = count == 1 ? [items.startIndex]
             : (0..<count).map { items.startIndex + $0 * (n - 1) / (count - 1) }
-        // The first ordinary photo among `candidates`, else the first document; never sensitive.
+        // The first ordinary photo among `candidates`, else the first of the best rank there
+        // (not analysed yet, then documents); never sensitive. At most `stretchLimit` items of
+        // a stretch are looked at: before the image analysis no photo is known, and the mosaic
+        // must not go through the whole library on every look.
         func choose(_ candidates: some Sequence<Int>) -> Int? {
-            var document: Int?
-            for index in candidates {
+            var best: (index: Int, rank: PreviewRank)?
+            for index in candidates.prefix(stretchLimit) {
                 let rank = ranks[id(items[index])] ?? .photo
                 if rank == .photo { return index }
-                if rank == .document, document == nil { document = index }
+                if rank != .sensitive, best.map({ rank < $0.rank }) ?? true { best = (index, rank) }
             }
-            return document
+            return best?.index
         }
         var picked: [AssetID] = []
         // Nothing before this index may be picked again.
@@ -201,6 +236,9 @@ public enum PreviewPicker {
         return picked
     }
 
+    /// How many items of one stretch `evenly` looks at, at most.
+    static let stretchLimit = 256
+
     /// The number on the last tile of a preview ("+5"): the photos it does not show plus the
     /// one under the number. `total` counts every photo of the suggestion, also those a preview
     /// leaves out, so the number stays right when it shows fewer tiles. `nil`: nothing more.
@@ -209,8 +247,8 @@ public enum PreviewPicker {
         return total - shown + 1
     }
 
-    /// The photos of the best rank among `ids`: ordinary photos when there are any, otherwise
-    /// documents and screenshots; never sensitive documents.
+    /// The photos of the best rank among `ids`: analysed ordinary photos when there are any,
+    /// otherwise photos not analysed yet, then documents and screenshots; never sensitive ones.
     static func bestSuited(_ ids: some Collection<AssetID>, ranks: [AssetID: PreviewRank]) -> [AssetID] {
         guard !ranks.isEmpty else { return Array(ids) }
         var best = PreviewRank.sensitive

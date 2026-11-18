@@ -11,7 +11,8 @@ struct TravelAtlasTests {
         return AssetFacts(
             asset: AssetSnapshot(id: AssetID("a\(n)"), creationDate: date),
             place: PlaceComponents(isoCountryCode: country, country: country, locality: city),
-            tripID: trip
+            tripID: trip,
+            contentKnown: true
         )
     }
 

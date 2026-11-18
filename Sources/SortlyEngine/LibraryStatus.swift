@@ -189,7 +189,8 @@ public enum LibraryStatus {
                     a.analyzed = analyzed
                 case .documents:
                     // Only photos read as documents (a photo's labels decide whether it is read).
-                    a.applicable = f.document != nil
+                    // A card or ID without a document type (`.other`, only for previews) is none.
+                    a.applicable = f.document.map { $0.type != .other } ?? false
                 case .messenger:
                     a.applicable = f.messenger != nil
                 case .peopleAndPets:

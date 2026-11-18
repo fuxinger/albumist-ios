@@ -258,7 +258,10 @@ final class DeviceConditionUITests: XCTestCase {
     /// The end of a condition test: the analysis still runs or every photo is analysed. An idle
     /// card with photos left ("180 von 246 Fotos analysiert") is a run that said "fertig" too
     /// early while the test watched it.
+    /// Waits up to 15 s: a single read can fall just as the running card turns into the finished
+    /// one and see neither (the flake that made expectEveryPhotoAnalysed wait, UI run 44091312348).
     private func expectRunningOrComplete(_ context: String) {
+        _ = waitStable("running or complete \(context)", timeout: 15, stableChecks: 1) { analysisRunning || everyPhotoAnalysed }
         let running = analysisRunning
         let complete = !running && everyPhotoAnalysed
         print(running || complete ? "UI_STEP_OK analysis running or complete \(context)" : "UI_STEP_MISSING analysis running or complete \(context)")

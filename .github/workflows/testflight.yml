@@ -44,6 +44,9 @@ name: TestFlight
 #   - a red test: fix it and start a NEW run. A red test is never re-run to green: the upload
 #     job of a later attempt stops when an earlier attempt failed in a test, a rule, a build or
 #     the archive (.github/scripts/earlier_attempts.py).
+#   - the same across runs: a UI group that was red for this app and this test code in any
+#     earlier run (14 days) blocks the upload until the test or the app changes (ui-gate,
+#     .github/scripts/ui_evidence.py); a new run on the same code does not make it green.
 #   - "Re-run failed jobs" only for a failure of the machinery: a runner or container that did
 #     not start, a simulator that did not boot, build products, a checkout or XcodeGen
 #     (Homebrew) that did not arrive, an upload to App Store Connect that broke off. The check

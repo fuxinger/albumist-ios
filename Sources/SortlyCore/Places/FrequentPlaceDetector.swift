@@ -67,7 +67,7 @@ public struct FrequentPlaceDetector: Sendable {
             let p90 = distances[min(distances.count - 1, Int(Double(distances.count) * 0.9))]
             let ids = members.map(\.0.id).sorted()
             return FrequentPlace(
-                id: .stable("frequent", String(format: "%.3f,%.3f", centroid.latitude, centroid.longitude)),
+                id: Self.cellID(of: centroid),
                 centroid: centroid,
                 radiusMeters: max(p90, 25),
                 assetIDs: ids,
@@ -77,7 +77,46 @@ public struct FrequentPlaceDetector: Sendable {
                 userName: nil
             )
         }
-        return places.sorted { ($0.distinctDays, $0.photoCount) > ($1.distinctDays, $1.photoCount) }
+        return Self.separatingSharedIDs(places)
+            .sorted { ($0.distinctDays, $0.photoCount) > ($1.distinctDays, $1.photoCount) }
+    }
+
+    /// A place's identity: its centre rounded to three decimals (a cell of about 110 m × 75 m in
+    /// Munich). Stored names, "Nicht jetzt" and decisions are keyed by it, so it is the same
+    /// for the same photos in every analysis, and it is the identity places had before 18.11.2026.
+    static func cellID(of centroid: GeoCoordinate) -> SortlyID {
+        .stable("frequent", cellKey(of: centroid))
+    }
+
+    private static func cellKey(of centroid: GeoCoordinate) -> String {
+        String(format: "%.3f,%.3f", centroid.latitude, centroid.longitude)
+    }
+
+    /// Places are told apart from 120 m on, but the centres of two of them up to about 150 m
+    /// apart can round to the same cell, and both had one ID: a name, "Nicht jetzt" or a
+    /// decision for one applied to both (review 18.11.2026, G1-04 and P1-01). Within one cell
+    /// the place photographed first keeps the cell's ID, so every ID stored before stays with
+    /// one place and a place alone in its cell keeps its ID as it was; each further place gets
+    /// the cell and its rank by first photo (2, 3, …). Photos taken later do not change the
+    /// first photo of a place, so the ranks do not swap between analyses. Ties are
+    /// broken by the centre and the photos, never by the order of the input.
+    static func separatingSharedIDs(_ places: [FrequentPlace]) -> [FrequentPlace] {
+        var result = places
+        let shared = Dictionary(grouping: places.indices, by: { places[$0].id }).values.filter { $0.count > 1 }
+        for indices in shared {
+            let ranked = indices.sorted { a, b in
+                let pa = places[a], pb = places[b]
+                if pa.firstDate != pb.firstDate { return pa.firstDate < pb.firstDate }
+                if pa.centroid.latitude != pb.centroid.latitude { return pa.centroid.latitude < pb.centroid.latitude }
+                if pa.centroid.longitude != pb.centroid.longitude { return pa.centroid.longitude < pb.centroid.longitude }
+                return pa.assetIDs.lexicographicallyPrecedes(pb.assetIDs)
+            }
+            let key = cellKey(of: places[ranked[0]].centroid)
+            for (rank, index) in ranked.enumerated() where rank > 0 {
+                result[index].id = .stable("frequent", key, String(rank + 1))
+            }
+        }
+        return result
     }
 
     private func mergeNearby(_ groups: [[Int]], coordinates: [GeoCoordinate]) -> [[Int]] {

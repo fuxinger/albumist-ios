@@ -49,6 +49,16 @@
   solchen Tag (nächstes Reisefoto 36 Stunden später) teilt die Reise. Die Reise-Werkstatt
   (Teilen/Zusammenführen) korrigiert beides.
 
+## Häufige Orte
+
+- Die Kennung eines häufigen Orts ist sein auf drei Stellen gerundeter Mittelpunkt (Zellen von
+  etwa 110 m × 75 m). Seit der Prüfung vom 18.11.2026 (G1-04) haben zwei Orte in einer Zelle
+  getrennte Kennungen. Offen: kommen Fotos dazu und wandert der Mittelpunkt eines Orts dabei
+  über eine Zellkante, bekommt der Ort eine neue Kennung; sein eigener Name und „Nicht jetzt“
+  gelten dann nicht mehr, und lag ein zweiter Ort in der alten Zelle, übernimmt dieser die
+  alte Kennung. Selten (Mittelpunkte vieler Fotos bewegen sich kaum); der Vorschlag erscheint
+  dann neu und lässt sich wieder benennen.
+
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.
 - Analyse auf Vorschaubildern; kleine Motive werden eventuell nicht erkannt.

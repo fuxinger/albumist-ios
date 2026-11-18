@@ -1366,7 +1366,10 @@ final class SortlyFlowUITests: XCTestCase {
         let left = waitGone(app.buttons["plan.apply"], timeout: 30)
         print("UI_FACT plan left its preview: \(left) after \(Int(Date().timeIntervalSince(tapped))) s")
         sleep(5)
-        print("UI_FACT plan running when the app was closed: \(anything("Alben werden angelegt").exists)")
+        // Read by identifier: the running card's title ("Alben werden angelegt") is covered by
+        // the sorting show, and a query over every element during the show took long on a slow
+        // simulator (device test 07, UI run 44202318875).
+        print("UI_FACT plan running when the app was closed: \(left && !app.buttons["result.receipt"].exists)")
         shot("49-plan-before-close")
         app.terminate()
         sleep(2)

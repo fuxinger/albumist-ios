@@ -608,23 +608,63 @@ final class DeviceConditionUITests: XCTestCase {
         return done
     }
 
-    /// Starts a plan made slow on purpose and closes the app half way, then opens it again.
-    /// Fails (instead of passing silently) when the plan was done before the app was closed.
-    private func interruptManualPlan(_ title: String) -> Bool {
-        start(["-SortlyUITestSlowPlan"])
-        guard openManualPlan(title), tap(app.buttons["plan.apply"], "start \(title)", timeout: 30) else { return false }
-        // The first change goes through at once, every later one waits 30 s: after 5 s one
-        // step is done and the next is not.
-        sleep(5)
-        print("UI_FACT \(title) running when the app was closed: \(anything("Alben werden angelegt").exists)")
-        app.terminate()
-        sleep(2)
-        start()
-        let card = anything("wurde unterbrochen").waitForExistence(timeout: 30)
-        print(card ? "UI_STEP_OK interruption card for \(title)" : "UI_STEP_MISSING interruption card for \(title)")
-        XCTAssertTrue(card, "No interruption card: the plan for \(title) finished before the app was closed")
-        if card { sleep(1); shot("interrupted-\(title.replacingOccurrences(of: " ", with: "-"))") }
-        return card
+    /// Starts a plan made slow on purpose (`-SortlyUITestSlowPlan`: the first change goes
+    /// through at once, every later one waits 30 s), ends the app while it runs and opens it
+    /// again. Returns the album's title when the interruption card came, nil otherwise.
+    ///
+    /// UI run 44202318875 (this test, "No interruption card"): 70 s passed between the tap on
+    /// "Jetzt umsetzen" and the end of the app on a slow simulator (a query over every element
+    /// while the sorting show played, then the end), the plan's second change was through
+    /// after its 30 s, and the plan was done. Its line "running when the app was closed: false"
+    /// read the running card's title, which the sorting show covers, so it said nothing. Now:
+    /// - between the tap and the end only two queries by identifier: the preview's button is
+    ///   gone (the plan started) and no result is shown (it is not done); that is asserted;
+    /// - the time from the tap to the end is said;
+    /// - when the plan was over anyway (its result showed, or no card came after an end later
+    ///   than 25 s), one more album is tried once, and that is said. A plan that did not start,
+    ///   or a card missing after an early end, still fails at once.
+    /// The real fix is a hold in the switch itself (every later change waits until the app is
+    /// ended), see docs/IMPROVEMENTS.md, flaky tests.
+    private func interruptManualPlan(_ title: String) -> String? {
+        for attempt in 1...2 {
+            let name = attempt == 1 ? title : "\(title) Zwei"
+            start(["-SortlyUITestSlowPlan"])
+            let apply = app.buttons["plan.apply"]
+            guard openManualPlan(name), apply.waitForExistence(timeout: 30) else { return nil }
+            let tapped = Date()
+            guard tap(apply, "start \(name)", timeout: 5) else { return nil }
+            let started = waitGone(apply, timeout: 10)
+            let finished = app.buttons["result.receipt"].exists
+            guard started else {
+                print("UI_STEP_MISSING \(name) started")
+                shot("x-plan-not-started-\(name.replacingOccurrences(of: " ", with: "-"))")
+                XCTFail("The plan for \(name) did not start: \"Jetzt umsetzen\" is still there 10 s after the tap")
+                return nil
+            }
+            UITestOnboarding.clock("end the app during \(name)")
+            app.terminate()
+            let closedAfter = Int(Date().timeIntervalSince(tapped))
+            print("UI_FACT \(name) running when the app was closed: \(!finished) (preview left, result shown \(finished)), closed \(closedAfter) s after the tap")
+            sleep(2)
+            start()
+            let card = anything("wurde unterbrochen").waitForExistence(timeout: 30)
+            if card {
+                print("UI_STEP_OK interruption card for \(name)")
+                sleep(1)
+                shot("interrupted-\(name.replacingOccurrences(of: " ", with: "-"))")
+                return name
+            }
+            let late = finished || closedAfter >= 25
+            print("UI_STEP_MISSING interruption card for \(name) (closed \(closedAfter) s after the tap)")
+            shot("x-no-interruption-card-\(name.replacingOccurrences(of: " ", with: "-"))")
+            if attempt == 1 && late {
+                print("UI_FACT the slow plan for \(name) was done before the app was closed (\(closedAfter) s, slow simulator): one more album")
+                continue
+            }
+            XCTFail("No interruption card: the plan for \(name) finished before the app was closed (\(closedAfter) s after the tap)")
+            return nil
+        }
+        return nil
     }
 
     /// The album is listed in the albums tab ("Von Albumist angelegt oder ergänzt").
@@ -973,8 +1013,7 @@ final class DeviceConditionUITests: XCTestCase {
         // "Entfernen", …, SortlyFlowUITests.sweepSkip): the albums stay in Photos, and test3
         // runs on the same simulator after these tests (UI run 43930271358: "The sweep reached
         // no screen from Alben", both album rows were skipped by their titles).
-        let continued = "Testalbum Vollendet"
-        if interruptManualPlan(continued), tap(app.buttons["Rest anlegen"], "continue interrupted plan") {
+        if let continued = interruptManualPlan("Testalbum Vollendet"), tap(app.buttons["Rest anlegen"], "continue interrupted plan") {
             let done = waitGone(card, timeout: 120)
             print(done ? "UI_STEP_OK interrupted plan continued" : "UI_STEP_MISSING interrupted plan continued")
             XCTAssertTrue(done, "\"Rest anlegen\" did not finish the interrupted plan")
@@ -987,8 +1026,7 @@ final class DeviceConditionUITests: XCTestCase {
             XCTAssertNotNil(photos, "After \"Rest anlegen\" the album is missing")
             XCTAssertEqual(photos, 2, "After \"Rest anlegen\" the album does not hold the two photos of the plan")
         }
-        let undone = "Testalbum Zurueck"
-        if interruptManualPlan(undone), tap(app.buttons["Alles zurücknehmen"].firstMatch, "undo interrupted plan") {
+        if let undone = interruptManualPlan("Testalbum Zurueck"), tap(app.buttons["Alles zurücknehmen"].firstMatch, "undo interrupted plan") {
             confirm("Alles zurücknehmen", "confirm undo of interrupted plan")
             let asked = answerDeleteQuestion(allow: true, timeout: 30) { !card.exists }
             print("UI_FACT undo of interrupted plan asked by iOS: \(asked)")

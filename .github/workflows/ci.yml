@@ -154,6 +154,26 @@ jobs:
           set -o pipefail
           mkdir -p build
           swift test --parallel 2>&1 | tee build/core-macos.log
+      - name: Fresh simulator (erased and booted)
+        # 18.11.: StoreKit listed no product for 300 s in four runs from ~16:00 UTC on, with no
+        # error, also on claude/next at 3dfda45 (CI 44369338871), whose code was green in every
+        # run before (until 10:10 UTC) and whose image, Xcode, runtime and simulator were the same
+        # (20261103.629, Xcode 27.2, iOS 27.2 24B8117, iPhone 17e). So the cause is in the runner's
+        # simulator, not in the app or test code. The simulator now starts erased (no state from
+        # the image), booted after the core tests (nothing competes with the boot then), and its
+        # StoreKit log is recorded live: after xcodebuild has shut it down, `log show` gave only
+        # "<compose failure>" lines from after a new boot (CI 44368423344).
+        if: hashFiles('App/project.yml') != ''
+        run: |
+          UDID="${{ steps.sim.outputs.udid }}"
+          xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
+          xcrun simctl erase "$UDID"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b > /dev/null
+          nohup xcrun simctl spawn "$UDID" log stream --style compact --level debug \
+            --predicate 'process CONTAINS[c] "storekit" OR subsystem CONTAINS[c] "storekit" OR process == "appstored" OR process == "itunesstored"' \
+            > storekit-live.log 2>&1 &
+          echo "simulator $UDID erased and booted; StoreKit log recorded live (pid $!)"
       - name: Build and test app
         if: hashFiles('App/project.yml') != ''
         run: |
@@ -171,17 +191,21 @@ jobs:
           exit $status
       - name: StoreKit daemon log
         # Only when the StoreKit test environment never came up: what the simulator's StoreKit
-        # daemon said meanwhile, so the cause is in the job log (the build log is an artifact).
+        # daemon said during the tests (recorded live, see "Fresh simulator") and whether Apple's
+        # store hosts answer from this runner, so the cause is in the job log (the build log is
+        # an artifact).
         if: failure() && hashFiles('build-log.txt') != ''
         run: |
           if grep -q "StoreKit test environment not" build-log.txt; then
-            # xcodebuild shuts the simulator down after the tests (CI 44363508667: "device is not
-            # booted"); its log store survives that, so the simulator is booted again to read it.
-            UDID="${{ steps.sim.outputs.udid }}"
-            xcrun simctl bootstatus "$UDID" -b > /dev/null 2>&1 || true
-            xcrun simctl spawn "$UDID" log show --last 45m --style compact \
-              --predicate 'process CONTAINS[c] "storekit" OR subsystem CONTAINS[c] "storekit" OR process == "appstored"' \
-              2>&1 | tail -600 || true
+            echo "StoreKit log: $(wc -l < storekit-live.log 2>/dev/null || echo 0) lines"
+            echo "--- errors and failures (last 300)"
+            grep -iE "error|fail|denied|timed? ?out|invalid|unable|refus|not (found|allowed|available)|configuration|products?" storekit-live.log | tail -300 || true
+            echo "--- last 200 lines"
+            tail -200 storekit-live.log || true
+            echo "--- Apple store hosts from this runner"
+            for url in https://bag.itunes.apple.com/bag.xml https://buy.itunes.apple.com https://xp.apple.com; do
+              curl -sS -o /dev/null -m 15 -w "$url: HTTP %{http_code} in %{time_total} s\n" "$url" 2>&1 || true
+            done
           fi
       - name: Build UI tests
         # The UI tests run in their own workflow (ui.yml); building them here finds a compile

@@ -32,6 +32,9 @@ MACHINERY_STEPS = {
     "Set up job", "Initialize containers", "Stop containers", "Complete job",
     "Install SQLite headers", "Install XcodeGen",
     "Boot simulator (in the background)", "Wait for the simulator",
+    # ci.yml: erases and boots the simulator before the app tests; a failure there is the
+    # simulator's, no test ran yet.
+    "Fresh simulator (erased and booted)",
     "Unpack build products", "Keep the retry record for the run summary",
     # This check itself: it fails on what it finds in an earlier attempt (found again from
     # there) or when the API does not answer (then a re-run of the upload job is right).

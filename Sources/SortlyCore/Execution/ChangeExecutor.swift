@@ -207,6 +207,12 @@ public actor ChangeExecutor {
             throw ExecutionError.blocked(conflicts)
         }
 
+        // A resumed plan: its journal may be one entry behind Photos (the last write did not
+        // reach the disk before a power loss, or the database came back from its copy; review
+        // P2-07). Then the first step not done may have run although it is not journaled as
+        // running: its photos already in the album are looked at (`perform`, `mayHaveRun`).
+        let firstOpen = started ? plan.steps.firstIndex { !$0.state.isFinished } : nil
+
         plan.status = .running
         let snapshot = plan
         plan.record?.recordNames(of: snapshot, inventory: inventory)
@@ -245,7 +251,8 @@ public actor ChangeExecutor {
             let state: StepState
             var sent = false
             do {
-                state = try await perform(index, plan: &plan, reconcile: wasRunning, available: available, sent: &sent)
+                state = try await perform(index, plan: &plan, reconcile: wasRunning, mayHaveRun: !wasRunning && index == firstOpen,
+                                          available: available, sent: &sent)
             } catch let notResponding as PhotosNotResponding {
                 // Photos did not answer (app-speed, docs/DECISIONS.md): the outcome of this step
                 // is not known, Photos may still carry it out. It is neither done nor failed: it
@@ -415,7 +422,7 @@ public actor ChangeExecutor {
         }
     }
 
-    private func perform(_ index: Int, plan: inout ChangePlan, reconcile: Bool, available: Set<AssetID>,
+    private func perform(_ index: Int, plan: inout ChangePlan, reconcile: Bool, mayHaveRun: Bool = false, available: Set<AssetID>,
                          sent: inout Bool) async throws -> StepState {
         let now = clock()
         let step = plan.steps[index]
@@ -578,9 +585,16 @@ public actor ChangeExecutor {
             }
             // Idempotent: only add what is missing and still available.
             let missing = assets.filter { !album.assetIDs.contains($0) && available.contains($0) }
+            // The first open step of a resumed plan may have run before the journal lost its
+            // entry (P2-07): its photos already in the album may be Albumist's. In an album this
+            // plan made, they are (as for a step journaled as running), and undo takes them out
+            // again; in someone else's album it cannot be proven, so they are noted as unclear:
+            // undo leaves them, and the app names them (`UndoRemainder`).
+            let earlier = mayHaveRun ? assets.filter { album.assetIDs.contains($0) } : []
             let unavailable = assets.count - assets.filter { available.contains($0) }.count
             if unavailable > 0 { plan.record?.unavailable[step.id] = unavailable }
             plan.record?.begin(step.id, missing)
+            if !earlier.isEmpty, !plan.createdVerifiably(albumID) { plan.record?.unclear[step.id] = earlier }
             plan.steps[index].state = .running(startedAt: now)
             try await store.save(plan)
             if !missing.isEmpty { try await sending(&sent) { try await library.addAssets(missing, to: albumID) } }
@@ -589,7 +603,8 @@ public actor ChangeExecutor {
                 return .failed(reason: "album no longer exists")
             }
             let arrived = missing.filter { verified.assetIDs.contains($0) }
-            plan.record?.settle(step.id, arrived)
+            let ours = plan.createdVerifiably(albumID) ? earlier.filter { verified.assetIDs.contains($0) } : []
+            plan.record?.settle(step.id, arrived + ours)
             guard arrived.count == missing.count else { return .failed(reason: "added media could not be verified") }
             return .succeeded(createdID: nil, verifiedAt: now)
 

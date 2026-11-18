@@ -97,6 +97,14 @@ struct InterruptionWaysOutTests {
         let kill: KillSwitch
         let killAfterSave: Int?
         private(set) var saves = 0
+        /// Every version written, to lose the last one (`loseLastEntry`).
+        private(set) var history: [ChangePlan] = []
+        /// The last journal write never reached the disk (power loss before it was on the
+        /// storage): the journal is back at the entry before it (review P2-07).
+        func loseLastEntry() async throws {
+            guard history.count >= 2 else { return }
+            try await inner.save(history[history.count - 2])
+        }
         init(inner: SortlyStore, kill: KillSwitch, killAfterSave: Int?) {
             self.inner = inner
             self.kill = kill
@@ -109,6 +117,7 @@ struct InterruptionWaysOutTests {
         func save(_ plan: ChangePlan) async throws {
             if kill.tripped { throw Dead() }
             try await inner.save(plan)
+            history.append(plan)
             persisted()
         }
         func save(_ plans: [ChangePlan]) async throws {
@@ -119,6 +128,7 @@ struct InterruptionWaysOutTests {
         func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws {
             if kill.tripped { throw Dead() }
             try await inner.noteCreated(id, key: key, in: plan)
+            if let stored = try await inner.plan(plan.id) { history.append(stored) }
             persisted()
         }
         func plan(_ id: SortlyID) async throws -> ChangePlan? { try await inner.plan(id) }
@@ -185,7 +195,7 @@ struct InterruptionWaysOutTests {
         }
 
         /// `AppModel.run`.
-        func run(_ plan: ChangePlan, kill spec: Kill = .none) async -> RunEnd {
+        func run(_ plan: ChangePlan, kill spec: Kill = .none, loseLastJournalEntry: Bool = false) async -> RunEnd {
             let kill = KillSwitch()
             let counter = Counter()
             var confirmed = plan
@@ -205,6 +215,7 @@ struct InterruptionWaysOutTests {
                     if ended.status == .completed || ended.status == .completedWithErrors { await finalize(ended) }
                 }
             } catch {}
+            if loseLastJournalEntry, kill.tripped { try? await journal.loseLastEntry() }
             return RunEnd(result: result, died: kill.tripped, writes: await counter.writes, saves: await journal.saves)
         }
 
@@ -468,5 +479,34 @@ struct InterruptionWaysOutTests {
         #expect(undone.result?.status == .completed)
         #expect(Self.unnamedLeftovers(try await app.library.currentInventory(), initial: initial, remainder: rest)
             .allSatisfy { $0 == "unnamed photos in the user's album (Sommer)" } == true)
+    }
+
+    // MARK: P2-07: the journal one entry behind Photos
+
+    /// The last journal write before the app ended never reached the disk (power loss), but
+    /// Photos has the change. Before, "Fortsetzen" then made "Reisen", "Paris" and "Rom" a
+    /// second time (the step was no longer journaled as running, so nothing was checked), and
+    /// the undo left albums with photos behind.
+    @Test func journalOneEntryBehindPhotosNeverMakesAnAlbumTwice() async throws {
+        let probe = try Self.freshApp()
+        let clean = await probe.run(representativePlan(try await probe.check().inventory))
+        var problems: [String] = []
+        for n in 0..<clean.writes {
+            let label = "journal loses its last entry after Photos write \(n)"
+            let app = try Self.freshApp()
+            let initial = try await app.library.currentInventory()
+            let plan = representativePlan(try await app.check().inventory)
+            #expect(await app.run(plan, kill: .afterWrite(n), loseLastJournalEntry: true).died, "\(label)")
+            guard let interrupted = try await app.relaunch() else { continue }
+            _ = try await app.resume(interrupted)
+            problems += Self.violations(try await app.library.currentInventory()).map { "\($0) [\(label), resumed]" }
+            if let (undone, remainder) = try await app.undo(plan.id) {
+                #expect(undone.result?.status == .completed, "\(label)")
+                let end = try await app.library.currentInventory()
+                problems += Self.violations(end).map { "\($0) [\(label), undone]" }
+                problems += Self.unnamedLeftovers(end, initial: initial, remainder: remainder).map { "\($0) [\(label), undone]" }
+            }
+        }
+        #expect(problems.isEmpty, "\(problems.prefix(8))")
     }
 }

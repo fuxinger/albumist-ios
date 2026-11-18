@@ -218,6 +218,31 @@ struct UndoHardeningTests {
         #expect(try await library.currentInventory() == before)
     }
 
+    /// P2-07: only the first open step of a resumed plan can have run without its journal
+    /// entry. Photos the user put into their own album during the interruption, for a step
+    /// further on, are never taken for "maybe Albumist's" (nothing is named after the undo).
+    /// (A first run never finds them: a change to the album since the preview blocks it.)
+    @Test func photosTheUserAddedBeforeAStepRanAreNeverUnclear() async throws {
+        let again = representativeLibrary()
+        let second = representativePlan(try await again.currentInventory())
+        let store = DyingPlanStore { plan in plan.steps.contains { if case .succeeded = $0.state { true } else { false } } }
+        _ = try? await ChangeExecutor(library: again, store: store).execute(second)
+        let interrupted = try #require(await store.saved.last)
+        await again.userEdit { inv in
+            var sommer = inv["sommer"]!
+            sommer.assetIDs.formUnion(ids("a", 100..<103))
+            inv.upsert(sommer)
+        }
+        let resumed = try await ChangeExecutor(library: again, store: InMemoryPlanStore()).execute(interrupted)
+        #expect(resumed.status == .completed)
+        #expect(resumed.record?.unclear.isEmpty == true)
+        let undo = confirmed(UndoPlanner().undoPlan(for: resumed, current: try await again.currentInventory()))
+        _ = try await ChangeExecutor(library: again, store: InMemoryPlanStore()).execute(undo)
+        let inv = try await again.currentInventory()
+        #expect(UndoRemainder(plan: resumed, current: inv).isEmpty)
+        #expect(inv["sommer"]?.assetIDs == Self.ownPhotos.union(ids("a", 100..<103)))
+    }
+
     // MARK: Batch deletion
 
     /// The user put an own photo into one of the albums after the undo was planned, and then

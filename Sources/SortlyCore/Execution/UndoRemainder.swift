@@ -8,8 +8,9 @@ import Foundation
 ///   it is never deleted. Since the id of every new album is written down inside the change
 ///   that creates it, this is rare (a journal that could not be written, plans from older
 ///   versions);
-/// - photos in an album the plan did not create, from an add that was cut off: a photo there
-///   may be Albumist's or the user's (audit 2, 1.1), and stays.
+/// - photos in an album the plan did not create, from an add that was cut off, or found there
+///   by a resumed run whose journal may have been one entry behind (P2-07): a photo there may
+///   be Albumist's or the user's (audit 2, 1.1), and stays.
 public struct UndoRemainder: Hashable, Sendable {
     public struct Collection: Hashable, Sendable {
         public var id: CollectionID
@@ -55,15 +56,18 @@ public struct UndoRemainder: Hashable, Sendable {
         }
         var byAlbum: [CollectionID: Set<AssetID>] = [:]
         for step in plan.steps {
-            guard case .addAssets(let ref, _) = step.operation, record?.unverified.contains(step.id) == true,
-                  let intent = record?.media[step.id] else { continue }
+            guard case .addAssets(let ref, _) = step.operation else { continue }
+            // An add that was cut off, and photos a resumed run found there already (P2-07).
+            var maybe = Set(record?.unclear[step.id] ?? [])
+            if record?.unverified.contains(step.id) == true { maybe.formUnion(record?.media[step.id] ?? []) }
+            guard !maybe.isEmpty else { continue }
             let albumID: CollectionID? = switch ref {
             case .existing(let id): id
             case .planned(let key): plan.resolvedKeys[key]
             }
             // In an album the plan made itself, what is there is Albumist's: the undo takes it.
             guard let albumID, !plan.createdVerifiably(albumID), let album = current[albumID] else { continue }
-            let there = album.assetIDs.intersection(intent)
+            let there = album.assetIDs.intersection(maybe)
             if !there.isEmpty { byAlbum[albumID, default: []].formUnion(there) }
         }
         for (id, assets) in byAlbum.sorted(by: { $0.key < $1.key }) {

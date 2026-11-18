@@ -224,11 +224,16 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
     public var maybeCreatedAt: [String: Date] = [:]
     /// Earlier `maybeCreated` ids of a key whose later request got no answer either.
     public var earlierMaybeCreated: [CollectionID] = []
+    /// Step id → photos of an add step that were already in someone else's album when a
+    /// resumed plan reached it, while the journal may have been one entry behind Photos (review
+    /// P2-07): Albumist may have put them there, or the user. Never claimed (undo leaves them),
+    /// but named after an undo (`UndoRemainder`).
+    public var unclear: [String: [AssetID]] = [:]
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case media, unverified, adoptedKeys, deletedAlbums, unavailable, names, maybeCreated, maybeCreatedAt, earlierMaybeCreated
+        case media, unverified, adoptedKeys, deletedAlbums, unavailable, names, maybeCreated, maybeCreatedAt, earlierMaybeCreated, unclear
     }
 
     public init(from decoder: any Decoder) throws {
@@ -242,6 +247,7 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
         maybeCreated = try c.decodeIfPresent([String: CollectionID].self, forKey: .maybeCreated) ?? [:]
         maybeCreatedAt = try c.decodeIfPresent([String: Date].self, forKey: .maybeCreatedAt) ?? [:]
         earlierMaybeCreated = try c.decodeIfPresent([CollectionID].self, forKey: .earlierMaybeCreated) ?? []
+        unclear = try c.decodeIfPresent([String: [AssetID]].self, forKey: .unclear) ?? [:]
     }
 
     /// Photos gave this id to the new album or folder of `key`, inside the change and before

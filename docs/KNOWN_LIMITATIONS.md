@@ -49,6 +49,14 @@ mit eingeschränkten Rechten: nur lesend.
   Der Änderungsbeleg zeigt den Schritt als nicht bestätigt; nach dem Rückgängig (auch nach
   „Alles zurücknehmen“) sagt Albumist, wie viele Fotos in welchem Album bleiben, und der Plan
   bleibt im Verlauf statt zu verschwinden (P2-01).
+- Das Journal schreibt mit `synchronous = FULL`, aber ohne `PRAGMA fullfsync` (Prüfer 2,
+  P2-07): Nach einem Stromausfall kann auf Apple-Geräten der letzte Eintrag fehlen, obwohl Fotos
+  die Änderung hat. Seit P2-01/P2-07 legt „Fortsetzen“ dann nichts doppelt an (die Kennung neuer
+  Alben steht in einem eigenen Eintrag im Änderungsblock), und Fotos des ersten offenen Schritts,
+  die schon im Album liegen, gelten in Albumists eigenem Album als seine, im Album des Nutzers
+  als unklar (Rückgängig lässt sie und nennt sie). `fullfsync` ist nicht eingeschaltet: Es kostet
+  bei jedem Journal-Eintrag eine volle Leerung des Gerätespeichers, und wie lange das auf einem
+  iPhone bei Hunderten Schritten dauert, ist nicht gemessen. Offen für eine Messung auf dem Gerät.
 - Nimmt der Nutzer während einer Unterbrechung alle Fotos aus einem Album, das der Plan gerade
   angelegt hat, und tippt danach „Rest anlegen“, legt Albumist sie wieder hinein: Das lässt sich
   nicht von einer Anfrage unterscheiden, die Fotos nie erreicht hat (gewollt, `DECISIONS.md`).

@@ -123,9 +123,10 @@ public final class PhotosDeadline: @unchecked Sendable {
 
     /// One look at a call: `quiet` since its last beat (for a call not running yet, beyond
     /// `notBegunGrace`), `late` how much later than planned this look came.
-    static func quiet(now: ContinuousClock.Instant, lastBeat: ContinuousClock.Instant, running: Bool) -> Duration {
+    static func quiet(now: ContinuousClock.Instant, lastBeat: ContinuousClock.Instant, running: Bool,
+                      grace: Duration = notBegunGrace) -> Duration {
         // Not running yet (its task has no thread): only its wait beyond the grace counts.
-        running ? now - lastBeat : max(.zero, now - lastBeat - notBegunGrace)
+        running ? now - lastBeat : max(.zero, now - lastBeat - grace)
     }
 
     /// Late looks in a row that give the call its limit again; after these the limit decides
@@ -150,9 +151,18 @@ public final class PhotosDeadline: @unchecked Sendable {
     /// Calls past their limit (or cancelled by their caller) that have not returned yet.
     private var hanging: [Lane: Int] = [:]
     public let slowAfter: Duration
+    /// `notBegunGrace` for this instance. The tests give it more: in the full parallel test run
+    /// Swift's shared pool was busy for 78 s (CI 44380367650 on Linux, even trivial tests took
+    /// that long), and calls that never got a thread were given up after 60 s + their limit.
+    let grace: Duration
 
-    public init(slowAfter: Duration = .seconds(10)) {
+    public convenience init(slowAfter: Duration = .seconds(10)) {
+        self.init(slowAfter: slowAfter, notBegunGrace: Self.notBegunGrace)
+    }
+
+    init(slowAfter: Duration = .seconds(10), notBegunGrace: Duration) {
         self.slowAfter = slowAfter
+        self.grace = notBegunGrace
     }
 
     /// Calls of this kind that went past their limit and still have not returned.
@@ -230,7 +240,7 @@ public final class PhotosDeadline: @unchecked Sendable {
                           answer: Answer<T>, planned: ContinuousClock.Instant?, cameBack: Int) {
         guard !answer.isDone else { return }
         let now = ContinuousClock.now
-        let quiet = Self.quiet(now: now, lastBeat: heartbeat.lastBeat, running: heartbeat.quietSince != nil)
+        let quiet = Self.quiet(now: now, lastBeat: heartbeat.lastBeat, running: heartbeat.quietSince != nil, grace: grace)
         let late = planned.map { max(.zero, now - $0) } ?? .zero
         let wait: Duration
         var inARow = 0

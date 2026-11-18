@@ -1553,7 +1553,9 @@ final class AppModel {
         // missing as "remaining" although a run in the app looks up at most a few, so every
         // quick check asked iOS for background time (device test 15.11. 23:16: the Lock Screen
         // and the Dynamic Island showed the analysis every few seconds).
-        guard analysis.isRunning, let stage = analysis.stage,
+        // Never for the overnight refinement seen in the app: the user did not start it, and its
+        // end must not read "Analyse wartet auf dich" on the Lock Screen (review of d744b74).
+        guard analysis.isRunning, !analysis.refining, let stage = analysis.stage,
               [.content, .text].contains(stage), analysis.remaining >= 100 else { return }
         ContinuedAnalysis.begin()
     }
@@ -1652,8 +1654,8 @@ final class AppModel {
         guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !refinementHeldByPause,
               !Task.isCancelled else { return nil }
         // Seen in the app, the card shows the refinement as a run of its own, fed and ticked like
-        // a run in the app (`RefinementCard`): its count, the countdown while it waits for Apple's
-        // limit, a wait for the device. Before, its reports reached no one and the card stood on
+        // a run in the app (`RefinementCard`): its count and the countdown while it waits for
+        // Apple's limit (heat or a low battery stop it, they never make it wait). Before, its reports reached no one and the card stood on
         // the last run's position without a word (second review of the no-wait fix, device test
         // 18.11., build 36). What the card showed of the analysis comes back when it ends.
         let shownBefore = analysis
@@ -1672,8 +1674,9 @@ final class AppModel {
         analysisBar = 0
         refinementCard = RefinementCard()
         progressMailbox = ProgressMailbox()
-        // Late progress of the run before must not show up during this one; the tick of this
-        // refinement stops by itself once another run has started (`tickNow`).
+        // Late progress of the run before must not show up during this one. The tick of this
+        // refinement ends with it (its end below), or when a newer run's `startTicks` or
+        // `beginCard` cancels it; `tickNow` only skips a tick that is not the newest run's.
         analysisGeneration += 1
         let generation = analysisGeneration
         let control = AnalysisRunControl()

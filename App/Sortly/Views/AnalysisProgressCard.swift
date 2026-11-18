@@ -684,7 +684,7 @@ struct AnalysisDetailsSheet: View {
         // Never 100 % before the end (`AnalysisPercent`).
         parts.append(AnalysisPercent.value(model.analysisBar, isComplete: model.analysis.isComplete)
             .formatted(.percent.precision(.fractionLength(0))))
-        if let start = model.analysisStartedAt, model.analysis.isRunning {
+        if let start = model.analysisStartedAt, model.analysis.isRunning, !model.analysis.refining {
             let elapsed = Duration.seconds(max(60, now.timeIntervalSince(start)))
             parts.append(String(localized: "bisher \(elapsed.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))"))
         }

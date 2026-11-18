@@ -85,6 +85,9 @@ enum ContinuedAnalysis {
 
     /// Called whenever the analysis state or its finish time changes (`AppModel`).
     static func publish(_ analysis: AppModel.AnalysisState, finish: FinishEstimate?) {
+        // The overnight refinement seen in the app is not the run a task shows: a task of a run
+        // in the app that has not seen its end yet must not take over its bar (review of d744b74).
+        guard !analysis.refining else { return }
         // The text only while a task shows it (the state changes several times a second).
         let running = analysis.isRunning, fraction = analysis.shownOverall
         let text = isActive && running ? subtitle(analysis, finish: finish) : ""

@@ -658,9 +658,10 @@ struct ShareCardImage: Transferable {
     /// Nonisolated: PhotoKit may call the result handler on a background queue.
     /// A cover Photos does not hand over within 15 s (Photos stuck) is left out: the card is
     /// shared without it instead of the share button waiting for good (app-speed, 18.11.2026).
-    /// The fetch before it is bounded too, on the image lane (`PhotoKitLibrary.fetchAssets`).
+    /// The fetch before it is bounded too, on the lane of pictures on screen
+    /// (`PhotoKitLibrary.fetchAssets`).
     nonisolated static func loadCover(_ id: AssetID) async -> UIImage? {
-        guard let asset = try? await PhotoKitLibrary.fetchAssets([id], what: "fetchCover").assets.first else { return nil }
+        guard let asset = try? await PhotoKitLibrary.fetchAssets([id], what: "fetchCover", lane: .thumbnail).assets.first else { return nil }
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
         options.resizeMode = .exact

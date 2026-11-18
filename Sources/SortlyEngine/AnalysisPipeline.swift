@@ -747,6 +747,9 @@ public actor AnalysisPipeline {
             // their content result (`LabelAttempts`), also when the failure is noted a batch later.
             var labelsOnlyIDs = Set<AssetID>()
             let analyzer = self.analyzer
+            // Previews loaded ahead end with the image step, also when it is cut off (third
+            // review of the PhotoKit limits, N7).
+            defer { analyzer.contentEnded() }
             while true {
                 if let reason = await shouldStop() { report.pausedBecause = reason; await settleEarly(stopping: .now); return report }
                 if await accessChanged() { report.pausedBecause = .accessRevoked; await settleEarly(stopping: .now); return report }
@@ -1200,8 +1203,12 @@ public actor AnalysisPipeline {
             // A read that may download an original is in work: it goes alone, so leaving
             // Wi-Fi or switching off the consent applies to the very next photo (audit 2, 5.1).
             var downloading = false
+            // Photos did not hand over a photo in time: neither the photo's fault nor Vision's.
+            // Nothing is counted for it, no new reads start, and the run ends with the error like
+            // in the image step (third review of the PhotoKit limits, N3).
+            var photosQuiet: PhotosNotResponding?
             while true {
-                while outcome.paused == nil, !cancelled, !downloading, next < candidates.count, inFlight < width {
+                while outcome.paused == nil, !cancelled, photosQuiet == nil, !downloading, next < candidates.count, inFlight < width {
                     let asset = candidates[next]
                     let previous = done[asset.id]
                     let allowNetwork = networkAllowed ? await networkAllowedNow() : false
@@ -1278,6 +1285,10 @@ public actor AnalysisPipeline {
                         cancelled = true
                         continue
                     }
+                    if let quiet = error as? PhotosNotResponding {
+                        if photosQuiet == nil { photosQuiet = quiet }
+                        continue
+                    }
                     if !(error is AnalysisError) {
                         // Vision failed, maybe not because of this photo: nothing is counted yet.
                         suspects.append(asset.id)
@@ -1302,6 +1313,7 @@ public actor AnalysisPipeline {
                 counted()
             }
             if cancelled { throw CancellationError() }
+            if let photosQuiet { throw photosQuiet }
         }
         return outcome
     }

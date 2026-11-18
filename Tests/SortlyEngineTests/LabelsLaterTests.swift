@@ -27,6 +27,10 @@ struct LabelsLaterTests {
         let failing = Mutex<Set<AssetID>>([])
         /// Photos Photos does not hand over in time (`PhotosNotResponding`).
         let quiet = Mutex<Set<AssetID>>([])
+        /// Photos whose text Photos does not hand over in time.
+        let textQuiet = Mutex<Set<AssetID>>([])
+        /// How often the image step said it ended (`contentEnded`).
+        let contentEnds = Mutex(0)
         struct VisionFailed: Error {}
         let delay: Duration
         init(delay: Duration = .zero) { self.delay = delay }
@@ -48,8 +52,11 @@ struct LabelsLaterTests {
 
         func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {
             textCalls.withLock { $0.append(asset.id) }
+            if textQuiet.withLock({ $0.contains(asset.id) }) { throw PhotosNotResponding(lane: .image, what: "fetchAsset", notSent: false) }
             return TextAnalysis(text: "Rechnung Nr. 4711 Gesamtbetrag 12,50 EUR", source: .original)
         }
+
+        func contentEnded() { contentEnds.withLock { $0 += 1 } }
 
         var full: Int { requests.withLock { $0.filter { $0.1.featurePrint }.count } }
         var labelsOnly: Int { requests.withLock { $0.filter { $0.1 == .labelsOnly }.count } }

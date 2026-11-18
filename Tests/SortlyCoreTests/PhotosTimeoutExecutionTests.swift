@@ -25,6 +25,8 @@ struct PhotosTimeoutExecutionTests {
         /// A create without an answer yet, which lands with `land()`.
         private var pending: (id: CollectionID, title: String, parent: CollectionID?, folder: Bool)?
         private(set) var sentWrites = 0
+        /// Creates whose request returned in this launch (`createAnswered`).
+        private var answered: Set<CollectionID> = []
 
         init(_ base: InMemoryPhotoLibrary, stalls: String?, lands: Bool, later: Bool = false,
              stallRead: (title: String, nth: Int)? = nil) {
@@ -39,6 +41,7 @@ struct PhotosTimeoutExecutionTests {
         func land() async {
             guard let c = pending else { return }
             pending = nil
+            answered.insert(c.id)
             await base.userEdit { inventory in
                 inventory.upsert(CollectionSnapshot(id: c.id, title: c.title, kind: c.folder ? .folder : .userAlbum, parentID: c.parent))
                 if let parent = c.parent, var p = inventory[parent] { p.childIDs.append(c.id); inventory.upsert(p) }
@@ -46,9 +49,22 @@ struct PhotosTimeoutExecutionTests {
         }
 
         /// The late create is answered with a failure: it never lands.
-        func neverLands() { pending = nil }
+        func neverLands() {
+            if let c = pending { answered.insert(c.id) }
+            pending = nil
+        }
+
+        /// The late create lands in a later launch: Albumist does not hear of it.
+        func landsAfterARestart() async {
+            guard let c = pending else { return }
+            pending = nil
+            await base.userEdit { inventory in
+                inventory.upsert(CollectionSnapshot(id: c.id, title: c.title, kind: c.folder ? .folder : .userAlbum, parentID: c.parent))
+            }
+        }
 
         func hasUnansweredWrites() async -> Bool { pending != nil }
+        func createAnswered(_ id: CollectionID) async -> Bool { answered.contains(id) }
 
         private func lane(_ what: String) throws {
             if pending != nil { throw PhotosNotResponding(lane: .write, what: what, notSent: true) }
@@ -257,8 +273,71 @@ struct PhotosTimeoutExecutionTests {
         let resumed = try await ChangeExecutor(library: photos, store: store).execute(journal)
         #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
         #expect(try await albums(lib, titled: "Reise").count == 1)
-        #expect(resumed.record?.maybeCreated.isEmpty == true)
+        // Never forgotten, but answered: it never comes, so it is not waited for.
+        #expect(resumed.record?.maybeCreated.values.contains(CollectionID("late-createAlbum")) == true)
         #expect(resumed.record?.adoptedKeys.isEmpty == true)
+    }
+
+    /// After a restart Albumist cannot know whether the create still lands: for a while neither
+    /// going on nor settling for an undo decides that step (no second "Reise"). Once it landed,
+    /// it is this plan's own (third review of the PhotoKit limits, N2).
+    @Test func lateCreateAfterARestartIsNotMadeTwice() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: "createAlbum", lands: false, later: true)
+        let journal = try await stopped(plan, on: photos, store)
+        let since = try #require(journal.record?.maybeCreatedAt[try albumKey(journal)])
+        // The app was closed with the request on its way; a new launch knows nothing of it.
+        let soon: @Sendable () -> Date = { since.addingTimeInterval(ChangeExecutor.lateCreateWait - 60) }
+        await #expect(throws: ChangeExecutor.ExecutionError.earlierCreateMayLand(until: since.addingTimeInterval(ChangeExecutor.lateCreateWait))) {
+            try await ChangeExecutor(library: lib, store: store, clock: soon).execute(journal)
+        }
+        await #expect(throws: ChangeExecutor.ExecutionError.self) {
+            try await ChangeExecutor(library: lib, store: store, clock: soon).reconcileInterrupted(journal)
+        }
+        #expect(try await store.latest == journal)
+        #expect(try await albums(lib, titled: "Reise").isEmpty)
+        await photos.landsAfterARestart()
+        let resumed = try await ChangeExecutor(library: lib, store: store, clock: soon).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").map(\.id) == [CollectionID("late-createAlbum")])
+        #expect(resumed.record?.adoptedKeys.isEmpty == true)
+        try await expectUndoRemovesReise(resumed, lib)
+    }
+
+    /// The create lands only after the wait, when the plan has made the album anyway: the late
+    /// one is still Albumist's. The album records keep it, and undo removes both (N2).
+    @Test func lateCreateLandingAfterTheWaitIsStillAlbumists() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: "createAlbum", lands: false, later: true)
+        let journal = try await stopped(plan, on: photos, store)
+        let since = try #require(journal.record?.maybeCreatedAt[try albumKey(journal)])
+        let later: @Sendable () -> Date = { since.addingTimeInterval(ChangeExecutor.lateCreateWait + 60) }
+        let resumed = try await ChangeExecutor(library: lib, store: store, clock: later).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").count == 1)
+        await photos.landsAfterARestart()
+        #expect(try await albums(lib, titled: "Reise").count == 2)
+        let late = CollectionID("late-createAlbum")
+        #expect(resumed.record?.mayStillLand(resolved: resumed.resolvedKeys) == [late])
+        let managed = ManagedAlbumTracker().record(resumed, into: [], inventory: try await lib.currentInventory())
+        #expect(managed.first { $0.albumID == late }?.createdBySortly == true)
+        try await expectUndoRemovesReise(resumed, lib)
+    }
+
+    /// Settled for an undo after the wait, and the create lands only then: the undo still
+    /// takes it away (N2).
+    @Test func lateCreateLandingAfterAnUndoWasSettledIsTakenAway() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: "createAlbum", lands: false, later: true)
+        let journal = try await stopped(plan, on: photos, store)
+        let since = try #require(journal.record?.maybeCreatedAt[try albumKey(journal)])
+        let later: @Sendable () -> Date = { since.addingTimeInterval(ChangeExecutor.lateCreateWait + 60) }
+        let settled = try await ChangeExecutor(library: lib, store: store, clock: later).reconcileInterrupted(journal)
+        await photos.landsAfterARestart()
+        try await expectUndoRemovesReise(settled, lib)
     }
 
     /// No answer to the check after the album was made: the step stays running with the id

@@ -69,5 +69,6 @@ extension AnalysisRunEnd {
     /// (`AppModel`), so the overnight refinement, for which iOS often starts the app in the
     /// night without its screen, leaves it paused (app-speed 18.11.2026, open point C of the
     /// labels fix). Before, a refinement started after a Pause went on with the analysis.
-    public var keepsPause: Bool { report?.pausedBecause == .userPaused }
+    /// Also when Pause was tapped and the run ended unfinished for another reason (`pauseHeld`).
+    public var keepsPause: Bool { report?.pausedBecause == .userPaused || pauseHeld }
 }

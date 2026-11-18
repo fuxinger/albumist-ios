@@ -114,6 +114,8 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
 
     func hasUnansweredWrites() async -> Bool { await base.hasUnansweredWrites() }
 
+    func createAnswered(_ id: CollectionID) async -> Bool { await base.createAnswered(id) }
+
     func addAssets(_ assets: [AssetID], to album: CollectionID) async throws {
         try await Self.beforeChange()
         try await base.addAssets(assets, to: album)
@@ -204,6 +206,10 @@ struct UITestAnalyzer: ContentAnalyzing {
 
     func willAnalyze(_ upcoming: [AssetSnapshot]) async {
         await base.willAnalyze(upcoming)
+    }
+
+    func contentEnded() {
+        base.contentEnded()
     }
 }
 

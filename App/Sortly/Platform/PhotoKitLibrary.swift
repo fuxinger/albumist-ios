@@ -25,6 +25,10 @@ final class LockedBox<Value: Sendable>: @unchecked Sendable {
         get { lock.withLock { stored } }
         set { lock.withLock { stored = newValue } }
     }
+    /// Changes the value in one step (a get and a set apart could lose a change in between).
+    func update(_ change: (inout Value) -> Void) {
+        lock.withLock { change(&stored) }
+    }
 }
 
 /// Reads and writes the user's photo library through PhotoKit. Only the closed set of
@@ -68,8 +72,9 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// The photos among `ids` that Photos knows, fetched on the image lane (`imageFetchLimit`):
     /// for one photo's image (the analysis, the atlas cover), apart from the plan's reads.
     /// Throws `PhotosNotResponding` when Photos does not answer in time.
-    static func fetchAssets(_ ids: [AssetID], what: String = "fetchAsset") async throws -> FetchedAssets {
-        try await read(what, limit: imageFetchLimit, lane: .image) { _ in
+    /// `lane`: `.thumbnail` for pictures on screen, so a hanging one never stops the analysis.
+    static func fetchAssets(_ ids: [AssetID], what: String = "fetchAsset", lane: PhotosDeadline.Lane = .image) async throws -> FetchedAssets {
+        try await read(what, limit: imageFetchLimit, lane: lane) { _ in
             var assets: [PHAsset] = []
             PHAsset.fetchAssets(withLocalIdentifiers: ids.map(\.rawValue), options: nil)
                 .enumerateObjects { asset, _, _ in assets.append(asset) }
@@ -80,12 +85,19 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// One change request, bounded. Without an answer in time the caller gets
     /// `PhotosNotResponding`: the outcome is not known (Photos may still carry it out), and no
     /// other change goes out until this one has returned (`PhotosDeadline`).
+    /// `answered` runs once Photos answers, also after the caller stopped waiting.
     static func change(_ what: String, limit: Duration = writeLimit, asksUser: Bool = false,
+                       answered: (@Sendable () -> Void)? = nil,
                        _ block: @escaping @Sendable () -> Void) async throws {
         try await deadline.run(what, lane: .write, limit: limit, reportsSlow: !asksUser) { _ in
+            defer { answered?() }
             try await PHPhotoLibrary.shared().performChanges(block)
         }
     }
+
+    /// Ids of new albums and folders whose create request returned in this launch, also after
+    /// its caller stopped waiting: such an album is there or never comes (`createAnswered`).
+    private static let answeredCreates = LockedBox<Set<String>>([])
 
     // MARK: Access
 
@@ -119,14 +131,16 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
                      progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot] {
         try await Self.read("fetchAssets") { beat -> [AssetSnapshot] in
-            try Self.readAssets(includeHidden: includeHidden, knownDetails: knownDetails) { read, total in
+            try Self.readAssets(includeHidden: includeHidden, knownDetails: knownDetails, stopped: { beat.isCancelled }) { read, total in
                 beat.beat()
                 return progress(read, total)
             }
         }
     }
 
-    private static func readAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
+    /// `stopped`: nobody waits for the read any more (it runs on the deadline's queue, where
+    /// `Task.isCancelled` is always false).
+    private static func readAssets(includeHidden: Bool, knownDetails: [AssetID: Date], stopped isStopped: @escaping () -> Bool,
                                    progress: @escaping (Int, Int) -> Bool) throws -> [AssetSnapshot] {
         let options = PHFetchOptions()
         options.includeHiddenAssets = includeHidden
@@ -146,7 +160,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         result.enumerateObjects { asset, index, stop in
             // Ended (the app's time ran out, "Analyse neu aufbauen"): stop reading. The
             // partial list is never returned, it would count the rest as deleted.
-            if Task.isCancelled {
+            if Task.isCancelled || isStopped() {
                 stop.pointee = true
                 return
             }
@@ -169,6 +183,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         if stopped { throw LibraryReadPaused(read: snapshots) }
         _ = progress(snapshots.count, total)
         try Task.checkCancellation()
+        if isStopped() { throw CancellationError() }
         return snapshots
     }
 
@@ -255,6 +270,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         return try await Self.read("availableAssets") { beat -> Set<AssetID> in
             var found = Set<AssetID>()
             for chunk in stride(from: 0, to: ids.count, by: 500).map({ Array(ids[$0..<min($0 + 500, ids.count)]) }) {
+                if beat.isCancelled { throw CancellationError() }
                 let result = PHAsset.fetchAssets(withLocalIdentifiers: chunk.map(\.rawValue), options: nil)
                 result.enumerateObjects { asset, _, _ in found.insert(AssetID(asset.localIdentifier)) }
                 beat.beat()
@@ -283,6 +299,16 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         Self.deadline.hangingCalls(.write) > 0
     }
 
+    func createAnswered(_ id: CollectionID) async -> Bool {
+        Self.answeredCreates.value.contains(id.rawValue)
+    }
+
+    /// Notes that the create that gave Photos `id` returned.
+    private static func noteAnswered(_ id: String?) {
+        guard let id else { return }
+        answeredCreates.update { $0.insert(id) }
+    }
+
     func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID {
         try await createFolder(title: title, parent: parent, noted: { _ in })
     }
@@ -298,7 +324,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
         try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
-        try await Self.change("createFolder") {
+        try await Self.change("createFolder", answered: { Self.noteAnswered(created.value) }) {
             // Into its folder or not at all (see `parentRequest`).
             guard let folder = Self.parentRequest(parentID) else { return }
             let request = PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: title)
@@ -315,7 +341,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
         try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
-        try await Self.change("createAlbum") {
+        try await Self.change("createAlbum", answered: { Self.noteAnswered(created.value) }) {
             // Into its folder or not at all (see `parentRequest`).
             guard let folder = Self.parentRequest(parentID) else { return }
             let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: title)
@@ -637,6 +663,8 @@ private final class InventoryCollector {
     }
 
     private func add(_ collection: PHCollection, parent: CollectionID?) {
+        // Nobody waits for the walk any more: it stops (the result is dropped anyway).
+        if beat?.isCancelled == true { return }
         guard let snapshot = Self.snapshot(of: collection, parent: parent) else { return }
         snapshots.append(snapshot)
         beat?.beat()

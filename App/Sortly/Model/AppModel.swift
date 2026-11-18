@@ -1063,6 +1063,8 @@ final class AppModel {
             let end = AnalysisRunEnd(report: finished, settings: settings, pauseTapped: control.isPaused,
                                      catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow)
             catchUpAfterRun = false
+            // Also a Pause tapped before the run ended unfinished for another reason (an error,
+            // the heat, Photos) stays (`AnalysisRunEnd.pauseHeld`).
             setPausedByUser(end.keepsPause)
             if let report = end.report { analysis.lastReport = report }
             // This run's own outcome (nil when it threw): the 100 % follows only a finished analysis.
@@ -3049,7 +3051,9 @@ final class AppModel {
                 if stored != added, self.lastIgnored?.id == undo.id {
                     self.lastIgnored = stored.isEmpty ? nil : IgnoreUndo(id: undo.id, assets: stored)
                 }
-            } else if !known, !stored.isEmpty {
+            } else if !known, !stored.isEmpty, self.lastIgnored == nil {
+                // Not over the note of a later tap, which answered first (review of the ignore
+                // fix, c).
                 let later = IgnoreUndo(assets: stored)
                 self.lastIgnored = later
                 self.announceAndExpire(later)

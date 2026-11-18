@@ -41,13 +41,58 @@ enum PreviewCache {
     /// previews are loaded ahead (the analysis hears of it with its next photo).
     static func start(_ ids: [AssetID]) async {
         guard !ids.isEmpty,
-              let fetched = try? await PhotoKitLibrary.fetchAssets(ids, what: "fetchPreviewAssets") else { return }
+              let fetched = try? await PhotoKitLibrary.fetchAssets(ids, what: "fetchPreviewAssets"),
+              !Task.isCancelled else { return }
         manager.startCachingImages(for: fetched.assets, targetSize: size, contentMode: .aspectFit, options: options())
+    }
+
+    /// Loads started by `willAnalyze` that have not finished: stopped with the image step
+    /// (`ContentAnalyzing.contentEnded`), so none outlives the run (third review, N7).
+    private static let pending = PendingStarts()
+
+    static func startAhead(_ ids: [AssetID]) {
+        guard !ids.isEmpty else { return }
+        pending.add { await PreviewCache.start(ids) }
+    }
+
+    /// The image step ended: loads still waiting for Photos stop, and the previews go.
+    static func stopAll() {
+        pending.cancelAll()
+        manager.stopCachingImagesForAllAssets()
     }
 
     /// Analysed: its preview is not kept for longer than needed.
     static func stop(_ asset: PHAsset) {
         manager.stopCachingImages(for: [asset], targetSize: size, contentMode: .aspectFit, options: options())
+    }
+}
+
+/// Tasks started for the run that the run does not wait for; cancelled together.
+final class PendingStarts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tasks: [UUID: Task<Void, Never>] = [:]
+
+    func add(_ work: @escaping @Sendable () async -> Void) {
+        let id = UUID()
+        // Kept before the task can end and remove itself (it waits for the lock meanwhile).
+        lock.withLock {
+            tasks[id] = Task {
+                await work()
+                self.remove(id)
+            }
+        }
+    }
+
+    func cancelAll() {
+        let running = lock.withLock { () -> [Task<Void, Never>] in
+            defer { tasks.removeAll() }
+            return Array(tasks.values)
+        }
+        for task in running { task.cancel() }
+    }
+
+    private func remove(_ id: UUID) {
+        lock.withLock { tasks[id] = nil }
     }
 }
 
@@ -303,8 +348,11 @@ struct VisionAnalyzer: ContentAnalyzing {
 
     func willAnalyze(_ upcoming: [AssetSnapshot]) async {
         // Not waited for: a fetch Photos is slow to answer never holds up the photo analysed now.
-        let ids = upcoming.filter { $0.kind == .image || $0.kind == .video }.map(\.id)
-        Task { await PreviewCache.start(ids) }
+        PreviewCache.startAhead(upcoming.filter { $0.kind == .image || $0.kind == .video }.map(\.id))
+    }
+
+    func contentEnded() {
+        PreviewCache.stopAll()
     }
 
     func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {

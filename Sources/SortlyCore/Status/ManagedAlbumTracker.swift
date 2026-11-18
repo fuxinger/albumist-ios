@@ -345,6 +345,16 @@ extension ManagedAlbumTracker {
                 break
             }
         }
+        // An album Albumist asked for whose request got no answer, and which landed next to the
+        // one the plan settled on: Albumist's own, recorded like any album it made, so it can be
+        // listed and removed (third review of the PhotoKit limits, N2).
+        for late in record?.mayStillLand(resolved: plan.resolvedKeys) ?? [] where byID[late] == nil {
+            guard let album = inventory[late], album.kind == .userAlbum else { continue }
+            byID[late] = ManagedAlbumState(albumID: late, sourceID: plan.id, lastKnownTitle: album.title, lastKnownParentID: nil,
+                                           lastKnownMembers: [], addedBySortly: [], createdBySortly: true)
+            touched.insert(late)
+            createdNow.insert(late)
+        }
 
         var result: [ManagedAlbumState] = []
         for var state in byID.values {

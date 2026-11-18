@@ -42,8 +42,10 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
 ///   the wait was followed by a second album). A read or an image request waits up to its own
 ///   limit for the old one and then fails without being sent. A stuck Photos does not collect
 ///   one stuck thread per retry.
-/// - Synchronous PhotoKit work runs on a queue of its own (`runBlocking`), not on Swift's shared
-///   pool, so a hanging fetch never holds a thread the analysis needs.
+/// - Synchronous PhotoKit work runs on queues of its own (`runBlocking`, by the caller's priority),
+///   not on Swift's shared pool, so a hanging fetch never holds a thread the analysis needs. It
+///   has no task to cancel: a long read checks `Heartbeat.isCancelled` and stops once nobody
+///   waits for it.
 /// - A look at a call that comes much later than planned means the app was suspended: the call
 ///   gets its limit again from then (`cameBack` does the same when the app is on screen again),
 ///   so time the app did not run in never cuts a call off.
@@ -60,6 +62,9 @@ public final class PhotosDeadline: @unchecked Sendable {
         /// One photo's fetch or image for the analysis, the grid, the atlas: apart from the
         /// reads, so a photo that hangs never holds up a plan's reads.
         case image
+        /// Pictures on screen: the grid's thumbnails and the atlas cover. Apart from the
+        /// analysis's photos, so a thumbnail that hangs never stops a run (third review, N6).
+        case thumbnail
     }
 
     /// A long call says it is still moving (a read every 250 photos): its limit counts from
@@ -68,8 +73,16 @@ public final class PhotosDeadline: @unchecked Sendable {
         private let lock = NSLock()
         private var last: ContinuousClock.Instant
         private var began = false
+        private var stopped = false
 
         init(_ now: ContinuousClock.Instant) { last = now }
+
+        /// The caller stopped waiting (limit passed, or it was cancelled). Work run on a queue
+        /// (`runBlocking`) has no task to be cancelled: a long read checks this instead, so a
+        /// read nobody waits for no longer keeps its lane busy for minutes (third review, N1).
+        public var isCancelled: Bool { lock.withLock { stopped } }
+
+        func cancel() { lock.withLock { stopped = true } }
 
         public func beat() {
             let now = ContinuousClock.now
@@ -115,8 +128,13 @@ public final class PhotosDeadline: @unchecked Sendable {
         running ? now - lastBeat : max(.zero, now - lastBeat - notBegunGrace)
     }
 
-    static func look(quiet: Duration, limit: Duration, late: Duration) -> Look {
-        if late >= suspendedAfter { return .cameBack }
+    /// Late looks in a row that give the call its limit again; after these the limit decides
+    /// (a timer that is always late is not a suspension, third review, N5).
+    static let maxCameBack = 3
+
+    /// `cameBack`: late looks in a row that already gave the call its limit again.
+    static func look(quiet: Duration, limit: Duration, late: Duration, cameBack: Int = 0) -> Look {
+        if late >= suspendedAfter, cameBack < maxCameBack { return .cameBack }
         if quiet >= limit { return .giveUp }
         return .again(min(limit - quiet, check(limit)))
     }
@@ -194,10 +212,10 @@ public final class PhotosDeadline: @unchecked Sendable {
                     return
                 }
                 watch(id, lane: lane, what: what, limit: limit, asksUser: !reportsSlow, heartbeat: heartbeat, answer: answer,
-                      planned: nil)
+                      planned: nil, cameBack: 0)
             }
         } onCancel: {
-            self.giveUp(id, lane: lane, answer: answer, error: CancellationError())
+            self.giveUp(id, lane: lane, answer: answer, heartbeat: heartbeat, error: CancellationError())
         }
     }
 
@@ -209,28 +227,31 @@ public final class PhotosDeadline: @unchecked Sendable {
     private static let timers = DispatchQueue(label: "PhotosDeadline.timers")
 
     private func watch<T>(_ id: UUID, lane: Lane, what: String, limit: Duration, asksUser: Bool, heartbeat: Heartbeat,
-                          answer: Answer<T>, planned: ContinuousClock.Instant?) {
+                          answer: Answer<T>, planned: ContinuousClock.Instant?, cameBack: Int) {
         guard !answer.isDone else { return }
         let now = ContinuousClock.now
         let quiet = Self.quiet(now: now, lastBeat: heartbeat.lastBeat, running: heartbeat.quietSince != nil)
         let late = planned.map { max(.zero, now - $0) } ?? .zero
         let wait: Duration
-        switch Self.look(quiet: quiet, limit: limit, late: late) {
+        var inARow = 0
+        switch Self.look(quiet: quiet, limit: limit, late: late, cameBack: cameBack) {
         case .giveUp:
-            giveUp(id, lane: lane, answer: answer,
+            giveUp(id, lane: lane, answer: answer, heartbeat: heartbeat,
                    error: PhotosNotResponding(lane: lane, what: what, notSent: false, asksUser: asksUser))
             return
         case .cameBack:
             heartbeat.beat()
+            inARow = cameBack + 1
             wait = Self.check(limit)
         case .again(let next):
             wait = next
         }
         let seconds = Double(wait.components.seconds) + Double(wait.components.attoseconds) / 1e18
         let next = now + wait
+        let inARowNow = inARow
         Self.timers.asyncAfter(deadline: .now() + seconds) {
             self.watch(id, lane: lane, what: what, limit: limit, asksUser: asksUser, heartbeat: heartbeat, answer: answer,
-                       planned: next)
+                       planned: next, cameBack: inARowNow)
         }
     }
 
@@ -238,14 +259,23 @@ public final class PhotosDeadline: @unchecked Sendable {
     /// fetch that hangs holds one of that queue's threads, never one of Swift's shared pool.
     public func runBlocking<T: Sendable>(_ what: String, lane: Lane, limit: Duration, reportsSlow: Bool = true,
                                          _ work: @escaping @Sendable (Heartbeat) throws -> T) async throws -> T {
-        try await run(what, lane: lane, limit: limit, reportsSlow: reportsSlow) { beat in
+        // The queue of the caller's priority: a background read of the analysis does not run
+        // at the priority of what the user waits for (third review, N4).
+        let queue = Self.queue(for: Task.currentPriority)
+        return try await run(what, lane: lane, limit: limit, reportsSlow: reportsSlow) { beat in
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
-                Self.photoKit.async { continuation.resume(with: Result { try work(beat) }) }
+                queue.async { continuation.resume(with: Result { try work(beat) }) }
             }
         }
     }
 
-    private static let photoKit = DispatchQueue(label: "PhotosDeadline.photoKit", qos: .userInitiated, attributes: .concurrent)
+    /// What the user waits for (`.medium` and above) and what runs on its own.
+    private static let photoKitUser = DispatchQueue(label: "PhotosDeadline.photoKit.user", qos: .userInitiated, attributes: .concurrent)
+    private static let photoKitUtility = DispatchQueue(label: "PhotosDeadline.photoKit.utility", qos: .utility, attributes: .concurrent)
+
+    static func queue(for priority: TaskPriority) -> DispatchQueue {
+        priority >= .medium ? photoKitUser : photoKitUtility
+    }
 
     /// Waits until no call of this kind hangs, up to `limit`. False if one still does (or the
     /// caller was cancelled meanwhile).
@@ -272,7 +302,7 @@ public final class PhotosDeadline: @unchecked Sendable {
 
     /// The caller stops waiting (limit passed, or cancelled): it gets `error`, and a call that
     /// was sent counts as hanging until it returns.
-    private func giveUp<T>(_ id: UUID, lane: Lane, answer: Answer<T>, error: any Error) {
+    private func giveUp<T>(_ id: UUID, lane: Lane, answer: Answer<T>, heartbeat: Heartbeat, error: any Error) {
         let first = lock.withLock { () -> Bool in
             let (first, sent) = answer.giveUp()
             guard first else { return false }
@@ -281,6 +311,7 @@ public final class PhotosDeadline: @unchecked Sendable {
             return true
         }
         guard first else { return }
+        heartbeat.cancel()
         answer.cancelWorker()
         answer.deliver(.failure(error))
     }

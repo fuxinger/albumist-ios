@@ -17,8 +17,22 @@ extension PhotosNotResponding: @retroactive LocalizedError {
             String(localized: "Die Rückfrage von iOS zum Löschen blieb ohne Antwort und ist vielleicht noch offen. Ob gelöscht wird, steht noch nicht fest. Sobald das geklärt ist, kannst du in der Übersicht fortsetzen.")
         case .write:
             String(localized: "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als zurückgenommen. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen.")
-        case .read, .image:
+        case .read, .image, .thumbnail:
             String(localized: "Fotos antwortet gerade nicht. Albumist versucht es gleich noch einmal.")
+        }
+    }
+}
+
+/// A new album Albumist asked for before (its request got no answer, and the app was closed
+/// since) is not in Photos yet and may still land: going on or taking the plan back waits a
+/// few minutes, so it is never made twice (`ChangeExecutor.lateCreateWait`, third review N2).
+extension ChangeExecutor.ExecutionError: @retroactive LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .earlierCreateMayLand:
+            String(localized: "Ein Album, das Albumist vorhin anlegen wollte, ist in Fotos noch nicht angekommen und kann noch kommen. Damit es nicht doppelt entsteht, geht es erst in ein paar Minuten weiter. Versuche es dann noch einmal.")
+        case .notConfirmed, .blocked:
+            nil
         }
     }
 }

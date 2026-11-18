@@ -189,6 +189,10 @@ struct PhotosDeadlineTests {
         #expect(PhotosDeadline.look(quiet: .seconds(61), limit: .seconds(60), late: .milliseconds(10)) == .giveUp)
         #expect(PhotosDeadline.look(quiet: .seconds(10), limit: .seconds(60), late: .zero) == .again(.seconds(1)))
         #expect(PhotosDeadline.look(quiet: .seconds(59.5), limit: .seconds(60), late: .zero) == .again(.milliseconds(500)))
+        // A timer that is always late is not a suspension: after three in a row the limit
+        // decides (third review, N5).
+        #expect(PhotosDeadline.look(quiet: .seconds(90), limit: .seconds(60), late: .seconds(5), cameBack: 2) == .cameBack)
+        #expect(PhotosDeadline.look(quiet: .seconds(90), limit: .seconds(60), late: .seconds(5), cameBack: 3) == .giveUp)
     }
 
     /// A call that has no thread yet is not cut off at its limit, but never kept for good
@@ -236,5 +240,24 @@ struct PhotosDeadlineTests {
         }
         stuck.open = true
         while deadline.hangingCalls(.image) > 0 { try await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    /// Work on the queue has no task to cancel: a long read nobody waits for any more is told
+    /// so by its heartbeat, stops, and frees its lane (third review, N1).
+    @Test func blockingWorkNobodyWaitsForIsToldToStop() async throws {
+        let deadline = PhotosDeadline()
+        await #expect(throws: PhotosNotResponding.self) {
+            try await deadline.runBlocking("fetchAssets", lane: .read, limit: .milliseconds(200)) { beat -> Int in
+                while !beat.isCancelled { usleep(5_000) }
+                return 1
+            }
+        }
+        let clock = ContinuousClock()
+        let gaveUp = clock.now
+        while deadline.hangingCalls(.read) > 0, clock.now - gaveUp < .seconds(20) { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(deadline.hangingCalls(.read) == 0)
+        // Blocking work runs at the caller's priority (N4).
+        #expect(PhotosDeadline.queue(for: .background).label != PhotosDeadline.queue(for: .userInitiated).label)
+        #expect(PhotosDeadline.queue(for: .medium).label == PhotosDeadline.queue(for: .high).label)
     }
 }

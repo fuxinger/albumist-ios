@@ -43,6 +43,10 @@ public struct AnalysisRunEnd: Sendable, Equatable {
     /// The analysis is finished with this run. The finish card, haptic and notification, the
     /// Lock Screen's "Analyse fertig", the 100 % and the end of the marker are for this case only.
     public var isFinished: Bool
+    /// Pause was tapped, and the run ended unfinished for another reason before the Pause
+    /// stopped it (an error, the heat, Photos not answering): the Pause stays all the same, and
+    /// nothing goes on by itself (review of the Pause fix, a).
+    public var pauseHeld = false
 
     /// `report`: the run's report, `nil` when it threw or was stopped on purpose. `settings`: as
     /// they are now. `pauseTapped`: Pause was tapped during the run (it may have come too late
@@ -52,12 +56,14 @@ public struct AnalysisRunEnd: Sendable, Equatable {
     public init(report: AnalysisPipeline.Report?, settings: OrganizationSettings, pauseTapped: Bool,
                 catchUpRequested: Bool, mayStart: Bool, background: Bool = false) {
         self.report = report
-        let later: Next = catchUpRequested ? .catchUp : (background ? .nothing : .retry)
+        let later: Next = pauseTapped ? .nothing : (catchUpRequested ? .catchUp : (background ? .nothing : .retry))
+        pauseHeld = pauseTapped
         guard let report else {
             next = later
             isFinished = false
             return
         }
+        pauseHeld = false
         if report.pausedBecause == .userPaused {
             next = .nothing
             isFinished = false
@@ -66,6 +72,7 @@ public struct AnalysisRunEnd: Sendable, Equatable {
         if report.pausedBecause != nil {
             next = later
             isFinished = false
+            pauseHeld = pauseTapped
             return
         }
         let settingsLeft = report.settingsUsed.needsRun(for: settings)
@@ -88,7 +95,7 @@ public struct AnalysisRunEnd: Sendable, Equatable {
     /// (`AppModel.AnalysisState.needsResume`), also when the settings left work that starts right
     /// away or once what holds it ends. The Lock Screen then says "Analyse wartet auf dich",
     /// never "Analyse fertig".
-    public var needsResume: Bool { !isFinished && report?.pausedBecause != .userPaused }
+    public var needsResume: Bool { !isFinished && !keepsPause }
 
     /// The overnight refinement's `needsResume` after this end, from the one before it:
     /// - finished: nothing to go on with;
@@ -99,7 +106,7 @@ public struct AnalysisRunEnd: Sendable, Equatable {
     ///   (`AppModel.refine`), or the app goes on with it when opened;
     /// - cut off by iOS or stopped by the device: as it was; the next window goes on.
     public func needsResume(afterRefinement before: Bool) -> Bool {
-        if isFinished || report?.pausedBecause == .userPaused { return false }
+        if isFinished || keepsPause { return false }
         return report?.isComplete == true ? true : before
     }
 

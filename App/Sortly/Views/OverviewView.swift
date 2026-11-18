@@ -631,7 +631,10 @@ struct LimitedAccessCard: View {
             Task {
                 let before = model.access
                 await model.refreshAccess()
-                if model.access != before { model.startAnalysis(userInitiated: true) }
+                // A Pause stays: "Fortsetzen" is the only way on (review of the Pause fix, b).
+                if model.access != before, !model.analysis.pausedByUser, !model.analysis.pausing {
+                    model.startAnalysis(userInitiated: true)
+                }
             }
         }
     }
@@ -653,7 +656,11 @@ struct LimitedAccessCard: View {
         let model = model
         // @Sendable: PhotoKit may call this from its own queue.
         PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: top) { @Sendable _ in
-            Task { @MainActor in model.startAnalysis(userInitiated: true) }
+            Task { @MainActor in
+                // A Pause stays: "Fortsetzen" is the only way on (review of the Pause fix, b).
+                guard !model.analysis.pausedByUser, !model.analysis.pausing else { return }
+                model.startAnalysis(userInitiated: true)
+            }
         }
     }
 }

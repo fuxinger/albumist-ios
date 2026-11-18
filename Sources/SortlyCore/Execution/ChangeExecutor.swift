@@ -29,6 +29,10 @@ public protocol PhotoLibraryWriting: Sendable {
     /// A change request sent earlier has not been answered yet: Photos may still carry it out,
     /// so what the library shows now is not final (`PhotosDeadline`).
     func hasUnansweredWrites() async -> Bool
+    /// The create request that gave Photos this id returned in this launch (also after its
+    /// caller stopped waiting): the album is there or never comes. False when not known (after
+    /// a restart).
+    func createAnswered(_ id: CollectionID) async -> Bool
 }
 
 /// Why Photos did not carry out a deletion, as far as the library adapter can tell. Other
@@ -58,6 +62,7 @@ extension PhotoLibraryWriting {
     }
 
     public func hasUnansweredWrites() async -> Bool { false }
+    public func createAnswered(_ id: CollectionID) async -> Bool { false }
 
     /// One by one: albums first, then folders from the inside out.
     public func deleteCollections(_ ids: [CollectionID]) async throws {
@@ -143,7 +148,17 @@ public actor ChangeExecutor {
     public enum ExecutionError: Error, Equatable {
         case notConfirmed
         case blocked([PlanConflict])
+        /// A new album or folder Albumist asked for earlier is not in Photos yet and may still
+        /// land (its request got no answer, and was not answered later in this launch): nothing
+        /// is decided for it before `until`, so it is never made twice (third review, N2).
+        case earlierCreateMayLand(until: Date)
     }
+
+    /// How long a create whose request got no answer may still land after the app was closed
+    /// (`ExecutionRecord.maybeCreated`). Within it, neither going on nor settling for an undo
+    /// decides that step; after it, the album is made (or the step settled) as after any
+    /// interruption, and if the old one lands still, it is Albumist's all the same.
+    public static let lateCreateWait: TimeInterval = 10 * 60
 
     /// Runs (or resumes) a plan. `onEvent` reports progress for the UI.
     public func execute(_ input: ChangePlan, onEvent: @Sendable (ExecutionEvent) -> Void = { _ in }) async throws -> ChangePlan {
@@ -221,6 +236,11 @@ public actor ChangeExecutor {
                 if !wasRunning && !sent { plan = beforeStep }
                 try await store.save(plan)
                 throw notResponding
+            } catch let wait as ExecutionError {
+                // An earlier create may still land: this step is left as it was (nothing sent).
+                plan = beforeStep
+                try await store.save(plan)
+                throw wait
             } catch {
                 await settleAfterError(step, plan: &plan)
                 state = .failed(reason: String(describing: error))
@@ -267,8 +287,11 @@ public actor ChangeExecutor {
                     // Photos gave this id to this run's request, which then got no answer in time:
                     // it landed, so it is Albumist's like any album it made (undo removes it).
                     plan.resolvedKeys[key] = maybe
-                    plan.record?.maybeCreated[key] = nil
                     state = .succeeded(createdID: maybe, verifiedAt: now)
+                } else if let until = try await mayStillLand(key, plan) {
+                    // Not there, and it may still come: not settled from a library that is not
+                    // final (the undo would leave it behind).
+                    throw ExecutionError.earlierCreateMayLand(until: until)
                 } else if let parent = resolve(parentRef, plan),
                    let found = adoptionCandidate(title: title, parent: parent, folder: isFolder, plan: plan, inventory: inventory) {
                     plan.resolvedKeys[key] = found
@@ -333,6 +356,16 @@ public actor ChangeExecutor {
     }
 
     /// An earlier change request has no answer yet (`PhotoLibraryWriting.hasUnansweredWrites`).
+    /// Until when the create of `key`, whose request got no answer and which is not in the
+    /// library, may still land; nil when it cannot any more (its request returned in this
+    /// launch, or `lateCreateWait` passed).
+    private func mayStillLand(_ key: String, _ plan: ChangePlan) async throws -> Date? {
+        guard let maybe = plan.record?.maybeCreated[key], let since = plan.record?.maybeCreatedAt[key] else { return nil }
+        if await library.createAnswered(maybe) { return nil }
+        let until = since.addingTimeInterval(Self.lateCreateWait)
+        return clock() < until ? until : nil
+    }
+
     private func requireAnsweredWrites() async throws {
         if await library.hasUnansweredWrites() {
             throw PhotosNotResponding(lane: .write, what: "earlierChange", notSent: true)
@@ -386,14 +419,17 @@ public actor ChangeExecutor {
                 // album is made below as after any interruption.
                 if let found = try await library.collection(maybe) {
                     plan.resolvedKeys[key] = maybe
-                    plan.record?.maybeCreated[key] = nil
                     try await store.save(plan)
                     guard found.title == title, found.parentID == parent else {
                         return .failed(reason: "created collection could not be verified")
                     }
                     return .succeeded(createdID: maybe, verifiedAt: now)
                 }
-                plan.record?.maybeCreated[key] = nil
+                // Not there. Its request returned in this launch: it never comes. After a
+                // restart it may still come: no second one for a while (third review, N2). After
+                // that the album is made below; the old id stays recorded, so one that lands
+                // later is still Albumist's (`ExecutionRecord.mayStillLand`).
+                if let until = try await mayStillLand(key, plan) { throw ExecutionError.earlierCreateMayLand(until: until) }
             }
             if reconcile {
                 // The app stopped while this was being created. A collection with the same
@@ -435,7 +471,7 @@ public actor ChangeExecutor {
                         : try await library.createAlbum(title: title, parent: parent, noted: { noted.note($0) })
                 }
             } catch let quiet as PhotosNotResponding {
-                if let maybe = noted.id { plan.record?.maybeCreated[key] = maybe }
+                if let maybe = noted.id { plan.record?.noteMaybeCreated(maybe, key: key, at: clock()) }
                 throw quiet
             }
             // Photos returned the new id: it is written down before the check, so a failed
@@ -1002,6 +1038,13 @@ public struct UndoPlanner: Sendable {
                 if !added.isEmpty { addedByUs[albumID, default: []].formUnion(added) }
             default: break
             }
+        }
+        // Albums and folders Albumist asked for whose request got no answer, which landed next
+        // to the one the plan settled on (or after the plan was settled): Albumist's own,
+        // deleted like any it made (third review of the PhotoKit limits, N2).
+        for late in record?.mayStillLand(resolved: executed.resolvedKeys) ?? [] {
+            guard let found = current[late], !createdAlbums.contains(late), !createdFolders.contains(late) else { continue }
+            if found.kind == .folder { createdFolders.append(late) } else { createdAlbums.append(late) }
         }
         if let owned {
             for (albumID, ours) in addedByUs { addedByUs[albumID] = ours.intersection(owned[albumID] ?? []) }

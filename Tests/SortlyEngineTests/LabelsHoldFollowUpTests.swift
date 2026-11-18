@@ -152,6 +152,14 @@ struct LabelsHoldFollowUpTests {
         hot.pausedBecause = .thermal
         #expect(!AnalysisRunEnd(report: hot, settings: settings, pauseTapped: false, catchUpRequested: false, mayStart: true,
                                 background: true).keepsPause)
+        // Pause tapped, but the run ended unfinished for another reason first (an error, the
+        // heat): the Pause stays, and nothing goes on by itself (review of the Pause fix, a).
+        let failed = AnalysisRunEnd(report: nil, settings: settings, pauseTapped: true, catchUpRequested: true, mayStart: true)
+        #expect(failed.keepsPause && !failed.needsResume && failed.next == .nothing)
+        let hotTapped = AnalysisRunEnd(report: hot, settings: settings, pauseTapped: true, catchUpRequested: false, mayStart: true,
+                                       background: true)
+        #expect(hotTapped.keepsPause && !hotTapped.needsResume(afterRefinement: true) && hotTapped.next == .nothing)
+        #expect(hotTapped.report?.pausedBecause == .thermal)
     }
 
     /// D: the end of a plan starts the analysis only once its try is due; a try that came due
@@ -199,5 +207,28 @@ struct LabelsHoldFollowUpTests {
         #expect(next.isComplete)
         #expect(try await s.store.result(ContentAnalysis.self, kind: "content", asset: stuck)?.failedAttempts == nil)
         #expect(try await s.store.result(ContentAnalysis.self, kind: "content", asset: stuck) != nil)
+        // Every image step said it ended, also the one cut off (previews loaded ahead stop).
+        #expect(s.analyzer.contentEnds.withLock { $0 } == 2)
+    }
+
+    /// The same while reading text: not Vision failing and not the screenshot's fault. The run
+    /// ends with the error, nothing is counted against the screenshot, and Vision is not said
+    /// to be unavailable (third review of the PhotoKit limits, N3).
+    @Test func aScreenshotPhotosDoesNotHandOverIsNotAVisionFailure() async throws {
+        let s = try LabelsLaterTests.setup(photos: 4, screenshots: 6, labels: false)
+        s.analyzer.textQuiet.withLock { $0 = Set(s.screenshots) }
+        await #expect(throws: PhotosNotResponding.self) { try await s.pipeline.run() }
+        for shot in s.screenshots {
+            #expect(try await s.store.result(TextResult.self, kind: "text", asset: shot) == nil)
+        }
+        // Only the reads already in work when the first one failed: no new ones were started.
+        #expect(s.analyzer.textCalls.withLock { $0.count } < s.screenshots.count)
+        s.analyzer.textQuiet.withLock { $0 = [] }
+        let next = try await s.pipeline.run()
+        #expect(next.isComplete)
+        #expect(!next.analyzerUnavailable)
+        for shot in s.screenshots {
+            #expect(try await s.store.result(TextResult.self, kind: "text", asset: shot)?.retries == nil)
+        }
     }
 }

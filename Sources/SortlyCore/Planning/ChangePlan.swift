@@ -210,14 +210,23 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
     /// when it ran, so the receipt keeps showing those names after a later rename (audit 2, 7.2).
     public var names: [CollectionID: RecordedName] = [:]
     /// Planned key → the id Photos gave the new album or folder of a request that then got no
-    /// answer in time (`PhotosNotResponding`): it may land later. If it is there when the plan
-    /// goes on or is taken back, it is this plan's own (made, not adopted), never made a second
-    /// time; if not, the request did not land (second review of the PhotoKit limits, 1).
+    /// answer in time (`PhotosNotResponding`): it may land later, and is never forgotten. If it
+    /// is there when the plan goes on or is taken back, it is this plan's own (made, not
+    /// adopted), never made a second time. While it may still land, no second one is made
+    /// (`ChangeExecutor.lateCreateWait`); one that lands after the plan made the album anyway is
+    /// still Albumist's: the album records keep it and undo deletes it (`mayStillLand`; second
+    /// and third review of the PhotoKit limits, 1 and N2).
     public var maybeCreated: [String: CollectionID] = [:]
+    /// When the request of `maybeCreated[key]` was given up.
+    public var maybeCreatedAt: [String: Date] = [:]
+    /// Earlier `maybeCreated` ids of a key whose later request got no answer either.
+    public var earlierMaybeCreated: [CollectionID] = []
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case media, unverified, adoptedKeys, deletedAlbums, unavailable, names, maybeCreated }
+    enum CodingKeys: String, CodingKey {
+        case media, unverified, adoptedKeys, deletedAlbums, unavailable, names, maybeCreated, maybeCreatedAt, earlierMaybeCreated
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -228,6 +237,24 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
         unavailable = try c.decodeIfPresent([String: Int].self, forKey: .unavailable) ?? [:]
         names = try c.decodeIfPresent([CollectionID: RecordedName].self, forKey: .names) ?? [:]
         maybeCreated = try c.decodeIfPresent([String: CollectionID].self, forKey: .maybeCreated) ?? [:]
+        maybeCreatedAt = try c.decodeIfPresent([String: Date].self, forKey: .maybeCreatedAt) ?? [:]
+        earlierMaybeCreated = try c.decodeIfPresent([CollectionID].self, forKey: .earlierMaybeCreated) ?? []
+    }
+
+    /// A request that got no answer gave Photos this id for a new album or folder.
+    mutating func noteMaybeCreated(_ id: CollectionID, key: String, at date: Date) {
+        if let earlier = maybeCreated[key], earlier != id, !earlierMaybeCreated.contains(earlier) {
+            earlierMaybeCreated.append(earlier)
+        }
+        maybeCreated[key] = id
+        maybeCreatedAt[key] = date
+    }
+
+    /// Albums and folders Albumist asked Photos for that may still land, or landed, next to
+    /// the one the plan settled on for their key: Albumist's own, never the user's.
+    public func mayStillLand(resolved: [String: CollectionID]) -> [CollectionID] {
+        let latest = maybeCreated.sorted { $0.key < $1.key }.compactMap { key, id in resolved[key] == id ? nil : id }
+        return earlierMaybeCreated.filter { !resolved.values.contains($0) } + latest
     }
 
     /// Notes the current name and path of every existing album or folder the plan refers to,

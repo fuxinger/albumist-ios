@@ -157,10 +157,11 @@ enum ThumbnailRequest {
     private static let lookups = DispatchQueue(label: "app.albumist.thumbnail-lookup", qos: .userInitiated)
 
     /// The assets Photos knows among `ids`, by local identifier, in one fetch; nil when Photos
-    /// does not answer in time (bounded on the image lane like the analysis's fetches, so the
-    /// grid never waits for good and the card's "Fotos antwortet gerade nicht" knows of it).
+    /// does not answer in time (bounded on the lane of pictures on screen, apart from the
+    /// analysis's photos, so the grid never waits for good and a hanging thumbnail never stops
+    /// a run; the card's "Fotos antwortet gerade nicht" knows of it).
     nonisolated static func lookUp(_ ids: [String]) async -> [String: Asset]? {
-        try? await PhotoKitLibrary.deadline.run("lookUpThumbnails", lane: .image, limit: PhotoKitLibrary.imageFetchLimit) { _ in
+        try? await PhotoKitLibrary.deadline.run("lookUpThumbnails", lane: .thumbnail, limit: PhotoKitLibrary.imageFetchLimit) { _ in
             await withCheckedContinuation { (continuation: CheckedContinuation<[String: Asset], Never>) in
                 lookups.async {
                     let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)

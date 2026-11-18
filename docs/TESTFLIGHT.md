@@ -197,6 +197,12 @@ Testcode gibt.
   das jede Gruppe läuft: jedes Skript unter `.github/scripts/` (außer dessen Unit-Tests in
   `tests/`) und jeder Workflow unter `.github/workflows/` (eine Änderung daran lässt also alle
   Gruppen laufen).
+  Swift-Dateien der UI-Tests zählen mit ihrem Code, nicht Byte für Byte: Kommentare,
+  Einrückung und Leerzeilen zählen nicht, Zeichenketten und Regex-Literale schon (Zeichen für
+  Zeichen). Ein geänderter Kommentar ist also keine Änderung des Tests: ein rotes Ergebnis
+  bleibt rot (Prüfer B, G5-04). Kann das Skript eine Datei nicht sicher lesen (etwa `a/b` statt
+  `a / b`, das könnte ein Regex-Literal sein), zählt sie Byte für Byte; ein Unit-Test verlangt,
+  dass alle Swift-Dateien der UI-Tests sicher lesbar sind.
   Welche Datei welche benutzt, liest `.github/scripts/ui_groups.py` bei jedem Lauf aus den
   Swift-Dateien (auch Klassen, deren Kopf über mehrere Zeilen geht, und Code in `\(…)` von
   Zeichenketten); keine Liste von Testnamen ist fest eingetragen. Im Zweifel streng: eine

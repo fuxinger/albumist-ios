@@ -40,9 +40,14 @@ APP = ui_groups.app_fingerprint(HEAD)
 FPS = ui_groups.Groups(HEAD).fingerprints()
 NAMES = ["device", "full", "other", "small"]
 TITLES = {"device": "device conditions", "full": "full flow", "other": "other flows", "small": "small iPhone"}
-# A test-only commit after HEAD: a shorter wait in FlowUITests.swift (groups full, other, small).
-TEST_ONLY = repo(**{"App__SortlyUITests__FlowUITests.swift": FLOW + "\n// waits 20 s, measured in run 1\n"})
+# A test-only commit after HEAD: a longer wait in FlowUITests.swift (groups full, other, small).
+TEST_ONLY = repo(**{"App__SortlyUITests__FlowUITests.swift":
+                    FLOW.replace("func test2_Other() throws {}", "func test2_Other() throws { sleep(20) }")})
 TEST_ONLY_FPS = ui_groups.Groups(TEST_ONLY).fingerprints()
+# A commit after HEAD that only changes comments and indentation in the same file: not a fix.
+COMMENT_ONLY = repo(**{"App__SortlyUITests__FlowUITests.swift":
+                       FLOW.replace("    func test2_Other", "    // waits 20 s, measured in run 1\n  func test2_Other")})
+COMMENT_ONLY_FPS = ui_groups.Groups(COMMENT_ONLY).fingerprints()
 # The same app where the device group reads the quick switch (SORTLY_UI_QUICK, test02 skips).
 QUICK_DEVICE = DEVICE.replace("func test02_Cold() {", 'func test02_Cold() {\n        if env["SORTLY_UI_QUICK"] == "1" { return }')
 QUICK = repo(**{"App__SortlyUITests__DeviceUITests.swift": QUICK_DEVICE})
@@ -99,6 +104,7 @@ class FakeVerifier:
 
 
 VERIFIER = FakeVerifier({"a" * 40: (APP, FPS), "b" * 40: (APP, TEST_ONLY_FPS), "c" * 40: ("f" * 64, {}),
+                         "k" * 40: (APP, COMMENT_ONLY_FPS),
                          "q" * 40: (APP, QUICK_FULL, QUICK_FAST)})
 
 
@@ -201,6 +207,17 @@ class DecideTests(unittest.TestCase):
         d = self.decide("other", runs, TEST_ONLY_FPS)
         self.assertEqual(d["state"], "green")
         self.assertEqual([e["run_id"] for e in d["older_reds"]], [1])
+
+    def test_a_comment_change_is_no_fix_and_the_red_stays(self):
+        # Prüfer B G5-04: a red (flaky) test must not get out of its lock by a comment edit in its
+        # test file and one green run. The comment commit has the same key, so its green does not count.
+        self.assertEqual(COMMENT_ONLY_FPS, FPS)
+        runs = [run(1, "a" * 40, [job("other", "failure", "failure", end="2026-11-19T10:00:00Z")]),
+                run(2, "k" * 40, [job("other", tests=COMMENT_ONLY_FPS["other"], end="2026-11-19T12:00:00Z")])]
+        d = self.decide("other", runs, COMMENT_ONLY_FPS)
+        self.assertEqual(d["state"], "red")
+        self.assertEqual([e["run_id"] for e in d["reds"]], [1])
+        self.assertEqual(d["older_reds"], [])
 
     def test_greens_that_do_not_match_their_commit_or_other_apps_do_not_count(self):
         # The name claims this app, but git says commit c has another app.

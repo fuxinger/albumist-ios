@@ -110,7 +110,31 @@ struct TextMinimizerTests {
 
     /// The masks are newer than texts stored by version 2: they are masked once more.
     @Test func theMaskVersionIsRaised() {
-        #expect(TextMinimizer.maskVersion == 3)
+        // 4: second review of P2-04 (see below).
+        #expect(TextMinimizer.maskVersion == 4)
+    }
+
+    /// Second review of P2-04: a space or underscore after the country code and underscores
+    /// between groups kept IBANs and card numbers readable; upper-case order numbers with
+    /// hyphens were masked as IBANs, and a phone number with a slash as a card.
+    @Test func moreSeparatorsAreMaskedAndOrderNumbersStay() {
+        for text in ["IBAN DE 89 3704 0044 0532 0130 00", "IBAN DE89_3704_0044_0532_0130_00", "iban de 89 3704 0044 0532 0130 00",
+                     "IBAN DE_89_3704_0044_0532_0130_00"] {
+            let stored = TextMinimizer.storable(text)
+            #expect(!stored.contains("0532"), "IBAN stays readable: \(stored)")
+            #expect(DocumentAnalyzer.containsIBAN(text), "not seen as an IBAN: \(text)")
+        }
+        let card = TextMinimizer.storable("Karte 4111_1111_1111_1111")
+        #expect(!card.contains("1111"), "card stays readable: \(card)")
+        // Printed IBANs in their usual form are masked without the checksum, as before.
+        #expect(!TextMinimizer.storable("IBAN DE12 3456 7890 1234 5678 90").contains("5678"))
+        // Order and invoice numbers in IBAN shape but with hyphens fail the checksum: they stay.
+        for kept in ["Bestellung AB12-3456-7890-1234", "Rechnung RE24-1118-0001", "Ticket XY99.1234.5678.9012", "Tel. 04321/12345678",
+                     "Fax 0432/1234/5678/9", "Code AB12/3456/7890"] {
+            #expect(TextMinimizer.storable(kept) == kept, "\(kept) was changed to \(TextMinimizer.storable(kept))")
+        }
+        // "04321/12345678" passes the Luhn check, so only the groups tell it is no card.
+        #expect(TextMinimizer.luhnValid("0432112345678".compactMap(\.wholeNumberValue)))
     }
 
     /// The subject line of a letter is stored with the document facts: it goes through the

@@ -60,7 +60,14 @@
 - IBANs und Kartennummern werden maskiert, auch mit Punkten, Bindestrichen, Schrägstrichen,
   bis zu vier Leerzeichen oder über zwei Zeilen; Ausweise (auch die Rückseite mit der
   maschinenlesbaren Zeile) und medizinische Dokumente werden nicht als Text gespeichert
-  (Prüfbefund P2-04, Masken-Version 3). Andere Schreibweisen (Buchstaben zwischen den Gruppen,
+  (Prüfbefund P2-04, Masken-Version 3). Seit Version 4 (zweite Prüfung) auch mit Unterstrichen
+  und mit Leerzeichen oder Unterstrich nach dem Ländercode („DE 89 3704 …“). Eine IBAN gilt
+  ohne Prüfsumme nur in der gedruckten Form (Großbuchstaben, nur Leerzeichen); jede andere
+  Schreibweise braucht eine gültige Prüfsumme, damit Bestell- und Rechnungsnummern wie
+  „AB12-3456-7890-1234“ suchbar bleiben: eine IBAN mit Bindestrichen und einem Tippfehler
+  bleibt dadurch lesbar. Kartennummern mit Schrägstrich nur in Vierergruppen
+  („4111/1111/…“), damit Telefonnummern wie „04321/12345678“ bleiben; eine Amex-Nummer mit
+  Schrägstrichen (4-6-5) bleibt lesbar. Andere Schreibweisen (Buchstaben zwischen den Gruppen,
   stark verlesene Ziffern) können lesbar bleiben.
 - Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
   der Gesundheitskarte. Der Text bleibt auf dem Gerät.

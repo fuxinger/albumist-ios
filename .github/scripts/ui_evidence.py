@@ -1,27 +1,42 @@
 """Which UI groups have to run, and whether every group is green for exactly this app and its own
 test code (the owner's rule of 17.11.).
 
-  python3 .github/scripts/ui_evidence.py plan --groups auto|all|"device contrast"
+  python3 .github/scripts/ui_evidence.py plan --groups auto|all|"device contrast" [--quick]
       For ui.yml: writes the job matrix of the groups that run (`matrix`, `count`) to
       $GITHUB_OUTPUT and a table to the job summary. "auto" runs every group that has no usable
       green result for this app fingerprint and its test fingerprint (ui_groups.py); "all" runs
       every group; names run those groups (also when they have a result).
-  python3 .github/scripts/ui_evidence.py gate
-      For testflight.yml before the upload: exits 1 unless every group's evidence holds (below).
-      Writes `text=<one line>` (for the tag message) to $GITHUB_OUTPUT.
+  python3 .github/scripts/ui_evidence.py gate [--quick]
+      For testflight.yml before the upload (always full) and the "UI verdict" job of ui.yml:
+      exits 1 unless every group's evidence holds (below). Writes `text=<one line>` (for the tag
+      message) to $GITHUB_OUTPUT.
+
+Quick mode (--quick, SORTLY_UI_QUICK=1 for the tests; pull requests): a group whose files read
+the switch (today device conditions: test11, the large library, skips itself) has another test
+fingerprint in a quick run (ui_groups.py). A quick run may take a full green instead of a quick
+one; a full check (the TestFlight gate, Release) never takes a quick green.
 
 Evidence. Every group job of ui.yml carries both fingerprints in its name, for example
 "UI device conditions [device app 0123456789ab tests 0123456789ab]" (ui.yml, from the plan).
-This script lists the runs of ui.yml and testflight.yml of the last DAYS days (this repository
-only, never a fork; at most MAX_RUNS per workflow; always the current run) with all their
-attempts, and reads the result of each group job:
+This script lists EVERY run of ui.yml and testflight.yml since this app fingerprint first
+existed (this repository only, never a fork; always the current run) with all their attempts,
+and reads the result of each group job. "First existed": the oldest commit of any fetched branch
+with this app fingerprint, or, for a merge commit with it, the later of the first appearances of
+its parents' apps (a pull request's runs test GitHub's merge commit before it is on a branch);
+one hour earlier for clock skew. When that window cannot be read completely (more than 1000 runs
+of one workflow in it, or older than the run retention of RETENTION_DAYS days), `plan` runs every
+group and `gate` fails: an old red must not drop out of sight. A durable record of reds outside
+GitHub's run list would need a token that can write from the test runs; not done.
   - green: the job succeeded. It counts as evidence only when the fingerprints in its name are
     those of its commit, recomputed here from git (a job of a pull request, which tests GitHub's
     merge commit, counts when the PR head has the same fingerprints).
-  - red: the job failed in "Run UI tests" (a test failed, the step timed out, or the runner was
-    lost while it ran). The same rule as earlier_attempts.py: it goes by the step.
-  - no result: anything else (a cancelled job, a simulator that did not boot, a download or the
-    toolchain that failed before the tests ran). Listed, never counted.
+  - red: the job ended without passing "Run UI tests" after that step had started (a test
+    failed, the step or job timed out, the run was cancelled or the runner lost while it ran).
+    The same rule as earlier_attempts.py: it goes by the step, not by the cause.
+  - no result: the step never started (a simulator that did not boot, a download, the
+    toolchain, a run cancelled before it), a job still running, or a pass in which the
+    simulator was lost before any test started (ui_tests.py exits 75 and the job fails in
+    "Simulator lost before the first test" instead). Listed, never counted.
 A group is green for this app when its newest result for (app fingerprint, group, test
 fingerprint) is green AND there is no red result for that key at all. Both rules together:
   - a group whose test files, shared helpers or definition changed has a new test fingerprint
@@ -59,14 +74,19 @@ import ui_groups  # noqa: E402
 
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 WORKFLOWS = ("ui.yml", "testflight.yml")
-DAYS = 14
-MAX_RUNS = 40
+RETENTION_DAYS = 85   # GitHub keeps runs 90 days by default; older reds may be gone
+MAX_LISTED = 1000     # the run list answers at most this many runs for one filter
+MAX_JOB_CALLS = 300   # plan only: beyond this, every group runs instead of reading more
 TEST_STEP = "Run UI tests"
 JOB_NAME = re.compile(r"\[([a-z0-9-]+) app ([0-9a-f]{12}) tests ([0-9a-f]{12})\]$")
 
 
 class ApiError(Exception):
     pass
+
+
+class CoverageError(ApiError):
+    """The runs since this app first existed cannot all be read."""
 
 
 def api(path: str, **params):
@@ -91,12 +111,14 @@ def api(path: str, **params):
 
 def classify(job: dict) -> str:
     """green, red or none (see the top of this file)."""
+    if job.get("status") not in (None, "completed"):
+        return "none"  # still running
     steps = {s.get("name"): s for s in job.get("steps") or []}
     test = steps.get(TEST_STEP)
     if job.get("conclusion") == "success":
         return "green" if test and test.get("conclusion") == "success" else "none"
-    if job.get("conclusion") == "failure" and test and TEST_STEP in earlier_attempts.failed_steps(job):
-        return "red"
+    if test and TEST_STEP in earlier_attempts.failed_steps(job):
+        return "red"  # started and not passed: failure, timed out, cancelled or lost runner
     return "none"
 
 
@@ -123,31 +145,53 @@ def results(runs_and_jobs) -> list[dict]:
     return found
 
 
-def fetch_history(target_app: str, run_id: int | None, verifier, days: int = DAYS, max_runs: int = MAX_RUNS,
-                  call=None, now: datetime | None = None) -> list[tuple[dict, list[dict]]]:
-    """[(run, jobs of every attempt)] of ui.yml and testflight.yml. A run of a commit whose app
-    fingerprint git can tell is skipped when it differs (no API call for its jobs); pull request
-    runs (merge commits) and the current run are always read."""
+def fetch_history(target_app: str, run_id: int | None, verifier, call=None, now: datetime | None = None,
+                  max_job_calls: int | None = None) -> list[tuple[dict, list[dict]]]:
+    """[(run, jobs of every attempt)] of ui.yml and testflight.yml since `target_app` first existed
+    (verifier.window_start). A run of a commit whose app fingerprint git can tell is skipped when
+    it differs (no API call for its jobs); pull request runs (merge commits) and the current run
+    are always read. Raises CoverageError when the window cannot be read completely."""
     call = call or api
     repo = os.environ["GITHUB_REPOSITORY"]
-    since = ((now or datetime.now(timezone.utc)) - timedelta(days=days)).strftime("%Y-%m-%d")
+    now = now or datetime.now(timezone.utc)
+    start = verifier.window_start(target_app)
+    if start is None:
+        raise CoverageError("no commit with this app fingerprint found in git")
+    since = datetime.fromtimestamp(start, timezone.utc) - timedelta(hours=1)
+    if since < now - timedelta(days=RETENTION_DAYS):
+        raise CoverageError(f"this app exists since {since:%Y-%m-%d}, longer than the run retention "
+                            f"({RETENTION_DAYS} days): older red results may be gone")
     runs = {}
     for workflow in WORKFLOWS:
-        answer = call(f"actions/workflows/{workflow}/runs", per_page=100, created=f">={since}")
-        listed = [r for r in answer.get("workflow_runs", [])
-                  if (r.get("head_repository") or {}).get("full_name") == repo]
-        for run in sorted(listed, key=lambda r: r.get("created_at", ""), reverse=True)[:max_runs]:
-            runs[run["id"]] = run
+        page, listed = 1, []
+        while True:
+            answer = call(f"actions/workflows/{workflow}/runs", per_page=100, page=page,
+                          created=f">={since:%Y-%m-%dT%H:%M:%SZ}")
+            total = answer.get("total_count", 0)
+            if total > MAX_LISTED:
+                raise CoverageError(f"{total} runs of {workflow} since {since:%Y-%m-%d %H:%M} UTC, "
+                                    f"the API lists at most {MAX_LISTED}")
+            batch = answer.get("workflow_runs", [])
+            listed += batch
+            if not batch or len(listed) >= total:
+                break
+            page += 1
+        for run in listed:
+            if (run.get("head_repository") or {}).get("full_name") == repo:
+                runs[run["id"]] = run
     if run_id and run_id not in runs:
         runs[run_id] = call(f"actions/runs/{run_id}")
-    history = []
-    for run in runs.values():
+    history, job_calls = [], 0
+    for run in sorted(runs.values(), key=lambda r: r.get("created_at", ""), reverse=True):
         if run["id"] != run_id and run.get("event") != "pull_request":
             app = verifier.app(run.get("head_sha", ""))
             if app is not None and app[:ui_groups.SHORT] != target_app[:ui_groups.SHORT]:
                 continue
         jobs, page = [], 1
         while True:
+            job_calls += 1
+            if max_job_calls is not None and job_calls > max_job_calls:
+                raise CoverageError(f"more than {max_job_calls} job lists to read")
             answer = call(f"actions/runs/{run['id']}/jobs", filter="all", per_page=100, page=page)
             jobs += answer.get("jobs", [])
             if len(jobs) >= answer.get("total_count", 0) or not answer.get("jobs"):
@@ -158,42 +202,79 @@ def fetch_history(target_app: str, run_id: int | None, verifier, days: int = DAY
 
 
 class Verifier:
-    """Recomputes the fingerprints of a commit from git (fetching it once when missing)."""
+    """Recomputes the fingerprints of commits from git (fetching a missing one once)."""
 
     def __init__(self, cwd: str = ui_groups.ROOT):
-        self.cwd, self.cache = cwd, {}
+        self.cwd, self.cache, self.apps = cwd, {}, {}
 
-    def _groups(self, sha: str):
-        if sha not in self.cache:
-            value = None
-            if sha and re.fullmatch(r"[0-9a-f]{40}", sha):
-                if subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=self.cwd,
-                                  capture_output=True).returncode != 0:
-                    subprocess.run(["git", "fetch", "--quiet", "origin", sha], cwd=self.cwd, capture_output=True)
-                try:
-                    tree = ui_groups.GitTree(sha, self.cwd)
-                    app = ui_groups.app_fingerprint(tree)
-                    try:
-                        groups = ui_groups.Groups(tree).fingerprints()
-                    except (ValueError, KeyError):
-                        groups = {}
-                    value = (app, groups)
-                except ValueError:
-                    value = None
-            self.cache[sha] = value
-        return self.cache[sha]
+    def _have(self, sha: str) -> bool:
+        if not (sha and re.fullmatch(r"[0-9a-f]{40}", sha)):
+            return False
+        if subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=self.cwd,
+                          capture_output=True).returncode != 0:
+            subprocess.run(["git", "fetch", "--quiet", "origin", sha], cwd=self.cwd, capture_output=True)
+        return True
 
     def app(self, sha: str) -> str | None:
-        found = self._groups(sha)
-        return found[0] if found else None
+        if sha not in self.apps:
+            try:
+                self.apps[sha] = ui_groups.app_fingerprint(ui_groups.GitTree(sha, self.cwd)) if self._have(sha) else None
+            except ValueError:
+                self.apps[sha] = None
+        return self.apps[sha]
+
+    def _groups(self, sha: str):
+        """(app, {group: full fingerprint}, {group: quick fingerprint}) of a commit, or None."""
+        if sha not in self.cache:
+            value = None
+            app = self.app(sha)
+            if app:
+                try:
+                    groups = ui_groups.Groups(ui_groups.GitTree(sha, self.cwd))
+                    value = (app, groups.fingerprints(), groups.fingerprints(quick=True))
+                except (ValueError, KeyError):
+                    value = (app, {}, {})
+            self.cache[sha] = value
+        return self.cache[sha]
 
     def matches(self, entry: dict) -> bool:
         found = self._groups(entry["sha"])
         if not found:
             return False
-        app, groups = found
-        return (app[:ui_groups.SHORT] == entry["app"]
-                and groups.get(entry["group"], "")[:ui_groups.SHORT] == entry["tests"])
+        app, full, quick = found
+        keys = {full.get(entry["group"], "")[:ui_groups.SHORT], quick.get(entry["group"], "")[:ui_groups.SHORT]}
+        return app[:ui_groups.SHORT] == entry["app"] and entry["tests"] in keys - {""}
+
+    def window_start(self, app: str) -> int | None:
+        """Unix time from which results for `app` can exist (top of this file)."""
+        out = subprocess.run(["git", "log", "--all", "HEAD", "--format=%H %ct %P"], cwd=self.cwd,
+                             capture_output=True, text=True)
+        if out.returncode != 0:
+            return None
+        commits = [line.split() for line in out.stdout.splitlines() if line.strip()]
+        first: dict[str, int] = {}
+        for sha, ct, *_ in commits:
+            fp = self.app(sha)
+            if fp:
+                first[fp] = min(first.get(fp, int(ct)), int(ct))
+        starts = []
+        for sha, ct, *parents in commits:
+            if self.app(sha) != app:
+                continue
+            starts.append(int(ct))
+            if len(parents) > 1 and all(self.app(p) in first for p in parents):
+                # A merge (GitHub's merge commit of a pull request, tested before it lands)
+                # holds the app of both sides: it cannot exist before the later of them.
+                starts.append(max(first[self.app(p)] for p in parents))
+        return min(starts, default=None)
+
+    def changed_since(self, sha: str) -> list[str] | None:
+        if not self._have(sha):
+            return None
+        try:
+            return ui_groups.changed_files(sha, "HEAD", self.cwd)
+        except ValueError:
+            return None
 
 
 def decide(group: str, app: str, tests: str, entries: list[dict], verifier) -> dict:
@@ -216,6 +297,40 @@ def decide(group: str, app: str, tests: str, entries: list[dict], verifier) -> d
         state = "missing"
     return {"group": group, "state": state, "evidence": newest if state == "green" else None, "reds": reds,
             "unverified": unverified, "older_reds": older_reds, "app": app, "tests": tests}
+
+
+def decide_mode(group: str, app: str, groups, entries: list[dict], verifier, quick: bool) -> dict:
+    """decide() for the run's mode: a full check takes full results only; a quick one its quick
+    result or, when that is not green, a full green (it ran more)."""
+    full = groups.fingerprint(group)
+    if not quick:
+        return decide(group, app, full, entries, verifier)
+    fast = groups.fingerprint(group, quick=True)
+    found = decide(group, app, fast, entries, verifier)
+    if fast == full or found["state"] == "green":
+        return found
+    instead = decide(group, app, full, entries, verifier)
+    return instead if instead["state"] == "green" else found
+
+
+def cleared_notes(decisions: list[dict], groups, verifier) -> list[str]:
+    """Groups that were red for this app with older test code and are not red now, where none of
+    their own test files changed since that red, only files they share with others (a helper, the
+    harness, a workflow): worth a look that this really was the fix."""
+    notes = []
+    for d in decisions:
+        if d["state"] == "red" or not d["older_reds"]:
+            continue
+        red = max(d["older_reds"], key=lambda e: e["completed_at"])
+        changed = verifier.changed_since(red["sha"])
+        if changed is None:
+            continue
+        mine = set(groups.files_of(d["group"]))
+        touched = [c for c in changed if c in mine]
+        if touched and not set(touched) & groups.own_files(d["group"]):
+            notes.append(f"{d['group']}: red for this app in run {red['run_id']} ({red['sha'][:7]}); since then only "
+                         f"shared files changed ({', '.join(touched[:6])}), none of its own test files")
+    return notes
 
 
 # ---------------------------------------------------------------------------------------------
@@ -277,27 +392,29 @@ def flaky_notes(decisions: list[dict], call=None) -> list[str]:
 def current(tree=None):
     tree = tree or ui_groups.GitTree("HEAD")
     groups = ui_groups.Groups(tree)
-    return tree, groups, ui_groups.app_fingerprint(tree), groups.fingerprints()
+    return tree, groups, ui_groups.app_fingerprint(tree)
 
 
-def plan(choice: str, call=None, verifier=None, tree=None) -> int:
-    tree, groups, app, fps = current(tree)
+def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False) -> int:
+    tree, groups, app = current(tree)
     names = groups.names()
+    fps = groups.fingerprints(quick)
     words = choice.split()
     unknown = [w for w in words if w not in names + ["auto", "all"]]
     if unknown or (len(words) > 1 and set(words) & {"auto", "all"}):
         print(f"::error title=UI groups::unknown choice {choice!r}; use auto, all or some of: {' '.join(names)}")
         return 1
     decisions, note = None, ""
+    mode = "quick" if quick else "full"
     if words in ([], ["auto"]):
         verifier = verifier or Verifier()
         try:
-            entries = results(fetch_history(app, None, verifier, call=call))
-            decisions = [decide(n, app, fps[n], entries, verifier) for n in names]
+            entries = results(fetch_history(app, None, verifier, call=call, max_job_calls=MAX_JOB_CALLS))
+            decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in names]
             run = [d["group"] for d in decisions if d["state"] != "green"]
         except (ApiError, KeyError) as error:
             run = names
-            note = f"Earlier results not readable ({error}): every group runs."
+            note = f"Earlier results not readable completely ({error}): every group runs."
             print(f"::warning title=UI groups::{note}")
     elif words == ["all"]:
         run = names
@@ -305,11 +422,11 @@ def plan(choice: str, call=None, verifier=None, tree=None) -> int:
         run = [n for n in names if n in words]
     # An empty matrix is an error in GitHub even for a skipped job: a placeholder, never run (the
     # group jobs need the build, which is skipped when count is 0).
-    matrix = {"include": [groups.matrix_entry(n, app) for n in run]
+    matrix = {"include": [groups.matrix_entry(n, app, quick) for n in run]
               or [{"group": "none", "title": "none", "app": "0" * ui_groups.SHORT, "tests": "0" * ui_groups.SHORT}]}
-    print(f"UI_PLAN app {app} tests " + " ".join(f"{n}={fps[n]}" for n in names))
-    print(f"UI_PLAN runs: {' '.join(run) or 'nothing'} (choice: {choice or 'auto'})")
-    md = [f"### UI groups for app {app[:ui_groups.SHORT]} (choice: {choice or 'auto'})", ""]
+    print(f"UI_PLAN app {app} {mode} tests " + " ".join(f"{n}={fps[n]}" for n in names))
+    print(f"UI_PLAN runs: {' '.join(run) or 'nothing'} (choice: {choice or 'auto'}, {mode})")
+    md = [f"### UI groups for app {app[:ui_groups.SHORT]} (choice: {choice or 'auto'}, {mode})", ""]
     if note:
         md += [note, ""]
     if decisions:
@@ -317,6 +434,9 @@ def plan(choice: str, call=None, verifier=None, tree=None) -> int:
         for d in decisions:
             if d["group"] not in run:
                 print(f"UI_PLAN reuse {d['group']}: green in {where(d['evidence'])}")
+        for text in cleared_notes(decisions, groups, verifier):
+            print(earlier_attempts.command("warning", "UI red cleared by a shared change", text))
+            md += [f"- Check: {text}"]
     else:
         md.append("Runs: " + (", ".join(run) or "nothing"))
     left = [n for n in names if n not in run]
@@ -330,16 +450,19 @@ def plan(choice: str, call=None, verifier=None, tree=None) -> int:
     return 0
 
 
-def gate(run_id: int | None, call=None, verifier=None, tree=None) -> int:
-    tree, groups, app, fps = current(tree)
+def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = False) -> int:
+    tree, groups, app = current(tree)
     verifier = verifier or Verifier()
+    mode = "quick" if quick else "full"
     try:
         entries = results(fetch_history(app, run_id, verifier, call=call))
     except (ApiError, KeyError) as error:
-        print(earlier_attempts.command("error", "UI gate", f"earlier results not readable ({error}); re-run this job"))
+        print(earlier_attempts.command("error", "UI gate", f"earlier results not readable completely ({error}); "
+                                       "re-run this job when the API answers"))
         return 1
-    decisions = [decide(n, app, fps[n], entries, verifier) for n in groups.names()]
+    decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in groups.names()]
     flaky = flaky_notes(decisions, call)
+    cleared = cleared_notes(decisions, groups, verifier)
     parts, blocked = [], False
     for d in decisions:
         if d["state"] == "green":
@@ -353,20 +476,26 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None) -> int:
             blocked = True
             why = ("red for this app and this test code in " + ", ".join(e["url"] for e in d["reds"])
                    + ". A red test is never re-run to green: fix it (the test or the app changes) and start a new run."
-                   if d["state"] == "red" else "no green result for this app and this test code")
+                   if d["state"] == "red" else f"no green {mode} result for this app and this test code")
             parts.append(f"{d['group']} {d['state']}")
             print(earlier_attempts.command("error", f"UI {d['group']}", why))
     for note in flaky:
         print(earlier_attempts.command("warning", "Flaky in a reused UI group", note))
-    md = [f"### UI groups for app {app[:ui_groups.SHORT]}: {'NOT green' if blocked else 'green'}", "", table(decisions)]
+    for note in cleared:
+        print(earlier_attempts.command("warning", "UI red cleared by a shared change", note))
+    md = [f"### UI groups for app {app[:ui_groups.SHORT]} ({mode}): {'NOT green' if blocked else 'green'}", "",
+          table(decisions)]
     if flaky:
         md += ["Flaky tests in reused results (passed only on a repeat; counted, to be fixed):", ""]
         md += [f"- {n}" for n in flaky] + [""]
+    if cleared:
+        md += ["Red with older test code, cleared only by shared files (check that this was the fix):", ""]
+        md += [f"- {n}" for n in cleared] + [""]
     if blocked:
-        md.append("**Not uploaded**: every group needs a green result for exactly this app and its own test code, "
-                  "and none may be red for that pair.")
+        md.append(f"**Not green** (no upload, no release): every group needs a green {mode} result for exactly this "
+                  "app and its own test code, and none may be red for that pair.")
     append("GITHUB_STEP_SUMMARY", "\n".join(md) + "\n")
-    text = "UI groups: " + "; ".join(parts)
+    text = f"UI groups ({mode}): " + "; ".join(parts)
     append("GITHUB_OUTPUT", f"text={' '.join(text.splitlines())[:900]}\n")
     return 1 if blocked else 0
 
@@ -376,12 +505,14 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("plan")
     p.add_argument("--groups", default="auto")
-    sub.add_parser("gate")
+    p.add_argument("--quick", action="store_true", help="a quick run (SORTLY_UI_QUICK=1)")
+    g = sub.add_parser("gate")
+    g.add_argument("--quick", action="store_true", help="the verdict of a quick run; never for an upload")
     args = parser.parse_args(argv)
     if args.command == "plan":
-        return plan(args.groups.strip())
+        return plan(args.groups.strip(), quick=args.quick)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
-    return gate(run_id)
+    return gate(run_id, quick=args.quick)
 
 
 if __name__ == "__main__":

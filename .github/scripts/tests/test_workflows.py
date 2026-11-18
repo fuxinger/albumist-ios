@@ -25,7 +25,8 @@ except ImportError:  # PyYAML is on the hosted runners; without it the plain rea
 # input read ("inputs.force", "inputs.skip_ui"), the word force or forced on its own (not the
 # "--force" flag of git, codesign or simctl), or "untested".
 SKIP_INPUT = re.compile(r"(?i)force|skip|bypass|untested|emergency|no[-_]?tests?")
-SKIP_MARK = re.compile(r"(?i)inputs\.\w*(?:force|skip)|(?<![-\w])forced?\b|untested")
+SKIP_MARK = re.compile(r"(?i)inputs\.\w*(?:force|skip)|inputs\[['\"]\w*(?:force|skip)|(?:vars|env|secrets)\.\w*(?:force|skip)"
+                       r"|\b(?:force|skip)_\w+|(?<![-\w])forced?\b|untested")
 
 
 def strip_comment(line):
@@ -164,8 +165,8 @@ class TestFlightWiringTests(unittest.TestCase):
                 self.assertEqual([f for f in flags if re.search(r"(?i)force|untested|skip[-_]?(?:tests?|gate)|no[-_]?tests?", f)], [])
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         self.assertEqual(job_field(text, "tests", "if"), "needs.check.outputs.ready == 'true'")
-        self.assertEqual(job_field(text, "ui", "needs"), "tests")
-        self.assertEqual(job_field(text, "stress", "needs"), "tests")
+        for job in ("ui", "stress"):
+            self.assertIn("tests", [need.strip() for need in job_field(text, job, "needs").split(",")])
         for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "ui-gate"))):
             with self.subTest(job=job):
                 rule = job_field(text, job, "if")
@@ -181,7 +182,9 @@ class TestFlightWiringTests(unittest.TestCase):
         for harmless in ("git push --force-with-lease origin HEAD", "codesign --force --sign - App.app",
                          "xcrun simctl io booted recordVideo --force out.mp4"):
             self.assertIsNone(SKIP_MARK.search(harmless), harmless)
-        for skip in ("if: inputs.force", "if: ${{ !inputs.skip_ui }}", "FORCED: yes", "echo untested", "      force:"):
+        for skip in ("if: inputs.force", "if: ${{ !inputs.skip_ui }}", "FORCED: yes", "echo untested", "      force:",
+                     "if: vars.FORCE_UPLOAD == 'true'", "if: env.SKIP_TESTS != '1'", "${{ inputs['skip_ui'] }}",
+                     "run: SKIP_TESTS=1 make"):
             self.assertIsNotNone(SKIP_MARK.search(skip), skip)
         sample = ("name: X\n\non:\n  workflow_dispatch:\n\n    inputs:\n      # an emergency switch\n\n      force:\n"
                   "        type: boolean\n      ui_groups:\n        type: string\n  workflow_call:\n    inputs:\n"

@@ -227,11 +227,17 @@ struct TextMinimizerTests {
         let medical = ["Laborbefund vom 12.03.", "AU-Bescheinigung\nfür den Arbeitgeber", "Facharztbrief Kardiologie", "Privatrezept Ibuprofen 600",
                        "Patientin: Erika Mustermann", "Patientenakte Nr. 4711", "Outpatient clinic, room 4", "Patient: John Smith",
                        "Doctors note for school", "Doctor`s letter", "Doctor´s certificate", "Fit note: not fit for work until 3 May",
-                       "Sick leave from 3 to 7 March"]
+                       "Sick leave from 3 to 7 March",
+                       // Compounds the first word-start rule missed (second review of 9f92569).
+                       "Betäubungsmittelrezept Nr. 12", "Arzneimittelrezept", "Wiederholungsrezept", "eRezept-Code",
+                       "Krebspatient seit 2019", "Notfallpatient", "Dialysepatientin", "Schmerzpatienten", "ePrescription",
+                       // An umlaut stored as "u" plus a separate mark.
+                       "Arbeitsunfa\u{0308}higkeitsbescheinigung"]
         for text in medical {
             #expect(TextMinimizer.sensitivity(of: text) == .medical, "\(text)")
             #expect(TextMinimizer.storable(text) == "", "\(text)")
         }
+        #expect(TextMinimizer.sensitivity(of: "Fu\u{0308}hrerschein Klasse B") == .identity)
         for text in ["Kontoauszug 3/2025", "IBAN DE89 3704 0044 0532 0130 00", "BIC: COBADEFFXXX", "Einkommensteuerbescheid 2024"] {
             #expect(TextMinimizer.sensitivity(of: text) == .financial, "\(text)")
         }

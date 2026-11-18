@@ -81,11 +81,11 @@ public struct DocumentAnalyzer: Sendable {
                      "date of birth", "geburtsdatum",
                      // The back of an ID card names no document (review P2-04).
                      "augenfarbe", "eye colour", "eye color", "colour of eyes", "color of eyes", "ordensname", "künstlername"]),
-        (.medical, ["*diagnose", "*befund", #"/(?<![\p{L}\p{N}])(?:privat|kassen|folge|e-)?rezept(?!ion)"#, "*arztbrief", "*krankenkasse",
-                    "*versichertennummer", "arbeitsunfähigkeit", "*medikament", "prescription",
+        (.medical, ["*diagnose", "*befund", #"/rezept(?!ion)"#, "*arztbrief", "*krankenkasse",
+                    "*versichertennummer", "arbeitsunfähigkeit", "*medikament", "*prescription",
                     // "patient" as a noun, also in "Patientin", "Patientenakte", "outpatient",
-                    // "Privatpatient"; not "patiently", "impatient" or the adjective after "be".
-                    #"/(?<!be )(?<!so )(?<!very )(?<!more )(?<!stay )(?<!remain )(?<![\p{L}\p{N}])(?:in|out|privat|kassen)?patient(?:s(?![\p{L}\p{N}])|en|in|(?![\p{L}\p{N}]))"#,
+                    // "Krebspatient"; not "patiently", "impatient" or the adjective after "be".
+                    #"/(?<!be )(?<!so )(?<!very )(?<!more )(?<!stay )(?<!remain )(?<!im)patient(?!ly)"#,
                     // English letters name the same things in other words: "diagnosis" holds no
                     // "diagnose" (review G2-03). Phrases rather than "medical", "hospital",
                     // "clinic" or "doctor" alone, which stand on signs, maps and parking tickets.
@@ -170,7 +170,8 @@ public struct DocumentAnalyzer: Sendable {
     /// A word OCR broke with a hyphen at the end of a line ("Diag-⏎nosis") is matched joined,
     /// and with its hyphen too ("AU-⏎Bescheinigung").
     static func keywordSensitivity(_ rawText: String) -> DocumentSensitivity {
-        var text = rawText.lowercased().replacingOccurrences(of: "\u{00AD}", with: "")
+        // Umlauts stored as a letter plus a separate mark are matched like the single character.
+        var text = rawText.precomposedStringWithCanonicalMapping.lowercased().replacingOccurrences(of: "\u{00AD}", with: "")
         for apostrophe in ["\u{2018}", "\u{2019}", "\u{02BC}", "\u{00B4}", "`", "\u{2032}"] {
             text = text.replacingOccurrences(of: apostrophe, with: "'")
         }

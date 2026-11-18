@@ -1410,8 +1410,10 @@ public actor AnalysisPipeline {
         let done = try await store.value(Int.self, forKey: Key.textMaskVersion) ?? 1
         guard done < TextMinimizer.maskVersion else { return }
         let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
-        var changed = false
         for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
+            // A big library takes minutes the first time; a cut-off run keeps what it did (masked
+            // rows are skipped next time) and the purge below runs when the last row is done.
+            try Task.checkCancellation()
             guard let text = result.text?.text else { continue }
             let level = TextMinimizer.sensitivity(of: text)
             let masked = text.isEmpty || level >= .identity ? "" : TextMinimizer.masked(text)
@@ -1424,7 +1426,6 @@ public actor AnalysisPipeline {
             // G2-03) is handled as such from now on, also by the document proposals.
             let sensitivity = result.document.map { max($0.sensitivity, level) }
             guard masked != text || subject != result.document?.subject || sensitivity != result.document?.sensitivity else { continue }
-            changed = true
             result.text?.text = masked
             result.document?.subject = subject
             if let sensitivity { result.document?.sensitivity = sensitivity }
@@ -1438,8 +1439,9 @@ public actor AnalysisPipeline {
             }
         }
         // The old wording must not stay readable in the file: deleted rows are overwritten
-        // (secure_delete), the search index drops its old entries and the log is emptied.
-        if changed { try await store.purgeDeletedText() }
+        // (secure_delete), the search index drops its old entries and the log is emptied. Once
+        // per mask version, also when an earlier, cut-off run changed the rows.
+        try await store.purgeDeletedText()
         try await store.setValue(TextMinimizer.maskVersion, forKey: Key.textMaskVersion)
     }
 

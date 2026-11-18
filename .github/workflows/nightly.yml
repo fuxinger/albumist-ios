@@ -107,6 +107,8 @@ jobs:
           grep -E "LOAD_|passed|failed|error" build/load.log
           exit $status
       - name: Build (no cache) and test app
+        # Deliberately without ci.yml's "Fresh simulator" step (18.11.): the nightly run is the
+        # unchanged control for the StoreKit "no product" case.
         run: |
           set +e
           cd App

@@ -144,7 +144,7 @@ jobs:
       - name: Pick simulator
         if: hashFiles('App/project.yml') != ''
         id: sim
-        # Not booted early on purpose: a first boot competes with the package build for the
+        # Not booted early on purpose (booted in "Fresh simulator" after the core tests): a first boot competes with the package build for the
         # three cores and made both several minutes slower (run 43749559109).
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --role default)
@@ -158,20 +158,29 @@ jobs:
         # 18.11.: StoreKit listed no product for 300 s in four runs from ~16:00 UTC on, with no
         # error, also on claude/next at 3dfda45 (CI 44369338871), whose code was green in every
         # run before (until 10:10 UTC) and whose image, Xcode, runtime and simulator were the same
-        # (20261103.629, Xcode 27.2, iOS 27.2 24B8117, iPhone 17e). So the cause is in the runner's
-        # simulator, not in the app or test code. The simulator now starts erased (no state from
-        # the image), booted after the core tests (nothing competes with the boot then), and its
-        # StoreKit log is recorded live: after xcodebuild has shut it down, `log show` gave only
-        # "<compose failure>" lines from after a new boot (CI 44368423344).
+        # (20261103.629, Xcode 27.2, iOS 27.2 24B8117, iPhone 17e). So the cause is in the
+        # environment (runner, simulator or Apple's services), not in the app or test code. The
+        # simulator now starts erased (no state from the image; it may well have been fresh
+        # already, so this alone may not help), booted after the core tests (nothing competes
+        # with the boot then), and its StoreKit log is recorded live: after xcodebuild has shut
+        # it down, `log show` gave only "<compose failure>" lines from after a new boot
+        # (CI 44368423344). Boot like ui_tests.py: up to three attempts, each counted.
         if: hashFiles('App/project.yml') != ''
+        timeout-minutes: 20
         run: |
           UDID="${{ steps.sim.outputs.udid }}"
           xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
           xcrun simctl erase "$UDID"
-          xcrun simctl boot "$UDID"
-          xcrun simctl bootstatus "$UDID" -b > /dev/null
+          for attempt in 1 2 3; do
+            xcrun simctl boot "$UDID" > /dev/null 2>&1 || true
+            xcrun simctl bootstatus "$UDID" -b > /dev/null && break
+            [ "$attempt" = 3 ] && { echo "simulator did not boot (3 attempts)"; exit 1; }
+            echo "FLAKY_BOOT bootstatus failed (attempt $attempt of 3), retrying"
+            xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
+            sleep 15
+          done
           nohup xcrun simctl spawn "$UDID" log stream --style compact --level debug \
-            --predicate 'process CONTAINS[c] "storekit" OR subsystem CONTAINS[c] "storekit" OR process == "appstored" OR process == "itunesstored"' \
+            --predicate 'process CONTAINS[c] "storekit" OR subsystem CONTAINS[c] "storekit" OR process == "appstored" OR process == "itunesstored" OR subsystem == "com.apple.AppleMediaServices"' \
             > storekit-live.log 2>&1 &
           echo "simulator $UDID erased and booted; StoreKit log recorded live (pid $!)"
       - name: Build and test app
@@ -197,7 +206,7 @@ jobs:
         if: failure() && hashFiles('build-log.txt') != ''
         run: |
           if grep -q "StoreKit test environment not" build-log.txt; then
-            echo "StoreKit log: $(wc -l < storekit-live.log 2>/dev/null || echo 0) lines"
+            [ -f storekit-live.log ] && echo "StoreKit log: $(wc -l < storekit-live.log | tr -d ' ') lines" || echo "no live StoreKit log"
             echo "--- errors and failures (last 300)"
             grep -iE "error|fail|denied|timed? ?out|invalid|unable|refus|not (found|allowed|available)|configuration|products?" storekit-live.log | tail -300 || true
             echo "--- last 200 lines"
@@ -250,6 +259,7 @@ jobs:
           path: |
             build-log.txt
             build/TestResults.xcresult
+            storekit-live.log
           retention-days: 7
           # "Re-run failed jobs" uploads it again under the same name.
           overwrite: true

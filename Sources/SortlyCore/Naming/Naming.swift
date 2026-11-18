@@ -144,7 +144,8 @@ public struct DateRangeFormatter: Sendable {
         case .day: return language == .german ? String(format: "%02d.%02d.%04d", c[2], c[1], c[0]) : String(format: "%04d-%02d-%02d", c[0], c[1], c[2])
         case .season:
             let season = Season.allCases[c[1]]
-            if season == .winter {
+            // The season over the turn of the year: winter in the north, summer in the south.
+            if season == (key.isSouthernSeason ? .summer : .winter) {
                 return "\(seasonName(season)) \(c[0] - 1)/\(String(format: "%02d", c[0] % 100))"
             }
             return "\(seasonName(season)) \(c[0])"

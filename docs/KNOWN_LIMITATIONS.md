@@ -42,6 +42,12 @@
 - Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
   der Gesundheitskarte. Der Text bleibt auf dem Gerät.
 
+## Jahreszeiten
+- Jahreszeiten sind noch nicht als Alben wählbar. Werden sie es, gilt: Frühling und Herbst
+  heißen auf beiden Halbkugeln gleich („Herbst 2026“ für April in Sydney und Oktober in
+  München) und wären zwei Alben gleichen Namens; wie sie unterschieden werden, ist offen
+  (Prüfbefund P1-04 hat nur Winter und Sommer benannt).
+
 ## Messenger-Herkunft
 iOS speichert keine verlässliche Quell-App. Albumist nutzt nur klare Hinweise (Messenger-
 Screenshots, vorhandene Alben, optional Dateinamen-Muster) und markiert alles andere als

@@ -97,9 +97,40 @@ struct ChronologyTests {
         let north = try #require(grouper.key(for: jan, granularity: .season, latitude: 48))
         let south = try #require(grouper.key(for: jan, granularity: .season, latitude: -33))
         #expect(de.label(for: north) == "Winter 2025/26")
-        #expect(de.label(for: south) == "Sommer 2026")
+        // The southern summer runs over the turn of the year, as the northern winter does (P1-04).
+        #expect(de.label(for: south) == "Sommer 2025/26")
         let december = try #require(grouper.key(for: Fixture.date("2025-12-20"), granularity: .season, latitude: 48))
         #expect(december == north) // December belongs to the same winter
+    }
+
+    /// Review finding P1-04 (18.11.2026): the winter in Sydney (July 2026) was labelled
+    /// "Winter 2025/26" and had the same key as the winter in Munich (January 2026).
+    @Test func southernSeasonsHaveTheirOwnKeyAndLabel() throws {
+        func key(_ date: String, _ latitude: Double) throws -> ChronologyKey {
+            try #require(grouper.key(for: Fixture.date(date), granularity: .season, latitude: latitude))
+        }
+        let en = DateRangeFormatter(language: .english, timeZone: Fixture.utc)
+        let sydneyWinter = try key("2026-07-15 12:00", -33.87)
+        let munichWinter = try key("2026-01-15 12:00", 48.14)
+        #expect(de.label(for: sydneyWinter) == "Winter 2026")
+        #expect(en.label(for: sydneyWinter) == "Winter 2026")
+        #expect(sydneyWinter != munichWinter)
+        // The southern summer: December to February is one season, named over both years.
+        let summer = try key("2025-12-20 12:00", -33.87)
+        #expect(try key("2026-01-10 12:00", -33.87) == summer)
+        #expect(try key("2026-02-27 12:00", -33.87) == summer)
+        #expect(de.label(for: summer) == "Sommer 2025/26")
+        #expect(en.label(for: summer) == "Summer 2025/26")
+        // Same months, other hemisphere, other season: never the same key.
+        #expect(summer != munichWinter)
+        #expect(summer != (try key("2026-07-15 12:00", 48.14)))
+        #expect(try key("2026-04-10 12:00", -33.87) != (try key("2026-10-10 12:00", 48.14)))
+        #expect(de.label(for: try key("2026-04-10 12:00", -33.87)) == "Herbst 2026")
+        // Northern keys are as before, so the ids of northern season suggestions stay.
+        #expect(munichWinter == ChronologyKey(.season, [2026, 3]))
+        #expect(try key("2026-07-15 12:00", 48.14) == ChronologyKey(.season, [2026, 1]))
+        // No location: northern, as before.
+        #expect(grouper.key(for: Fixture.date("2026-07-15 12:00"), granularity: .season) == ChronologyKey(.season, [2026, 1]))
     }
 
     @Test func nestedGroupingKeepsUndatedSeparate() {

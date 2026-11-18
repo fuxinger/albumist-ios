@@ -370,6 +370,17 @@ final class DeviceConditionUITests: XCTestCase {
     @discardableResult
     private func grantFromHost(relaunchWith extra: [String]? = nil) -> Bool {
         print("UI_HOST_GRANT_PHOTOS")
+        // iOS ends an app whose photo access changes, so the Mac's grant ends the running app. A
+        // launch before the grant lands loses its new process to it: UI run 44355110562 (test 09)
+        // launched 5 s after the request, the grant took 8 s and ended that launch ("Application
+        // ... does not have a process ID", a failure no later attempt could undo). So the first
+        // launch waits until the grant has ended the app; a grant that changes nothing ends
+        // nothing, hence the limit (two grant attempts of up to 90 s each, ui_tests.py).
+        if app.state != .notRunning {
+            let start = Date()
+            while app.state != .notRunning, Date().timeIntervalSince(start) < 190 { sleep(1) }
+            print("UI_FACT app \(app.state == .notRunning ? "ended" : "still running") \(Int(Date().timeIntervalSince(start))) s after the grant request")
+        }
         for attempt in 1...12 {
             sleep(5)
             if let extra { launch(extra) } else { start() }

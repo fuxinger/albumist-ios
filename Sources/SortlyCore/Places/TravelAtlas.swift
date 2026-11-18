@@ -24,7 +24,8 @@ public struct TravelAtlas: Hashable, Sendable {
     /// Most photographed town outside the home area (by trip photos), if any.
     public var favoriteTripCity: String?
     /// A good photo from the favorite destination for the share image: a real photo (no
-    /// screenshot or video), favorites first, then the largest one.
+    /// screenshot, document, card or video; `PreviewRank.photo`), favorites first, then the
+    /// largest one. `nil` when there is none: the image is then shared without a photo.
     public var favoriteTripCover: AssetID?
     /// First photo per country, for the "countries light up in order" animation.
     public var firstVisits: [String: Date] = [:]
@@ -121,7 +122,7 @@ public struct TravelAtlas: Hashable, Sendable {
             }
             atlas.favoriteTripCover = facts
                 .lazy
-                .filter { $0.tripID != nil && $0.place?.locality == city && $0.asset.kind == .image && !$0.asset.isScreenshotLike }
+                .filter { $0.tripID != nil && $0.place?.locality == city && $0.asset.kind == .image && PreviewRank($0) == .photo }
                 .map(\.asset)
                 .max { rank($0) < rank($1) }?
                 .id

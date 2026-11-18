@@ -102,7 +102,8 @@ public enum FactsAssembler {
                 albumIDs: Set(albums),
                 recognizedText: recognized,
                 keywords: Set(content?.labels.filter { $0.confidence >= 0.5 }.map(\.identifier) ?? []),
-                atHome: home.contains(asset.id)
+                atHome: home.contains(asset.id),
+                looksLikeDocument: content?.isDocumentLike ?? false
             )
         }
     }

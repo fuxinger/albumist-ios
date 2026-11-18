@@ -33,6 +33,18 @@ public enum TextMinimizer {
         maskCardNumbers(maskIBANs(text))
     }
 
+    /// What stands in a stored text where an IBAN was.
+    static let ibanMask = "IBAN ••••"
+    /// What stands in a stored text where a card number was.
+    static let cardMask = "•••• ••••"
+
+    /// Whether a stored text had an IBAN or a card number masked: the photo shows a bank card,
+    /// a statement or a banking app, also when no document type was recognised in it (a card
+    /// says "Visa Debit", not "Kontoauszug"). Such a photo is never a preview (`PreviewRank`).
+    public static func showsMaskedNumber(_ storedText: String) -> Bool {
+        storedText.contains(cardMask) || storedText.contains(ibanMask)
+    }
+
     // MARK: Masks
 
     /// Raised when the masks change, so texts stored by an older version are masked again
@@ -69,7 +81,7 @@ public enum TextMinimizer {
             let candidate = String(result[range])
             let compact = candidate.uppercased().filter { $0.isLetter || $0.isNumber }
             let printed = printedIBANPattern.firstMatch(in: candidate, range: NSRange(candidate.startIndex..., in: candidate)) != nil
-            if printed || DocumentAnalyzer.startsWithValidIBAN(compact) { result.replaceSubrange(range, with: "IBAN ••••") }
+            if printed || DocumentAnalyzer.startsWithValidIBAN(compact) { result.replaceSubrange(range, with: ibanMask) }
         }
         return result
     }
@@ -124,7 +136,7 @@ public enum TextMinimizer {
             }
         }
         let result = NSMutableString(string: text)
-        for r in merged.reversed() { result.replaceCharacters(in: r, with: "•••• ••••") }
+        for r in merged.reversed() { result.replaceCharacters(in: r, with: cardMask) }
         return result as String
     }
 

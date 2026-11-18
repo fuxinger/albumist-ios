@@ -11,6 +11,8 @@ public struct PlannedAlbumPreview: Hashable, Sendable, Identifiable {
     public var addedCount: Int
     /// A new album (otherwise an existing album is extended).
     public var isNew: Bool
+    /// The first photo the plan adds that suits a cover (`PreviewPicker.firstSuited`): never a
+    /// sensitive document; `nil` when every photo is one.
     public var coverAssetID: AssetID?
     /// The suggestion the album comes from (first step that creates or fills it).
     public var sourceID: SortlyID?
@@ -20,7 +22,9 @@ extension ChangePlan {
     /// Every album the plan creates or extends, with its folder path. Albums follow `order`
     /// (suggestion ids, e.g. the order of the suggestions list) so the preview reads like the
     /// list the user chose from; albums without a place in `order` keep plan order at the end.
-    public func albumPreview(inventory: CollectionInventory, order: [SortlyID] = []) -> [PlannedAlbumPreview] {
+    /// `ranks`: how well each photo suits a cover (`PreviewRank`; missing ones are photos).
+    public func albumPreview(inventory: CollectionInventory, order: [SortlyID] = [],
+                             ranks: [AssetID: PreviewRank] = [:]) -> [PlannedAlbumPreview] {
         var folders: [String: (title: String, parent: FolderRef)] = [:]
         var albums: [String: (title: String, parent: FolderRef)] = [:]
         var refs: [AlbumRef] = []
@@ -75,15 +79,16 @@ extension ChangePlan {
 
         return sorted.map { ref in
             let ids = added[ref] ?? []
+            let cover = PreviewPicker.firstSuited(ids, count: 1, ranks: ranks).first
             switch ref {
             case .planned(let key):
                 let album = albums[key]
                 return PlannedAlbumPreview(id: ref, title: album?.title ?? "", folderPath: album.map { path($0.parent) } ?? [],
-                                           addedCount: Set(ids).count, isNew: true, coverAssetID: ids.first, sourceID: source[ref])
+                                           addedCount: Set(ids).count, isNew: true, coverAssetID: cover, sourceID: source[ref])
             case .existing(let id):
                 let album = inventory[id]
                 return PlannedAlbumPreview(id: ref, title: album?.title ?? "", folderPath: existingPath(album?.parentID),
-                                           addedCount: Set(ids).count, isNew: false, coverAssetID: ids.first, sourceID: source[ref])
+                                           addedCount: Set(ids).count, isNew: false, coverAssetID: cover, sourceID: source[ref])
             }
         }
     }

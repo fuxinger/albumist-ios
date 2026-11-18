@@ -22,6 +22,9 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
     public var keywords: Set<String>
     /// Taken where the user lives (`TripAnalysis.atHome`): no place album is made for it.
     public var atHome: Bool
+    /// The image analysis took it for a document, receipt, card or other utility picture
+    /// (`ContentAnalysis.isDocumentLike`): a poor preview or cover (`PreviewRank`).
+    public var looksLikeDocument: Bool
 
     public init(
         asset: AssetSnapshot,
@@ -37,7 +40,8 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         albumIDs: Set<CollectionID> = [],
         recognizedText: String? = nil,
         keywords: Set<String> = [],
-        atHome: Bool = false
+        atHome: Bool = false,
+        looksLikeDocument: Bool = false
     ) {
         self.asset = asset
         self.place = place
@@ -53,6 +57,7 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         self.recognizedText = recognizedText
         self.keywords = keywords
         self.atHome = atHome
+        self.looksLikeDocument = looksLikeDocument
     }
 
     public var id: AssetID { asset.id }

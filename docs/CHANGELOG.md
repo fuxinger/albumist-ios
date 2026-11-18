@@ -53,6 +53,8 @@
 - Prüfer B 18.11. (UI-Tests): Ein roter UI-Test bleibt rot, wenn nur Kommentare oder Einrückung
   seiner Testdatei geändert werden (G5-04). Ein Bildschirm, dessen Barrierefreiheits-Prüfung zweimal
   nicht fertig wird, lässt den Test scheitern statt nur zu warnen (G5-06).
+  Der Härtetest scheitert, wenn die Analyse nicht vorankommt oder Pause und Fortsetzen nie
+  versucht wurden (G5-07).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

@@ -15,10 +15,12 @@
   und 15 Minuten Messung (rund 45 Minuten, die Vorgaben des Workflows; der TestFlight-Lauf
   startet ihn selbst und lädt nur hoch, wenn er grün ist); der **volle Durchgang**
   mit 50.000 Fotos und 45 Minuten Messung nur **wöchentlich nachts** (Zeitplan Sonntag 00:40 UTC;
-  läuft erst, wenn der Workflow in `main` ist) und **vor dem Start im App Store**. Pause prüft der
-  Test nach einem Zehntel der Bildinhalte: beim kleinen Durchgang etwa in Minute 12–13, beim vollen
-  erst nach rund 60 Minuten, also dort nicht (Simulator ~1,75 Fotos/s; mit `claude/ui-fix`
-  9ff0dfc nach 200 Fotos oder 2 Minuten, dann in jedem Durchgang). Grün heißt, test12 ist
+  läuft erst, wenn der Workflow in `main` ist) und **vor dem Start im App Store**. Pause und
+  Fortsetzen prüft der Test nach 200 Fotos oder 2 Minuten der Bildinhalte (seit 9ff0dfc; vorher
+  nach einem Zehntel, das der volle Durchgang nie erreichte), also in jedem Durchgang (Simulator
+  ~1,75 Fotos/s). Der Test schlägt fehl, wenn Pause nie versucht wurde oder in den Bildinhalten
+  kein Foto gezählt wurde (eine Analyse, die nur „Wartet“ zeigt); nur eine Mediathek, die vorher
+  ganz fertig analysiert ist, ist davon ausgenommen (Prüfer B, G5-07). Grün heißt, test12 ist
   durchgelaufen; übersprungen zählt als Fehler. Der volle Durchgang 44116350940 (17.11.) ist
   fehlgeschlagen (Fortschrittszeile zu Beginn von Schritt 4 13,7 s still, Grenze 10 s); die
   Korrektur liegt auf `claude/ui-fix` (9ff0dfc), ein neuer voller Durchgang steht aus.

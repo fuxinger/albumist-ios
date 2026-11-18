@@ -24,13 +24,14 @@ name: UI stress
 # skips itself, because only this workflow sets SORTLY_STRESS_PHOTOS. Here a skipped test12 is
 # no pass: "Stress run" fails unless the log says test12 passed.
 #
-# The test tries Pause a tenth into the image step. The simulator analyses about 1.75 photos/s
-# there (stress runs 43833158673: 5,042 photos in 48 min; 44116350940: 3,419 in 31 min), so
-# with 10,000 photos Pause comes at about minute 12 to 13 of the 15 (later on a slow simulator,
-# then not at all: no line "UI_TIMING stress pause" in the log), and with 50,000 photos only
-# after about 60 min: the 45-minute full pass measures speed, stills, answers and memory, but
-# not Pause. (claude/ui-fix 9ff0dfc moves Pause to 200 photos or 2 min into the image step;
-# with it every pass measures Pause.)
+# The test tries Pause 200 photos or 2 min into the image step, whichever comes first (since
+# 9ff0dfc; before, a tenth into the step, which the 45-minute full pass never reached). The
+# simulator analyses about 1.75 photos/s there (stress runs 43833158673: 5,042 photos in 48 min;
+# 44116350940: 3,419 in 31 min), and the image step begins about 3 min in with 10,000 photos and
+# about 14 min in with 50,000 (44116350940: its last 31 of 45 min), so every pass measures Pause
+# and Fortsetzen ("UI_TIMING stress pause" in the log). test12 fails when it did not (Prüfer B
+# G5-07), and when no photo was counted in the image step while it measured (an analysis that
+# only waited); only a library analysed completely before Pause could come is let off.
 #
 # The full pass of 17.11., run 44116350940 (50,000 photos), FAILED: at the start of step 4 the
 # progress line stood still for 13.7 s ("0 von 50.246 Fotos", limit 10 s). The fix is on

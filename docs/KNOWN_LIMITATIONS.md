@@ -32,6 +32,18 @@
   Schlüssel; bei ihr und bei Städten, die Apple nach einem Neustart in der anderen Sprache
   nennt („Rom“/„Rome“), entsteht nach einem Sprachwechsel eine neue Kennung.
 
+## Reisen
+
+- Fotos mit dem Ort des Zuhauses mitten in einer Reise (Prüfbefund P1-14, zweite Prüfung):
+  ob der Nutzer wirklich zu Hause war oder ein Foto von dort geschickt bekam, zeigt das Foto
+  nicht. Geht die Reise weit weg dort weiter, wo sie aufhörte, gilt ein Aufenthalt zu Hause
+  nur, wenn die Fotos eine Nacht zu Hause zeigen oder er 36 Stunden dauern konnte. Offen
+  bleiben zwei seltene Fälle: wer abends nach Hause fliegt, nur am Abend dort fotografiert und
+  am nächsten Morgen an denselben Ort zurückfliegt, bekommt eine Reise statt zwei; und ein
+  geschicktes Foto von zu Hause, auf das ein ganzer Reisetag ohne eigene Fotos folgt (nächstes
+  Reisefoto 36 Stunden später), teilt die Reise. Die Reise-Werkstatt (Teilen/Zusammenführen)
+  korrigiert beides.
+
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.
 - Analyse auf Vorschaubildern; kleine Motive werden eventuell nicht erkannt.

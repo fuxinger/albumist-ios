@@ -3,8 +3,16 @@ name: CodeQL
 # Code scanning (advanced setup; GitHub's default setup is off for this repository, the two
 # cannot run side by side). Results appear under Security > Code scanning.
 #   - actions and python (workflows and .github/scripts): Linux, no build, every pull request.
-#   - swift: needs a real build on macOS, so it runs nightly and on pull requests only when a
-#     push changed Swift sources since the last analysed commit.
+#   - swift: needs a real build on macOS, so it runs nightly (and by hand) only, not on pull
+#     requests: on PR #1 its Mac job ran 26 min beside a UI run and held back two UI groups by
+#     14 and 20 min (UI run 44202318875, five Macs busy; docs/TESTFLIGHT.md, "Messung").
+#     It analyses the core package (Sources/**, built with `swift build`), not the app target:
+#     the app uses Swift macros (@Observable, @State, ...), and under the CodeQL tracer the
+#     compiler cannot start Xcode's macro plugin server ("swift-plugin-server could not be
+#     loaded: Bad CPU type in executable", CodeQL run 44202319351, after 24 min of building),
+#     like sandbox-exec before it. The core package uses no macros. The app's own Swift
+#     (App/Sortly) is analysed again once CodeQL's tracer can start the plugin server on the
+#     arm64 runners (try: a manual run with the newest codeql-action; docs/TESTFLIGHT.md).
 # Sources/CSQLite is a module map and a header shim with no C code, so c-cpp is not analysed.
 # Not part of a TestFlight run (testflight.yml runs CI, the UI flow and the stress pass): a
 # finding never blocks a build for the testers; it is reviewed in the Security tab.
@@ -50,65 +58,35 @@ jobs:
         with:
           category: /language:${{ matrix.language }}
 
-  changes:
-    # Pull requests only: did Swift change since the last commit whose Swift analysis passed?
-    if: github.event_name == 'pull_request'
-    name: Changes
-    uses: ./.github/workflows/changes.yml
-    permissions:
-      contents: read
-      actions: read
-    with:
-      workflow: codeql.yml
-      job-prefix: Analyze (swift)
-
   swift:
     name: Analyze (swift)
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.swift != 'false') }}
+    if: github.event_name != 'pull_request'
     runs-on: xcode-27
-    timeout-minutes: 75
+    timeout-minutes: 45
     permissions:
       contents: read
       actions: read
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode
-      - name: Generate Xcode project
-        run: |
-          brew install xcodegen
-          cd App && xcodegen generate
-      # Package manifests are resolved before CodeQL starts tracing, and the manifest sandbox is
-      # off in the traced build: under the tracer, sandbox-exec failed with "Bad CPU type in
-      # executable (86)" and the build stopped at "Could not resolve package dependencies".
-      - name: Resolve packages
-        run: |
-          cd App
-          xcodebuild -resolvePackageDependencies -project Sortly.xcodeproj -scheme Sortly \
-            -derivedDataPath "$RUNNER_TEMP/codeql-dd"
+      # The package manifest is compiled and run before CodeQL starts tracing: under the tracer
+      # sandbox-exec failed with "Bad CPU type in executable (86)".
+      - name: Resolve the package
+        run: swift package resolve --scratch-path "$RUNNER_TEMP/codeql-build"
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: swift
           build-mode: manual
-      # A clean build (fresh DerivedData, no cache): CodeQL only sees what is compiled.
-      - name: Build for the simulator
+      # A clean build of the core libraries (fresh .build, no cache): CodeQL only sees what is
+      # compiled. No tests: they use the Swift Testing macros (@Test), see the top of this file.
+      - name: Build the core package
         run: |
           set -o pipefail
-          cd App
-          xcodebuild build \
-            -project Sortly.xcodeproj \
-            -scheme Sortly \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$RUNNER_TEMP/codeql-dd" \
-            -disableAutomaticPackageResolution \
-            -IDEPackageSupportDisableManifestSandbox=YES \
-            -IDEPackageSupportDisablePluginExecutionSandbox=YES \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            CODE_SIGNING_ALLOWED=NO > ../codeql-build.txt 2>&1 \
-            || { grep -E "error:" -A3 ../codeql-build.txt | head -60; exit 1; }
-          tail -3 ../codeql-build.txt
+          swift build --disable-sandbox --scratch-path "$RUNNER_TEMP/codeql-build" 2>&1 | tail -20
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:swift

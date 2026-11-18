@@ -26,8 +26,11 @@
   die Ortssuche (`SystemGeocoder`) bei einem Sprachwechsel mit der neuen Sprache neu anlegen
   (heute nur beim Start, `AppModel`), den Zwischenspeicher der Ortssuche je Sprache führen und
   die gespeicherten Städte zum erneuten Nachfragen vormerken (Netz und Apples Drosselung, eine
-  Entscheidung für Fuchs). Vorschläge für Regionen tragen den Regionsnamen in ihrer Kennung:
-  nach einem Sprachwechsel gelten „Nicht jetzt“ und eigene Namen bei Regionen nicht mehr.
+  Entscheidung für Fuchs). Die Kennungen von Städten und Regionen hängen nicht an der Sprache
+  (fester Regionsschlüssel je Mediathek, zweite Prüfung). Offen: eine Region, die die
+  Offline-Karte nicht kennt (Apple nennt sie anders als die Karte), behält ihren Namen als
+  Schlüssel; bei ihr und bei Städten, die Apple nach einem Neustart in der anderen Sprache
+  nennt („Rom“/„Rome“), entsteht nach einem Sprachwechsel eine neue Kennung.
 
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.

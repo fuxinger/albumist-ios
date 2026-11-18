@@ -39,6 +39,11 @@ public struct PlaceComponents: Hashable, Sendable, Codable {
     public var ocean: String?
     /// IANA identifier of the local time zone, used to format trip dates in local time.
     public var timeZoneIdentifier: String?
+    /// The region's part of `key(at:)`, fixed for this library when the region was first stored
+    /// (`OfflineWorldMap.RegionKeys`). The region's name follows the language of album names,
+    /// its key does not: a town's or region's suggestion keeps its id, and with it the user's
+    /// decisions, when the language changes (second review of P1-12). `nil`: the name is the key.
+    public var administrativeAreaKey: String?
 
     public init(
         isoCountryCode: String? = nil,
@@ -51,7 +56,8 @@ public struct PlaceComponents: Hashable, Sendable, Codable {
         areaOfInterest: String? = nil,
         inlandWater: String? = nil,
         ocean: String? = nil,
-        timeZoneIdentifier: String? = nil
+        timeZoneIdentifier: String? = nil,
+        administrativeAreaKey: String? = nil
     ) {
         self.isoCountryCode = isoCountryCode?.uppercased()
         self.country = country
@@ -64,6 +70,7 @@ public struct PlaceComponents: Hashable, Sendable, Codable {
         self.inlandWater = inlandWater
         self.ocean = ocean
         self.timeZoneIdentifier = timeZoneIdentifier
+        self.administrativeAreaKey = administrativeAreaKey
     }
 
     public var continent: Continent? {
@@ -101,7 +108,7 @@ public struct PlaceComponents: Hashable, Sendable, Codable {
                 continue
             }
             if let value = name(at: current) {
-                parts.append(PlaceKey.normalize(value))
+                parts.append(current == .administrativeArea ? administrativeAreaKey ?? PlaceKey.normalize(value) : PlaceKey.normalize(value))
             } else if current == level {
                 return nil
             }

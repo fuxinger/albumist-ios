@@ -17,14 +17,15 @@ struct AlbumNameLanguageTests {
         var settings: OrganizationSettings
     }
 
-    static func run(_ assets: [AssetSnapshot]) throws -> Run {
+    static func run(_ assets: [AssetSnapshot], geocoder: FakeGeocoder = FakeGeocoder(),
+                    levels: [PlaceLevel] = [.country, .administrativeArea]) throws -> Run {
         var settings = OrganizationSettings()
         settings.titleLanguage = .german
-        settings.places.levels = [.country, .administrativeArea]
+        settings.places.levels = levels
         let store = try SortlyStore(url: nil)
         let reader = InMemoryLibraryReader(assets: assets)
         let pipeline = AnalysisPipeline(
-            store: store, reader: reader, analyzer: FakeContentAnalyzer(), geocoder: FakeGeocoder(), map: PipelineTests.map,
+            store: store, reader: reader, analyzer: FakeContentAnalyzer(), geocoder: geocoder, map: PipelineTests.map,
             conditions: FakeConditions(), settings: settings, calendar: Fixture.calendar, time: ManualTime().source,
             now: { Fixture.date("2026-11-18 06:00") }
         )
@@ -98,5 +99,88 @@ struct AlbumNameLanguageTests {
         // A region the map does not know keeps its name.
         let unknown = PlaceComponents(isoCountryCode: "IT", country: "Italien", administrativeArea: "Nirgendwo")
         #expect(map.renamed(unknown, to: .english).administrativeArea == "Nirgendwo")
+    }
+
+    // MARK: Second review: ids of towns and regions
+
+    static func placeIDs(_ run: Run) async throws -> [String: SortlyID] {
+        var ids: [String: SortlyID] = [:]
+        let snapshot = try await run.pipeline.latestProposals()
+        for p in (snapshot?.proposals ?? []) + (snapshot?.dismissed ?? []) {
+            guard let key = p.placeKeys.first, key.level == .administrativeArea || key.level == .locality else { continue }
+            // Named by the photos they hold, which do not change with the language.
+            ids["\(key.level):\(p.assetIDs.map(\.rawValue).sorted().first ?? "")"] = p.id
+        }
+        return ids
+    }
+
+    /// Second review of P1-12: the key of a town or region held the region's name, so after the
+    /// switch "locality:de/bayern/…" became "locality:de/bavaria/…": a new id, and the user's
+    /// "Nicht jetzt", own names and "do not create a deleted album again" were lost. A decision
+    /// on a town and on a region survives a switch to English and back, and the ids stay.
+    @Test func decisionsOnTownsAndRegionsSurviveALanguageSwitch() async throws {
+        var run = try Self.townsAndRegions()
+        #expect(try await run.pipeline.run().isComplete)
+        let german = try await Self.placeIDs(run)
+        let town = german.first { $0.key.hasPrefix("locality") }?.value
+        let region = german.first { $0.key.hasPrefix("administrativeArea") }?.value
+        #expect(town != nil && region != nil, "\(german)")
+        guard let town, let region else { return }
+        try await run.store.addOverride(UserOverride(scope: .source(town), decision: .rejectProposal))
+        try await run.store.addOverride(UserOverride(scope: .source(region), decision: .doNotRecreateAlbum))
+
+        for language in [TitleLanguage.english, .german, .english] {
+            run.settings.titleLanguage = language
+            await run.pipeline.update(settings: run.settings)
+            #expect(try await run.pipeline.run().isComplete)
+            #expect(try await Self.placeIDs(run) == german, "\(language)")
+            let snapshot = try #require(try await run.pipeline.latestProposals())
+            let open = Set(snapshot.proposals.map(\.id))
+            #expect(!open.contains(town) && !open.contains(region), "\(language): a decided suggestion is back")
+            #expect(Set(snapshot.dismissed.map(\.id)).isSuperset(of: [town, region]), "\(language)")
+        }
+        // The names did follow the language.
+        #expect(try await run.store.places().values.contains { $0.components.administrativeArea == "Veneto" })
+    }
+
+    /// An install from before the fix: places stored without a fixed region key. Its ids stay
+    /// what they were, in its language and after switching to the other one.
+    @Test func anExistingLibraryKeepsItsIDs() async throws {
+        var run = try Self.townsAndRegions()
+        #expect(try await run.pipeline.run().isComplete)
+        let german = try await Self.placeIDs(run)
+        #expect(german.count >= 2, "\(german)")
+        // As stored before: no keys, no table.
+        var places = try await run.store.places()
+        #expect(places.values.contains { $0.components.administrativeAreaKey != nil })
+        for id in places.keys { places[id]?.components.administrativeAreaKey = nil }
+        try await run.store.setPlaces(places)
+        try await run.store.removeValue(forKey: AnalysisPipeline.Key.regionKeys)
+        let old = Set(places.values.compactMap { $0.components.key(at: .administrativeArea)?.description })
+        #expect(old.contains("administrativeArea:it/venetien"), "\(old)")
+
+        #expect(try await run.pipeline.run().isComplete)
+        #expect(try await Self.placeIDs(run) == german)
+        run.settings.titleLanguage = .english
+        await run.pipeline.update(settings: run.settings)
+        #expect(try await run.pipeline.run().isComplete)
+        #expect(try await Self.placeIDs(run) == german)
+        let keys = Set(try await run.store.places().values.compactMap { $0.components.key(at: .administrativeArea)?.description })
+        #expect(keys == old)
+    }
+
+    /// Two trips to Rome (an album for the town) and to Lake Garda and Venice (one for Veneto).
+    static func townsAndRegions() throws -> Run {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2025-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1,
+                      skipping: [("2025-05-10", "2025-05-17"), ("2025-09-10", "2025-09-17"), ("2026-04-01", "2026-04-08"), ("2026-06-01", "2026-06-08")])
+        _ = lib.daily(from: "2025-05-10", to: "2025-05-17", at: Fixture.Places.rome, perDay: 4, hour: 10)
+        _ = lib.daily(from: "2025-09-10", to: "2025-09-17", at: Fixture.Places.rome, perDay: 4, hour: 10)
+        _ = lib.daily(from: "2026-04-01", to: "2026-04-08", at: Fixture.Places.gardaLake, perDay: 4, hour: 10)
+        let venice = GeoCoordinate(latitude: 45.4408, longitude: 12.3155)
+        _ = lib.daily(from: "2026-06-01", to: "2026-06-08", at: venice, perDay: 4, hour: 10)
+        let geocoder = FakeGeocoder(answers: FakeGeocoder.defaultAnswers
+            + [(venice, PlaceComponents(isoCountryCode: "IT", country: "Italy", administrativeArea: "Veneto", locality: "Venedig"))])
+        return try Self.run(lib.assets, geocoder: geocoder, levels: [.country, .administrativeArea, .locality])
     }
 }

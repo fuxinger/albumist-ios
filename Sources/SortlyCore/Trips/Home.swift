@@ -402,8 +402,10 @@ public struct HomeName: Hashable, Sendable {
         }
         if let town = best(towns) {
             return PlaceComponents(isoCountryCode: town.isoCountryCode, country: town.country, administrativeArea: town.administrativeArea,
-                                   subAdministrativeArea: town.subAdministrativeArea, locality: town.locality)
+                                   subAdministrativeArea: town.subAdministrativeArea, locality: town.locality,
+                                   administrativeAreaKey: town.administrativeAreaKey)
         }
-        return best(regions).map { PlaceComponents(isoCountryCode: $0.isoCountryCode, country: $0.country, administrativeArea: $0.administrativeArea) }
+        return best(regions).map { PlaceComponents(isoCountryCode: $0.isoCountryCode, country: $0.country, administrativeArea: $0.administrativeArea,
+                                                   administrativeAreaKey: $0.administrativeAreaKey) }
     }
 }

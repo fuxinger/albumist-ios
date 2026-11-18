@@ -112,6 +112,21 @@ enum Migrations {
         CREATE TABLE plan_steps (plan_id TEXT NOT NULL, idx INTEGER NOT NULL, payload BLOB NOT NULL, PRIMARY KEY (plan_id, idx)) WITHOUT ROWID;
         CREATE TABLE plan_media (plan_id TEXT NOT NULL, step_id TEXT NOT NULL, payload BLOB NOT NULL, PRIMARY KEY (plan_id, step_id)) WITHOUT ROWID;
         """),
+        // v5: which photos have image labels (`AnalysisPipeline.labelsVersion`). Labels are
+        // asked for only while "Themen" or "Dokumente" is on; turned on later, the photos
+        // without them get labels in the next run (image step, labels only), not a full
+        // analysis. Rows of earlier versions: classified only if their stored result has at
+        // least one label. Whether a photo without labels was looked at with the classifier
+        // on cannot be known; it is classified once more (cheap, against search and topics
+        // missing it for good). A format the pattern does not match only means more of that.
+        (5, """
+        ALTER TABLE assets ADD COLUMN labels_version INTEGER NOT NULL DEFAULT 0;
+        UPDATE assets SET labels_version = 1 WHERE EXISTS (
+            SELECT 1 FROM analysis_results r
+            WHERE r.asset_id = assets.id AND r.kind = 'content' AND CAST(r.payload AS TEXT) LIKE '%"labels":[{%'
+        );
+        CREATE INDEX idx_assets_labels ON assets(labels_version);
+        """),
     ]
 
     /// Optional full-text index over `text_plain` (external content), kept in sync by

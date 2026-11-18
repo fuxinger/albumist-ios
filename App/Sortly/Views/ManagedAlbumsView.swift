@@ -9,9 +9,10 @@ struct ManagedAlbumsView: View {
     /// The removal preview is pushed onto the stack's path (`AppScreen`). With
     /// `navigationDestination(isPresented:)` it was drawn 502 times in a 5.9 s stall (UI run
     /// 44066730498, device test 08).
+    /// A removal plan that is ready after Back, or after the sheet closed, is not pushed. This
+    /// screen opens only in the settings sheet, where no other tab can be chosen, so a plan that
+    /// cannot be pushed at once is not kept (`Navigator.Outcome.waiting` counts as not pushed).
     @Environment(Navigator.self) private var navigator: Navigator?
-    /// On screen and on top: a removal plan that is ready after Back is not pushed.
-    @State private var visible = false
     /// The suggestions behind the album being removed; they are not offered again afterwards.
     @State private var removingSources: Set<SortlyID> = []
     @State private var nothingToDo = false
@@ -34,8 +35,6 @@ struct ManagedAlbumsView: View {
         }
         // Also albums Albumist only added to (design review N9).
         .navigationTitle("Alben von Albumist")
-        .onAppear { visible = true }
-        .onDisappear { visible = false }
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             pending.map { Text("„\($0.lastKnownTitle)“ zurücknehmen?") } ?? Text(""),
@@ -88,12 +87,12 @@ struct ManagedAlbumsView: View {
 
     private func prepare(_ state: ManagedAlbumState) async {
         pending = nil
-        let before = navigator?.path
+        let before = navigator?.mark
         guard let removal = await model.removalPlan(for: state) else {
-            if visible { nothingToDo = true }
+            if navigator?.isShowing(before) == true { nothingToDo = true }
             return
         }
-        if Navigator.push(.prebuiltPlan(PlanToken(removal)), on: navigator, ifStill: before, visible: visible) {
+        if Navigator.push(.prebuiltPlan(PlanToken(removal)), on: navigator, ifStill: before) == .pushed {
             removingSources = state.allSourceIDs
         }
     }

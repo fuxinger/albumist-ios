@@ -472,3 +472,43 @@ struct MosaicAfterRebuildTests {
         #expect(ScanShowRule.shows(isRunning: true, firstAnalysis: !AnalysisMarker.completedOnce, isQuickCheck: false))
     }
 }
+
+/// Second review of the labels fix, finding 9; third review, 7: the marker as the app really
+/// keeps it (`AnalysisMarker.Point` in UserDefaults), not a copy of it. "Fotos werden für die
+/// neuen Bereiche angesehen" is kept as "Neue Fotos" plus a flag, so a build before that label
+/// (TestFlight back to it) reads the marker instead of dropping it whole.
+@MainActor
+struct AnalysisMarkerLabelTests {
+    /// The marker of a build before `newAreas`: its label knew four cases, and a value it could
+    /// not read made the whole marker unreadable.
+    struct OlderPoint: Codable {
+        enum NewWork: String, Codable { case newPhotos, afterUpdate, moreNewPhotos, afterUpdateAgain }
+        var stage: Int
+        var overall: Double
+        var newWork: NewWork?
+    }
+
+    @Test func olderBuildsReadTheMarkerAndThisBuildReadsItsLabelBack() throws {
+        let key = "analysis.unfinished"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+
+        for label in [ResumedRun.NewWork.newAreas, .newPhotos, .moreNewPhotos, .afterUpdate, .afterUpdateAgain] {
+            let point = AnalysisMarker.Point(stage: 4, overall: 0.4, newWork: label.markerValue, newAreas: label.markerFlag)
+            AnalysisMarker.unfinished = point
+            let stored = try #require(UserDefaults.standard.data(forKey: key))
+            let older = try JSONDecoder().decode(OlderPoint.self, from: stored)
+            #expect(older.stage == 4)
+            #expect(older.newWork?.rawValue == label.markerValue.rawValue)
+            let back = try #require(AnalysisMarker.unfinished)
+            #expect(back == point)
+            #expect(ResumedRun.NewWork.fromMarker(back.newWork, flag: back.newAreas) == label)
+        }
+        // A marker an older build wrote reads as it is.
+        let written = try JSONEncoder().encode(OlderPoint(stage: 4, overall: 0.4, newWork: .moreNewPhotos))
+        UserDefaults.standard.set(written, forKey: key)
+        let read = try #require(AnalysisMarker.unfinished)
+        #expect(read.newAreas == nil)
+        #expect(ResumedRun.NewWork.fromMarker(read.newWork, flag: read.newAreas) == .moreNewPhotos)
+    }
+}

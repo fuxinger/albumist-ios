@@ -245,12 +245,33 @@ final class DeviceConditionUITests: XCTestCase {
             UITestOnboarding.clock("tap demo library")
             demo.tap()
         }
+        // UI run 44144000817: test07 waited the full 900 s right after test05 and nothing said
+        // what the overview showed. The state is now printed every 60 s and at the end, with a
+        // screenshot when it never got ready.
+        var lastState = Date.distantPast
         let ready = waitStable("demo library analysed", timeout: 900) {
-            (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
+            let met = (analysedPhotos()?.total ?? 0) >= 200 && !analysisRunning && !anything("Beispielfotos werden angelegt").exists
+            if !met && Date().timeIntervalSince(lastState) >= 60 {
+                lastState = Date()
+                printPrepareState()
+            }
+            return met
+        }
+        if !ready {
+            printPrepareState()
+            shot("prepare-not-ready")
         }
         print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
         XCTAssertTrue(ready, "The demo library was not created and analysed")
         print("UI_TIMING prepare \(Int(Date().timeIntervalSince(started))) s")
+    }
+
+    /// What `prepare` waits on, in one line: the headline, "Pause", "Fortsetzen", the seeding
+    /// text and the card's progress element.
+    private func printPrepareState() {
+        let headline = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@ OR label == %@", "Fotos analysiert", "Analyse aktuell")).firstMatch
+        let label = (try? headline.snapshot().label) ?? "none"
+        print("UI_FACT prepare state: headline '\(label)', Pause \(app.buttons["Pause"].exists), Fortsetzen \(app.buttons["Fortsetzen"].exists), seeding \(anything("Beispielfotos werden angelegt").exists), progress '\(progressText() ?? "none")'")
     }
 
     private enum PhotoChoice { case full, limited, deny }
@@ -1242,13 +1263,14 @@ final class DeviceConditionUITests: XCTestCase {
 
         // 2. Measuring
         try? FileManager.default.removeItem(atPath: mainStalls)
+        try? FileManager.default.removeItem(atPath: progressRecord)
         print("UI_STRESS_PHASE measure")
         // The image step runs at about 1.7 photos/s in the simulator (stress run 43833158673):
         // 50,000 photos would take 8 h. The run measures for SORTLY_STRESS_MINUTES (45) and
         // reports how far it got; the simulator's speed is not a device's.
         let minutes = ProcessInfo.processInfo.environment["SORTLY_STRESS_MINUTES"].flatMap { Int($0) } ?? 45
         let arguments = ["-SortlyUITestICloudOnly", "-SortlyUITestOffline", "-SortlyUITestWatchMain",
-                         "-SortlyUITestWatchMainLog", mainStalls]
+                         "-SortlyUITestWatchMainLog", mainStalls, "-SortlyUITestProgressLog", progressRecord]
         start(arguments + ["-SortlyUITestRebuildDatabase"])
         let analysisBegan = Date()
         var lastLine = ""
@@ -1288,34 +1310,123 @@ final class DeviceConditionUITests: XCTestCase {
                 }
                 let known = stepCounts[progress.step]
                 stepCounts[progress.step] = (known?.first ?? progress.done, progress.done, known?.firstAt ?? now, now)
-                // Pause once, a tenth into the image step; then Fortsetzen.
-                if !paused, progress.step == 4, progress.total > 0, progress.done >= progress.total / 10 {
+                // Pause once early in the image step, after 200 photos of it or 2 min, whichever
+                // comes first; then Fortsetzen. It waited for a tenth of the step, which the
+                // simulator never reached with 50,000 photos (3,419 in 45 min, stress run
+                // 44116350940), so Pause was not measured at that size.
+                if !paused, progress.step == 4, progress.total > 0, progress.done < progress.total, let step = stepCounts[4],
+                   progress.done - step.first >= 200 || now.timeIntervalSince(step.firstAt) >= 120 {
                     paused = true
+                    print("UI_FACT stress pause after \(progress.done - step.first) photos and \(Int(now.timeIntervalSince(step.firstAt))) s of the image step")
                     measurePauseAndResume()
                     lastChange = Date()
                 }
             }
             return analysisIdle
         }
+        let measureEnded = Date()
         print("UI_TIMING stress analysis \(elapsed(analysisBegan)) s, app ended \(ended) times")
         for (step, c) in stepCounts.sorted(by: { $0.key < $1.key }) {
             let seconds = c.lastAt.timeIntervalSince(c.firstAt)
             let rate = seconds > 0 ? Double(c.last - c.first) / seconds : 0
             print("UI_TIMING stress step \(step): \(c.last - c.first) in \(Int(seconds)) s (\(String(format: "%.1f", rate))/s)")
         }
-        print("UI_TIMING stress longest still line \(Int(longestStill.seconds)) s: '\(longestStill.line)'")
+        // The still time from the app's own record of the line (`-SortlyUITestProgressLog`); the
+        // one from this test's reads is a cross-check: they took up to 7 s each in stress run
+        // 44116350940, and a time between two rounds of reads is off by up to a round either way.
+        let recorded = longestStillInRecord(from: analysisBegan, to: measureEnded)
+        if let recorded {
+            print("UI_TIMING stress longest still line \(String(format: "%.1f", recorded.seconds)) s (app record, \(recorded.lines) lines) from \(UITestOnboarding.clockText(recorded.since)) UTC: '\(recorded.line)'")
+        } else {
+            print("UI_FACT stress: no progress record from the app; this test's reads are the measure")
+        }
+        print("UI_TIMING stress longest still line \(String(format: "%.1f", longestStill.seconds)) s (XCTest reads, cross-check): '\(longestStill.line)'")
+        printImageStepStart()
         print("UI_TIMING stress slowest answer \(String(format: "%.1f", slowestAnswer)) s")
         print("UI_FACT stress result \(String(describing: analysedPhotos()))")
         shot("26-stress-done")
         if !finished { print("UI_FACT stress measured \(minutes) min; the analysis was not finished then (simulator speed)") }
         XCTAssertEqual(ended, 0, "The app ended during the analysis")
-        XCTAssertLessThanOrEqual(longestStill.seconds, 10, "The progress line stood still \(Int(longestStill.seconds)) s at '\(longestStill.line)'")
+        let still = recorded.map { (seconds: $0.seconds, line: $0.line) } ?? longestStill
+        XCTAssertLessThanOrEqual(still.seconds, 10, "The progress line stood still \(String(format: "%.1f", still.seconds)) s at '\(still.line)'")
         XCTAssertLessThan(slowestAnswer, 10, "The app took \(Int(slowestAnswer)) s to answer")
         let opened = Date()
         tabButton("Mediathek").tap()
         let listed = libraryPhotos.firstMatch.waitForExistence(timeout: 60)
-        print("UI_TIMING stress library tab \(String(format: "%.1f", Date().timeIntervalSince(opened))) s (\(listed))")
+        let shown = Date()
+        print("UI_TIMING stress library tab \(String(format: "%.1f", shown.timeIntervalSince(opened))) s (\(listed))")
+        // How much of that was the app's main thread (the rest is XCTest's tap and reads).
+        if let stalls = mainStallsOverlapping(opened, shown) {
+            print("UI_TIMING stress library tab: main-thread stalls over 0.5 s \(stalls.map { "\($0.ms) ms" })")
+        }
         shot("27-stress-library")
+        // The measured launch's stalls of 2 s or more, with stacks (its own file, not the one
+        // `UITestStalls.report()` prints at every launch).
+        UITestStalls.report(mainStalls)
+    }
+
+    /// The card's progress line as the app recorded it (`-SortlyUITestProgressLog`): every change
+    /// with the app's own time, appended by each launch of the measurement.
+    private var progressRecord: String { NSTemporaryDirectory() + "stress-progress-line.txt" }
+
+    /// The record's lines between `from` and `to`: (time, line), the line nil at a relaunch
+    /// ("@ …") and "-" where the card stopped showing it; the line shown when `from` came is
+    /// the first one, from `from` on. Marks ("# …") come separately.
+    private func readProgressRecord(from: Date, to: Date) -> (lines: [(at: Date, line: String?)], marks: [(at: Date, what: String)])? {
+        guard let text = try? String(contentsOfFile: progressRecord, encoding: .utf8) else { return nil }
+        var lines: [(at: Date, line: String?)] = []
+        var marks: [(at: Date, what: String)] = []
+        for row in text.split(separator: "\n") {
+            let fields = row.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            if fields.first == "@" {
+                if fields.count == 3, let t = Double(fields[2]) { lines.append((Date(timeIntervalSince1970: t), nil)) }
+            } else if fields.first == "#" {
+                if fields.count == 3, let t = Double(fields[1]) { marks.append((Date(timeIntervalSince1970: t), fields[2])) }
+            } else if let t = Double(fields[0]), fields.count >= 2 {
+                lines.append((Date(timeIntervalSince1970: t), fields.dropFirst().joined(separator: " ")))
+            }
+        }
+        var window = lines.filter { $0.at >= from && $0.at <= to }
+        if let before = lines.last(where: { $0.at < from }) { window.insert((from, before.line), at: 0) }
+        return (window, marks.filter { $0.at >= from && $0.at <= to })
+    }
+
+    /// The longest time the line stood still between `from` and `to` while the analysis
+    /// worked, from the app's record (nil: no record, or no line in it). A line that says
+    /// nothing runs (paused, pausing, waiting for the device, finished) and the time without a
+    /// line do not count; a relaunch ends the line before it (an ended app fails on its own).
+    private func longestStillInRecord(from: Date, to: Date) -> (seconds: Double, line: String, since: Date, lines: Int)? {
+        guard let record = readProgressRecord(from: from, to: to) else { return nil }
+        let rows = record.lines
+        let resting = ["Analyse pausiert", "Wird angehalten", "Wartet", "Analyse fertig", "-"]
+        var longest: (seconds: Double, line: String, since: Date, lines: Int)?
+        var counted = 0
+        for (i, row) in rows.enumerated() {
+            guard let line = row.line else { continue }
+            counted += 1
+            if resting.contains(where: { line.hasPrefix($0) }) { continue }
+            let end = i + 1 < rows.count ? rows[i + 1].at : to
+            let seconds = end.timeIntervalSince(row.at)
+            if seconds > (longest?.seconds ?? -1) { longest = (seconds, line, row.at, 0) }
+        }
+        guard counted > 0, var result = longest else { return nil }
+        result.lines = counted
+        return result
+    }
+
+    /// The start of the image step as the app recorded it: when "Schritt 4" was first shown,
+    /// the next lines, and the app's marks (when the early suggestions were saved).
+    private func printImageStepStart() {
+        guard let record = readProgressRecord(from: .distantPast, to: .distantFuture) else { return }
+        if let first = record.lines.firstIndex(where: { $0.line?.contains("Schritt 4 von") ?? false }) {
+            let begin = record.lines[first].at
+            for row in record.lines[first..<min(record.lines.count, first + 6)] {
+                print("UI_FACT stress record +\(String(format: "%.1f", row.at.timeIntervalSince(begin))) s: '\(row.line ?? "(relaunch)")'")
+            }
+            for mark in record.marks {
+                print("UI_FACT stress record \(String(format: "%+.1f", mark.at.timeIntervalSince(begin))) s from step 4: \(mark.what)")
+            }
+        }
     }
 
     /// The app's main-thread stalls over 0.5 s ("<end, s since 1970> <ms>"), written by the

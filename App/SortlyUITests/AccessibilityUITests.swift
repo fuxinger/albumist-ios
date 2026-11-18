@@ -86,19 +86,24 @@ final class AccessibilityUITests: XCTestCase {
         var shareAtlas: String
         var searchQuery: String
         var country: String
+        /// Titles of screens the walk opens and goes back from: it waits for their bar.
+        var receiptTitle: String
+        var historyTitle: String
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: ".*[0-9.]+ Vorschl(ag|äge) prüfen.*",
                                   suggestionTitle: "Vorschlag", rowMarker: "Fotos",
                                   starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
                                   applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
-                                  shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom", country: "Italien")
+                                  shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom", country: "Italien",
+                                  receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ suggestions?.*",
                                    suggestionTitle: "Suggestion", rowMarker: "photo",
                                    starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
                                    applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
-                                   shareAtlas: "Share Travel Atlas", searchQuery: "Rome", country: "Italy")
+                                   shareAtlas: "Share Travel Atlas", searchQuery: "Rome", country: "Italy",
+                                   receiptTitle: "Changes", historyTitle: "History and Undo")
     }
 
     // MARK: Tests
@@ -168,8 +173,9 @@ final class AccessibilityUITests: XCTestCase {
         let demo = button("Beispiel-Mediathek anlegen")
         let seeds = demo.waitForExistence(timeout: welcome ? 30 : 5)
         if seeds {
-            tap(demo, "seed demo library")
-            XCTAssertTrue(UITestOnboarding.demoLibraryCreated(app), "Demo library not created")
+            if seedDemoLibrary(demo) {
+                XCTAssertTrue(UITestOnboarding.demoLibraryCreated(app), "Demo library not created")
+            }
         } else if checking {
             print("UI_STEP_MISSING demo button")
             XCTFail("No \"Beispiel-Mediathek anlegen\" after the onboarding on a fresh simulator")
@@ -291,12 +297,11 @@ final class AccessibilityUITests: XCTestCase {
                         sleep(2)
                         check("\(tag) result", english: english)
                         let receipt = app.buttons["result.receipt"]
-                        let resultBar = barTitle()
-                        if tap(receipt, "\(tag) open receipt", timeout: 10) {
-                            let receiptShown = barChanged(from: resultBar, "\(tag) receipt")
+                        if tap(receipt, "\(tag) open receipt", timeout: 10),
+                           opened(app.navigationBars[w.receiptTitle], "\(tag) receipt") {
                             sleep(2)
                             check("\(tag) receipt", english: english)
-                            if receiptShown { back("\(tag) receipt", confirmed: true); sleep(1) }
+                            back("\(tag) receipt", confirmed: true); sleep(1)
                         }
                     } else {
                         XCTFail("The starter plan did not finish")
@@ -315,12 +320,11 @@ final class AccessibilityUITests: XCTestCase {
                 check("\(tag) atlas lower", english: english)
                 // A country: its photo colours sit behind the title and caption.
                 let country = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", w.country)).firstMatch
-                let atlasBar = barTitle()
-                if tap(country, "\(tag) open country", timeout: 10) {
-                    let countryShown = barChanged(from: atlasBar, "\(tag) country")
+                // Its screen is called by the country's name.
+                if tap(country, "\(tag) open country", timeout: 10), opened(app.navigationBars[w.country], "\(tag) country") {
                     sleep(2)
                     check("\(tag) country", english: english)
-                    if countryShown { back("\(tag) country", confirmed: true); sleep(1) }
+                    back("\(tag) country", confirmed: true); sleep(1)
                 }
                 app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
@@ -364,12 +368,11 @@ final class AccessibilityUITests: XCTestCase {
                 // Design review W16: history and undo on their own screen. Opened first, from
                 // the top of the list: after scrolling down and back the first row was not in
                 // the tree again (UI run 43773339053, "history" missing).
-                let settingsBar = barTitle()
-                if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5) {
-                    let historyShown = barChanged(from: settingsBar, "\(tag) history")
+                if tap(app.buttons["settings.history"], "\(tag) history", timeout: 5),
+                   opened(app.navigationBars[w.historyTitle], "\(tag) history") {
                     sleep(1)
                     check("\(tag) history", english: english)
-                    if historyShown { back("\(tag) history", confirmed: true); sleep(1) }
+                    back("\(tag) history", confirmed: true); sleep(1)
                 }
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
@@ -761,6 +764,65 @@ final class AccessibilityUITests: XCTestCase {
         return button
     }
 
+    /// Taps "Beispiel-Mediathek anlegen" and checks that the seeding started: its progress text
+    /// shows, or the button is gone, within 20 s. Accessibility run 44144000817: at the largest
+    /// text the demo card's button was still 2 pt above the tab bar after 10 swipes
+    /// (element y 582, bar from 584), the tap landed on the bar, nothing was seeded, the test
+    /// waited 600 s and tests 2 to 4 then ran on the simulator's 6 photos ("Missing: open
+    /// suggestions"). A tap that started nothing is said with the button's state and repeated
+    /// on the part of the button clear of the bars, at most 3 times; then the test fails at once.
+    private func seedDemoLibrary(_ demo: XCUIElement) -> Bool {
+        let seeding = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Beispielfotos werden angelegt")).firstMatch
+        for attempt in 1...3 {
+            if attempt == 1 {
+                tap(demo, "seed demo library")
+            } else if !tapClearOfBars(demo, "seed demo library, attempt \(attempt)") {
+                break
+            }
+            let deadline = Date().addingTimeInterval(20)
+            while Date() < deadline {
+                if seeding.exists || !demo.exists { return true }
+                sleep(2)
+            }
+            let tabs = app.tabBars.firstMatch
+            print("UI_FACT seed demo library attempt \(attempt): nothing started; button enabled \(demo.isEnabled), hittable \(demo.isHittable), frame \(demo.frame), tab bar \(tabs.exists ? "\(tabs.frame)" : "none")")
+        }
+        print("UI_STEP_MISSING seed demo library started")
+        shot("a11y-x-missing-seed-demo-library")
+        XCTFail("Tapping \"Beispiel-Mediathek anlegen\" started no seeding")
+        return false
+    }
+
+    /// Scrolls `element` up by short drags above the tab bar until at least 30 pt of it are clear
+    /// of both bars, then taps the middle of that part. False when it never got clear.
+    private func tapClearOfBars(_ element: XCUIElement, _ step: String) -> Bool {
+        guard element.exists else { return false }
+        let window = app.windows.firstMatch.frame
+        let bar = app.navigationBars.firstMatch
+        let tabs = app.tabBars.firstMatch
+        func band() -> (top: CGFloat, bottom: CGFloat) {
+            let frame = element.frame
+            let top = max(frame.minY, bar.exists ? bar.frame.maxY + 8 : window.minY + 60)
+            let bottom = min(frame.maxY, tabs.exists ? tabs.frame.minY - 24 : window.maxY - 24)
+            return (top, bottom)
+        }
+        let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        var drags = 0
+        while band().bottom - band().top < 30 && drags < 6 {
+            let from = (tabs.exists ? tabs.frame.minY : window.maxY) - 40
+            origin.withOffset(CGVector(dx: window.midX, dy: from))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.midX, dy: from - 220)))
+            drags += 1
+            sleep(1)
+        }
+        let clear = band()
+        print("UI_FACT tap \(step): element \(element.frame), clear band \(Int(clear.top))-\(Int(clear.bottom)), \(drags) drags")
+        guard clear.bottom - clear.top >= 30 else { return false }
+        UITestOnboarding.clock("tap \(step)")
+        origin.withOffset(CGVector(dx: element.frame.midX, dy: (clear.top + clear.bottom) / 2)).tap()
+        return true
+    }
+
     @discardableResult
     private func tap(_ element: XCUIElement, _ step: String, timeout: TimeInterval = 15) -> Bool {
         guard element.waitForExistence(timeout: timeout) else {
@@ -826,24 +888,6 @@ final class AccessibilityUITests: XCTestCase {
             return
         }
         first.tap()
-    }
-
-    /// The title of the navigation bar on screen ("" when there is none), from one snapshot.
-    private func barTitle() -> String {
-        (try? app.navigationBars.firstMatch.snapshot())?.identifier ?? ""
-    }
-
-    /// After a tap: a screen of its own opened (the bar's title changed within 5 s). Only then
-    /// does the walk go back from it; otherwise `back()` would leave the screen below (the one
-    /// the tap was on) and report it as closed by itself.
-    private func barChanged(from title: String, _ step: String) -> Bool {
-        let deadline = Date().addingTimeInterval(5)
-        repeat {
-            if barTitle() != title { return true }
-            usleep(300_000)
-        } while Date() < deadline
-        print("UI_FACT \(step): the tap opened no screen of its own (bar still '\(title)')")
-        return false
     }
 
     private func shot(_ name: String) {

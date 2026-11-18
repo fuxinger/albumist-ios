@@ -67,6 +67,13 @@ public enum LibraryStatus {
     /// Where an album that fits a photo came from.
     private enum Source: Int { case own, standIn, dismissed }
 
+    /// A photo analysed before "Themen" or "Dokumente" was turned on has no labels yet: neither
+    /// area is known for it until the next run gave them (`DerivedLibraryStatus.labelsMissing`).
+    /// It does not count for these areas meanwhile: it stays as sorted as its other main areas
+    /// make it, and it joins the total once its labels show that an area applies (second
+    /// review of the labels fix: counted as not looked at, the sorted count fell when an area
+    /// was turned on, and the total shrank while the labels came in). The overview says apart
+    /// how many photos are still to be looked at for these areas.
     public static func computeWithReasons(
         facts: [AssetFacts],
         snapshot: ProposalSnapshot?,
@@ -158,9 +165,11 @@ public enum LibraryStatus {
                     a.applicable = f.asset.isScreenshotLike
                     a.analyzed = analyzed
                 case .imageCategories:
+                    // Analysed without labels: no theme yet, so not counted until its labels come.
                     a.applicable = !analyzed || !f.categories.isEmpty
                     a.analyzed = analyzed
                 case .documents:
+                    // Only photos read as documents (a photo's labels decide whether it is read).
                     a.applicable = f.document != nil
                 case .messenger:
                     a.applicable = f.messenger != nil
@@ -286,6 +295,15 @@ public struct DerivedLibraryStatus: Sendable {
     public var photos = 0
     public var analyzed = 0
     public var unreadable = 0
+    /// Of them, photos analysed before "Themen" or "Dokumente" was turned on that wait for their
+    /// labels ("Für die neuen Bereiche fehlen noch 120 Fotos."): the analysed count stays as it
+    /// is (no number goes back), and "Alle 5.683 Fotos analysiert" alone no longer reads as done
+    /// for these areas (second review of the labels fix). 0 while both areas are off.
+    public var labelsMissing = 0
+    /// Of `labelsMissing`, the photos not looked at for their labels yet; the others could not
+    /// be read and wait for their retry. While any is left, the ring's count does not fall
+    /// (`RecountState`, third review of the labels fix, finding 2).
+    public var labelsUntried = 0
 
     public init() {}
 
@@ -295,6 +313,8 @@ public struct DerivedLibraryStatus: Sendable {
         settings: OrganizationSettings,
         overrides: OverrideSet,
         contents: [AssetID: ContentAnalysis],
+        labelsMissing: Set<AssetID> = [],
+        labelsRetrying: Set<AssetID> = [],
         managed: [ManagedAlbumState],
         inventory: CollectionInventory,
         scope: OrganizationScope,
@@ -312,12 +332,14 @@ public struct DerivedLibraryStatus: Sendable {
         // also once that suggestion is no longer shown.
         let byAlbumist = LibraryStatus.organizedBySortly(managed, inventory: inventory, snapshot: snapshot)
         let (states, reasons) = LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                                                  contentAnalyzed: analyzed, organizedBySortly: byAlbumist, calendar: calendar)
+                                                                  contentAnalyzed: analyzed, organizedBySortly: byAlbumist,
+                                                                  calendar: calendar)
         result.states = states
         result.reasons = reasons
         // The trial year counts only its own photos (the ring said "839 von 5.683" over the
         // whole library while the suggestions were for 2026).
         let resolver = OrganizationStatusResolver(primaryAreas: settings.primaryAreas)
+        var scopedIDs: Set<AssetID>?
         if scope == .all {
             result.progress = resolver.progress(states.values)
             result.leftOut = LibraryStatus.leftOut(states.values, reasons: reasons, resolver: resolver)
@@ -325,13 +347,24 @@ public struct DerivedLibraryStatus: Sendable {
             result.analyzed = analyzed.count
             result.unreadable = unreadable.count
         } else {
-            let scopedIDs = Set(facts.lazy.filter { scope.includes($0, calendar: calendar) }.map(\.id))
-            let counted = states.filter { scopedIDs.contains($0.key) }.map(\.value)
+            let scoped = Set(facts.lazy.filter { scope.includes($0, calendar: calendar) }.map(\.id))
+            scopedIDs = scoped
+            let counted = states.filter { scoped.contains($0.key) }.map(\.value)
             result.progress = resolver.progress(counted)
             result.leftOut = LibraryStatus.leftOut(counted, reasons: reasons, resolver: resolver)
-            result.photos = scopedIDs.count
-            result.analyzed = analyzed.intersection(scopedIDs).count
-            result.unreadable = unreadable.intersection(scopedIDs).count
+            result.photos = scoped.count
+            result.analyzed = analyzed.intersection(scoped).count
+            result.unreadable = unreadable.intersection(scoped).count
+        }
+        // Over the set from the store (empty once the labels are caught up), not over every
+        // photo; of the analysed photos only (one not readable yet is said as such).
+        // `labelsRetrying`: of them, those whose labels could not be read yet
+        // (`AnalysisPipeline.photosWaitingForLabels`).
+        if AnalysisPipeline.wantsLabels(settings) {
+            for id in labelsMissing where analyzed.contains(id) && scopedIDs?.contains(id) != false {
+                result.labelsMissing += 1
+                if !labelsRetrying.contains(id) { result.labelsUntried += 1 }
+            }
         }
         return result
     }

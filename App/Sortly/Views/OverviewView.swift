@@ -120,10 +120,19 @@ struct OverviewView: View {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                         Text("Wird neu gezählt")
                             .font(.headline)
-                        Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt mit den ersten Vorschlägen.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                        Group {
+                            if recount.isForLabels {
+                                // Photos analysed before "Themen" or "Dokumente" became a main area
+                                // get their labels: the count would fall photo by photo meanwhile
+                                // (`RecountState`).
+                                Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt, sobald die Fotos für die neuen Bereiche angesehen sind.")
+                            } else {
+                                Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert. Die neue Zahl kommt mit den ersten Vorschlägen.")
+                            }
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                     }
                     .accessibilityElement(children: .combine)
                 } else {
@@ -247,14 +256,28 @@ struct OverviewView: View {
         }
         if let report = model.analysis.lastReport, model.analysis.lastRun != nil, model.analysis.kind == .check {
             // What "Neu prüfen" found, so a check that ends after a few seconds is clearly done.
+            // Photos that only got their labels ("Themen" or "Dokumente" turned on) are no new
+            // photos (review of the labels fix, M2); both in one line (second review, nit).
             Group {
-                if report.contentAnalyzed > 0 {
-                    Text("Beim Prüfen \(report.contentAnalyzed) neue Fotos analysiert.")
+                if report.newPhotosAnalyzed > 0 && report.labelsAdded > 0 {
+                    Text("Beim Prüfen \(report.newPhotosAnalyzed) neue Fotos analysiert und \(report.labelsAdded) weitere für die neuen Bereiche angesehen.")
+                } else if report.newPhotosAnalyzed > 0 {
+                    Text("Beim Prüfen \(report.newPhotosAnalyzed) neue Fotos analysiert.")
+                } else if report.labelsAdded > 0 {
+                    Text("Beim Prüfen \(report.labelsAdded) Fotos für die neuen Bereiche angesehen.")
                 } else if report.newOrChanged == 0 && report.removed == 0 {
                     Text("Beim Prüfen keine neuen Fotos gefunden.")
                 }
             }
             .font(.footnote).foregroundStyle(.secondary)
+        }
+        if counts.labelsMissing > 0 {
+            // Analysed before "Themen" or "Dokumente" was turned on and still without their image
+            // labels (no run yet, or a read that failed waits for its retry): said apart, the
+            // count above stays (second review of the labels fix, finding 6).
+            Label("Für die neuen Bereiche fehlen noch \(counts.labelsMissing) Fotos.", systemImage: "hourglass")
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         if counts.unreadable > 0 {
             Label("\(counts.unreadable) Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal.", systemImage: "exclamationmark.icloud")
@@ -329,7 +352,9 @@ struct OverviewView: View {
         let text = VStack(alignment: .leading, spacing: 2) {
             Text(area.title).font(.body.weight(.medium))
             Group {
-                if proposals.isEmpty, model.recount != nil {
+                // While the labels come in, only the new areas wait for suggestions.
+                if proposals.isEmpty, let recount = model.recount,
+                   !recount.isForLabels || area == .imageCategories || area == .documents {
                     Text("Wird neu berechnet")
                 } else if proposals.isEmpty {
                     Text("Noch keine Vorschläge")

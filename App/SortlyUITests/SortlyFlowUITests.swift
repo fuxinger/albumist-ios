@@ -825,7 +825,13 @@ final class SortlyFlowUITests: XCTestCase {
         // audit that took 16 s left too little of that for the tap (UI run 44012530107).
         let note = anything("2 Fotos ignoriert")
         if ignoreTwo("undo") {
-            let shown = note.waitForExistence(timeout: 5)
+            // The note comes once the app has counted again (`ignore` waits for
+            // `refreshDerived`): UI run 44178558165 had none within 5 s, and it was there for
+            // "Widerrufen" later. Up to 20 s, and the time it took is said; anything over a
+            // second is a finding about the app, listed for after the build (owner rule 17.11.).
+            let asked = Date()
+            let shown = note.waitForExistence(timeout: 20)
+            print("UI_TIMING ignore note \(Int(Date().timeIntervalSince(asked) * 1000)) ms, shown \(shown)")
             print(shown ? "UI_STEP_OK ignore note" : "UI_STEP_MISSING ignore note")
             XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring")
             shot("16a-ignore-note")
@@ -843,7 +849,9 @@ final class SortlyFlowUITests: XCTestCase {
         // 2. Ignore again: the note is audited and must then go away by itself. Then one
         // photo is brought back from "Ignoriert".
         if ignoreTwo("unignore") {
-            let shown = note.waitForExistence(timeout: 5)
+            let asked = Date()
+            let shown = note.waitForExistence(timeout: 20)
+            print("UI_TIMING ignore note again \(Int(Date().timeIntervalSince(asked) * 1000)) ms, shown \(shown)")
             print(shown ? "UI_STEP_OK ignore note again" : "UI_STEP_MISSING ignore note again")
             XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring again")
             if shown {
@@ -863,8 +871,17 @@ final class SortlyFlowUITests: XCTestCase {
                 if ignored > 0 { photos.element(boundBy: 0).tap() }
                 // No red, destructive look for a step that can be taken back.
                 if tap(app.buttons["selection.unignore"], "unignore one photo") {
-                    sleep(2)
-                    XCTAssertEqual(photos.count, max(0, ignored - 1), "Nicht mehr ignorieren did not bring the photo back")
+                    // The list follows once the app has counted again (`refreshDerived`), which
+                    // took more than the 2 s waited here before on a busy simulator (UI run
+                    // 44164854295: still 2 after 2 s). Up to 15 s, and the time it took is said.
+                    let asked = Date()
+                    var left = photos.count
+                    while left != max(0, ignored - 1) && Date().timeIntervalSince(asked) < 15 {
+                        sleep(1)
+                        left = photos.count
+                    }
+                    print("UI_TIMING unignore one photo \(Int(Date().timeIntervalSince(asked) * 1000)) ms, \(left) left")
+                    XCTAssertEqual(left, max(0, ignored - 1), "Nicht mehr ignorieren did not bring the photo back")
                 }
             }
             // The other one through the photo's own detail.

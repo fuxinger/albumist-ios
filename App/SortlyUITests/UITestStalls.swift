@@ -18,10 +18,12 @@ enum UITestStalls {
     /// 18:31:05.2 UTC` (the clock of `UI_MAIN_STALL` and of `UI_FACT slow query`), and each stack
     /// as `UI_FACT main stack after 5.0 s of the stall from …: frame | frame | …`, and the marked
     /// work the main thread did in it as `UI_FACT main work in the stall of …: name 12x 0.3 s, …`
-    /// (`MainThreadWatch.count` and `section`).
-    static func report() {
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return }
-        try? FileManager.default.removeItem(atPath: path)
+    /// (`MainThreadWatch.count` and `section`). `file`: another file the app wrote the same way
+    /// (the stress test's measured launch, `-SortlyUITestWatchMainLog <file>`), else `path`.
+    static func report(_ file: String? = nil) {
+        let file = file ?? path
+        guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { return }
+        try? FileManager.default.removeItem(atPath: file)
         for line in text.split(separator: "\n") {
             if line.hasPrefix("# ") {
                 print("UI_FACT main stack \(line.dropFirst(2))")

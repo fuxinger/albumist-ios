@@ -288,6 +288,8 @@ struct FullRunDisplayTests {
     /// Review I2: "Schon fertig" read the suggestions at the report that starts the image
     /// step, before the early ones were saved, and never again. Now one more report says when
     /// they are saved; at that report they are in the store. Only the first run says it.
+    /// They are made beside the first photos (stress run 44116350940), so that report comes
+    /// after the one that starts the step and repeats the newest count: never back, no jump.
     @Test func earlySuggestionsAreSaidOnceSaved() async throws {
         let sim = try Sim(scale: 0.2)
         let saidAt = Mutex<[Int]>([])
@@ -298,11 +300,12 @@ struct FullRunDisplayTests {
         for (i, p) in events.enumerated() where p.earlyProposals { saidAt.withLock { $0.append(i) } }
         let at = saidAt.withLock { $0 }
         #expect(at.count == 1, "said \(at.count) times")
-        // After the report that starts the image step, before the first photo is counted.
+        // After the report that starts the image step, with the count of the report before it.
         let begin = try #require(events.firstIndex { $0.stage == .content })
         if let i = at.first {
             #expect(i > begin)
-            #expect(events[i].stage == .content && events[i].completed == events[begin].completed)
+            #expect(events[i].stage == .content && events[i - 1].stage == .content)
+            #expect(events[i].completed == events[i - 1].completed && events[i].total == events[i - 1].total)
         }
         let early = try #require(try await sim.pipeline.latestProposals())
         #expect(early.isEarly)
@@ -770,7 +773,11 @@ final class Sim: @unchecked Sendable {
         pipeline = AnalysisPipeline(
             store: store, reader: reader, analyzer: analyzer, geocoder: geocoder, map: FullRunDisplayTests.map,
             conditions: conditions, settings: settings, calendar: Fixture.calendar, time: clock.source,
-            foregroundOnlineBudget: 60, contentLanes: 4, textLanes: 2, now: { clock.date }
+            foregroundOnlineBudget: 60, contentLanes: 4, textLanes: 2, now: { clock.date },
+            // The simulated time runs far ahead of real time: a Pause at 20 % of the image step
+            // comes a few real milliseconds after it begins, and the early set it checks would
+            // depend on the test machine's load. The real half second is tested in ImageStepStartTests.
+            earlyGraceOnStop: .seconds(60)
         )
     }
 

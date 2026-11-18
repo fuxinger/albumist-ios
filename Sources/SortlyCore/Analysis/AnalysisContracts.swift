@@ -142,6 +142,20 @@ public struct ContentAnalysis: Hashable, Sendable, Codable {
         self.source = source
     }
 
+    /// This result with the labels of `fresh`, a look at the same image with only the labels
+    /// asked for (`ContentAnalysisRequest.labelsOnly`): "Themen" or "Dokumente" turned on after
+    /// the photo was analysed. Everything else stays as it was found then; what the earlier
+    /// look did not have (a score, the utility flag) is taken from the new one.
+    public func addingLabels(of fresh: ContentAnalysis) -> ContentAnalysis {
+        var merged = self
+        merged.labels = fresh.labels
+        merged.looksLikeDocument = looksLikeDocument || fresh.looksLikeDocument
+        merged.containsText = containsText || fresh.containsText
+        merged.aestheticsScore = aestheticsScore ?? fresh.aestheticsScore
+        merged.isUtility = isUtility ?? fresh.isUtility
+        return merged
+    }
+
     /// Labels that indicate a document even if the analyzer did not flag one.
     static let documentLabels: Set<String> = ["document", "receipt", "printed_page", "paper", "envelope", "letter", "text", "menu", "ticket", "invoice"]
 
@@ -157,6 +171,23 @@ public struct ContentAnalysis: Hashable, Sendable, Codable {
     }
 }
 
+/// Failed reads of a photo that only needed its labels (`ContentAnalysisRequest.labelsOnly`),
+/// stored apart from its content result (kind "labels"), which stays exactly as it was. Counted
+/// and spaced like `ContentAnalysis.failedAttempts`: given up for its labels after
+/// `ContentAnalysis.maxFailedAttempts` runs, at least `ContentAnalysis.retrySpacing` apart.
+public struct LabelAttempts: Hashable, Sendable, Codable {
+    public var failedAttempts: Int
+    public var lastAttempt: Date
+    public init(failedAttempts: Int, lastAttempt: Date) {
+        self.failedAttempts = failedAttempts
+        self.lastAttempt = lastAttempt
+    }
+
+    public func isDueForRetry(now: Date) -> Bool {
+        now.timeIntervalSince(lastAttempt) >= ContentAnalysis.retrySpacing
+    }
+}
+
 public struct ContentAnalysisRequest: Hashable, Sendable {
     public var classify = true
     public var detectFaces = false
@@ -168,6 +199,10 @@ public struct ContentAnalysisRequest: Hashable, Sendable {
         self.detectAnimals = detectAnimals
         self.featurePrint = featurePrint
     }
+
+    /// Only the image labels: for photos analysed while "Themen" and "Dokumente" were off,
+    /// once one of them is turned on (the rest of their result stays).
+    public static let labelsOnly = ContentAnalysisRequest(classify: true, detectFaces: false, detectAnimals: false, featurePrint: false)
 }
 
 /// Recognized text of a screenshot or document.

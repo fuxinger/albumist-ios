@@ -188,14 +188,28 @@ struct AnalysisProgressCard: View {
         .accessibilityAddTraits(isRunning ? .updatesFrequently : [])
         .accessibilityIdentifier("analysis.progress")
         .onChange(of: accessibilityValue, initial: true) { renewSpoken() }
+        // UI runs only: the line as XCTest reads it, with the app's time (`ProgressLineLog`).
+        #if DEBUG
+        .onChange(of: ProgressLineLog.isOn ? title + " " + spokenValue : "", initial: true) { _, line in
+            if !line.isEmpty { ProgressLineLog.note(line) }
+        }
+        #endif
         // A new state or step is said at once, so the words and the spoken value agree.
         .onChange(of: state.phase) { renewSpoken(now: true) }
         .onChange(of: position?.step) { renewSpoken(now: true) }
         // onDisappear drops a queued update: on return the value is taken afresh.
-        .onAppear { renewSpoken(now: true) }
+        .onAppear {
+            renewSpoken(now: true)
+            #if DEBUG
+            if ProgressLineLog.isOn { ProgressLineLog.note(title + " " + spokenValue) }
+            #endif
+        }
         .onDisappear {
             spokenPending?.cancel()
             spokenPending = nil
+            #if DEBUG
+            ProgressLineLog.note("-")
+            #endif
         }
     }
 

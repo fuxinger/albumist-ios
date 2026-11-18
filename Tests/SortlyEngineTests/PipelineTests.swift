@@ -49,7 +49,10 @@ struct PipelineTests {
         let conditions = FakeConditions(pauseAfterChecks: pauseAfter)
         let pipeline = AnalysisPipeline(
             store: store, reader: reader, analyzer: analyzer, geocoder: geocoder, map: Self.map,
-            conditions: conditions, settings: settings, calendar: Fixture.calendar, time: ManualTime().source, batchSize: batchSize
+            conditions: conditions, settings: settings, calendar: Fixture.calendar, time: ManualTime().source, batchSize: batchSize,
+            // A stop in the image step waits for the early set (see ImageStepStartTests for the
+            // real half second), so tests that pause there do not depend on the machine's load.
+            earlyGraceOnStop: .seconds(60)
         )
         return Setup(store: store, reader: reader, analyzer: analyzer, geocoder: geocoder, conditions: conditions, pipeline: pipeline, ids: (rome, screenshots, dogs))
     }
@@ -258,11 +261,14 @@ struct PipelineTests {
         #expect(AnalysisPipeline.Stage.content.number == 4)
     }
 
+    /// Pause asked for once photos are counted. Asked at the report that starts the image
+    /// step, it raced the first batch: run alone, this test failed on the code before the
+    /// early suggestions moved beside the photos too (the run stopped before any photo).
     @Test func userPauseStopsAtBatchBoundary() async throws {
         let s = try setup()
         let pipeline = s.pipeline
         let report = try await pipeline.run { progress in
-            if progress.stage == .content { Task { await pipeline.pause() } }
+            if progress.stage == .content, progress.completed > 0 { Task { await pipeline.pause() } }
         }
         #expect(report.contentAnalyzed > 0)
         #expect(report.pausedBecause == .userPaused || report.isComplete) // the pause races the last batch

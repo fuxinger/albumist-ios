@@ -23,8 +23,15 @@ enum AnalysisMarker {
         var left: Int? = nil
         var photos: Int? = nil
         var version: String? = nil
-        /// The label of the phase the run was in, kept when it goes on.
+        /// The label of the phase the run was in, kept when it goes on. "Fotos werden für die
+        /// neuen Bereiche angesehen" is kept as `newPhotos` with `newAreas` set
+        /// (`ResumedRun.NewWork.markerValue`): an older build (TestFlight back to an earlier
+        /// one) cannot read that label and would drop the whole marker (second review of the
+        /// labels fix, finding 9); it ignores the flag and reads "Neue Fotos werden analysiert".
         var newWork: ResumedRun.NewWork? = nil
+        /// `newWork` is "Fotos werden für die neuen Bereiche angesehen" (see there). `nil` in
+        /// markers of older versions and for every other label.
+        var newAreas: Bool? = nil
         /// Where in `stage` it stood (count of total): a run that goes on holds the value until
         /// it is past this position (review of 11ef3e1). `nil` in markers of older versions.
         var completed: Int? = nil

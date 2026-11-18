@@ -10,12 +10,20 @@ struct AlbumsView: View {
     /// The merge preview is pushed onto the tab's path (`AppScreen`), not presented with
     /// `navigationDestination(isPresented:)`.
     @Environment(Navigator.self) private var navigator: Navigator?
-    /// On screen and on top: a merge plan that is ready after Back or after a folder was
-    /// opened is not pushed (`Navigator.push(_:on:ifStill:visible:)`).
-    @State private var visible = false
     /// The suggestion whose merge plan is being prepared: its row shows a spinner and the
-    /// rows do not take a second tap meanwhile (design review N13).
+    /// rows do not take a second tap meanwhile (design review N13). Albums and folders do not
+    /// open meanwhile either: the plan would be pushed above them (a destination link moves no
+    /// `Navigator.mark`). Their hint, and that of the other suggestions, says why they wait.
     @State private var preparing: [CollectionID]?
+    /// A merge plan that was ready while another tab was chosen: offered again when this tab
+    /// shows (`showWaiting()`).
+    @State private var waiting: WaitingMerge?
+
+    private struct WaitingMerge {
+        let plan: ChangePlan
+        let suggestion: AlbumOverlapAnalyzer.MergeSuggestion
+        let request: PlanRequest
+    }
 
     private var topLevel: [CollectionSnapshot] {
         model.inventory.collections.values
@@ -36,15 +44,7 @@ struct AlbumsView: View {
                 Section {
                     ForEach(suggestions, id: \.albumIDs) { suggestion in
                         Button {
-                            preparing = suggestion.albumIDs
-                            let before = navigator?.path
-                            Task {
-                                let plan = await model.mergePlan(suggestion)
-                                preparing = nil
-                                if let plan {
-                                    Navigator.push(.prebuiltPlan(PlanToken(plan)), on: navigator, ifStill: before, visible: visible)
-                                }
-                            }
+                            merge(suggestion)
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -62,6 +62,8 @@ struct AlbumsView: View {
                             }
                         }
                         .disabled(preparing != nil)
+                        // The row being prepared says so with its spinner.
+                        .accessibilityHint(preparing == suggestion.albumIDs ? Text(verbatim: "") : waitHint)
                     }
                 } header: {
                     Text("Ähnliche Alben")
@@ -75,6 +77,8 @@ struct AlbumsView: View {
                 Section {
                     ForEach(fromSortly.sorted(by: Self.order)) { collection in
                         CollectionRow(collection: collection)
+                            .disabled(preparing != nil)
+                            .accessibilityHint(waitHint)
                     }
                 } header: {
                     Text("Von Albumist angelegt oder ergänzt")
@@ -106,13 +110,66 @@ struct AlbumsView: View {
                 }
                 ForEach(topLevel) { collection in
                     CollectionRow(collection: collection)
+                        .disabled(preparing != nil)
+                        .accessibilityHint(waitHint)
                 }
             }
         }
         .navigationTitle("Alben")
-        .onAppear { visible = true }
-        .onDisappear { visible = false }
+        .onAppear { showWaiting() }
+        // The tab shows again (`Navigator.appearances`): a result that waited is offered now.
+        .onChange(of: navigator?.appearances) { showWaiting() }
         .refreshable { await model.refreshDerived() }
+    }
+
+    /// Why albums, folders and the other suggestions wait while a merge preview is prepared
+    /// (VoiceOver said only "dimmed").
+    private var waitHint: Text {
+        preparing == nil ? Text(verbatim: "") : Text("Vorschau wird vorbereitet")
+    }
+
+    /// Makes the merge plan of `suggestion`; the row shows a spinner meanwhile.
+    private func merge(_ suggestion: AlbumOverlapAnalyzer.MergeSuggestion, attempt: Int = 1) {
+        waiting = nil
+        preparing = suggestion.albumIDs
+        let request = PlanRequest(model: model, navigator: navigator)
+        Task {
+            let plan = await model.mergePlan(suggestion)
+            preparing = nil
+            guard let plan else { return }
+            offer(WaitingMerge(plan: plan, suggestion: suggestion, request: request), attempt: attempt)
+        }
+    }
+
+    /// A merge plan that is ready, or that waited for this tab: shown if it is still current,
+    /// kept while another tab is chosen, made again once when the album list changed meanwhile
+    /// (a second change says Albumist is busy), dropped when the user went elsewhere on this
+    /// stack. Never pushed twice: `waiting` holds it only while it is not shown.
+    private func offer(_ ready: WaitingMerge, attempt: Int) {
+        switch ready.request.verdict(model: model, navigator: navigator) {
+        case .show:
+            Navigator.push(.prebuiltPlan(PlanToken(ready.plan)), on: navigator, ifStill: ready.request.mark)
+        case .wait:
+            waiting = ready
+        case .gone:
+            break
+        case .busy:
+            model.message = .busy
+        case .stale:
+            if attempt > 1 {
+                model.message = .busy
+            } else if let current = suggestions.first(where: { $0.albumIDs == ready.suggestion.albumIDs }) {
+                merge(current, attempt: attempt + 1)
+            }
+            // Otherwise the suggestion is gone (merged meanwhile): its row went away with it.
+        }
+    }
+
+    /// The tab shows again: a merge plan that was ready meanwhile is offered now.
+    private func showWaiting() {
+        guard let ready = waiting, navigator?.showing == true else { return }
+        waiting = nil
+        offer(ready, attempt: 1)
     }
 }
 

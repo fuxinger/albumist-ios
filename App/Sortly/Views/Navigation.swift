@@ -17,7 +17,12 @@ import SortlyCore
 /// which registers the destinations, so no push leads nowhere (the reason for the
 /// destination-link rule in DECISIONS: value links in screens without a registered
 /// destination did nothing). Plain `NavigationLink { destination }` stays for screens that
-/// open nothing in code (photos, albums, folders, settings pages).
+/// open nothing in code (photos, albums, folders, settings pages). A screen that opens a
+/// preview after building its plan and also holds such links (albums and folders under
+/// "Alben", a suggestion's photos) turns them off while the plan is built. What a screen hands
+/// to a screen it pushes and takes back when that one goes (a preview's pick) is tied to the
+/// pushed screen (`Navigator.onLeave`): a pop to the root or back to an earlier screen takes the
+/// screen that pushed along without telling it.
 enum AppScreen: Hashable {
     /// All suggestions, or those of one area.
     case proposals
@@ -108,13 +113,87 @@ struct ProposalScreen: View {
 /// The path of one navigation stack, in the environment of every screen on it.
 @MainActor @Observable
 final class Navigator {
-    var path: [AppScreen] = []
+    var path: [AppScreen] = [] {
+        didSet {
+            guard path != oldValue else { return }
+            changes &+= 1
+            runLeaving()
+        }
+    }
+    /// Counts the changes of `path`: a push and the pop after it are two, although the path is
+    /// the same again (`mark`). Asking for the screen on top again counts too (`push(_:)`).
+    @ObservationIgnored private var changes = 0
+
+    /// The stack is on screen: its tab is the chosen one, its sheet is up. Set by
+    /// `NavigationRoot` from the onAppear/onDisappear of the stack itself, which TabView sends
+    /// when the user changes tabs. A swipe back that is called off sends them to the screens
+    /// on the stack, not to the stack, so this does not depend on them being paired.
+    private(set) var showing = false
+    /// Goes up each time the stack comes on screen. A screen whose result waits for its stack
+    /// watches this (`onChange`): it changes at every return, also for a screen that was not
+    /// drawn while its tab was away and so never saw `showing` turn false.
+    private(set) var appearances = 0
+
+    func appeared() {
+        showing = true
+        appearances &+= 1
+    }
+
+    func disappeared() { showing = false }
+
+    /// What runs when a screen leaves the path (`onLeave(_:perform:)`), by screen.
+    @ObservationIgnored private var leaving: [AppScreen: [@MainActor () -> Void]] = [:]
+
+    /// Runs `action` once `screen` is no longer on the path: Back from it, a pop to the root
+    /// (its tab tapped again) or back to an earlier screen (a long press on Back), also when the
+    /// screen that pushed it goes along, and when the whole stack goes (its sheet closed). For
+    /// what a screen hands to the screen it pushes and must take back (a preview's pick): the
+    /// screen that pushed may be gone before it could see its preview leave.
+    func onLeave(_ screen: AppScreen, perform action: @escaping @MainActor () -> Void) {
+        leaving[screen, default: []].append(action)
+    }
+
+    private func runLeaving() {
+        guard !leaving.isEmpty else { return }
+        for screen in leaving.keys.filter({ !path.contains($0) }) {
+            for action in leaving.removeValue(forKey: screen) ?? [] { action() }
+        }
+    }
+
+    /// The stack goes with its screens (its sheet closed): what waits for them to leave runs
+    /// now, on the main actor.
+    deinit {
+        let actions = leaving.values.flatMap { $0 }
+        if !actions.isEmpty { Task { @MainActor in for action in actions { action() } } }
+    }
+
+    /// Where the stack stands, read when work starts on the screen on top. The same mark later
+    /// means nothing was pushed or popped meanwhile (Back, a screen from Siri, Back and the same
+    /// screen opened again, the screen on top asked for again), so that screen is still the one
+    /// on top. Read from the navigator, not from the screen's onAppear/onDisappear, which a
+    /// swipe back that is called off may leave unpaired. Marks of two stacks never match.
+    var mark: Mark { Mark(stack: ObjectIdentifier(self), changes: changes) }
+
+    struct Mark: Equatable {
+        fileprivate let stack: ObjectIdentifier
+        fileprivate let changes: Int
+    }
+
+    /// The screen that read `mark` is still on top of this stack, and the stack is on screen.
+    func isShowing(_ mark: Mark?) -> Bool { showing && self.mark == mark }
 
     /// Pushes `screen`, unless it is already on top (a second tap on the same row, the map or
-    /// a link pushes nothing more).
-    func push(_ screen: AppScreen) {
-        if let last = path.last, last.isSame(as: screen) { return }
+    /// a link pushes nothing more). Returns whether it pushed. Asking for the screen on top
+    /// still moves the `mark`: Siri opening the suggestion that already shows means that
+    /// suggestion, not a preview its screen built before.
+    @discardableResult
+    func push(_ screen: AppScreen) -> Bool {
+        if let last = path.last, last.isSame(as: screen) {
+            changes &+= 1
+            return false
+        }
         path.append(screen)
+        return true
     }
 
     /// Pushes `screen` onto the stack of the screen that asks. Every stack is a
@@ -127,16 +206,67 @@ final class Navigator {
         navigator.push(screen)
     }
 
+    /// What became of a screen pushed at the end of work (`push(_:on:ifStill:)`).
+    enum Outcome {
+        /// Pushed: the screen that asked is on top of an unchanged stack, and the stack shows.
+        case pushed
+        /// Not yet: the stack is unchanged, but it is not on screen (`showing`: another tab is
+        /// chosen, or its sheet was closed). A screen in a tab keeps the result and pushes it
+        /// when its stack shows again, if the result is still current then (`PlanRequest`); a
+        /// screen in a sheet drops it.
+        case waiting
+        /// Not pushed: the stack changed since the work started (a push, a pop, the screen on
+        /// top asked for again), so the result has no place on it any more.
+        case dropped
+    }
+
     /// The end of work that started on a screen (a plan being built) pushes its result only if
-    /// that screen is still showing and on top: `visible` (its onAppear/onDisappear; a
-    /// destination link opened above it or Back makes it false) and the path still `before`,
-    /// as read when the work started. Otherwise the result is not pushed, as with the old
-    /// `navigationDestination(isPresented:)` of a screen that had gone. Returns whether it pushed.
+    /// that screen is still on top of its stack and the stack shows: the stack's `mark` still
+    /// `before`, as read when the work started, and `showing`. Otherwise the result is not
+    /// pushed, as with the old `navigationDestination(isPresented:)` of a screen that had gone,
+    /// or waits (`Outcome`).
     @discardableResult
-    static func push(_ screen: AppScreen, on navigator: Navigator?, ifStill before: [AppScreen]?, visible: Bool) -> Bool {
-        guard visible, let navigator, navigator.path == before else { return false }
-        navigator.push(screen)
-        return true
+    static func push(_ screen: AppScreen, on navigator: Navigator?, ifStill before: Mark?) -> Outcome {
+        guard let navigator, let before, navigator.mark == before else { return .dropped }
+        guard navigator.showing else { return .waiting }
+        return navigator.push(screen) ? .pushed : .dropped
+    }
+}
+
+/// A preview asked for by a tap (an album merge, "Album anlegen", "Fehlendes erneut
+/// versuchen"): where the screen's stack stood and what the album list held at the tap. When
+/// the plan is ready, and again when it waited for its stack to show, `verdict` says what
+/// becomes of it, the same way both times.
+struct PlanRequest {
+    let mark: Navigator.Mark?
+    /// Compared by content, not by `AppModel.inventoryVersion`: that goes up with every
+    /// refresh, also one that read the same albums again (the check after every plan).
+    let inventory: CollectionInventory
+
+    @MainActor init(model: AppModel, navigator: Navigator?) {
+        mark = navigator?.mark
+        inventory = model.inventory
+    }
+
+    enum Verdict {
+        /// Push the preview now.
+        case show
+        /// The stack is not on screen (another tab): keep the plan until it is.
+        case wait
+        /// The user went elsewhere on this stack: the plan has no place on it.
+        case gone
+        /// A plan runs, a change in "Dein Zuhause" is applied or the analysis is rebuilt: the
+        /// preview could not be used now. Said (`AppMessage.busy`), not shown.
+        case busy
+        /// The album list changed since the tap: the plan is made again.
+        case stale
+    }
+
+    @MainActor func verdict(model: AppModel, navigator: Navigator?) -> Verdict {
+        guard let navigator, let mark, navigator.mark == mark else { return .gone }
+        guard navigator.showing else { return .wait }
+        if model.execution.isRunning || model.homeChangeRunning || model.analysisResetting { return .busy }
+        return model.inventory == inventory ? .show : .stale
     }
 }
 
@@ -157,6 +287,9 @@ struct NavigationRoot<Root: View>: View {
             root.navigationDestination(for: AppScreen.self) { $0.destination }
         }
         .environment(navigator)
+        // The stack as a whole: another tab chosen, the sheet closed (`Navigator.showing`).
+        .onAppear { navigator.appeared() }
+        .onDisappear { navigator.disappeared() }
     }
 }
 

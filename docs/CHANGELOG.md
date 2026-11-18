@@ -50,6 +50,15 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- Gratis-Alben nach Rückgängig (Prüfung 18.11.): Gibt ein Rückgängig Alben aus der alten
+  Gesamtzahl (Versionen vor der Zählung je Plan) zurück, merkt sich Albumist das jetzt je Plan.
+  Gingen die beiden Kopien der Zählung (Einstellungen, Schlüsselbund) auseinander, weil die App
+  zwischen den beiden Schreibvorgängen endete, nahm das Zusammenführen beim nächsten Start die
+  Rückgabe wieder weg (die Alben zählten dauerhaft weiter). Rückgaben summieren sich nie über
+  die erlaubte Zahl hinaus, und ältere Versionen lesen weiter, was noch zählt. „Rückgängig
+  gemacht“ erscheint erst, wenn die Zählung geschrieben ist (vorher erst nach der langsamen
+  Abfrage bei Fotos). Gesperrte UI-Läufe starten mit einer festen Zahl, die kein Rückgängig
+  eines früheren Laufs mehr erhöht (auch nicht nach einem Neustart mitten im Abschluss).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

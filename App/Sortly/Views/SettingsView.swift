@@ -332,7 +332,7 @@ struct InterruptedHistoryRow: View {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
-            Text("Albumist entfernt die schon angelegten Alben und Zuordnungen. Deine Fotos bleiben unverändert.")
+            Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt. Deine Fotos bleiben unverändert.")
         }
     }
 

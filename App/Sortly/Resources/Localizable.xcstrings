@@ -5623,12 +5623,12 @@
         }
       }
     },
-    "Albumist entfernt die schon angelegten Alben und Zuordnungen. Deine Fotos bleiben unverändert." : {
+    "Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt. Deine Fotos bleiben unverändert." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist removes the albums and assignments it already made. Your photos stay unchanged."
+            "value" : "Albumist removes what is certainly its own and tells you if anything stays. Your photos stay unchanged."
           }
         }
       }

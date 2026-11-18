@@ -447,16 +447,17 @@ struct AssetDetailView: View {
 
     private var reasonText: LocalizedStringKey? {
         guard let state = model.states[facts.id] else { return "Die Analyse ist für dieses Foto noch nicht fertig." }
-        // Outside the chosen year the ring does not count the photo ("Nicht mitgezählt" above).
-        if case .year(let year) = model.analysisScope,
-           model.resolver.ringPart(state, inScope: model.analysisScope.includes(facts, calendar: .sortlyDefault)) == .outsideScope {
-            return "Albumist zählt gerade nur Fotos aus \(String(year))."
-        }
         switch model.resolver.overall(state) {
         case .fullyOrganized: return nil
         case .ignored: return "Du hast dieses Foto ignoriert."
         case .excluded: return "Dieses Foto ist von der Analyse ausgeschlossen, zum Beispiel weil es ausgeblendet ist."
         default:
+            // Outside the chosen year the ring does not count the photo ("Nicht mitgezählt" above).
+            // Only for photos that are not sorted: a sorted photo needs no "Warum nicht sortiert?" (review 18.11.).
+            if case .year(let year) = model.analysisScope,
+               model.resolver.ringPart(state, inScope: model.analysisScope.includes(facts, calendar: .sortlyDefault)) == .outsideScope {
+                return "Albumist zählt gerade nur Fotos aus \(String(year))."
+            }
             let statuses = Set(state.areas.values)
             if statuses.contains(.proposed) || statuses.contains(.pendingConfirmation) {
                 return "Es gibt schon einen Vorschlag dafür. Du findest ihn in der Übersicht."

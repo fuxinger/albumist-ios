@@ -113,7 +113,14 @@ final class ThumbnailCache {
             let ids = Array(wanted.prefix(Self.batchLimit))
             queued = Array(wanted.dropFirst(Self.batchLimit))
             guard !ids.isEmpty else { continue }
-            let found = await ThumbnailRequest.lookUp(ids)
+            guard let found = await ThumbnailRequest.lookUp(ids) else {
+                // Photos did not answer: these cells show no picture for now, and are not
+                // remembered as missing (they are asked again when they come into view).
+                for id in ids {
+                    for waiter in waiting.removeValue(forKey: id) ?? [] { waiter.continuation.resume(returning: nil) }
+                }
+                continue
+            }
             let now = ContinuousClock.now
             if missing.count > 1000 { missing = missing.filter { now - $0.value < Self.missingKept } }
             for id in ids {
@@ -149,17 +156,22 @@ enum ThumbnailRequest {
     /// runs there) wait for them, and only one thread ever does.
     private static let lookups = DispatchQueue(label: "app.albumist.thumbnail-lookup", qos: .userInitiated)
 
-    /// The assets Photos knows among `ids`, by local identifier, in one fetch.
-    nonisolated static func lookUp(_ ids: [String]) async -> [String: Asset] {
-        await withCheckedContinuation { continuation in
-            lookups.async {
-                let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
-                var found: [String: Asset] = [:]
-                for index in 0..<result.count {
-                    let asset = result.object(at: index)
-                    found[asset.localIdentifier] = Asset(asset)
+    /// The assets Photos knows among `ids`, by local identifier, in one fetch; nil when Photos
+    /// does not answer in time (bounded on the lane of pictures on screen, apart from the
+    /// analysis's photos, so the grid never waits for good and a hanging thumbnail never stops
+    /// a run; the card's "Fotos antwortet gerade nicht" knows of it).
+    nonisolated static func lookUp(_ ids: [String]) async -> [String: Asset]? {
+        try? await PhotoKitLibrary.deadline.run("lookUpThumbnails", lane: .thumbnail, limit: PhotoKitLibrary.imageFetchLimit) { _ in
+            await withCheckedContinuation { (continuation: CheckedContinuation<[String: Asset], Never>) in
+                lookups.async {
+                    let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+                    var found: [String: Asset] = [:]
+                    for index in 0..<result.count {
+                        let asset = result.object(at: index)
+                        found[asset.localIdentifier] = Asset(asset)
+                    }
+                    continuation.resume(returning: found)
                 }
-                continuation.resume(returning: found)
             }
         }
     }

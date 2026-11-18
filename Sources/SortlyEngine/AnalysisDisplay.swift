@@ -938,6 +938,10 @@ public enum AnalysisCardState: Sendable, Equatable {
         case cooling
         /// "Wartet aufs Laden"
         case charging
+        /// "Fotos antwortet gerade nicht": a call into Photos has had no answer for 10 s or
+        /// more, or the run ended on one and goes on by itself a little later (app-speed,
+        /// `PhotosDeadline`).
+        case photos
     }
 
     public struct Position: Sendable, Equatable {
@@ -972,6 +976,9 @@ public enum AnalysisCardState: Sendable, Equatable {
         public var waiting: PauseReason?
         public var slower: SlowReason?
         public var appleWait = false
+        /// Photos has not answered for a while (`PhotosDeadline.slowFor`), or the last run ended
+        /// on it and the next try is due (`AppModel`): said instead of a count standing still.
+        public var photosNotResponding = false
         /// Pause was tapped this long ago (the run is finishing the photos in work).
         public var pausingFor: Duration?
         /// The last run ended because the user paused it, at this position.
@@ -998,6 +1005,8 @@ public enum AnalysisCardState: Sendable, Equatable {
             if let pausing = i.pausingFor {
                 return .pausing(i.position, longer: pausing >= pausingLongerAfter)
             }
+            // Before the quick check too: a check that waits for Photos says so.
+            if i.photosNotResponding { return .waiting(.photos, i.position) }
             if i.isQuickCheck { return .quickCheck(showsPause: i.runningFor >= pauseShownAfter) }
             switch i.waiting {
             case .thermal?: return .waiting(.cooling, i.position)
@@ -1007,6 +1016,9 @@ public enum AnalysisCardState: Sendable, Equatable {
             return .running(i.position, slower: i.slower, appleWait: i.appleWait, catchingUp: i.catchingUpTo)
         }
         if i.pausedByUser { return .paused(i.pausedAt) }
+        // The run ended because Photos did not answer; the next try comes by itself. Never
+        // "fertig" meanwhile.
+        if i.photosNotResponding { return .waiting(.photos, i.pausedAt) }
         if let finished = i.finished { return .finished(photos: finished.photos, proposals: finished.proposals) }
         return nil
     }

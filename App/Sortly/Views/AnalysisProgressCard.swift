@@ -66,6 +66,7 @@ struct AnalysisProgressCard: View {
             return p?.step.labelText ?? String(localized: "Analyse läuft")
         case .waiting(.cooling, _): return String(localized: "Wartet, bis dein iPhone abkühlt")
         case .waiting(.charging, _): return String(localized: "Wartet aufs Laden")
+        case .waiting(.photos, _): return String(localized: "Fotos antwortet gerade nicht")
         case .pausing: return String(localized: "Wird angehalten …")
         case .paused: return String(localized: "Analyse pausiert")
         case .quickCheck: return String(localized: "Sucht neue Fotos")
@@ -87,6 +88,7 @@ struct AnalysisProgressCard: View {
         switch state {
         case .waiting(.cooling, _): "thermometer.medium"
         case .waiting(.charging, _): "battery.25percent"
+        case .waiting(.photos, _): "hourglass"
         case .paused: "pause.circle"
         default: nil
         }
@@ -161,6 +163,11 @@ struct AnalysisProgressCard: View {
                 .accessibilityIdentifier("analysis.resume")
         case .pausing:
             EmptyView()
+        case .waiting(.photos, _) where !model.analysis.isRunning:
+            // The run ended because Photos did not answer; the next try comes by itself, or now.
+            Button { model.startAnalysis(userInitiated: true) } label: { CardTextButton("Jetzt versuchen") }
+                .accessibilityLabel("Analyse jetzt erneut versuchen")
+                .accessibilityIdentifier("analysis.retry")
         default:
             Button { model.pauseAnalysis() } label: { CardTextButton("Pause") }
                 .accessibilityIdentifier("analysis.pause")
@@ -299,6 +306,8 @@ struct AnalysisProgressCard: View {
                 Text("Geht von selbst weiter. Du musst nichts tun.")
             case .waiting(.charging, _):
                 Text("Unter \(Int(DeviceState.appBatteryFloor * 100)) % Akku. Geht weiter, sobald dein iPhone lädt.")
+            case .waiting(.photos, _):
+                Text("Albumist wartet auf die Fotos-App und versucht es sonst gleich noch einmal. Du musst nichts tun.")
             case .pausing(_, let longer):
                 Text("Macht noch fertig, was gerade läuft.")
                 if longer { Text("Dauert noch einen Moment.") }
@@ -767,6 +776,7 @@ extension AnalysisCardState {
         case .running: "running"
         case .waiting(.cooling, _): "cooling"
         case .waiting(.charging, _): "charging"
+        case .waiting(.photos, _): "photos"
         case .pausing: "pausing"
         case .paused: "paused"
         case .finished: "finished"

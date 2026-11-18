@@ -213,6 +213,33 @@ struct ManagedAlbumCheckTests {
         #expect(try await store.managedAlbums().first { $0.albumID == rome }?.lastKnownMembers.contains(AssetID("a-0")) == false)
         #expect(try await store.overrides().contains { $0.scope == .assetInAlbum(AssetID("a-0"), rome) })
     }
+
+    /// An album of a create Photos did not answer that lands only after its plan was finalized:
+    /// the album check records it as Albumist's when it appears, once (round-3 review of the
+    /// PhotoKit limits, L3).
+    @Test func aLateAlbumIsRecordedAsAlbumistsWhenItAppears() async throws {
+        let store = try SortlyStore(url: nil)
+        let library = InMemoryPhotoLibrary(assets: photos(0..<20))
+        var executed = try await parisAndRomeRecorded(store, library)
+        let key = try #require(executed.resolvedKeys.keys.sorted().first)
+        executed.record?.maybeCreated[key] = CollectionID("late-1")
+        executed.record?.maybeCreatedAt[key] = Date()
+        executed.finalizedAt = Date()
+        try await store.save(executed)
+        let check = ManagedAlbumCheck(store: store, library: library, pause: .zero)
+        // Not there yet: nothing new.
+        #expect(try await check.run(access: .full).managedAlbums.count == 2)
+        await library.userEdit { inventory in
+            inventory.upsert(CollectionSnapshot(id: "late-1", title: "Paris", kind: .userAlbum, parentID: nil))
+        }
+        let after = try await check.run(access: .full)
+        let late = try #require(after.managedAlbums.first { $0.albumID == CollectionID("late-1") })
+        #expect(late.createdBySortly)
+        #expect(late.sourceID == executed.id)
+        #expect(try await store.managedAlbums().count == 3)
+        // Seen again: recorded once.
+        #expect(try await check.run(access: .full).managedAlbums.count == 3)
+    }
 }
 
 /// Lacks some albums in the list (they are there when asked for on their own); the first such

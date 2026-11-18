@@ -92,6 +92,30 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         return id
     }
 
+    /// The forms that report Photos' placeholder ID go to the real adapter too, so the
+    /// executor can record "maybe created" before Photos answers.
+    func createFolder(
+        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void
+    ) async throws -> CollectionID {
+        try await Self.beforeChange()
+        let id = try await base.createFolder(title: title, parent: parent, noted: noted)
+        Self.afterChange()
+        return id
+    }
+
+    func createAlbum(
+        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void
+    ) async throws -> CollectionID {
+        try await Self.beforeChange()
+        let id = try await base.createAlbum(title: title, parent: parent, noted: noted)
+        Self.afterChange()
+        return id
+    }
+
+    func hasUnansweredWrites() async -> Bool { await base.hasUnansweredWrites() }
+
+    func createAnswered(_ id: CollectionID) async -> Bool { await base.createAnswered(id) }
+
     func addAssets(_ assets: [AssetID], to album: CollectionID) async throws {
         try await Self.beforeChange()
         try await base.addAssets(assets, to: album)
@@ -182,6 +206,10 @@ struct UITestAnalyzer: ContentAnalyzing {
 
     func willAnalyze(_ upcoming: [AssetSnapshot]) async {
         await base.willAnalyze(upcoming)
+    }
+
+    func contentEnded() {
+        base.contentEnded()
     }
 }
 

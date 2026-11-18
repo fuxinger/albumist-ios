@@ -64,14 +64,34 @@ enum AnalysisMarker {
     /// Everything was analysed once: later runs only check for new photos.
     static var completedOnce: Bool { UserDefaults.standard.bool(forKey: completedKey) }
 
+    private static let pausedKey = "analysis.pausedByUser"
+
+    /// Pause was tapped (or the last run ended paused by the user, `AnalysisRunEnd.keepsPause`)
+    /// and no run started since. Kept across launches: opening the app and the overnight
+    /// refinement, for which iOS often starts the app in the night without its screen, leave a
+    /// paused analysis paused until "Fortsetzen" (app-speed 18.11.2026, open point C of the
+    /// labels fix and its second review).
+    static var pausedByUser: Bool {
+        get { UserDefaults.standard.bool(forKey: pausedKey) }
+        set {
+            if newValue {
+                UserDefaults.standard.set(true, forKey: pausedKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: pausedKey)
+            }
+        }
+    }
+
     static func finished() {
         unfinished = nil
         UserDefaults.standard.set(true, forKey: completedKey)
     }
 
-    /// Another part of the library or a rebuilt analysis: the next run is a full one again.
+    /// Another part of the library or a rebuilt analysis: the next run is a full one again,
+    /// and a Pause of the analysis before does not hold it.
     static func reset() {
         unfinished = nil
         UserDefaults.standard.removeObject(forKey: completedKey)
+        pausedByUser = false
     }
 }

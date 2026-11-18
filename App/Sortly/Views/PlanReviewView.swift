@@ -304,6 +304,10 @@ struct PlanReviewView: View {
 
 /// The progress bar of the running plan, with "N von M Schritten" when asked. A view of its
 /// own: it is the only part of a screen drawn again after every step (`AppModel.ExecutionProgress`).
+///
+/// While a step has waited 10 s or more for Photos (`PhotosDeadline.slowFor`, app-speed
+/// 18.11.2026), a line says so instead of the bar standing still without a word. Not while
+/// iOS asks the user before albums are deleted: that wait is the user's.
 struct ExecutionProgressBar: View {
     @Environment(AppModel.self) private var model
     var showsCount = false
@@ -315,6 +319,14 @@ struct ExecutionProgressBar: View {
         if showsCount {
             Text("\(progress.completedSteps) von \(progress.totalSteps) Schritten")
                 .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+        }
+        TimelineView(.periodic(from: .now, by: 2)) { _ in
+            if PhotoKitLibrary.deadline.slowFor() != nil {
+                Label("Fotos antwortet gerade nicht. Albumist wartet noch.", systemImage: "hourglass")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("execution.photosSlow")
+            }
         }
     }
 }

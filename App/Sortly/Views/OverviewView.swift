@@ -150,6 +150,21 @@ struct OverviewView: View {
                                 .font(.subheadline)
                                 .monospacedDigit()
                         }
+                        if let note = model.recountNote {
+                            // The hold for the labels ended lower than it held
+                            // (`RecountState.LowerNote`): said once, so the lower number is not
+                            // read as one going back.
+                            Text("Neu gezählt: Zuvor waren es \(note.held.formatted()) sortiert. Die neue Zahl zählt alles, was sich seitdem geändert hat, etwa Fotos mit Themen oder Dokumenten, die jetzt auch ein passendes Album brauchen.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("overview.recountNote")
+                            Button("OK") { model.dismissRecountNote() }
+                                .font(.subheadline)
+                                .accessibilityLabel("Hinweis zur neuen Zahl ausblenden")
+                                .accessibilityIdentifier("overview.recountNote.ok")
+                        }
                         Text(primaryAreasText)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -616,7 +631,10 @@ struct LimitedAccessCard: View {
             Task {
                 let before = model.access
                 await model.refreshAccess()
-                if model.access != before { model.startAnalysis(userInitiated: true) }
+                // A Pause stays: "Fortsetzen" is the only way on (review of the Pause fix, b).
+                if model.access != before, !model.analysis.pausedByUser, !model.analysis.pausing {
+                    model.startAnalysis(userInitiated: true)
+                }
             }
         }
     }
@@ -638,7 +656,11 @@ struct LimitedAccessCard: View {
         let model = model
         // @Sendable: PhotoKit may call this from its own queue.
         PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: top) { @Sendable _ in
-            Task { @MainActor in model.startAnalysis(userInitiated: true) }
+            Task { @MainActor in
+                // A Pause stays: "Fortsetzen" is the only way on (review of the Pause fix, b).
+                guard !model.analysis.pausedByUser, !model.analysis.pausing else { return }
+                model.startAnalysis(userInitiated: true)
+            }
         }
     }
 }

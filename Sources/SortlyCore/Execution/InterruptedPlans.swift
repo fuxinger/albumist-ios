@@ -20,7 +20,10 @@ extension ChangePlan {
         let succeeded = kept.steps.filter { if case .succeeded = $0.state { true } else { false } }.count
         if succeeded > 0 && succeeded == kept.steps.count {
             kept.status = .completed
-        } else if succeeded > 0 || !UndoPlanner().undoPlan(for: kept, current: current).steps.isEmpty {
+        } else if succeeded > 0 || !UndoPlanner().undoPlan(for: kept, current: current).steps.isEmpty
+                    || !(kept.record?.mayStillLand(resolved: kept.resolvedKeys).isEmpty ?? true) {
+            // Also when an album Albumist asked for may still land: the plan stays in the
+            // history, so the album records and its undo take that album as Albumist's.
             kept.status = .completedWithErrors
         } else {
             kept.status = .cancelled

@@ -781,6 +781,25 @@ public actor SortlyStore: PlanJournal {
             .compactMap { try loadPlan($0["payload"]) }
     }
 
+    /// Of the latest `limit` finished plans, the albums and folders each asked Photos for whose
+    /// request got no answer and that may land next to the one the plan settled on
+    /// (`ExecutionRecord.mayStillLand`): read from the plans' headers only, without their steps
+    /// (round-3 review of the PhotoKit limits, L3).
+    public func lateCreates(limit: Int = 50) throws -> [(plan: SortlyID, ids: [CollectionID])] {
+        struct Header: Decodable {
+            var id: SortlyID
+            var resolvedKeys: [String: CollectionID]?
+            var record: ExecutionRecord?
+        }
+        return try db.query("SELECT payload FROM plans WHERE status IN ('completed', 'completedWithErrors') ORDER BY created_at DESC LIMIT ?",
+                            [.integer(Int64(limit))])
+            .compactMap { row -> (plan: SortlyID, ids: [CollectionID])? in
+                guard let header = try decode(Header.self, row["payload"]),
+                      let ids = header.record?.mayStillLand(resolved: header.resolvedKeys ?? [:]), !ids.isEmpty else { return nil }
+                return (header.id, ids)
+            }
+    }
+
     /// The finished undo plans that took back `id`, newest first (for the change receipt).
     public func reverts(of id: SortlyID) throws -> [ChangePlan] {
         struct Header: Decodable { var reverts: SortlyID? }

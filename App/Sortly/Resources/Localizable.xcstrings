@@ -12082,6 +12082,156 @@
           }
         }
       }
+    },
+    "Fotos werden zusammengestellt …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gathering photos …"
+          }
+        }
+      }
+    },
+    "Fotos antwortet gerade nicht" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos isn’t responding right now"
+          }
+        }
+      }
+    },
+    "Albumist wartet auf die Fotos-App und versucht es sonst gleich noch einmal. Du musst nichts tun." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is waiting for the Photos app and will otherwise try again shortly. You don’t need to do anything."
+          }
+        }
+      }
+    },
+    "Jetzt versuchen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try Now"
+          }
+        }
+      }
+    },
+    "Analyse jetzt erneut versuchen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try the analysis again now"
+          }
+        }
+      }
+    },
+    "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als zurückgenommen. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos isn’t responding right now. What Albumist was about to change counts neither as done nor as undone. As soon as Photos responds again, you can continue from the overview."
+          }
+        }
+      }
+    },
+    "Fotos antwortet gerade nicht. Albumist versucht es gleich noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos isn’t responding right now. Albumist will try again shortly."
+          }
+        }
+      }
+    },
+    "Fotos antwortet gerade nicht. Albumist wartet noch." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos isn’t responding right now. Albumist is still waiting."
+          }
+        }
+      }
+    },
+    "Neu gezählt: Zuvor waren es %@ sortiert. Die neue Zahl zählt alles, was sich seitdem geändert hat, etwa Fotos mit Themen oder Dokumenten, die jetzt auch ein passendes Album brauchen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recounted: before, %@ were sorted. The new number takes in everything that changed since, for example photos with themes or documents that now need a matching album too."
+          }
+        }
+      }
+    },
+    "Hinweis zur neuen Zahl ausblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide the note about the new number"
+          }
+        }
+      }
+    },
+    "Die Analyse ist pausiert. Tippe in Albumist auf „Fortsetzen“, damit sie weitergeht." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The analysis is paused. Tap “Resume” in Albumist to continue."
+          }
+        }
+      }
+    },
+    "Fotos hat eine frühere Änderung noch nicht beantwortet, deshalb schickt Albumist nichts Neues. Hält das an, beende Albumist und öffne es neu, notfalls starte das iPhone neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos has not answered an earlier change yet, so Albumist sends nothing new. If this lasts, close Albumist and open it again, or restart the iPhone if need be."
+          }
+        }
+      }
+    },
+    "Die Rückfrage von iOS zum Löschen blieb ohne Antwort und ist vielleicht noch offen. Ob gelöscht wird, steht noch nicht fest. Sobald das geklärt ist, kannst du in der Übersicht fortsetzen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The iOS question about deleting got no answer and may still be open. Whether anything is deleted is not known yet. Once that is settled, you can continue in the overview."
+          }
+        }
+      }
+    },
+    "Ob die Beispielfotos entfernt werden, steht noch nicht fest: Die Rückfrage von iOS ist vielleicht noch offen. Schau in Fotos nach und versuche es danach noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Whether the sample photos are removed is not known yet: the iOS question may still be open. Check in Photos, then try again."
+          }
+        }
+      }
+    },
+    "Ein Album, das Albumist vorhin anlegen wollte, ist in Fotos noch nicht angekommen und kann noch kommen. Damit es nicht doppelt entsteht, geht es ab %@ weiter, von selbst, solange Albumist offen ist." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An album Albumist asked for earlier has not arrived in Photos yet and may still come. So that it is not made twice, this goes on from %@, by itself while Albumist is open."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

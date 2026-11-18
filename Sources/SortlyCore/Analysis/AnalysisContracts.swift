@@ -236,10 +236,14 @@ public protocol ContentAnalyzing: Sendable {
     /// The next few photos the content stage will look at, so their previews can be loaded
     /// ahead while the current ones are analysed. A hint; nothing depends on it.
     func willAnalyze(_ upcoming: [AssetSnapshot]) async
+    /// The image step of a run ended (done, paused, cancelled or failed): what `willAnalyze`
+    /// started is stopped.
+    func contentEnded()
 }
 
 extension ContentAnalyzing {
     public func willAnalyze(_ upcoming: [AssetSnapshot]) async {}
+    public func contentEnded() {}
 }
 
 public enum PauseReason: String, Sendable, Codable {

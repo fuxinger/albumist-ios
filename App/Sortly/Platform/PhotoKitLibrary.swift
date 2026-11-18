@@ -25,11 +25,80 @@ final class LockedBox<Value: Sendable>: @unchecked Sendable {
         get { lock.withLock { stored } }
         set { lock.withLock { stored = newValue } }
     }
+    /// Changes the value in one step (a get and a set apart could lose a change in between).
+    func update(_ change: (inout Value) -> Void) {
+        lock.withLock { change(&stored) }
+    }
 }
 
 /// Reads and writes the user's photo library through PhotoKit. Only the closed set of
 /// album/folder operations exists here: no API that deletes or modifies media.
 struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
+    // MARK: Bounded waits (app-speed, 18.11.2026; docs/DECISIONS.md)
+
+    /// Every fetch and change request below waits a bounded time for Photos (`PhotosDeadline`):
+    /// a Photos that never answers (assetsd or photolibraryd stuck) froze the analysis or a
+    /// plan for good before. While a call waits longer than 10 s, the analysis card says
+    /// "Fotos antwortet gerade nicht" (`AppModel.updateCard`). Not bounded: the question for
+    /// photo access (`requestAccess`, the user decides) and the status reads (local, no answer
+    /// from Photos needed). Image requests for the analysis have their own limit
+    /// (`ImageLoader`, 30 s, 180 s from iCloud); the fetch of a photo before it is bounded on the
+    /// image lane (`imageFetchLimit`), apart from these reads, so a photo that hangs never holds
+    /// up a plan.
+    static let deadline = PhotosDeadline()
+    /// Fetching one photo (or a few) before its image is asked for: the analysis, the grid, the
+    /// atlas (second review of the PhotoKit limits, 4).
+    static let imageFetchLimit: Duration = .seconds(30)
+    /// A read without an answer, or a long read without a sign of progress.
+    static let readLimit: Duration = .seconds(60)
+    /// A change request. Photos answers within a second or two, adding thousands of photos
+    /// within seconds.
+    static let writeLimit: Duration = .seconds(60)
+    /// Deleting albums or photos: iOS asks the user first, and the request waits for the answer.
+    static let deletionLimit: Duration = .seconds(300)
+
+    /// A read of Photos, bounded (`readLimit` without an answer or a `beat`), on the deadline's
+    /// own queue, not on Swift's shared pool (a hanging fetch holds none of its threads).
+    static func read<T: Sendable>(_ what: String, limit: Duration = readLimit, lane: PhotosDeadline.Lane = .read,
+                                  _ work: @escaping @Sendable (PhotosDeadline.Heartbeat) throws -> T) async throws -> T {
+        try await deadline.runBlocking(what, lane: lane, limit: limit) { beat in try work(beat) }
+    }
+
+    /// PHAsset is thread-safe but not marked Sendable; a fetched asset is only handed on.
+    struct FetchedAssets: @unchecked Sendable {
+        let assets: [PHAsset]
+    }
+
+    /// The photos among `ids` that Photos knows, fetched on the image lane (`imageFetchLimit`):
+    /// for one photo's image (the analysis, the atlas cover), apart from the plan's reads.
+    /// Throws `PhotosNotResponding` when Photos does not answer in time.
+    /// `lane`: `.thumbnail` for pictures on screen, so a hanging one never stops the analysis.
+    static func fetchAssets(_ ids: [AssetID], what: String = "fetchAsset", lane: PhotosDeadline.Lane = .image) async throws -> FetchedAssets {
+        try await read(what, limit: imageFetchLimit, lane: lane) { _ in
+            var assets: [PHAsset] = []
+            PHAsset.fetchAssets(withLocalIdentifiers: ids.map(\.rawValue), options: nil)
+                .enumerateObjects { asset, _, _ in assets.append(asset) }
+            return FetchedAssets(assets: assets)
+        }
+    }
+
+    /// One change request, bounded. Without an answer in time the caller gets
+    /// `PhotosNotResponding`: the outcome is not known (Photos may still carry it out), and no
+    /// other change goes out until this one has returned (`PhotosDeadline`).
+    /// `answered` runs once Photos answers, also after the caller stopped waiting.
+    static func change(_ what: String, limit: Duration = writeLimit, asksUser: Bool = false,
+                       answered: (@Sendable () -> Void)? = nil,
+                       _ block: @escaping @Sendable () -> Void) async throws {
+        try await deadline.run(what, lane: .write, limit: limit, reportsSlow: !asksUser) { _ in
+            defer { answered?() }
+            try await PHPhotoLibrary.shared().performChanges(block)
+        }
+    }
+
+    /// Ids of new albums and folders whose create request returned in this launch, also after
+    /// its caller stopped waiting: such an album is there or never comes (`createAnswered`).
+    private static let answeredCreates = LockedBox<Set<String>>([])
+
     // MARK: Access
 
     func access() async -> LibraryAccess {
@@ -57,8 +126,22 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         try await fetchAssets(includeHidden: includeHidden, knownDetails: knownDetails) { _, _ in true }
     }
 
+    /// Bounded by `readLimit` without progress: a large first read takes minutes, and it says
+    /// every 250 photos that it moves.
     func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
                      progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot] {
+        try await Self.read("fetchAssets") { beat -> [AssetSnapshot] in
+            try Self.readAssets(includeHidden: includeHidden, knownDetails: knownDetails, stopped: { beat.isCancelled }) { read, total in
+                beat.beat()
+                return progress(read, total)
+            }
+        }
+    }
+
+    /// `stopped`: nobody waits for the read any more (it runs on the deadline's queue, where
+    /// `Task.isCancelled` is always false).
+    private static func readAssets(includeHidden: Bool, knownDetails: [AssetID: Date], stopped isStopped: @escaping () -> Bool,
+                                   progress: @escaping (Int, Int) -> Bool) throws -> [AssetSnapshot] {
         let options = PHFetchOptions()
         options.includeHiddenAssets = includeHidden
         options.includeAssetSourceTypes = [.typeUserLibrary, .typeiTunesSynced]
@@ -77,7 +160,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         result.enumerateObjects { asset, index, stop in
             // Ended (the app's time ran out, "Analyse neu aufbauen"): stop reading. The
             // partial list is never returned, it would count the rest as deleted.
-            if Task.isCancelled {
+            if Task.isCancelled || isStopped() {
                 stop.pointee = true
                 return
             }
@@ -100,6 +183,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         if stopped { throw LibraryReadPaused(read: snapshots) }
         _ = progress(snapshots.count, total)
         try Task.checkCancellation()
+        if isStopped() { throw CancellationError() }
         return snapshots
     }
 
@@ -160,30 +244,39 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         return result
     }
 
+    /// Bounded by `readLimit` without progress: every album read is a sign of progress.
     func currentInventory() async throws -> CollectionInventory {
-        let collector = InventoryCollector()
-        collector.walk(PHCollectionList.fetchTopLevelUserCollections(with: nil), parent: nil)
-        return CollectionInventory(collector.snapshots)
+        try await Self.read("currentInventory") { beat -> CollectionInventory in
+            let collector = InventoryCollector(beat: beat)
+            collector.walk(PHCollectionList.fetchTopLevelUserCollections(with: nil), parent: nil)
+            return CollectionInventory(collector.snapshots)
+        }
     }
 
     /// One album or folder without reading the whole list (used to verify every plan step).
     func collection(_ id: CollectionID) async throws -> CollectionSnapshot? {
         let raw = id.rawValue
-        let found: PHCollection? = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [raw], options: nil).firstObject
-            ?? PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject
-        guard let found else { return nil }
-        let parent = PHCollectionList.fetchCollectionListsContaining(found, options: nil).firstObject.map { CollectionID($0.localIdentifier) }
-        return InventoryCollector.snapshot(of: found, parent: parent)
+        return try await Self.read("collection") { _ -> CollectionSnapshot? in
+            let found: PHCollection? = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [raw], options: nil).firstObject
+                ?? PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject
+            guard let found else { return nil }
+            let parent = PHCollectionList.fetchCollectionListsContaining(found, options: nil).firstObject.map { CollectionID($0.localIdentifier) }
+            return InventoryCollector.snapshot(of: found, parent: parent)
+        }
     }
 
     func availableAssets(_ ids: [AssetID]) async throws -> Set<AssetID> {
         guard !ids.isEmpty else { return [] }
-        var found = Set<AssetID>()
-        for chunk in stride(from: 0, to: ids.count, by: 500).map({ Array(ids[$0..<min($0 + 500, ids.count)]) }) {
-            let result = PHAsset.fetchAssets(withLocalIdentifiers: chunk.map(\.rawValue), options: nil)
-            result.enumerateObjects { asset, _, _ in found.insert(AssetID(asset.localIdentifier)) }
+        return try await Self.read("availableAssets") { beat -> Set<AssetID> in
+            var found = Set<AssetID>()
+            for chunk in stride(from: 0, to: ids.count, by: 500).map({ Array(ids[$0..<min($0 + 500, ids.count)]) }) {
+                if beat.isCancelled { throw CancellationError() }
+                let result = PHAsset.fetchAssets(withLocalIdentifiers: chunk.map(\.rawValue), options: nil)
+                result.enumerateObjects { asset, _, _ in found.insert(AssetID(asset.localIdentifier)) }
+                beat.beat()
+            }
+            return found
         }
-        return found
     }
 
     // MARK: Writing (closed operation set, prompt §16)
@@ -201,32 +294,60 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
     }
 
+    /// A change request has no answer yet: Photos may still carry it out (`PhotosDeadline`).
+    func hasUnansweredWrites() async -> Bool {
+        Self.deadline.hangingCalls(.write) > 0
+    }
+
+    func createAnswered(_ id: CollectionID) async -> Bool {
+        Self.answeredCreates.value.contains(id.rawValue)
+    }
+
+    /// Notes that the create that gave Photos `id` returned.
+    private static func noteAnswered(_ id: String?) {
+        guard let id else { return }
+        answeredCreates.update { $0.insert(id) }
+    }
+
     func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID {
+        try await createFolder(title: title, parent: parent, noted: { _ in })
+    }
+
+    func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID {
+        try await createAlbum(title: title, parent: parent, noted: { _ in })
+    }
+
+    /// `noted` hears the placeholder's id inside the change block, before Photos commits it: a
+    /// request without an answer in time leaves the id in the plan's journal, and the album is
+    /// known as Albumist's if it lands later (`ExecutionRecord.maybeCreated`).
+    func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
-        try Self.requireFolder(parentID)
-        try await PHPhotoLibrary.shared().performChanges {
+        try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
+        try await Self.change("createFolder", answered: { Self.noteAnswered(created.value) }) {
             // Into its folder or not at all (see `parentRequest`).
             guard let folder = Self.parentRequest(parentID) else { return }
             let request = PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: title)
             let placeholder = request.placeholderForCreatedCollectionList
             created.value = placeholder.localIdentifier
+            noted(CollectionID(placeholder.localIdentifier))
             folder?.addChildCollections([placeholder] as NSArray)
         }
         guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("folder") }
         return CollectionID(id)
     }
 
-    func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID {
+    func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
-        try Self.requireFolder(parentID)
-        try await PHPhotoLibrary.shared().performChanges {
+        try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
+        try await Self.change("createAlbum", answered: { Self.noteAnswered(created.value) }) {
             // Into its folder or not at all (see `parentRequest`).
             guard let folder = Self.parentRequest(parentID) else { return }
             let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: title)
             let placeholder = request.placeholderForCreatedAssetCollection
             created.value = placeholder.localIdentifier
+            noted(CollectionID(placeholder.localIdentifier))
             folder?.addChildCollections([placeholder] as NSArray)
         }
         guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("album") }
@@ -249,10 +370,11 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func addAssets(_ assets: [AssetID], to album: CollectionID) async throws {
         let albumID = album.rawValue
         let ids = assets.map(\.rawValue)
-        guard PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumID], options: nil).firstObject != nil else {
-            throw PhotoKitError.collectionNotFound(albumID)
+        let exists = try await Self.read("album") { _ -> Bool in
+            PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumID], options: nil).firstObject != nil
         }
-        try await PHPhotoLibrary.shared().performChanges {
+        guard exists else { throw PhotoKitError.collectionNotFound(albumID) }
+        try await Self.change("addAssets") {
             guard let collection = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumID], options: nil).firstObject else { return }
             let fetched = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
             PHAssetCollectionChangeRequest(for: collection)?.addAssets(fetched)
@@ -262,7 +384,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func removeAssets(_ assets: [AssetID], from album: CollectionID) async throws {
         let albumID = album.rawValue
         let ids = assets.map(\.rawValue)
-        try await PHPhotoLibrary.shared().performChanges {
+        try await Self.change("removeAssets") {
             guard let collection = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumID], options: nil).firstObject else { return }
             let fetched = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
             // Removes only the album membership; the media stay in the library.
@@ -272,7 +394,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
 
     func renameCollection(_ id: CollectionID, to title: String) async throws {
         let raw = id.rawValue
-        try await PHPhotoLibrary.shared().performChanges {
+        try await Self.change("renameCollection") {
             if let album = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [raw], options: nil).firstObject {
                 PHAssetCollectionChangeRequest(for: album)?.title = title
             } else if let list = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject {
@@ -287,7 +409,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         let oldRaw = oldParent?.rawValue
         let newRaw = newParent?.rawValue
         let moved = LockedBox(false)
-        try await PHPhotoLibrary.shared().performChanges {
+        try await Self.change("moveCollection") {
             let collection: PHCollection? = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [raw], options: nil).firstObject
                 ?? PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject
             // The target first: if it is gone, the album is not taken out of its folder at all
@@ -322,7 +444,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func deleteCollections(_ ids: [CollectionID]) async throws {
         var log = DeletionLog.Entry(requested: ids.count)
         defer { DeletionLog.record(log) }
-        var target = Self.deletable(ids.map(\.rawValue), in: CollectionTree(), log: &log)
+        var target = try await Self.deletableNow(ids.map(\.rawValue), log: &log)
         guard !target.isEmpty else {
             log.outcome = "nothing deletable"
             return
@@ -334,11 +456,18 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             let request = target
             let started = Date()
             do {
-                try await PHPhotoLibrary.shared().performChanges {
+                // iOS asks the user first: a long limit, and the wait is not "Fotos antwortet
+                // gerade nicht". Without an answer by then the outcome is not known (the user may
+                // still answer): `PhotosNotResponding`, never "deleted" or "not applied".
+                try await Self.change("deleteCollections", limit: Self.deletionLimit, asksUser: true) {
                     // Deletes only the album/folder containers. PhotoKit keeps the media.
                     if !request.albums.isEmpty { PHAssetCollectionChangeRequest.deleteAssetCollections(request.albums as NSArray) }
                     if !request.folders.isEmpty { PHCollectionListChangeRequest.deleteCollectionLists(request.folders as NSArray) }
                 }
+            } catch let hung as PhotosNotResponding {
+                log.seconds.append(Date().timeIntervalSince(started))
+                log.outcome = "no answer"
+                throw hung
             } catch {
                 log.seconds.append(Date().timeIntervalSince(started))
                 let ns = error as NSError
@@ -352,11 +481,12 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             let took = Date().timeIntervalSince(started)
             log.seconds.append(took)
             // Photos may need a moment before the deletion shows in a new read.
-            var left = Self.stillThere(request.ids)
+            let requested = request.ids
+            var left = try await Self.read("stillThere") { _ in Self.stillThere(requested) }
             var polls = 0
             while !left.isEmpty, polls < 8 {
                 try? await Task.sleep(for: .milliseconds(250))
-                left = Self.stillThere(request.ids)
+                left = try await Self.read("stillThere") { _ in Self.stillThere(requested) }
                 polls += 1
             }
             if left.isEmpty {
@@ -368,13 +498,25 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             // Found again from the tree, with the folder check again: only what is still
             // there, and a folder only if everything in it still goes.
             var again = DeletionLog.Entry(requested: left.count)
-            target = Self.deletable(Array(left), in: CollectionTree(), log: &again)
+            target = try await Self.deletableNow(Array(left), log: &again)
             if target.isEmpty { break }
             // A question that could not be shown (a dialog was still closing) shows now.
             try? await Task.sleep(for: .seconds(1))
         }
         log.outcome = "not applied"
         throw LibraryWriteFailure.notApplied
+    }
+
+    /// `deletable` over a fresh walk of the tree, bounded like every read.
+    private static func deletableNow(_ raws: [String], log: inout DeletionLog.Entry) async throws -> DeletionTarget {
+        let before = log
+        let (target, entry) = try await read("deletable") { _ -> (DeletionTarget, DeletionLog.Entry) in
+            var entry = before
+            let target = deletable(raws, in: CollectionTree(), log: &entry)
+            return (target, entry)
+        }
+        log = entry
+        return target
     }
 
     /// Less time than anyone needs to read the iOS question and tap an answer: a request
@@ -486,11 +628,12 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func deleteCollection(_ id: CollectionID) async throws {
         let raw = id.rawValue
         // Never delete a folder that still holds something: Photos would delete its contents.
-        if let list = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject,
-           PHCollection.fetchCollections(in: list, options: nil).count > 0 {
-            return
+        let holdsSomething = try await Self.read("folderContents") { _ -> Bool in
+            guard let list = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject else { return false }
+            return PHCollection.fetchCollections(in: list, options: nil).count > 0
         }
-        try await PHPhotoLibrary.shared().performChanges {
+        if holdsSomething { return }
+        try await Self.change("deleteCollection", limit: Self.deletionLimit, asksUser: true) {
             // Deletes only the album/folder container. PhotoKit keeps the media.
             let albums = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [raw], options: nil)
             if albums.count > 0 {
@@ -506,6 +649,12 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
 /// Walks the user's folder/album tree.
 private final class InventoryCollector {
     var snapshots: [CollectionSnapshot] = []
+    /// Said after every album and folder: the walk is still moving (`PhotoKitLibrary.read`).
+    private let beat: PhotosDeadline.Heartbeat?
+
+    init(beat: PhotosDeadline.Heartbeat? = nil) {
+        self.beat = beat
+    }
 
     func walk(_ result: PHFetchResult<PHCollection>, parent: CollectionID?) {
         result.enumerateObjects { collection, _, _ in
@@ -514,8 +663,11 @@ private final class InventoryCollector {
     }
 
     private func add(_ collection: PHCollection, parent: CollectionID?) {
+        // Nobody waits for the walk any more: it stops (the result is dropped anyway).
+        if beat?.isCancelled == true { return }
         guard let snapshot = Self.snapshot(of: collection, parent: parent) else { return }
         snapshots.append(snapshot)
+        beat?.beat()
         if let list = collection as? PHCollectionList {
             walk(PHCollection.fetchCollections(in: list, options: nil), parent: snapshot.id)
         }

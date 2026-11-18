@@ -109,8 +109,10 @@ final class SamplePhotos {
     /// traps at runtime under Swift 6). The identifiers are written down inside the change
     /// itself, before Photos stores it: an app ended right after the change still knows every
     /// photo it made (an identifier of a change that did not go through is simply not found).
+    /// Bounded like every change request (`PhotoKitLibrary.change`): without an answer in time
+    /// the caller hears so; what was made is still found by its written-down identifiers.
     nonisolated static func save(_ items: [Item]) async throws {
-        try await PHPhotoLibrary.shared().performChanges {
+        try await PhotoKitLibrary.change("samplePhotos.save", limit: .seconds(120)) {
             var made: [String] = []
             for item in items {
                 let request = PHAssetCreationRequest.forAsset()
@@ -182,6 +184,12 @@ final class SamplePhotos {
             update { $0.keepOnly(still) }
             model.inventory = try await model.library.currentInventory()
             model.startAnalysis(userInitiated: true)
+        } catch let quiet as PhotosNotResponding where quiet.lane == .write {
+            // Not known whether they go: the question iOS asks may still be on screen, or an
+            // earlier change still has no answer (second review of the PhotoKit limits, 7).
+            model.message = .failure(quiet.asksUser && !quiet.notSent
+                ? String(localized: "Ob die Beispielfotos entfernt werden, steht noch nicht fest: Die Rückfrage von iOS ist vielleicht noch offen. Schau in Fotos nach und versuche es danach noch einmal.")
+                : quiet.localizedDescription)
         } catch {
             let ns = error as NSError
             if ns.domain == PHPhotosErrorDomain, ns.code == PHPhotosError.Code.userCancelled.rawValue { return }
@@ -199,8 +207,9 @@ final class SamplePhotos {
     }
 
     /// One change request, so iOS asks once. Albums before the folders they are in.
+    /// iOS asks first: the long limit for deletions, not said as "Fotos antwortet gerade nicht".
     nonisolated static func delete(assets: [String], collections: [String]) async throws {
-        try await PHPhotoLibrary.shared().performChanges {
+        try await PhotoKitLibrary.change("samplePhotos.delete", limit: PhotoKitLibrary.deletionLimit, asksUser: true) {
             if !assets.isEmpty {
                 let photos = PHAsset.fetchAssets(withLocalIdentifiers: assets, options: nil)
                 if photos.count > 0 { PHAssetChangeRequest.deleteAssets(photos) }

@@ -62,8 +62,15 @@ final class AppModel {
         /// The last run ended before it was done without the user pausing it: opening the
         /// app again goes on by itself.
         var needsResume = false
+        /// Pause was tapped and not taken back by "Fortsetzen" (`AppModel.setPausedByUser`): kept
+        /// across launches in `AnalysisMarker.pausedByUser`, so neither opening the app nor the
+        /// overnight refinement goes on with a paused analysis (decision of the second review of
+        /// the app-speed branch, 18.11.2026).
+        var pausedByUser = false
         /// The analysis stands paused by the user (the paused card, "Fortsetzen").
-        var isPausedByUser: Bool { !isRunning && !needsResume && lastReport?.pausedBecause == .userPaused }
+        var isPausedByUser: Bool {
+            !isRunning && !needsResume && (pausedByUser || lastReport?.pausedBecause == .userPaused)
+        }
         /// The bar's six segments, fixed for the whole analysis (from the first run's workload,
         /// kept with the marker over Pause and restarts: progress display S6).
         var widths: StepWidths = .standard
@@ -168,7 +175,7 @@ final class AppModel {
 
     var phase: Phase = .loading
     var access: LibraryAccess = .notDetermined
-    var settings = OrganizationSettings() { didSet { bucketCache = [:] } }
+    var settings = OrganizationSettings() { didSet { libraryInputsChanged() } }
     /// Every change also reaches the background task's progress (read off the main thread).
     var analysis = AnalysisState() { didSet { ContinuedAnalysis.publish(analysis, finish: analysisFinish) } }
 
@@ -240,11 +247,39 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { bucketCache = [:]; atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
-    var states: [AssetID: AssetOrganizationState] = [:] { didSet { bucketCache = [:] } }
-    /// Filtered and sorted library buckets; rebuilt only when facts or states change, not on
-    /// every redraw of the library (a selection tap redraws it).
-    @ObservationIgnored private var bucketCache: [InboxBucket: [AssetFacts]] = [:]
+    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
+    var states: [AssetID: AssetOrganizationState] = [:] { didSet { libraryInputsChanged() } }
+    /// The photos the user ignored, and the state of each once it is no longer ignored, from
+    /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
+    /// "Nicht mehr ignorieren" are shown at once, before the recount.
+    @ObservationIgnored private var ignoredIDs: Set<AssetID> = []
+    @ObservationIgnored private var statesIfNotIgnored: [AssetID: AssetOrganizationState] = [:]
+    @ObservationIgnored private var ignoreChanges = IgnoreChange()
+    /// The store writes of ignore taps, one after the other in the order of the taps, and how
+    /// many are still to be done: one recount follows once all are (`writeIgnore`).
+    @ObservationIgnored private var ignoreWrites: Task<Void, Never>?
+    @ObservationIgnored private var ignoreWritesLeft = 0
+    /// A count was assigned in this launch: `ignoredIDs` holds the photos ignored before. Until
+    /// then "Widerrufen" waits for the store's answer (`ignore`).
+    @ObservationIgnored private var ignoredKnown = false
+    /// The library tab's areas, made off the main thread (`LibraryBuckets`): `nil` until the
+    /// first pass is done, then kept while a newer pass runs, so the grid never empties.
+    /// Stress run 44144011110: filtering and sorting 50,000 photos in the library's body
+    /// stalled the main thread for 7.7 s at the first tap on "Mediathek".
+    private(set) var libraryBuckets: LibraryBuckets?
+    /// The library tab is on screen: its areas follow facts, states and settings only then.
+    @ObservationIgnored private var libraryBucketsShown = false
+    /// Ignore taps while a pass runs: their photos, and how many changes of the inputs they made.
+    /// The pass's result gets them laid over (`makeLibraryBuckets`).
+    @ObservationIgnored private var libraryTapsDuringPass: [AssetID] = []
+    @ObservationIgnored private var libraryTapInputs = 0
+    /// An ignore tap moves its photos itself (`moveInLibraryBuckets`): no pass for it.
+    @ObservationIgnored private var movingInLibrary = false
+    /// Counts the changes of facts, states and settings; `libraryBucketsMadeFor` is the one
+    /// `libraryBuckets` shows.
+    @ObservationIgnored private var libraryInputs = 0
+    @ObservationIgnored private var libraryBucketsMadeFor = -1
+    @ObservationIgnored private var libraryBucketsTask: Task<Void, Never>?
     /// The atlas is shown on the overview, which redraws often during an analysis.
     @ObservationIgnored private var atlasCache: [Int: TravelAtlas] = [:]
     @ObservationIgnored private var atlasYearsCache: [Int]?
@@ -354,6 +389,16 @@ final class AppModel {
     var recount: RecountState? = RecountState.load() {
         didSet { RecountState.save(recount) }
     }
+    /// The hold for the labels ended lower than the count it held: said once under the ring
+    /// (`RecountState.LowerNote`; app-speed 18.11.2026, open point A of the labels fix). Kept
+    /// across launches: it may end in the overnight refinement, before anyone looks.
+    var recountNote: RecountState.LowerNote? = RecountState.LowerNote.load() {
+        didSet { RecountState.LowerNote.save(recountNote) }
+    }
+    /// The photos waiting for labels when the count on screen was made
+    /// (`RecountState.LabelsWaiting`): only a fall the labels can explain is held
+    /// (`RecountState.next`, open point B). `nil` until the first status of this launch.
+    @ObservationIgnored private var shownLabels: RecountState.LabelsWaiting?
     var inventory = CollectionInventory() { didSet { resetSearchIndex(); inventoryVersion &+= 1 } }
     /// Counts changes of `inventory`: a screen that works something out from the inventory off
     /// the main thread (the plan preview, `PlanReviewFacts`) watches this number instead.
@@ -449,9 +494,14 @@ final class AppModel {
     @ObservationIgnored private var analysisControl: AnalysisRunControl?
     /// Counts runs: progress that arrives late from an earlier run is dropped.
     @ObservationIgnored private var analysisGeneration = 0
-    /// Runs in a row that ended early by themselves (an error, Vision failing): tried again
-    /// a little later instead of only at the next start of the app.
-    @ObservationIgnored private var unattendedRetries = 0
+    /// Runs in a row that ended early by themselves (an error, Vision failing, Photos not
+    /// answering): tried again a little later instead of only at the next start of the app, and
+    /// the end of a plan keeps that wait (`UnattendedRetry`, open point D of the labels fix).
+    @ObservationIgnored private var retry = UnattendedRetry()
+    /// The last run ended because Photos did not answer (`PhotosNotResponding`): the card says
+    /// "Fotos antwortet gerade nicht" until the next run starts, and that run comes by itself
+    /// (`retryUnattendedRun`).
+    @ObservationIgnored private var photosRetryDue = false
     /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile. Observed: the
     /// suggestion's "Ja, hier bin ich öfter" says why it waits.
     private(set) var analysisResetting = false
@@ -518,6 +568,7 @@ final class AppModel {
                 // A new, empty database: its first analysis is a full one, not a quick check.
                 AnalysisMarker.reset()
             }
+            restorePause()
             access = await library.access()
             // A rebuilt (or newly restored) database gets the user's decisions back first.
             await restoreFromBackupIfNeeded(store)
@@ -582,6 +633,20 @@ final class AppModel {
         try? await store.setValue(settings, forKey: Key.settings)
     }
 
+    /// Paused by the user before this launch: the paused card where the analysis stood, with
+    /// "Fortsetzen"; no run starts by itself (`AnalysisState.pausedByUser`).
+    private func restorePause() {
+        guard AnalysisMarker.pausedByUser else { return }
+        analysis.pausedByUser = true
+        analysis.needsResume = false
+        if let point = AnalysisMarker.unfinished, let completed = point.completed, let total = point.total,
+           AnalysisPipeline.Stage.allCases.indices.contains(point.stage - 1) {
+            analysis.stoppedAt = AnalysisCardState.Position(step: AnalysisStep(AnalysisPipeline.Stage.allCases[point.stage - 1]),
+                                                            completed: completed, total: total)
+        }
+        updateCard()
+    }
+
     /// "Neu aufbauen" on the start error screen: the damaged database is set aside (one copy
     /// is kept for support) and Albumist starts fresh. Photos and albums are not touched.
     func rebuildAfterFailure() async {
@@ -612,6 +677,11 @@ final class AppModel {
     /// overview says so until the user taps OK. The count is stored by the pipeline in the
     /// same transaction as the reopened decisions (`AnalysisPipeline.recheckedSuggestionsKey`).
     var recheckedSuggestions = 0
+
+    /// "OK" under the ring: the note that the count came back lower after the labels is gone.
+    func dismissRecountNote() {
+        recountNote = nil
+    }
 
     /// "OK" on the card.
     func dismissRecheckNotice() {
@@ -889,6 +959,11 @@ final class AppModel {
 
     private func startAnalysisNow(scope: OrganizationScope?, mode: AnalysisPipeline.Mode, userInitiated: Bool) {
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
+        // Paused by the user: only a tap goes on ("Fortsetzen", "Analyse neu aufbauen", another
+        // part of the library). The start at every launch, follow-ups, retries, the end of a plan,
+        // changes in Photos or in the settings wait for it (second review of the app-speed branch:
+        // the start at launch ended the Pause; decision, reversible).
+        if analysis.pausedByUser && !userInitiated { return }
         // A change in "Dein Zuhause" is being applied: the run starts right after it, so it
         // never takes the run lock in the middle of the change. Several requests meanwhile are
         // one run; one started by a tap keeps what a tap gets (background time, retries reset).
@@ -900,6 +975,10 @@ final class AppModel {
             return
         }
         analysis.isRunning = true
+        photosRetryDue = false
+        retry.runStarted()
+        // A run goes on: the Pause no longer stands.
+        setPausedByUser(false)
         analysis.needsResume = false
         analysis.pausing = false
         analysis.stage = nil
@@ -937,7 +1016,7 @@ final class AppModel {
                 ContinuedAnalysis.requestNotificationPermission()
                 ContinuedAnalysis.begin()
             }
-            unattendedRetries = 0
+            retry.reset()
         }
         analysisGeneration += 1
         let generation = analysisGeneration
@@ -968,6 +1047,10 @@ final class AppModel {
             } catch is CancellationError {
                 // Stopped on purpose ("Analyse neu aufbauen", a new scope): not an error to show
                 // (plugin review N3: "Swift.CancellationError error 1").
+            } catch is PhotosNotResponding {
+                // Photos did not answer (app-speed): said on the card, not in an alert, and the
+                // run comes again by itself. Nothing of it counts as done.
+                photosRetryDue = true
             } catch {
                 message = .failure(error.localizedDescription)
             }
@@ -980,6 +1063,9 @@ final class AppModel {
             let end = AnalysisRunEnd(report: finished, settings: settings, pauseTapped: control.isPaused,
                                      catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow)
             catchUpAfterRun = false
+            // Also a Pause tapped before the run ended unfinished for another reason (an error,
+            // the heat, Photos) stays (`AnalysisRunEnd.pauseHeld`).
+            setPausedByUser(end.keepsPause)
             if let report = end.report { analysis.lastReport = report }
             // This run's own outcome (nil when it threw): the 100 % follows only a finished analysis.
             analysis.outcome.ended(with: end.isFinished ? end.report : nil)
@@ -1045,7 +1131,7 @@ final class AppModel {
                 }
             }
             BackgroundWork.scheduleRefinement()
-            if end.isFinished { unattendedRetries = 0 }
+            if end.isFinished { retry.reset() }
             follow(settled.next, after: generation)
         }
     }
@@ -1068,14 +1154,18 @@ final class AppModel {
     /// A run that ended early by itself (an error, Vision failing, the app's time ran out)
     /// goes on a little later, a few times, instead of waiting until the app is opened again.
     /// Nothing happens when another run started meanwhile or the user paused.
+    ///
+    /// The waits are `UnattendedRetry`'s: 30 s, then 60 s, then none until a tap, the app on
+    /// screen or a finished analysis; every minute without a cap when Photos did not answer (a
+    /// try never sends a second call while the first still hangs, `PhotosDeadline`, so it costs
+    /// nothing; the card says "Fotos antwortet gerade nicht" meanwhile). A try that comes due
+    /// while a plan holds the analysis back does not start; the end of the plan starts it
+    /// (`releaseExecution`).
     private func retryUnattendedRun(after run: Int) {
-        guard unattendedRetries < 2 else { return }
-        unattendedRetries += 1
-        let delay = 30 * unattendedRetries
+        guard let delay = retry.schedule(photos: photosRetryDue, now: .now) else { return }
         Task {
-            try? await Task.sleep(for: .seconds(delay))
-            guard analysisGeneration == run, analysis.needsResume, !analysis.isRunning,
-                  phase == .ready, access.canRead, !execution.isRunning, !analysisResetting else { return }
+            try? await Task.sleep(for: delay)
+            guard analysisGeneration == run, analysis.needsResume, !analysis.isRunning, runMayStartNow else { return }
             startAnalysis()
         }
     }
@@ -1364,6 +1454,8 @@ final class AppModel {
             isLowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled
         ).slowerReason : nil
         i.appleWait = analysis.appleWait
+        // Photos has had no answer for 10 s or more (still waiting), or the run ended on it.
+        i.photosNotResponding = photosRetryDue || (analysis.isRunning && PhotoKitLibrary.deadline.slowFor() != nil)
         i.pausingFor = analysis.pausing ? pausingSince.map { now - $0 } ?? .zero : nil
         i.pausedByUser = analysis.isPausedByUser
         i.pausedAt = analysis.stoppedAt
@@ -1434,6 +1526,9 @@ final class AppModel {
     /// The app is on screen again: a run that iOS ended goes on by itself, and a run still
     /// busy asks for background time again (the last request may have run out).
     func sceneBecameActive() {
+        // A call into Photos that waited while the app was suspended gets its limit again from
+        // now: Photos could not answer it meanwhile (second review of the PhotoKit limits, 3).
+        PhotoKitLibrary.deadline.cameBack()
         // Back from the Settings app on the "Kein Zugriff" screen: the access may be back (W4).
         if phase == .noAccess {
             Task { await refreshAccess() }
@@ -1444,7 +1539,7 @@ final class AppModel {
             return
         }
         guard analysis.needsResume, phase == .ready, !execution.isRunning, !analysisResetting else { return }
-        unattendedRetries = 0
+        retry.reset()
         guard access.canRead else {
             // The run ended because the access was taken away: it may be back from Settings.
             Task {
@@ -1457,6 +1552,9 @@ final class AppModel {
     }
 
     func pauseAnalysis() {
+        // The Pause stands from the tap on, also when the app is closed before the run ends;
+        // only when something is left to pause (a run, or one that will go on by itself).
+        if analysis.isRunning || analysis.needsResume { setPausedByUser(true) }
         analysis.needsResume = false
         // Shown at once: the photos in work are finished first, which can take a moment
         // (device test 15.11.: "Pause reagiert nicht"). The card changes in this same call, not
@@ -1491,6 +1589,8 @@ final class AppModel {
     /// the next window or when the app is opened (`needsResume`).
     private func refine() async -> (succeeded: Bool, next: AnalysisRunEnd.Next) {
         if phase == .loading { await bootstrap() }
+        // Paused by the user: nothing to do in this window (open point C).
+        if refinementHeldByPause { return (true, .nothing) }
         var outcome: (succeeded: Bool, next: AnalysisRunEnd.Next) = (false, .nothing)
         var generation: Int?
         for _ in 0..<3 {
@@ -1514,7 +1614,8 @@ final class AppModel {
         // the labels fix, finding 6).
         await runsEnded()
         if let previous, analysisGeneration != previous { return nil }
-        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return nil }
+        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !refinementHeldByPause,
+              !Task.isCancelled else { return nil }
         analysis.isRunning = true
         updateCard()
         // Late progress of the run before must not show up during this one.
@@ -1536,6 +1637,7 @@ final class AppModel {
         let end = AnalysisRunEnd(report: report, settings: settings, pauseTapped: control.isPaused,
                                  catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow, background: true)
         catchUpAfterRun = false
+        setPausedByUser(end.keepsPause)
         if let ended = end.report {
             analysis.lastReport = ended
             if end.isFinished, analysis.outcome.refined(with: ended) {
@@ -1557,6 +1659,21 @@ final class AppModel {
         await refreshDerived()
         saveSafetyBackup(immediately: true)
         return (ran.pausedBecause == nil, end.next, generation)
+    }
+
+    /// The analysis stands paused by the user, in this launch or before it (iOS often starts
+    /// the app in the night for the refinement alone, `AnalysisMarker.pausedByUser`): the
+    /// refinement does not run, the Pause stays until "Fortsetzen" (app-speed 18.11.2026, open
+    /// point C of the labels fix: before, the refinement went on with a paused analysis). Also
+    /// a Pause tapped on a run from the app that this window waited for.
+    private var refinementHeldByPause: Bool {
+        analysis.pausing || analysis.pausedByUser || analysis.isPausedByUser
+    }
+
+    /// Pause tapped (true), or a run going on (false): in the model and kept across launches.
+    private func setPausedByUser(_ paused: Bool) {
+        if analysis.pausedByUser != paused { analysis.pausedByUser = paused }
+        AnalysisMarker.pausedByUser = paused
     }
 
     /// Until no run is busy and the end of the last one is done too (its overview refresh, its
@@ -1627,7 +1744,7 @@ final class AppModel {
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
             guard derivedCalls.isNewest(call), scope == analysisScope else { return }
-            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot) }
+            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot, call: call) }
         } catch {
             message = .failure(error.localizedDescription)
         }
@@ -1635,8 +1752,15 @@ final class AppModel {
     }
 
     /// `snapshot`: the one the status was derived from (read before the await).
-    private func assignDerived(_ derived: DerivedLibraryStatus, snapshot: ProposalSnapshot?) {
-        states = derived.states
+    /// `call`: the `refreshDerived` call that made `derived`; ignore taps it does not include yet
+    /// are laid over it (`IgnoreChange.settle`).
+    private func assignDerived(_ derived: DerivedLibraryStatus, snapshot: ProposalSnapshot?, call: Int) {
+        var visible = IgnoreChange.Shown(derived)
+        ignoreChanges.settle(&visible, call: call)
+        states = visible.states
+        ignoredIDs = visible.ignored
+        statesIfNotIgnored = visible.ifNotIgnored
+        ignoredKnown = true
         statusReasons = derived.reasons
         let shown = progress
         progress = derived.progress
@@ -1648,9 +1772,16 @@ final class AppModel {
         // would be shown as final hours before the image analysis is done (review minor). Nor by
         // the report of the run before "Analyse neu aufbauen": its own refresh ended the hold at
         // once when that run was complete.
-        let held = RecountState.next(recount, shown: shown, derived: derived, settings: settings,
+        // Only a fall the labels can explain is held (open point B): a photo taken out of its
+        // album in Photos, or other main areas, show their count at once.
+        let held = RecountState.next(recount, shown: shown, shownLabels: shownLabels, derived: derived, settings: settings,
                                      newSuggestions: snapshot?.isEarly == false && !proposals.isEmpty,
                                      ended: (analysis.isRunning || analysisResetting) ? nil : analysis.lastReport)
+        shownLabels = RecountState.LabelsWaiting(derived)
+        // Ended lower than it held: said once under the ring (open point A).
+        let note = RecountState.LowerNote.next(recountNote, before: recount, after: held, progress: derived.progress,
+                                               settings: settings)
+        if note != recountNote { recountNote = note }
         if held != recount { recount = held }
         analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable,
                                         labelsMissing: derived.labelsMissing)
@@ -2254,9 +2385,15 @@ final class AppModel {
     /// on now, not only when the app is opened next (third review of the labels fix, finding 5:
     /// "So lassen", a refused plan or a missing write access ended the claim without a run). A
     /// plan that ran started its run already (`run(_:)`); a Pause stays (`needsResume` is false).
+    ///
+    /// A run that ended early by itself keeps its wait (`UnattendedRetry`; app-speed 18.11.2026,
+    /// open point D of the labels fix): before, the end of a plan started it at once, and a Vision
+    /// that had just failed on a hot iPhone was asked again within seconds. Its try starts it when
+    /// due; a try that came due during the plan starts here.
     private func releaseExecution() {
         executionClaimed = false
-        if analysis.needsResume, !analysis.isRunning, runMayStartNow { startAnalysis() }
+        guard analysis.needsResume, !analysis.isRunning, runMayStartNow, retry.startsOnRelease(now: .now) else { return }
+        startAnalysis()
     }
 
     /// Runs a plan; the caller holds the execution claim. `resume`: an interrupted plan that
@@ -2313,6 +2450,8 @@ final class AppModel {
             }
         } catch {
             execution.failure = failureText(error)
+            // "Rest anlegen" waited for an album that may still land: goes on by itself then.
+            if resume { retryAfterLateCreateWait(error, plan: planID) { await self.resumeInterruptedPlan() } }
         }
         ReviewPrompt.shared.planEnded(ended, resultsStored: resultsStored)
         // A plan that stopped half way in this session (its journal could not be written, a
@@ -2321,13 +2460,18 @@ final class AppModel {
         keepAwake.end()
         execution.isRunning = false
         self.plan = nil
-        startAnalysis()
+        // A run that ended early by itself keeps its wait here too (like `releaseExecution`):
+        // only a try that came due during the plan starts now (second review of the PhotoKit
+        // limits, 5).
+        if !analysis.needsResume || retry.startsOnRelease(now: .now) { startAnalysis() }
     }
 
     /// What the user reads when a plan could not run: a plan stopped by a change in Photos
     /// (an album changed since the preview, access reduced) says which, in the words of the
     /// review screen, instead of "SortlyCore.ChangeExecutor.ExecutionError error 1".
     private func failureText(_ error: any Error) -> String {
+        // Photos did not answer a change in time: said as such (`PhotosNotResponding`'s text);
+        // the plan stays open in the overview, neither done nor undone.
         if let stopped = error as? ChangeExecutor.ExecutionError, case .blocked(let conflicts) = stopped, !conflicts.isEmpty {
             return conflicts.prefix(3).map { ConflictText.text($0, inventory: inventory) }.joined(separator: "\n")
         }
@@ -2583,6 +2727,22 @@ final class AppModel {
         await reloadInterruptedPlan()
     }
 
+    /// "Rest anlegen" or "Rückgängig" on an interrupted plan waited for an album that may still
+    /// land (`ChangeExecutor.ExecutionError.earlierCreateMayLand`): the same way out runs again
+    /// by itself once the wait is over, while the app is open and the plan still waits (round-3
+    /// review of the PhotoKit limits, L1). The message says from when.
+    private func retryAfterLateCreateWait(_ error: any Error, plan: SortlyID, _ action: @escaping @MainActor () async -> Void) {
+        guard let stopped = error as? ChangeExecutor.ExecutionError, case .earlierCreateMayLand(let until) = stopped else { return }
+        lateCreateRetry?.cancel()
+        lateCreateRetry = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(max(0, until.timeIntervalSinceNow) + 1))
+            guard !Task.isCancelled, self.interruptedPlan?.id == plan else { return }
+            await action()
+        }
+    }
+
+    @ObservationIgnored private var lateCreateRetry: Task<Void, Never>?
+
     /// Takes back what an interrupted plan already did, and drops the rest. Steps the
     /// interruption left open are first checked against the library (an album created or
     /// photos added right before the app was closed are taken back too).
@@ -2648,6 +2808,8 @@ final class AppModel {
             }
         } catch {
             message = .failure(error.localizedDescription)
+            // Waited for an album that may still land: the undo goes on by itself then.
+            retryAfterLateCreateWait(error, plan: interrupted.id) { await self.undoInterruptedPlan() }
         }
         // What is still open, from the store: nothing, or the undo itself.
         await reloadInterruptedPlan()
@@ -2663,8 +2825,10 @@ final class AppModel {
         guard let store, let interrupted = interruptedPlan, claimExecution() else { return }
         defer { releaseExecution() }
         do {
-            // Steps the interruption left open are checked against the library first.
-            let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
+            // Steps the interruption left open are checked against the library first. An album
+            // that may still land is not waited for: "So lassen" makes nothing, and its id stays
+            // recorded, so the album records and undo take it as Albumist's (round-3 review, L1).
+            let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted, keeping: true)
             // Also an album Photos made before its check failed is recorded (plugin review K1).
             let kept = settled.keptAsIs(current: try await library.currentInventory())
             try await store.save(kept)
@@ -2799,48 +2963,186 @@ final class AppModel {
 
     // MARK: Library and search
 
-    func bucketMembers(_ bucket: InboxBucket) -> [AssetFacts] {
-        access(keyPath: \.facts)
-        access(keyPath: \.states)
-        access(keyPath: \.settings)
-        if let cached = bucketCache[bucket] { return cached }
-        let resolver = resolver
-        let members = MainThreadWatch.shared.section("library bucket") {
-            facts.filter { f in
-                guard let state = states[f.id] else { return bucket == .all }
-                return resolver.buckets(state).contains(bucket)
+    /// The library tab appeared: its areas are made now if they are not up to date, and follow
+    /// every later change while it is on screen.
+    func showLibraryBuckets() {
+        libraryBucketsShown = true
+        if libraryBucketsMadeFor != libraryInputs { makeLibraryBuckets() }
+    }
+
+    /// The library tab is no longer on screen: no passes for it until it is back.
+    func hideLibraryBuckets() {
+        libraryBucketsShown = false
+    }
+
+    private func libraryInputsChanged() {
+        libraryInputs += 1
+        if libraryBucketsShown && !movingInLibrary { makeLibraryBuckets() }
+    }
+
+    /// One pass over all photos off the main thread. A pass that runs is not cancelled for a
+    /// newer change: it finishes and is shown, the ignore taps since are laid over it, and one more
+    /// pass follows if anything else changed meanwhile (second review of the app-speed branch, 6:
+    /// cancelled and started anew at every change, the passes could starve during an analysis and
+    /// "Fotos werden zusammengestellt …" stood for more than 10 s).
+    private func makeLibraryBuckets() {
+        guard libraryBucketsTask == nil else { return }
+        let inputs = libraryInputs
+        let facts = facts, states = states, resolver = resolver
+        libraryTapsDuringPass = []
+        libraryTapInputs = 0
+        libraryBucketsTask = Task { [weak self] in
+            let made = await Task.detached(priority: .userInitiated) {
+                LibraryBuckets.make(facts: facts, states: states, resolver: resolver)
+            }.value
+            guard let self else { return }
+            self.libraryBucketsTask = nil
+            if let made {
+                MainThreadWatch.shared.section("library buckets") {
+                    let taps = self.libraryTapsDuringPass
+                    self.libraryBuckets = taps.isEmpty ? made : made.updating(taps, to: self.states, resolver: self.resolver)
+                    // Up to date when nothing but those taps came since.
+                    self.libraryBucketsMadeFor = inputs + self.libraryTapInputs == self.libraryInputs ? self.libraryInputs : inputs
+                }
             }
-            .sorted { ($0.asset.creationDate ?? .distantPast) > ($1.asset.creationDate ?? .distantPast) }
+            self.libraryTapsDuringPass = []
+            self.libraryTapInputs = 0
+            if self.libraryBucketsShown, self.libraryBucketsMadeFor != self.libraryInputs { self.makeLibraryBuckets() }
         }
-        bucketCache[bucket] = members
-        return members
+    }
+
+    /// After "Ignorieren" or "Nicht mehr ignorieren": only the tapped photos move in the grid,
+    /// at once (`LibraryBuckets.updating`, which looks up where each photo is, so areas from a
+    /// little older states stay right; a large selection is merged, not inserted photo by photo).
+    /// `upToDate`: the areas were up to date before the tap; then they are after it too.
+    private func moveInLibraryBuckets(_ assets: [AssetID], upToDate: Bool) {
+        if libraryBucketsTask != nil {
+            libraryTapsDuringPass += assets
+            libraryTapInputs += 1
+        }
+        if let current = libraryBuckets {
+            libraryBuckets = current.updating(assets, to: states, resolver: resolver)
+        }
+        if upToDate {
+            libraryBucketsMadeFor = libraryInputs
+        } else if libraryBucketsShown {
+            makeLibraryBuckets()
+        }
     }
 
     /// The photos the last "Ignorieren" newly ignored, for "Widerrufen" right after it
     /// (design review D4: ignoring could not be taken back). A new id per action, so the
     /// note shows again and its timer starts over.
     struct IgnoreUndo: Identifiable, Equatable {
-        let id = UUID()
+        let id: UUID
         let assets: [AssetID]
+
+        init(id: UUID = UUID(), assets: [AssetID]) {
+            self.id = id
+            self.assets = assets
+        }
     }
 
     var lastIgnored: IgnoreUndo?
 
     /// "Ignorieren": no confirmation, because it can be taken back right away ("Widerrufen")
     /// and later in the "Ignoriert" area ("Nicht mehr ignorieren").
+    ///
+    /// Shown at once (app-speed, 18.11.2026: UI runs measured 1.2 to 1.3 s to the note, the
+    /// time of the store write and the whole recount): the photos move to "Ignoriert" and the
+    /// note comes on the main actor, from what is shown (`IgnoreChange`); the store write and
+    /// the recount follow in the background and give the same states. The ring's numbers come
+    /// with the recount, once, so none moves back. A write that fails says so, and the recount
+    /// shows the photos where they really are.
     func ignore(_ assets: [AssetID]) {
-        Task {
-            guard let store else { return }
-            do {
-                let added = try await store.ignoreAssets(assets)
-                saveSafetyBackup()
-                await refreshDerived()
-                guard !added.isEmpty else { lastIgnored = nil; return }
-                let undo = IgnoreUndo(assets: added)
-                lastIgnored = undo
-                announceAndExpire(undo)
-            } catch {
-                message = .failure(error.localizedDescription)
+        guard store != nil else { return }
+        // Before the first count of this launch the photos ignored earlier are not known here:
+        // "Widerrufen" then waits for the store's answer, so it never brings back photos that
+        // were ignored before (second review of the app-speed branch, 8).
+        let known = ignoredKnown
+        let added = IgnoreChange.newlyIgnored(assets, ignored: ignoredIDs)
+        let step = showIgnore(assets, ignore: true)
+        let undo = added.isEmpty || !known ? nil : IgnoreUndo(assets: added)
+        lastIgnored = undo
+        if let undo { announceAndExpire(undo) }
+        writeIgnore(step, undo: undo?.id) { store in
+            let stored = try await store.ignoreAssets(assets)
+            // The store decides what was new; "Widerrufen" takes back exactly that. Differs
+            // only if the shown set was behind the store (then the note says the store's count).
+            if let undo {
+                if stored != added, self.lastIgnored?.id == undo.id {
+                    self.lastIgnored = stored.isEmpty ? nil : IgnoreUndo(id: undo.id, assets: stored)
+                }
+            } else if !known, !stored.isEmpty, self.lastIgnored == nil {
+                // Not over the note of a later tap, which answered first (review of the ignore
+                // fix, c).
+                let later = IgnoreUndo(assets: stored)
+                self.lastIgnored = later
+                self.announceAndExpire(later)
+            }
+        }
+    }
+
+    /// "Nicht mehr ignorieren" and "Widerrufen": Albumist counts and suggests these photos
+    /// again. Shown at once like `ignore`.
+    func unignore(_ assets: [AssetID]) {
+        guard store != nil else { return }
+        if let last = lastIgnored, !Set(last.assets).isDisjoint(with: assets) { lastIgnored = nil }
+        let step = showIgnore(assets, ignore: false)
+        writeIgnore(step) { store in
+            _ = try await store.unignoreAssets(assets)
+        }
+    }
+
+    /// Lays one tap over what is shown; cheap: only the tapped photos change.
+    private func showIgnore(_ assets: [AssetID], ignore: Bool) -> Int {
+        MainThreadWatch.shared.section("ignore shown") {
+            let upToDate = libraryBucketsMadeFor == libraryInputs
+            var shown = IgnoreChange.Shown(states: states, ignored: ignoredIDs, ifNotIgnored: statesIfNotIgnored)
+            let step = ignoreChanges.record(assets, ignore: ignore, in: &shown)
+            movingInLibrary = true
+            states = shown.states
+            movingInLibrary = false
+            ignoredIDs = shown.ignored
+            statesIfNotIgnored = shown.ifNotIgnored
+            moveInLibraryBuckets(assets, upToDate: upToDate)
+            return step
+        }
+    }
+
+    /// Writes one tap to the store after the taps before it; once no write is left, counts
+    /// again in the background, outside the chain (second review of the app-speed branch, 1:
+    /// with the count inside, each write waited for the full count of the one before, so a
+    /// "Widerrufen" within a second reached the store seconds later, and N taps were N counts).
+    /// Counts that begin after a write read it (`IgnoreChange.stored`). A write that fails, or
+    /// finds no store, is no longer laid over the counts, and its "Widerrufen" note ends.
+    private func writeIgnore(_ step: Int, undo: UUID? = nil,
+                             _ write: @escaping @Sendable @MainActor (SortlyStore) async throws -> Void) {
+        let previous = ignoreWrites
+        ignoreWritesLeft += 1
+        ignoreWrites = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            var failure: (any Error)?
+            if let store = self.store {
+                do {
+                    try await write(store)
+                    self.ignoreChanges.stored(step, nextCall: self.derivedCalls.newest + 1)
+                    self.saveSafetyBackup()
+                } catch {
+                    failure = error
+                }
+            } else {
+                failure = CancellationError()
+            }
+            if let failure {
+                self.ignoreChanges.failed(step)
+                if let undo, self.lastIgnored?.id == undo { self.lastIgnored = nil }
+                if !(failure is CancellationError) { self.message = .failure(failure.localizedDescription) }
+            }
+            self.ignoreWritesLeft -= 1
+            if self.ignoreWritesLeft == 0 {
+                Task { await self.refreshDerived() }
             }
         }
     }
@@ -2860,21 +3162,6 @@ final class AppModel {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(voiceOver || UITestSupport.isRunning ? 20 : 6))
             if self?.lastIgnored?.id == undo.id { self?.lastIgnored = nil }
-        }
-    }
-
-    /// "Nicht mehr ignorieren" and "Widerrufen": Albumist counts and suggests these photos again.
-    func unignore(_ assets: [AssetID]) {
-        if let last = lastIgnored, !Set(last.assets).isDisjoint(with: assets) { lastIgnored = nil }
-        Task {
-            guard let store else { return }
-            do {
-                try await store.unignoreAssets(assets)
-                saveSafetyBackup()
-                await refreshDerived()
-            } catch {
-                message = .failure(error.localizedDescription)
-            }
         }
     }
 
@@ -3011,6 +3298,25 @@ extension RecountState {
 
     static func save(_ state: RecountState?) {
         if let state, let data = try? JSONEncoder().encode(state) {
+            UserDefaults.standard.set(data, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+}
+
+/// The note that the count came back lower after the labels (`RecountState.LowerNote`): kept
+/// across launches until it is tapped away or no longer true.
+extension RecountState.LowerNote {
+    private static let key = "overview.recountLower"
+
+    static func load() -> RecountState.LowerNote? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(RecountState.LowerNote.self, from: data)
+    }
+
+    static func save(_ note: RecountState.LowerNote?) {
+        if let note, let data = try? JSONEncoder().encode(note) {
             UserDefaults.standard.set(data, forKey: key)
         } else {
             UserDefaults.standard.removeObject(forKey: key)

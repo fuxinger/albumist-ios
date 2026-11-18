@@ -303,6 +303,33 @@ extension LibraryBuckets {
     }
 }
 
+extension LibraryStatus {
+    /// The status the search asks for ("nicht sortiert"), per photo, by the ring's rule
+    /// (`OrganizationStatusResolver.ringPart` over `scope`), so the search finds exactly the
+    /// photos of the list "Nicht sortiert" (second review 18.11.). A photo the ring does not count
+    /// (no main area applies, outside the chosen year) has none.
+    public static func searchStatuses(facts: [AssetFacts], states: [AssetID: AssetOrganizationState],
+                                      resolver: OrganizationStatusResolver, scope: OrganizationScope,
+                                      calendar: Calendar = .sortlyDefault) -> [AssetID: OverallStatus] {
+        var result: [AssetID: OverallStatus] = [:]
+        result.reserveCapacity(states.count)
+        for f in facts {
+            guard let state = states[f.id] else { continue }
+            let inScope = scope == .all || scope.includes(f, calendar: calendar)
+            switch resolver.ringPart(state, inScope: inScope) {
+            case .sorted: result[f.id] = .fullyOrganized
+            case .partlySorted: result[f.id] = .partiallyOrganized
+            case .unsorted: result[f.id] = .unorganized
+            case .pending: result[f.id] = .pending
+            case .ignored: result[f.id] = .ignored
+            case .excluded: result[f.id] = .excluded
+            case .outsideMainAreas, .outsideScope: break
+            }
+        }
+        return result
+    }
+}
+
 // MARK: Overlapping calls
 
 /// Calls that may overlap (`AppModel.refreshDerived` waits for detached work): only the newest

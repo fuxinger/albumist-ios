@@ -205,6 +205,13 @@ public struct OrganizationStatusResolver: Sendable {
         public var allPhotos: Int { total + outsideMainAreas + ignored + excluded }
 
         public var fullyShare: Double { total == 0 ? 0 : Double(fully) / Double(total) }
+
+        /// The share the ring shows for `fraction` (`ProgressRing`, also for VoiceOver): below 1
+        /// at most 0.99, so 199 of 200 reads "99 %", never "100 %" while a photo is open (second
+        /// review of the one meaning of sorted, 18.11.: the percent format rounds to the nearest).
+        public static func shownShare(_ fraction: Double) -> Double {
+            fraction < 1 ? min(fraction, 0.99) : 1
+        }
         public var partiallyShare: Double { total == 0 ? 0 : Double(partially) / Double(total) }
     }
 

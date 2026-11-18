@@ -209,8 +209,14 @@ struct OverviewView: View {
         }
         // Ignored photos are neither sorted nor open, so they leave the ring (Fuchs 18.11.):
         // said here, so a total that shrinks after "Ignorieren" has its reason on screen.
+        // With "Nur 2026" the ring counts the ignored photos of that year only ("Ignoriert" in
+        // the library holds all of them).
         if model.progress.ignored > 0 {
-            parts.append(String(localized: "\(model.progress.ignored) ignorierte Fotos"))
+            if case .year(let year) = model.analysisScope {
+                parts.append(String(localized: "\(model.progress.ignored) ignorierte Fotos aus \(String(year))"))
+            } else {
+                parts.append(String(localized: "\(model.progress.ignored) ignorierte Fotos"))
+            }
         }
         guard !parts.isEmpty else { return nil }
         return String(localized: "Außerdem nicht mitgezählt: \(parts.formatted(.list(type: .and))).")

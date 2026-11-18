@@ -1,4 +1,5 @@
 import SwiftUI
+import SortlyCore
 
 /// Design tokens for direction A "Klar" (chosen 2026-11-13): calm, light, close to iOS.
 /// System font (SF Pro) with Dynamic Type everywhere; numbers use monospaced digits.
@@ -99,19 +100,21 @@ struct Card<Content: View>: View {
     }
 }
 
-/// Progress ring for the organized share.
+/// Progress ring for the organized share. Below 1 it shows at most 99 % (`Progress.shownShare`):
+/// the percent format rounds to the nearest, and 199 of 200 read "100 %" with a photo still open.
 struct ProgressRing: View {
     var fraction: Double
     var lineWidth: CGFloat = 10
 
     var body: some View {
+        let shown = OrganizationStatusResolver.Progress.shownShare(fraction)
         ZStack {
             Circle().stroke(Color(uiColor: .systemFill), lineWidth: lineWidth)
             Circle()
-                .trim(from: 0, to: max(0.001, fraction))
+                .trim(from: 0, to: max(0.001, shown))
                 .stroke(Theme.accent, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text(fraction, format: .percent.precision(.fractionLength(0)))
+            Text(shown, format: .percent.precision(.fractionLength(0)))
                 .font(.title3.weight(.bold))
                 .monospacedDigit()
                 .dynamicTypeSize(...DynamicTypeSize.accessibility2)
@@ -122,7 +125,7 @@ struct ProgressRing: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Sortiert"))
-        .accessibilityValue(Text(fraction, format: .percent.precision(.fractionLength(0))))
+        .accessibilityValue(Text(shown, format: .percent.precision(.fractionLength(0))))
     }
 }
 

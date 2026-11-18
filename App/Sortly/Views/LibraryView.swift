@@ -237,9 +237,14 @@ struct LibraryView: View {
 
     private var emptyDescription: LocalizedStringKey {
         switch bucket {
-        case .unorganized: "Alle Fotos liegen in deinen Hauptbereichen."
-        case .ignored: "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen."
-        default: "In diesem Bereich gibt es gerade nichts."
+        case .unorganized:
+            // "Nur 2026": the list holds what the ring counts, the photos of that year.
+            if case .year(let year) = model.analysisScope {
+                return "Alle Fotos aus \(String(year)) liegen in deinen Hauptbereichen."
+            }
+            return "Alle Fotos liegen in deinen Hauptbereichen."
+        case .ignored: return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen."
+        default: return "In diesem Bereich gibt es gerade nichts."
         }
     }
 }
@@ -442,6 +447,11 @@ struct AssetDetailView: View {
 
     private var reasonText: LocalizedStringKey? {
         guard let state = model.states[facts.id] else { return "Die Analyse ist für dieses Foto noch nicht fertig." }
+        // Outside the chosen year the ring does not count the photo ("Nicht mitgezählt" above).
+        if case .year(let year) = model.analysisScope,
+           model.resolver.ringPart(state, inScope: model.analysisScope.includes(facts, calendar: .sortlyDefault)) == .outsideScope {
+            return "Albumist zählt gerade nur Fotos aus \(String(year))."
+        }
         switch model.resolver.overall(state) {
         case .fullyOrganized: return nil
         case .ignored: return "Du hast dieses Foto ignoriert."

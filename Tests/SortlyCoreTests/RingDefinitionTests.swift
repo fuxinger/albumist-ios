@@ -103,6 +103,29 @@ struct RingDefinitionTests {
         }
     }
 
+    /// The ring never says "100 %" while a photo is open (second review 18.11.: 199 of 200
+    /// rounded to "100 %"), and says it once everything counted is sorted.
+    @Test func ringSaysOneHundredPercentOnlyWhenEverythingIsSorted() {
+        let format = FloatingPointFormatStyle<Double>.Percent.percent.precision(.fractionLength(0)).locale(Locale(identifier: "en_US"))
+        func shown(_ fully: Int, of total: Int) -> String {
+            var p = OrganizationStatusResolver.Progress()
+            p.fully = fully
+            p.total = total
+            return OrganizationStatusResolver.Progress.shownShare(p.fullyShare).formatted(format)
+        }
+        #expect(shown(199, of: 200) == "99%")
+        #expect(shown(1_999, of: 2_000) == "99%")
+        #expect(shown(99_999, of: 100_000) == "99%")
+        #expect(shown(200, of: 200) == "100%")
+        #expect(shown(1, of: 3) == "33%")
+        #expect(shown(0, of: 0) == "0%")
+        for total in 1...400 {
+            for fully in 0..<total {
+                #expect(OrganizationStatusResolver.Progress.shownShare(Double(fully) / Double(total)) < 1, "\(fully) von \(total)")
+            }
+        }
+    }
+
     // MARK: - Many small libraries
 
     static let areas: [OrganizationArea] = [.places, .trips, .screenshots, .chronology, .imageCategories]

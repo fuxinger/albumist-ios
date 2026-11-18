@@ -134,6 +134,45 @@ struct RingAndListTests {
         #expect(allLists[.unorganized].count == all.progress.total - all.progress.fully)
     }
 
+    /// The year changed in the settings or on the overview: a recount over the photos already
+    /// analysed (`AppModel.changeScope` asks for one at once, before the run for the new part
+    /// begins) gives a ring that agrees with the lists made for the new part.
+    @Test func ringAndListsAgreeRightAfterTheYearChanges() async throws {
+        let w = try await world(withTuscany: true)
+        for scope in [OrganizationScope.year(2026), .year(2025), .all] {
+            let d = try await w.derived(scope: scope)
+            let lists = try await lists(w, d, scope: scope)
+            #expect(lists[.organized].count == d.progress.fully, "\(scope): Sortiert \(lists[.organized].count), Ring \(Self.line(d.progress))")
+            #expect(lists[.unorganized].count == d.progress.total - d.progress.fully, "\(scope)")
+        }
+        // Photos of 2026 are in neither list of the ring of 2025.
+        let ring2025 = try await w.derived(scope: .year(2025))
+        let lists2025 = try await lists(w, ring2025, scope: .year(2025))
+        let of2026 = Set(w.rome + w.basel + w.home)
+        #expect(Set(lists2025[.organized].map(\.id) + lists2025[.unorganized].map(\.id)).isDisjoint(with: of2026))
+    }
+
+    /// The search "nicht sortiert" finds exactly the photos of the list "Nicht sortiert":
+    /// partly sorted, unsorted and not yet analysed photos the ring counts, in the chosen part
+    /// of the library, ignored ones not.
+    @Test func searchNotSortedFindsTheListsPhotos() async throws {
+        let w = try await world(withTuscany: true)
+        try await w.ignore([w.basel[0], w.home[0]])
+        let facts = try await w.pipeline.currentFacts()
+        let index = SearchIndex(facts: facts, inventory: try await w.store.loadInventory(), calendar: Fixture.calendar)
+        let resolver = OrganizationStatusResolver(primaryAreas: w.settings.primaryAreas)
+        for scope in [OrganizationScope.all, .year(2026), .year(2025)] {
+            let d = try await w.derived(scope: scope)
+            let lists = try await lists(w, d, scope: scope)
+            let statuses = LibraryStatus.searchStatuses(facts: facts, states: d.states, resolver: resolver, scope: scope,
+                                                        calendar: Fixture.calendar)
+            for query in ["nicht sortiert", "unsorted"] {
+                let hits = index.search(query, now: Self.today, statuses: statuses).ids
+                #expect(Set(hits) == Set(lists[.unorganized].map(\.id)), "\(scope) \(query): \(hits.count) hits, list \(lists[.unorganized].count)")
+            }
+        }
+    }
+
     /// "Ignorieren", then "Widerrufen" or "Nicht mehr ignorieren", shown at once
     /// (`IgnoreChange`): the ring that follows from what is shown and the lists are those of the
     /// recount, and back where they were once the photos are no longer ignored.

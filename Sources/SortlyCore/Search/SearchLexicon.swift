@@ -126,7 +126,7 @@ struct SearchLexicon: Sendable {
               "without location|no location|without gps|no gps|unlocated|not geotagged|without place", .hasLocation(false), kind: .location, dimension: "location", importance: 6)
         media("mit Standort", "with location", "mit ort|mit standort|mit gps|mit position|mit geodaten", "with location|with gps|geotagged", .hasLocation(true), kind: .location, dimension: "location", importance: 6)
         media("nicht sortiert", "not sorted", "nicht sortiert|unsortiert|nicht organisiert|unorganisiert|noch nicht sortiert|noch nicht organisiert|ungeordnet|nicht einsortiert",
-              "unsorted|not sorted|unorganized|not organized|unorganised|not organised", .status([.unorganized, .partiallyOrganized]), kind: .status, dimension: "status", importance: 6)
+              "unsorted|not sorted|unorganized|not organized|unorganised|not organised", .status([.unorganized, .partiallyOrganized, .pending]), kind: .status, dimension: "status", importance: 6)
         media("mit Bestellnummer", "with order number", "bestellnummer|bestellnummern|bestellnr|auftragsnummer", "order number|order numbers|order no", .orderNumber, kind: .field, importance: 4)
         media("mit Rechnungsnummer", "with invoice number", "rechnungsnummer|rechnungsnummern|rechnungsnr", "invoice number|invoice numbers|invoice no", .invoiceNumber, kind: .field, importance: 4)
 

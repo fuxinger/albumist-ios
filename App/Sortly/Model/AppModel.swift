@@ -892,6 +892,10 @@ final class AppModel {
     func changeScope(_ scope: OrganizationScope) {
         guard scope != analysisScope else { return }
         analysisScope = scope
+        // The ring counts the new part at once, over what is analysed already, like the lists
+        // (`analysisScope` makes them anew): "Sortiert" and "x von y" agree right away, not only
+        // once the run for the new part has ended (second review 18.11.).
+        Task { await refreshDerived() }
         Task {
             // Stored first: whichever run starts next (this one, a catch-up, the next launch)
             // works on the new part, also if another run slips in before ours.
@@ -3265,9 +3269,17 @@ final class AppModel {
         // Reading the query compares unknown words with every word on screenshots (typos);
         // off the main thread, so typing stays smooth in a large library.
         let parsed = await Task.detached(priority: .userInitiated) { index.parse(query) }.value
-        // The organization state of every photo only when the query asks for it ("nicht sortiert").
-        let statuses = parsed.usesStatus ? states.mapValues { resolver.overall($0) } : [:]
-        return await Task.detached(priority: .userInitiated) { SearchEngine().run(parsed, in: index, statuses: statuses) }.value
+        // The organization state of every photo only when the query asks for it ("nicht sortiert"),
+        // by the ring's rule over the chosen part of the library: the search finds exactly the
+        // photos of the list "Nicht sortiert" (`LibraryStatus.searchStatuses`, Fuchs 18.11.).
+        let wantsStatus = parsed.usesStatus
+        let facts = wantsStatus ? self.facts : [], states = wantsStatus ? self.states : [:]
+        let resolver = self.resolver, scope = analysisScope
+        return await Task.detached(priority: .userInitiated) {
+            let statuses = wantsStatus
+                ? LibraryStatus.searchStatuses(facts: facts, states: states, resolver: resolver, scope: scope) : [:]
+            return SearchEngine().run(parsed, in: index, statuses: statuses)
+        }.value
     }
 
     /// Completions for the word being typed, from the user's own places, topics and albums.

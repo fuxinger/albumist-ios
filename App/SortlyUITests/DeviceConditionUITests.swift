@@ -179,20 +179,6 @@ final class DeviceConditionUITests: XCTestCase {
         return nil
     }
 
-    private var everyPhotoAnalysed: Bool {
-        guard let counts = analysedPhotos() else { return false }
-        return counts.total > 0 && counts.analysed == counts.total
-    }
-
-    /// The headline says every photo is analysed, read until it does for up to 15 s: a snapshot
-    /// taken while the finished card replaces the running one reads nothing, and device test 03
-    /// failed on that although its screenshot a moment later showed "Alle 246 Fotos analysiert"
-    /// (UI run 44091312348). A count that stays short still fails, with what was read.
-    private func expectEveryPhotoAnalysed(_ context: String) {
-        let complete = waitStable("every photo analysed \(context)", timeout: 15, stableChecks: 1) { everyPhotoAnalysed }
-        XCTAssertTrue(complete, "Not every photo was analysed \(context): \(analysedPhotos().map { "\($0.analysed) of \($0.total)" } ?? "no count readable")")
-    }
-
     /// Every label inside `element`, read from one snapshot.
     private func allLabels(_ element: XCUIElement) -> String {
         guard let snapshot = try? element.snapshot() else { return "" }
@@ -222,6 +208,30 @@ final class DeviceConditionUITests: XCTestCase {
             XCTAssertFalse(back, "The analysis went back at \(moment): \(last) -> \(count)")
         }
         seen.append(count)
+    }
+
+    /// The analysis visibly goes on: within `timeout` its count moves past where it stood at
+    /// the call (or it is done), the count never goes back (`record`), and nothing waits for a
+    /// tap. That such a run then ends with every photo is the pipeline's work, checked in the
+    /// fast tests (`DeviceConditionRunTests`); waiting for the whole demo library here took 2 to
+    /// 3 min per test (docs/TEST_PLAN.md, "UI-Tests: Dauer und Verlagerung").
+    /// `dismissing`: notices on the way are closed (the full disk of test06).
+    @discardableResult
+    private func expectAnalysisGoesOn(_ context: String, timeout: TimeInterval = 120, dismissing: Bool = false) -> Bool {
+        let from = analysisCount()
+        record("\(context), before")
+        let moved = waitStable("analysis goes on \(context)", timeout: timeout, stableChecks: 1) {
+            if dismissing, app.alerts.firstMatch.exists { dismissNotices() }
+            if analysisIdle { return true }
+            guard let now = analysisCount() else { return false }
+            guard let from else { return analysisRunning }
+            return now.step > from.step || (now.step == from.step && now.done > from.done)
+        }
+        record(context)
+        print(moved ? "UI_STEP_OK analysis goes on \(context)" : "UI_STEP_MISSING analysis goes on \(context)")
+        XCTAssertTrue(moved, "The analysis did not go on \(context)")
+        XCTAssertFalse(app.buttons["Fortsetzen"].exists, "The analysis waits for a tap \(context)")
+        return moved
     }
 
     /// Waits until the image step (4) runs, where most of the time goes.
@@ -669,10 +679,9 @@ final class DeviceConditionUITests: XCTestCase {
             print(cooled ? "UI_STEP_OK goes on after cooling down" : "UI_STEP_MISSING goes on after cooling down")
             XCTAssertTrue(cooled, "The analysis kept waiting after the iPhone cooled down")
         }
-        let finished = waitStable("analysis finished after heat", timeout: 900) { analysisIdle }
-        XCTAssertTrue(finished, "The analysis did not finish after the heat")
-        print("UI_FACT after heat \(String(describing: analysedPhotos()))")
-        expectEveryPhotoAnalysed("after the heat")
+        // It goes on by itself: the count moves. That the run then ends with every photo is
+        // DeviceConditionRunTests.heatScriptOfTheUITestEndsWithEveryPhoto (same script).
+        expectAnalysisGoesOn("after the heat")
         XCTAssertFalse(anything("Analyse pausiert").exists, "The analysis stopped for heat")
         shot("02-after-heat")
     }
@@ -693,15 +702,26 @@ final class DeviceConditionUITests: XCTestCase {
             XCTAssertFalse((progressText() ?? "").contains("abkühlt"), "Low battery was worded as heat")
             XCTAssertTrue(analysisRunning, "Low battery ended the analysis")
         }
+        let charged = waitGone(battery, timeout: 120)
+        print(charged ? "UI_STEP_OK goes on after charging" : "UI_STEP_MISSING goes on after charging")
+        XCTAssertTrue(charged, "The analysis kept waiting for the charger")
+        // Then Low Power Mode for the rest of the run: the count moves on by 20 photos (about
+        // 12 s) and the card never says "pausiert" meanwhile. That the run ends with every
+        // photo is DeviceConditionRunTests.lowBatteryThenLowPowerModeEndsWithEveryPhoto.
         var pausedForLowPower = false
-        let finished = waitStable("analysis finished in Low Power Mode", timeout: 900) {
+        let from = analysisCount()
+        let goesOn = waitStable("analysis goes on in Low Power Mode", timeout: 150, stableChecks: 1) {
             if text("Pausiert im Stromsparmodus").exists || (progressText() ?? "").contains("pausiert") { pausedForLowPower = true }
-            return analysisIdle
+            if analysisIdle { return true }
+            guard let now = analysisCount() else { return false }
+            guard let from else { return analysisRunning }
+            return now.step > from.step || now.done >= from.done + 20
         }
-        XCTAssertTrue(finished, "The analysis did not finish in Low Power Mode")
+        record("in Low Power Mode")
+        print(goesOn ? "UI_STEP_OK analysis goes on in Low Power Mode" : "UI_STEP_MISSING analysis goes on in Low Power Mode")
+        XCTAssertTrue(goesOn, "The analysis did not go on in Low Power Mode")
         XCTAssertFalse(pausedForLowPower, "Low Power Mode paused the analysis in the app")
         XCTAssertFalse(app.buttons["Fortsetzen"].exists, "The analysis waits for a tap after low battery")
-        expectEveryPhotoAnalysed("after low battery")
         shot("04-after-battery")
     }
 
@@ -709,7 +729,8 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// The worst case of background time: iOS ends the run while the app is away. Coming back
     /// goes on without a tap. Then the app is ended during the analysis (A4) and started again:
-    /// it goes on by itself, its count never goes down, and every photo ends up analysed.
+    /// it goes on by itself and its count never goes down (that every photo ends up analysed:
+    /// DeviceConditionRunTests, a fast test).
     func test03_BackgroundExpiryAndRelaunchContinue() {
         continueAfterFailure = true
         prepare()
@@ -747,16 +768,15 @@ final class DeviceConditionUITests: XCTestCase {
         shot("06-after-relaunch")
         _ = waitStable("count after relaunch", timeout: 120, stableChecks: 1) { analysisCount() != nil || analysisIdle }
         record("after relaunch")
-        var checks = 0
-        while !analysisIdle && checks < 200 {
-            sleep(3)
-            if checks % 4 == 0 { record("after relaunch, running") }
-            checks += 1
+        // It goes on from there and its count never goes back: it moves, then two more
+        // readings while it runs. That it ends with every photo, none looked at twice, is
+        // DeviceConditionRunTests.backgroundTimeOverThenRelaunchEndsWithEveryPhoto.
+        expectAnalysisGoesOn("after the relaunch")
+        for _ in 0..<2 where !analysisIdle {
+            sleep(6)
+            record("after relaunch, running")
         }
-        let finished = waitStable("analysis finished after relaunch", timeout: 120) { analysisIdle }
-        XCTAssertTrue(finished, "The analysis did not finish after the app was opened again")
-        expectEveryPhotoAnalysed("after the relaunch")
-        shot("07-done-after-relaunch")
+        shot("07-running-after-relaunch")
     }
 
     // MARK: 4 Unreadable, iCloud only, offline
@@ -818,36 +838,47 @@ final class DeviceConditionUITests: XCTestCase {
 
     // MARK: 5 Undo when Photos does not delete
 
-    /// Undo asks iOS before albums are deleted. First the real question is answered with
-    /// "Nicht erlauben" (C4); then the two failures of the first iPhone are played by the
-    /// switch: declined, and Photos reporting success while deleting nothing. Each time the
-    /// receipt says what is left and why, and "Rest rückgängig machen" takes back everything.
+    /// Undo asks iOS before albums are deleted. The real question is answered with "Nicht
+    /// erlauben" (C4): the receipt says what is left and why, and "Rest rückgängig machen"
+    /// takes back everything. Only when iOS does not ask (some simulator runs) the same path
+    /// runs once more with the switch that plays the declined question, so the partial receipt
+    /// and "Rest rückgängig machen" are walked in every run.
+    /// The two failures of the first iPhone as such (declined, and Photos reporting success
+    /// while deleting nothing) each walked this same path with only another sentence; they are
+    /// fast tests now: PlanningExecutionTests.undoThatPhotosDidNotCarryOutSaysWhyAndCanBeRepeated
+    /// (both faults: the reason, nothing counted as removed, the second attempt takes back
+    /// everything) and SortlyTests StepProblemTextTests (the sentence the receipt shows for each).
     func test05_UndoWhenDeletionIsDeclinedOrIgnored() {
         continueAfterFailure = true
         prepare()
-        undo(fault: nil, title: "Testalbum Frage", reason: "Löschen in der Frage von iOS nicht erlaubt")
-        undo(fault: "declined", title: "Testalbum Abgelehnt", reason: "Löschen in der Frage von iOS nicht erlaubt")
-        undo(fault: "ignored", title: "Testalbum Ignoriert", reason: "Löschen nicht ausgeführt")
+        let asked = undo(fault: nil, title: "Testalbum Frage", reason: "Löschen in der Frage von iOS nicht erlaubt")
+        if !asked {
+            undo(fault: "declined", title: "Testalbum Abgelehnt", reason: "Löschen in der Frage von iOS nicht erlaubt")
+        }
     }
 
-    private func undo(fault: String?, title: String, reason: String) {
+    /// One album made and undone with the deletion declined or not carried out. False only when
+    /// the real question was meant (`fault` nil) and iOS did not ask: then nothing was left over
+    /// and the partial receipt was not seen.
+    @discardableResult
+    private func undo(fault: String?, title: String, reason: String) -> Bool {
         start(fault.map { ["-SortlyUITestDeletionFault", $0] } ?? [])
-        guard applyManualPlan(title), tap(app.buttons["result.receipt"], "receipt of \(title)") else { return }
+        guard applyManualPlan(title), tap(app.buttons["result.receipt"], "receipt of \(title)") else { return true }
         sleep(2)
         let undo = app.buttons["receipt.undo"]
         var swipes = 0
         while !(undo.exists && undo.isHittable) && swipes < 6 { app.swipeUp(); swipes += 1 }
-        guard tap(undo, "undo \(title)"), confirm("Rückgängig machen", "confirm undo of \(title)") else { return }
+        guard tap(undo, "undo \(title)"), confirm("Rückgängig machen", "confirm undo of \(title)") else { return true }
         let partial = anything("Nicht alles ließ sich zurücknehmen")
         let removed = anything("Entfernte Alben und Ordner")
         if fault == nil {
             let asked = answerDeleteQuestion(allow: false, timeout: 30) { partial.exists || removed.exists }
             guard asked else {
-                // Some simulator runs never ask (run 43739129373); the switch parts still cover it.
-                print("UI_FACT iOS did not ask before deleting \(title); real \"Nicht erlauben\" not tapped in this run")
+                // Some simulator runs never ask (run 43739129373); the switch then plays it.
+                print("UI_FACT iOS did not ask before deleting \(title); real \"Nicht erlauben\" not tapped in this run, the switch plays it")
                 let complete = removed.waitForExistence(timeout: 60)
                 XCTAssertTrue(complete, "Undo of \(title) did not finish")
-                return
+                return false
             }
         }
         let leftOver = partial.waitForExistence(timeout: 60)
@@ -862,7 +893,7 @@ final class DeviceConditionUITests: XCTestCase {
         let rest = app.buttons["receipt.undoRest"]
         swipes = 0
         while !(rest.exists && rest.isHittable) && swipes < 4 { app.swipeUp(); swipes += 1 }
-        guard tap(rest, "undo the rest of \(title)"), confirm("Rückgängig machen", "confirm undo of the rest of \(title)") else { return }
+        guard tap(rest, "undo the rest of \(title)"), confirm("Rückgängig machen", "confirm undo of the rest of \(title)") else { return true }
         let asked = answerDeleteQuestion(allow: true, timeout: 30) { removed.exists && !partial.exists }
         print("UI_FACT second attempt asked by iOS: \(asked)")
         let complete = waitStable("rest of \(title) taken back", timeout: 60, stableChecks: 2) { removed.exists && !partial.exists }
@@ -870,6 +901,7 @@ final class DeviceConditionUITests: XCTestCase {
         shot("undo-complete-\(fault ?? "real")")
         print(complete ? "UI_STEP_OK second attempt took back everything (\(fault ?? "real question"))" : "UI_STEP_MISSING second attempt took back everything (\(fault ?? "real question"))")
         XCTAssertTrue(complete, "The second attempt did not take back everything (\(fault ?? "real question"))")
+        return true
     }
 
     // MARK: 6 Full disk
@@ -890,15 +922,13 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertTrue(told && text.contains("Speicher deines iPhone ist voll"), "A full disk during the analysis was not explained: \(text)")
         dismissNotices()
         XCTAssertEqual(app.state, .runningForeground, "The app ended with a full disk")
-        // Space is freed in the Settings app; back in Albumist the analysis goes on by itself.
+        // Space is freed in the Settings app; back in Albumist the analysis goes on by itself
+        // (its count moves). That it then ends with every photo is
+        // DeviceConditionRunTests.fullDiskDuringTheAnalysisThenSpaceAgainEndsWithEveryPhoto.
         XCUIDevice.shared.press(.home)
         sleep(4)
         app.activate()
-        let finished = waitStable("analysis finished after the disk had space again", timeout: 900) {
-            if app.alerts.firstMatch.exists { dismissNotices() }
-            return analysisIdle && everyPhotoAnalysed
-        }
-        XCTAssertTrue(finished, "The analysis did not go on after the disk had space again")
+        expectAnalysisGoesOn("after the disk had space again", dismissing: true)
         shot("11-after-disk-full-analysis")
 
         start(["-SortlyUITestDiskFull", "plan"])
@@ -1098,9 +1128,9 @@ final class DeviceConditionUITests: XCTestCase {
         start(["-SortlyUITestSlowAnalysis", "-SortlyUITestLaunchAnalysis"])
         _ = waitStable("count after access came back", timeout: 120, stableChecks: 1) { analysisCount() != nil || analysisIdle }
         record("after access came back")
-        let finished = waitStable("analysis finished after access came back", timeout: 900) { analysisIdle }
-        XCTAssertTrue(finished, "The analysis did not finish after access came back")
-        expectEveryPhotoAnalysed("after access came back")
+        // It goes on with access (its count moves, never back). That it ends with every photo,
+        // none looked at twice, is DeviceConditionRunTests.accessTakenAwayThenBackEndsWithEveryPhoto.
+        expectAnalysisGoesOn("after access came back")
         shot("20-access-back")
     }
 

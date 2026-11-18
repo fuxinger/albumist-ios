@@ -385,19 +385,19 @@ extension ProposalDecision {
         return result
     }
 
-    /// The suggestions whose accepted decision adds photos to the album recorded for their ID
-    /// (`assignments`) while that album was made for other photos (`AlbumMatcher.isStillAlbum`):
+    /// The suggestions whose accepted decision adds photos to an album recorded for their ID
+    /// (`recorded`, from the managed-album records) while that album was made for other photos (`AlbumMatcher.isStillAlbum`):
     /// the ID went to another place (a frequent place that is gone leaves its ID to a new one in
     /// its cell). They go back to open after each analysis, so "ergänzen" never runs on photos
     /// the user did not choose it for. An album the user picked for a suggestion is not recorded
     /// for it and stays chosen; `protected` as in `uncertainExtensions`.
     public static func extensionsOfOtherPhotos(_ decisions: [SortlyID: ProposalDecision], proposals: [AlbumProposal],
-                                               inventory: CollectionInventory, assignments: [SortlyID: CollectionID],
+                                               inventory: CollectionInventory, recorded: [SortlyID: Set<CollectionID>],
                                                overrides: OverrideSet, protected: Set<SortlyID> = []) -> Set<SortlyID> {
         var result = Set<SortlyID>()
         for proposal in proposals where !protected.contains(proposal.id) {
             guard let decision = decisions[proposal.id], decision.isAccepted, let album = decision.extendedAlbum,
-                  assignments[proposal.id] == album, let members = inventory[album]?.assetIDs else { continue }
+                  recorded[proposal.id]?.contains(album) == true, let members = inventory[album]?.assetIDs else { continue }
             let shared = members.isDisjoint(with: proposal.assetIDs) ? 0 : 1
             if !AlbumMatcher.isStillAlbum(album, of: proposal, shared: shared, inventory: inventory, overrides: overrides) {
                 result.insert(proposal.id)

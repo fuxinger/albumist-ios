@@ -1615,7 +1615,8 @@ public actor AnalysisPipeline {
             }
         }
         let tripSets = trips.map { Set($0.allAssetIDs) }
-        let found = suggestions, assignments = Self.assignments(try await store.managedAlbums()), albums = inventory
+        let found = suggestions, albums = inventory
+        let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albums)
         var matches = await offActor {
             Self.match(found.open, dismissed: found.dismissed, against: albums, overrides: overrides, assignments: assignments, trips: tripSets)
         }
@@ -1623,7 +1624,7 @@ public actor AnalysisPipeline {
             // A plan was applied while this ran: match against the albums as they are now, or
             // the suggestions would offer albums that were just created.
             let albumsNow = try await store.loadInventory(), overridesNow = OverrideSet(try await store.overrides())
-            let assignmentsNow = Self.assignments(try await store.managedAlbums())
+            let assignmentsNow = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albumsNow)
             matches = await offActor {
                 Self.match(found.open, dismissed: found.dismissed, against: albumsNow, overrides: overridesNow, assignments: assignmentsNow,
                            trips: tripSets)
@@ -1866,9 +1867,32 @@ public actor AnalysisPipeline {
         }
     }
 
-    /// Suggestion → the album it was applied to, from the managed-album records.
-    static func assignments(_ states: [ManagedAlbumState]) -> [SortlyID: CollectionID] {
-        Dictionary(states.flatMap { state in state.allSourceIDs.map { ($0, state.albumID) } }, uniquingKeysWith: { first, _ in first })
+    /// Suggestion → the album it was applied to, from the managed-album records. Two albums
+    /// can be recorded for one ID (the album of a place that had the ID before, and the one made
+    /// for the place that has it now, second review of the place IDs 18.11.): the one sharing
+    /// the most photos with the suggestion (`proposals`; its photos as in `inventory`, else as
+    /// last recorded) is its album; with none shared, the first record, as before.
+    static func assignments(_ states: [ManagedAlbumState], proposals: [AlbumProposal] = [],
+                            inventory: CollectionInventory? = nil) -> [SortlyID: CollectionID] {
+        let recorded = recordedAlbums(states)
+        var result = Dictionary(states.flatMap { state in state.allSourceIDs.map { ($0, state.albumID) } }, uniquingKeysWith: { first, _ in first })
+        let members = Dictionary(states.map { ($0.albumID, $0.lastKnownMembers) }, uniquingKeysWith: { first, _ in first })
+        for proposal in proposals {
+            guard let albums = recorded[proposal.id], albums.count > 1, let first = result[proposal.id] else { continue }
+            func shared(_ album: CollectionID) -> Int {
+                (inventory?[album]?.assetIDs ?? members[album] ?? []).intersection(proposal.assetIDs).count
+            }
+            let best = albums.sorted { $0.rawValue < $1.rawValue }.max { shared($0) < shared($1) }
+            if let best, shared(best) > shared(first) { result[proposal.id] = best }
+        }
+        return result
+    }
+
+    /// Suggestion → every album recorded for it.
+    static func recordedAlbums(_ states: [ManagedAlbumState]) -> [SortlyID: Set<CollectionID>] {
+        states.reduce(into: [:]) { result, state in
+            for id in state.allSourceIDs { result[id, default: []].insert(state.albumID) }
+        }
     }
 
     public func latestProposals() async throws -> ProposalSnapshot? {
@@ -1898,7 +1922,8 @@ public actor AnalysisPipeline {
         let inventory = try await store.loadInventory()
         let overrides = OverrideSet(try await store.overrides())
         let trips = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map { Set($0.allAssetIDs) }
-        let assignments = Self.assignments(try await store.managedAlbums()), found = snapshot
+        let found = snapshot
+        let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.proposals + found.dismissed, inventory: inventory)
         snapshot.matches = await offActor {
             Self.match(found.proposals, dismissed: found.dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
         }
@@ -1951,9 +1976,11 @@ public actor AnalysisPipeline {
             snapshot = rematched
         }
         var decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
-        let assignments = Self.assignments(try await store.managedAlbums())
+        let recorded = Self.recordedAlbums(try await store.managedAlbums())
         // Most refreshes have no "ergänzen" into an album recorded for the same suggestion.
-        let ownAlbum = decisions.contains { id, decision in decision.isAccepted && decision.extendedAlbum.map { assignments[id] == $0 } == true }
+        let ownAlbum = decisions.contains { id, decision in
+            decision.isAccepted && decision.extendedAlbum.map { recorded[id]?.contains($0) == true } == true
+        }
         guard outdated || ownAlbum else { return MatchRefresh(snapshot: snapshot) }
         let started = Set(try await store.unfinishedPlans().flatMap { $0.steps.compactMap(\.sourceID) })
         let suggested = snapshot.proposals + snapshot.dismissed
@@ -1961,7 +1988,7 @@ public actor AnalysisPipeline {
                                                                        protected: started) : []
         if ownAlbum {
             reopened.formUnion(ProposalDecision.extensionsOfOtherPhotos(
-                decisions, proposals: suggested, inventory: try await store.loadInventory(), assignments: assignments,
+                decisions, proposals: suggested, inventory: try await store.loadInventory(), recorded: recorded,
                 overrides: OverrideSet(try await store.overrides()), protected: started))
         }
         guard outdated || !reopened.isEmpty else { return MatchRefresh(snapshot: snapshot) }

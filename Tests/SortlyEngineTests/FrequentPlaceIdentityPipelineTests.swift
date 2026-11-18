@@ -151,4 +151,25 @@ struct FrequentPlaceIdentityPipelineTests {
         #expect(proposals.contains { $0.id == place.id })
         #expect(!proposals.contains { $0.id == RecurringPlaces.proposalID(for: entry.id) })
     }
+
+    /// Second review: two albums are recorded for one suggestion ID (the album of a place that
+    /// had the ID before, and the album made for the place that has it now). The album that
+    /// shares photos with the suggestion is its album, whichever record comes first.
+    @Test func theRecordedAlbumSharingPhotosIsTheSuggestionsAlbum() {
+        let id = SortlyID("frequent-x")
+        let place = AlbumProposal(id: id, kind: .frequentPlace, title: "Garten", folderPath: ["Orte"],
+                                  assetIDs: Set((0..<10).map { AssetID("new-\($0)") }))
+        func state(_ album: CollectionID, _ prefix: String) -> ManagedAlbumState {
+            let members = Set((0..<10).map { AssetID("\(prefix)-\($0)") })
+            return ManagedAlbumState(albumID: album, sourceID: id, lastKnownTitle: album.rawValue, lastKnownParentID: nil,
+                                     lastKnownMembers: members, addedBySortly: members, createdBySortly: true)
+        }
+        let old = state("a-old", "old"), new = state("a-new", "new")
+        let inventory = CollectionInventory([CollectionSnapshot(id: "a-old", title: "Haus", assetIDs: old.lastKnownMembers),
+                                             CollectionSnapshot(id: "a-new", title: "Garten", assetIDs: new.lastKnownMembers)])
+        #expect(AnalysisPipeline.assignments([old, new], proposals: [place], inventory: inventory)[id] == "a-new")
+        #expect(AnalysisPipeline.assignments([new, old], proposals: [place], inventory: inventory)[id] == "a-new")
+        // Without the suggestion (or sharing none): the first record, as before.
+        #expect(AnalysisPipeline.assignments([old, new])[id] == "a-old")
+    }
 }

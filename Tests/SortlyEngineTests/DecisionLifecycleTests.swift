@@ -392,9 +392,15 @@ struct DecisionLifecycleTests {
         #expect(ps.count >= 2)
         let decisions: [SortlyID: ProposalDecision] = [ps[0].id: .extendExisting("sommer-rom"), ps[1].id: .extendExisting("sommer-rom")]
         try await w.store.setValue(decisions, forKey: AnalysisPipeline.Key.decisions)
-        try await w.store.saveManagedAlbums([ManagedAlbumState(
-            albumID: "sommer-rom", sourceID: ps[0].id, lastKnownTitle: "Sommer in Rom", lastKnownParentID: nil,
-            lastKnownMembers: Set(w.rome.prefix(20)), addedBySortly: Set(w.rome.prefix(20)), createdBySortly: true)])
+        // Recorded for the ID too: the album made for the photos it has now.
+        let own = Set(ps[0].assetIDs.prefix(3))
+        let inventory = try await w.store.loadInventory()
+        try await w.store.saveInventory(CollectionInventory(inventory.albums + [CollectionSnapshot(id: "a-now", title: ps[0].title, assetIDs: own)]))
+        try await w.store.saveManagedAlbums([
+            ManagedAlbumState(albumID: "sommer-rom", sourceID: ps[0].id, lastKnownTitle: "Sommer in Rom", lastKnownParentID: nil,
+                              lastKnownMembers: Set(w.rome.prefix(20)), addedBySortly: Set(w.rome.prefix(20)), createdBySortly: true),
+            ManagedAlbumState(albumID: "a-now", sourceID: ps[0].id, lastKnownTitle: ps[0].title, lastKnownParentID: nil,
+                              lastKnownMembers: own, addedBySortly: own, createdBySortly: true)])
         #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened == [ps[0].id])
         #expect(try await w.store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions)
                 == [ps[1].id: .extendExisting("sommer-rom")])

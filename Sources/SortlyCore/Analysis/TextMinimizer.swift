@@ -6,11 +6,7 @@ import Foundation
 /// - IBANs and valid card numbers are masked in every other text.
 public enum TextMinimizer {
     public static func sensitivity(of rawText: String) -> DocumentSensitivity {
-        let text = rawText.lowercased()
-        var level = DocumentSensitivity.normal
-        for (candidate, words) in DocumentAnalyzer.sensitivityKeywords where words.contains(where: { text.contains($0) }) {
-            level = max(level, candidate)
-        }
+        var level = DocumentAnalyzer.keywordSensitivity(rawText)
         // The back of an ID card or a passport page names no document, but carries the
         // machine-readable zone (review P2-04).
         if level < .identity, DocumentAnalyzer.hasMachineReadableZone(rawText) { level = .identity }
@@ -40,8 +36,9 @@ public enum TextMinimizer {
     /// 3: dots, hyphens, slashes and wide spaces between groups, the back of an ID card
     /// (review P2-04, 18.11.2026). 4: a space or underscore after the country code, underscores
     /// between groups, the checksum for IBANs in an unusual form, card groups of four around a
-    /// slash (second review of P2-04).
-    public static let maskVersion = 4
+    /// slash (second review of P2-04). 5: medical letters in English and more medical words
+    /// (review G2-03, 18.11.2026): their stored text and subject are removed.
+    public static let maskVersion = 5
 
     /// IBAN shape in any letter case. Between groups: up to four spaces of any kind, a line
     /// break (OCR splits long lines), nothing, or one dot, hyphen, slash or underscore with a

@@ -22,6 +22,8 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | ✅ | Ausgeblendete Fotos in Alben mitzählen, damit Rückgängig nichts Fremdes löscht. | S | E1 Technik |
 | ✅ | Beschädigte Datenbank: „Neu aufbauen“-Knopf statt Sackgasse. | S | E1 Technik |
 | ✅ | StoreKit: nicht geprüfte Käufe sauber abschließen und Fehlermeldung zeigen; wartende Käufe (Familienfreigabe) erklären. | S | E1 Technik |
+| ✅ | Englische Arztbriefe gelten als medizinisch (kein Text, kein Betreff gespeichert): „Diagnosis“, „Medication“, Entlass-, Krank- und Laborberichte, ICD-Codes; deutsch zusätzlich Entlassbrief, Anamnese, Medikation, Krankschreibung. Altbestand einmal bereinigt (Masken-Version 5). | S | Prüfungen 18.11. (G2-03, Nebenbefund) |
+| 💡 | Medizinische Briefe ohne Schlüsselwort (z. B. „Betreff: Depression, stationäre Behandlung“, Klinikbrief nur mit Therapie und Medikamentnamen) erkennen, ohne Schilder, Karten und Anleitungen mitzunehmen: etwa „Brief“ plus Klinik/Krankenhaus/Hospital plus Behandlung/Therapie/Treatment zusammen. Braucht eine Entscheidung, wie viel Fehlalarm (nicht suchbarer Text) in Ordnung ist. | M | Prüfungen 18.11. (Fable blind, Befund 7) |
 
 ## Aus den Testläufen (T)
 

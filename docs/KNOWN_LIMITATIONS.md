@@ -77,6 +77,13 @@
   („4111/1111/…“), damit Telefonnummern wie „04321/12345678“ bleiben; eine Amex-Nummer mit
   Schrägstrichen (4-6-5) bleibt lesbar. Andere Schreibweisen (Buchstaben zwischen den Gruppen,
   stark verlesene Ziffern) können lesbar bleiben.
+- Medizinische Dokumente erkennt Albumist an Wörtern auf Deutsch und Englisch (den Sprachen der
+  Texterkennung), seit Masken-Version 5 (Nebenbefund G2-03, 18.11.) auch englische Arztbriefe
+  („Diagnosis“, „Discharge summary“, „Medication“, ICD-Codes). Ein Brief, der keines dieser
+  Wörter nennt (etwa „Betreff: Depression, stationäre Behandlung“), wird wie ein gewöhnlicher
+  Brief gespeichert (IBAN und Karten maskiert). Umgekehrt wird der Text einer Anleitung mit
+  „Fehlerdiagnose“/„Fault diagnosis“ oder eines Kochrezepts („Rezept“) nicht gespeichert und ist
+  nicht per Volltext suchbar.
 - Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
   der Gesundheitskarte. Der Text bleibt auf dem Gerät.
 

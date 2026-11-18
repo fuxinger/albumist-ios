@@ -386,6 +386,41 @@ struct AuditAnalysisTests {
         #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
     }
 
+    /// Review G2-03: an English medical letter counted as an ordinary letter, so its text and
+    /// subject were stored. Mask version 5 removes them once, without reading the photo again,
+    /// and marks the document as medical (the document proposals leave it out then).
+    @Test func englishMedicalLettersStoredByMaskVersionFourAreRemoved() async throws {
+        let (assets, ids) = screenshots(2)
+        let store = try SortlyStore(url: nil)
+        _ = try await store.upsertAssets(assets)
+        try await store.setValue(4, forKey: AnalysisPipeline.Key.textMaskVersion)
+        let medical = "Dear Mr Smith,\nSubject: Diagnosis of type 2 diabetes\nDiagnosis: type 2 diabetes mellitus. Medication: Metformin 500 mg.\nSincerely, Dr. Jones"
+        let ordinary = "Dear Anna,\nSubject: Garden party\nSee you on Friday!\nSincerely, Tom"
+        for (id, (text, subject)) in zip(ids, [(medical, "Diagnosis of type 2 diabetes"), (ordinary, "Garden party")]) {
+            var result = TextResult(text: TextAnalysis(text: text, source: .original))
+            result.document = try JSONDecoder().decode(DocumentInfo.self, from: Data(#"""
+                {"type":"letter","typeReliability":1,"subject":"\#(subject)","keywords":[],"sensitivity":"normal"}
+                """#.utf8))
+            try await store.saveResult(result, kind: "text", asset: id, version: AnalysisPipeline.textVersion)
+            try await store.indexText(text, for: id)
+        }
+        let analyzer = ScriptedAnalyzer()
+        _ = try await pipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: analyzer).run()
+        let letter = try await store.result(TextResult.self, kind: "text", asset: ids[0])
+        #expect(letter?.text?.text == "")
+        #expect(letter?.document?.subject == nil)
+        #expect(letter?.document?.sensitivity == .medical)
+        #expect(letter?.document?.type == .letter, "the facts stay")
+        #expect(try await store.searchText("diabetes").isEmpty)
+        let party = try await store.result(TextResult.self, kind: "text", asset: ids[1])
+        #expect(party?.text?.text == ordinary)
+        #expect(party?.document?.subject == "Garden party")
+        #expect(party?.document?.sensitivity == .normal)
+        #expect(try await store.searchText("Friday") == [ids[1]])
+        #expect(try await store.value(Int.self, forKey: AnalysisPipeline.Key.textMaskVersion) == TextMinimizer.maskVersion)
+        #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
+    }
+
     /// Geocoder that runs a hook before it answers (the user changes a setting meanwhile).
     final class HookedGeocoder: ReverseGeocoding, @unchecked Sendable {
         let inner = FakeGeocoder()

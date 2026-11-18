@@ -1416,9 +1416,13 @@ public actor AnalysisPipeline {
             // full, so it is cleared here even though there is no text to mask (second review).
             let sensitive = (result.document?.sensitivity ?? .normal) >= .identity || (!text.isEmpty && masked.isEmpty)
             let subject = sensitive ? nil : result.document?.subject.map(TextMinimizer.masked)
-            guard masked != text || subject != result.document?.subject else { continue }
+            // A document that newer words mark as sensitive (an English medical letter, review
+            // G2-03) is handled as such from now on, also by the document proposals.
+            let sensitivity = result.document.map { max($0.sensitivity, TextMinimizer.sensitivity(of: text)) }
+            guard masked != text || subject != result.document?.subject || sensitivity != result.document?.sensitivity else { continue }
             result.text?.text = masked
             result.document?.subject = subject
+            if let sensitivity { result.document?.sensitivity = sensitivity }
             // An outdated result keeps its old version, so it is still read again later.
             let version = current[asset] != nil ? Self.textVersion : 0
             try await store.saveResult(result, kind: "text", asset: asset, version: version)

@@ -68,7 +68,19 @@ public struct DocumentAnalyzer: Sendable {
         (.identity, ["personalausweis", "reisepass", "passport", "identity card", "führerschein", "driving licence", "aufenthaltstitel", "nationalität", "date of birth", "geburtsdatum",
                      // The back of an ID card names no document (review P2-04).
                      "augenfarbe", "eye colour", "eye color", "colour of eyes", "color of eyes", "ordensname", "künstlername"]),
-        (.medical, ["diagnose", "befund", "rezept", "arztbrief", "krankenkasse", "versichertennummer", "arbeitsunfähigkeit", "patient", "medikament", "prescription"]),
+        (.medical, ["diagnose", "befund", "rezept", "arztbrief", "krankenkasse", "versichertennummer", "arbeitsunfähigkeit", "patient", "medikament", "prescription",
+                    // English letters name the same things in other words: "diagnosis" holds no
+                    // "diagnose" (review G2-03, 18.11.2026). Phrases rather than "medical",
+                    // "hospital", "clinic" or "doctor" alone, which stand on signs, maps and
+                    // parking tickets too.
+                    "diagnosis", "medication", "medical report", "medical certificate", "medical record", "medical history",
+                    "medical findings", "discharge summary", "discharge letter", "discharge report", "doctor's letter",
+                    "doctor's note", "doctor's certificate", "sick note", "unfit for work", "incapacity for work",
+                    "lab report", "laboratory report", "laboratory results", "blood test", "pathology report", "radiology report",
+                    "health insurance card", "nhs number",
+                    // The same in German, and the ICD codes doctors put next to a diagnosis.
+                    "entlassbrief", "entlassungsbrief", "entlassungsbericht", "arztbericht", "anamnese", "medikation",
+                    "krankschreibung", "au-bescheinigung", "icd-10", "icd 10", "icd10", "icd-11", "icd 11", "icd11"]),
         (.financial, ["kontoauszug", "iban", "bic", "lohnabrechnung", "gehaltsabrechnung", "kreditkarte", "steuerbescheid", "kontostand", "bank statement", "salary"]),
     ]
 
@@ -96,10 +108,7 @@ public struct DocumentAnalyzer: Sendable {
         }
         let reliability: Reliability = best.value >= 3 ? .likely : (best.value == 2 ? .plausible : .uncertain)
 
-        var sensitivity = DocumentSensitivity.normal
-        for (level, words) in Self.sensitivityKeywords where words.contains(where: { text.contains($0) }) {
-            sensitivity = max(sensitivity, level)
-        }
+        var sensitivity = Self.keywordSensitivity(rawText)
         if Self.containsIBAN(rawText) { sensitivity = max(sensitivity, .financial) }
         if sensitivity < .identity, Self.hasMachineReadableZone(rawText) { sensitivity = .identity }
         // The subject line is stored with these facts: masked like the text, and not kept at all
@@ -118,6 +127,19 @@ public struct DocumentAnalyzer: Sendable {
             keywords: Self.typeKeywords.flatMap(\.1).filter { text.contains($0) }.prefix(8).map { $0 },
             sensitivity: sensitivity
         )
+    }
+
+    /// The level the words of `sensitivityKeywords` in `rawText` point to. Case does not count,
+    /// line breaks and runs of spaces count as one space (OCR splits "discharge summary" over
+    /// two lines), and a typographic apostrophe as a plain one ("doctor’s note").
+    static func keywordSensitivity(_ rawText: String) -> DocumentSensitivity {
+        let text = rawText.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
+            .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        var level = DocumentSensitivity.normal
+        for (candidate, words) in sensitivityKeywords where words.contains(where: { text.contains($0) }) {
+            level = max(level, candidate)
+        }
+        return level
     }
 
     // MARK: - Field extraction

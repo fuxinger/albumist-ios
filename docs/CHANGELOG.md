@@ -58,6 +58,12 @@
   „oder“ zwischen Grenzen. Orte behalten ihre ID beim Sprachwechsel und beim Neuaufbau;
   Jahreszeiten der Südhalbkugel; Schwärzen von IBAN, Karten und Ausweisen in mehr Schreibweisen;
   ein ganzer Tag zu Hause trennt eine Reise. Release-Tor: ein Grün nach Wiederholung zählt nie.
+- Prüfungen 18.11. (G2-03, Nebenbefund): Ein englischer Arztbrief galt nicht als medizinisch
+  („Diagnosis“ enthält „Diagnose“ nicht), sein Text und Betreff wurden gespeichert und waren
+  suchbar. Jetzt erkennt Albumist auch englische Arztbriefe, Entlassberichte, Krankmeldungen,
+  Laborberichte und ICD-Codes, auf Deutsch zusätzlich Entlassbrief, Anamnese, Medikation und
+  Krankschreibung; Wortgruppen auch über zwei Zeilen. Schon gespeicherte Texte solcher Briefe
+  werden einmal entfernt (Masken-Version 5), ohne die Fotos neu zu lesen.
 - Erster iPhone-Test (15.11.): Analyse endet nicht mehr bei Wärme, Stromsparmodus oder
   wenn iOS die Hintergrundzeit beendet, sondern wird langsamer, wartet oder geht beim Öffnen
   weiter; jeder lange Lauf fragt nach Hintergrundzeit (Sperrbildschirm); Fortschritt zählt

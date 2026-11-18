@@ -110,8 +110,8 @@ struct TextMinimizerTests {
 
     /// The masks are newer than texts stored by version 2: they are masked once more.
     @Test func theMaskVersionIsRaised() {
-        // 4: second review of P2-04 (see below).
-        #expect(TextMinimizer.maskVersion == 4)
+        // 4: second review of P2-04 (see below). 5: English medical letters (review G2-03).
+        #expect(TextMinimizer.maskVersion == 5)
     }
 
     /// Second review of P2-04: a space or underscore after the country code and underscores
@@ -163,5 +163,50 @@ struct TextMinimizerTests {
         #expect(info.subject?.contains("0532") == false, "\(info.subject ?? "")")
         let medical = "Arztbrief\nBetreff: Diagnose Bronchitis bei Erika Mustermann\nSehr geehrte Kollegin"
         #expect(try #require(DocumentAnalyzer().analyze(text: medical)).subject == nil)
+    }
+
+    /// Review G2-03 (18.11.2026): a medical letter in English counted as an ordinary letter, as
+    /// "diagnosis" holds no "diagnose"; its text and subject were stored and searchable.
+    @Test func englishMedicalLettersAreMedical() throws {
+        // The reviewers' reproductions (PrueferAReviewTests.g203_englishMedicalLetterIsMedical,
+        // FableBlindTests.claim7). The first one has no letter markers, so no document facts.
+        let report = "Medical report from Dr. Smith\nSubject: Diagnosis MOONLIGHT-123 confirmed\nPlease find the findings attached, hospital visit on Monday."
+        #expect(TextMinimizer.sensitivity(of: report) == .medical)
+        #expect(TextMinimizer.storable(report) == "")
+        let letters = [
+            "Dear Mr Smith,\nSubject: Diagnosis of type 2 diabetes\nDiagnosis: type 2 diabetes mellitus. Medication: Metformin 500 mg.\nSincerely, Dr. Jones, Medical Centre",
+            "Dear Dr Miller,\nRe: Discharge summary, depression and anxiety disorder\nYour client was admitted to our clinic on 3 May 2025. Medical history: major depressive disorder. Treatment: sertraline.\nSincerely, St Mary's Hospital",
+            // A phrase split over two lines by OCR, a typographic apostrophe, an ICD code.
+            "Dear Sir or Madam,\nRe: Discharge\nsummary of Jane Doe\nSincerely, Ward 4",
+            "Doctor\u{2019}s note\nSubject: Absence from work 3-7 March\nDear Sir or Madam, Ms Doe is unfit for work.",
+            "Dear colleague,\nSubject: Referral of Jane Doe\nICD-10 F32.1, sertraline 50 mg\nSincerely",
+        ]
+        for letter in letters {
+            #expect(TextMinimizer.sensitivity(of: letter) == .medical, "\(letter)")
+            #expect(TextMinimizer.storable(letter) == "", "\(letter)")
+            let info = try #require(DocumentAnalyzer().analyze(text: letter), "\(letter)")
+            #expect(info.sensitivity == .medical, "\(letter)")
+            #expect(info.subject == nil, "\(letter)")
+        }
+    }
+
+    /// Review G2-03: German medical papers that named none of the first ten words.
+    @Test func moreGermanMedicalPapersAreMedical() {
+        for text in ["Entlassungsbericht\nAnamnese: seit drei Wochen Husten", "Krankschreibung bis 14.03.", "AU-Bescheinigung für den Arbeitgeber",
+                     "Medikation: Ramipril 5 mg morgens", "ICD-10-GM: J20.9 akute Bronchitis"] {
+            #expect(TextMinimizer.storable(text) == "", "\(text)")
+        }
+    }
+
+    /// The words for medical papers are phrases where a single word would also stand on signs,
+    /// maps, tickets and receipts: such text stays stored and searchable.
+    @Test func everydayTextWithMedicalSoundingWordsStays() {
+        for text in ["Medical Centre car park, pay at machine", "Hospital Road 12, 1st floor", "St Mary's Clinic opening hours Mon-Fri 8-18",
+                     "Battery discharge rate 2C, charge before use", "Thank you for your patience", "Doctor Who season 3 episode 4",
+                     "Test results: 12 of 14 passed", "Dear Anna, see you at the clinic party on Friday! Sincerely, Tom",
+                     "Fault: charging port, see the user manual", "Diagnostic port behind the dashboard"] {
+            #expect(TextMinimizer.sensitivity(of: text) == .normal, "\(text)")
+            #expect(TextMinimizer.storable(text) == text, "\(text)")
+        }
     }
 }

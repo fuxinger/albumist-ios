@@ -626,20 +626,16 @@ class GroupTests(unittest.TestCase):
                 for g in listed}
 
     def ui_tests(self):
-        """Every test method of the SortlyUITests target, as "Class/test"."""
+        """Every test method of the SortlyUITests target, as "Class/test", read from the files on
+        disk the same way ui_groups.py reads them (multi-line declarations, extensions, inherited
+        tests)."""
         import glob
-        import re
-        tests = []
+        import ui_groups
+        contents = {}
         for path in sorted(glob.glob(os.path.join(self.ROOT, "App", "SortlyUITests", "*.swift"))):
-            current = None
-            for line in open(path, encoding="utf-8"):
-                cls = re.match(r"\s*(?:@\w+\s+)*(?:final\s+)?class\s+(\w+)\s*:\s*XCTestCase", line)
-                if cls:
-                    current = cls.group(1)
-                test = re.match(r"\s*(?:@\w+\s+)*func\s+(test\w*)\s*\(\s*\)", line)
-                if test and current:
-                    tests.append(f"{current}/{test.group(1)}")
-        return tests
+            with open(path, encoding="utf-8") as f:
+                contents["App/SortlyUITests/" + os.path.basename(path)] = f.read()
+        return sorted(ui_groups.all_tests(ui_groups.ui_files(ui_groups.DictTree(contents))))
 
     @staticmethod
     def selected(test, only, skip):

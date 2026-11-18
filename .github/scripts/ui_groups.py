@@ -47,11 +47,19 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 GROUPS_FILE = ".github/ui-groups.json"
 UI_DIR = "App/SortlyUITests/"
-HARNESS = (".github/scripts/ui_tests.py", ".github/scripts/pick_simulator.py", ".github/scripts/toolchain.py")
+HARNESS = (".github/scripts/ui_tests.py", ".github/scripts/pick_simulator.py", ".github/scripts/toolchain.py",
+           # How the groups are built, started and named: a branch that changes them gets other
+           # fingerprints, so its results never count for an unchanged ui.yml (and the reverse).
+           ".github/workflows/ui.yml", ".github/workflows/testflight.yml")
 NOT_APP_PREFIXES = ("App/SortlyUITests/", "App/SortlyTests/", "Tests/", "docs/", ".github/", "scripts/", "tools/",
                     "design/")
 APP_EXCEPTIONS = (".github/toolchain.json",)
 SHORT = 12  # hex digits in job names (48 bits)
+GROUP_NAME = re.compile(r"[a-z0-9-]+")  # as ui_evidence.JOB_NAME reads it from a job name
+# Environment switch of the UI tests for a quick run per change (SORTLY_UI_QUICK=1, handed to the
+# tests as TEST_RUNNER_SORTLY_UI_QUICK): a group whose files read it has another test fingerprint
+# in a quick run, so a quick result never stands in for a full one (the upload needs full ones).
+QUICK_SWITCH = "SORTLY_UI_QUICK"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -112,8 +120,8 @@ class DictTree:
 def is_app(path: str) -> bool:
     if path in APP_EXCEPTIONS:
         return True
-    if path.endswith(".md"):
-        return False
+    if path.endswith(".md") and "/" not in path:
+        return False  # README.md, STATUS.md, ... at the top; a .md deeper down may be a resource
     return not path.startswith(NOT_APP_PREFIXES)
 
 
@@ -149,51 +157,76 @@ PARENS = re.compile(r"\([^()]*\)")
 
 
 def strip_swift(source: str) -> str:
-    """The source with comments and the contents of string literals blanked out (newlines kept),
-    so braces and names in them do not count."""
+    """The source with comments and the text of string literals blanked out (newlines kept), so
+    braces and names in them do not count. The code inside an interpolation "\\(...)" is kept:
+    a helper used only there is still a use. One pass, character by character."""
     out, i, n = [], 0, len(source)
+    # Frames: ("code", paren depth or None at the top) and ("string", closing delimiter, hashes, multi-line).
+    stack: list[tuple] = [("code", None)]
+
+    def blank(text: str) -> str:
+        return "".join(ch if ch == "\n" else " " for ch in text)
+
     while i < n:
+        frame = stack[-1]
         c = source[i]
-        if source.startswith("//", i):
-            j = source.find("\n", i)
-            j = n if j < 0 else j
-            out.append(" " * (j - i))
-            i = j
-        elif source.startswith("/*", i):
-            depth, j = 1, i + 2
-            while j < n and depth:
-                if source.startswith("/*", j):
-                    depth, j = depth + 1, j + 2
-                elif source.startswith("*/", j):
-                    depth, j = depth - 1, j + 2
-                else:
-                    j += 1
-            out.append("".join(ch if ch == "\n" else " " for ch in source[i:j]))
-            i = j
-        elif c == '"' or (c == "#" and source[i:].lstrip("#").startswith('"')):
-            hashes = 0
-            while source[i + hashes] == "#":
-                hashes += 1
-            start = i
-            j = i + hashes
-            multi = source.startswith('"""', j)
-            close = ('"""' if multi else '"') + "#" * hashes
-            j += 3 if multi else 1
-            while j < n:
-                if source[j] == "\\" and not hashes:
-                    j += 2
-                    continue
-                if source.startswith(close, j):
-                    j += len(close)
-                    break
-                if source[j] == "\n" and not multi:
-                    break
-                j += 1
-            out.append('"' + "".join(ch if ch == "\n" else " " for ch in source[start + 1:j]))
-            i = j
+        if frame[0] == "code":
+            if source.startswith("//", i):
+                j = source.find("\n", i)
+                j = n if j < 0 else j
+                out.append(" " * (j - i))
+                i = j
+            elif source.startswith("/*", i):
+                depth, j = 1, i + 2
+                while j < n and depth:
+                    if source.startswith("/*", j):
+                        depth, j = depth + 1, j + 2
+                    elif source.startswith("*/", j):
+                        depth, j = depth - 1, j + 2
+                    else:
+                        j += 1
+                out.append(blank(source[i:j]))
+                i = j
+            elif c == '"' or (c == "#" and source[i:].lstrip("#").startswith('"')):
+                hashes = 0
+                while source[i + hashes] == "#":
+                    hashes += 1
+                multi = source.startswith('"""', i + hashes)
+                opening = hashes + (3 if multi else 1)
+                out.append('"' + " " * (opening - 1))
+                stack.append(("string", ('"""' if multi else '"') + "#" * hashes, hashes, multi))
+                i += opening
+            else:
+                if frame[1] is not None and c == "(":
+                    stack[-1] = ("code", frame[1] + 1)
+                elif frame[1] is not None and c == ")":
+                    if frame[1] == 1:
+                        stack.pop()  # back into the string
+                    else:
+                        stack[-1] = ("code", frame[1] - 1)
+                out.append(c)
+                i += 1
         else:
-            out.append(c)
-            i += 1
+            _, close, hashes, multi = frame
+            escape = "\\" + "#" * hashes
+            if source.startswith(escape + "(", i):
+                out.append(" " * len(escape) + "(")
+                stack.append(("code", 1))
+                i += len(escape) + 1
+            elif source.startswith(escape, i) and i + len(escape) < n:
+                out.append(blank(source[i:i + len(escape) + 1]))
+                i += len(escape) + 1
+            elif source.startswith(close, i):
+                out.append(" " * (len(close) - 1) + '"')
+                stack.pop()
+                i += len(close)
+            elif c == "\n" and not multi:
+                stack.pop()  # an unterminated string ends at the line
+                out.append(c)
+                i += 1
+            else:
+                out.append(blank(c))
+                i += 1
     return "".join(out)
 
 
@@ -207,6 +240,8 @@ class SwiftFile:
         self.exported: set[str] = set()            # names other files can use
         text = strip_swift(source)
         self.words = set(WORD.findall(text))
+        # Reads the quick switch (a string, so in the raw source): its group's result depends on the mode.
+        self.quick_switch = QUICK_SWITCH in source
         self.observer = "XCTestObservation" in self.words
         self._parse(text)
 
@@ -224,23 +259,35 @@ class SwiftFile:
                 if not nxt or nxt.startswith("@"):
                     return None
                 private = any(w in ("private", "fileprivate") for w in words[:i])
-                inherits = []
-                if word in TYPE_KINDS and ":" in line:
-                    inherits = [w for w in WORD.findall(line.split(":", 1)[1].split("{", 1)[0].split(" where ")[0])]
-                return word, nxt, private, inherits
+                return word, nxt, private, SwiftFile._inherits(line) if word in TYPE_KINDS else []
             if word not in MODIFIERS:
                 return None
         return None
 
+    @staticmethod
+    def _inherits(header: str) -> list[str]:
+        """The names after ":" of a type declaration up to its "{" or "where"."""
+        if ":" not in header:
+            return []
+        return WORD.findall(header.split(":", 1)[1].split("{", 1)[0].split(" where ")[0])
+
     def _parse(self, text: str) -> None:
         stack: list[tuple | None] = []  # one entry per open brace: the top-level declaration it opens, or None
         pending = None                  # a top-level declaration whose "{" has not come yet
+        header = None                   # (class name, text) of a class declaration spread over lines
         for line in text.split("\n"):
+            if header and not stack:
+                header = (header[0], header[1] + " " + line)
+                if "{" in line:
+                    self.classes[header[0]] = self._inherits(header[1])
+                    header = None
             found = self._declaration(line)
             if found and not stack:
                 kind, name, private, inherits = found
                 if kind == "class":
                     self.classes[name] = inherits
+                    if "{" not in line:
+                        header = (name, line)
                 if kind != "extension" and not private:
                     self.exported.add(name)
                 pending = (kind, name, private)
@@ -350,6 +397,11 @@ def load_groups(tree) -> list[dict] | None:
         raise ValueError(f"{GROUPS_FILE} is not readable: {error}") from error
     if not isinstance(groups, list) or not all(isinstance(g, dict) and g.get("group") for g in groups):
         raise ValueError(f"{GROUPS_FILE}: every group needs a name")
+    for g in groups:
+        if not GROUP_NAME.fullmatch(str(g["group"])):
+            raise ValueError(f"{GROUPS_FILE}: group name {g['group']!r} must be lower-case letters, digits and '-'")
+    if len({g["group"] for g in groups}) != len(groups):
+        raise ValueError(f"{GROUPS_FILE}: a group name appears twice")
     return groups
 
 
@@ -369,9 +421,20 @@ class Groups:
         self.tests = all_tests(self.files)
         self.graph = uses(self.files)
         blobs = tree.files()
-        self.shared = sorted({p for p in blobs if p.startswith(UI_DIR) and not p.endswith(".swift")}
-                             | {p for p, f in self.files.items() if f.observer}
-                             | {p for p in HARNESS if p in blobs})
+        shared = ({p for p in blobs if p.startswith(UI_DIR) and not p.endswith(".swift")}
+                  | {p for p, f in self.files.items() if f.observer}
+                  | {p for p in HARNESS if p in blobs})
+        # Fails closed: a Swift file of the target that no group's tests reach (a helper whose use
+        # this reader missed, a test class it could not see) counts for every group.
+        reached = set()
+        for g in self.groups:
+            reached |= closure(self.own_files(g["group"]), self.graph)
+        self.uncovered = sorted(p for p in self.files if p not in reached and p not in shared)
+        self.shared = sorted(closure(shared | set(self.uncovered), self.graph) | shared)
+        empty = [g["group"] for g in self.groups if not self.selected_tests(g["group"])]
+        if empty:
+            raise ValueError(f"group(s) {', '.join(empty)} of {GROUPS_FILE} select no UI test "
+                             "(renamed or moved tests? see ui_groups.py map)")
 
     def names(self) -> list[str]:
         return [g["group"] for g in self.groups]
@@ -391,14 +454,21 @@ class Groups:
         """Every file the group's result depends on, besides the app."""
         return sorted(closure(self.own_files(name), self.graph) | set(self.shared))
 
-    def fingerprint(self, name: str) -> str:
+    def reads_quick(self, name: str) -> bool:
+        """Whether a file of the group reads the quick switch (SORTLY_UI_QUICK)."""
+        return any(self.files[p].quick_switch for p in self.files_of(name) if p in self.files)
+
+    def fingerprint(self, name: str, quick: bool = False) -> str:
+        """The group's test fingerprint; in a quick run another one when its tests read the switch."""
         blobs = self.tree.files()
         lines = [json.dumps(definition(self.group(name)), sort_keys=True)]
         lines += [f"{p}\0{blobs[p]}" for p in self.files_of(name)]
+        if quick and self.reads_quick(name):
+            lines.append(f"mode quick ({QUICK_SWITCH}=1)")
         return _digest(lines)
 
-    def fingerprints(self) -> dict[str, str]:
-        return {name: self.fingerprint(name) for name in self.names()}
+    def fingerprints(self, quick: bool = False) -> dict[str, str]:
+        return {name: self.fingerprint(name, quick) for name in self.names()}
 
     def file_map(self) -> dict[str, list[str]]:
         """{file of the UI test target or harness: [groups that depend on it]}."""
@@ -411,15 +481,19 @@ class Groups:
                 result.setdefault(path, [])
         return dict(sorted(result.items()))
 
-    def matrix_entry(self, name: str, app: str) -> dict:
+    def matrix_entry(self, name: str, app: str, quick: bool = False) -> dict:
         """One entry of ui.yml's job matrix: the group's fields and both short fingerprints (they
         go into the job name, where ui_evidence.py finds them again)."""
         g = definition(self.group(name))
         entry = {k: g.get(k, "") for k in ("group", "title", "device", "only", "skip")}
         for flag in ("video", "reduce_motion", "increase_contrast"):
             entry[flag] = bool(g.get(flag, False))
+        quick = quick and self.reads_quick(name)
+        if quick:
+            entry["title"] += " (quick)"
+        entry["quick"] = quick
         entry["app"] = app[:SHORT]
-        entry["tests"] = self.fingerprint(name)[:SHORT]
+        entry["tests"] = self.fingerprint(name, quick)[:SHORT]
         return entry
 
 

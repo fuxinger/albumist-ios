@@ -30,6 +30,14 @@ struct PlanTests {
     func notATest() {}
 
     @Testing func notTheAttribute() {}
+
+    @Test(
+        "Arguments over lines (with (nested) parentheses)",
+        arguments: [(1, 2), (3, 4)]
+    )
+    func overSeveralLines(_ a: Int, _ b: Int) {}
+
+    @Test("closing on the line", .tags(.slow)) @MainActor func onOneLine() {}
 }
 """
 
@@ -37,7 +45,8 @@ struct PlanTests {
 class SwiftTestNameTests(unittest.TestCase):
     def test_names(self):
         self.assertEqual(test_summary.swift_test_names(SOURCE),
-                         ["afterAttributesAndABlankLine", "sameLine", "withArguments"])
+                         ["afterAttributesAndABlankLine", "onOneLine", "overSeveralLines", "sameLine",
+                          "withArguments"])
 
     def test_long_attribute_runs_stay_fast(self):
         # The input that made the old pattern backtrack: many attribute-like lines, no func.

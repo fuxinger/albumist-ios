@@ -57,24 +57,44 @@ SWIFT_TEST = re.compile(r"@Test\b")
 
 def swift_test_names(source):
     """Names of the Swift Testing functions (`@Test`) in a file, sorted. Line by line instead of
-    one regular expression over the file: the attribute may be followed by other attributes and
-    blank lines before `func`, and a pattern for that needed nested repetition (CodeQL
-    py/redos, PR #1). Every expression here repeats a single character class once."""
-    names, waiting = set(), False
+    one regular expression over the file: the attribute may carry arguments over several lines
+    and be followed by other attributes and blank lines before `func`, and a pattern for that
+    needed nested repetition (CodeQL py/redos, PR #1). Every expression here repeats a single
+    character class once; the arguments are skipped by counting parentheses."""
+    names, waiting, depth = set(), False, 0
+
+    def after_arguments(text):
+        """The rest of `text` once the open parentheses are closed (None while they are open)."""
+        nonlocal depth
+        for index, ch in enumerate(text):
+            if ch == "(":
+                depth += 1
+            elif ch == ")" and depth:
+                depth -= 1
+                if not depth:
+                    return text[index + 1:]
+        return None if depth else text
+
     for line in source.splitlines():
-        stripped = line.strip()
-        test = SWIFT_TEST.search(line)
-        if test:
-            same_line = SWIFT_FUNC.search(line, test.end())
-            if same_line:
-                names.add(same_line.group(1))
-                waiting = False
-            else:
+        if depth:                    # inside the arguments of an @Test(...)
+            rest = after_arguments(line)
+            if rest is None:
+                continue
+        else:
+            test = SWIFT_TEST.search(line)
+            if test:
                 waiting = True
-            continue
-        if not waiting:
-            continue
-        found = SWIFT_FUNC.match(stripped)
+                rest = line[test.end():]
+                if rest.lstrip().startswith("("):  # @Test(...): skip its arguments
+                    rest = after_arguments(rest)
+                    if rest is None:
+                        continue
+            elif not waiting:
+                continue
+            else:
+                rest = line
+        stripped = rest.strip()
+        found = SWIFT_FUNC.search(stripped) if stripped.startswith("@") else SWIFT_FUNC.match(stripped)
         if found:
             names.add(found.group(1))
             waiting = False

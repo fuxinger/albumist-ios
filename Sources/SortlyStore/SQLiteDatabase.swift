@@ -59,6 +59,10 @@ final class SQLiteDatabase {
             throw SQLiteError(code: rc, message: message)
         }
         try execute("PRAGMA foreign_keys = ON")
+        // Deleted content is overwritten with zeros, not only unlinked: text that must not be
+        // stored (medical letters, ID cards, IBANs before a stricter mask) does not stay
+        // readable in free pages of the file (second review of G2-03).
+        try execute("PRAGMA secure_delete = ON")
         isFile = path != nil
         if path != nil {
             try execute("PRAGMA journal_mode = WAL")
@@ -162,6 +166,16 @@ final class SQLiteDatabase {
         defer { try? execute("PRAGMA synchronous = NORMAL") }
         return try body()
     }
+
+    /// Writes the write-ahead log back into the file and empties it (`wal_checkpoint(TRUNCATE)`),
+    /// so earlier versions of changed pages do not stay in the log. Nothing to do in memory.
+    func checkpoint() throws {
+        guard isFile else { return }
+        try execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    }
+
+    /// Whether freed content is overwritten (`PRAGMA secure_delete`).
+    var securesDeletes: Bool { (try? query("PRAGMA secure_delete").first?["secure_delete"]?.int) == 1 }
 
     func transaction<T>(_ body: () throws -> T) throws -> T {
         try execute("BEGIN IMMEDIATE")

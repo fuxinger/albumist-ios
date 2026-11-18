@@ -587,6 +587,9 @@ public actor AnalysisPipeline {
         if Task.isCancelled { report.pausedBecause = .timeBudget; return report }
         let scope: OrganizationScope
         if let requested { scope = requested } else { scope = try await storedScope() }
+        // Stored texts follow stricter masks first, whatever this run reads (it reads no photo):
+        // also with the text step off, and before a failed read writes an earlier result back.
+        try await remaskStoredTexts()
 
         runOnWaiting = onWaiting
         func shouldStop() async -> PauseReason? { await admission(lanes: 1).stop }
@@ -1211,9 +1214,6 @@ public actor AnalysisPipeline {
     ) async throws -> TextOutcome {
         var outcome = TextOutcome()
         guard Self.readsText(settings) else { return outcome }
-        // Masked first: a read that fails below writes the earlier result back, which must be
-        // the masked one.
-        try await remaskStoredTexts()
         let done = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
         let networkAllowed = await networkAllowedNow()
         let started = now()
@@ -1403,14 +1403,18 @@ public actor AnalysisPipeline {
     }
 
     /// Texts stored before the masks got stricter are masked again once (no new reading of
-    /// the photos): the stored copy only ever loses detail.
+    /// the photos): the stored copy only ever loses detail. Called at the start of every run,
+    /// also when no text is read any more (screenshots, documents and messenger pictures off):
+    /// what was stored before must not stay (second review of G2-03).
     private func remaskStoredTexts() async throws {
         let done = try await store.value(Int.self, forKey: Key.textMaskVersion) ?? 1
         guard done < TextMinimizer.maskVersion else { return }
         let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
+        var changed = false
         for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
             guard let text = result.text?.text else { continue }
-            let masked = text.isEmpty ? "" : TextMinimizer.storable(text)
+            let level = TextMinimizer.sensitivity(of: text)
+            let masked = text.isEmpty || level >= .identity ? "" : TextMinimizer.masked(text)
             // The subject line of a letter is stored with the document facts (review P2-04). An ID
             // or medical document keeps none: version 2 stored no text for it but its subject in
             // full, so it is cleared here even though there is no text to mask (second review).
@@ -1418,8 +1422,9 @@ public actor AnalysisPipeline {
             let subject = sensitive ? nil : result.document?.subject.map(TextMinimizer.masked)
             // A document that newer words mark as sensitive (an English medical letter, review
             // G2-03) is handled as such from now on, also by the document proposals.
-            let sensitivity = result.document.map { max($0.sensitivity, TextMinimizer.sensitivity(of: text)) }
+            let sensitivity = result.document.map { max($0.sensitivity, level) }
             guard masked != text || subject != result.document?.subject || sensitivity != result.document?.sensitivity else { continue }
+            changed = true
             result.text?.text = masked
             result.document?.subject = subject
             if let sensitivity { result.document?.sensitivity = sensitivity }
@@ -1432,6 +1437,9 @@ public actor AnalysisPipeline {
                 try await store.indexText(masked, for: asset)
             }
         }
+        // The old wording must not stay readable in the file: deleted rows are overwritten
+        // (secure_delete), the search index drops its old entries and the log is emptied.
+        if changed { try await store.purgeDeletedText() }
         try await store.setValue(TextMinimizer.maskVersion, forKey: Key.textMaskVersion)
     }
 

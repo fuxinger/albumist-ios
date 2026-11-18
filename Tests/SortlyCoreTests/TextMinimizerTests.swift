@@ -209,4 +209,40 @@ struct TextMinimizerTests {
             #expect(TextMinimizer.storable(text) == text, "\(text)")
         }
     }
+
+    /// Second review of G2-03: every keyword starts a word, so words that merely hold one stay
+    /// ordinary text; German compounds keep matching where the keyword ends the compound.
+    @Test func keywordsInsideOtherWordsDoNotCount() {
+        for text in ["Collab report for the team", "Bau-Bescheinigung für das Amt", "Rezeption: Check-in ab 15 Uhr, Buchungsbestätigung",
+                     "Please be patient, your order is on its way", "We waited patiently for the bus", "Don't be impatient",
+                     "New bicycle helmet, 49,99 EUR", "Volume 3 cubic metres", "Urlaub im Libanon 2025", "Outfit notes for Saturday"] {
+            #expect(TextMinimizer.sensitivity(of: text) == .normal, "\(text)")
+            #expect(TextMinimizer.storable(text) == text, "\(text)")
+        }
+    }
+
+    /// The same review: what must still count, also inside German compounds and at the start
+    /// of a line.
+    @Test func keywordsAtWordStartsAndInCompoundsStillCount() {
+        let medical = ["Laborbefund vom 12.03.", "AU-Bescheinigung\nfür den Arbeitgeber", "Facharztbrief Kardiologie", "Privatrezept Ibuprofen 600",
+                       "Patientin: Erika Mustermann", "Patientenakte Nr. 4711", "Outpatient clinic, room 4", "Patient: John Smith",
+                       "Doctors note for school", "Doctor`s letter", "Doctor´s certificate", "Fit note: not fit for work until 3 May",
+                       "Sick leave from 3 to 7 March"]
+        for text in medical {
+            #expect(TextMinimizer.sensitivity(of: text) == .medical, "\(text)")
+            #expect(TextMinimizer.storable(text) == "", "\(text)")
+        }
+        for text in ["Kontoauszug 3/2025", "IBAN DE89 3704 0044 0532 0130 00", "BIC: COBADEFFXXX", "Einkommensteuerbescheid 2024"] {
+            #expect(TextMinimizer.sensitivity(of: text) == .financial, "\(text)")
+        }
+    }
+
+    /// OCR breaks long words at the end of a line with a hyphen: they count joined, and a real
+    /// hyphen at the end of a line still counts as one.
+    @Test func wordsBrokenOverTwoLinesCount() {
+        for text in ["Dear Sir,\nre: Diag-\nnosis of type 2 diabetes", "Entlassungs-\nbericht vom 3. Mai", "Bitte die AU-\nBescheinigung abgeben"] {
+            #expect(TextMinimizer.sensitivity(of: text) == .medical, "\(text)")
+            #expect(TextMinimizer.storable(text) == "", "\(text)")
+        }
+    }
 }

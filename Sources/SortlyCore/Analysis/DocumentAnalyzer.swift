@@ -64,25 +64,57 @@ public struct DocumentAnalyzer: Sendable {
         (.vehicle, ["fahrzeugschein", "zulassungsbescheinigung", "fahrgestellnummer", "tüv", "hauptuntersuchung", "kfz", "kennzeichen", "inspektion", "ölwechsel"]),
     ]
 
+    /// Words that mark a document as sensitive, in German and English (the languages the text
+    /// is read in, `VisionAnalyzer`). How a keyword has to sit in the text (second review of
+    /// G2-03, 18.11.2026), checked by `keywordSensitivity`:
+    /// - `word`: starts a word (no letter or digit before it) and may go on ("diagnosis:",
+    ///   "medications", "IBAN-Nr."), so "lab report" is not found in "Collab report",
+    ///   "au-bescheinigung" not in "Bau-Bescheinigung", "iban" not in "Libanon".
+    /// - `*word`: may also end a longer word, for German compounds ("*befund" in "Laborbefund",
+    ///   "*steuerbescheid" in "Einkommensteuerbescheid", "*arztbrief" in "Facharztbrief").
+    /// - `word$`: must also end the word ("bic$" not in "bicycle" or "cubic").
+    /// - `/regex`: a pattern of its own, for words that need more ("rezept" but not
+    ///   "Rezeption"; "patient" but not "patiently", "impatient" or "please be patient").
+    /// An apostrophe may be left out ("doctors note"). Text is matched in lower case.
     static let sensitivityKeywords: [(DocumentSensitivity, [String])] = [
-        (.identity, ["personalausweis", "reisepass", "passport", "identity card", "führerschein", "driving licence", "aufenthaltstitel", "nationalität", "date of birth", "geburtsdatum",
+        (.identity, ["*personalausweis", "*reisepass", "passport", "identity card", "*führerschein", "driving licence", "*aufenthaltstitel", "nationalität",
+                     "date of birth", "geburtsdatum",
                      // The back of an ID card names no document (review P2-04).
                      "augenfarbe", "eye colour", "eye color", "colour of eyes", "color of eyes", "ordensname", "künstlername"]),
-        (.medical, ["diagnose", "befund", "rezept", "arztbrief", "krankenkasse", "versichertennummer", "arbeitsunfähigkeit", "patient", "medikament", "prescription",
+        (.medical, ["*diagnose", "*befund", #"/(?<![\p{L}\p{N}])(?:privat|kassen|folge|e-)?rezept(?!ion)"#, "*arztbrief", "*krankenkasse",
+                    "*versichertennummer", "arbeitsunfähigkeit", "*medikament", "prescription",
+                    // "patient" as a noun, also in "Patientin", "Patientenakte", "outpatient",
+                    // "Privatpatient"; not "patiently", "impatient" or the adjective after "be".
+                    #"/(?<!be )(?<!so )(?<!very )(?<!more )(?<!stay )(?<!remain )(?<![\p{L}\p{N}])(?:in|out|privat|kassen)?patient(?:s(?![\p{L}\p{N}])|en|in|(?![\p{L}\p{N}]))"#,
                     // English letters name the same things in other words: "diagnosis" holds no
-                    // "diagnose" (review G2-03, 18.11.2026). Phrases rather than "medical",
-                    // "hospital", "clinic" or "doctor" alone, which stand on signs, maps and
-                    // parking tickets too.
+                    // "diagnose" (review G2-03). Phrases rather than "medical", "hospital",
+                    // "clinic" or "doctor" alone, which stand on signs, maps and parking tickets.
                     "diagnosis", "medication", "medical report", "medical certificate", "medical record", "medical history",
                     "medical findings", "discharge summary", "discharge letter", "discharge report", "doctor's letter",
-                    "doctor's note", "doctor's certificate", "sick note", "unfit for work", "incapacity for work",
+                    "doctor's note", "doctor's certificate", "sick note", "fit note", "sick leave", "unfit for work", "incapacity for work",
                     "lab report", "laboratory report", "laboratory results", "blood test", "pathology report", "radiology report",
                     "health insurance card", "nhs number",
                     // The same in German, and the ICD codes doctors put next to a diagnosis.
-                    "entlassbrief", "entlassungsbrief", "entlassungsbericht", "arztbericht", "anamnese", "medikation",
+                    "*entlassbrief", "*entlassungsbrief", "*entlassungsbericht", "*arztbericht", "*anamnese", "*medikation",
                     "krankschreibung", "au-bescheinigung", "icd-10", "icd 10", "icd10", "icd-11", "icd 11", "icd11"]),
-        (.financial, ["kontoauszug", "iban", "bic", "lohnabrechnung", "gehaltsabrechnung", "kreditkarte", "steuerbescheid", "kontostand", "bank statement", "salary"]),
+        (.financial, ["*kontoauszug", "iban", "bic$", "*lohnabrechnung", "*gehaltsabrechnung", "*kreditkarte", "*steuerbescheid", "*kontostand",
+                      "bank statement", "salary"]),
     ]
+
+    /// `sensitivityKeywords` as one pattern per level.
+    static let sensitivityPatterns: [(DocumentSensitivity, NSRegularExpression)] = sensitivityKeywords.map { level, words in
+        let parts = words.map { word -> String in
+            if word.hasPrefix("/") { return String(word.dropFirst()) }
+            var core = Substring(word)
+            let compound = core.hasPrefix("*")
+            if compound { core = core.dropFirst() }
+            let wholeWord = core.hasSuffix("$")
+            if wholeWord { core = core.dropLast() }
+            let escaped = NSRegularExpression.escapedPattern(for: String(core)).replacingOccurrences(of: "'", with: "'?")
+            return (compound ? "" : #"(?<![\p{L}\p{N}])"#) + escaped + (wholeWord ? #"(?![\p{L}\p{N}])"# : "")
+        }
+        return (level, try! NSRegularExpression(pattern: "(?:" + parts.joined(separator: "|") + ")"))
+    }
 
     static let knownMerchants = [
         "amazon", "ikea", "mediamarkt", "media markt", "saturn", "zalando", "otto", "lidl", "aldi", "rewe", "edeka", "dm", "rossmann",
@@ -129,15 +161,33 @@ public struct DocumentAnalyzer: Sendable {
         )
     }
 
-    /// The level the words of `sensitivityKeywords` in `rawText` point to. Case does not count,
+    /// A hyphen at the end of a line between two letters: OCR's broken word.
+    private static let brokenWord = try! NSRegularExpression(pattern: #"(?<=\p{L})-[ \t]*\r?\n\s*(?=\p{L})"#)
+
+    /// The level the words of `sensitivityKeywords` in `rawText` point to. Case does not count;
     /// line breaks and runs of spaces count as one space (OCR splits "discharge summary" over
-    /// two lines), and a typographic apostrophe as a plain one ("doctor’s note").
+    /// two lines); typographic apostrophes (’ ‘ ʼ ´ ` ′) count as a plain one ("doctor’s note").
+    /// A word OCR broke with a hyphen at the end of a line ("Diag-⏎nosis") is matched joined,
+    /// and with its hyphen too ("AU-⏎Bescheinigung").
     static func keywordSensitivity(_ rawText: String) -> DocumentSensitivity {
-        let text = rawText.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
-            .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        var text = rawText.lowercased().replacingOccurrences(of: "\u{00AD}", with: "")
+        for apostrophe in ["\u{2018}", "\u{2019}", "\u{02BC}", "\u{00B4}", "`", "\u{2032}"] {
+            text = text.replacingOccurrences(of: apostrophe, with: "'")
+        }
+        for hyphen in ["\u{2010}", "\u{2011}"] { text = text.replacingOccurrences(of: hyphen, with: "-") }
+        var variants = [text]
+        let whole = NSRange(text.startIndex..., in: text)
+        if brokenWord.firstMatch(in: text, range: whole) != nil {
+            variants = [brokenWord.stringByReplacingMatches(in: text, range: whole, withTemplate: ""),
+                        brokenWord.stringByReplacingMatches(in: text, range: whole, withTemplate: "-")]
+        }
         var level = DocumentSensitivity.normal
-        for (candidate, words) in sensitivityKeywords where words.contains(where: { text.contains($0) }) {
-            level = max(level, candidate)
+        for variant in variants {
+            let compact = variant.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            let range = NSRange(compact.startIndex..., in: compact)
+            for (candidate, pattern) in sensitivityPatterns where pattern.firstMatch(in: compact, range: range) != nil {
+                level = max(level, candidate)
+            }
         }
         return level
     }

@@ -58,10 +58,11 @@ struct AuditAnalysisTests {
 
     func pipeline(
         store: SortlyStore, reader: InMemoryLibraryReader, analyzer: ScriptedAnalyzer, conditions: FakeConditions = FakeConditions(),
-        clock: Clock = Clock(), batchSize: Int = 10, network: Bool = false, cellular: Bool = false
+        clock: Clock = Clock(), batchSize: Int = 10, network: Bool = false, cellular: Bool = false, readsText: Bool = true
     ) -> AnalysisPipeline {
         var settings = OrganizationSettings()
         settings.titleLanguage = .german
+        if !readsText { settings.enabledAreas.subtract([.screenshots, .documents, .messenger]) }
         settings.privacy.allowNetworkForAnalysis = network
         settings.privacy.allowCellularDownloads = cellular
         return AnalysisPipeline(
@@ -388,8 +389,10 @@ struct AuditAnalysisTests {
 
     /// Review G2-03: an English medical letter counted as an ordinary letter, so its text and
     /// subject were stored. Mask version 5 removes them once, without reading the photo again,
-    /// and marks the document as medical (the document proposals leave it out then).
-    @Test func englishMedicalLettersStoredByMaskVersionFourAreRemoved() async throws {
+    /// and marks the document as medical (the document proposals leave it out then). Second
+    /// review: also when no text is read any more (screenshots, documents and messenger off).
+    @Test(arguments: [true, false])
+    func englishMedicalLettersStoredByMaskVersionFourAreRemoved(readsText: Bool) async throws {
         let (assets, ids) = screenshots(2)
         let store = try SortlyStore(url: nil)
         _ = try await store.upsertAssets(assets)
@@ -405,7 +408,9 @@ struct AuditAnalysisTests {
             try await store.indexText(text, for: id)
         }
         let analyzer = ScriptedAnalyzer()
-        _ = try await pipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: analyzer).run()
+        let pipeline = pipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: analyzer, readsText: readsText)
+        #expect(AnalysisPipeline.readsText(await pipeline.settings) == readsText)
+        _ = try await pipeline.run()
         let letter = try await store.result(TextResult.self, kind: "text", asset: ids[0])
         #expect(letter?.text?.text == "")
         #expect(letter?.document?.subject == nil)

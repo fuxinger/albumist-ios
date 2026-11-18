@@ -40,6 +40,8 @@ Die Analyse liest den vollen Text, gespeichert wird nur eine verkleinerte Fassun
   nur die Einordnung („Dokument, sensibel“). Sie sind deshalb nicht per Volltext suchbar.
   Erkannt werden sie an Wörtern auf Deutsch und Englisch (z. B. „Arztbrief“, „Diagnose“,
   „Diagnosis“, „Discharge summary“, ICD-Codes); Grenzen in `KNOWN_LIMITATIONS.md`.
+  Gelöschter Text wird in der Datenbankdatei mit Nullen überschrieben (`secure_delete`), nicht
+  nur als frei markiert.
 - IBANs und gültige Kartennummern (Luhn-Prüfung) werden in allen anderen Texten maskiert.
 - „Analyse neu aufbauen“ löscht den gesamten Suchindex.
 

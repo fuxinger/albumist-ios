@@ -62,8 +62,12 @@
   („Diagnosis“ enthält „Diagnose“ nicht), sein Text und Betreff wurden gespeichert und waren
   suchbar. Jetzt erkennt Albumist auch englische Arztbriefe, Entlassberichte, Krankmeldungen,
   Laborberichte und ICD-Codes, auf Deutsch zusätzlich Entlassbrief, Anamnese, Medikation und
-  Krankschreibung; Wortgruppen auch über zwei Zeilen. Schon gespeicherte Texte solcher Briefe
-  werden einmal entfernt (Masken-Version 5), ohne die Fotos neu zu lesen.
+  Krankschreibung, „fit note“ und „sick leave“; Wortgruppen auch über zwei Zeilen, getrennte
+  Wörter („Diag-⏎nosis“) und „doctors note“ ohne Apostroph. Schlüsselwörter zählen nur am
+  Wortanfang: Hotelbestätigungen mit „Rezeption“, „Libanon“, „bicycle“ oder „please be patient“
+  gelten nicht mehr als sensibel. Schon gespeicherte Texte solcher Briefe werden einmal entfernt
+  (Masken-Version 5), ohne die Fotos neu zu lesen, auch wenn das Lesen von Text inzwischen aus
+  ist; gelöschter Text wird in der Datenbankdatei überschrieben.
 - Prüfungen 18.11. (G5-02/G6-02): Der TestFlight-Ablauf hatte noch den Notfall-Schalter
   „force“, der einen Build ohne jeden Test hochlud, obwohl Fuchs ihn am 17.11. gestrichen hatte.
   Er ist entfernt, samt `--forced` in `earlier_attempts.py` und `testflight_notes.py`; kein

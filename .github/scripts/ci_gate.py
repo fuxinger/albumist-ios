@@ -5,7 +5,9 @@ Used before a release tag (release.yml, without waiting). Green means:
      "iOS build and tests (macOS)" really ran and succeeded in it or in an earlier run of the
      same commit. When it was skipped everywhere (only documentation changed since the last
      tested commit), there is nothing new to ship.
-  2. The newest UI flow run (ui.yml) for exactly this commit succeeded too. Always: a commit
+     It must be its first attempt, and no other CI run of this commit may be red ("Re-run
+     failed jobs" or a new run on the same commit never turns a red green; Fable P5-01).
+  2. The newest UI flow run (ui.yml) for exactly this commit succeeded too, in its first attempt. Always: a commit
      without a UI flow run is not green (owner decision 16.11.), so nothing is released that
      never ran the UI tests. ui.yml runs for pull requests (on the PR's head
      commit); a commit that never was a PR head, e.g. a merge commit pushed to main, needs a
@@ -48,6 +50,7 @@ CI, CI_JOB = "ci.yml", "iOS build and tests"
 UI = "ui.yml"
 UI_VERDICT, UI_QUICK_VERDICT = "UI verdict (full)", "UI verdict (quick)"
 NO_CI, NO_UI = "no CI run", "no UI flow run"
+RED = {"failure", "timed_out"}
 
 
 def api(path, **params):
@@ -83,6 +86,11 @@ def describe(run):
     return f"{run['name']} #{run['run_number']} ({run['event']}, {run['html_url']})"
 
 
+def rerun(run):
+    return (f"{describe(run)} is attempt {run['run_attempt']}: only a first attempt counts, a red is fixed in "
+            "a new commit and a new run, never re-run to green")
+
+
 def check():
     """(done, ok, reason) for the current state of the runs."""
     ci = newest_run(CI)
@@ -92,6 +100,15 @@ def check():
         return False, False, f"waiting for {describe(ci)}"
     if ci["conclusion"] != "success":
         return True, False, f"{describe(ci)} ended with '{ci['conclusion']}'"
+    # A red is fixed in a new commit, never re-run to green (the owner's rule; Fable P5-01): a
+    # green CI run counts only in its first attempt, and only when no other CI run of this commit
+    # was red. A run cancelled by a newer push is not red.
+    if ci.get("run_attempt", 1) != 1:
+        return True, False, rerun(ci)
+    red = [r for r in runs(CI) if r["status"] == "completed" and r.get("conclusion") in RED]
+    if red:
+        return True, False, (f"{describe(red[0])} of this commit ended with '{red[0]['conclusion']}'; a red test "
+                             "is fixed in a new commit, never re-run to green")
     # The iOS job must have passed in this run, or in an earlier run of the same commit (then
     # this run skipped it because that exact code was tested already).
     ios, state = False, []
@@ -125,6 +142,8 @@ def check():
             return True, False, (f"CI passed, but {describe(ui)} has no green '{UI_VERDICT}' job "
                                  f"({', '.join(str(j.get('conclusion')) for j in verdict) or 'none'}); start 'UI flow' "
                                  "by hand on this commit")
+        if ui.get("run_attempt", 1) != 1:
+            return True, False, f"CI passed, but {rerun(ui)}"
         return True, True, f"{describe(ci)} and {describe(ui)} ({UI_VERDICT}) passed"
     # Not green, ever: main() waits NO_RUN_MINUTES for one to appear, then gives up.
     only_quick = f", only {quick} quick run(s) of pull requests, which never count" if quick else ""

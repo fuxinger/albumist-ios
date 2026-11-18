@@ -42,6 +42,29 @@ class CiPartTests(unittest.TestCase):
         ci_gate.api = self.fake("failure", "failure")
         self.assertEqual(ci_gate.check()[:2], (True, False))
 
+    def test_a_re_run_ci_attempt_is_not_green(self):
+        # Fable P5-01: build 36 went out after a red run was re-run to green.
+        api = self.fake("success", "success")
+        ci_gate.api = lambda path, **params: (
+            {"workflow_runs": [dict(r, run_attempt=2) for r in api(path)["workflow_runs"]]}
+            if path == "actions/workflows/ci.yml/runs" else api(path, **params))
+        done, ok, reason = ci_gate.check()
+        self.assertEqual((done, ok), (True, False))
+        self.assertIn("attempt 2", reason)
+
+    def test_a_new_green_run_after_a_red_one_is_not_green(self):
+        api = self.fake("success", "success")
+        red = {"id": 6, "run_number": 11, "name": "CI", "event": "workflow_dispatch", "html_url": "https://example/6",
+               "head_sha": os.environ["SHA"], "status": "completed", "conclusion": "failure"}
+        cancelled = dict(red, id=5, run_number=10, conclusion="cancelled")
+        ci_gate.api = lambda path, **params: (
+            {"workflow_runs": api(path)["workflow_runs"] + [red, cancelled]}
+            if path == "actions/workflows/ci.yml/runs" else api(path, **params))
+        done, ok, reason = ci_gate.check()
+        self.assertEqual((done, ok), (True, False))
+        self.assertIn("#11", reason)
+        self.assertIn("never re-run to green", reason)
+
     def test_skipped_ios_job_is_not_green(self):
         ci_gate.api = self.fake("success", "skipped")
         done, ok, reason = ci_gate.check()
@@ -104,6 +127,15 @@ class FullGateTests(unittest.TestCase):
                 done, ok, reason = ci_gate.check()
                 self.assertEqual((done, ok), (True, False))
                 self.assertIn("no green 'UI verdict (full)' job", reason)
+
+    def test_a_re_run_ui_attempt_is_not_green(self):
+        api = self.fake(ui=("completed", "success"))
+        ci_gate.api = lambda path, **params: (
+            {"workflow_runs": [dict(r, run_attempt=3) for r in api(path)["workflow_runs"]]}
+            if path == "actions/workflows/ui.yml/runs" else api(path, **params))
+        done, ok, reason = ci_gate.check()
+        self.assertEqual((done, ok), (True, False))
+        self.assertIn("attempt 3", reason)
 
     def test_no_ui_run_is_not_green(self):
         # A push to main (merge commit) has no UI flow run; before 16.11. CI alone made it green.

@@ -41,6 +41,25 @@ class CacheTests(unittest.TestCase):
 class TestFlightWiringTests(unittest.TestCase):
     """The upload waits for the UI gate (ui_evidence.py), which reads the group jobs' names."""
 
+    def test_no_upload_starts_by_itself(self):
+        # Fable P5-15: the old testflight.yml on main uploaded the old app state, untested, on
+        # every push to main (16.11.: the website merge started one). Uploads start by hand only,
+        # and no workflow that reads the App Store Connect key starts on a push, a pull request
+        # or a schedule.
+        for path in WORKFLOWS:
+            text = read(path)
+            if "secrets.ASC_KEY_P8" not in text:
+                continue
+            trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0]
+            events = re.findall(r"^  ([a-z_]+):", trigger, re.M)
+            with self.subTest(workflow=os.path.basename(path)):
+                if os.path.basename(path) == "testflight.yml":
+                    self.assertEqual(events, ["workflow_dispatch"])
+                else:
+                    self.assertNotIn("push", events)
+                    self.assertNotIn("pull_request", events)
+                    self.assertNotIn("pull_request_target", events)
+
     def test_upload_needs_the_ui_gate(self):
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         self.assertIn("python3 .github/scripts/ui_evidence.py gate", text)

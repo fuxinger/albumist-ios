@@ -76,6 +76,47 @@ struct PurchaseRulesTests {
         #expect(p.freeAlbumUse(applied: false) == 1)
     }
 
+    /// The preview's "Neue Alben" plus "Ergänzte Alben" (PlanSummary) is what the plan takes
+    /// from the free albums (freeAlbumUse), for every kind of decision on a suggestion. The two
+    /// are counted apart; the locked UI test (SortlyLockedUITests.test7) reads the summary to
+    /// know whether the unlock card must show, and the card goes by freeAlbumUse.
+    @Test func previewSummaryCountsWhatTheFreeAlbumsCount() {
+        let inventory = CollectionInventory([
+            CollectionSnapshot(id: "rom", title: "Rom", assetIDs: ["old"]),
+            CollectionSnapshot(id: "paris", title: "Paris", assetIDs: ["p1"]),
+            CollectionSnapshot(id: "zoo", title: "Zoo", assetIDs: ["z1"]),
+            CollectionSnapshot(id: "berg", title: "Berg", assetIDs: ["b1"]),
+            CollectionSnapshot(id: "see", title: "See", assetIDs: ["s1"]),
+        ])
+        func proposal(_ id: String, _ assets: Set<AssetID>, folder: [String] = []) -> AlbumProposal {
+            AlbumProposal(id: SortlyID(id), kind: .trip, title: "Album \(id)", folderPath: folder, assetIDs: assets)
+        }
+        let many = Set((0..<1_200).map { AssetID("many-\($0)") }) // more than one step of 500
+        let confirmed = [
+            ConfirmedProposal(proposal: proposal("a", ["a1"], folder: ["Reisen", "2024"]), decision: .createNew(title: nil, folderPath: nil)),
+            ConfirmedProposal(proposal: proposal("b", many), decision: .createNew(title: "Groß", folderPath: nil)),
+            // Two suggestions into the same album: one album.
+            ConfirmedProposal(proposal: proposal("c", ["n1"]), decision: .extendExisting("rom")),
+            ConfirmedProposal(proposal: proposal("d", ["n2", "n3"]), decision: .extendExisting("rom")),
+            // Everything already in the album: no step, no album.
+            ConfirmedProposal(proposal: proposal("e", ["p1"]), decision: .extendExisting("paris")),
+            ConfirmedProposal(proposal: proposal("f", ["z2"]), decision: .renameExisting("zoo", newTitle: "Tierpark", extend: false)),
+            ConfirmedProposal(proposal: proposal("g", ["b2"]), decision: .moveExisting("berg", folderPath: ["Natur"], extend: true)),
+            ConfirmedProposal(proposal: proposal("h", ["s2"]), decision: .merge(target: "see", sources: ["see"], title: nil, folderPath: nil)),
+        ]
+        let p = OrganizationPlanner().makePlan(from: confirmed, inventory: inventory)
+        let summary = p.summary
+        #expect(summary.newAlbums == 2)
+        #expect(summary.extendedAlbums == 3) // rom, berg, see
+        #expect(summary.newAlbums + summary.extendedAlbums == p.freeAlbumUse(applied: false))
+        // Every subset of the suggestions, as a user might select them.
+        for mask in 1..<(1 << confirmed.count) {
+            let some = confirmed.indices.filter { mask & (1 << $0) != 0 }.map { confirmed[$0] }
+            let plan = OrganizationPlanner().makePlan(from: some, inventory: inventory)
+            #expect(plan.summary.newAlbums + plan.summary.extendedAlbums == plan.freeAlbumUse(applied: false), "suggestions \(some.map(\.proposal.id.rawValue))")
+        }
+    }
+
     /// Only what really happened counts: a plan that made 2 of 3 albums uses 2.
     @Test func onlyAlbumsThatReallyCameCount() {
         var p = applied(plan("partial", creating: 3))

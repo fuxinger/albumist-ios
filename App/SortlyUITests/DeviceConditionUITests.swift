@@ -638,7 +638,8 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// Starts a plan made slow on purpose (`-SortlyUITestSlowPlan`: the first change goes
     /// through at once, every later one waits 30 s), ends the app while it runs and opens it
-    /// again. Returns the album's title when the interruption card came, nil otherwise.
+    /// again. Returns the album's title when the interruption card came (and asserts that the
+    /// plan was really half done, "Erledigt: 1 von 2 Schritten"), nil otherwise.
     ///
     /// UI run 44202318875 (this test, "No interruption card"): 70 s passed between the tap on
     /// "Jetzt umsetzen" and the end of the app on a slow simulator (a query over every element
@@ -647,12 +648,14 @@ final class DeviceConditionUITests: XCTestCase {
     /// read the running card's title, which the sorting show covers, so it said nothing. Now:
     /// - between the tap and the end only two queries by identifier: the preview's button is
     ///   gone (the plan started) and no result is shown (it is not done); that is asserted;
-    /// - the time from the tap to the end is said;
+    /// - the first change gets 5 s from the tap (it goes through at once), and after the
+    ///   relaunch the card must say that some but not all steps are done, so "Rest anlegen"
+    ///   and "Alles zurücknehmen" run on a real half-done plan;
     /// - when the plan was over anyway (its result showed, or no card came after an end later
-    ///   than 25 s), one more album is tried once, and that is said. A plan that did not start,
-    ///   or a card missing after an early end, still fails at once.
-    /// The real fix is a hold in the switch itself (every later change waits until the app is
-    /// ended), see docs/IMPROVEMENTS.md, flaky tests.
+    ///   than 25 s), one more album is tried once and a `UI_FLAKY_RETRY` line says so. That
+    ///   retry hides a flake and stays only until the switch holds every later change until the
+    ///   app is ended (owner's decision, docs/IMPROVEMENTS.md "Wackelige UI-Tests"). A plan that
+    ///   did not start, or a card missing after an early end, still fails at once.
     private func interruptManualPlan(_ title: String) -> String? {
         for attempt in 1...2 {
             let name = attempt == 1 ? title : "\(title) Zwei"
@@ -662,13 +665,16 @@ final class DeviceConditionUITests: XCTestCase {
             let tapped = Date()
             guard tap(apply, "start \(name)", timeout: 5) else { return nil }
             let started = waitGone(apply, timeout: 10)
-            let finished = app.buttons["result.receipt"].exists
             guard started else {
                 print("UI_STEP_MISSING \(name) started")
                 shot("x-plan-not-started-\(name.replacingOccurrences(of: " ", with: "-"))")
                 XCTFail("The plan for \(name) did not start: \"Jetzt umsetzen\" is still there 10 s after the tap")
                 return nil
             }
+            // The first change (the album) goes through at once; the next waits 30 s.
+            let waited = Date().timeIntervalSince(tapped)
+            if waited < 5 { usleep(UInt32((5 - waited) * 1_000_000)) }
+            let finished = app.buttons["result.receipt"].exists
             UITestOnboarding.clock("end the app during \(name)")
             app.terminate()
             let closedAfter = Int(Date().timeIntervalSince(tapped))
@@ -680,19 +686,33 @@ final class DeviceConditionUITests: XCTestCase {
                 print("UI_STEP_OK interruption card for \(name)")
                 sleep(1)
                 shot("interrupted-\(name.replacingOccurrences(of: " ", with: "-"))")
+                let steps = interruptedSteps()
+                let halfDone = steps.map { $0.done > 0 && $0.done < $0.total } ?? false
+                print("UI_FACT \(name) interrupted with \(steps.map { "\($0.done) of \($0.total)" } ?? "no count readable") steps done")
+                print(halfDone ? "UI_STEP_OK \(name) half done" : "UI_STEP_MISSING \(name) half done")
+                XCTAssertTrue(halfDone, "The plan for \(name) was not half done when the app was closed: \(steps.map { "\($0.done) of \($0.total)" } ?? "no count readable") steps")
                 return name
             }
             let late = finished || closedAfter >= 25
             print("UI_STEP_MISSING interruption card for \(name) (closed \(closedAfter) s after the tap)")
             shot("x-no-interruption-card-\(name.replacingOccurrences(of: " ", with: "-"))")
             if attempt == 1 && late {
-                print("UI_FACT the slow plan for \(name) was done before the app was closed (\(closedAfter) s, slow simulator): one more album")
+                print("UI_FLAKY_RETRY DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo slow plan for \(name) was done before the app was closed (\(closedAfter) s after the tap), retried with a second album")
                 continue
             }
             XCTFail("No interruption card: the plan for \(name) finished before the app was closed (\(closedAfter) s after the tap)")
             return nil
         }
         return nil
+    }
+
+    /// "Erledigt: 1 von 2 Schritten" on the interruption card, as (done, total).
+    private func interruptedSteps() -> (done: Int, total: Int)? {
+        let line = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Erledigt:")).firstMatch
+        guard let label = try? line.snapshot().label,
+              let m = label.replacingOccurrences(of: ".", with: "").firstMatch(of: #/Erledigt: (\d+) von (\d+)/#),
+              let done = Int(m.1), let total = Int(m.2) else { return nil }
+        return (done, total)
     }
 
     /// The album is listed in the albums tab ("Von Albumist angelegt oder ergänzt").
@@ -1244,12 +1264,13 @@ final class DeviceConditionUITests: XCTestCase {
     /// 3,000 more photos (120 trips): created once, then analysed. Prints the times and checks
     /// that lists, the overview, search and the atlas stay quick with a real-sized library.
     /// It takes about 25 minutes (creating and analysing 3,000 photos), so a run per change can
-    /// leave it out with SORTLY_UI_QUICK=1 (passed as TEST_RUNNER_SORTLY_UI_QUICK); the nightly run
-    /// and the run before an upload keep it. LoadTests checks 20,000 and 100,000 photos on Linux
+    /// leave it out with SORTLY_UI_QUICK=1 (passed as TEST_RUNNER_SORTLY_UI_QUICK). Every full UI
+    /// run keeps it, and a quick run never counts for an upload (the pipeline's gate). There is
+    /// no nightly UI run yet. LoadTests checks 20,000 and 100,000 photos on Linux
     /// at every change (docs/TEST_PLAN.md, "UI-Tests: Dauer und Verlagerung").
     func test11_LargeLibrary() throws {
         if ProcessInfo.processInfo.environment["SORTLY_UI_QUICK"] == "1" {
-            throw XCTSkip("Quick UI run (SORTLY_UI_QUICK): the large library runs nightly and before an upload")
+            throw XCTSkip("Quick UI run (SORTLY_UI_QUICK): the large library runs only in a full UI run, which an upload needs")
         }
         continueAfterFailure = true
         prepare()

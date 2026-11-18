@@ -36,6 +36,10 @@ MACHINERY_STEPS = {
     # This check itself: it fails on what it finds in an earlier attempt (found again from
     # there) or when the API does not answer (then a re-run of the upload job is right).
     "Earlier attempts of this run",
+    # The UI plan (ui.yml) and the UI gate (testflight.yml) decide from the recorded results of
+    # the groups alone, every time anew (ui_evidence.py): a red group stays red for them in
+    # every attempt, so a re-run of them can hide nothing.
+    "Plan the UI groups", "UI groups green for this app and test code",
 }
 MACHINERY_PREFIXES = ("Upload ", "Download ", "Post ", "Run actions/checkout@")
 NOT_PASSED = ("failure", "timed_out", "cancelled")

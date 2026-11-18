@@ -9,21 +9,32 @@ name: TestFlight
 #      on another branch, the run stops here, before any macOS minute.
 #   2. Tests: CI (ci.yml) with the app rules, the Linux core tests and then, on one Mac, the
 #      iOS build, core and app tests. Its iOS job always runs here.
-#   3. Then side by side: the UI flow (ui.yml, five groups, at most four Macs) and the small
-#      stress pass (ui-stress.yml with photos 10000 and minutes 15; the owner's rule 17.11.:
-#      before each TestFlight build). Five Macs at the peak. "Repeats and flaky tests" then
+#   3. Then side by side: the UI flow (ui.yml, at most four Macs) and the small stress pass
+#      (ui-stress.yml with photos 10000 and minutes 15; the owner's rule 17.11.: before each
+#      TestFlight build). Five Macs at the peak. The UI flow runs with groups "auto" (input
+#      ui_groups): only the groups that have no green result yet for exactly this app and their
+#      own test code (the owner's rule 17.11.: a test-only change reruns only the groups it
+#      touches, any app change everything; ui.yml "UI plan"). "Repeats and flaky tests" then
 #      counts the simulator repeats and the flaky tests of both in one table.
-#   4. Archive and upload, one Mac job, only when 2 and 3 are green: archives exactly this
+#   3b. UI gate (Linux): every UI group must be green for exactly this app fingerprint and its
+#      own test fingerprint, from this run or an earlier one, and none may be red for that pair
+#      (a red is fixed, never re-run to green; .github/scripts/ui_evidence.py gate). It names
+#      the reused results and their flaky tests.
+#   4. Archive and upload, one Mac job, only when 2, 3 and 3b are green: archives exactly this
 #      commit with the pinned Xcode and this run's number as the build number, checks the
 #      app's Info.plist (commit, build number, Xcode build), signs it for the App Store during
 #      the export and uploads it. Archive and export happen in the same job: nothing is handed
 #      between machines, so the app that is uploaded is the one built from the tested commit.
 #   5. The commit gets the annotated git tag build-<number>; "Was testen" is set from
 #      docs/TESTFLIGHT_NOTES.md.
-# Two to two and a half hours until the upload (CI ~20 min, UI flow 75-100 min observed,
-# archive and upload ~15 min), then up to 50 min until "Was testen" is set (see concurrency).
+# Two to two and a half hours until the upload when every UI group runs (CI ~20 min, UI flow
+# 75-100 min observed, archive and upload ~15 min); after a test-only change only the touched
+# groups run, and the stress pass (~45 min) sets the time. Then up to 50 min until "Was testen"
+# is set (see concurrency).
 #
-# Every part tests this run's commit (github.sha). The called workflows get a concurrency group
+# Every part tests this run's commit (github.sha); only a UI group may instead be covered by an
+# earlier green result for a byte-identical app and the same test code of that group (3b; the
+# app fingerprint covers everything that goes into the app, ui_groups.py). The called workflows get a concurrency group
 # of their own for this run (inputs.release; github.workflow, which is "TestFlight" in a called
 # workflow, is a second guard): the Mac queue of ui.yml never holds or replaces them, and a push
 # to main never cancels them. Start a TestFlight run when the Mac queue is idle (one Mac-heavy
@@ -56,6 +67,11 @@ on:
         description: 'Emergency: upload without running the tests'
         type: boolean
         default: false
+      ui_groups:
+        description: 'UI groups: auto (only those without a green result for this app and their test code) or all'
+        type: choice
+        options: [auto, all]
+        default: auto
 
 permissions:
   contents: read
@@ -121,8 +137,13 @@ jobs:
     name: UI flow
     needs: tests
     uses: ./.github/workflows/ui.yml
+    # actions: read for its "UI plan" (earlier results of the groups).
+    permissions:
+      contents: read
+      actions: read
     with:
       release: true
+      groups: ${{ inputs.ui_groups || 'auto' }}
 
   stress:
     name: Stress pass
@@ -162,15 +183,46 @@ jobs:
           mapfile -t records < <(find flaky -name 'flaky-*.json' 2>/dev/null | sort)
           python3 .github/scripts/ui_tests.py flaky-summary "${records[@]}" >> "$GITHUB_STEP_SUMMARY"
 
+  ui-gate:
+    # Every UI group green for exactly this app and its own test code (this run's groups or a
+    # reused earlier result), none red for that pair; see .github/scripts/ui_evidence.py. Linux,
+    # before the Mac job. If the API does not answer it fails; re-run this job then
+    # (earlier_attempts.py counts it as machinery: it decides from the results alone).
+    name: UI gate (every group green for this app and its test code)
+    needs: [check, tests, ui, stress]
+    if: >-
+      ${{ !cancelled() && needs.check.outputs.ready == 'true' && !inputs.force && needs.tests.result == 'success'
+      && needs.ui.result == 'success' && needs.stress.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # actions: read for the runs and jobs, checks: read for the flaky warnings of reused jobs.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      text: ${{ steps.gate.outputs.text }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: UI groups green for this app and test code
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/ui_evidence.py gate
+
   release:
     name: Archive and upload to TestFlight
-    needs: [check, tests, ui, stress]
-    # The tests, the UI flow and the stress pass of this run must all be green (or skipped on
-    # purpose by force). !cancelled() instead of the default: with force, skipped jobs must not
-    # skip this one.
+    needs: [check, tests, ui, stress, ui-gate]
+    # The tests, the UI flow, the stress pass and the UI gate of this run must all be green (or
+    # skipped on purpose by force). !cancelled() instead of the default: with force, skipped jobs
+    # must not skip this one.
     if: >-
       ${{ !cancelled() && needs.check.outputs.ready == 'true' && (inputs.force
-      || (needs.tests.result == 'success' && needs.ui.result == 'success' && needs.stress.result == 'success')) }}
+      || (needs.tests.result == 'success' && needs.ui.result == 'success' && needs.stress.result == 'success'
+      && needs.ui-gate.result == 'success')) }}
     runs-on: xcode-27
     # Archive ~10-20 min, export and upload ~3-5 min.
     timeout-minutes: 60
@@ -318,7 +370,7 @@ jobs:
     # that may write to the repository, and it can only create a tag: an existing tag is left
     # alone when it is on the same commit (a re-run) and fails the job otherwise.
     name: Tag the TestFlight build
-    needs: release
+    needs: [release, ui-gate]
     # always(), not the default success(): that would also look at the tests, which force
     # skips; and an uploaded build gets its tag even when the run is cancelled after the upload.
     if: ${{ always() && needs.release.result == 'success' }}
@@ -336,8 +388,10 @@ jobs:
           # from attempt 2 on, what failed before it (earlier_attempts.py).
           ATTEMPT: ${{ needs.release.outputs.attempt }}
           EARLIER: ${{ needs.release.outputs.earlier }}
+          # Which UI groups ran in this run and which green results were reused (ui_evidence.py).
+          UI_GATE: ${{ needs.ui-gate.outputs.text }}
         run: |
-          about="TestFlight build $GITHUB_RUN_NUMBER of $GITHUB_SHA (run $GITHUB_RUN_ID, attempt ${ATTEMPT:-$GITHUB_RUN_ATTEMPT}${EARLIER:+; $EARLIER})"
+          about="TestFlight build $GITHUB_RUN_NUMBER of $GITHUB_SHA (run $GITHUB_RUN_ID, attempt ${ATTEMPT:-$GITHUB_RUN_ATTEMPT}${EARLIER:+; $EARLIER}${UI_GATE:+; $UI_GATE})"
           if [ "$FORCED" = "true" ]; then
             message="FORCED – untested: $about, uploaded without running any test (force)"
           else

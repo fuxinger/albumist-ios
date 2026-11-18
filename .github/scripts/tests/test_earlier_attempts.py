@@ -51,7 +51,8 @@ class FailureTests(unittest.TestCase):
         for step in ("Set up job", "Initialize containers", "Boot simulator (in the background)",
                      "Wait for the simulator", "Download build products", "Unpack build products",
                      "Install XcodeGen", "Upload to TestFlight", "Upload results", "Post Run actions/checkout@abc",
-                     "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "Earlier attempts of this run"):
+                     "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "Earlier attempts of this run",
+                     "Plan the UI groups", "UI groups green for this app and test code"):
             with self.subTest(step=step):
                 self.assertTrue(earlier_attempts.is_machinery(step))
         for step in ("Run UI tests", "Select pinned Xcode", "Generate Xcode project", "Job summary"):

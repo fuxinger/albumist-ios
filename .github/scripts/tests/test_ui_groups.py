@@ -161,6 +161,7 @@ class GroupTests(unittest.TestCase):
         self.assertEqual(groups.selected_tests("other"), ["FlowUITests/test2_Other", "FlowUITests/test3_Search",
                                                           "SearchUITests/testSearch"])
         self.assertEqual(groups.file_map(), {
+            ".github/scripts/other.py": ["device", "full", "other", "small"],
             ".github/scripts/pick_simulator.py": ["device", "full", "other", "small"],
             ".github/scripts/toolchain.py": ["device", "full", "other", "small"],
             ".github/scripts/ui_tests.py": ["device", "full", "other", "small"],
@@ -179,14 +180,19 @@ class GroupTests(unittest.TestCase):
             with self.subTest(name=bad), self.assertRaisesRegex(ValueError, "lower-case"):
                 ui_groups.Groups(repo(**{".github__ui-groups.json": json.dumps(groups)}))
 
-    def test_quick_mode_changes_only_the_groups_that_read_the_switch(self):
+    def test_quick_mode_changes_every_group(self):
         device = DEVICE.replace("func test02_Cold() {", 'func test02_Cold() {\n        if env["SORTLY_UI_QUICK"] == "1" { return }')
         groups = ui_groups.Groups(repo(**{"App__SortlyUITests__DeviceUITests.swift": device}))
-        self.assertNotEqual(groups.fingerprint("device", quick=True), groups.fingerprint("device"))
-        self.assertEqual(groups.fingerprint("full", quick=True), groups.fingerprint("full"))
-        entry = groups.matrix_entry("device", "a" * 64, quick=True)
-        self.assertEqual((entry["title"], entry["quick"]), ("device conditions (quick)", True))
-        self.assertFalse(groups.matrix_entry("full", "a" * 64, quick=True)["quick"])
+        self.assertTrue(groups.reads_quick("device"))
+        self.assertFalse(groups.reads_quick("full"))
+        # Fails safe: in a quick run every group has another fingerprint, also one whose files
+        # do not visibly read the switch.
+        for name in ("device", "full"):
+            self.assertNotEqual(groups.fingerprint(name, quick=True), groups.fingerprint(name))
+            entry = groups.matrix_entry(name, "a" * 64, quick=True)
+            self.assertTrue(entry["quick"])
+            self.assertTrue(entry["title"].endswith(" (quick)"))
+        self.assertFalse(groups.matrix_entry("full", "a" * 64)["quick"])
 
     def test_matrix_entry(self):
         tree = repo()
@@ -248,6 +254,11 @@ class FingerprintTests(unittest.TestCase):
         self.assertEqual(self.changed(**{"App__SortlyUITests__Observer.swift": observer}), everyone)
         self.assertEqual(self.changed(**{".github__workflows__ui.yml": "name: UI flow changed"}), everyone)
         self.assertEqual(self.changed(**{".github__workflows__testflight.yml": "name: TestFlight"}), everyone)
+        # Every script and workflow (the matrix generator and the evidence reader too), not their tests.
+        for path in (".github/scripts/ui_groups.py", ".github/scripts/ui_evidence.py", ".github/workflows/ci.yml"):
+            with self.subTest(path=path):
+                self.assertEqual(self.changed(**{path.replace("/", "__"): "# new"}), everyone)
+        self.assertEqual(self.changed(**{".github__scripts__tests__test_x.py": "# new"}), (False, []))
         # Fails closed: a file no group's tests reach (here a helper nobody uses yet) counts for all.
         self.assertEqual(self.changed(**{"App__SortlyUITests__Unused.swift": "enum Unused {}\n"}), everyone)
 

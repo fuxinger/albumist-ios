@@ -17,7 +17,7 @@ removed test is followed automatically.
 
 App fingerprint: sha256 over the path and git blob id of every tracked file that can go into
 the app or decide how it is built. That is every file EXCEPT the UI tests (App/SortlyUITests),
-the unit tests (App/SortlyTests, Tests), docs/, any *.md, .github/ (but .github/toolchain.json,
+the unit tests (App/SortlyTests, Tests), docs/, top-level *.md, .github/ (but .github/toolchain.json,
 the pinned Xcode and simulator runtime, counts), scripts/, tools/ and design/. It is made as an
 exclusion list on purpose: a new folder counts as app until someone says otherwise, so an
 unknown file can only cause a run too many, never a run too few. Same blobs means the same
@@ -29,10 +29,12 @@ Test fingerprint of a group: sha256 over the group's own definition (fields of u
 without the "_" comments), the files that hold its tests, every file those use (transitively:
 a Swift file uses another when it names a type, function or extension member that file declares
 for the others; private declarations are not seen from outside), every file of App/SortlyUITests
-that is not Swift (Info.plist and the like) or declares an XCTestObservation, and the harness all
-groups run through (ui_tests.py, pick_simulator.py, toolchain.py). So a change to a shared helper
+that is not Swift (Info.plist and the like) or declares an XCTestObservation, every Swift file of
+the target that no group's tests reach (fails closed), and the harness: every file under
+.github/scripts/ (but its tests/) and .github/workflows/. In a quick run (SORTLY_UI_QUICK=1) a
+line "mode quick" is added for every group. So a change to a shared helper
 (UITestOnboarding.swift) changes the fingerprint of every group whose tests use it, and only of
-those; ui.yml itself is not part of it (how a group is started lives in the files above).
+those; a change to any script or workflow changes every group's.
 """
 from __future__ import annotations
 
@@ -47,18 +49,28 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 GROUPS_FILE = ".github/ui-groups.json"
 UI_DIR = "App/SortlyUITests/"
-HARNESS = (".github/scripts/ui_tests.py", ".github/scripts/pick_simulator.py", ".github/scripts/toolchain.py",
-           # How the groups are built, started and named: a branch that changes them gets other
-           # fingerprints, so its results never count for an unchanged ui.yml (and the reverse).
-           ".github/workflows/ui.yml", ".github/workflows/testflight.yml")
+# Everything that builds, starts, names or judges the groups: every script (the runner, the
+# matrix generator ui_groups.py, ui_evidence.py, ...) and every workflow. A branch that changes
+# any of them gets other fingerprints for every group, so its results never count for the
+# unchanged ones (and the reverse). Only the scripts' own unit tests are left out: they never
+# run in a UI job.
+HARNESS_PREFIXES = (".github/scripts/", ".github/workflows/")
+HARNESS_EXCLUDED = (".github/scripts/tests/",)
+
+
+def is_harness(path: str) -> bool:
+    return path.startswith(HARNESS_PREFIXES) and not path.startswith(HARNESS_EXCLUDED)
+
+
 NOT_APP_PREFIXES = ("App/SortlyUITests/", "App/SortlyTests/", "Tests/", "docs/", ".github/", "scripts/", "tools/",
                     "design/")
 APP_EXCEPTIONS = (".github/toolchain.json",)
 SHORT = 12  # hex digits in job names (48 bits)
 GROUP_NAME = re.compile(r"[a-z0-9-]+")  # as ui_evidence.JOB_NAME reads it from a job name
 # Environment switch of the UI tests for a quick run per change (SORTLY_UI_QUICK=1, handed to the
-# tests as TEST_RUNNER_SORTLY_UI_QUICK): a group whose files read it has another test fingerprint
-# in a quick run, so a quick result never stands in for a full one (the upload needs full ones).
+# tests as TEST_RUNNER_SORTLY_UI_QUICK; DeviceConditionUITests.test11_LargeLibrary skips itself):
+# every group has another test fingerprint in a quick run, so a quick result never stands in for
+# a full one (the upload needs full ones).
 QUICK_SWITCH = "SORTLY_UI_QUICK"
 
 
@@ -423,7 +435,7 @@ class Groups:
         blobs = tree.files()
         shared = ({p for p in blobs if p.startswith(UI_DIR) and not p.endswith(".swift")}
                   | {p for p, f in self.files.items() if f.observer}
-                  | {p for p in HARNESS if p in blobs})
+                  | {p for p in blobs if is_harness(p)})
         # Fails closed: a Swift file of the target that no group's tests reach (a helper whose use
         # this reader missed, a test class it could not see) counts for every group.
         reached = set()
@@ -459,11 +471,13 @@ class Groups:
         return any(self.files[p].quick_switch for p in self.files_of(name) if p in self.files)
 
     def fingerprint(self, name: str, quick: bool = False) -> str:
-        """The group's test fingerprint; in a quick run another one when its tests read the switch."""
+        """The group's test fingerprint; in a quick run always another one."""
         blobs = self.tree.files()
         lines = [json.dumps(definition(self.group(name)), sort_keys=True)]
         lines += [f"{p}\0{blobs[p]}" for p in self.files_of(name)]
-        if quick and self.reads_quick(name):
+        if quick:
+            # Every group, not only those whose files read the switch (reads_quick): a switch
+            # read where this reader cannot see it must not make a quick result look full.
             lines.append(f"mode quick ({QUICK_SWITCH}=1)")
         return _digest(lines)
 
@@ -488,7 +502,6 @@ class Groups:
         entry = {k: g.get(k, "") for k in ("group", "title", "device", "only", "skip")}
         for flag in ("video", "reduce_motion", "increase_contrast"):
             entry[flag] = bool(g.get(flag, False))
-        quick = quick and self.reads_quick(name)
         if quick:
             entry["title"] += " (quick)"
         entry["quick"] = quick

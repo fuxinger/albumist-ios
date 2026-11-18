@@ -58,7 +58,10 @@ on:
       minutes:
         # The simulator's Vision needs about 8 h for 50,000 photos (a device is faster), so the
         # analysis is measured for this many minutes after the photos are created.
-        description: Minutes of analysis measured after the photos are created; 45 for the full pass
+        # Pause comes 2 min into the image step, which begins about 3 min in with 10,000 photos
+        # and about 14 min in with 50,000 (see above); with less time test12 fails because
+        # Pause was never tried.
+        description: Minutes of analysis measured after the photos are created; 45 for the full pass; at least 8 for 10,000 photos and 20 for 50,000, or Pause is never tried and the test fails
         type: string
         default: '15'
   # testflight.yml runs the small pass for the commit it uploads, in the same run, and names
@@ -74,7 +77,7 @@ on:
         type: string
         default: '10000'
       minutes:
-        description: Minutes of analysis measured after the photos are created
+        description: Minutes of analysis measured after the photos are created; at least 8 for 10,000 photos and 20 for 50,000 (Pause)
         type: string
         default: '15'
 

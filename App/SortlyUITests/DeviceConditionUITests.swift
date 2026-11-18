@@ -1358,8 +1358,8 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// Runs only when the runner sets SORTLY_STRESS_PHOTOS (ui-stress.yml: before each TestFlight
     /// build, weekly at night, or by hand; xcodebuild hands TEST_RUNNER_SORTLY_STRESS_PHOTOS on
-    /// as that); the "device conditions" group of ui.yml skips it at once. Two phases, so that neither disturbs the other (stress runs
-    /// 43795785359 and 43823462215 mixed them):
+    /// as that); the "device conditions" group of ui.yml skips it at once. Two phases, so that
+    /// neither disturbs the other (stress runs 43795785359 and 43823462215 mixed them):
     /// 1. Creating: launches with `-SortlyUITestCreateOnly` add that many photos and end the
     ///    app when they are done, writing how far they are into a file of the runner's.
     /// 2. Measuring: a fresh launch sets the database aside (-SortlyUITestRebuildDatabase) and

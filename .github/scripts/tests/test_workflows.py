@@ -69,6 +69,15 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertIn("python3 .github/scripts/ui_evidence.py gate\n", testflight)  # full, never --quick
         self.assertIn("      release: true\n      quick: false\n", testflight)
 
+    def test_pull_request_runs_name_their_merge_commit(self):
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
+        import ui_evidence
+        text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        self.assertIn("format('{0} [merge {1}]', github.event.pull_request.title, github.sha)", text)
+        run = {"event": "pull_request", "display_title": "Some PR [merge " + "a" * 40 + "]", "head_sha": "b" * 40}
+        self.assertEqual(ui_evidence.tested_sha(run), "a" * 40)
+
     def test_ui_flow_checkouts_keep_no_token(self):
         for step in re.split(r"\n\s+- ", read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))):
             if "actions/checkout@" in step:

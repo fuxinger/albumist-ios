@@ -1,4 +1,9 @@
 name: UI flow
+# A pull request run names the merge commit it tests (github.sha): ui_evidence.py reads it from
+# the run list to tell that commit's app fingerprint without reading the run's jobs. Other runs
+# keep their usual name (an empty run-name falls back to it).
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('{0} [merge {1}]', github.event.pull_request.title, github.sha) || '' }}
 
 # End-to-end UI tests on the simulator. Separate from CI, in the repository's one Mac queue
 # (see "concurrency" below): one UI run or stress pass at a time across all branches; a new
@@ -32,13 +37,15 @@ name: UI flow
 #   this app and test code was red runs again when asked, but its green never counts (a red test
 #   is fixed, not re-run to green).
 #   Quick mode (pull requests, or "quick" by hand; never in a TestFlight run): the tests get
-#   SORTLY_UI_QUICK=1 and the long device test skips itself. A group whose files read that
-#   switch has another test fingerprint then, so a quick green never stands for a full one.
+#   SORTLY_UI_QUICK=1 and DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips
+#   itself. Every group has another test fingerprint then, so a quick green never stands for a
+#   full one; a red in either mode blocks both.
 #   The last job, "UI verdict (full|quick)", checks every group for this app and its test code
 #   (the same check as the TestFlight gate), also when no group had to run; the release gate
 #   (ci_gate.py) needs "UI verdict (full)" green.
-#   A group whose simulator was lost before its first test in every pass has no result (neither
-#   green nor red): its job fails in "Simulator lost before the first test", not in "Run UI tests".
+#   A group whose every pass failed on the simulator or XCTest alone (lost before the first
+#   test, testmanagerd crashed, also in the repeat) has no result (neither green nor red): its job
+#   fails in "No test result (...)", not in "Run UI tests".
 #
 # Each group runs through .github/scripts/ui_tests.py: a pass that the simulator service lost
 # (an explicit "Error returned in reply from CoreSimulatorService", "Timed out waiting for AX
@@ -62,7 +69,7 @@ on:
         type: string
         default: auto
       quick:
-        description: Quick (SORTLY_UI_QUICK=1, the long device test skips itself); a quick result never counts for an upload
+        description: Quick (SORTLY_UI_QUICK=1, device test11_LargeLibrary skips itself); a quick result never counts for an upload
         type: boolean
         default: false
   # testflight.yml runs the UI flow for the commit it uploads, in the same run (release: true).
@@ -250,7 +257,7 @@ jobs:
       REDUCE_MOTION: ${{ matrix.reduce_motion }}
       VIDEO: ${{ matrix.video }}
       # Quick mode (SORTLY_UI_QUICK=1 in the tests; xcodebuild hands TEST_RUNNER_* variables to
-      # the test runner without the prefix). Only for groups whose tests read it (matrix.quick).
+      # the test runner without the prefix): every group of a quick run (matrix.quick).
       TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -306,16 +313,16 @@ jobs:
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
             --only "$ONLY" --skip "$SKIP" "${flags[@]}"
           status=$?
-          # 75: the simulator was lost before the first test in every pass, no test ran
-          # (build/no-test-started); the next step fails the job, not this one.
+          # 75: every pass failed on the simulator or XCTest alone, no test result
+          # (build/no-test-result); the next step fails the job, not this one.
           [ "$status" = 75 ] && exit 0
           exit "$status"
-      - name: Simulator lost before the first test
+      - name: No test result (simulator or XCTest failed in every pass)
         # No test result for this group (ui_evidence.py: neither green nor red); the job fails
         # here so that the run is not green. earlier_attempts.py counts it as machinery.
-        if: hashFiles('build/no-test-started') != ''
+        if: hashFiles('build/no-test-result') != ''
         run: |
-          echo "::error title=UI $GROUP::no test started: $(cat build/no-test-started). Start the group again."
+          echo "::error title=UI $GROUP::no test result: $(cat build/no-test-result). Start the group again."
           exit 1
       - name: Job summary
         if: always()

@@ -8,7 +8,6 @@ import io
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -34,7 +33,8 @@ TEST_ONLY_FPS = ui_groups.Groups(TEST_ONLY).fingerprints()
 QUICK_DEVICE = DEVICE.replace("func test02_Cold() {", 'func test02_Cold() {\n        if env["SORTLY_UI_QUICK"] == "1" { return }')
 QUICK = repo(**{"App__SortlyUITests__DeviceUITests.swift": QUICK_DEVICE})
 QUICK_FULL, QUICK_FAST = ui_groups.Groups(QUICK).fingerprints(), ui_groups.Groups(QUICK).fingerprints(quick=True)
-NOW = datetime(2026, 11, 18, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 20, tzinfo=timezone.utc)
+FAILED_LOG = "Test Case '-[SortlyUITests.DeviceUITests test01_Hot]' failed (3.0 seconds).\n"
 
 
 def name(group, app=APP, tests=None, prefix=""):
@@ -42,27 +42,31 @@ def name(group, app=APP, tests=None, prefix=""):
     return f"{prefix}UI {TITLES[group]} [{group} app {app[:12]} tests {tests[:12]}]"
 
 
-def job(group, conclusion="success", step="success", job_id=None, end="2026-11-17T12:00:00Z", **kw):
+def job(group, conclusion="success", step="success", job_id=None, end="2026-11-19T12:00:00Z", **kw):
     steps = [{"name": "Set up job", "conclusion": "success"}, {"name": "Wait for the simulator", "conclusion": "success"},
-             {"name": "Run UI tests", "conclusion": step, "started_at": "2026-11-17T11:00:00Z"}]
+             {"name": "Run UI tests", "conclusion": step, "started_at": "2026-11-19T11:00:00Z"}]
     if conclusion == "boot":
         conclusion = "failure"
         steps[1]["conclusion"], steps[2] = "failure", {"name": "Run UI tests", "conclusion": "skipped"}
     return {"id": job_id or hash((group, end, conclusion)) % 10**9, "name": name(group, **kw), "conclusion": conclusion,
-            "started_at": "2026-11-17T11:00:00Z", "completed_at": end, "steps": steps, "run_attempt": 1,
+            "started_at": "2026-11-19T11:00:00Z", "completed_at": end, "steps": steps, "run_attempt": 1,
             "html_url": f"https://example/job/{group}"}
 
 
-def run(run_id, sha, jobs, event="workflow_dispatch", workflow="ui.yml", repo_name="owner/repo"):
+def run(run_id, sha, jobs, event="workflow_dispatch", workflow="ui.yml", repo_name="owner/repo",
+        created="2026-11-19T10:00:00Z", merge=None):
+    """A run; a pull request run tests `merge` (its run-name ends "[merge <sha>]"), by default `sha`."""
+    title = f"A pull request [merge {merge or sha}]" if event == "pull_request" and merge != "" else "A title"
     return ({"id": run_id, "run_number": run_id, "head_sha": sha, "event": event, "path": f".github/workflows/{workflow}",
-             "created_at": "2026-11-17T10:00:00Z", "head_repository": {"full_name": repo_name}}, jobs)
+             "created_at": created, "display_title": title, "status": "completed", "run_attempt": 1,
+             "head_repository": {"full_name": repo_name}}, jobs)
 
 
 class FakeVerifier:
     """sha -> (app, group fingerprints[, quick fingerprints]) as git would compute them."""
 
-    def __init__(self, commits, start=NOW.timestamp() - 86400, changed=None):
-        self.commits, self.start, self.changed = commits, start, changed or {}
+    def __init__(self, commits, changed=None):
+        self.commits, self.changed = commits, changed or {}
 
     def app(self, sha):
         return self.commits.get(sha, (None, {}))[0]
@@ -72,9 +76,6 @@ class FakeVerifier:
         keys = {f.get(entry["group"], "")[:12] for f in fps} - {""}
         return bool(app) and app[:12] == entry["app"] and entry["tests"] in keys
 
-    def window_start(self, app):
-        return self.start
-
     def changed_since(self, sha):
         return self.changed.get(sha)
 
@@ -83,7 +84,9 @@ VERIFIER = FakeVerifier({"a" * 40: (APP, FPS), "b" * 40: (APP, TEST_ONLY_FPS), "
                          "q" * 40: (APP, QUICK_FULL, QUICK_FAST)})
 
 
-def fake_api(runs, annotations=None, fail=False, total=None, per_page=None):
+def fake_api(runs, annotations=None, fail=False, per_page=None, logs=None):
+    """The REST API over `runs`. logs: job id -> log text, or an exception to raise; a job not
+    in it has a log with a failed test case."""
     calls = []
 
     def call(path, **params):
@@ -92,11 +95,18 @@ def fake_api(runs, annotations=None, fail=False, total=None, per_page=None):
             raise ui_evidence.ApiError("down")
         match = re.fullmatch(r"actions/workflows/(\S+)/runs", path)
         if match:
-            listed = [r for r, _ in runs if r["path"].endswith(match.group(1))]
+            low, high = params["created"].split("..")
+            listed = [r for r, _ in runs if r["path"].endswith(match.group(1)) and low <= r["created_at"] <= high]
+            listed.sort(key=lambda r: r["created_at"], reverse=True)
             size = per_page or params.get("per_page", 100)
             page = params.get("page", 1)
-            return {"total_count": total if total is not None else len(listed),
-                    "workflow_runs": listed[(page - 1) * size:page * size]}
+            return {"total_count": len(listed), "workflow_runs": listed[(page - 1) * size:page * size]}
+        match = re.fullmatch(r"actions/jobs/(\d+)/logs", path)
+        if match:
+            text = (logs or {}).get(int(match.group(1)), FAILED_LOG)
+            if isinstance(text, Exception):
+                raise text
+            return text
         match = re.fullmatch(r"actions/runs/(\d+)/jobs", path)
         if match:
             jobs = next(j for r, j in runs if r["id"] == int(match.group(1)))
@@ -121,7 +131,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(ui_evidence.classify(job("device", "cancelled", "cancelled")), "red")
         self.assertEqual(ui_evidence.classify(job("device", "timed_out", "cancelled")), "red")
         # No test ran: a simulator that did not boot, a run cancelled before the step, a job that
-        # still runs, or "Simulator lost before the first test" (ui_tests.py exit 75, step green).
+        # still runs, or "No test result (...)" (ui_tests.py exit 75, step green).
         self.assertEqual(ui_evidence.classify(job("device", "boot")), "none")
         before = job("device", "cancelled", "cancelled")
         before["steps"][2] = {"name": "Run UI tests", "conclusion": "skipped"}
@@ -131,7 +141,7 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(ui_evidence.classify(never), "none")
         self.assertEqual(ui_evidence.classify(dict(job("device"), status="in_progress", conclusion=None)), "none")
         lost = job("device", "failure")
-        lost["steps"].append({"name": "Simulator lost before the first test", "conclusion": "failure"})
+        lost["steps"].append({"name": "No test result (simulator or XCTest failed in every pass)", "conclusion": "failure"})
         self.assertEqual(ui_evidence.classify(lost), "none")
 
     def test_job_names_from_ui_yml_are_found(self):
@@ -161,8 +171,8 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(d["evidence"]["run_id"], 1)
 
     def test_a_red_rerun_to_green_without_a_fix_stays_red(self):
-        runs = [run(1, "a" * 40, [job("other", "failure", "failure", end="2026-11-17T10:00:00Z")]),
-                run(2, "a" * 40, [job("other", end="2026-11-17T12:00:00Z")])]
+        runs = [run(1, "a" * 40, [job("other", "failure", "failure", end="2026-11-19T10:00:00Z")]),
+                run(2, "a" * 40, [job("other", end="2026-11-19T12:00:00Z")])]
         d = self.decide("other", runs)
         self.assertEqual(d["state"], "red")
         self.assertEqual([e["run_id"] for e in d["reds"]], [1])
@@ -188,77 +198,73 @@ class HistoryTests(unittest.TestCase):
         runs = [run(1, "a" * 40, [job("device")]),
                 run(2, "c" * 40, [job("device")]),                      # another app: its jobs are not even read
                 run(3, "d" * 40, [job("full")], event="pull_request", repo_name="fork/repo"),
-                run(4, "a" * 40, [job("small")], event="pull_request"),  # merge commit: always read
-                run(9, "a" * 40, [job("other")], workflow="testflight.yml")]
+                run(4, "e" * 40, [job("small")], event="pull_request", merge="a" * 40),  # tests merge commit a
+                run(5, "e" * 40, [job("small")], event="pull_request", merge="c" * 40),  # merge with another app
+                run(6, "e" * 40, [job("small")], event="pull_request", merge=""),        # older run: merge unknown
+                run(7, "9" * 40, [job("small")]),                       # commit unknown to git (rebased away)
+                run(8, "a" * 40, [job("full")], created="2026-11-17T23:00:00Z"),  # before any fingerprint
+                run(9, "c" * 40, [job("other")], workflow="testflight.yml")]  # the current run: always
         call = fake_api(runs)
         history = ui_evidence.fetch_history(APP, 9, VERIFIER, call=call, now=NOW)
-        self.assertEqual(sorted(r["id"] for r, _ in history), [1, 4, 9])
+        self.assertEqual(sorted(r["id"] for r, _ in history), [1, 4, 6, 7, 9])
         self.assertNotIn("actions/runs/2/jobs", call.calls)
+        self.assertNotIn("actions/runs/5/jobs", call.calls)
+        # A pull request's results are those of the merge commit it tested.
+        entries = ui_evidence.results(history)
+        self.assertEqual({e["run_id"]: e["sha"] for e in entries}[4], "a" * 40)
 
-    def test_every_page_since_the_app_first_existed_is_read(self):
-        runs = [run(i, "a" * 40, [job("device", job_id=i)]) for i in range(1, 8)]
+    def test_every_page_and_every_range_is_read(self):
+        runs = [run(i, "a" * 40, [job("device", job_id=i)], created=f"2026-11-19T{i:02d}:00:00Z") for i in range(1, 8)]
         call = fake_api(runs, per_page=3)
         history = ui_evidence.fetch_history(APP, None, VERIFIER, call=call, now=NOW)
         self.assertEqual(sorted(r["id"] for r, _ in history), list(range(1, 8)))
         self.assertEqual(call.calls.count("actions/workflows/ui.yml/runs"), 3)
+        # More runs than the API lists for one filter: the range is split, nothing is left out.
+        saved = ui_evidence.MAX_LISTED
+        ui_evidence.MAX_LISTED = 2
+        self.addCleanup(setattr, ui_evidence, "MAX_LISTED", saved)
+        call = fake_api(runs, per_page=3)
+        history = ui_evidence.fetch_history(APP, None, VERIFIER, call=call, now=NOW)
+        self.assertEqual(sorted(r["id"] for r, _ in history), list(range(1, 8)))
+        # Only within one second it cannot be split.
+        same = [run(i, "a" * 40, [], created="2026-11-19T01:00:00Z") for i in range(1, 4)]
+        with self.assertRaisesRegex(ui_evidence.CoverageError, "within one second"):
+            ui_evidence.fetch_history(APP, None, VERIFIER, call=fake_api(same), now=NOW)
 
-    def test_a_window_that_cannot_be_read_completely_is_an_error(self):
-        runs = [run(1, "a" * 40, [job("device")])]
-        with self.assertRaisesRegex(ui_evidence.CoverageError, "at most 1000"):
-            ui_evidence.fetch_history(APP, None, VERIFIER, call=fake_api(runs, total=1001), now=NOW)
-        old = FakeVerifier(VERIFIER.commits, start=NOW.timestamp() - 86 * 86400)
-        with self.assertRaisesRegex(ui_evidence.CoverageError, "retention"):
-            ui_evidence.fetch_history(APP, None, old, call=fake_api(runs), now=NOW)
-        unknown = FakeVerifier(VERIFIER.commits, start=None)
-        with self.assertRaises(ui_evidence.CoverageError):
-            ui_evidence.fetch_history(APP, None, unknown, call=fake_api(runs), now=NOW)
-        with self.assertRaisesRegex(ui_evidence.CoverageError, "job lists"):
-            ui_evidence.fetch_history(APP, None, VERIFIER, call=fake_api(runs * 1), now=NOW, max_job_calls=0)
+    def test_the_call_budget(self):
+        runs = [run(i, "a" * 40, [job("device", job_id=i)]) for i in range(1, 6)]
+        call = ui_evidence.counted(fake_api(runs), limit=3)
+        with self.assertRaisesRegex(ui_evidence.CoverageError, "more than 3 API calls"):
+            ui_evidence.fetch_history(APP, None, VERIFIER, call=call, now=NOW)
 
 
-class WindowTests(unittest.TestCase):
-    """Verifier.window_start on a real git repository."""
+class RedFromTheLogTests(unittest.TestCase):
+    """A job stopped in "Run UI tests" is red only when its log shows a test result."""
 
-    def git(self, *args, date=None):
-        env = dict(os.environ, GIT_AUTHOR_DATE=f"@{date} +0000", GIT_COMMITTER_DATE=f"@{date} +0000",
-                   GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid", GIT_COMMITTER_NAME="t",
-                   GIT_COMMITTER_EMAIL="t@example.invalid") if date else None
-        return subprocess.run(["git", *args], cwd=self.dir, env=env, check=True, capture_output=True,
-                              text=True).stdout.strip()
+    def entries(self, logs):
+        runs = [run(1, "a" * 40, [job("device", "cancelled", "cancelled", job_id=11)])]
+        return ui_evidence.results(runs, logs=ui_evidence.log_reader(fake_api(runs, logs=logs)))[0]["result"]
 
-    def commit(self, path, text, date):
-        with open(os.path.join(self.dir, path), "w", encoding="utf-8") as f:
-            f.write(text)
-        self.git("add", "-A")
-        self.git("commit", "-q", "-m", path, date=date)
-        return self.git("rev-parse", "HEAD")
-
-    def test_since_the_first_commit_with_this_app(self):
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        self.dir = folder.name
-        self.git("init", "-q", "-b", "main")
-        os.makedirs(os.path.join(self.dir, "App", "SortlyUITests"))
-        self.commit("Package.swift", "// app 1", 1000)
-        self.commit("App/SortlyUITests/A.swift", "// test only", 2000)          # same app
-        verifier = ui_evidence.Verifier(self.dir)
-        app1 = verifier.app(self.git("rev-parse", "HEAD"))
-        self.assertEqual(verifier.window_start(app1), 1000)
-        # A branch changes the app; its merge into main has the branch's app, which first
-        # existed on the branch (a pull request run tests the merge commit before it lands).
-        self.git("checkout", "-q", "-b", "feature")
-        self.commit("Package.swift", "// app 2", 3000)
-        self.git("checkout", "-q", "main")
-        self.commit("App/SortlyUITests/B.swift", "// test only", 4000)
-        self.git("merge", "-q", "--no-edit", "feature", date=5000)
-        app2 = verifier.app(self.git("rev-parse", "HEAD"))
-        self.assertNotEqual(app1, app2)
-        self.assertEqual(ui_evidence.Verifier(self.dir).window_start(app2), 3000)
-        self.assertIsNone(ui_evidence.Verifier(self.dir).window_start("f" * 64))
+    def test_logs(self):
+        self.assertEqual(self.entries({}), "red")  # a failed test case
+        self.assertEqual(self.entries({11: "UI_VERDICT device first: fail (a test failed)\n"}), "red")
+        self.assertEqual(self.entries({11: "UI_RESULT device fail\n"}), "red")
+        self.assertEqual(self.entries({11: "##[error]The job running on runner X has exceeded the maximum execution "
+                                           "time of 150 minutes.\n"}), "red")
+        # Cancelled while a test ran, no result in the log: no result.
+        cancelled = "Test Case '-[SortlyUITests.DeviceUITests test01_Hot]' started.\n##[error]The operation was canceled.\n"
+        self.assertEqual(self.entries({11: cancelled}), "none")
+        # ui_tests.py's own result line decides: a testmanagerd crash in every pass shows a
+        # failed test case but is no result.
+        self.assertEqual(self.entries({11: FAILED_LOG + "UI_RESULT device infra\n"}), "none")
+        self.assertEqual(self.entries({11: "UI_RESULT device fail\n"}), "red")
+        # A log that cannot be read: red.
+        self.assertEqual(self.entries({11: ui_evidence.ApiError("gone")}), "red")
 
 
 class QuickTests(unittest.TestCase):
-    """A quick run (pull requests) may take a full green; a full check never takes a quick one."""
+    """A quick run (pull requests) may take a full green; a full check never takes a quick one; a
+    red in either mode blocks both."""
 
     def decide(self, runs, quick):
         groups = ui_groups.Groups(QUICK)
@@ -272,10 +278,14 @@ class QuickTests(unittest.TestCase):
         self.assertEqual(self.decide(quick_green, quick=False)["state"], "missing")
         self.assertEqual(self.decide(full_green, quick=True)["state"], "green")
         self.assertEqual(self.decide(full_green, quick=False)["state"], "green")
-        # A quick red is not hidden by a full green in a quick check.
         quick_red = [run(3, "q" * 40, [job("device", "failure", "failure", tests=QUICK_FAST["device"])])]
-        self.assertEqual(self.decide(quick_red + full_green, quick=True)["state"], "green")
-        self.assertEqual(self.decide(quick_red, quick=True)["state"], "red")
+        full_red = [run(4, "q" * 40, [job("device", "failure", "failure", tests=QUICK_FULL["device"])])]
+        for red in (quick_red, full_red):
+            for quick in (True, False):
+                with self.subTest(red=red[0][0]["id"], quick=quick):
+                    found = self.decide(red + quick_green + full_green, quick=quick)
+                    self.assertEqual(found["state"], "red")
+                    self.assertEqual(found["older_reds"], [])
 
 
 class CommandTests(unittest.TestCase):
@@ -297,16 +307,16 @@ class CommandTests(unittest.TestCase):
     def outputs(self):
         return dict(line.split("=", 1) for line in self.read(self.output).splitlines())
 
-    def plan(self, choice, runs, tree=TEST_ONLY, fail=False, verifier=VERIFIER, quick=False, total=None):
+    def plan(self, choice, runs, tree=TEST_ONLY, fail=False, verifier=VERIFIER, quick=False):
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            code = ui_evidence.plan(choice, call=fake_api(runs, fail=fail, total=total), verifier=verifier, tree=tree,
-                                    quick=quick)
+            code = ui_evidence.plan(choice, call=fake_api(runs, fail=fail), verifier=verifier, tree=tree,
+                                    quick=quick, now=NOW)
         return code, log.getvalue()
 
-    def gate(self, runs, tree=TEST_ONLY, run_id=9, annotations=None, verifier=VERIFIER, quick=False, total=None):
+    def gate(self, runs, tree=TEST_ONLY, run_id=9, annotations=None, verifier=VERIFIER, quick=False):
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            code = ui_evidence.gate(run_id, call=fake_api(runs, annotations, total=total), verifier=verifier, tree=tree,
-                                    quick=quick)
+            code = ui_evidence.gate(run_id, call=fake_api(runs, annotations), verifier=verifier, tree=tree,
+                                    quick=quick, now=NOW)
         return code, log.getvalue()
 
     # Last night: a full UI run on commit a, then a test-only commit b (FlowUITests.swift).
@@ -359,21 +369,24 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("::error title=UI device::no green full result", log)
         red_then_green = self.NIGHT + [
-            run(8, "b" * 40, [job("other", "failure", "failure", tests=TEST_ONLY_FPS["other"], end="2026-11-17T13:00:00Z")]),
-            run(9, "b" * 40, [job(g, tests=TEST_ONLY_FPS[g], end="2026-11-17T15:00:00Z") for g in ["full", "other", "small"]],
+            run(8, "b" * 40, [job("other", "failure", "failure", tests=TEST_ONLY_FPS["other"], end="2026-11-19T13:00:00Z")]),
+            run(9, "b" * 40, [job(g, tests=TEST_ONLY_FPS[g], end="2026-11-19T15:00:00Z") for g in ["full", "other", "small"]],
                 workflow="testflight.yml")]
         code, log = self.gate(red_then_green)
         self.assertEqual(code, 1)
         self.assertIn("::error title=UI other::red for this app and this test code", log)
         self.assertIn("**Not green** (no upload, no release)", self.read(self.summary))
 
-    def test_a_window_that_cannot_be_read_runs_everything_and_fails_the_gate(self):
-        code, log = self.plan("auto", self.NIGHT, total=1001)
+    def test_history_that_cannot_be_read_runs_everything_and_fails_the_gate(self):
+        saved = ui_evidence.MAX_CALLS
+        ui_evidence.MAX_CALLS = 1
+        self.addCleanup(setattr, ui_evidence, "MAX_CALLS", saved)
+        code, log = self.plan("auto", self.NIGHT)
         self.assertEqual((code, self.outputs()["count"]), (0, "4"))
-        self.assertIn("at most 1000", log)
+        self.assertIn("more than 1 API calls", log)
         os.remove(self.output)
         here = [job(g, tests=TEST_ONLY_FPS[g], job_id=100 + i) for i, g in enumerate(NAMES)]
-        code, log = self.gate([run(9, "b" * 40, here, workflow="testflight.yml")], total=1001)
+        code, log = self.gate([run(9, "b" * 40, here, workflow="testflight.yml")])
         self.assertEqual(code, 1)
         self.assertIn("::error title=UI gate::", log)
 
@@ -382,13 +395,14 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(self.gate(quick, tree=QUICK, quick=True)[0], 0)
         code, log = self.gate(quick, tree=QUICK)
         self.assertEqual(code, 1)
-        self.assertIn("::error title=UI device::no green full result", log)
-        self.assertNotIn("title=UI full::", log)  # its quick and full fingerprints are the same
+        # Every group: a quick fingerprint differs from the full one also where no file reads the switch.
+        for g in NAMES:
+            self.assertIn(f"::error title=UI {g}::no green full result", log)
 
     def test_a_red_cleared_only_by_a_shared_file_is_flagged(self):
         # Red for this app with older test code (another key); since then only the shared runner
         # changed (the fake verifier's diff), none of the device group's own test files.
-        red = [run(1, "a" * 40, [job("device", "failure", "failure", tests="0" * 64, end="2026-11-17T10:00:00Z")])]
+        red = [run(1, "a" * 40, [job("device", "failure", "failure", tests="0" * 64, end="2026-11-19T10:00:00Z")])]
         verifier = FakeVerifier(VERIFIER.commits, changed={"a" * 40: [".github/scripts/ui_tests.py"]})
         here = [job(g, tests=TEST_ONLY_FPS[g], job_id=300 + i) for i, g in enumerate(NAMES)]
         code, log = self.gate(red + [run(9, "b" * 40, here, workflow="testflight.yml")], verifier=verifier)
@@ -400,7 +414,7 @@ class CommandTests(unittest.TestCase):
 
     def test_gate_fails_closed_without_the_api(self):
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            code = ui_evidence.gate(9, call=fake_api([], fail=True), verifier=VERIFIER, tree=TEST_ONLY)
+            code = ui_evidence.gate(9, call=fake_api([], fail=True), verifier=VERIFIER, tree=TEST_ONLY, now=NOW)
         self.assertEqual(code, 1)
         self.assertIn("re-run this job", log.getvalue())
 

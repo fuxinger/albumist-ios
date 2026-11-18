@@ -194,8 +194,9 @@ Testcode gibt.
   Byte für Byte dieselben Dateien.
 - **Fingerabdruck einer Gruppe**: ihre Testdateien, alle Hilfsdateien, die diese benutzen (zum
   Beispiel `UITestOnboarding.swift`), ihre Zeile in `.github/ui-groups.json` und alles, über
-  das jede Gruppe läuft: die Skripte `ui_tests.py`, `pick_simulator.py`, `toolchain.py` und die
-  Workflows `ui.yml` und `testflight.yml` (eine Änderung daran lässt also alle Gruppen laufen).
+  das jede Gruppe läuft: jedes Skript unter `.github/scripts/` (außer dessen Unit-Tests in
+  `tests/`) und jeder Workflow unter `.github/workflows/` (eine Änderung daran lässt also alle
+  Gruppen laufen).
   Welche Datei welche benutzt, liest `.github/scripts/ui_groups.py` bei jedem Lauf aus den
   Swift-Dateien (auch Klassen, deren Kopf über mehrere Zeilen geht, und Code in `\(…)` von
   Zeichenketten); keine Liste von Testnamen ist fest eingetragen. Im Zweifel streng: eine
@@ -210,16 +211,22 @@ Testcode gibt.
 - Jeder Gruppen-Job trägt beide Fingerabdrücke im Namen, zum Beispiel
   „UI device conditions [device app 1a2b3c4d5e6f tests 9f8e7d6c5b4a]“. Daran finden spätere
   Läufe das Ergebnis wieder (`.github/scripts/ui_evidence.py`). Gezählt wird ein grünes
-  Ergebnis nur, wenn Git für den Commit dieses Laufs dieselben Fingerabdrücke ausrechnet, und
-  nur aus diesem Repository (nie aus einem Fork).
-- **Lückenlos gelesen**: Plan und Gate lesen jeden Lauf von `ui.yml` und `testflight.yml` seit
-  dem ersten Commit mit diesem App-Fingerabdruck (Seite für Seite, ohne Obergrenze vor dem
-  Filter). Geht das nicht vollständig (mehr als 1000 Läufe eines Workflows in diesem Zeitraum,
-  oder der Zeitraum ist älter als 85 Tage und GitHub hat ältere Läufe womöglich gelöscht),
-  laufen im Plan alle Gruppen und das Gate ist rot: ein altes Rot darf nicht aus dem Blick
-  fallen. Ein dauerhaftes Verzeichnis der roten Ergebnisse außerhalb von GitHubs Laufliste
-  gibt es nicht (es bräuchte ein Schreib-Token in den Testläufen; Artefakte laufen ab wie die
-  Läufe).
+  Ergebnis nur, wenn Git für den getesteten Commit dieselben Fingerabdrücke ausrechnet, und
+  nur aus diesem Repository (nie aus einem Fork). Ein Pull-Request-Lauf testet GitHubs
+  Merge-Commit; er steht deshalb im Namen des Laufs („… [merge <sha>]“).
+- **Lückenlos gelesen**: Plan und Gate lesen jeden Lauf von `ui.yml` und `testflight.yml` der
+  letzten 90 Tage (so lange hält GitHub Läufe; keiner vor dem 18.11.2026, als die Job-Namen
+  die Fingerabdrücke bekamen). Bewusst nicht ab einem Commit-Datum: ein Rot auf einem Commit,
+  der später umgeschrieben (rebase, amend) oder dessen Zweig gelöscht wurde, bleibt so im
+  Blick. Ein Zeitraum mit mehr als 1000 Läufen (so viele liefert die API je Abfrage) wird
+  geteilt. Die Jobs eines Laufs werden gelesen, wenn sein Commit diese App haben kann: Git
+  kennt den Commit und er hat diese App, oder Git kennt ihn nicht (dann zählt sein Rot, sein
+  Grün nicht). Jeder Aufruf darf höchstens 300 API-Anfragen machen (das Token eines Laufs hat
+  1000 je Stunde für das ganze Repository; jeder UI-Lauf ruft zweimal auf, die Zahl steht als
+  `UI_API_CALLS` im Log). Reicht das nicht oder antwortet die API nicht, laufen im Plan alle
+  Gruppen und das Gate ist rot. Ein dauerhaftes Verzeichnis der roten Ergebnisse außerhalb
+  von GitHubs Laufliste gibt es nicht (es bräuchte ein Schreib-Token in den Testläufen;
+  Artefakte laufen ab wie die Läufe).
 - **Beispiel** (die Nacht zum 18.11.): Commit 4bb7fdd änderte nur eine Wartezeit in
   `SortlyFlowUITests.swift`. Bisher liefen danach alle fünf Gruppen (über 80 Minuten). Jetzt
   laufen „voller Ablauf“ und „übrige Abläufe“ (beide haben Tests in dieser Datei);
@@ -227,9 +234,11 @@ Testcode gibt.
   mit derselben App und demselben Testcode. Die Zusammenfassung des Jobs „UI plan“ zeigt für
   jede Gruppe, woher ihr Grün kommt oder warum sie läuft.
 - **Rot bleibt rot** (wie bei „Re-run failed jobs“): Ist eine Gruppe für dieselbe App und
-  denselben Testcode irgendwann rot gewesen (der Schritt „Run UI tests“ hatte begonnen und ist
-  nicht grün geworden: ein Test gescheitert, Zeitlimit, Lauf abgebrochen, Runner verloren),
-  zählt kein späteres Grün dieser Kombination, egal aus welchem Lauf. Ein
+  denselben Testcode irgendwann rot gewesen, zählt kein späteres Grün dieser Kombination, egal
+  aus welchem Lauf und in welchem Modus (schnell oder voll). Rot heißt: „Run UI tests“ hatte
+  begonnen, ist nicht grün geworden, und das Log zeigt ein Testergebnis, nämlich die Zeile
+  `UI_RESULT <Gruppe> fail` von `ui_tests.py` (ältere Logs: ein gescheiterter Testfall) oder
+  das Zeitlimit des Jobs. Ein Log, das sich nicht lesen lässt, zählt als Rot. Ein
   wackelnder Test wird so gezählt und behoben, nie durch Wiederholen versteckt. Die Gruppe darf
   zur Beobachtung noch einmal laufen; ihr Grün steht dann als „red before for this key“ in der
   Tabelle und zählt für TestFlight nicht. Ein Test, der einen Schritt in sich selbst noch
@@ -237,11 +246,17 @@ Testcode gibt.
   wie ein erst in der Wiederholung grüner Test als wackelnd gezählt und gezeigt
   (`flaky-*.json`, FLAKY-Zeile, Zusammenfassung, Warnung im Gate bei übernommenen Ergebnissen),
   blockiert aber nicht: gezählt und behoben, nicht gesperrt. Scheitert er trotz seines eigenen
-  zweiten Versuchs, ist er ohnehin rot. Kein Ergebnis (weder Rot noch Grün) ist nur, was
-  keinen Test gestartet hat: „Run UI tests“ hat nie begonnen (Simulator nicht gestartet,
-  Lauf vorher abgebrochen, gebaute Tests fehlen: Schritt „Built tests present“), oder der
-  Simulator ging in jedem Durchgang vor dem ersten Test verloren (`ui_tests.py` endet mit 75,
-  der Job scheitert im eigenen Schritt „Simulator lost before the first test“). Wurde ein Rot
+  zweiten Versuchs, ist er ohnehin rot. Kein Ergebnis (weder Rot noch Grün): „Run UI tests“
+  hat nie begonnen (Simulator nicht gestartet, Lauf vorher abgebrochen, gebaute Tests fehlen:
+  Schritt „Built tests present“); ein Abbruch oder verlorener Runner mitten in den Tests, ohne
+  dass im Log etwas gescheitert ist (**laufende Testläufe nie abbrechen**, Regel des
+  Besitzers); oder jeder Durchgang scheiterte allein am Simulator oder an XCTest, auch die
+  Wiederholung (`ui_tests.py` endet mit 75 und `UI_RESULT <Gruppe> infra`, der Job scheitert
+  im eigenen Schritt „No test result (simulator or XCTest failed in every pass)“). Dazu zählt
+  seit 19.11. ein Absturz von XCTests Dienst `testmanagerd` („Critical process testmanagerd
+  crashed“, „Lost connection to the application“; Lauf 44202318875, Versuch 2, Gruppe
+  flow-other): die betroffenen Tests laufen einmal neu wie nach einem Simulatorfehler; rot
+  wird es nur, wenn dabei ein Test aus Gründen der App scheitert. Wurde ein Rot
   nur durch eine gemeinsame Datei (Hilfsdatei, Skript, Workflow) zu einem neuen Schlüssel,
   ohne dass sich eine eigene Testdatei der Gruppe änderte, warnen Plan und Gate („UI red
   cleared by a shared change“): prüfen, ob das wirklich die Korrektur war.
@@ -261,13 +276,14 @@ Testcode gibt.
   Das Freigabe-Gate (`ci_gate.py`, Workflow „Release“) verlangt einen grünen Job
   „UI verdict (full)“.
 - **Schnellmodus** (`quick`): Pull Requests laufen schnell. Die Tests bekommen
-  `SORTLY_UI_QUICK=1` (im Workflow als `TEST_RUNNER_SORTLY_UI_QUICK`), und der lange
-  Gerätetest (test11, große Mediathek) überspringt sich. Eine Gruppe, deren Dateien diesen
-  Schalter lesen, hat im Schnellmodus einen anderen Test-Fingerabdruck, und ihr Job heißt
+  `SORTLY_UI_QUICK=1` (im Workflow als `TEST_RUNNER_SORTLY_UI_QUICK`), und
+  `DeviceConditionUITests.test11_LargeLibrary` (große Mediathek, rund 25 Minuten) überspringt
+  sich. Im Schnellmodus hat jede Gruppe einen anderen Test-Fingerabdruck (sicherheitshalber
+  alle, nicht nur die, deren Dateien den Schalter sichtbar lesen), und ihr Job heißt
   „… (quick)“. Ein schnelles Grün zählt nie als volles: TestFlight und die Freigabe verlangen
-  volle Ergebnisse. Ein schneller Lauf darf dagegen ein volles Grün übernehmen. Für die
-  Freigabe eines Commits, der nur schnelle Läufe hat: „UI flow“ von Hand ohne `quick` starten;
-  dann laufen nur die Gruppen, deren schneller und voller Testcode sich unterscheiden.
+  volle Ergebnisse. Ein schneller Lauf darf dagegen ein volles Grün übernehmen. Ein Rot sperrt
+  in beiden Modi. Für die Freigabe eines Commits, der nur schnelle Läufe hat: „UI flow“ von
+  Hand ohne `quick` starten; dann laufen alle Gruppen ohne volles Grün für diesen Stand.
 - Von Hand: Actions > **UI flow** > Run workflow, Feld **groups**: `auto` (Vorgabe), `all`
   (alle Gruppen) oder Gruppennamen (`device flow-full flow-other accessibility contrast`), und
   **quick** (aus = voller Lauf). In **TestFlight** gibt es dafür **ui_groups** (`auto` oder

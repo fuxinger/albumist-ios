@@ -93,8 +93,8 @@ struct HomeDayPointTests {
         #expect(GeoMath.distance(reversed, Fixture.Places.gardaLake) < 1_000)
     }
 
-    /// The day's point is the most central of at most `GeoMath.daySample` photos spread over
-    /// the whole day: a day of 10,000 photos costs what a day of 15 costs, and every part of
+    /// The day's point comes from at most `GeoMath.daySample` photos spread over the whole
+    /// day: a day of 10,000 photos costs what a day of 15 costs, and every part of
     /// the day is in the sample in proportion to its photos.
     @Test func dayPointSamplesTheWholeDay() throws {
         let n = GeoMath.daySample
@@ -110,5 +110,23 @@ struct HomeDayPointTests {
         #expect(GeoMath.dayPoint(split) == Fixture.Places.munichHome)
         #expect(GeoMath.daySampleIndices(count: 10_000).count == n)
         #expect(GeoMath.dayPoint([]) == nil)
+    }
+
+    /// Second review: the medoid alone picks a minority place lying between two others. On a
+    /// line west to east, 5 photos at 0 km, 4 at 20 km, 6 at 40 km: the medoid is the middle
+    /// (4 photos); the day was where the 6 were. Photos all far apart keep the medoid.
+    @Test func theDayIsWhereMostPhotosWereNotTheMiddle() {
+        func east(_ km: Double) -> GeoCoordinate {
+            GeoCoordinate(latitude: 48.0, longitude: 11.0 + km * 1_000 / (GeoMath.metersPerDegreeLatitude * cos(48.0 * .pi / 180)))
+        }
+        let day = Array(repeating: east(0), count: 5) + Array(repeating: east(20), count: 4) + Array(repeating: east(40), count: 6)
+        #expect(GeoMath.dayPoint(day) == east(40))
+        #expect(GeoMath.dayPoint(day.reversed()) == east(40))
+        // Within 1 km counts as one place: 6 photos spread over 600 m beat 5 on one spot.
+        let spread = (0..<6).map { east(40 + Double($0) * 0.12) }
+        #expect(GeoMath.dayPoint(Array(repeating: east(0), count: 5) + spread).map { GeoMath.distance($0, east(40)) < 1_000 } == true)
+        // A hike: every photo 3 km from the next; the most central one, as before.
+        let hike = (0..<7).map { east(Double($0) * 3) }
+        #expect(GeoMath.dayPoint(hike) == east(9))
     }
 }

@@ -37,20 +37,32 @@ public enum GeoMath {
     /// At most this many photos of one day are compared to find where the day was (`dayPoint`).
     public static let daySample = 15
 
-    /// Where a day was: the most central of its photos (the one with the smallest sum of
-    /// distances to the others), robust against a few far-away photos that day. `coordinates`
-    /// are the day's photos in time order. A day with more than `daySample` photos is
-    /// represented by `daySample` photos spread evenly over all of them, so each part of the day
-    /// counts by its number of photos and the place of most of the day's photos wins; a burst at
-    /// the start of the day no longer decides (review 18.11.2026, G1-02: only the first 15
-    /// were read, and 8 early photos at work 49 km away moved home there). The cost stays at
-    /// `daySample`² distances per day, however many photos the day has.
+    /// Photos of one day this close to each other count as one place (`dayPoint`).
+    public static let dayPlaceRadius = 1_000.0
+
+    /// Where a day was. `coordinates` are the day's photos in time order (callers sort them).
+    /// The sample: all photos up to `daySample`, else the middle photo of each of `daySample`
+    /// equal parts of the day's photos, so each part of the day is in it by its number of
+    /// photos; a burst at the start of the day no longer decides (review 18.11.2026, G1-02: only
+    /// the first 15 were read, and 8 early photos at work 49 km away moved home there).
+    /// The day's point is the sample photo with the most sample photos within `dayPlaceRadius`
+    /// (the place of most of the day's photos); among equally many, the most central one (the
+    /// smallest sum of distances to the whole sample, a medoid). The medoid alone could pick a
+    /// minority place lying between two others (5 photos west, 4 in the middle, 6 east: the
+    /// middle). A day of photos all far apart (a hike, a drive) gets its medoid, as before.
+    /// The cost stays at `daySample`² distances per day, however many photos the day has.
     public static func dayPoint(_ coordinates: [GeoCoordinate]) -> GeoCoordinate? {
         let sample = daySampleIndices(count: coordinates.count).map { coordinates[$0] }
-        var best: (index: Int, sum: Double)?
+        var best: (index: Int, near: Int, sum: Double)?
         for (i, candidate) in sample.enumerated() {
-            let sum = sample.reduce(0) { $0 + distance($1, candidate) }
-            if best == nil || sum < best!.sum { best = (i, sum) }
+            var near = 0, sum = 0.0
+            for other in sample {
+                let d = distance(other, candidate)
+                sum += d
+                if d <= dayPlaceRadius { near += 1 }
+            }
+            if let current = best, near < current.near || (near == current.near && sum >= current.sum) { continue }
+            best = (i, near, sum)
         }
         return best.map { sample[$0.index] }
     }

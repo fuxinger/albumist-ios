@@ -302,9 +302,10 @@ public enum RecurringPlaces {
         return false
     }
 
-    /// Where a stay mostly was: one point per day (the day's most central photo), then the
-    /// centre of the day points that have the most other days within `radius`. A day trip from
-    /// the holiday flat does not move the place; a road trip gets its longest stop.
+    /// Where a stay mostly was: one point per day (`GeoMath.dayPoint`: where most of the day's
+    /// photos were), then the centre of the day points that have the most other days within
+    /// `radius`. A day trip from the holiday flat does not move the place; a road trip gets its
+    /// longest stop.
     public static func mainPlace(of photos: [(date: Date, coordinate: GeoCoordinate)], calendar: Calendar,
                                  radius: Double = RecurringPlaceAnswers.matchRadiusMeters) -> GeoCoordinate? {
         guard !photos.isEmpty else { return nil }

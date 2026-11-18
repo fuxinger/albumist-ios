@@ -472,6 +472,23 @@ class SelectionTests(unittest.TestCase):
         self.assertLess(time.time() - started, 10)
         quick = subprocess.Popen(["true"])
         self.assertEqual(ui_tests.wait_until(quick, time.time() + 30), (0, False))
+        # SIGINT first, so xcodebuild can write its result bundle; a process that ends on it is
+        # not waited for until SIGTERM.
+        import sys
+        import tempfile
+        marker = os.path.join(tempfile.mkdtemp(), "sigint")
+        polite = subprocess.Popen([sys.executable, "-c",
+                                   "import signal, sys, time\n"
+                                   f"def stop(*_):\n    open({marker!r}, 'w').close(); sys.exit(0)\n"
+                                   "signal.signal(signal.SIGINT, stop)\nprint('ready', flush=True)\ntime.sleep(30)"],
+                                  stdout=subprocess.PIPE)
+        polite.stdout.readline()
+        started = time.time()
+        status, hung = ui_tests.wait_until(polite, time.time() + 0.5, grace=20)
+        self.assertEqual((status, hung), (1, True), "stopped at the deadline is never green")
+        self.assertTrue(os.path.exists(marker), "SIGINT came first")
+        self.assertLess(time.time() - started, 10)
+        os.remove(marker)
         # The lines run_pass writes: with a test still running a hang, a finding, never repeated;
         # with none running the time ran out (infrastructure).
         log = ("Test Case '-[SortlyUITests.A t1]' started.\nTest Case '-[SortlyUITests.A t1]' passed (1.0 seconds).\n"

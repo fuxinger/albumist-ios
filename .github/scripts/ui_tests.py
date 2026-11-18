@@ -427,7 +427,8 @@ def watchdog_should_stop(log: str, states: list[str]) -> bool:
 
 
 def watchdog_bundle(findings: list[str]) -> list[str]:
-    """Result bundle findings of a pass the watchdog stopped before any test: a bundle that
+    """Result bundle findings of a pass the watchdog stopped before any test, or that was stopped
+    at the job's deadline (UI_HANG stays a finding from the log): a bundle that
     xcodebuild could not finish is expected then and is no finding; anything it does say still
     counts (and blocks the repeat)."""
     return [f for f in findings if not f.startswith("result bundle not readable")]
@@ -933,7 +934,9 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     print(f"UI_PASS_TIME {args.name} {label} {int(time.time() - started)} s (exit {status})", flush=True)
     with open(log_path, encoding="utf-8", errors="replace") as log:
         text = log.read()
-    return status, text, result, started, bool(watchdog.fired)
+    # A pass stopped by the watchdog or at the deadline may leave a result bundle xcodebuild
+    # could not finish; command_run then drops only the "not readable" finding (watchdog_bundle).
+    return status, text, result, started, bool(watchdog.fired) or hung
 
 
 RUNNING = re.compile(r"Test Case '-\[\w+\.(\w+) (\w+)\]' (started|passed|failed|skipped)")
@@ -953,18 +956,22 @@ def running_test(log: str) -> str | None:
 
 def wait_until(process, deadline: float, grace: float = 30) -> tuple[int, bool]:
     """(exit status, whether it hung): waits for `process` until the epoch second `deadline`
-    (0: no deadline), then stops it (SIGTERM, after `grace` seconds SIGKILL)."""
+    (0: no deadline), then stops it: SIGINT first, which lets xcodebuild end the test and write
+    its result bundle like Ctrl-C does; after `grace` seconds SIGTERM, after `grace` more SIGKILL."""
     if not deadline:
         return process.wait(), False
     try:
         return process.wait(timeout=max(1.0, deadline - time.time())), False
     except subprocess.TimeoutExpired:
-        process.terminate()
+        pass
+    for stop in (lambda: process.send_signal(signal.SIGINT), process.terminate):
+        stop()
         try:
             return process.wait(timeout=grace) or 1, True
         except subprocess.TimeoutExpired:
-            process.kill()
-            return process.wait() or 1, True
+            continue
+    process.kill()
+    return process.wait() or 1, True
 
 
 def report(text: str, status: int, label: str) -> None:

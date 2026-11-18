@@ -76,8 +76,11 @@ final class AppModel {
         var widths: StepWidths = .standard
         /// Where the last run stood when it ended (the paused card: "Bei 2.433 von 5.683 Fotos").
         var stoppedAt: AnalysisCardState.Position?
-        /// Apple's geocoder makes the places step wait ("Apple antwortet gleich").
-        var appleWait = false
+        /// The places step waits for Apple's geocoder (only the overnight refinement does: a run
+        /// in the app never waits for it): about how long still, for the card's countdown
+        /// ("Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in 25 s").
+        var appleWaitLeft: Duration?
+        var appleWait: Bool { appleWaitLeft != nil }
 
         var fraction: Double { total == 0 ? 0 : min(1, Double(completed) / Double(total)) }
         /// The step the card shows (six steps; the pipeline's groups belong to the last one).
@@ -985,7 +988,7 @@ final class AppModel {
         analysis.completed = 0
         analysis.total = 0
         analysis.waiting = nil
-        analysis.appleWait = false
+        analysis.appleWaitLeft = nil
         analysis.stoppedAt = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
         analysis.resumed = analysis.resumeFrom.map {
@@ -1090,7 +1093,7 @@ final class AppModel {
             analysis.pausing = false
             analysis.stage = nil
             analysis.waiting = nil
-            analysis.appleWait = false
+            analysis.appleWaitLeft = nil
             endCard()
             if end.isFinished {
                 AnalysisMarker.finished()
@@ -1204,7 +1207,7 @@ final class AppModel {
         // Not cleared here: a report sent just before a wait for the device began can be taken
         // after it (the tick runs every 250 ms); the wait comes and goes with the pipeline's
         // own word, taken in order from the mailbox (`tick`).
-        analysis.appleWait = progress.waitLeft != nil
+        analysis.appleWaitLeft = progress.waitLeft
         analysis.mapPass = progress.stage == .places ? progress.mapPass : nil
         let step = AnalysisStep(progress.stage)
         if !analysis.pausing {
@@ -1654,6 +1657,8 @@ final class AppModel {
         analysis.needsResume = end.needsResume(afterRefinement: analysis.needsResume)
         analysis.isRunning = false
         analysis.pausing = false
+        // A wait for Apple's limit ends with the refinement (cut off in the middle of it).
+        analysis.appleWaitLeft = nil
         updateCard()
         guard let ran = report else { return (false, end.next, generation) }
         await refreshDerived()

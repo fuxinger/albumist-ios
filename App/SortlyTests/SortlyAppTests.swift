@@ -430,6 +430,21 @@ struct AnalysisTextTests {
         #expect(AnalysisText.finish(.soon, now: now) == String(localized: "Gleich fertig"))
     }
 
+    /// Device test 18.11. (build 36): "Apple antwortet gleich" said nothing true and stood
+    /// still. The wait (overnight refinement only) says why, with a countdown in whole seconds.
+    @Test func appleWaitSaysWhyWithACountdown() {
+        #expect(AnalysisText.appleWait(.seconds(25)) == String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(25) s"))
+        #expect(AnalysisText.appleWait(.milliseconds(24_200)) == AnalysisText.appleWait(.seconds(25)))
+        #expect(AnalysisText.appleWait(.seconds(23)) != AnalysisText.appleWait(.seconds(25)))
+        // Never "in 0 s" while it still waits.
+        #expect(AnalysisText.appleWait(.milliseconds(300)) == AnalysisText.appleWait(.seconds(1)))
+        var state = running(.places)
+        state.appleWaitLeft = .seconds(12)
+        #expect(state.appleWait)
+        state.appleWaitLeft = nil
+        #expect(!state.appleWait)
+    }
+
     @Test func alreadyDoneLeavesZerosOut() {
         #expect(AnalysisText.alreadyDone(AlreadyDone(trips: 51, places: 38))
                 == String(localized: "\(51) Reisen") + ", " + String(localized: "\(38) Orte"))

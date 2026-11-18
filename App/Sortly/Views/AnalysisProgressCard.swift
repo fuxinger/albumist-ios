@@ -274,19 +274,23 @@ struct AnalysisProgressCard: View {
         .animation(reduceMotion ? nil : .snappy, value: position.step)
     }
 
-    /// Under the count: the finish time, Apple's wait, why it is slower, what waiting means.
+    /// Under the count: the finish time, the wait for Apple's limit, why it is slower, what waiting means.
     @ViewBuilder
     private var statusLines: some View {
         Group {
             switch state {
             case .running(_, let slower, let appleWait, _):
                 if appleWait {
-                    // The wait can last a minute; the spinner says it is alive meanwhile
-                    // (limit: nothing stands still for more than 10 s while work goes on).
+                    // Only the overnight refinement waits for Apple's geocoder (a run in the app
+                    // never does). The wait can last a minute: it says honestly why, and its
+                    // countdown moves every 2 s (limit: nothing stands still for more than 10 s
+                    // while work goes on; device test 18.11., build 36).
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
                             .accessibilityHidden(true)
-                        Text("Apple antwortet gleich")
+                        Text(AnalysisText.appleWait(model.analysis.appleWaitLeft ?? .zero))
+                            .contentTransition(.numericText(countsDown: true))
+                            .accessibilityIdentifier("analysis.appleWait")
                     }
                 } else if let finish = model.analysisFinish {
                     Text(AnalysisText.finish(finish))

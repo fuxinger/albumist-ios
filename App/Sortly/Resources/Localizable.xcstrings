@@ -10223,12 +10223,12 @@
         }
       }
     },
-    "Apple antwortet gleich" : {
+    "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in %lld s" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple will answer shortly"
+            "value" : "Place names: Apple allows only a few lookups a minute · continuing in %lld s"
           }
         }
       }

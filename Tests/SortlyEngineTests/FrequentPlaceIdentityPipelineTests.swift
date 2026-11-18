@@ -84,7 +84,6 @@ struct FrequentPlaceIdentityPipelineTests {
 
         var settings = OrganizationSettings()
         settings.titleLanguage = .german
-        settings.frequentPlaces.names[homeID] = "Dahoam"
         let store = try SortlyStore(url: nil)
         try await store.setValue(stored, forKey: "analysis.frequentPlaces")
         try await store.setValue([homeID: "Dahoam"], forKey: "user.titles")
@@ -100,7 +99,6 @@ struct FrequentPlaceIdentityPipelineTests {
         let shown = try #require(places.first { GeoMath.distance($0.centroid, Self.b) < 10 })
         let other = try #require(places.first { GeoMath.distance($0.centroid, Self.a) < 10 })
         #expect(homePlace.id == homeID)
-        #expect(homePlace.userName == "Dahoam")
         #expect(shown.id == sharedID)
         #expect(other.id != sharedID)
 
@@ -112,5 +110,45 @@ struct FrequentPlaceIdentityPipelineTests {
         #expect(snapshot.dismissed.map(\.id).contains(sharedID))
         #expect(!snapshot.proposals.contains { $0.id == sharedID })
         #expect(snapshot.proposals.contains { $0.id == other.id })
+    }
+
+    /// Second review of build 36: the app keeps a name typed for a suggestion in `user.titles`
+    /// (never in the settings). Such a frequent place stays when the user then adds the same
+    /// place as one they are often at; before, the recurring place replaced it and the name was
+    /// gone.
+    @Test func aTitleTypedInTheAppKeepsTheFrequentPlace() async throws {
+        let home = GeoCoordinate(latitude: 48.1500, longitude: 11.5600)
+        let waldhaus = GeoCoordinate(latitude: 48.9500, longitude: 13.1000)
+        var lib = LibraryBuilder()
+        for day in 0..<120 {
+            let date = Fixture.date("2026-01-01").addingTimeInterval(Double(day) * 86_400 + 19 * 3_600)
+            for k in 0..<3 { _ = lib.photo(at: date.addingTimeInterval(Double(k) * 60), home, jitterMeters: 0) }
+        }
+        for week in 0..<10 {
+            let day = Fixture.date("2026-01-03").addingTimeInterval(Double(week * 7) * 86_400 + 11 * 3_600)
+            for k in 0..<6 { _ = lib.photo(at: day.addingTimeInterval(Double(k) * 600), waldhaus, jitterMeters: 0) }
+        }
+        var settings = OrganizationSettings()
+        settings.titleLanguage = .german
+        let store = try SortlyStore(url: nil)
+        let pipeline = AnalysisPipeline(
+            store: store, reader: InMemoryLibraryReader(assets: lib.assets), analyzer: FakeContentAnalyzer(labels: { _ in [] }, text: { _ in "" }),
+            geocoder: FakeGeocoder(), map: PipelineTests.map, conditions: FakeConditions(), settings: settings,
+            calendar: Fixture.calendar, time: ManualTime().source
+        )
+        _ = try await pipeline.run()
+        let place = try #require(try await places(store).first { GeoMath.distance($0.centroid, waldhaus) < 10 })
+        try await store.setValue([place.id: "Waldhaus"], forKey: "user.titles")
+
+        let answers = try await pipeline.recurringPlaceAnswers()
+            .addingPersonalPlace(at: waldhaus, name: nil, kind: .secondHome, label: nil, date: Fixture.date("2026-06-01"))
+        try await pipeline.setRecurringPlaceAnswers(answers)
+        _ = try await pipeline.run()
+        let entry = try #require(answers.places.first)
+        let recurring = try #require(try await pipeline.recurringPlaceReport()?.places.first { $0.id == entry.id })
+        #expect(Set(recurring.assetIDs) == Set(place.assetIDs), "the test needs both to be the same place")
+        let proposals = try #require(try await pipeline.latestProposals()).proposals
+        #expect(proposals.contains { $0.id == place.id })
+        #expect(!proposals.contains { $0.id == RecurringPlaces.proposalID(for: entry.id) })
     }
 }

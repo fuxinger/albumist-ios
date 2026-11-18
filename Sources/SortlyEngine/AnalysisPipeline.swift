@@ -243,6 +243,9 @@ public actor AnalysisPipeline {
         /// The user's decisions on suggestions (written by the app; here only to set decisions
         /// back to open after a rule update, together with the new matches).
         static let decisions = "user.decisions"
+        /// The names the user typed for suggestions in the app (written by the app; read here so
+        /// a named suggestion is kept, `AnalysisSnapshot.chosen`).
+        static let titles = "user.titles"
         /// Suggestions the user chose before a change in "Dein Zuhause" would have changed or
         /// dropped them: kept as chosen (`HeldSuggestions`).
         static let heldSuggestions = "user.heldSuggestions"
@@ -1588,6 +1591,7 @@ public actor AnalysisPipeline {
             home: try await homeSettings()
         )
         analysis.applied = Set(Self.assignments(try await store.managedAlbums()).keys)
+        analysis.chosen = try await chosenSuggestions()
         let engine = ProposalEngine(settings: settings, calendar: calendar)
         let input = analysis
         var suggestions = await offActor { engine.suggestions(for: input, overrides: overrides) }
@@ -1645,6 +1649,16 @@ public actor AnalysisPipeline {
         proposalsGeneration += 1
         try await store.setValues(values, removing: removing)
         return snapshot
+    }
+
+    /// The suggestions the user named in the app (`user.titles`, a name typed for it) or chose
+    /// to create (an accepted decision): the same place as another suggestion keeps them
+    /// (`ProposalEngine.suggestEachPlaceOnce`). Values this build cannot read count as none.
+    func chosenSuggestions() async throws -> Set<SortlyID> {
+        let titles = try await readable { try await store.value([SortlyID: String].self, forKey: Key.titles) } ?? [:]
+        let decisions = try await readable { try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) } ?? [:]
+        return Set(titles.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.keys)
+            .union(decisions.filter { $0.value.isAccepted }.keys)
     }
 
     /// The shown suggestions are matched on their own, as always. The dismissed ones are

@@ -62,8 +62,12 @@
 - iPhone-Test Build 36: Ein Ort, an dem du öfter bist, heißt jetzt nach seiner Stadt (etwa
   „Dorfen“), nicht mehr nach dem Bundesland („Bayern“).
 - iPhone-Test Build 36: Derselbe Ort kam zweimal, als Ort, an dem du öfter bist („Bayern“), und
-  als häufiger Ort („Häufiger Ort in Zwiesel“). Jetzt einmal, als Ort, an dem du öfter bist;
-  hast du den häufigen Ort schon benannt oder hat er schon sein Album, bleibt dieser.
+  als häufiger Ort („Häufiger Ort in Zwiesel“). Jetzt einmal, als Ort, an dem du öfter bist.
+  Hast du dem häufigen Ort in der App einen Namen gegeben, ihn zum Erstellen ausgewählt oder
+  hat er schon sein Album, bleibt er; ebenso ein Ort, an dem du öfter bist, den du ausgewählt
+  hast oder der sein Album hat. Sagst du zu einem der beiden „Nicht jetzt“, bleibt der andere.
+  Ein kleiner Lieblingsort in einer großen Urlaubsgegend bleibt ein eigener Vorschlag, und
+  keine Fotos verlieren dabei ihren Vorschlag.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

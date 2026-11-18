@@ -12082,6 +12082,16 @@
           }
         }
       }
+    },
+    "Fotos werden zusammengestellt …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gathering photos …"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

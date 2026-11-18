@@ -24,46 +24,33 @@ struct LibraryView: View {
 
     var body: some View {
         let _ = MainThreadWatch.shared.count("library body")
-        let members = model.bucketMembers(bucket)
+        // Made off the main thread (`AppModel.libraryBuckets`); `nil` only before the first pass.
+        let members = model.libraryBuckets?[bucket]
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 bucketPicker
-                if bucket == .suggestions {
-                    // Numbers as plural strings (design review W5: "1 Fotos und Videos").
-                    Text("\(model.openProposals.count) Vorschläge für \(members.count) Fotos und Videos")
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                if let members {
+                    content(members)
                 } else {
-                    Text("\(members.count) Fotos und Videos")
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-                }
-
-                if bucket == .suggestions {
-                    // Photos with a suggestion: show the suggestions themselves, ready to open.
-                    proposalList
-                } else if members.isEmpty {
-                    ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
-                                           description: Text(emptyDescription))
-                } else {
-                    grid(members)
-                    if members.count > shown {
-                        // The next photos load by themselves when the end of the grid comes
-                        // into view (design review N10: a button every 3,000 photos).
+                    // The first pass over all photos (a moment in a very large library). Not
+                    // "Alles sortiert" or "0 Fotos": that would not be true yet.
+                    HStack(spacing: Theme.Spacing.s) {
                         ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, Theme.Spacing.m)
-                            .accessibilityLabel(Text("Weitere Fotos werden geladen"))
-                            .onScrollVisibilityChange(threshold: 0.1) { visible in
-                                if visible { shown += Self.page }
-                            }
-                            .accessibilityLabel(Text("Weitere Fotos werden geladen"))
-                            .accessibilityIdentifier("library.loadingMore")
+                            .accessibilityHidden(true)
+                        Text("Fotos werden zusammengestellt …")
                     }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("library.preparing")
                 }
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.bottom, Theme.Spacing.xl)
         }
         .background(Theme.background)
+        .onAppear { model.showLibraryBuckets() }
         .navigationTitle("Mediathek")
         .toolbar {
             if bucket != .suggestions {
@@ -105,6 +92,42 @@ struct LibraryView: View {
         .refreshable { await model.refreshDerived() }
     }
 
+    /// One area's count and its photos (or its suggestions).
+    @ViewBuilder
+    private func content(_ members: [LibraryBuckets.Item]) -> some View {
+        if bucket == .suggestions {
+            // Numbers as plural strings (design review W5: "1 Fotos und Videos").
+            Text("\(model.openProposals.count) Vorschläge für \(members.count) Fotos und Videos")
+                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+        } else {
+            Text("\(members.count) Fotos und Videos")
+                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+        }
+
+        if bucket == .suggestions {
+            // Photos with a suggestion: show the suggestions themselves, ready to open.
+            proposalList
+        } else if members.isEmpty {
+            ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
+                                   description: Text(emptyDescription))
+        } else {
+            grid(members)
+            if members.count > shown {
+                // The next photos load by themselves when the end of the grid comes
+                // into view (design review N10: a button every 3,000 photos).
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Spacing.m)
+                    .accessibilityLabel(Text("Weitere Fotos werden geladen"))
+                    .onScrollVisibilityChange(threshold: 0.1) { visible in
+                        if visible { shown += Self.page }
+                    }
+                    .accessibilityLabel(Text("Weitere Fotos werden geladen"))
+                    .accessibilityIdentifier("library.loadingMore")
+            }
+        }
+    }
+
     @ViewBuilder
     private var proposalList: some View {
         let open = model.openProposals.sorted { ($0.assetIDs.count, $1.title) > ($1.assetIDs.count, $0.title) }
@@ -131,10 +154,10 @@ struct LibraryView: View {
         }
     }
 
-    private func grid(_ members: [AssetFacts]) -> some View {
+    private func grid(_ members: [LibraryBuckets.Item]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
-            ForEach(members.prefix(shown), id: \.id) { facts in
-                let id = facts.id
+            ForEach(members.prefix(shown)) { item in
+                let id = item.id
                 // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
                 Button {
                     guard selecting else {
@@ -157,7 +180,7 @@ struct LibraryView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(Text(facts.asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+                .accessibilityLabel(Text(item.date?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
                 .accessibilityAddTraits(selecting && selection.contains(id) ? .isSelected : [])
             }
         }

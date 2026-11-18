@@ -168,7 +168,7 @@ final class AppModel {
 
     var phase: Phase = .loading
     var access: LibraryAccess = .notDetermined
-    var settings = OrganizationSettings() { didSet { bucketCache = [:] } }
+    var settings = OrganizationSettings() { didSet { libraryInputsChanged() } }
     /// Every change also reaches the background task's progress (read off the main thread).
     var analysis = AnalysisState() { didSet { ContinuedAnalysis.publish(analysis, finish: analysisFinish) } }
 
@@ -240,8 +240,8 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { bucketCache = [:]; atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
-    var states: [AssetID: AssetOrganizationState] = [:] { didSet { bucketCache = [:] } }
+    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
+    var states: [AssetID: AssetOrganizationState] = [:] { didSet { libraryInputsChanged() } }
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
     /// "Nicht mehr ignorieren" are shown at once, before the recount.
@@ -250,9 +250,18 @@ final class AppModel {
     @ObservationIgnored private var ignoreChanges = IgnoreChange()
     /// The store writes of ignore taps, one after the other in the order of the taps.
     @ObservationIgnored private var ignoreWrites: Task<Void, Never>?
-    /// Filtered and sorted library buckets; rebuilt only when facts or states change, not on
-    /// every redraw of the library (a selection tap redraws it).
-    @ObservationIgnored private var bucketCache: [InboxBucket: [AssetFacts]] = [:]
+    /// The library tab's areas, made off the main thread (`LibraryBuckets`): `nil` until the
+    /// first pass is done, then kept while a newer pass runs, so the grid never empties.
+    /// Stress run 44144011110: filtering and sorting 50,000 photos in the library's body
+    /// stalled the main thread for 7.7 s at the first tap on "Mediathek".
+    private(set) var libraryBuckets: LibraryBuckets?
+    /// The library tab was shown once: from then on its areas follow facts, states and settings.
+    @ObservationIgnored private var libraryBucketsWanted = false
+    /// Counts the changes of facts, states and settings; `libraryBucketsMadeFor` is the one
+    /// `libraryBuckets` shows.
+    @ObservationIgnored private var libraryInputs = 0
+    @ObservationIgnored private var libraryBucketsMadeFor = -1
+    @ObservationIgnored private var libraryBucketsTask: Task<Void, Never>?
     /// The atlas is shown on the overview, which redraws often during an analysis.
     @ObservationIgnored private var atlasCache: [Int: TravelAtlas] = [:]
     @ObservationIgnored private var atlasYearsCache: [Int]?
@@ -2813,21 +2822,49 @@ final class AppModel {
 
     // MARK: Library and search
 
-    func bucketMembers(_ bucket: InboxBucket) -> [AssetFacts] {
-        access(keyPath: \.facts)
-        access(keyPath: \.states)
-        access(keyPath: \.settings)
-        if let cached = bucketCache[bucket] { return cached }
-        let resolver = resolver
-        let members = MainThreadWatch.shared.section("library bucket") {
-            facts.filter { f in
-                guard let state = states[f.id] else { return bucket == .all }
-                return resolver.buckets(state).contains(bucket)
+    /// The library tab appeared: its areas are made now if they are not up to date, and follow
+    /// every later change.
+    func showLibraryBuckets() {
+        libraryBucketsWanted = true
+        if libraryBucketsMadeFor != libraryInputs && libraryBucketsTask == nil { makeLibraryBuckets() }
+    }
+
+    private func libraryInputsChanged() {
+        libraryInputs += 1
+        if libraryBucketsWanted { makeLibraryBuckets() }
+    }
+
+    /// One pass over all photos off the main thread; a newer change cancels it and starts its own.
+    private func makeLibraryBuckets() {
+        libraryBucketsTask?.cancel()
+        let inputs = libraryInputs
+        let facts = facts, states = states, resolver = resolver
+        libraryBucketsTask = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            let work = Task.detached(priority: .userInitiated) {
+                LibraryBuckets.make(facts: facts, states: states, resolver: resolver) { Task.isCancelled }
             }
-            .sorted { ($0.asset.creationDate ?? .distantPast) > ($1.asset.creationDate ?? .distantPast) }
+            let made = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+            guard let self, !Task.isCancelled, inputs == self.libraryInputs, let made else { return }
+            MainThreadWatch.shared.section("library buckets") {
+                self.libraryBuckets = made
+                self.libraryBucketsMadeFor = inputs
+                self.libraryBucketsTask = nil
+            }
         }
-        bucketCache[bucket] = members
-        return members
+    }
+
+    /// After "Ignorieren" or "Nicht mehr ignorieren": only the tapped photos move in the grid,
+    /// at once (`LibraryBuckets.updating`); a pass over all photos is not needed for that.
+    private func moveInLibraryBuckets(_ assets: [AssetID], from old: [AssetID: AssetOrganizationState], upToDate: Bool) {
+        guard let current = libraryBuckets else { return }
+        libraryBuckets = current.updating(assets, from: old, to: states, resolver: resolver)
+        // Up to date before the tap, up to date after it: the pass the tap started is not needed.
+        if upToDate {
+            libraryBucketsTask?.cancel()
+            libraryBucketsTask = nil
+            libraryBucketsMadeFor = libraryInputs
+        }
     }
 
     /// The photos the last "Ignorieren" newly ignored, for "Widerrufen" right after it
@@ -2885,11 +2922,14 @@ final class AppModel {
     /// Lays one tap over what is shown; cheap: only the tapped photos change.
     private func showIgnore(_ assets: [AssetID], ignore: Bool) -> Int {
         MainThreadWatch.shared.section("ignore shown") {
+            let before = states
+            let upToDate = libraryBucketsMadeFor == libraryInputs
             var shown = IgnoreChange.Shown(states: states, ignored: ignoredIDs, ifNotIgnored: statesIfNotIgnored)
             let step = ignoreChanges.record(assets, ignore: ignore, in: &shown)
             states = shown.states
             ignoredIDs = shown.ignored
             statesIfNotIgnored = shown.ifNotIgnored
+            moveInLibraryBuckets(assets, from: before, upToDate: upToDate)
             return step
         }
     }

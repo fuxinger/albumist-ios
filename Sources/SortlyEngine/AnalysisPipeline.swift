@@ -1393,10 +1393,13 @@ public actor AnalysisPipeline {
         guard done < TextMinimizer.maskVersion else { return }
         let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
         for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
-            guard let text = result.text?.text, !text.isEmpty else { continue }
-            let masked = TextMinimizer.storable(text)
-            // The subject line of a letter is stored with the document facts (review P2-04).
-            let subject = masked.isEmpty ? nil : result.document?.subject.map(TextMinimizer.masked)
+            guard let text = result.text?.text else { continue }
+            let masked = text.isEmpty ? "" : TextMinimizer.storable(text)
+            // The subject line of a letter is stored with the document facts (review P2-04). An ID
+            // or medical document keeps none: version 2 stored no text for it but its subject in
+            // full, so it is cleared here even though there is no text to mask (second review).
+            let sensitive = (result.document?.sensitivity ?? .normal) >= .identity || (!text.isEmpty && masked.isEmpty)
+            let subject = sensitive ? nil : result.document?.subject.map(TextMinimizer.masked)
             guard masked != text || subject != result.document?.subject else { continue }
             result.text?.text = masked
             result.document?.subject = subject

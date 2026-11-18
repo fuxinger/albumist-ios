@@ -66,10 +66,20 @@ struct PhotosTimeoutExecutionTests {
         func hasUnansweredWrites() async -> Bool { pending != nil }
         func createAnswered(_ id: CollectionID) async -> Bool { answered.contains(id) }
 
+        /// The next write of this kind is given up before it began (no thread in time): never
+        /// sent, nothing hangs (`PhotosNotResponding.neverBegan`).
+        var neverBegins: String?
+
         private func lane(_ what: String) throws {
             if pending != nil { throw PhotosNotResponding(lane: .write, what: what, notSent: true) }
+            if neverBegins == what {
+                neverBegins = nil
+                throw PhotosNotResponding(lane: .write, what: what, notSent: true, neverBegan: true)
+            }
             sentWrites += 1
         }
+
+        func neverBegins(_ what: String) { neverBegins = what }
 
         private func stall<T>(_ what: String, _ write: () async throws -> T) async throws -> T {
             try lane(what)
@@ -407,6 +417,30 @@ struct PhotosTimeoutExecutionTests {
         let resumed = try await ChangeExecutor(library: lib, store: store).execute(journal)
         #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
         #expect(try await albums(lib, titled: "Reise").count == 1)
+        #expect(resumed.record?.adoptedKeys.isEmpty == true)
+    }
+
+    /// A change request given up before it began (Albumist kept every thread busy) never
+    /// reached Photos: the step is as it was, nothing is left to settle, and "Fortsetzen" makes
+    /// the album once (second review of 6c45378, P1: the executor relies on `notSent` for this).
+    @Test func writeThatNeverBeganLeavesTheStepAsItWas() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: nil, lands: false)
+        await photos.neverBegins("createAlbum")
+        await #expect(throws: PhotosNotResponding(lane: .write, what: "createAlbum", notSent: true, neverBegan: true)) {
+            try await ChangeExecutor(library: photos, store: store).execute(plan)
+        }
+        let journal = try #require(await store.latest)
+        let key = try albumKey(journal)
+        let albumStep = try #require(journal.steps.firstIndex { if case .createAlbum = $0.operation { true } else { false } })
+        #expect(journal.steps[albumStep].state == .pending)
+        #expect(!journal.steps.contains { running($0.state) })
+        #expect(journal.record?.maybeCreated[key] == nil)
+        #expect(try await albums(lib, titled: "Reise").isEmpty)
+        let resumed = try await ChangeExecutor(library: photos, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").map(\.assetIDs) == [["x", "y"]])
         #expect(resumed.record?.adoptedKeys.isEmpty == true)
     }
 

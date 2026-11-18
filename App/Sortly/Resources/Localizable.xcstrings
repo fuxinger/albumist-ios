@@ -12193,6 +12193,16 @@
         }
       }
     },
+    "Albumist war gerade zu beschäftigt und hat die Änderung nicht an Fotos geschickt. Geändert wurde nichts. Versuche es gleich noch einmal, bei einem Plan mit „Fortsetzen“ in der Übersicht." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist was too busy just now and did not send the change to Photos. Nothing was changed. Try again in a moment; for a plan, tap “Resume” in the overview."
+          }
+        }
+      }
+    },
     "Fotos hat eine frühere Änderung noch nicht beantwortet, deshalb schickt Albumist nichts Neues. Hält das an, beende Albumist und öffne es neu, notfalls starte das iPhone neu." : {
       "localizations" : {
         "en" : {

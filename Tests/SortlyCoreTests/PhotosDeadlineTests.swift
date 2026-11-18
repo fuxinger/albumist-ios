@@ -4,16 +4,39 @@ import Testing
 
 /// App-speed (18.11.2026): calls into Photos that never answer must not freeze the analysis or
 /// a plan for good (`PhotosDeadline`). Short limits here; the app waits seconds.
-@Suite("Bounded waits for Photos")
+@Suite("Bounded waits for Photos", .timeLimit(.minutes(15)))
 struct PhotosDeadlineTests {
     /// How long a call may wait for a thread before it counts as not answering. The app gives
     /// 60 s (`PhotosDeadline.notBegunGrace`); in the full parallel test run Swift's shared pool
     /// was busy for 78 s once (CI 44380367650 on Linux: every test, even a trivial one, took 78 s),
     /// and three calls whose answer these tests check were given up before their task got a
-    /// thread. These tests are about Photos' answer, not about that wait (it has its own test,
-    /// `aCallWithoutAThreadIsGivenUpOnlyAfterItsGrace`); a call that got its thread is still cut
-    /// off at its limit.
-    static let grace: Duration = .seconds(3600)
+    /// thread. These tests are about Photos' answer, not about that wait (it has its own tests,
+    /// `aCallWithoutAThreadIsGivenUpOnlyAfterItsGrace` and the ones with a `Gate`); a call that
+    /// got its thread is still cut off at its limit. Ten minutes, well under the suite's limit,
+    /// so a call that never gets a thread fails the test instead of holding it for an hour.
+    static let grace: Duration = .seconds(600)
+
+    /// Holds every call of a `PhotosDeadline` before it begins, as a thread pool kept busy by
+    /// Albumist's own work does, until opened (`startGate`).
+    final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isOpen = false
+        private var held = 0
+        private var through = 0
+        var open: Bool {
+            get { lock.withLock { isOpen } }
+            set { lock.withLock { isOpen = newValue } }
+        }
+        /// Calls whose task reached the gate.
+        var waiting: Int { lock.withLock { held } }
+        /// Calls whose task went through the gate (they begin, or find they were given up).
+        var passed: Int { lock.withLock { through } }
+        func wait() async {
+            lock.withLock { held += 1 }
+            while !open { await Stuck.pause() }
+            lock.withLock { through += 1 }
+        }
+    }
 
     /// Stands for a Photos call that does not answer and ignores cancellation, until opened.
     final class Stuck: @unchecked Sendable {
@@ -209,11 +232,13 @@ struct PhotosDeadlineTests {
     @Test func aCallWithoutAThreadIsGivenUpOnlyAfterItsGrace() {
         let start = ContinuousClock.now
         let limit = Duration.seconds(1)
-        let early = PhotosDeadline.quiet(now: start + .seconds(30), lastBeat: start, running: false)
+        let grace = PhotosDeadline.notBegunGrace
+        let early = PhotosDeadline.quiet(now: start + .seconds(30), lastBeat: start, running: false, grace: grace)
         #expect(PhotosDeadline.look(quiet: early, limit: limit, late: .zero) != .giveUp)
-        let late = PhotosDeadline.quiet(now: start + PhotosDeadline.notBegunGrace + limit, lastBeat: start, running: false)
+        let late = PhotosDeadline.quiet(now: start + PhotosDeadline.notBegunGrace + limit, lastBeat: start, running: false,
+                                        grace: grace)
         #expect(PhotosDeadline.look(quiet: late, limit: limit, late: .zero) == .giveUp)
-        let running = PhotosDeadline.quiet(now: start + limit, lastBeat: start, running: true)
+        let running = PhotosDeadline.quiet(now: start + limit, lastBeat: start, running: true, grace: grace)
         #expect(PhotosDeadline.look(quiet: running, limit: limit, late: .zero) == .giveUp)
         // The app's instance waits the 60 s; a longer grace (the tests) only adds to the wait of
         // a call without a thread, never to that of a running one.
@@ -223,6 +248,95 @@ struct PhotosDeadlineTests {
         #expect(PhotosDeadline.look(quiet: longer, limit: limit, late: .zero) != .giveUp)
         let runningLonger = PhotosDeadline.quiet(now: start + limit, lastBeat: start, running: true, grace: Self.grace)
         #expect(PhotosDeadline.look(quiet: runningLonger, limit: limit, late: .zero) == .giveUp)
+    }
+
+    /// A call given up before its task got a thread (its limit plus the grace passed while
+    /// Albumist's own work kept every thread busy) was never sent: it never runs later, does not
+    /// hang, says so (`notSent`, `neverBegan`), and the next write goes out. Before, it counted
+    /// as hanging (the next write was refused) and its change request still ran after the plan
+    /// had stopped with "outcome unknown" (second review of 6c45378, P1).
+    @Test func aWriteGivenUpBeforeItBeganNeverRuns() async throws {
+        let gate = Gate()
+        let deadline = PhotosDeadline(notBegunGrace: .milliseconds(100), startGate: { await gate.wait() })
+        let stuck = Stuck()
+        stuck.open = true
+        await #expect(throws: PhotosNotResponding(lane: .write, what: "createAlbum", notSent: true, neverBegan: true)) {
+            try await deadline.run("createAlbum", lane: .write, limit: .milliseconds(100)) { _ in await stuck.wait() }
+        }
+        #expect(deadline.hangingCalls(.write) == 0)
+        // Its task gets a thread now: it finds it was given up and does not run.
+        gate.open = true
+        let clock = ContinuousClock()
+        let opened = clock.now
+        while gate.passed < 1, clock.now - opened < .seconds(300) { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(gate.passed >= 1)
+        // The next write is sent (a long limit: it only has to get a thread under a full test run).
+        let next = Stuck()
+        next.open = true
+        #expect(try await deadline.run("addAssets", lane: .write, limit: .seconds(300)) { _ in await next.wait() } == 7)
+        #expect(next.started == 1)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(stuck.started == 0)
+        #expect(deadline.hangingCalls(.write) == 0)
+    }
+
+    /// The same for a caller cancelled while its call had no thread yet: the call never runs
+    /// and does not hang.
+    @Test func aCancelledCallThatHadNotBegunNeverRuns() async throws {
+        let gate = Gate()
+        let deadline = PhotosDeadline(notBegunGrace: Self.grace, startGate: { await gate.wait() })
+        let stuck = Stuck()
+        stuck.open = true
+        let call = Task { try await deadline.run("createAlbum", lane: .write, limit: .seconds(300)) { _ in await stuck.wait() } }
+        let clock = ContinuousClock()
+        let began = clock.now
+        while gate.waiting == 0, clock.now - began < .seconds(300) { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(gate.waiting == 1)
+        call.cancel()
+        await #expect(throws: CancellationError.self) { try await call.value }
+        #expect(deadline.hangingCalls(.write) == 0)
+        gate.open = true
+        while gate.passed < 1 { try await Task.sleep(for: .milliseconds(5)) }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(stuck.started == 0)
+        #expect(deadline.hangingCalls(.write) == 0)
+    }
+
+    /// Stopping and beginning exclude each other: a call stopped first never begins (it was not
+    /// sent); one that began says so when it is stopped (it hangs until it returns).
+    @Test func aHeartbeatStoppedBeforeItBeganNeverBegins() {
+        let notBegun = PhotosDeadline.Heartbeat(.now)
+        #expect(notBegun.stop() == false)
+        #expect(notBegun.begin() == false)
+        #expect(notBegun.isCancelled)
+        #expect(notBegun.quietSince == nil)
+        let running = PhotosDeadline.Heartbeat(.now)
+        #expect(running.begin())
+        #expect(running.stop())
+        #expect(running.isCancelled)
+    }
+
+    /// "Fotos antwortet gerade nicht" only for a call Photos has been asked: one still waiting
+    /// for a thread waits for Albumist's own work (second review of 6c45378, P2). Before, the
+    /// note came after 10 s of a busy thread pool.
+    @Test func slowForCountsOnlyCallsThatBegan() async throws {
+        let gate = Gate()
+        let deadline = PhotosDeadline(slowAfter: .milliseconds(60), notBegunGrace: Self.grace, startGate: { await gate.wait() })
+        let stuck = Stuck()
+        let call = Task { try await deadline.run("fetch", lane: .read, limit: .seconds(300)) { _ in await stuck.wait() } }
+        let clock = ContinuousClock()
+        let began = clock.now
+        while gate.waiting == 0, clock.now - began < .seconds(300) { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(gate.waiting == 1)
+        // A minute without a thread: still not "Fotos antwortet gerade nicht".
+        #expect(deadline.slowFor(now: .now + .seconds(60)) == nil)
+        gate.open = true
+        while stuck.started == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        // Begun: it counts from when it began.
+        #expect(deadline.slowFor(now: .now + .seconds(1)) != nil)
+        stuck.open = true
+        #expect(try await call.value == 7)
+        #expect(deadline.slowFor(now: .now + .seconds(60)) == nil)
     }
 
     /// Back on screen: every waiting call gets its limit again from then.

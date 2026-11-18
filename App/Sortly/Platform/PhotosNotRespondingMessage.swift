@@ -8,6 +8,11 @@ import SortlyCore
 extension PhotosNotResponding: @retroactive LocalizedError {
     public var errorDescription: String? {
         switch lane {
+        case .write where neverBegan:
+            // Given up before it got a thread (Albumist's own work kept them all busy): Photos
+            // was never asked, nothing changed, nothing hangs. Trying again is safe; no restart
+            // needed (second review of 6c45378, P1).
+            String(localized: "Albumist war gerade zu beschäftigt und hat die Änderung nicht an Fotos geschickt. Geändert wurde nichts. Versuche es gleich noch einmal, bei einem Plan mit „Fortsetzen“ in der Übersicht.")
         case .write where notSent:
             // An earlier change still has no answer: nothing new was sent. Restarting, not
             // "Fortsetzen", is the way out when it lasts (second review of the PhotoKit limits, 11).

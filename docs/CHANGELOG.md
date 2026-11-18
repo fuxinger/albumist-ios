@@ -102,6 +102,12 @@
   jetzt oben statt erst am Ende; in der Reise-Werkstatt steht „Beginn der Reise“ unter dem
   Datum (der Tag brach sonst um); die Blätter „Reise anpassen“ und „Fotos hinzufügen“
   schließen mit dem runden X, der Titel steht wieder mittig.
+- Fotos-Grenzen: Eine Änderung, die Albumist aufgab, bevor sie überhaupt an Fotos ging (alle
+  Threads mit der Analyse beschäftigt), lief später trotzdem noch und galt als hängend; die
+  nächste Änderung wurde abgelehnt, mit dem Rat zum Neustart. Jetzt läuft sie nie, die Meldung
+  sagt „Albumist war gerade zu beschäftigt … Geändert wurde nichts“, und „Fortsetzen“ geht
+  sofort. „Fotos antwortet gerade nicht“ erscheint nicht mehr, nur weil Albumist selbst
+  ausgelastet ist.
 ### Migrationen
 - v2: Spalte `asset_places.precision_m`.
 - v3: `text_plain` mit Zeilen-ID, damit der Volltextindex automatisch folgt.

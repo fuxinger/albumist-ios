@@ -496,7 +496,8 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                 }
             } catch let hung as PhotosNotResponding {
                 log.seconds.append(Date().timeIntervalSince(started))
-                log.outcome = "no answer"
+                // Never sent (no thread in time, or an earlier change hangs): not "no answer".
+                log.outcome = hung.neverBegan ? "not sent (never began)" : hung.notSent ? "not sent" : "no answer"
                 throw hung
             } catch {
                 log.seconds.append(Date().timeIntervalSince(started))

@@ -332,6 +332,13 @@ public struct AlbumMatcher: Sendable {
             stats.membershipReads += albums.count
             for album in albums { intersections[album, default: 0] += 1 }
         }
+        // The album this suggestion was applied to is its album only while it is about the same
+        // photos: it holds some of them, or the user took them out by hand. One that shares no
+        // photo was made for other photos under this ID (a place that had it before, second
+        // review of the place IDs, 18.11.2026): it is not extended with these.
+        let assigned = assigned.flatMap { album -> CollectionID? in
+            (intersections[album] ?? 0) > 0 || proposal.assetIDs.contains { overrides.tookOut($0, of: album) } ? album : nil
+        }
         let tracksTrips: Bool
         if case .placeCollection = proposal.kind { tracksTrips = !tripOf.isEmpty } else { tracksTrips = false }
         var tripCounts: [Int: Int] = [:]

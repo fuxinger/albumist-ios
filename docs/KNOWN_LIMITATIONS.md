@@ -51,13 +51,22 @@
 
 ## Häufige Orte
 
-- Die Kennung eines häufigen Orts ist sein auf drei Stellen gerundeter Mittelpunkt (Zellen von
-  etwa 110 m × 75 m). Seit der Prüfung vom 18.11.2026 (G1-04) haben zwei Orte in einer Zelle
-  getrennte Kennungen. Offen: kommen Fotos dazu und wandert der Mittelpunkt eines Orts dabei
-  über eine Zellkante, bekommt der Ort eine neue Kennung; sein eigener Name und „Nicht jetzt“
-  gelten dann nicht mehr, und lag ein zweiter Ort in der alten Zelle, übernimmt dieser die
-  alte Kennung. Selten (Mittelpunkte vieler Fotos bewegen sich kaum); der Vorschlag erscheint
-  dann neu und lässt sich wieder benennen.
+- Ein häufiger Ort behält seine Kennung (und damit Name, „Nicht jetzt“, Entscheidung und Album)
+  über seine Fotos: jede Analyse vergleicht mit den Orten der vorigen (seit der zweiten Prüfung
+  vom 18.11.2026). Offen bleibt:
+  - Ändern sich die Fotos eines Orts zwischen zwei Analysen um mehr als die Hälfte (viele
+    gelöscht, zwei Orte zusammengewachsen oder geteilt), gilt er als neuer Ort.
+  - Fiel ein Ort aus einer Analyse heraus (unter fünf Tage, etwa nach dem Löschen von Fotos),
+    kennt die nächste ihn nicht mehr: kommt er wieder, bekommt er die Kennung seiner Zelle,
+    wenn sie frei ist (meist seine alte). Entsteht später ein neuer Ort in derselben Zelle
+    (Mittelpunkt auf drei Stellen gerundet), bekommt dieser die Kennung, wenn sie frei ist, und
+    damit Name und „Nicht jetzt“ des verschwundenen Orts; ein Album des alten Orts wird mit
+    den neuen Fotos nicht ergänzt (es teilt keine Fotos mit ihm). Selten (ein neuer Ort im
+    selben Feld von etwa 110 m × 75 m); der Name lässt sich ändern.
+  - Nach „Analyse neu aufbauen“ fehlen die vorigen Orte: Kennungen werden neu vergeben, ein Ort
+    allein in seiner Zelle bekommt wieder die alte; von zwei Orten einer Zelle bekommt der in
+    der App zuerst gezeigte die Zellkennung, der andere Zelle und erste Foto-ID, was nicht
+    immer die Kennung von vorher ist (etwa wenn ältere Fotos nachgekommen sind).
 
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.

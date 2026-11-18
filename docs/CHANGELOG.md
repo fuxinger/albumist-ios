@@ -56,7 +56,9 @@
   Urlaubsziels, an das du öfter fährst.
 - Prüfung 18.11. (häufige Orte): Zwei häufige Orte dicht beieinander (etwa Haus und Garten
   gegenüber) hatten eine gemeinsame Kennung, ein Name oder „Nicht jetzt“ galt für beide. Jetzt
-  hat jeder Ort seine eigene; Namen und Entscheidungen, die du schon vergeben hast, bleiben.
+  hat jeder Ort seine eigene und behält sie über seine Fotos, auch wenn Fotos dazukommen oder
+  wegfallen. Name, „Nicht jetzt“ und Album bleiben bei dem der beiden Orte, den Albumist bisher
+  gezeigt hat; der andere erscheint als neuer Vorschlag und braucht wieder einen Namen.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

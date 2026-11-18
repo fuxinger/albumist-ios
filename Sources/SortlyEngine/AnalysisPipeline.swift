@@ -1004,7 +1004,11 @@ public actor AnalysisPipeline {
         let trips = TripIdentity.carryOver(detected, from: known)
         try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
         try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
-        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar).detect(in: all)
+        // Places keep their IDs by their photos, from the places the last analysis stored (names,
+        // "Nicht jetzt", decisions and albums are bound to them). An unreadable list counts as none.
+        let previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
+        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar)
+            .detect(in: all, previous: previousPlaces ?? [])
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)

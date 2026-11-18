@@ -345,3 +345,69 @@ struct AnalysisRunEndTests {
         #expect(try await store.unlabelledAssets(version: 1, labelsVersion: 1).isEmpty)
     }
 }
+
+/// Owner decision 18.11.2026 ("Analyse läuft dann weiter"): a Pause of the user stands until the
+/// user goes on. Nothing that happens by itself ends it; a tap does, and so does a change of the
+/// user's that needs a run to apply it (a split, a merge, "Aufheben", "Reisen wieder automatisch
+/// erkennen"): its run starts at once, like a tap. Before, the change was stored and nothing
+/// applied it until "Fortsetzen", and the trip workshop kept its spinner with no word why.
+@Suite("Run start: what a Pause does to it")
+struct AnalysisStartCauseTests {
+    typealias Cause = AnalysisStartCause
+
+    @Test func everyAutomaticStartWaitsForThePause() {
+        let automatic = Cause.allCases.filter { !$0.isUserInitiated }
+        #expect(automatic == [.automatic])
+        for cause in automatic {
+            #expect(!cause.startsWhilePaused && !cause.endsPause, "\(cause)")
+            #expect(!cause.startsRun(pausedByUser: true), "\(cause) started under a Pause")
+            #expect(cause.pausedAfterStart(pausedByUser: true), "\(cause) ended the Pause")
+            // Without a Pause it starts as before, and none comes from it.
+            #expect(cause.startsRun(pausedByUser: false))
+            #expect(!cause.pausedAfterStart(pausedByUser: false))
+        }
+    }
+
+    @Test func aTapStartsAndEndsThePause() {
+        #expect(Cause.tap.startsWhilePaused && Cause.tap.endsPause && Cause.tap.isUserInitiated)
+        #expect(Cause.tap.startsRun(pausedByUser: true))
+        #expect(!Cause.tap.pausedAfterStart(pausedByUser: true))
+        #expect(Cause.tap.startsRun(pausedByUser: false))
+    }
+
+    @Test func theUsersOwnChangeStartsAndEndsThePauseLikeATap() {
+        let change = Cause.userChange
+        #expect(change.startsWhilePaused, "a trip change waited for Fortsetzen")
+        #expect(change.endsPause)
+        #expect(change.startsRun(pausedByUser: true), "a trip change was stored and nothing applied it")
+        #expect(!change.pausedAfterStart(pausedByUser: true), "the Pause stood over the run of a trip change")
+        #expect(change.startsRun(pausedByUser: false))
+        // Like a tap: background time for a long run, the retries count from nothing again.
+        #expect(change.isUserInitiated)
+    }
+
+    /// No run goes on under a card that says "Analyse pausiert": what starts while paused ends it.
+    @Test func noRunStartsUnderAStandingPause() {
+        for cause in Cause.allCases {
+            #expect(cause.startsWhilePaused == cause.endsPause, "\(cause)")
+            if cause.startsRun(pausedByUser: true) { #expect(!cause.pausedAfterStart(pausedByUser: true), "\(cause)") }
+        }
+    }
+
+    /// Several requests while a change in "Dein Zuhause" is applied become one run: the one the
+    /// user asked for wins, so a queued trip change still ends the Pause.
+    @Test func joinedRequestsKeepWhatTheUserAskedFor() {
+        #expect(Cause.automatic.joined(with: nil) == .automatic)
+        #expect(Cause.automatic.joined(with: .automatic) == .automatic)
+        #expect(Cause.automatic.joined(with: .tap) == .tap)
+        #expect(Cause.tap.joined(with: .automatic) == .tap)
+        #expect(Cause.automatic.joined(with: .userChange) == .userChange)
+        #expect(Cause.userChange.joined(with: .automatic) == .userChange)
+        for a in Cause.allCases {
+            for b in Cause.allCases {
+                #expect(a.joined(with: b).isUserInitiated == (a.isUserInitiated || b.isUserInitiated), "\(a) + \(b)")
+                #expect(a.joined(with: b).startsWhilePaused == (a.startsWhilePaused || b.startsWhilePaused), "\(a) + \(b)")
+            }
+        }
+    }
+}

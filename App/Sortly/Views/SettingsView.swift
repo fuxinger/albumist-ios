@@ -220,7 +220,7 @@ struct SettingsView: View {
                 Task {
                     // Refused during a change in "Dein Zuhause": only the busy message, no run.
                     if await model.resetAnalysis() {
-                        model.startAnalysis(userInitiated: true)
+                        model.startAnalysis(cause: .tap)
                     }
                 }
             }

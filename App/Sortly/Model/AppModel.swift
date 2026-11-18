@@ -454,7 +454,7 @@ final class AppModel {
     struct QueuedAnalysis {
         var scope: OrganizationScope?
         var mode: AnalysisPipeline.Mode
-        var userInitiated: Bool
+        var cause: AnalysisStartCause
     }
     @ObservationIgnored private var homeCandidatesCache: [HomeCandidate]?
     @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
@@ -883,7 +883,7 @@ final class AppModel {
         phase = .ready
         if access.canRead { LibraryChangeWatcher.shared.start() }
         ContinuedAnalysis.requestNotificationPermission()
-        startAnalysis(scope: scope, userInitiated: true)
+        startAnalysis(scope: scope, cause: .tap)
     }
 
     /// "Nur 2026" or the whole library, also later in Settings and on the overview. A run in
@@ -902,7 +902,7 @@ final class AppModel {
             guard analysisScope == scope else { return }
             // Only now: late progress of the old run cannot mark the new part as half done.
             AnalysisMarker.reset()
-            startAnalysis(userInitiated: true)
+            startAnalysis(cause: .tap)
         }
     }
 
@@ -933,7 +933,7 @@ final class AppModel {
             from: previous, to: settings, running: analysis.isRunning,
             pausedByUser: analysis.pausing || analysis.isPausedByUser, mayStart: runMayStartNow)
         switch next {
-        case .now: startAnalysis(userInitiated: true)
+        case .now: startAnalysis(cause: .tap)
         case .afterCurrentRun, .whenResumed, .noRun: break
         }
     }
@@ -947,38 +947,45 @@ final class AppModel {
 
     // MARK: Analysis
 
-    /// `userInitiated`: started by a tap. Every long run asks iOS to go on in the background
-    /// with progress on the Lock Screen (iOS 26 continued processing), not only the first one
-    /// (first device test 15.11.: shown once, then never again).
+    /// `cause`: why the run is asked for (`AnalysisStartCause`). One the user asked for (a tap,
+    /// or a change of the user's that needs a run) asks iOS to go on in the background with
+    /// progress on the Lock Screen (iOS 26 continued processing) for every long run, not only
+    /// the first one (first device test 15.11.: shown once, then never again).
     /// `scope`: a new part of the library to work on; `nil` keeps the stored one.
-    func startAnalysis(scope: OrganizationScope? = nil, mode: AnalysisPipeline.Mode = .incremental, userInitiated: Bool = false) {
+    func startAnalysis(scope: OrganizationScope? = nil, mode: AnalysisPipeline.Mode = .incremental,
+                       cause: AnalysisStartCause = .automatic) {
         MainThreadWatch.shared.section("start analysis") {
-            startAnalysisNow(scope: scope, mode: mode, userInitiated: userInitiated)
+            startAnalysisNow(scope: scope, mode: mode, cause: cause)
         }
     }
 
-    private func startAnalysisNow(scope: OrganizationScope?, mode: AnalysisPipeline.Mode, userInitiated: Bool) {
+    private func startAnalysisNow(scope: OrganizationScope?, mode: AnalysisPipeline.Mode, cause: AnalysisStartCause) {
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
-        // Paused by the user: only a tap goes on ("Fortsetzen", "Analyse neu aufbauen", another
-        // part of the library). The start at every launch, follow-ups, retries, the end of a plan,
-        // changes in Photos or in the settings wait for it (second review of the app-speed branch:
-        // the start at launch ended the Pause; decision, reversible).
-        if analysis.pausedByUser && !userInitiated { return }
+        // Paused by the user (`AnalysisStartCause`): a tap goes on ("Fortsetzen", "Analyse neu
+        // aufbauen", another part of the library), and so does a change of the user's that needs
+        // a run (a split, a merge, "Aufheben", "Reisen wieder automatisch erkennen"; owner
+        // decision 18.11.2026: before, the change was stored and nothing applied it). The start
+        // at every launch, follow-ups, retries, the end of a plan, changes in Photos or in the
+        // settings wait for it (second review of the app-speed branch: the start at launch ended
+        // the Pause; decision, reversible).
+        let pausedBefore = analysis.pausedByUser
+        guard cause.startsRun(pausedByUser: pausedBefore) else { return }
         // A change in "Dein Zuhause" is being applied: the run starts right after it, so it
         // never takes the run lock in the middle of the change. Several requests meanwhile are
-        // one run; one started by a tap keeps what a tap gets (background time, retries reset).
+        // one run; one the user asked for keeps what it gets (background time, retries reset,
+        // the end of a Pause).
         if homeChangeRunning {
             let queued = analysisAfterHomeChange
             analysisAfterHomeChange = QueuedAnalysis(scope: scope ?? queued?.scope,
                                                      mode: mode == .incremental ? (queued?.mode ?? mode) : mode,
-                                                     userInitiated: userInitiated || (queued?.userInitiated ?? false))
+                                                     cause: cause.joined(with: queued?.cause))
             return
         }
         analysis.isRunning = true
         photosRetryDue = false
         retry.runStarted()
-        // A run goes on: the Pause no longer stands.
-        setPausedByUser(false)
+        // A run goes on: the Pause no longer stands (only a cause that ends it starts under it).
+        setPausedByUser(cause.pausedAfterStart(pausedByUser: pausedBefore))
         analysis.needsResume = false
         analysis.pausing = false
         analysis.stage = nil
@@ -1008,7 +1015,7 @@ final class AppModel {
         analysisFinished = nil
         finishMomentPlayed = false
         beginCard()
-        if userInitiated {
+        if cause.isUserInitiated {
             // A quick check for new photos ("Neu prüfen") needs no background time: asking for
             // it put "Albumist analysiert deine Fotos · Schritt 1 von 7" on the Lock Screen for
             // a few seconds after every check (device test 15.11. 23:16).
@@ -1956,7 +1963,7 @@ final class AppModel {
         await removeRejection(of: nil)
         for (id, decision) in decisions where decision == .reject { decisions[id] = nil }
         persistDecisions()
-        startAnalysis(userInitiated: true)
+        startAnalysis(cause: .tap)
     }
 
     // MARK: Trip workshop (I07)
@@ -2013,6 +2020,10 @@ final class AppModel {
 
     /// Stores the change (it is part of the decisions copy in the backup) and starts the
     /// analysis that applies it. Not while an analysis already read the old corrections.
+    /// The change is the user's own: its run starts at once, like a tap, and ends a Pause
+    /// (`AnalysisStartCause.userChange`; owner decision 18.11.2026, "Analyse läuft dann weiter").
+    /// Before, a Pause held the run back: the change was stored, and the workshop or the
+    /// settings kept the old trips with no word why until "Fortsetzen".
     private func changeTrips(_ change: (TripCorrections) -> TripCorrections) async -> Bool {
         guard let pipeline, tripChangeWait == nil else { return false }
         do {
@@ -2020,7 +2031,7 @@ final class AppModel {
             try await pipeline.setTripCorrections(updated)
             tripCorrections = updated
             saveSafetyBackup()
-            startAnalysis()
+            startAnalysis(cause: .userChange)
             return true
         } catch {
             message = .failure(error.localizedDescription)
@@ -2101,7 +2112,8 @@ final class AppModel {
     }
 
     /// Like `changeTrips`: an answer that changes the trips is not stored while an analysis
-    /// already read the old answers.
+    /// already read the old answers, and its run starts at once and ends a Pause (the user's own
+    /// change, `AnalysisStartCause.userChange`).
     private func changeRecurringPlaces(rerun: Bool, _ change: (RecurringPlaceAnswers) -> RecurringPlaceAnswers) async -> Bool {
         guard let pipeline, !rerun || (!analysis.isRunning && !execution.isRunning) else { return false }
         do {
@@ -2109,7 +2121,7 @@ final class AppModel {
             try await pipeline.setRecurringPlaceAnswers(updated)
             recurringPlaces = updated
             saveSafetyBackup()
-            if rerun { startAnalysis() }
+            if rerun { startAnalysis(cause: .userChange) }
             return true
         } catch {
             message = .failure(error.localizedDescription)
@@ -2229,7 +2241,7 @@ final class AppModel {
             homeChangeRunning = false
             if let queued = analysisAfterHomeChange {
                 analysisAfterHomeChange = nil
-                startAnalysis(scope: queued.scope, mode: queued.mode, userInitiated: queued.userInitiated)
+                startAnalysis(scope: queued.scope, mode: queued.mode, cause: queued.cause)
             }
         }
         do {

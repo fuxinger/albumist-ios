@@ -134,7 +134,7 @@ final class DemoLibrary {
         }
         isDone = true
         UserDefaults.standard.set(true, forKey: "demo.seeded")
-        model.startAnalysis(userInitiated: true)
+        model.startAnalysis(cause: .tap)
     }
 
     /// Nonisolated on purpose: PhotoKit runs the change block on its own queue, and a

@@ -66,7 +66,7 @@ struct EmptyLibraryCard: View {
                 case .nothingShared:
                     EmptyView() // "Auswahl ändern" is on the card above
                 default:
-                    Button("Neu prüfen") { model.startAnalysis(userInitiated: true) }
+                    Button("Neu prüfen") { model.startAnalysis(cause: .tap) }
                         .buttonStyle(SecondaryButtonStyle())
                 }
             }

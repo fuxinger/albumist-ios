@@ -227,7 +227,7 @@ struct OverviewView: View {
                 // Ended by the device, iOS or the photo access: the reason and the way on.
                 Text(reason.label).font(.headline)
                 Text("Die Analyse setzt genau dort fort, wo sie aufgehört hat.").font(.subheadline).foregroundStyle(.secondary)
-                Button("Fortsetzen") { model.startAnalysis(userInitiated: true) }.buttonStyle(SecondaryButtonStyle())
+                Button("Fortsetzen") { model.startAnalysis(cause: .tap) }.buttonStyle(SecondaryButtonStyle())
             } else {
                 finishedAnalysis
             }
@@ -633,7 +633,7 @@ struct LimitedAccessCard: View {
                 await model.refreshAccess()
                 // A Pause stays: "Fortsetzen" is the only way on (review of the Pause fix, b).
                 if model.access != before, !model.analysis.pausedByUser, !model.analysis.pausing {
-                    model.startAnalysis(userInitiated: true)
+                    model.startAnalysis(cause: .tap)
                 }
             }
         }
@@ -659,7 +659,7 @@ struct LimitedAccessCard: View {
             Task { @MainActor in
                 // A Pause stays: "Fortsetzen" is the only way on (review of the Pause fix, b).
                 guard !model.analysis.pausedByUser, !model.analysis.pausing else { return }
-                model.startAnalysis(userInitiated: true)
+                model.startAnalysis(cause: .tap)
             }
         }
     }

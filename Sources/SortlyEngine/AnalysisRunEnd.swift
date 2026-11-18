@@ -121,6 +121,60 @@ public struct AnalysisRunEnd: Sendable, Equatable {
     }
 }
 
+/// Why a run is asked for, and what a Pause of the user does to it (`AppModel.startAnalysis`).
+///
+/// A Pause stands until the user goes on (`AnalysisMarker.pausedByUser`, also across launches):
+/// - Nothing that happens by itself starts a run then (`automatic`); "Fortsetzen" reads the
+///   library and the settings anew. A change in the settings has its own rule and waits for
+///   "Fortsetzen" too (`AnalysisPipeline.runAfterSettingsChange`).
+/// - A tap that asks for the analysis starts it and ends the Pause (`tap`).
+/// - A change of the user's that needs a run to apply it starts that run at once and ends the
+///   Pause, like a tap (`userChange`; owner decision 18.11.2026, "Analyse läuft dann weiter").
+///   Before, the change was stored, the run waited for "Fortsetzen", and the trip workshop or the
+///   settings kept the old trips with no word why.
+///
+/// No cause starts a run under a standing Pause: what starts while paused ends it.
+public enum AnalysisStartCause: Sendable, Equatable, CaseIterable {
+    /// Nothing the user did just now: the start at launch, a follow-up, a retry, the end of a
+    /// plan, changes in Photos.
+    case automatic
+    /// A tap that asks for the analysis: "Fortsetzen", "Analyse neu aufbauen", another part of
+    /// the library, a change in the settings that needs a run (only without a Pause).
+    case tap
+    /// A change of the user's that needs a run to apply it: a split, a merge, "Aufheben" in the
+    /// trip workshop, "Reisen wieder automatisch erkennen" in the settings, an answer in "Dein
+    /// Zuhause" that changes the trips.
+    case userChange
+
+    /// A run with this cause starts while the Pause stands.
+    public var startsWhilePaused: Bool { self != .automatic }
+    /// Its run ends the Pause.
+    public var endsPause: Bool { self != .automatic }
+    /// Started by the user: background time for a long run, the retries count from nothing again.
+    public var isUserInitiated: Bool { self != .automatic }
+
+    /// Whether the run starts now.
+    public func startsRun(pausedByUser: Bool) -> Bool { !pausedByUser || startsWhilePaused }
+
+    /// Whether the Pause still stands once this run has started.
+    public func pausedAfterStart(pausedByUser: Bool) -> Bool { pausedByUser && !endsPause }
+
+    /// Two requests that become one run (asked for while a change in "Dein Zuhause" is applied):
+    /// the one the user asked for wins, so a queued trip change still ends the Pause.
+    public func joined(with other: Self?) -> Self {
+        guard let other else { return self }
+        return other.rank > rank ? other : self
+    }
+
+    private var rank: Int {
+        switch self {
+        case .automatic: 0
+        case .tap: 1
+        case .userChange: 2
+        }
+    }
+}
+
 extension AnalysisWorkload {
     /// The work left is mostly image labels for photos analysed before ("Themen" or
     /// "Dokumente" turned on since): a check run names it "Fotos werden für die neuen Bereiche

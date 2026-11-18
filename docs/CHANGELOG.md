@@ -50,6 +50,13 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- Reise-Werkstatt während einer Pause (Entscheidung 18.11.2026, „Analyse läuft dann weiter“):
+  Wer die Analyse pausiert hatte und dann eine Reise teilte, zusammenlegte, eine Änderung
+  aufhob oder in den Einstellungen „Reisen wieder automatisch erkennen“ wählte, dessen Änderung
+  wurde gespeichert, aber nicht angewendet: die Werkstatt drehte ohne Ende, die alten Reisen
+  blieben, ohne Hinweis. Jetzt startet die Analyse, die die Änderung anwendet, sofort wie nach
+  einem Tippen, und die Pause endet. Was von selbst startet (Start der App, Wiederholungen,
+  Änderungen in Fotos oder an Einstellungen), wartet weiter auf „Fortsetzen“.
 - Reise-Werkstatt (UI-Lauf 44375768011): Direkt nach dem Teilen war „Mit der Reise danach
   zusammenlegen“ gesperrt, solange Albumist die Reisen neu rechnete, sah aber tippbar aus und sagte
   nichts. Jetzt sind „Zusammenlegen“, „Aufheben“, „Reise teilen“ und in den Einstellungen „Reisen

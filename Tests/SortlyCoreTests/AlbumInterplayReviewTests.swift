@@ -133,18 +133,33 @@ struct AlbumInterplayReviewTests {
     }
 
     // A7: speed for huge libraries: 50,000 photos, 300 albums incl. one 50,000 "Alle" album.
-    @Test("A7 Abgleich bei 50.000 Fotos und 300 Alben unter 2 Sekunden")
+    // Counted as work, not on the clock: under the parallel test run the 2-second limit failed
+    // once at 2.14 s (alone 0.6-0.7 s, review of a26e8bc). What made it slow before would show
+    // here as reads: a big album read once per suggestion (400 x 50,000) instead of once per
+    // family, or overlaps counted by scanning albums instead of the photo -> album index.
+    @Test("A7 Abgleich bei 50.000 Fotos und 300 Alben: Arbeit wächst nur linear")
     func a7_hugeLibrary() throws {
         var albums: [CollectionSnapshot] = [CollectionSnapshot(id: "alle", title: "Alle", assetIDs: set("x", 0..<50_000))]
         for i in 0..<299 { albums.append(CollectionSnapshot(id: CollectionID("a\(i)"), title: "Album \(i)", assetIDs: set("x", (i * 150)..<(i * 150 + 300)))) }
         var proposals: [AlbumProposal] = []
         for i in 0..<400 { proposals.append(trip("p\(i)", set("x", (i * 120)..<(i * 120 + 120)), "Reise \(i)")) }
         proposals.append(AlbumProposal(id: SortlyID("big"), kind: .imageCategory("x"), title: "Natur", assetIDs: set("x", 0..<20_000)))
+        let inventory = CollectionInventory(albums)
+        var stats = AlbumMatcher.Stats()
         let start = Date()
-        _ = matcher.match(proposals, against: CollectionInventory(albums))
+        _ = matcher.match(proposals, against: inventory, overrides: OverrideSet(), assignments: [:], reserved: [], trips: [], stats: &stats)
         let seconds = Date().timeIntervalSince(start)
-        print("A7 seconds=\(seconds)")
-        #expect(seconds < 2)
+        // One pass: every photo of every suggestion, once per album it is in.
+        let membership = inventory.albumMembershipIndex()
+        let onePass = proposals.reduce(0) { sum, p in sum + p.assetIDs.reduce(0) { $0 + (membership[$1]?.count ?? 0) } }
+        let albumPhotos = albums.reduce(0) { $0 + $1.assetIDs.count }
+        let families = Set(proposals.map(\.kind.familyKey)).count
+        print("A7 seconds=\(seconds) runs=\(stats.proposalRuns) membershipReads=\(stats.membershipReads) (one pass \(onePass)) albumPhotoReads=\(stats.albumPhotoReads) (all albums \(albumPhotos) x \(families) families)")
+        // Each suggestion matched once, plus at most one more round for those that lost an album.
+        #expect(stats.proposalRuns <= 2 * proposals.count)
+        #expect(stats.membershipReads <= 2 * onePass)
+        // Each album read in full at most once per family, never once per suggestion.
+        #expect(stats.albumPhotoReads <= albumPhotos * families)
     }
     // A8: app deleted and installed again, no backup restored. Albumist's albums are still
     // in Photos ("Albumist/Länder/Italien", "Albumist/Reisen/…"); the new analysis has no

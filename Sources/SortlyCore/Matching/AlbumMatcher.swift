@@ -171,6 +171,14 @@ public struct AlbumMatcher: Sendable {
         /// How often the photos of each album were read to find its trip (`isOneTripOfPlace`):
         /// at most once per album and run.
         var albumTripScans: [CollectionID: Int] = [:]
+        /// Album memberships read to count each suggestion's overlap with the albums: one per
+        /// photo of the suggestion and album that photo is in, per time the suggestion is matched.
+        var membershipReads = 0
+        /// Photos of albums read in full (the sibling count of a family, the trip rule). Each
+        /// album at most once per family and run, so a big "Alle" album is not read per suggestion.
+        var albumPhotoReads = 0
+        /// Times a suggestion was matched (once, plus once per round it lost an album).
+        var proposalRuns = 0
     }
 
     func match(_ proposals: [AlbumProposal], against inventory: CollectionInventory,
@@ -318,8 +326,11 @@ public struct AlbumMatcher: Sendable {
         titleIndex: [String: [CollectionID]]
     ) -> MatchResult {
         var intersections: [CollectionID: Int] = [:]
+        stats.proposalRuns += 1
         for asset in proposal.assetIDs {
-            for album in membership[asset] ?? [] { intersections[album, default: 0] += 1 }
+            let albums = membership[asset] ?? []
+            stats.membershipReads += albums.count
+            for album in albums { intersections[album, default: 0] += 1 }
         }
         let tracksTrips: Bool
         if case .placeCollection = proposal.kind { tracksTrips = !tripOf.isEmpty } else { tracksTrips = false }
@@ -339,6 +350,7 @@ public struct AlbumMatcher: Sendable {
                 }
                 albumTrips[album.id] = .some(found)
                 stats.albumTripScans[album.id, default: 0] += 1
+                stats.albumPhotoReads += album.assetIDs.count
                 trip = found
             }
             guard let trip else { return false }
@@ -374,6 +386,7 @@ public struct AlbumMatcher: Sendable {
                 } else {
                     var fresh: [SortlyID: Int] = [:]
                     for asset in album.assetIDs { if let s = siblings[asset] { fresh[s, default: 0] += 1 } }
+                    stats.albumPhotoReads += album.assetIDs.count
                     siblingCounts[albumID] = fresh
                     counts = fresh
                 }

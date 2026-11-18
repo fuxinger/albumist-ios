@@ -664,7 +664,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// - when the plan was over anyway (its result showed, or no card came after an end later
     ///   than 25 s), one more album is tried once and a `UI_FLAKY_RETRY` line says so. That
     ///   retry hides a flake and stays only until the switch holds every later change until the
-    ///   app is ended (owner's decision, docs/IMPROVEMENTS.md "Wackelige UI-Tests"). A plan that
+    ///   app is ended (owner's decision, docs/IMPROVEMENTS.md "Wackelige Tests"). A plan that
     ///   did not start, or a card missing after an early end, still fails at once.
     private func interruptManualPlan(_ title: String) -> String? {
         for attempt in 1...2 {

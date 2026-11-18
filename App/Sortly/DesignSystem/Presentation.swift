@@ -303,11 +303,16 @@ enum AnalysisText {
     }
 
     /// "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in 25 s": the places step
-    /// waits for the limit of Apple's geocoder (the overnight refinement only). Whole seconds,
-    /// rounded up, at least 1: the countdown never says 0 while it still waits.
+    /// waits for the limit of Apple's geocoder (the overnight refinement only). Whole seconds up
+    /// to a minute, whole minutes above ("weiter in 2 Minuten"), rounded up (`AppleWaitCountdown`):
+    /// never less than is left, never 0 while it still waits.
     static func appleWait(_ left: Duration) -> String {
-        let seconds = max(1, Int((Double(left.components.seconds) + Double(left.components.attoseconds) / 1e18).rounded(.up)))
-        return String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(seconds) s")
+        switch AppleWaitCountdown(left) {
+        case .seconds(let seconds):
+            String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(seconds) s")
+        case .minutes(let minutes):
+            String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(minutes) Minuten")
+        }
     }
 
     /// "2.431 von 5.683 Fotos", number first.

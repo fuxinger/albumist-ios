@@ -98,7 +98,9 @@ struct AnalysisProgressCard: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             header
             progress
-            if case .running(let p, _, _, _) = state, p?.step == .places {
+            // Not during the overnight refinement: it is the "later" this note speaks of, and
+            // says itself what it waits for.
+            if case .running(let p, _, _, _) = state, p?.step == .places, !model.analysis.refining {
                 Text("Städtenamen kommen von Apple, das braucht etwas Zeit. Was jetzt nicht fertig wird, holt Albumist nach, wenn dein iPhone das nächste Mal lädt.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -282,9 +284,10 @@ struct AnalysisProgressCard: View {
             case .running(_, let slower, let appleWait, _):
                 if appleWait {
                     // Only the overnight refinement waits for Apple's geocoder (a run in the app
-                    // never does). The wait can last a minute: it says honestly why, and its
-                    // countdown moves every 2 s (limit: nothing stands still for more than 10 s
-                    // while work goes on; device test 18.11., build 36).
+                    // never does), seen when the app is opened while it runs. It says why, with
+                    // a countdown renewed every 2 s, in minutes above one (a wait after a refusal
+                    // lasts up to 10 min); the spinner moves meanwhile (limit: nothing stands
+                    // still for more than 10 s without saying why; device test 18.11., build 36).
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
                             .accessibilityHidden(true)

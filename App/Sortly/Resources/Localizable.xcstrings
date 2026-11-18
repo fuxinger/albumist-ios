@@ -10223,6 +10223,46 @@
         }
       }
     },
+    "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in %lld Minuten" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in %lld Minute"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in %lld Minuten"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Place names: Apple allows only a few lookups a minute · continuing in %lld minute"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Place names: Apple allows only a few lookups a minute · continuing in %lld minutes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in %lld s" : {
       "localizations" : {
         "en" : {

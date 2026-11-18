@@ -374,6 +374,30 @@ struct FullRunDisplayTests {
         #expect(clock.now > .seconds(60))
     }
 
+    /// The overnight refinement seen in the app (second review of the no-wait fix, device test
+    /// 18.11., build 36): its wait for Apple's limit is on the card with a countdown that never
+    /// says less than is left and at most a report (2 s) and a tick more, it goes when the
+    /// wait ends, and nothing stands still for more than 10 s without a reason.
+    @Test func refinementCardSaysWhyItWaitsWithAnHonestCountdown() async throws {
+        let sim = try Sim()
+        let first = await sim.run("r1 run in the app")
+        sim.expectComplete(first)
+        let left = first.report?.placesPendingOnline ?? 0
+        #expect(left > 0)
+        let refined = await sim.run("r2 overnight refinement", mode: .refinement)
+        #expect(refined.report?.isComplete == true)
+        #expect((refined.report?.placesPendingOnline ?? 0) < left)
+        // The refinement waited for Apple's limit (40 lookups a minute).
+        #expect(refined.progress.contains { $0.waitLeft != nil })
+        let card = sim.replayRefinementCard(refined)
+        #expect(card.countdownTicks > 0)
+        #expect(!card.countdownEverLess)
+        #expect(card.worstCountdownLead <= .milliseconds(2_250), "\(card.worstCountdownLead)")
+        #expect(card.longestStill <= .seconds(10), "\(card.longestStill)")
+        #expect(card.last.waitLeft == nil)
+        sim.finish()
+    }
+
     /// Lookups left for a later run (budget, refusal, Pause) are not counted as done: the run
     /// that goes on starts where this one ended, not below.
     @Test func placesLeftForLaterAreNotCountedAsDone() async throws {
@@ -836,6 +860,72 @@ final class Sim: @unchecked Sendable {
         return longest
     }
 
+    /// What the card showed during a refinement (`RefinementCard`, as `AppModel.refinePass`
+    /// feeds it): its events into the mailbox in order, a tick every 250 ms.
+    struct RefinementReplay {
+        /// Ticks that showed the countdown of a wait for Apple.
+        var countdownTicks = 0
+        /// The longest stretch in which nothing on the card changed (count, step, countdown,
+        /// the bar by 0.2 %) and it said no reason (a wait for Apple or for the device).
+        var longestStill: Duration = .zero
+        /// How much more the countdown said than was really left (never less: checked).
+        var worstCountdownLead: Duration = .zero
+        var countdownEverLess = false
+        var last = RefinementCard.Shown()
+    }
+
+    func replayRefinementCard(_ run: RunLog) -> RefinementReplay {
+        let base = ContinuousClock.now
+        let timeline = run.timeline
+        // When a wait for Apple really ended: the first report after the one that showed it
+        // that says it is over (or the end of the run).
+        func waitEnd(after index: Int) -> Duration {
+            for e in timeline[(index + 1)...] {
+                if case .progress(let p) = e.kind, p.waitLeft == nil { return e.t }
+            }
+            return run.end
+        }
+        let mailbox = ProgressMailbox()
+        var card = RefinementCard()
+        var result = RefinementReplay()
+        var next = 0
+        var t = run.start
+        var lastChange = run.start
+        var lastKey = ""
+        var barAtChange = 0.0
+        var reported: Int?
+        while t <= run.end + .milliseconds(250) {
+            while next < timeline.count, timeline[next].t <= t {
+                switch timeline[next].kind {
+                case .progress(let p):
+                    mailbox.post(p)
+                    reported = p.waitLeft != nil ? next : nil
+                case .waiting(let w): mailbox.wait(w)
+                default: break
+                }
+                next += 1
+            }
+            let shown = card.take(mailbox.take(), at: base.advanced(by: t), gliding: true)
+            if let left = shown.waitLeft, let reported {
+                result.countdownTicks += 1
+                let real = waitEnd(after: reported) - t
+                if left < real - .milliseconds(1) { result.countdownEverLess = true }
+                result.worstCountdownLead = max(result.worstCountdownLead, left - real)
+            }
+            let key = "\(String(describing: shown.stage)) \(shown.completed)/\(shown.total) \(String(describing: shown.countdown)) \(String(describing: shown.waiting))"
+            if key != lastKey || shown.bar - barAtChange >= 0.002 || shown.waitLeft != nil || shown.waiting != nil {
+                lastKey = key
+                barAtChange = shown.bar
+                lastChange = t
+            } else {
+                result.longestStill = max(result.longestStill, t - lastChange)
+            }
+            result.last = shown
+            t += .milliseconds(250)
+        }
+        return result
+    }
+
     /// An update that changed the image analysis: every photo is to be looked at again, and
     /// the marker was written by the version before.
     func updateChangesTheAnalysis() async throws {
@@ -880,8 +970,12 @@ final class Sim: @unchecked Sendable {
         }
     }
 
+    /// `mode`: `.refinement` runs the overnight refinement; its card is checked by
+    /// `replayRefinementCard`, not by the rules of a run in the app, and it leaves the analysis
+    /// it follows as it was (the marker, the number shown).
     @discardableResult
-    func run(_ label: String, pause: PauseTrigger? = nil, action: PauseAction = .pause) async -> RunLog {
+    func run(_ label: String, mode: AnalysisPipeline.Mode = .incremental, pause: PauseTrigger? = nil,
+             action: PauseAction = .pause) async -> RunLog {
         let log = RunLog(label: label)
         current.withLock { $0 = log }
         let control = AnalysisRunControl()
@@ -891,7 +985,7 @@ final class Sim: @unchecked Sendable {
         if let pause { armed.withLock { $0 = Armed(trigger: pause, action: action, control: control) } }
         log.start = clock.now
         let task = Task {
-            try await pipeline.run(control: control, onProgress: { [weak self] progress in
+            try await pipeline.run(mode: mode, control: control, onProgress: { [weak self] progress in
                 let t = clock.now
                 log.add(.progress(progress), at: t)
                 onProgress?(progress, t)
@@ -909,6 +1003,10 @@ final class Sim: @unchecked Sendable {
         log.end = clock.now
         armed.withLock { $0 = nil }
         current.withLock { $0 = nil }
+        if mode == .refinement {
+            runs.append(log)
+            return log
+        }
         check(log)
         checkCard(log)
         countsStartAgain = false

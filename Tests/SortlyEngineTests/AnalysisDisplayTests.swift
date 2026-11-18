@@ -1015,3 +1015,99 @@ struct AnalysisDisplayTests {
         #expect(box.take().waiting == .thermal)
     }
 }
+
+/// The overnight refinement on the card (second review of the no-wait fix for the geocoder,
+/// device test 18.11., build 36): before, its reports reached no one, so its wait for Apple
+/// never showed and the card stood on the last run's position without a word.
+@Suite("Analysis card: the overnight refinement")
+struct RefinementCardTests {
+    typealias Progress = AnalysisPipeline.Progress
+
+    @Test func aWaitForAppleReachesTheCardAndEnds() {
+        var card = RefinementCard()
+        let box = ProgressMailbox()
+        let t0 = ContinuousClock.now
+        box.post(Progress(stage: .places, completed: 100, total: 500))
+        var shown = card.take(box.take(), at: t0, gliding: true)
+        #expect(shown.position == AnalysisCardState.Position(step: .places, completed: 100, total: 500))
+        #expect(shown.waitLeft == nil)
+        box.post(Progress(stage: .places, completed: 100, total: 500, waitLeft: .seconds(48)))
+        shown = card.take(box.take(), at: t0 + .seconds(1), gliding: true)
+        #expect(shown.waitLeft == .seconds(48))
+        #expect(shown.countdown == .seconds(48))
+        // A tick without a new report keeps the wait (the next report comes within 2 s).
+        shown = card.take(box.take(), at: t0 + .milliseconds(1_250), gliding: true)
+        #expect(shown.waitLeft == .seconds(48))
+        box.post(Progress(stage: .places, completed: 100, total: 500, waitLeft: .seconds(46)))
+        shown = card.take(box.take(), at: t0 + .seconds(3), gliding: true)
+        #expect(shown.countdown == .seconds(46))
+        // The wait is over: the pipeline says so with the same count, and the countdown goes.
+        box.post(Progress(stage: .places, completed: 100, total: 500))
+        shown = card.take(box.take(), at: t0 + .seconds(48), gliding: true)
+        #expect(shown.waitLeft == nil)
+        #expect(shown.countdown == nil)
+        box.post(Progress(stage: .places, completed: 140, total: 500))
+        shown = card.take(box.take(), at: t0 + .seconds(49), gliding: true)
+        #expect(shown.completed == 140)
+    }
+
+    @Test func countAndStepNeverGoBack() {
+        var card = RefinementCard()
+        let box = ProgressMailbox()
+        let t0 = ContinuousClock.now
+        box.post(Progress(stage: .places, completed: 200, total: 500))
+        card.take(box.take(), at: t0, gliding: true)
+        box.post(Progress(stage: .places, completed: 150, total: 500))
+        #expect(card.take(box.take(), at: t0 + .seconds(1), gliding: true).completed == 200)
+        box.post(Progress(stage: .patterns, completed: 3, total: 3))
+        #expect(card.take(box.take(), at: t0 + .seconds(2), gliding: true).stage == .places)
+        box.post(Progress(stage: .content, completed: 0, total: 40))
+        #expect(card.take(box.take(), at: t0 + .seconds(3), gliding: true).stage == .content)
+    }
+
+    @Test func aWaitForTheDeviceIsSaid() {
+        var card = RefinementCard()
+        let box = ProgressMailbox()
+        let t0 = ContinuousClock.now
+        box.post(Progress(stage: .content, completed: 3, total: 40))
+        box.wait(.thermal)
+        #expect(card.take(box.take(), at: t0, gliding: true).waiting == .thermal)
+        box.wait(nil)
+        #expect(card.take(box.take(), at: t0 + .seconds(1), gliding: true).waiting == nil)
+    }
+
+    /// The bar moves with the refinement, glides between its reports, never goes back, and
+    /// never reaches 100 % (`AnalysisPercent`).
+    @Test func theBarMovesAndNeverGoesBack() {
+        var card = RefinementCard()
+        let box = ProgressMailbox()
+        let t0 = ContinuousClock.now
+        var bars: [Double] = []
+        for (i, stage) in [AnalysisPipeline.Stage.inventory, .patterns, .places, .content, .text, .groups, .proposals].enumerated() {
+            for done in stride(from: 0, through: 100, by: 10) {
+                box.post(Progress(stage: stage, completed: done, total: 100))
+                let t = t0 + .seconds(i * 60 + done / 2)
+                bars.append(card.take(box.take(), at: t, gliding: true).bar)
+                bars.append(card.take(box.take(), at: t + .milliseconds(250), gliding: true).bar)
+            }
+        }
+        #expect(zip(bars, bars.dropFirst()).allSatisfy { $0.0 <= $0.1 + 1e-12 })
+        #expect(bars.first! < 0.05)
+        #expect(bars.last! > 0.9)
+        #expect(bars.allSatisfy { $0 <= AnalysisPercent.cap })
+    }
+
+    /// "weiter in 25 s", "weiter in 2 Minuten": whole seconds up to a minute, whole minutes
+    /// above, always rounded up (never less than is left, never 0 while it waits).
+    @Test func countdownInSecondsThenMinutes() {
+        #expect(AppleWaitCountdown(.seconds(25)) == .seconds(25))
+        #expect(AppleWaitCountdown(.milliseconds(24_200)) == .seconds(25))
+        #expect(AppleWaitCountdown(.milliseconds(300)) == .seconds(1))
+        #expect(AppleWaitCountdown(.zero) == .seconds(1))
+        #expect(AppleWaitCountdown(.seconds(60)) == .seconds(60))
+        #expect(AppleWaitCountdown(.milliseconds(60_500)) == .minutes(2))
+        #expect(AppleWaitCountdown(.seconds(120)) == .minutes(2))
+        #expect(AppleWaitCountdown(.seconds(121)) == .minutes(3))
+        #expect(AppleWaitCountdown(.seconds(600)) == .minutes(10))
+    }
+}

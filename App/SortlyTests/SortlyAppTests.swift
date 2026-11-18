@@ -438,11 +438,28 @@ struct AnalysisTextTests {
         #expect(AnalysisText.appleWait(.seconds(23)) != AnalysisText.appleWait(.seconds(25)))
         // Never "in 0 s" while it still waits.
         #expect(AnalysisText.appleWait(.milliseconds(300)) == AnalysisText.appleWait(.seconds(1)))
+        // Above a minute in whole minutes, rounded up (a wait after a refusal lasts up to 10 min).
+        #expect(AnalysisText.appleWait(.seconds(60)) == String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(60) s"))
+        #expect(AnalysisText.appleWait(.seconds(90)) == String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(2) Minuten"))
+        #expect(AnalysisText.appleWait(.seconds(600)) == String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(10) Minuten"))
         var state = running(.places)
         state.appleWaitLeft = .seconds(12)
         #expect(state.appleWait)
         state.appleWaitLeft = nil
         #expect(!state.appleWait)
+    }
+
+    /// The overnight refinement on the card is a run of its own (second review of the no-wait
+    /// fix): no catching up and no phase of the analysis before it, no quick check, the bar
+    /// from its own start.
+    @Test func refinementIsShownAsARunOfItsOwn() {
+        var state = running(.places, completed: 30, total: 300)
+        state.resumed = ResumedRun(stage: 5, completed: 100, shown: 0.6)
+        state.refining = true
+        #expect(!state.isCatchingUp)
+        #expect(!state.isHolding)
+        #expect(state.newWork == nil)
+        #expect(state.shownOverall == AnalysisPercent.value(state.overall, isComplete: false))
     }
 
     @Test func alreadyDoneLeavesZerosOut() {

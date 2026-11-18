@@ -138,6 +138,29 @@ final class SortlyLockedUITests: XCTestCase {
         return undone
     }
 
+    /// A count row of the plan's summary (PlanReviewView.row: title and number combined into
+    /// one element, "Neue Alben, 3"): the number, nil when no such row is there within `timeout`.
+    /// Should the two texts come as elements of their own, the number is the text on the
+    /// title's line.
+    private func summaryCount(_ title: String, timeout: TimeInterval) -> Int? {
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", title))
+        if timeout > 0 { _ = rows.firstMatch.waitForExistence(timeout: timeout) }
+        var titleFrame: CGRect?
+        for row in rows.allElementsBoundByIndex {
+            guard let snapshot = try? row.snapshot() else { continue }
+            if snapshot.label == title { titleFrame = snapshot.frame; continue }
+            let rest = snapshot.label.dropFirst(title.count).replacingOccurrences(of: ".", with: "")
+            if let m = rest.wholeMatch(of: #/[,:\s]*(\d+)\s*/#), let n = Int(m.1) { return n }
+        }
+        guard let line = titleFrame else { return nil }
+        for text in app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+")).allElementsBoundByIndex {
+            guard let snapshot = try? text.snapshot(), snapshot.frame.midY >= line.minY, snapshot.frame.midY <= line.maxY,
+                  snapshot.frame.minX > line.maxX else { continue }
+            return Int(snapshot.label.replacingOccurrences(of: ".", with: ""))
+        }
+        return nil
+    }
+
     private func back() {
         let bar = app.navigationBars.firstMatch
         if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
@@ -203,8 +226,23 @@ final class SortlyLockedUITests: XCTestCase {
         guard tap(apply, "open plan (locked)", timeout: 20) else { return }
         sleep(3)
 
+        // The unlock card comes exactly when the plan needs more albums than are free
+        // (PlanReviewView: !purchases.allows(albums: facts.freeAlbumUse)); one is left here.
+        // freeAlbumUse of a plan from suggestions is its new plus its extended albums, which
+        // the summary above the card shows ("Neue Alben", "Ergänzte Alben" only when > 0).
+        let newAlbums = summaryCount("Neue Alben", timeout: 30)
+        let extended = summaryCount("Ergänzte Alben", timeout: 0) ?? 0
+        print("UI_FACT locked: the plan has \(newAlbums.map { "\($0)" } ?? "?") new and \(extended) extended albums, 1 free album left")
+        XCTAssertNotNil(newAlbums, "The plan's summary shows no readable \"Neue Alben\" row")
+        let planned = (newAlbums ?? 0) + extended
         let unlock = app.staticTexts["Albumist freischalten"]
-        if unlock.waitForExistence(timeout: 10) {
+        let cardShown = unlock.waitForExistence(timeout: planned > 1 ? 10 : 3)
+        if newAlbums != nil {
+            XCTAssertEqual(cardShown, planned > 1, planned > 1
+                           ? "A plan with \(planned) albums and 1 free album left shows no unlock card"
+                           : "A plan with \(planned) album shows the unlock card although 1 free album is left")
+        }
+        if cardShown {
             print("UI_STEP_OK unlock card")
             XCTAssertFalse(app.buttons["plan.apply"].exists, "A plan over the free albums offered \"Alben jetzt anlegen\"")
             // With or without a price from StoreKit (W7: "Preis wird geladen …" until it is there).
@@ -213,7 +251,7 @@ final class SortlyLockedUITests: XCTestCase {
             guard tap(button("jetzt kostenlos anlegen"), "keep the free albums only") else { return }
             sleep(3)
         } else {
-            print("UI_FACT locked: the plan has a single album, it fits the free one")
+            print("UI_FACT locked: the plan has \(planned) album, it fits the free one")
         }
         let start = app.buttons["plan.apply"]
         XCTAssertTrue(start.waitForExistence(timeout: 20), "The plan within the free albums cannot be applied")

@@ -45,6 +45,8 @@ public struct QueryParser: Sendable {
         var holiday: Holiday?
         /// The last word of the query the draft was read from, when it was read from words.
         var end: Int?
+        /// A period open to one side ("seit 2024", "vor 2020"): bounds of one query apply together.
+        var bound: Bound?
     }
 
     public func parse(_ text: String) -> SearchQuery {
@@ -669,7 +671,9 @@ extension QueryParser {
                 let typed = (1..<match.numberOfRanges).compactMap { Range(match.range(at: $0), in: text).map { String(text[$0]) } }
                 let groups = typed.compactMap { Int($0) }
                 guard groups.count == match.numberOfRanges - 1, let literal = make(groups, typed) else { continue }
-                let position = Self.tokenize(String(text[..<whole.lowerBound])).count
+                // Where it stands, counted in words once every literal is cut out: a literal
+                // further left that is still in the text must not count ("24.12.2024 bis 6.1.2025").
+                let position = text.distance(from: text.startIndex, to: whole.lowerBound)
                 switch literal {
                 case .notUnderstood:
                     notUnderstood.append((position, String(text[whole])))
@@ -683,6 +687,9 @@ extension QueryParser {
                 text.replaceSubrange(whole, with: String(repeating: " ", count: text[whole].count))
             }
         }
+        func words(before offset: Int) -> Int { Self.tokenize(String(text.prefix(offset))).count }
+        drafts.sort { $0.position < $1.position }
+        for i in drafts.indices { drafts[i].position = words(before: drafts[i].position) }
         ignored += notUnderstood.sorted { $0.position < $1.position }.map(\.typed)
         return drafts
     }
@@ -720,64 +727,169 @@ extension QueryParser {
     /// "seit dem 24.12.2024", "bis zum 3.5.2025".
     static let periodArticles: Set<String> = ["dem", "den", "zum", "the"]
 
+    /// "bis Ende 2024", "until the end of May 2025", "seit Anfang 2024": a word that names the
+    /// edge of the date that follows, with the bounds it fits.
+    static let periodEdges: [String: Set<Bound>] = [
+        "ende": [.through], "end": [.through],
+        "anfang": [.from], "beginn": [.from], "beginning": [.from], "start": [.from],
+    ]
+    static let periodEdgeArticles: Set<String> = ["of", "des", "von"]
+
     /// "seit 2024", "vor Mai 2025", "bis zum 24.12.2024", "after last year": the date after the
     /// word becomes a period open to one side. Before a date that is no single period
     /// ("seit Weihnachten", "nach Mai") the word is shown as not understood, never dropped
     /// without a word so that the search would quietly show the date itself.
+    /// "Mai bis Juli 2024" and "2023 bis Mai 2024" are one period from the first date to the
+    /// second, and bounds on both sides ("nach 2022 und vor 2024") apply together.
     private func periods(_ input: [Draft], words: [Word], consumed: inout [Bool], ignored: inout [String]) -> [Draft] {
         var drafts = input
-        func isDate(_ d: Draft) -> Bool { d.kind == .date || d.kind == .year }
+        func isDate(_ d: Draft) -> Bool { (d.kind == .date || d.kind == .year) && d.bound == nil }
         func single(_ d: Draft) -> SearchCriterion? { d.alternatives.count == 1 ? d.alternatives[0] : nil }
+        func yearInterval(_ y: Int) -> DateInterval? {
+            calendar.date(from: DateComponents(year: y, month: 1, day: 1)).flatMap { calendar.dateInterval(of: .year, for: $0) }
+        }
+        func monthInterval(_ m: Int, _ y: Int) -> DateInterval? {
+            calendar.date(from: DateComponents(year: y, month: m, day: 1)).flatMap { calendar.dateInterval(of: .month, for: $0) }
+        }
+        /// The single period a date draft names, with the drafts it took ("Mai 2025" takes two).
+        func named(_ index: Int) -> (DateInterval, [Int])? {
+            switch single(drafts[index]) {
+            case .year(let y):
+                return yearInterval(y).map { ($0, [index]) }
+            case .dateRange(let range):
+                return (range, [index])
+            case .month(let m):
+                // "seit Mai 2025": the month of that year. A month alone is no single period.
+                guard let after = drafts[index].end.map({ $0 + 1 }), let y = drafts.firstIndex(where: { $0.position == after && isDate($0) }),
+                      case .year(let year) = single(drafts[y]) else { return nil }
+                return monthInterval(m, year).map { ($0, [index, y]) }
+            default:
+                return nil
+            }
+        }
         for (i, word) in words.enumerated() where !consumed[i] {
             guard let (bound, language) = Self.periodWords[word.key] else { continue }
             var next = i + 1
             if next < words.count, !consumed[next], Self.periodArticles.contains(words[next].key) { next += 1 }
-            guard let first = drafts.firstIndex(where: { $0.position == next && isDate($0) }) else { continue }
-            var used = [first]
-            var interval: DateInterval?
-            switch single(drafts[first]) {
-            case .year(let y):
-                interval = calendar.date(from: DateComponents(year: y, month: 1, day: 1)).flatMap { calendar.dateInterval(of: .year, for: $0) }
-            case .dateRange(let range):
-                interval = range
-            case .month(let m):
-                // "seit Mai 2025": the month of that year. A month alone is no single period.
-                if let after = drafts[first].end.map({ $0 + 1 }), let y = drafts.firstIndex(where: { $0.position == after && isDate($0) }),
-                   case .year(let year) = single(drafts[y]) {
-                    used.append(y)
-                    interval = calendar.date(from: DateComponents(year: year, month: m, day: 1)).flatMap { calendar.dateInterval(of: .month, for: $0) }
-                }
-            default:
-                break
+            // "bis Ende 2024": the end of 2024. An edge that does not fit the word ("bis Anfang
+            // 2024") makes the word not understood; the date stays what it is.
+            var edge: Int?
+            if next < words.count, !consumed[next], Self.periodEdges[words[next].key] != nil {
+                edge = next
+                next += 1
+                if next < words.count, !consumed[next], Self.periodEdgeArticles.contains(words[next].key) { next += 1 }
             }
-            for j in i..<next { consumed[j] = true }
-            guard let interval else {
+            guard let first = drafts.firstIndex(where: { $0.position == next && isDate($0) }) else { continue }
+            let edgeFits = edge.map { Self.periodEdges[words[$0].key]?.contains(bound) == true } ?? true
+            let found = edgeFits ? named(first) : nil
+            // An edge that does not fit stays for the rest of the reading, which shows it as not understood.
+            for j in i..<(edgeFits ? next : edge ?? next) { consumed[j] = true }
+            guard let (interval, takenAfter) = found else {
                 ignored.append(word.typed)
                 continue
             }
-            let period: DateInterval = switch bound {
-            case .from: DateInterval(start: interval.start, end: .distantFuture)
-            case .after: DateInterval(start: interval.end, end: .distantFuture)
-            case .before: DateInterval(start: .distantPast, end: interval.start)
-            case .through: DateInterval(start: .distantPast, end: interval.end)
+            var used = takenAfter
+            // "Mai bis Juli 2024", "2023 bis Mai 2024", "24.12.2024 bis 6.1.2025": a date right
+            // before "bis" starts the period. A month alone is the last one at or before the end.
+            var start: (interval: DateInterval, position: Int, last: Int?)?
+            if bound == .through,
+               let before = drafts.indices.first(where: { j in
+                   !used.contains(j) && isDate(drafts[j]) && (drafts[j].end == i - 1 || (drafts[j].end == nil && drafts[j].position == i))
+               }) {
+                if case .month(let m) = single(drafts[before]), drafts[before].dimension == "month" {
+                    var year = calendar.component(.year, from: interval.start)
+                    if let candidate = monthInterval(m, year), candidate.start > interval.start { year -= 1 }
+                    if let range = monthInterval(m, year) {
+                        start = (range, drafts[before].position, drafts[before].end)
+                        used.append(before)
+                    }
+                } else if case .year(let y) = single(drafts[before]),
+                          let month = drafts.firstIndex(where: { isDate($0) && $0.end == drafts[before].position - 1 }),
+                          case .month(let m) = single(drafts[month]), drafts[month].dimension == "month", let range = monthInterval(m, y) {
+                    start = (range, drafts[month].position, drafts[before].end)
+                    used += [before, month]
+                } else if let (range, taken) = named(before), taken.count == 1 {
+                    start = (range, drafts[before].position, drafts[before].end)
+                    used.append(before)
+                }
             }
-            // What the user typed, with the date as the search read it when it was written as numbers.
-            let last = used.compactMap { drafts[$0].end }.max()
-            var typed = words[i..<next].map(\.typed)
-            if let last { typed += words[next...last].map(\.typed) } else { typed.append(language == .english ? drafts[first].english : drafts[first].german) }
+            let period: DateInterval
+            if let start {
+                period = start.interval.start < interval.end ? DateInterval(start: start.interval.start, end: interval.end)
+                                                              : DateInterval(start: start.interval.start, duration: 0)
+            } else {
+                period = switch bound {
+                case .from: DateInterval(start: interval.start, end: .distantFuture)
+                case .after: DateInterval(start: interval.end, end: .distantFuture)
+                case .before: DateInterval(start: .distantPast, end: interval.start)
+                case .through: DateInterval(start: .distantPast, end: interval.end)
+                }
+            }
+            // What the user typed, with a date as the search read it when it was written as numbers.
+            func shownText(_ index: Int) -> String { language == .english ? drafts[index].english : drafts[index].german }
+            let last = used.filter { takenAfter.contains($0) }.compactMap { drafts[$0].end }.max()
+            var typed: [String] = []
+            if let start {
+                if let startLast = start.last { typed += words[start.position...startLast].map(\.typed) }
+                else if let literal = used.first(where: { !takenAfter.contains($0) }) { typed.append(shownText(literal)) }
+            }
+            typed += words[i..<next].map(\.typed)
+            if let last { typed += words[next...last].map(\.typed) } else { typed.append(shownText(first)) }
             let text = typed.joined(separator: " ")
             let label = text.prefix(1).uppercased() + text.dropFirst()
-            let open = bound == .from || bound == .after
-            let shown = open ? period.start : period.end.addingTimeInterval(-1)
-            let detailGerman = (open ? "ab " : "bis ") + SearchDateFormat.day(shown, english: false, calendar: calendar)
-            let detailEnglish = (open ? "from " : "until ") + SearchDateFormat.day(shown, english: true, calendar: calendar)
             var draft = Draft(alternatives: [.dateRange(period)], kind: .date, german: label, english: label, dimension: "date", importance: 4,
-                              position: i, language: language, end: last)
-            draft.detailGerman = detailGerman
-            draft.detailEnglish = detailEnglish
+                              position: start?.position ?? i, language: language, end: last)
+            (draft.detailGerman, draft.detailEnglish) = detail(period)
+            if start == nil { draft.bound = bound }
             for index in used.sorted(by: >) { drafts.remove(at: index) }
             drafts.append(draft)
         }
+        return together(drafts)
+    }
+
+    /// What a period covers, as shown under its term: "bis 31. Dez. 2023", "2023",
+    /// "kein gemeinsamer Zeitraum" when no day lies in it.
+    private func detail(_ period: DateInterval) -> (german: String, english: String) {
+        if period.duration <= 0 { return ("kein gemeinsamer Zeitraum", "no common period") }
+        if period.end == .distantFuture {
+            return ("ab " + SearchDateFormat.day(period.start, english: false, calendar: calendar),
+                    "from " + SearchDateFormat.day(period.start, english: true, calendar: calendar))
+        }
+        if period.start == .distantPast {
+            let last = period.end.addingTimeInterval(-1)
+            return ("bis " + SearchDateFormat.day(last, english: false, calendar: calendar),
+                    "until " + SearchDateFormat.day(last, english: true, calendar: calendar))
+        }
+        return (SearchDateFormat.interval(period, english: false, calendar: calendar),
+                SearchDateFormat.interval(period, english: true, calendar: calendar))
+    }
+
+    /// "nach 2022 und vor 2024": a bound from below and one from above are one period, the
+    /// days that lie after the one and before the other. When no day does ("vor 2020 nach
+    /// 2024") the term says so and finds nothing. Bounds of one side alone stay as they are.
+    private func together(_ input: [Draft]) -> [Draft] {
+        let bounded = input.indices.filter { input[$0].bound != nil }.sorted { input[$0].position < input[$1].position }
+        let lower = bounded.filter { input[$0].bound == .from || input[$0].bound == .after }
+        let upper = bounded.filter { input[$0].bound == .before || input[$0].bound == .through }
+        guard !lower.isEmpty, !upper.isEmpty else { return input }
+        var start = Date.distantPast, end = Date.distantFuture
+        for index in bounded {
+            guard case .dateRange(let range) = input[index].alternatives.first else { continue }
+            start = max(start, range.start)
+            end = min(end, range.end)
+        }
+        let period = start < end ? DateInterval(start: start, end: end) : DateInterval(start: start, duration: 0)
+        let first = input[bounded[0]]
+        func lowered(_ s: String) -> String { s.prefix(1).lowercased() + s.dropFirst() }
+        var draft = first
+        draft.alternatives = [.dateRange(period)]
+        draft.german = ([first.german] + bounded.dropFirst().map { lowered(input[$0].german) }).joined(separator: " und ")
+        draft.english = ([first.english] + bounded.dropFirst().map { lowered(input[$0].english) }).joined(separator: " and ")
+        (draft.detailGerman, draft.detailEnglish) = detail(period)
+        draft.end = bounded.compactMap { input[$0].end }.max()
+        draft.bound = nil
+        var drafts = input.enumerated().filter { !bounded.contains($0.offset) }.map(\.element)
+        drafts.append(draft)
         return drafts
     }
 }

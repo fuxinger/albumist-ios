@@ -23,7 +23,8 @@ run-name: >-
 #      repository has; accepted on 16.11. Contrast is listed last, so it is the group that
 #      waits.
 #      The stress pass is not part of this run: .github/workflows/ui-stress.yml (10,000 photos
-#      before each TestFlight build, 50,000 weekly at night and before the App Store launch).
+#      before each TestFlight build with the big gate, 50,000 weekly at night and before the App
+#      Store launch).
 #
 # Which groups run (the owner's rule of 17.11., "UI plan" below, .github/scripts/ui_evidence.py):
 #   - auto (pull requests, and the default of a run by hand or from TestFlight): only the groups

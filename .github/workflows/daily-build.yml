@@ -1,0 +1,70 @@
+name: Daily build
+
+# The daily TestFlight build for the owner's own iPhone (the owner's decision 10 of 18.11.2026:
+# a daily build with the small gate; the big gate stays for testers and the App Store). Once a
+# morning this starts TestFlight (testflight.yml) on main with the input gate=small, but only when
+# there is something new and nothing in the way (.github/scripts/daily_build.py):
+#   - the upload asks the owner first (environment testflight-upload with a required reviewer,
+#     docs/launch/FREIGABE_EINRICHTEN.md); until that is set up, nothing starts;
+#   - no TestFlight run runs or waits for the owner's approval (a new run would only wait behind
+#     it and replace one that waits there);
+#   - the app changed since the last uploaded build (app fingerprint, ui_groups.py; docs, tests
+#     and the pipeline do not count), and no TestFlight run tested exactly this commit yet.
+# The TestFlight run then tests main with the small gate (CI and the UI groups flow-full and
+# contrast, about 45 min) and its upload job waits for the owner's click like every upload: the
+# daily build never uploads by itself. This job reads no secret, runs on Linux (a minute) and
+# only starts the run; testflight.yml does everything else, so build numbers, tags and the one
+# TestFlight run at a time stay as they are.
+#
+# Not part of nightly.yml on purpose: its jobs are the unchanged control run for the StoreKit
+# "no product" case of 18.11. (see its comment), and a TestFlight build needs testflight.yml's own
+# run numbers (the build number) and its concurrency group.
+#
+# Scheduled workflows only run from the default branch's copy of this file, so this starts once it
+# is on main. GitHub turns a schedule off after 60 days without activity in a public repository;
+# then Actions > Daily build > "Enable workflow". By hand: Actions > Daily build > Run workflow
+# (the same checks), or start TestFlight with gate small directly.
+on:
+  schedule:
+    # 03:30 UTC = 04:30 in Berlin in winter (05:30 in summer): after the nightly runs (01:00 and
+    # 01:30 UTC, and the weekly full stress pass on Sundays from 00:40), so the build waits for
+    # the owner's approval when he gets up.
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-build
+  cancel-in-progress: false
+
+jobs:
+  start:
+    name: Start the daily TestFlight build (small gate)
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # actions: write to list the TestFlight runs and their jobs and to start one (workflow_dispatch;
+    # GitHub lets the run's own token start that event).
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Every commit and the build-<number> tags: the app fingerprints of uploaded builds.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Something new for TestFlight
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/daily_build.py decide
+      - name: Start TestFlight with the small gate
+        if: steps.decide.outputs.start == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run testflight.yml --repo "$GITHUB_REPOSITORY" --ref main -f gate=small
+          echo "Started: Actions > TestFlight, the run \"TestFlight daily build (small gate, only for the owner)\"; its upload waits for the owner's approval." >> "$GITHUB_STEP_SUMMARY"

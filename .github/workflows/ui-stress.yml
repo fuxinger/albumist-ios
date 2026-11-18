@@ -7,10 +7,11 @@ name: UI stress
 # the test's phase).
 #
 # Which pass when (rule of the owner, 17.11.):
-#   - before each TestFlight build: the small pass, 10,000 photos and 15 min of measuring
-#     (~45 min in all). Every TestFlight run calls this workflow for its commit (photos 10000,
-#     minutes 15) and uploads only when the pass is green (testflight.yml). The same pass by
-#     hand (the defaults):
+#   - before each TestFlight build with the big gate (testflight.yml; the daily build with the
+#     small gate has none): the small pass, 10,000 photos and 15 min of measuring
+#     (~45 min in all). Every TestFlight run with the big gate calls this workflow for its
+#     commit (photos 10000, minutes 15) and uploads only when the pass is green (testflight.yml).
+#     The same pass by hand (the defaults):
 #       gh workflow run ui-stress.yml --ref BRANCH
 #   - weekly at night and before the App Store launch: the full pass, 50,000 photos and 45 min
 #     of measuring (~1.5 h, up to ~2.5 h when creating the photos is slow). The schedule below

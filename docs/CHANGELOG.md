@@ -49,6 +49,13 @@
   mit Vorschau der zwei Reisen, Zusammenlegen mit der Reise davor oder danach (bis 14 Tage
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
+- Bau-Strecke (Entscheidungen 5 und 10 vom 18.11.): TestFlight lädt nur noch nach der Freigabe von
+  Fuchs hoch. Der Upload-Job läuft in der GitHub-Umgebung `testflight-upload`, nur dort liegen die
+  Apple-Schlüssel; der erste Job hält den Lauf an, solange die Umgebung keinen Prüfer verlangt
+  (Anleitung `docs/launch/FREIGABE_EINRICHTEN.md`). Neu: ein täglicher Build mit kleinem Tor
+  (`daily-build.yml`, CI und die UI-Gruppen „ganzer Ablauf“ und „Kontrast“, rund 45 Minuten, nur
+  an Tagen mit geänderter App); das große Tor mit allen UI-Gruppen und Härtetest bleibt für Tester
+  und App Store. „Was testen“ nennt das kleine Tor; der Feedback-Abruf hat einen eigenen Schlüssel.
 ### Korrigiert
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;

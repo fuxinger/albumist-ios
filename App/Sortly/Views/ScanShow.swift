@@ -23,11 +23,10 @@ struct ScanShow: View {
         MainThreadWatch.shared.section("scan show photos") { pickMosaicPhotos() }
     }
 
+    /// Ordinary photos only where the library has them: no screenshot, document or bank card
+    /// in the mosaic (`PreviewPicker.evenly`).
     private func pickMosaicPhotos() -> [AssetID] {
-        let facts = model.facts
-        let count = columns * rows
-        guard facts.count > count else { return facts.map(\.id) }
-        return (0..<count).map { facts[$0 * (facts.count - 1) / (count - 1)].id }
+        PreviewPicker.evenly(model.facts, count: columns * rows, ranks: model.previewRanks) { $0.id }
     }
 
     private var mosaic: some View {
@@ -75,7 +74,7 @@ struct ScanShow: View {
             }
             ForEach(Array(trips)) { trip in
                 HStack(spacing: Theme.Spacing.m) {
-                    AssetThumbnail(id: trip.coverAssetID ?? AssetID(""), side: 44)
+                    CoverThumbnail(id: model.coverID(for: trip), side: 44)
                         .frame(width: 44, height: 44)
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {

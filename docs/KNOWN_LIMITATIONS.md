@@ -79,6 +79,15 @@
   stark verlesene Ziffern) können lesbar bleiben.
 - Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
   der Gesundheitskarte. Der Text bleibt auf dem Gerät.
+- Vorschauen und Titelbilder lassen sensible Dokumente weg (`PreviewRank`), erkennen sie aber
+  nur aus dem Gespeicherten: der Dokument-Einordnung und den maskierten Karten- und
+  Kontonummern im Text. Die Stufe selbst (`TextMinimizer.sensitivity`) wird nicht gespeichert:
+  Ein Ausweis oder Arztbrief ohne erkannte Dokumentart (sein Text wird nicht gespeichert) gilt
+  deshalb nur als Dokument und füllt eine Vorschau, wenn gewöhnliche Fotos fehlen. Ein Foto, das
+  die Bildanalyse nicht für ein Dokument hielt und dessen Text nie gelesen wurde (auch wenn
+  Screenshots, Dokumente und Messenger alle aus sind), gilt als gewöhnliches Foto. Eine
+  maskierte Bestell- oder Sendungsnummer, die die Kartenprüfung besteht, macht einen Screenshot
+  zum sensiblen Dokument: er fehlt dann nur in der Vorschau.
 
 ## Jahreszeiten
 - Jahreszeiten sind noch nicht als Alben wählbar. Werden sie es, gilt: Frühling und Herbst

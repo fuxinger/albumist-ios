@@ -41,6 +41,27 @@ Die Analyse liest den vollen Text, gespeichert wird nur eine verkleinerte Fassun
 - IBANs und gültige Kartennummern (Luhn-Prüfung) werden in allen anderen Texten maskiert.
 - „Analyse neu aufbauen“ löscht den gesamten Suchindex.
 
+### Sensible Dokumente in Vorschauen
+Fotos von Bankkarten, Kontoauszügen, Ausweisen und medizinischen Dokumenten erscheinen nie als
+Vorschau oder Titelbild (`PreviewRank`, `PreviewPicker`; iPhone-Test Build 36: der Vorschlag
+„Häufiger Ort in Zwiesel“ zeigte unter seinen acht Vorschaufotos eine DKB-Karte mit lesbarer
+Nummer). Das gilt für die Vorschaufotos und den Farbschein eines Vorschlags, die Titelbilder in
+den Listen (Vorschläge, Startpaket, Alben, „Schon gefunden“, Tage der Reise-Werkstatt), die
+Vorschau und den Beleg eines Plans, die Sortier-Show, das Mosaik der ersten Analyse, den
+Farbschein eines Atlas-Lands und das Foto im teilbaren Reise-Atlas-Bild.
+- **Sensibel** ist ein Foto, dessen Dokument-Einordnung finanziell, Ausweis oder medizinisch
+  sagt, oder in dessen gespeichertem Text eine Kartennummer oder IBAN maskiert wurde (eine
+  Karte nennt keine Dokumentart, ihre Nummer wird aber maskiert).
+- **Dokument** (Bildschirmfoto, von der Bildanalyse als Dokument, Beleg, Karte oder Ticket
+  erkannt, mit Dokument-Einordnung oder Screenshot-Thema) füllt nur die Plätze, für die es zu
+  wenige gewöhnliche Fotos gibt; das Teilen-Bild des Atlas zeigt nie eines.
+- Entschieden: Gibt es zu wenige andere Fotos, zeigt die Vorschau **weniger Kacheln**, statt mit
+  sensiblen Dokumenten aufzufüllen; „+N“ zählt weiter alle Fotos des Vorschlags. Besteht ein
+  Vorschlag oder Album nur aus sensiblen Dokumenten, steht statt eines Bildes „Vorschau
+  ausgeblendet“ mit dem Symbol für ausgeblendete Fotos; ein Tippen zeigt wie immer alle Fotos.
+- Nichts wird aus einem Vorschlag oder Album genommen: Die Fotos bleiben darin und erscheinen
+  in der Liste aller Fotos.
+
 ## Berechtigungen
 - Fotos, Lesen und Schreiben (voll oder ausgewählte Fotos). Lesen für die Vorschläge; Schreiben
   (Alben und Ordner anlegen, Fotos hinzufügen oder aus Alben nehmen) erst nach Bestätigung und

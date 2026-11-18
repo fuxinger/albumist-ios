@@ -247,7 +247,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
+    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { libraryInputsChanged() } }
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
@@ -304,6 +304,7 @@ final class AppModel {
 
     @ObservationIgnored private var countryCache: [String: CountryPhotos] = [:]
     @ObservationIgnored private var datesCache: [AssetID: Date]?
+    @ObservationIgnored private var previewRanksCache: [AssetID: PreviewRank]?
     @ObservationIgnored private var factsIndex: [AssetID: AssetFacts]?
 
     /// Facts by photo id (search hits, photo view).
@@ -328,6 +329,18 @@ final class AppModel {
         return dates
     }
 
+    /// How well each photo suits a preview or cover (`PreviewRank`): screenshots and documents
+    /// only when there are too few ordinary photos, sensitive documents (bank cards, statements,
+    /// IDs, medical papers) never. Ordinary photos are not listed (owner's iPhone, build 36: a
+    /// bank card among the preview photos of "Häufiger Ort in Zwiesel").
+    var previewRanks: [AssetID: PreviewRank] {
+        access(keyPath: \.facts)
+        if let previewRanksCache { return previewRanksCache }
+        let ranks = MainThreadWatch.shared.section("preview ranks") { PreviewRank.ranks(of: facts) }
+        previewRanksCache = ranks
+        return ranks
+    }
+
     /// Photos the user took out of a suggestion ("Aus Vorschlag entfernen").
     var removedFromProposals: [SortlyID: Set<AssetID>] = [:]
 
@@ -336,10 +349,26 @@ final class AppModel {
         PreviewPicker.chronological(proposal.assetIDs.subtracting(removedFromProposals[proposal.id] ?? []), dates: creationDates)
     }
 
-    /// Preview photos spread over the suggestion's time span, with the cover photo.
+    /// Preview photos spread over the suggestion's time span, with its cover: ordinary photos
+    /// first, never a sensitive document, so a suggestion with too few other photos shows fewer
+    /// than `count` (its photo count, `members(of:)`, stays the same).
     func previewIDs(for proposal: AlbumProposal, count: Int = 8) -> [AssetID] {
-        PreviewPicker.pick(proposal.assetIDs.subtracting(removedFromProposals[proposal.id] ?? []),
-                           dates: creationDates, cover: proposal.coverAssetID, count: count)
+        let members = proposal.assetIDs.subtracting(removedFromProposals[proposal.id] ?? [])
+        return PreviewPicker.pick(members, dates: creationDates, cover: coverID(for: proposal), count: count, ranks: previewRanks)
+    }
+
+    /// The photo a suggestion shows in the lists and whose colours glow behind its photos: its
+    /// own cover unless that is a document or screenshot while it has ordinary photos, never a
+    /// sensitive document (`PreviewPicker.cover`). `nil` when it has no photo to show.
+    func coverID(for proposal: AlbumProposal) -> AssetID? {
+        let removed = removedFromProposals[proposal.id] ?? []
+        let ranks = previewRanks
+        // The usual case, without going through the suggestion's photos: its cover is an
+        // ordinary photo that is still in it.
+        if let cover = proposal.coverAssetID, ranks[cover] == nil, !removed.contains(cover), proposal.assetIDs.contains(cover) {
+            return cover
+        }
+        return PreviewPicker.cover(proposal.assetIDs.subtracting(removed), preferred: proposal.coverAssetID, proposal: proposal.id, ranks: ranks)
     }
 
     /// Takes photos out of one suggestion only; they stay in the library and in other suggestions.
@@ -2997,7 +3026,8 @@ final class AppModel {
     func receipt(for plan: ChangePlan) async -> (plan: PlanReceipt, undos: [PlanReceipt]) {
         let undos = (try? await store?.reverts(of: plan.id)) ?? []
         return MainThreadWatch.shared.section("receipt") {
-            (PlanReceipt(plan: plan, inventory: inventory), undos.map { PlanReceipt(plan: $0, inventory: inventory) })
+            (PlanReceipt(plan: plan, inventory: inventory, ranks: previewRanks),
+             undos.map { PlanReceipt(plan: $0, inventory: inventory, ranks: previewRanks) })
         }
     }
 

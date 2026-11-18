@@ -14,7 +14,11 @@ struct SortingShow: View {
         /// Index of the album's last "add photos" step in the plan.
         let id: Int
         let title: String
+        /// Every photo the plan adds: what the counter counts.
         let assets: [AssetID]
+        /// What flies and shows on the album's cover: ordinary photos first, never a sensitive
+        /// document (`FilledAlbum.shown`). Can be shorter than `assets`, or empty.
+        let shown: [AssetID]
     }
 
     let albums: [Album]
@@ -158,8 +162,8 @@ struct SortingShow: View {
         var result: [AssetID] = []
         var round = 0
         while result.count < 6 && round < 6 {
-            for album in albums where round < album.assets.count && result.count < 6 {
-                let id = album.assets[round]
+            for album in albums where round < album.shown.count && result.count < 6 {
+                let id = album.shown[round]
                 if !result.contains(id) { result.append(id) }
             }
             round += 1
@@ -233,7 +237,7 @@ struct SortingShow: View {
     @discardableResult
     private func launch(_ index: Int, duration: Double, lead: Double = 0) -> Double {
         let album = albums[index]
-        let count = min(album.assets.count, albums.count == 1 ? 5 : 3)
+        let count = min(album.shown.count, albums.count == 1 ? 5 : 3)
         let flight = max(0.5, duration)
         let stagger = 0.08
         let target = CGPoint(x: albumCenter.x, y: albumCenter.y - 30)
@@ -246,7 +250,7 @@ struct SortingShow: View {
             let from = CGPoint(x: pileCenter.x + s.0 * 0.25, y: pileCenter.y + s.1 * 0.25 - 6)
             let to = CGPoint(x: target.x + CGFloat(k % 3 - 1) * 5, y: target.y + CGFloat(k % 2) * 3)
             let control = CGPoint(x: (from.x + to.x) / 2 + bow * (1 + 0.2 * CGFloat(k)), y: from.y - 56)
-            launched.append(Flight(asset: album.assets[k], from: from, control: control, to: to,
+            launched.append(Flight(asset: album.shown[k], from: from, control: control, to: to,
                                    angle: s.2 * 0.6, delay: lead + Double(k) * stagger, duration: flight))
         }
         flights.append(contentsOf: launched)
@@ -305,7 +309,7 @@ struct SortingShow: View {
 
     /// Loads the photos about to fly now, not mid-flight.
     private func prefetch(_ index: Int) async {
-        for id in albums[index].assets.prefix(albums.count == 1 ? 5 : 3) {
+        for id in albums[index].shown.prefix(albums.count == 1 ? 5 : 3) {
             _ = await ThumbnailCache.shared.image(for: id, side: 76)
         }
     }
@@ -314,13 +318,13 @@ struct SortingShow: View {
 
     /// The albums a plan fills, in plan order. Chunked "add photos" steps of one album are
     /// merged; the album counts as done when its last chunk is done.
-    static func albums(from plan: ChangePlan, inventory: CollectionInventory) -> [Album] {
-        albums(from: plan.filledAlbums(inventory: inventory))
+    static func albums(from plan: ChangePlan, inventory: CollectionInventory, ranks: [AssetID: PreviewRank] = [:]) -> [Album] {
+        albums(from: plan.filledAlbums(inventory: inventory, ranks: ranks))
     }
 
     /// The albums of `PlanReviewFacts.filledAlbums` (worked out off the main thread).
     static func albums(from filled: [FilledAlbum]) -> [Album] {
-        filled.map { Album(id: $0.lastStep, title: $0.title ?? String(localized: "Album"), assets: $0.assets) }
+        filled.map { Album(id: $0.lastStep, title: $0.title ?? String(localized: "Album"), assets: $0.assets, shown: $0.shown) }
     }
 }
 
@@ -415,8 +419,8 @@ private struct AlbumStack: View {
                 .font(.system(size: 34, weight: .medium))
                 .foregroundStyle(Theme.accent.opacity(0.6))
                 .symbolEffect(.pulse, isActive: focused && !filled && !reduceMotion)
-                .opacity(filled ? 0 : 1)
-            if let first = album.assets.first {
+                .opacity(filled && album.shown.first != nil ? 0 : 1)
+            if let first = album.shown.first {
                 AssetThumbnail(id: first, side: side)
                     .opacity(filled ? 1 : 0)
             }

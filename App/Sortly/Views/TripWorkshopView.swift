@@ -329,13 +329,15 @@ private extension TripChange {
 
 /// One day of the trip: first photo, date, number of photos, and the split mark.
 private struct DayRow: View {
+    @Environment(AppModel.self) private var model
     var day: TripWorkshop.Day
     var note: String?
     var selected: Bool
 
     var body: some View {
         HStack(spacing: Theme.Spacing.s) {
-            AssetThumbnail(id: day.assetIDs[0], side: 88)
+            // The day's first photo that suits a cover: not the photographed ticket or bank card.
+            CoverThumbnail(id: PreviewPicker.firstSuited(day.assetIDs, count: 1, ranks: model.previewRanks).first, side: 88)
                 .frame(width: 44, height: 44)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             // The note sits under the date: on the right it pushed "Dienstag, 1. August" onto two lines.

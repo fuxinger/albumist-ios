@@ -132,8 +132,10 @@ struct PlanReviewView: View {
         let order = MainThreadWatch.shared.section("plan review: order") {
             model.acceptedProposals.inDisplayOrder().map(\.id)
         }
+        // Covers and the sorting show leave sensitive documents out (`PreviewRank`).
+        let ranks = model.previewRanks
         let made = await Task.detached(priority: .userInitiated) {
-            PlanReviewFacts(plan: plan, inventory: inventory, order: order)
+            PlanReviewFacts(plan: plan, inventory: inventory, order: order, ranks: ranks)
         }.value
         guard !Task.isCancelled else { return }
         facts = made

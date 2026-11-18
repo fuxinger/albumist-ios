@@ -50,6 +50,11 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- iPhone-Test Build 36: Vorschaufotos, Titelbilder, Farbschein, Sortier-Show und das Atlas-Bild
+  zeigen nie mehr sensible Dokumente (Bankkarte, Kontoauszug, Ausweis, Arztbrief; „Häufiger Ort
+  in Zwiesel“ zeigte eine Karte mit lesbarer Nummer). Bildschirmfotos und Dokumente füllen nur
+  Plätze, für die es zu wenige gewöhnliche Fotos gibt; sonst zeigt die Vorschau weniger Kacheln,
+  „+N“ zählt weiter alle Fotos, und nichts wird aus Vorschlägen oder Alben genommen.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

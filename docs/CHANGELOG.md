@@ -50,6 +50,14 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- Fable-Analyse und Prüfungen 18.11.: Fotos schreibt die ID eines neuen Albums jetzt innerhalb
+  derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
+  ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“
+  wartet auf Alben, die noch ankommen können; Zählen und Erkennen der Beispielfotos innerhalb
+  der Lösch-Änderung. Suche: Grenzen auf beiden Seiten, „seit/vor/nach/bis“ als Zeiträume,
+  „oder“ zwischen Grenzen. Orte behalten ihre ID beim Sprachwechsel und beim Neuaufbau;
+  Jahreszeiten der Südhalbkugel; Schwärzen von IBAN, Karten und Ausweisen in mehr Schreibweisen;
+  ein ganzer Tag zu Hause trennt eine Reise. Release-Tor: ein Grün nach Wiederholung zählt nie.
 - Erster iPhone-Test (15.11.): Analyse endet nicht mehr bei Wärme, Stromsparmodus oder
   wenn iOS die Hintergrundzeit beendet, sondern wird langsamer, wartet oder geht beim Öffnen
   weiter; jeder lange Lauf fragt nach Hintergrundzeit (Sperrbildschirm); Fortschritt zählt

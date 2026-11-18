@@ -15,16 +15,21 @@ Buildnummer und der Commit werden automatisch angehängt.
   („FORCED – untested“).
 
 <!-- testflight:start -->
-Danke fürs Testen! Bitte achte in diesem Build besonders auf:
+Danke fürs Testen! Dieser Build bringt vor allem Stabilität. Bitte achte besonders auf:
 
-- Rückgängig fragt jetzt nach dem Löschen: Wenn Albumist beim Rückgängigmachen ein Album löschen will, fragt iOS um Erlaubnis. Probiere einmal „Löschen“ und einmal „Nicht erlauben“. Albumist soll danach genau sagen, was erledigt ist und was nicht, und „Nicht erlauben“ nie als gelöscht zählen.
-- Analyse läuft bei Wärme weiter: Wird das iPhone warm, ist der Stromsparmodus an oder beendet iOS die Hintergrundzeit, wird die Analyse langsamer oder wartet, hört aber nicht auf. Beim nächsten Öffnen geht sie weiter, und der Fortschritt springt nicht zurück. Am besten mit einer großen Mediathek, beim Laden und mit gesperrtem Bildschirm.
-- Probejahr bleibt: Das gewählte Probejahr bleibt nach dem Beenden und Neustarten der App erhalten, und die Analyse bleibt auf dieses Jahr begrenzt.
-- Fotos groß ansehen: Ein Foto in einem Vorschlag antippen öffnet es groß. Bitte ein paar Fotos öffnen und wieder schließen, auch mit großer Schrift.
+- Ausblenden: Fotos, die du ausblendest oder wieder einblendest, verschwinden bzw. erscheinen sofort. Die Zahlen ziehen kurz danach nach.
+- Mediathek-Tab: öffnet schneller, auch bei einer großen Mediathek.
+- Fotos hängt: Antwortet Fotos einmal nicht (z. B. während iCloud lädt), friert weder die Analyse noch das Umsetzen eines Plans ein. Albumist sagt, worauf es wartet, und macht danach weiter.
+- Rückgängig nach einem abgebrochenen Plan: Albumist entfernt nur, was sicher von Albumist ist, und sagt dir genau, falls etwas in Fotos bleibt. Deine Fotos bleiben unverändert.
+- Suche mit Zeiträumen: Probiere „seit 2024“, „vor 2022“ und „vor 2022 oder nach 2024“.
+- Themen und Dokumente später einschalten: Fotos, die schon analysiert waren, bekommen ihre Themen danach im Hintergrund.
+- Sprache der Albumnamen ändern: Orte bekommen neue Namen, Vorschläge, die du abgelehnt hast, kommen nicht zurück.
+- Reisen: Ein ganzer Tag zu Hause zwischen zwei Reisetagen trennt die Reise in zwei.
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
 <!-- testflight:end -->
 
 ## Frühere Builds
 
+- Bis 18.11.2026: Rückgängig fragt nach dem Löschen; Analyse läuft bei Wärme weiter; Probejahr bleibt; Fotos groß ansehen.
 - Build 27 (15.11.2026): erster Text, Inhalt wie oben.

@@ -260,3 +260,86 @@ Neuaufbau für „Ja“, und unter „Keine Reise, hier bin ich öfter“ auf ei
 Antippen des Orts aus. „Stimmt“ fehlt, solange das erkannte
 Zuhause keinen Namen hat. Die Frage „Seit wann wohnst du dort?“ nach „Ändern“ ist ein Blatt mit
 Datumsauswahl.
+
+## UI-Tests: Dauer und Verlagerung (Branch `claude/test-speed`, 18.11.2026)
+
+Ziel: der UI-Lauf soll deutlich kürzer und stabil werden, ohne dass ein Fall verloren geht.
+Ein Fall verlässt die UI-Tests nur, wenn ein schneller Test (Swift-Paket auf Linux oder
+`App/SortlyTests`) genau ihn prüft. In den UI-Tests bleibt, was ein Mensch auf dem Bildschirm
+sieht und tut (**Nutzerweg**). Was ausgerechnet wird, prüft der schnelle Test (**Logik**).
+
+Dauern in Sekunden aus UI-Lauf 44202318875 (Versuch 1) und dem grünen Lauf 44130058787. Der
+erste Test einer Gruppe enthält das erste `prepare` (Onboarding, Beispiel-Mediathek, ganze
+Analyse: 235–254 s); später kostet `prepare` nur 16–40 s. „Neu“ ist geschätzt aus den Logs
+(gleiche Schritte abzüglich der gestrichenen Wartezeiten), noch nicht auf dem Mac gemessen.
+
+### Gerätebedingungen (Job ~67 Min.)
+
+| Test | Dauer | Was er prüft | Einstufung | Änderung | Neu |
+|---|---|---|---|---|---|
+| test01 warm und heiß | 479 / 470 | Karte „wartet, zu warm“, geht von selbst weiter, Zahl geht nie zurück · danach 2–3 Min. Warten, bis alle 246 Fotos wieder analysiert sind | Nutzerweg · Logik | Warten auf das Ende gestrichen; der Test endet, sobald die Analyse sichtbar weiterläuft. Ende mit allen Fotos, ohne Doppeltes: `DeviceConditionRunTests.heatScriptOfTheUITestEndsWithEveryPhoto` (gleiches Skript `normal:40,gentle:40,hot:10,normal`) | ~350 |
+| test02 Akku und Stromsparmodus | 220 / 250 | eigene Worte für den Akku, geht nach dem Laden weiter, Stromsparmodus zeigt nie „pausiert“ · Ende mit allen Fotos | Nutzerweg · Logik | Ende: `lowBatteryThenLowPowerModeEndsWithEveryPhoto` (auch die Regel „Stromsparmodus allein hält nie an“); der Stromsparmodus wird höchstens 150 s bzw. 20 Fotos lang beobachtet | ~130 |
+| test03 Hintergrundzeit vorbei, App beendet | 206 / 277 | geht ohne Tipp weiter, nach dem Neustart zählt sie weiter und nie zurück · Ende mit allen Fotos, kein Foto zweimal | Nutzerweg · Logik | Ende: `backgroundTimeOverThenRelaunchEndsWithEveryPhoto` | ~100 |
+| test04 iCloud unlesbar, offline | 217 / 240 | Meldung, wie viele Fotos nicht lesbar waren, Orte aus der Offline-Karte, „Neu prüfen“ liest den Rest | Nutzerweg | bleibt | 217 |
+| test06 Speicher voll | 342 / 368 | Meldung, mit der man etwas anfangen kann, kein Absturz, der Plan wird zum unterbrochenen Plan · danach Analyse bis zum Ende | Nutzerweg · Logik | Ende: `fullDiskDuringTheAnalysisThenSpaceAgainEndsWithEveryPhoto` (echter SQLite-Fehler „voll“, Datenbank bleibt heil) | ~230 |
+| test09 Fotozugriff | 426 / 746 | echte Systemfrage abgelehnt und eingeschränkt, Zugriff im Lauf entzogen · danach Analyse bis zum Ende | Nutzerweg · Logik | Ende: `accessTakenAwayThenBackEndsWithEveryPhoto` | ~270 |
+| test10 leere Mediathek | 47 / 71 | ruhiger leerer Zustand, kein Fehler | Nutzerweg | bleibt | 47 |
+| test11 große Mediathek (3.000 Fotos) | 1551 / 1716 | 3.000 Fotos anlegen und analysieren (~25 Min.), dann bleiben Listen, Übersicht, Suche und Atlas flott | Last · Nutzerweg | bei jeder Änderung auf Linux: `LoadTests` (20.000 und 100.000 Fotos). Mit `SORTLY_UI_QUICK=1` (`TEST_RUNNER_SORTLY_UI_QUICK`) übersprungen, sonst unverändert: nachts und vor dem Hochladen | 0 bzw. ~1640 |
+| test12 Stress | übersprungen | nur im Stress-Lauf | – | bleibt | – |
+
+test11 braucht im vollen Lauf etwa 90 s mehr als bisher: test01 bis test09 enden jetzt, während
+die Analyse noch läuft, und test11 analysiert den Rest der Beispiel-Mediathek mit.
+
+### Übrige Abläufe, Kauf und Suche (Job ~62 Min.)
+
+| Test | Dauer | Was er prüft | Einstufung | Änderung | Neu |
+|---|---|---|---|---|---|
+| Gerät test05 Rückgängig abgelehnt / nicht ausgeführt | 526 / 445 | dreimal dieselben Schritte (Plan, Rückgängig, Beleg), nur mit anderem Satz | Nutzerweg einmal · Logik zweimal | einmal mit der echten Frage von iOS (nur wenn iOS nicht fragt, mit „declined“). Abgelehnt und nicht ausgeführt: `PlanningExecutionTests.undoThatPhotosDidNotCarryOutSaysWhyAndCanBeRepeated` (Grund, nichts als entfernt gezählt, zweiter Versuch nimmt alles zurück) und `App/SortlyTests/StepProblemTextTests` (der Satz im Beleg) | ~330 |
+| Gerät test07 unterbrochener Plan | 280 (rot) / 225 | „Rest anlegen“ füllt das Album, „Alles zurücknehmen“ nimmt zurück | Nutzerweg | wackelte (siehe IMPROVEMENTS, „Wackelige UI-Tests“) | ~250 |
+| Gerät test08 Album entfernen und zurück | 133 / 139 | Nutzerweg in den Einstellungen | Nutzerweg | bleibt | 133 |
+| Ablauf 1b Atlas, Mediathek, Suche | 424 / 523 | Wege durch Atlas, Land, Teilen, Mediathek, Foto, Alben, Suche · 8 Barrierefreiheits-Prüfungen, die nur ins Log schreiben (~100 s) | Nutzerweg · doppelte Prüfung | die 8 Prüfungen gestrichen: `AccessibilityUITests` prüft dieselben Bildschirme und schlägt bei Funden fehl. „Zu Album hinzufügen“ und der Ignorieren-Hinweis behalten ihre Prüfung (kommen dort nicht vor). Zeitmessung des Ignorierens bleibt | ~320 |
+| Ablauf 1c Rückgängig aus dem Verlauf | 146 / 175 | eine Frage von iOS, alles weg · Prüfung von Einstellungen und Verlauf (17 s) | Nutzerweg · doppelte Prüfung | die 2 Prüfungen gestrichen (Barrierefreiheits-Test prüft beide) | ~130 |
+| Ablauf 1d Reise-Werkstatt | 161 / 177 | teilen, zusammenlegen, zurücknehmen | Nutzerweg | bleibt | 161 |
+| Ablauf test2 große Schrift, dunkel | 103 / 115 | Bildschirmfotos von Übersicht, Atlas, Mediathek bei XXXL dunkel; Prüfungen nur im Log | doppelt | gestrichen: `AccessibilityUITests` test1 und test3 laufen in derselben Einstellung und schlagen bei Funden fehl (A12, A13) | 0 |
+| Ablauf test3 Durchklicken | 233 / 247 | jeder Tab, jede Zeile eine Ebene tief | Nutzerweg | bleibt | 233 |
+| Ablauf test4 Entscheidungen nach Neuaufbau | 267 / 290 | Entscheidungen und Verlauf kommen nach dem Neuaufbau wieder, die App sagt es | Nutzerweg | bleibt | 267 |
+| Ablauf test5 Erledigtes behalten, Fehlendes erneut | 271 / 270 | Karte nach Unterbrechung, Beleg, Plan nur mit dem Fehlenden | Nutzerweg | bleibt (Log-Zeile „lief noch“ liest jetzt eine Kennung statt eines verdeckten Titels) | 271 |
+| Ablauf test6 Analyse durch Hintergrund und Tabs | 325 / 313 | läuft weiter nach Hintergrund und Tabwechsel, Zahl nie zurück, endet mit allen Fotos (~2 Min. Warten) · Probejahr | Nutzerweg | bleibt: einziger UI-Test für A3, und die Suche danach braucht die fertig analysierte Mediathek | 325 |
+| Kauf test7 gesperrter Plan | 227 / 242 | Freischalt-Karte, freie Alben | Nutzerweg | bleibt | 227 |
+| Suche | 116 / 127 | sechs Anfragen, Chips, Hinweise, leerer Zustand | Nutzerweg · Logik | „Portugal April“ gestrichen: sieht aus wie „Italien 2022“, was Land und Monat finden, prüft `SearchQuerySetTests` („Rom Juli 2025“). Tippfehler, Lockerung, Vervollständigung und unverstandenes Wort bleiben (je eigener Zustand auf dem Bildschirm) | ~105 |
+
+### Ganzer Ablauf, Barrierefreiheit, Kontrast
+
+| Gruppe / Test | Dauer | Was er prüft | Einstufung | Änderung |
+|---|---|---|---|---|
+| Ganzer Ablauf test1 (Job ~18 Min.) | 597 / 589 | erster Start wie beim Nutzer, Vorschläge, Plan, Sortier-Show-Video, Beleg; 9 Prüfungen nur im Log (~100 s) | Nutzerweg | bleibt; die Prüfungen sind ein Kandidat zum Streichen, decken aber Willkommen und Probezeit in heller Normalschrift ab |
+| Barrierefreiheit test1–4 (Job ~30 Min.) | 269 / 559 / 290 (rot) / 207 (nur Lauf 44202318875) | Prüfungen, die bei Funden fehlschlagen: Onboarding XXXL dunkel, Englisch, XXXL dunkel weniger Bewegung, Querformat | Nutzerweg | bleibt; test3 wackelte (siehe IMPROVEMENTS) |
+| Kontrast test5 (Job ~18 Min.) | 709 / 609 | erhöhter Kontrast, weniger Transparenz, hell und dunkel | Nutzerweg | bleibt |
+
+### Neue Dauer je Gruppe (geschätzt)
+
+| Gruppe | vorher (Job) | Tests vorher | Tests neu | Job neu |
+|---|---|---|---|---|
+| Gerätebedingungen, schnell (`SORTLY_UI_QUICK=1`) | ~67 Min. | ~58 Min. | ~22 Min. | ~31 Min. |
+| Gerätebedingungen, voll (nachts, vor dem Hochladen) | ~67 Min. | ~58 Min. | ~50 Min. | ~59 Min. |
+| Übrige Abläufe, Kauf und Suche | ~62 Min. | ~54 Min. | ~46 Min. | ~54 Min. |
+| Ganzer Ablauf | ~18 Min. | ~10 Min. | ~10 Min. | ~18 Min. |
+| Barrierefreiheit | ~30 Min. | ~22 Min. | ~22 Min. | ~30 Min. |
+| Kontrast | ~18 Min. | ~12 Min. | ~12 Min. | ~18 Min. |
+
+Gestrichen je Änderung: ~36 Min. Testzeit bei den Gerätebedingungen (davon ~26 Min. test11),
+~7 Min. bei den übrigen Abläufen. Ein Job braucht außerhalb der Tests ~8 Min. (Build laden,
+Simulator starten).
+
+**Die 15 Minuten je Gruppe erreichen die Testinhalte allein nicht.** Dazu braucht es den
+Pipeline-Teil (Workflows gehören einem anderen Agenten, hier nicht geändert):
+
+1. Bei jeder Änderung `TEST_RUNNER_SORTLY_UI_QUICK=1` setzen; der volle Lauf nur nachts und
+   vor dem Hochladen.
+2. Die zwei langen Gruppen teilen, z. B. Geräte A (test01–03, ~18 Min.), Geräte B (test04, 06,
+   09, 10, ~24 Min.), Abläufe A (Gerät test05, 07, 08, ~20 Min.), Abläufe B (1b, 1c, 1d, test3,
+   ~22 Min.), Abläufe C (test4, 5, 6, Kauf, Suche, ~28 Min.). Jeder neue Job zahlt einmal das
+   erste `prepare` (~4 Min.).
+3. Was dann noch über 15 Min. liegt: das erste `prepare` je Job (ein fertig analysierter
+   Simulator als Vorlage würde es sparen), Barrierefreiheit test2 (559 s) und das Warten von
+   Ablauf test6 auf das Ende der Analyse.

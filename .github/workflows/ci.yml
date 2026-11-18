@@ -170,6 +170,13 @@ jobs:
         # boot). So the step waits until the load has gone down (at most 5 min, every value in the
         # log as SIM_SETTLE), and the later steps ask whether a simulator was picked (only when
         # App/project.yml exists) instead of hashFiles().
+        # CI 44383157858 and 44390350152 (erased and booted): StoreKit served the test host from
+        # the App Store's sandbox, not from the local configuration. Both: "Error updating
+        # Storefront ... environment: Optional("Sandbox")"; storekitd ran the product request as
+        # "[Client] app.albumist.ios (Albumist) Sandbox" against the Media API and logged "Ignoring
+        # empty product response" (44390350152, network up: empty list, no error), or it failed
+        # with URLError -1009 (44383157858). The test session now comes before the test process's
+        # first StoreKit call (PurchaseStoreKitTests, StoreKitEnvironment).
         if: steps.sim.outputs.udid != ''
         timeout-minutes: 20
         run: |
@@ -187,6 +194,13 @@ jobs:
           for i in $(seq 1 30); do
             load=$(sysctl -n vm.loadavg | awk '{print $2}')
             echo "SIM_SETTLE load(1m)=$load after $((i * 10 - 10)) s"
+            # What keeps the Mac busy, once a minute (CI 44383157858: load 330, 551, then 243 after
+            # 5 min; 44390350152: 198, 594, then 420; on three cores, before the StoreKit log
+            # started; which processes, the log did not say).
+            if [ $((i % 6)) = 1 ]; then
+              echo "SIM_TOP $(ps -A | wc -l | tr -d ' ') processes, $(pgrep -f CoreSimulator/Volumes | wc -l | tr -d ' ') from the simulator runtime; busiest:"
+              ps -Ao pcpu=,state=,comm= -r | head -12 | cut -c1-160 | sed 's/^/SIM_TOP /'
+            fi
             awk -v l="$load" 'BEGIN { exit !(l < 3.5) }' && break
             sleep 10
           done
@@ -198,6 +212,7 @@ jobs:
         if: steps.sim.outputs.udid != ''
         run: |
           echo "LOAD at start: $(sysctl -n vm.loadavg)"
+          ps -Ao pcpu=,state=,comm= -r | head -8 | cut -c1-160 | sed 's/^/SIM_TOP at start /'
           set +e
           cd App
           xcodebuild test \
@@ -208,24 +223,42 @@ jobs:
             COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1
           status=$?
-          grep -E "error:|warning: .*Sortly|test host signed ad hoc|STOREKIT|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
+          # StoreKit's own lines too (SKTestSession, StoreKitServiceError with its environment):
+          # "[SKTestSession] Error saving configuration file: ... SKInternalErrorDomain" names no
+          # "error:" and stayed in the artifact, where it cannot be read when the download fails.
+          grep -E "error:|warning: .*Sortly|test host signed ad hoc|STOREKIT|SKTestSession|SKInternalErrorDomain|StoreKitServiceError|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
+          # Whether the test session's configuration reached the simulator: storekitd keeps it in
+          # its app group under Persistence/Octane/<bundle id>/Configuration.storekit (Apple
+          # forum 826971, FB22237318: "Missing" when SKTestSession could not save it). In green
+          # runs too, so a red one can be compared; nothing listed in both says nothing.
+          find "$HOME/Library/Developer/CoreSimulator/Devices/${{ steps.sim.outputs.udid }}/data/Containers/Shared/AppGroup" \
+            -maxdepth 6 -path "*/Persistence/Octane*" -exec ls -ld {} + 2>&1 | head -20 | sed 's/^/OCTANE /'
+          echo "OCTANE end of list (empty: no Octane folder in the simulator's app groups)"
           exit $status
       - name: StoreKit daemon log
         # Only when the StoreKit test environment never came up: what the simulator's StoreKit
         # daemon said during the tests (recorded live, see "Fresh simulator") and whether Apple's
         # store hosts answer from this runner, so the cause is in the job log (the build log is
-        # an artifact).
-        if: failure() && steps.sim.outputs.udid != ''
+        # an artifact). Also after a cancel: CI 44383157858 was cancelled from outside the job
+        # seconds before the failed test step ended (no timeout, no newer run), and the step was
+        # skipped, with the store hosts unchecked.
+        if: (failure() || cancelled()) && steps.sim.outputs.udid != ''
         run: |
           if [ -f build-log.txt ] && grep -q "StoreKit test environment not" build-log.txt; then
             [ -f storekit-live.log ] && echo "StoreKit log: $(wc -l < storekit-live.log | tr -d ' ') lines" || echo "no live StoreKit log"
+            # CI 44390350152: the last 300 lines below were all product requests from the last
+            # minute; what storekitd did with the session's configuration at set-up was cut off.
+            echo "--- how storekitd classed this app's requests ([Client] bundle id (name) environment)"
+            grep -aoE "\[Client\] [^ ]+ \([^)]*\) [A-Za-z]+" storekit-live.log | sort | uniq -c || true
+            echo "--- StoreKit Testing in Xcode: storekitd's XcodeTest and Octane lines (first 150)"
+            grep -aE "XcodeTest|Octane|SKTestSession" storekit-live.log | head -150 || true
             echo "--- errors and failures (last 300)"
-            grep -iE "error|fail|denied|timed? ?out|invalid|unable|refus|not (found|allowed|available)|configuration|products?" storekit-live.log | tail -300 || true
+            grep -iE "error|fail|denied|timed? ?out|invalid|unable|refus|not (found|allowed|available)|configuration|products?|sandbox|octane|storefront|environment" storekit-live.log | tail -300 || true
             echo "--- last 200 lines"
             tail -200 storekit-live.log || true
-            echo "--- Apple store hosts from this runner"
+            echo "--- Apple store hosts from this runner (connect time: a hang shows as a long one or as the 15 s limit)"
             for url in https://bag.itunes.apple.com/bag.xml https://buy.itunes.apple.com https://xp.apple.com; do
-              curl -sS -o /dev/null -m 15 -w "$url: HTTP %{http_code} in %{time_total} s\n" "$url" 2>&1 || true
+              curl -sS -o /dev/null -m 15 -w "$url: HTTP %{http_code}, connect %{time_connect} s, total %{time_total} s\n" "$url" 2>&1 || true
             done
           fi
       - name: Build UI tests

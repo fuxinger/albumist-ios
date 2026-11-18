@@ -837,9 +837,23 @@ struct StoreKitStepTimedOut: Error, CustomStringConvertible {
 /// before every test, the first purchase after that read was missing in 3 of 6 runs. So the
 /// round trips below make that first purchase, before any test does.
 ///
-/// First a listener on StoreKit's updates starts for the whole run (`StoreKitRunListener`, a
-/// diagnostic). Then the test session is set up and the product loaded (on a just-booted
-/// simulator the first set-up once did not answer within 30 s, CI run 43949938467). Then the
+/// First the test session is set up, before this process makes any other StoreKit call (on a
+/// just-booted simulator the first set-up once did not answer within 30 s, CI run 43949938467).
+/// StoreKit Testing in Xcode serves an app from its configuration file without the App Store;
+/// without one StoreKit asks the App Store's sandbox for the same app. The red runs of 18.11.
+/// show that case: StoreKit's own errors name `environment: Optional("Sandbox")` for the
+/// storefront (CI 44383157858 and 44390350152), and the simulator's storekitd ran the product
+/// request as "[Client] app.albumist.ios (Albumist) Sandbox" against the App Store's Media API
+/// and logged "Ignoring empty product response" (44390350152), so the list came back empty
+/// without an error, 548 times in 300 s; where the simulator could not reach the host, the same
+/// request failed with URLError -1009 (44383157858). The run listener (`StoreKitRunListener`, a
+/// diagnostic) was StoreKit's first call in those runs, 0.9 to 5.7 s before the session (in the
+/// green runs before them too, 0.5 to 20 s); it now starts after the session, so StoreKit has
+/// the local configuration at this process's first call. Then the
+/// product is loaded, and StoreKit's storefront is read as evidence of where StoreKit answers
+/// from: the session's DEU comes from the local configuration; anything else means StoreKit
+/// asks the App Store (printed with every new session while no product comes, and once the
+/// product is there). Every round trip's purchase must come from the Xcode environment. Then the
 /// round trip of a purchase test is made until `promptInARow` in a row are prompt: a new
 /// session that holds nothing, StoreKit's list read until it shows no unlock (as `session()`
 /// does before every test), a purchase in the session, the list shows it, the transaction
@@ -847,10 +861,11 @@ struct StoreKitStepTimedOut: Error, CustomStringConvertible {
 /// cleared, the list no longer shows it. Prompt: every step within a fifth of what a test
 /// allows for it (`RoundTrip`). A wait for the list stops after `waitCap`; that round trip is
 /// not prompt, and the next one starts with a new session. Each round trip is printed with its
-/// times and what the run's listener heard. The bring-up ends unready only when `budget` runs
-/// out, a step does not answer, or a session holds transactions where it must be empty (new,
-/// or just cleared); then every test that needs StoreKit fails with
-/// `StoreKitEnvironmentFailure`, never passes.
+/// times, the purchase's environment and what the run's listener heard. The bring-up ends
+/// unready only when `budget` runs out, a step does not answer, a session holds transactions
+/// where it must be empty (new, or just cleared), or a purchase comes from another environment
+/// than Xcode's; then every test that needs StoreKit fails with `StoreKitEnvironmentFailure`,
+/// never passes.
 ///
 /// The round trips involve StoreKit and the test session only, never the app's purchase code,
 /// and every test still starts with an empty session and no unlock in StoreKit's list
@@ -896,6 +911,31 @@ enum StoreKitEnvironment {
         session.clearTransactions()
     }
 
+    /// StoreKit's storefront for this app, as evidence of where StoreKit answers from: the local
+    /// test environment names the session's (DEU, `configure`) without the network; a StoreKit
+    /// that does not serve this app from the configuration asks the App Store (CI 44390350152:
+    /// "Error updating Storefront ... environment: Optional("Sandbox"), storefront:
+    /// Optional("USA")"; 44383157858 the same with storefront nil). A diagnostic only: not
+    /// counted in `StoreKitSteps`, so a read that hangs holds up no test; it gives up after
+    /// `seconds`.
+    nonisolated static func storefront(seconds: Double) async -> String {
+        let start = Date()
+        let answer: String? = try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String?, any Error>) in
+            let once = ResumeOnce(continuation)
+            Task.detached {
+                let code = await Storefront.current?.countryCode
+                once.resume(.success(code ?? "none"))
+            }
+            Task.detached {
+                try? await Task.sleep(for: .seconds(seconds))
+                once.resume(.success(nil))
+            }
+        }
+        let waited = Int(Date().timeIntervalSince(start) * 1000)
+        guard let answer else { return "no answer within \(Int(seconds)) s" }
+        return "\(answer) after \(waited) ms"
+    }
+
     /// The product's entry in StoreKit's list of entitlements, nil if it has none (one read).
     nonisolated static func entry(for id: String) async -> VerificationResult<Transaction>? {
         for await result in Transaction.currentEntitlements where result.unsafePayloadValue.productID == id {
@@ -933,10 +973,9 @@ enum StoreKitEnvironment {
         var trips = 0
         func elapsed() -> Int { Int(Date().timeIntervalSince(started) * 1000) }
         func left() -> Double { max(1, deadline.timeIntervalSinceNow) }
-        let listening = StoreKitRunListener.shared.start()
-        done.append("run listener \(elapsed()) ms")
         do {
             let url = try PurchaseStoreKitTests.configurationURL()
+            // The session comes before this process makes any other StoreKit call (see above).
             // Kept until StoreKit lists the product, so the session cannot go away while StoreKit
             // may still be taking its configuration; released before a replacement is made and
             // once the product is listed, so no two bring-up sessions exist side by side.
@@ -946,16 +985,21 @@ enum StoreKitEnvironment {
                 return PurchaseTestStore(session)
             }
             done.append("session \(elapsed()) ms")
+            let listening = StoreKitRunListener.shared.start()
+            done.append("run listener \(elapsed()) ms")
             // StoreKit answers from the configuration file only when it knows the test host (see
             // `requireTestEnvironment`); until the environment is up the list may come back empty.
             // StoreKit's own error is kept, so a signing or bundle-id problem says what it is
             // instead of only "no product" after the whole budget (second review 16.11.).
             // While the list stays empty, a new session every `waitCap` seconds hands StoreKit the
-            // configuration again, and each one goes into the trace with the loads so far: CI run
-            // 44340950061 waited 300 s on one session with no product, no error and nothing that
-            // told a missing signature (the build now stops on that) from a daemon that never
-            // took the configuration. The tests' own checks are untouched.
+            // configuration again, and each one goes into the trace with the loads so far and the
+            // storefront StoreKit names: CI run 44340950061 waited 300 s on one session with no
+            // product, no error and nothing that told a missing signature (the build now stops on
+            // that) from a daemon that never took the configuration; CI 44383157858 and
+            // 44390350152 had StoreKit ask the App Store's sandbox instead. The tests' own checks
+            // are untouched.
             var lastError = "none"
+            var lastStorefront = "not read"
             var loads = 0
             var sessions = 1
             var sessionSince = Date()
@@ -967,10 +1011,11 @@ enum StoreKitEnvironment {
                 if load.count > 0 { break }
                 if let error = load.error { lastError = error }
                 if Date() > deadline {
-                    throw StoreKitStepTimedOut(description: "no product from the test session (is the test host signed with its bundle id?); \(loads) loads, \(sessions) sessions; last StoreKit error: \(lastError)")
+                    throw StoreKitStepTimedOut(description: "no product from the test session; \(loads) loads, \(sessions) sessions; last StoreKit error: \(lastError); StoreKit's storefront: \(lastStorefront) (the session's is DEU: anything else means StoreKit does not answer from the local configuration but asks the App Store)")
                 }
                 if Date().timeIntervalSince(sessionSince) > waitCap {
-                    storeKitTrace("StoreKit lists no product at \(elapsed()) ms (\(loads) loads, last error \(lastError)); new session \(sessions + 1)")
+                    lastStorefront = await StoreKitEnvironment.storefront(seconds: 10)
+                    storeKitTrace("StoreKit lists no product at \(elapsed()) ms (\(loads) loads, last error \(lastError); StoreKit's storefront \(lastStorefront)); new session \(sessions + 1)")
                     _ = current.take()
                     current = try await onSessionQueue("bring up a new test session", seconds: left()) {
                         let session = try SKTestSession(contentsOf: url)
@@ -985,9 +1030,11 @@ enum StoreKitEnvironment {
             if sessions > 1 { done.append("product with session \(sessions)") }
             _ = current.take()
             done.append("product \(elapsed()) ms")
+            // Evidence in every run, green ones included: DEU here comes from the configuration.
+            let storefront = await StoreKitEnvironment.storefront(seconds: 10)
             let lead = listenerLead - Date().timeIntervalSince(listening)
             if lead > 0 { try await Task.sleep(for: .seconds(lead)) }
-            storeKitTrace("StoreKit test environment up after \(elapsed()) ms (\(done.joined(separator: ", "))); StoreKit's list first read \(Int(Date().timeIntervalSince(listening) * 1000)) ms after the run listener started; round trips until \(promptInARow) in a row are prompt")
+            storeKitTrace("StoreKit test environment up after \(elapsed()) ms (\(done.joined(separator: ", "))); StoreKit's storefront \(storefront); StoreKit's list first read \(Int(Date().timeIntervalSince(listening) * 1000)) ms after the run listener started; round trips until \(promptInARow) in a row are prompt")
             var inARow = 0
             while inARow < promptInARow {
                 if trips > 0 { try await Task.sleep(for: .seconds(1)) }
@@ -1052,6 +1099,7 @@ enum StoreKitEnvironment {
             // one took 26.5 s in CI run 44157630387; no test waits for the app's either). Not a
             // counted step, so it holds up neither the bring-up nor the next `session()`.
             let transaction = entry.unsafePayloadValue
+            trip.environment = transaction.environment.rawValue
             Task.detached {
                 let start = Date()
                 await transaction.finish()
@@ -1066,6 +1114,11 @@ enum StoreKitEnvironment {
         }
         trip.clear = clear
         guard after == 0 else { throw StoreKitEnvironmentFailure(description: "the session still holds \(after) transactions after clearing") }
+        // A purchase made in the session belongs to StoreKit's local test environment. Listed from
+        // any other, StoreKit does not answer from the configuration file, and no test may run on it.
+        if let environment = listed.entry?.unsafePayloadValue.environment, environment != .xcode {
+            throw StoreKitEnvironmentFailure(description: "StoreKit listed the session's purchase from the \(environment.rawValue) environment, not from Xcode's local test environment")
+        }
         if listed.reached {
             let goneWait = cap()
             trip.gone = try await within("round trip: StoreKit lists no unlock after the clear", seconds: goneWait + 2) {
@@ -1089,7 +1142,8 @@ struct StoreKitEnvironmentFailure: Error, CustomStringConvertible {
 /// arrived, and each round trip and a session purchase StoreKit never lists say what it heard
 /// after the buy, so the log shows whether StoreKit's list waited for the update (CI run
 /// 44157630387: list and listener both 15,316 ms after the buy). It does not make the update
-/// come sooner: it had been listening for 20.7 s then. The bring-up starts it first, at least
+/// come sooner: it had been listening for 20.7 s then. The bring-up starts it right after the
+/// first test session (never before: it is a StoreKit call, see `StoreKitEnvironment`), at least
 /// `StoreKitEnvironment.listenerLead` before the first round trip. It finishes nothing: where
 /// a test starts the app's listener, that one does.
 final class StoreKitRunListener: @unchecked Sendable {
@@ -1164,6 +1218,8 @@ private struct RoundTrip: Sendable, CustomStringConvertible {
     var noUnlock: ListWait?
     var buy: Double?
     var listed: ListWait?
+    /// The listed purchase's environment (`Transaction.environment`): "Xcode" for the session's.
+    var environment: String?
     var clear: Double?
     var gone: ListWait?
     var heard = "nothing"
@@ -1178,7 +1234,10 @@ private struct RoundTrip: Sendable, CustomStringConvertible {
         var steps = ["session \(Self.ms(setUp)) ms"]
         if let noUnlock { steps.append("no unlock in the list \(noUnlock)") }
         if let buy { steps.append("buy \(Self.ms(buy)) ms") }
-        if let listed { steps.append("purchase in the list \(listed)" + (listed.reached ? ", finish started" : "")) }
+        if let listed {
+            let from = environment.map { " (environment \($0))" } ?? ""
+            steps.append("purchase in the list \(listed)\(from)" + (listed.reached ? ", finish started" : ""))
+        }
         if let clear { steps.append("clear \(Self.ms(clear)) ms") }
         if let gone { steps.append("no unlock after the clear \(gone)") }
         let listener = buy == nil ? "" : "; run listener heard \(heard)"

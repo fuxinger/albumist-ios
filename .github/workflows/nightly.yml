@@ -35,6 +35,20 @@ concurrency:
   group: nightly
   cancel-in-progress: false
 
+# Cache poisoning (CodeQL actions/cache-poisoning on PR #1, the checkouts of
+# needs.pick.outputs.sha below): a scheduled or manual run executes code of another ref (the
+# development branch, NIGHTLY_REF or the ref typed in by hand) in the context of the default
+# branch, where an Actions cache entry it saved would be readable by every branch. Accepted,
+# because:
+#   - no workflow of this repository restores any Actions cache (no actions/cache, no "cache:"
+#     of a setup action; owner decision 17.11.: no build cache), so an entry saved here would
+#     never be read; .github/scripts/tests/test_workflows.py fails as soon as one appears;
+#   - the ref comes from this repository only: a branch written by people with write access,
+#     the repository variable NIGHTLY_REF, or the input of a run started by such a person;
+#   - the tested code gets a read-only token (permissions above) and no token stays in
+#     .git/config (persist-credentials: false), and nothing of this workflow is used by a
+#     release (TestFlight builds and tests its own commit).
+
 jobs:
   pick:
     name: Pick the commit
@@ -70,6 +84,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.pick.outputs.sha }}
+          # The tested code never sees a token in .git/config (see "Cache poisoning" above).
+          persist-credentials: false
       - name: Install SQLite headers
         run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev python3 > /dev/null
       - name: All core tests, stress test with ${{ env.SORTLY_STRESS_SEEDS }} seeds (clean build)
@@ -99,6 +115,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.pick.outputs.sha }}
+          # The tested code never sees a token in .git/config (see "Cache poisoning" above).
+          persist-credentials: false
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode --runtime
       - name: Generate Xcode project

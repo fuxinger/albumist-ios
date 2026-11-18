@@ -5,7 +5,7 @@
 **Untertitel (max. 30 Zeichen):** Fotos automatisch in Alben
 
 **Werbetext (max. 170 Zeichen, jederzeit änderbar):**
-Deine Reisen, Orte und Screenshots endlich in echten Alben – sortiert auf deinem iPhone, ohne Upload, ohne Abo. Und dein persönlicher Reise-Atlas zum Teilen.
+Deine Reisen, Orte und Screenshots endlich in echten Alben – sortiert auf deinem iPhone, ohne Foto-Upload, ohne Abo. Und dein persönlicher Reise-Atlas zum Teilen.
 
 **Beschreibung:**
 Tausende Fotos, aber nichts wiederfinden? Albumist sortiert deine Mediathek in echte Alben und Ordner – direkt in der Fotos-App, auf all deinen Geräten.
@@ -13,8 +13,8 @@ Tausende Fotos, aber nichts wiederfinden? Albumist sortiert deine Mediathek in e
 REISEN MIT DATUM
 Albumist erkennt deine Reisen und legt Alben wie „Toskana 03.08.–14.08.2024“ an. Wiederkehrende Ziele bekommen zusätzlich ein Sammelalbum.
 
-LÄNDER, STÄDTE UND DEINE ORTE
-Fotos landen automatisch in Ländern und Städten. Orte, an denen du oft bist, schlägt Albumist vor – den Namen gibst du selbst.
+LÄNDER, AUF WUNSCH AUCH STÄDTE
+Fotos landen automatisch in Länder-Alben, auf Wunsch auch in Städte-Alben. Orte, an denen du oft bist, schlägt Albumist vor – den Namen gibst du selbst.
 
 SCREENSHOTS, DOKUMENTE, THEMEN
 Bestellungen, Tickets, Rezepte, Rechnungen, Hunde, Strand oder Essen: Albumist erkennt Inhalte und Text auf dem Gerät.
@@ -27,7 +27,8 @@ Eine Weltkarte, auf der alle Länder leuchten, in denen du fotografiert hast. Mi
 
 PRIVAT VON ANFANG AN
 • Die Analyse läuft komplett auf deinem iPhone
-• Keine Fotos werden hochgeladen, kein Konto, kein Tracking
+• Kein Foto wird hochgeladen, kein Konto, kein Tracking
+• Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten
 • Originale werden nie gelöscht, verändert oder kopiert
 
 FAIRER PREIS
@@ -44,4 +45,4 @@ fotos,alben,sortieren,ordnen,reise,urlaub,mediathek,screenshots,ordner,karte,wel
 3. „Deine Alben bleiben – und werden ergänzt.“ (Abgleich-Karte)
 4. „Erst prüfen, dann umsetzen. Alles rückgängig.“ (Umsetzen-Seite)
 5. „Dein Reise-Atlas.“ (Atlas mit leuchtender Karte)
-6. „Alles bleibt auf deinem iPhone.“ (Datenschutz)
+6. „Deine Fotos bleiben auf deinem iPhone.“ (Datenschutz)

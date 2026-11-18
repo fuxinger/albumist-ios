@@ -343,7 +343,7 @@ public actor PlaceResolutionService {
 
     /// Online is needed for town-level names, at borders, or when the map knows nothing.
     func requiresOnline(_ match: OfflineWorldMap.Match?) -> Bool {
-        guard let match, match.country != nil, match.countryIsCertain else { return true }
+        guard let match, match.country != nil || match.disputedArea != nil, match.countryIsCertain else { return true }
         if policy.deepestLevel >= .locality { return true }
         if policy.deepestLevel >= .administrativeArea && !match.regionIsCertain { return true }
         return false
@@ -354,6 +354,11 @@ public actor PlaceResolutionService {
     func merge(online: PlaceComponents, offline: OfflineWorldMap.Match?, at coordinate: GeoCoordinate) -> (components: PlaceComponents, townIsValid: Bool)? {
         var result = online
         var townIsValid = true
+        if let area = offline?.disputedArea {
+            // A disputed area: Apple names the country by the country of the device, Albumist
+            // takes no side (decision Fuchs 18.11.2026). The town stays.
+            return (online.inDisputedArea(area, language: policy.language), true)
+        }
         if let offline, offline.countryIsCertain, let country = offline.country {
             if let code = online.isoCountryCode, code.uppercased() != country.isoCode.uppercased() {
                 // The coarse cell's representative lies in another country: keep this photo's

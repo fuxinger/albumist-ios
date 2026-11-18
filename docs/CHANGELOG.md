@@ -50,6 +50,17 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- Entscheidungen Fuchs 18.11. (Punkte 3, 8 und 14 der Rückgabe): Der erste Bildschirm sagt
+  „Kein Foto wird hochgeladen“ statt „Nichts wird hochgeladen“; die Zugriffs-Seite sagt in einem
+  Satz, dass iOS für Ortsnamen einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst
+  schickt und dass man das in den Einstellungen ausschalten kann. Der Schalter „Orte online
+  genauer bestimmen“ bleibt ab Werk an; Einstellungen, Datenschutz-Seite, Website und
+  Store-Texte sagen dasselbe. Umstrittene Gebiete (Krim, Westsahara, Kaschmir, Nordzypern,
+  Kosovo, Taiwan, Golanhöhen, Abchasien) bekommen kein Land mehr, weder aus der Offline-Karte
+  noch aus Apples Antwort: Das Gebiet heißt mit seinem eigenen Namen („Krim“), sein Vorschlag
+  ist „Unsicher“ mit der Begründung „Umstrittenes Gebiet …“, im Reise-Atlas zählt es nicht als
+  Land; Städte darin behalten ihren Namen. Die Store-Texte versprechen „Länder, auf Wunsch auch
+  Städte“ statt Städte-Alben ab Werk (Standard bleibt: nur Länder).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

@@ -1,8 +1,10 @@
 # Datenschutz
 
 ## Datenverarbeitung
-Alle Analysen laufen auf dem Gerät. Albumist lädt keine Fotos hoch, hat keinen Server, kein
-Konto, keine Werbung, kein Tracking und keine Analyse-SDKs.
+Alle Analysen laufen auf dem Gerät. Kein Foto wird hochgeladen; Albumist hat keinen Server, kein
+Konto, keine Werbung, kein Tracking und keine Analyse-SDKs. Für Ortsnamen schickt iOS einzelne
+Aufnahmeorte (nur Koordinaten) an Apples Kartendienst; das ist ab Werk an und in den
+Einstellungen abschaltbar (siehe „Externe Dienste“).
 
 Albumist liest die Mediathek, um Alben vorzuschlagen, und schreibt erst, wenn der Nutzer einen
 Plan bestätigt: Es legt Alben und Ordner in Fotos an, benennt und verschiebt sie, fügt Fotos zu
@@ -54,8 +56,12 @@ Die Analyse liest den vollen Text, gespeichert wird nur eine verkleinerte Fassun
   Vorschläge, ohne Fotos, Orte oder Albumnamen auf dem Sperrbildschirm.
 
 ## Externe Dienste
-- **Apple-Geocoder** (`CLGeocoder`): Für Stadtnamen werden einzelne Koordinaten (eine pro
-  Rasterzelle, keine Fotos) an Apple gesendet. Abschaltbar; dann nur Offline-Karte.
+- **Apple-Geocoder** (`CLGeocoder`): Für Ortsnamen werden einzelne Aufnahmeorte als Koordinaten
+  (eine pro Rasterzelle, keine Fotos) an Apples Kartendienst gesendet. Ab Werk an (Entscheidung
+  Fuchs 18.11.: zeigen mit Schalter, nicht vorab fragen). Das Onboarding sagt es auf der
+  Zugriffs-Seite in einem Satz; der Schalter „Orte online genauer bestimmen“ steht in den
+  Einstellungen unter „Datenschutz“. Ausgeschaltet: nur Offline-Karte (Länder und Regionen, keine
+  Städte).
 - **iCloud-Fotos:** Originale von Screenshots/Dokumenten werden nur mit Zustimmung über
   Apples Fotosystem geladen.
 - **App Store (StoreKit):** einmaliger Kauf, abgewickelt von Apple.

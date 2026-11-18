@@ -33,14 +33,29 @@ public struct OfflineWorldMap: Sendable {
         public var regionIsCertain: Bool
         /// Countries considered (inside or within the margin), nearest first.
         public var countryCandidates: [Region]
+        /// The point lies in a disputed area (decision Fuchs 18.11.2026, review P1-11). Then
+        /// `country` and `region` are nil (the map's view is one side's view) and
+        /// `countryIsCertain` is true: the answer "disputed, not sure which country" is final,
+        /// and Apple's lookup, which answers by the country of the device, does not change it.
+        public var disputedArea: DisputedArea?
 
         public func components(language: TitleLanguage) -> PlaceComponents? {
+            if let disputedArea { return PlaceComponents().inDisputedArea(disputedArea, language: language) }
             guard let country else { return nil }
             return PlaceComponents(
                 isoCountryCode: country.isoCode.isEmpty ? nil : String(country.isoCode.prefix(2)),
                 country: country.name(language),
                 administrativeArea: regionIsCertain ? region?.name(language) : nil
             )
+        }
+
+        /// No country and no region: neither side's view (see `disputedArea`).
+        mutating func markDisputed(_ area: DisputedArea) {
+            disputedArea = area
+            country = nil
+            region = nil
+            countryIsCertain = true
+            regionIsCertain = true
         }
     }
 
@@ -164,7 +179,11 @@ public struct OfflineWorldMap: Sendable {
     public func lookup(_ coordinate: GeoCoordinate) -> Match {
         let countries = evaluate(coordinate, among: regions.lazy.filter { $0.level == .country }.map(\.index))
         var match = Match(country: nil, region: nil, countryIsCertain: false, regionIsCertain: false, countryCandidates: countries.map { regions[$0.index] })
-        guard let best = countries.first, best.inside || best.distance <= borderMarginMeters else { return match }
+        guard let best = countries.first, best.inside || best.distance <= borderMarginMeters else {
+            // At sea, near a disputed coast the map does not draw (Western Sahara).
+            if let area = DisputedAreas.area(outlineContaining: coordinate) { match.markDisputed(area) }
+            return match
+        }
         match.country = regions[best.index]
         // Certain if no other country is inside or within the margin.
         match.countryIsCertain = countries.dropFirst().allSatisfy { !$0.inside && $0.distance > borderMarginMeters }
@@ -172,20 +191,27 @@ public struct OfflineWorldMap: Sendable {
             match.region = r.region
             match.regionIsCertain = r.isCertain
         }
+        if let area = DisputedAreas.area(mapCountry: match.country?.nameEN, mapRegion: match.region?.isoCode)
+            ?? DisputedAreas.area(outlineContaining: coordinate) {
+            match.markDisputed(area)
+        }
         return match
     }
 
     /// Region lookup restricted to one country, e.g. after the online geocoder decided the
     /// country of a point at a border. Keeps region names identical across both sources.
     public func region(_ coordinate: GeoCoordinate, inCountryCode code: String) -> (region: Region, isCertain: Bool)? {
-        let upper = code.uppercased()
-        guard let country = regions.first(where: { $0.level == .country && $0.isoCode.uppercased() == upper }) else { return nil }
+        guard let country = country(code: code) else { return nil }
         return region(coordinate, inCountry: country.index)
     }
 
+    /// The map's country of a code. Where a disputed area shares the code (Northern Cyprus has
+    /// "CY" in the map), the other one: Apple's "CY" south of the Green Line is the Republic of
+    /// Cyprus, and a point in the disputed area never gets here (`lookup` marks it first).
     public func country(code: String) -> Region? {
         let upper = code.uppercased()
-        return regions.first { $0.level == .country && $0.isoCode.uppercased() == upper }
+        let matches = regions.filter { $0.level == .country && $0.isoCode.uppercased() == upper }
+        return matches.first { DisputedAreas.area(mapCountry: $0.nameEN, mapRegion: nil) == nil } ?? matches.first
     }
 
     /// Names stored places in one language (review P1-12: after the language of album names was
@@ -203,6 +229,11 @@ public struct OfflineWorldMap: Sendable {
         /// region by its name in either language. Towns and everything else stay as they are
         /// (they come from Apple's lookup, not from the map).
         public func renamed(_ place: PlaceComponents) -> PlaceComponents {
+            if let area = place.disputedArea.flatMap(DisputedAreas.area(id:)) {
+                var result = place
+                result.country = area.name(language)
+                return result
+            }
             guard let country = country(of: place) else { return place }
             var result = place
             result.country = country.name(language)

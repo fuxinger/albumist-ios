@@ -18,6 +18,14 @@
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
   Länder und Regionen kommen immer aus der Offline-Karte.
 - `CLGeocoder` ist in iOS 26 als veraltet markiert; der Nachfolger in MapKit ist geplant.
+- Umstrittene Gebiete (Entscheidung Fuchs 18.11., `DisputedAreas`): Krim, Westsahara, Kaschmir,
+  Nordzypern, Kosovo, Taiwan, Golanhöhen und Abchasien heißen mit ihrem eigenen Namen statt eines
+  Landes, ihr Vorschlag ist „Unsicher“. Die Umrisse von Westsahara, Golanhöhen und Aksai Chin
+  sind grob (einige Kilometer). Orte, die vor dem Update bestimmt wurden, behalten ihr altes Land,
+  bis „Analyse neu aufbauen“ sie neu bestimmt. Im Reise-Atlas zählen diese Gebiete nicht als
+  Land, und die Suche nach „Taiwan“ oder „Kosovo“ als Land findet sie nicht (wohl aber nach dem
+  Gebiets- oder Ortsnamen). Nicht in der Liste: Südossetien, Transnistrien, Somaliland,
+  Westjordanland und Ost-Jerusalem (dort gilt die Karte wie bisher).
 - Sprache der Albumnamen gewechselt (Prüfbefund P1-12): Länder und Regionen aller
   gespeicherten Orte werden beim nächsten Lauf aus der Offline-Karte neu benannt (der Wechsel
   startet einen Lauf). Städte und Ortsteile kommen von Apples Ortssuche und bleiben in der

@@ -74,7 +74,7 @@ struct OnboardingView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, Theme.Spacing.s)
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-                promise("iphone", "Deine Fotos bleiben auf deinem Gerät. Nichts wird hochgeladen.")
+                promise("iphone", "Deine Fotos bleiben auf deinem Gerät. Kein Foto wird hochgeladen.")
                 promise("lock.shield", "Originale werden nie gelöscht, verändert oder kopiert.")
                 promise("checklist", "Du siehst jeden Vorschlag, bevor etwas passiert, und kannst alles rückgängig machen.")
                 promise("rectangle.stack", "Vorhandene Alben werden erkannt und ergänzt statt doppelt angelegt.")
@@ -167,7 +167,9 @@ struct OnboardingView: View {
             IconTile(systemName: "photo.on.rectangle", tint: Theme.accent).scaleEffect(1.4).padding(.bottom, Theme.Spacing.s)
             Text("Zugriff auf deine Fotos").font(.title.weight(.bold))
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät.")
+            // Said where the user agrees (decision Fuchs 18.11.2026, review P2-03): place names come
+            // from Apple, on by default, switch in the settings.
+            Text("Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             // Testers asked exactly here whether "full access" means the app may delete.

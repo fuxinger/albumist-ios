@@ -531,6 +531,16 @@
         }
       }
     },
+    "Umstrittenes Gebiet: Zu welchem Land es gehört, ist nicht sicher. Albumist ordnet „%@“ darum keinem Land zu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disputed area: which country it belongs to is not certain, so Albumist doesn’t put “%@” in any country."
+          }
+        }
+      }
+    },
     "%lld Fotos ohne Ort passen zeitlich dazu und sind nur vorgeschlagen." : {
       "localizations" : {
         "en" : {
@@ -5271,12 +5281,12 @@
         }
       }
     },
-    "Die Analyse läuft immer auf deinem Gerät. Für genauere Orte sendet iOS nur Koordinaten an Apple, keine Fotos. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst." : {
+    "Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst, nie ein Foto. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The analysis always runs on your device. For more precise places, iOS sends only coordinates to Apple, never photos. Only screenshots and documents are downloaded from iCloud, never videos, and only over Wi‑Fi unless you choose otherwise."
+            "value" : "The analysis always runs on your device. For place names, iOS sends single photo locations (coordinates only) to Apple’s map service, never a photo. Only screenshots and documents are downloaded from iCloud, never videos, and only over Wi‑Fi unless you choose otherwise."
           }
         }
       }
@@ -5361,12 +5371,12 @@
         }
       }
     },
-    "Nur wenn „Orte online genauer bestimmen“ eingeschaltet ist, schickt iOS Koordinaten an Apple, um Ortsnamen zu finden. Fotos verlassen dein Gerät nie." : {
+    "Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Fotos verlassen dein Gerät nie." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Only when “Refine places online” is on, iOS sends coordinates to Apple to find place names. Photos never leave your device."
+            "value" : "For place names, iOS sends single photo locations (coordinates only) to Apple’s map service. This is on by default and can be turned off under “Refine places online”. Photos never leave your device."
           }
         }
       }
@@ -5461,16 +5471,6 @@
         }
       }
     },
-    "Alles bleibt auf deinem Gerät. Nichts wird hochgeladen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Everything stays on your device. Nothing is uploaded."
-          }
-        }
-      }
-    },
     "Geschrieben von Apple Intelligence auf deinem Gerät, nur aus Zahlen, Orten und Themen." : {
       "localizations" : {
         "en" : {
@@ -5491,12 +5491,12 @@
         }
       }
     },
-    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät." : {
+    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device."
+            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device. For place names, iOS sends single photo locations (coordinates only) to Apple’s map service; you can turn this off in Settings."
           }
         }
       }
@@ -7763,12 +7763,12 @@
         }
       }
     },
-    "Deine Fotos bleiben auf deinem Gerät. Nichts wird hochgeladen." : {
+    "Deine Fotos bleiben auf deinem Gerät. Kein Foto wird hochgeladen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your photos stay on your device. Nothing is uploaded."
+            "value" : "Your photos stay on your device. No photo is ever uploaded."
           }
         }
       }

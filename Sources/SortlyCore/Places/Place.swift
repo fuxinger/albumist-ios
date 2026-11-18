@@ -44,6 +44,10 @@ public struct PlaceComponents: Hashable, Sendable, Codable {
     /// its key does not: a town's or region's suggestion keeps its id, and with it the user's
     /// decisions, when the language changes (second review of P1-12). `nil`: the name is the key.
     public var administrativeAreaKey: String?
+    /// The disputed area the place lies in (`DisputedAreas`), by its id. Such a place has the
+    /// area's name as `country`, no country code and no region: Albumist takes no side there
+    /// (decision Fuchs 18.11.2026). `nil` everywhere else.
+    public var disputedArea: String?
 
     public init(
         isoCountryCode: String? = nil,
@@ -57,7 +61,8 @@ public struct PlaceComponents: Hashable, Sendable, Codable {
         inlandWater: String? = nil,
         ocean: String? = nil,
         timeZoneIdentifier: String? = nil,
-        administrativeAreaKey: String? = nil
+        administrativeAreaKey: String? = nil,
+        disputedArea: String? = nil
     ) {
         self.isoCountryCode = isoCountryCode?.uppercased()
         self.country = country
@@ -71,10 +76,11 @@ public struct PlaceComponents: Hashable, Sendable, Codable {
         self.ocean = ocean
         self.timeZoneIdentifier = timeZoneIdentifier
         self.administrativeAreaKey = administrativeAreaKey
+        self.disputedArea = disputedArea
     }
 
     public var continent: Continent? {
-        isoCountryCode.flatMap(Continent.forCountryCode)
+        isoCountryCode.flatMap(Continent.forCountryCode) ?? disputedArea.flatMap { DisputedAreas.area(id: $0)?.continent }
     }
 
     /// Display name for a level (continent names are localized by the app layer).
@@ -103,7 +109,8 @@ public struct PlaceComponents: Hashable, Sendable, Codable {
                 continue
             }
             if current == .country {
-                guard let code = isoCountryCode ?? country.map(PlaceKey.normalize) else { return nil }
+                // A disputed area by its id, so the key stays when the language changes.
+                guard let code = isoCountryCode ?? disputedArea.map({ "disputed-\($0)" }) ?? country.map(PlaceKey.normalize) else { return nil }
                 parts.append(code.lowercased())
                 continue
             }

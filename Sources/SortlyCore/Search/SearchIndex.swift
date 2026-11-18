@@ -138,8 +138,10 @@ public struct SearchIndex: Sendable {
                     if let name = place.country { countryNames[code, default: [:]][name, default: 0] += 1 }
                 }
                 var seen = Set<String>()
+                // A disputed area ("Krim") has no country code; its name is found like a place's.
                 for name in [place.locality, place.subLocality, place.administrativeArea, place.subAdministrativeArea,
-                             place.inlandWater, place.ocean, place.areaOfInterest].compactMap({ $0 }) {
+                             place.inlandWater, place.ocean, place.areaOfInterest,
+                             place.disputedArea != nil ? place.country : nil].compactMap({ $0 }) {
                     let key = SearchText.key(name)
                     guard !key.isEmpty, seen.insert(key).inserted else { continue }
                     post(.place(key))

@@ -262,21 +262,6 @@ struct AnalysisReliabilityTests {
 
     static let fivePlaces = [Fixture.Places.munichHome, Fixture.Places.rome, Fixture.Places.florence, Fixture.Places.naples, Fixture.Places.gardaLake]
 
-    @Test func appRunWaitsForTheGeocoderOnlyBriefly() async throws {
-        let time = ManualTime()
-        let geocoder = RefusingGeocoder()
-        let service = PlaceResolutionService(
-            map: Self.map, geocoder: geocoder, cache: MemoryPlaceCache(),
-            policy: PlaceResolutionPolicy(deepestLevel: .locality, onlineAllowed: true, language: .german), time: time.source
-        )
-        let outcome = try await service.resolve(requests(Self.fivePlaces), maxRateLimitWait: .seconds(30)) { _ in }
-        // Asked once, waited once, asked again; then the rest waits for a later run.
-        #expect(geocoder.calls.withLock { $0 } == 2)
-        #expect(time.now.withLock { $0 } <= .seconds(31))
-        #expect(outcome.stoppedBecauseThrottled)
-        #expect(outcome.pendingOnline.count == Self.fivePlaces.count)
-    }
-
     @Test func refusedLookupsStopAfterOneCellAlsoWithoutALimit() async throws {
         let time = ManualTime()
         let geocoder = RefusingGeocoder()
@@ -373,6 +358,32 @@ struct AnalysisReliabilityTests {
         #expect(second.onlineRequests == RequestThrottle.apple.maxRequests - 30)
         #expect(second.placesPendingOnline == 20)
         #expect(s.time.now.withLock { $0 } == .zero)
+    }
+
+    /// A run that stopped asking because the throttle had no free slot starts the hour, like a
+    /// used-up budget: a run within the hour asks nothing (even once Apple's minute is over),
+    /// a run after it asks again what fits (second review of the no-wait fix, finding SF1).
+    @Test func aRunStoppedByTheThrottleStartsTheHour() async throws {
+        let geocoder = FakeGeocoder()
+        let s = try setup(photos: 0, geocoder: geocoder, foregroundOnlineBudget: 60)
+        await s.reader.set(assets: gridPhotos(100))
+        let first = try await s.pipeline.run()
+        #expect(first.onlineRequests == RequestThrottle.apple.maxRequests)
+        #expect(first.placesPendingOnline == 60)
+
+        // Apple's minute is over (the throttle has free slots again); the hour is not.
+        s.time.now.withLock { $0 += .seconds(120) }
+        s.clock.advance(5 * 60)
+        let second = try await s.pipeline.run()
+        #expect(second.onlineRequests == 0)
+        #expect(geocoder.calls.count == RequestThrottle.apple.maxRequests)
+        #expect(second.placesPendingOnline == 60)
+
+        s.time.now.withLock { $0 += .seconds(AnalysisPipeline.foregroundOnlineCooldown) }
+        s.clock.advance(AnalysisPipeline.foregroundOnlineCooldown)
+        let third = try await s.pipeline.run()
+        #expect(third.onlineRequests == RequestThrottle.apple.maxRequests)
+        #expect(third.placesPendingOnline == 20)
     }
 
     /// The overnight refinement may wait: it gets the towns the run in the app left.

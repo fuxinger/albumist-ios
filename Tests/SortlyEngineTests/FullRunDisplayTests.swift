@@ -185,7 +185,8 @@ struct FullRunDisplayTests {
     }
 
     /// (f) Apple's geocoder keeps refusing; a run within the hour does not ask again; the run
-    /// after the hour uses up the online budget.
+    /// after the hour asks as many towns as Albumist's throttle allows without a wait (40 a
+    /// minute, below the run's budget of 60), and leaves the rest for later.
     @Test func throttledGeocoderAndUsedUpBudget() async throws {
         let sim = try Sim()
         sim.geocoder.refuseCalls(5..<Int.max)
@@ -203,7 +204,7 @@ struct FullRunDisplayTests {
         #expect(sim.geocoder.calls.withLock { $0 } == asked)
         #expect(soon.first(.places)?.completed == throttled.last(.places)?.completed)
         sim.clock.advance(.seconds(AnalysisPipeline.foregroundOnlineCooldown))
-        let budget = await sim.run("f3 after the hour, budget used up")
+        let budget = await sim.run("f3 after the hour, throttle full")
         sim.expectComplete(budget)
         #expect(budget.report?.onlineRequests == RequestThrottle.apple.maxRequests)
         #expect((budget.report?.placesPendingOnline ?? 0) > 0)
@@ -362,7 +363,7 @@ struct FullRunDisplayTests {
                                              policy: PlaceResolutionPolicy(deepestLevel: .locality, onlineAllowed: true, language: .german),
                                              time: clock.source)
         let seen = Mutex<[(Duration, Duration?)]>([])
-        _ = try await service.resolve(requests, maxRateLimitWait: .seconds(30),
+        _ = try await service.resolve(requests,
                                       progress: { _ in seen.withLock { $0.append((clock.now, nil)) } },
                                       waiting: { left in seen.withLock { $0.append((clock.now, left)) } }) { _ in }
         let events = seen.withLock { $0 }

@@ -274,11 +274,59 @@ struct PlaceResolutionTests {
         let places = [Fixture.Places.munichHome, Fixture.Places.rome, Fixture.Places.florence]
         let reqs = places.enumerated().map { PlaceResolutionService.Request(assetID: AssetID("p\($0.offset)"), coordinate: $0.element) }
         let outcome = try await service(level: .locality, geocoder: geocoder, time: time.source)
-            .resolve(reqs, maxRateLimitWait: .seconds(30), mayWait: false) { _ in }
+            .resolve(reqs, mayWait: false) { _ in }
         #expect(geocoder.calls.count == 1)
         #expect(time.now.withLock { $0 } == .zero)
         #expect(outcome.stoppedBecauseThrottled)
         #expect(outcome.pendingOnline.count == 3)
+    }
+
+    /// A call that may not wait stops asking at the first cell without a free slot, also when
+    /// a slot would be free again for a later cell (a slow run: the minute moves on while it
+    /// goes through the cells). The rest comes with a later run, in priority order.
+    @Test func aCallThatMayNotWaitStopsAtTheFirstFullThrottle() async throws {
+        let clock = Mutex<Duration>(.zero)
+        // Every look at the clock is 25 s later: the third request finds both slots taken,
+        // the fourth would find one free again.
+        let slow = TimeSource(elapsed: { clock.withLock { $0 += .seconds(25); return $0 } },
+                              sleep: { d in clock.withLock { $0 += d } })
+        let geocoder = FakeGeocoder()
+        let places = [Fixture.Places.munichHome, Fixture.Places.rome, Fixture.Places.florence, Fixture.Places.naples, Fixture.Places.gardaLake]
+        let reqs = places.enumerated().map { PlaceResolutionService.Request(assetID: AssetID("p\($0.offset)"), coordinate: $0.element) }
+        let outcome = try await service(level: .locality, geocoder: geocoder, throttle: RequestThrottle(maxRequests: 2, window: .seconds(60)), time: slow)
+            .resolve(reqs, mayWait: false) { _ in }
+        #expect(geocoder.calls.count == 2)
+        #expect(outcome.stoppedAtRequestLimit)
+        #expect(outcome.pendingOnline.count == 3)
+    }
+
+    /// After a wait for its slot, a call takes the slot anew instead of writing itself into the
+    /// log: when another caller took the slot that came free meanwhile, it waits again, and the
+    /// minute never holds more requests than the throttle allows (second review, SF5).
+    @Test func aSlotTakenDuringTheWaitIsWaitedForAgain() async throws {
+        let now = Mutex<Duration>(.zero)
+        let log = RequestLog()
+        let throttle = RequestThrottle(maxRequests: 1, window: .seconds(60))
+        #expect(log.take(at: .zero, throttle) == nil)
+        let tookFreedSlot = Mutex(false)
+        let time = TimeSource(elapsed: { now.withLock { $0 } }, sleep: { d in
+            let t = now.withLock { $0 += d; return $0 }
+            // Just as the slot comes free, someone else takes it.
+            if t >= .seconds(60), !tookFreedSlot.withLock({ $0 }) {
+                tookFreedSlot.withLock { $0 = true }
+                #expect(log.take(at: t, throttle) == nil)
+            }
+        })
+        let geocoder = FakeGeocoder()
+        let service = PlaceResolutionService(map: Self.map, geocoder: geocoder, cache: MemoryPlaceCache(),
+                                             policy: PlaceResolutionPolicy(deepestLevel: .locality, onlineAllowed: true, language: .german),
+                                             throttle: throttle, time: time, requestLog: log)
+        _ = try await service.resolve([.init(assetID: "a", coordinate: Fixture.Places.rome)]) { _ in }
+        #expect(geocoder.calls.count == 1)
+        #expect(tookFreedSlot.withLock { $0 })
+        // Waited for the next slot, a minute after the one the other caller took.
+        #expect(now.withLock { $0 } >= .seconds(120))
+        #expect(log.count(at: now.withLock { $0 }, throttle) <= throttle.maxRequests)
     }
 
     @Test func rateLimitIsRetried() async throws {

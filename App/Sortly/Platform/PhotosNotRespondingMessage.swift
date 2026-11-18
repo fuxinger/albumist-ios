@@ -26,13 +26,16 @@ extension PhotosNotResponding: @retroactive LocalizedError {
 /// A new album Albumist asked for before (its request got no answer, and the app was closed
 /// since) is not in Photos yet and may still land: going on or taking the plan back waits a
 /// few minutes, so it is never made twice (`ChangeExecutor.lateCreateWait`, third review N2).
+/// Says from when, in the local time format; the app goes on by itself then while it is open
+/// (`AppModel.retryAfterLateCreateWait`, round-3 review L1). "So lassen" does not wait.
 extension ChangeExecutor.ExecutionError: @retroactive LocalizedError {
     public var errorDescription: String? {
         switch self {
-        case .earlierCreateMayLand:
-            String(localized: "Ein Album, das Albumist vorhin anlegen wollte, ist in Fotos noch nicht angekommen und kann noch kommen. Damit es nicht doppelt entsteht, geht es erst in ein paar Minuten weiter. Versuche es dann noch einmal.")
+        case .earlierCreateMayLand(let until):
+            let time = until.formatted(date: .omitted, time: .shortened)
+            return String(localized: "Ein Album, das Albumist vorhin anlegen wollte, ist in Fotos noch nicht angekommen und kann noch kommen. Damit es nicht doppelt entsteht, geht es ab \(time) weiter, von selbst, solange Albumist offen ist.")
         case .notConfirmed, .blocked:
-            nil
+            return nil
         }
     }
 }

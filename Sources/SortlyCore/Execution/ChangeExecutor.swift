@@ -264,7 +264,10 @@ public actor ChangeExecutor {
     /// writes nothing). Used before an interrupted plan is taken back, so the undo sees what
     /// the interrupted run really did (an album created or media added right before the app
     /// was closed). Steps that never started stay as they are.
-    public func reconcileInterrupted(_ input: ChangePlan) async throws -> ChangePlan {
+    /// `keeping`: for "So lassen", which makes nothing. A create that may still land is then
+    /// left as not done instead of waited for: its id stays recorded, so the album records and
+    /// undo take the album as Albumist's if it lands (round-3 review, L1).
+    public func reconcileInterrupted(_ input: ChangePlan, keeping: Bool = false) async throws -> ChangePlan {
         // Not while an earlier change request may still land: settled from a library that is
         // not final, a late album would be left behind by the undo.
         try await requireAnsweredWrites()
@@ -290,8 +293,9 @@ public actor ChangeExecutor {
                     state = .succeeded(createdID: maybe, verifiedAt: now)
                 } else if let until = try await mayStillLand(key, plan) {
                     // Not there, and it may still come: not settled from a library that is not
-                    // final (the undo would leave it behind).
-                    throw ExecutionError.earlierCreateMayLand(until: until)
+                    // final (the undo would leave it behind). Kept as it is: not done, and nothing
+                    // of the same name is taken over.
+                    if !keeping { throw ExecutionError.earlierCreateMayLand(until: until) }
                 } else if let parent = resolve(parentRef, plan),
                    let found = adoptionCandidate(title: title, parent: parent, folder: isFolder, plan: plan, inventory: inventory) {
                     plan.resolvedKeys[key] = found
@@ -363,7 +367,10 @@ public actor ChangeExecutor {
         guard let maybe = plan.record?.maybeCreated[key], let since = plan.record?.maybeCreatedAt[key] else { return nil }
         if await library.createAnswered(maybe) { return nil }
         let until = since.addingTimeInterval(Self.lateCreateWait)
-        return clock() < until ? until : nil
+        let now = clock()
+        // The clock was set back: never wait longer than the wait itself (round-3 review, L2).
+        if until.timeIntervalSince(now) > Self.lateCreateWait { return nil }
+        return now < until ? until : nil
     }
 
     private func requireAnsweredWrites() async throws {

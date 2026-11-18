@@ -326,6 +326,37 @@ struct PhotosTimeoutExecutionTests {
         try await expectUndoRemovesReise(resumed, lib)
     }
 
+    /// "So lassen" does not wait: it makes nothing, the plan stays in the history, and if the
+    /// album lands after all, the undo takes it away (round-3 review, L1).
+    @Test func keepingDuringTheWaitMakesNothingAndTheUndoStillTakesTheLateAlbum() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: "createAlbum", lands: false, later: true)
+        let journal = try await stopped(plan, on: photos, store)
+        let since = try #require(journal.record?.maybeCreatedAt[try albumKey(journal)])
+        let soon: @Sendable () -> Date = { since.addingTimeInterval(60) }
+        let settled = try await ChangeExecutor(library: lib, store: store, clock: soon).reconcileInterrupted(journal, keeping: true)
+        let kept = settled.keptAsIs(current: try await lib.currentInventory())
+        #expect(kept.status == .completedWithErrors)
+        #expect(kept.record?.adoptedKeys.isEmpty == true)
+        #expect(try await albums(lib, titled: "Reise").isEmpty)
+        await photos.landsAfterARestart()
+        try await expectUndoRemovesReise(kept, lib)
+    }
+
+    /// The clock was set back after the request: the wait is never longer than itself (L2).
+    @Test func aClockSetBackDoesNotMakeTheWaitLonger() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: "createAlbum", lands: false, later: true)
+        let journal = try await stopped(plan, on: photos, store)
+        let since = try #require(journal.record?.maybeCreatedAt[try albumKey(journal)])
+        let setBack: @Sendable () -> Date = { since.addingTimeInterval(-3_600) }
+        let resumed = try await ChangeExecutor(library: lib, store: store, clock: setBack).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").count == 1)
+    }
+
     /// Settled for an undo after the wait, and the create lands only then: the undo still
     /// takes it away (N2).
     @Test func lateCreateLandingAfterAnUndoWasSettledIsTakenAway() async throws {

@@ -2450,6 +2450,8 @@ final class AppModel {
             }
         } catch {
             execution.failure = failureText(error)
+            // "Rest anlegen" waited for an album that may still land: goes on by itself then.
+            if resume { retryAfterLateCreateWait(error, plan: planID) { await self.resumeInterruptedPlan() } }
         }
         ReviewPrompt.shared.planEnded(ended, resultsStored: resultsStored)
         // A plan that stopped half way in this session (its journal could not be written, a
@@ -2725,6 +2727,22 @@ final class AppModel {
         await reloadInterruptedPlan()
     }
 
+    /// "Rest anlegen" or "Rückgängig" on an interrupted plan waited for an album that may still
+    /// land (`ChangeExecutor.ExecutionError.earlierCreateMayLand`): the same way out runs again
+    /// by itself once the wait is over, while the app is open and the plan still waits (round-3
+    /// review of the PhotoKit limits, L1). The message says from when.
+    private func retryAfterLateCreateWait(_ error: any Error, plan: SortlyID, _ action: @escaping @MainActor () async -> Void) {
+        guard let stopped = error as? ChangeExecutor.ExecutionError, case .earlierCreateMayLand(let until) = stopped else { return }
+        lateCreateRetry?.cancel()
+        lateCreateRetry = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(max(0, until.timeIntervalSinceNow) + 1))
+            guard !Task.isCancelled, self.interruptedPlan?.id == plan else { return }
+            await action()
+        }
+    }
+
+    @ObservationIgnored private var lateCreateRetry: Task<Void, Never>?
+
     /// Takes back what an interrupted plan already did, and drops the rest. Steps the
     /// interruption left open are first checked against the library (an album created or
     /// photos added right before the app was closed are taken back too).
@@ -2790,6 +2808,8 @@ final class AppModel {
             }
         } catch {
             message = .failure(error.localizedDescription)
+            // Waited for an album that may still land: the undo goes on by itself then.
+            retryAfterLateCreateWait(error, plan: interrupted.id) { await self.undoInterruptedPlan() }
         }
         // What is still open, from the store: nothing, or the undo itself.
         await reloadInterruptedPlan()
@@ -2805,8 +2825,10 @@ final class AppModel {
         guard let store, let interrupted = interruptedPlan, claimExecution() else { return }
         defer { releaseExecution() }
         do {
-            // Steps the interruption left open are checked against the library first.
-            let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
+            // Steps the interruption left open are checked against the library first. An album
+            // that may still land is not waited for: "So lassen" makes nothing, and its id stays
+            // recorded, so the album records and undo take it as Albumist's (round-3 review, L1).
+            let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted, keeping: true)
             // Also an album Photos made before its check failed is recorded (plugin review K1).
             let kept = settled.keptAsIs(current: try await library.currentInventory())
             try await store.save(kept)

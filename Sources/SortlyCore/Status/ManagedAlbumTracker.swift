@@ -128,6 +128,26 @@ public struct ManagedAlbumTracker: Sendable {
         return Reconciliation(changes: changes, updatedStates: updated, newOverrides: overrides)
     }
 
+    /// Albums Albumist asked for whose request got no answer, and which have landed since
+    /// (`lateCreates`, by plan, as `SortlyStore.lateCreates` reads them): recorded as Albumist's like any
+    /// album it made, when the album check sees them first, not only when their plan was
+    /// finalized (round-3 review of the PhotoKit limits, L3). Albums a plan still changes
+    /// (`changing`) are left to that plan.
+    public func recordingLateAlbums(_ states: [ManagedAlbumState], lateCreates: [(plan: SortlyID, ids: [CollectionID])],
+                                    inventory: CollectionInventory, changing: Set<CollectionID> = []) -> [ManagedAlbumState] {
+        var result = states
+        var known = Set(states.map(\.albumID))
+        for (plan, ids) in lateCreates {
+            for id in ids where !known.contains(id) && !changing.contains(id) {
+                guard let album = inventory[id], album.kind == .userAlbum else { continue }
+                result.append(ManagedAlbumState(albumID: id, sourceID: plan, lastKnownTitle: album.title, lastKnownParentID: album.parentID,
+                                                lastKnownMembers: album.assetIDs, addedBySortly: [], createdBySortly: true))
+                known.insert(id)
+            }
+        }
+        return result
+    }
+
     /// `reconcile` against the library itself (plugin review W3). A deletion is recorded for
     /// good (the suggestion never comes back), so an album missing from the album list counts
     /// as deleted only once Photos confirms it when asked for that album on its own: the list

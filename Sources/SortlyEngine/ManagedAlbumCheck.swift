@@ -53,13 +53,19 @@ public struct ManagedAlbumCheck: Sendable {
     private func attempt(access: LibraryAccess, now: Date) async throws -> Outcome? {
         let stored = try await store.managedAlbums()
         let listed = try await library.currentInventory()
-        guard !stored.isEmpty, access == .full else {
+        // Albums of a create Photos did not answer that may have landed since (L3).
+        let late = try await store.lateCreates()
+        guard !stored.isEmpty || !late.isEmpty, access == .full else {
             return Outcome(managedAlbums: stored, inventory: listed, foundChanges: false)
         }
         let changing = try await store.collectionsInFlight()
         let checked = try await ManagedAlbumTracker().reconcile(stored, listed: listed, in: library, changing: changing, pause: pause, now: now)
-        let result = checked.reconciliation
-        if !result.changes.isEmpty {
+        var result = checked.reconciliation
+        let withLate = ManagedAlbumTracker().recordingLateAlbums(result.updatedStates, lateCreates: late, inventory: checked.inventory,
+                                                                 changing: changing)
+        let lateFound = withLate.count != result.updatedStates.count
+        result.updatedStates = withLate
+        if !result.changes.isEmpty || lateFound {
             // Overrides and the new last-known state in one transaction: a manual change is
             // never marked as seen without its override. Refused when the records changed since.
             guard try await store.applyReconciliation(overrides: result.newOverrides, managedAlbums: result.updatedStates, expected: stored) else {

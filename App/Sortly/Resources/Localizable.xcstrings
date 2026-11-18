@@ -12223,12 +12223,12 @@
         }
       }
     },
-    "Ein Album, das Albumist vorhin anlegen wollte, ist in Fotos noch nicht angekommen und kann noch kommen. Damit es nicht doppelt entsteht, geht es erst in ein paar Minuten weiter. Versuche es dann noch einmal." : {
+    "Ein Album, das Albumist vorhin anlegen wollte, ist in Fotos noch nicht angekommen und kann noch kommen. Damit es nicht doppelt entsteht, geht es ab %@ weiter, von selbst, solange Albumist offen ist." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "An album Albumist asked for earlier has not arrived in Photos yet and may still come. So that it is not made twice, this goes on only in a few minutes. Please try again then."
+            "value" : "An album Albumist asked for earlier has not arrived in Photos yet and may still come. So that it is not made twice, this goes on from %@, by itself while Albumist is open."
           }
         }
       }

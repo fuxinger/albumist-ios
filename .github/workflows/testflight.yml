@@ -63,9 +63,9 @@ name: TestFlight
 #
 # Started by hand only: Actions > TestFlight > Run workflow on main
 # (gh workflow run testflight.yml --ref main). No push or merge starts a build from a branch
-# with this file. claude/sortly-app still has an older testflight.yml whose push trigger starts
-# an upload for every push there once its CI is green, until that branch gets this file or is
-# retired (Profi-Analyse Top 1); with this file, runs there are by hand too.
+# with this file. The old release branch claude/sortly-app uploads nothing any more: since
+# 1358f7f (the owner's decision 18.11., branch kept) its testflight.yml can only be started by
+# hand and stops at once, with no secret, no Mac and no push trigger.
 on:
   workflow_dispatch:
     inputs:

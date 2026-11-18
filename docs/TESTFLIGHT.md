@@ -120,10 +120,9 @@ Actions > **TestFlight feedback** > Run workflow.
   UI-Tests und Härtetest zusammen.
 - Nichts startet von selbst, kein Push und kein Merge in `main` (16.11.: das Zusammenführen der
   Webseite startete sonst einen Build mit altem App-Stand). Das gilt für jeden Zweig mit der
-  neuen `testflight.yml`. `claude/sortly-app` hat noch die alte Fassung mit Push-Auslöser: dort
-  startet jeder Push einen Lauf, der nach grünem CI hochlädt, bis der Zweig die neue Datei
-  bekommt oder stillgelegt ist (Profi-Analyse Top 1). Mit der neuen Datei geht der Lauf auch
-  dort nur von Hand.
+  neuen `testflight.yml`. Der alte Release-Zweig `claude/sortly-app` lädt nichts mehr hoch
+  (Beschluss Fuchs 18.11., Zweig bleibt bestehen): seit 1358f7f lässt sich seine `testflight.yml`
+  nur von Hand starten und bricht sofort ab, ohne Secrets, ohne Mac, ohne Push-Auslöser.
 - Ist ein Test rot: den Fehler beheben und einen **neuen** Lauf starten (wackelnde Tests werden
   gezählt und behoben, nie versteckt). Ein roter Test wird nie per Wiederholung grün: der
   Upload-Job eines späteren Versuchs liest alle Schritte der früheren Versuche und lädt nicht
@@ -403,14 +402,14 @@ Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-
 ## Freigabe vor dem Hochladen (geplant, Schritte für den Besitzer)
 
 Noch nicht eingerichtet, und `testflight.yml` nutzt es noch nicht. Ziel: den Schlüssel für App
-Store Connect bekommt nur ein Lauf auf `main` (bis zur Stilllegung auch `claude/sortly-app`), und
+Store Connect bekommt nur ein Lauf auf `main` (`claude/sortly-app` lädt seit 18.11. nicht mehr hoch), und
 erst, wenn du ihn freigegeben hast.
 
 1. https://github.com/fuxinger/sortly-ios/settings/environments > **New environment**, Name
    `testflight`.
 2. **Required reviewers**: dich selbst eintragen. „Prevent self-review“ aus lassen, sonst kannst
    du deine eigenen Läufe nicht freigeben.
-3. **Deployment branches and tags** > Selected branches and tags: `main` und `claude/sortly-app`.
+3. **Deployment branches and tags** > Selected branches and tags: nur `main`.
 4. **Environment secrets**: die vier Secrets aus Abschnitt 4 dort noch einmal anlegen
    (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `APPLE_TEAM_ID`).
 5. Einem Agenten sagen, dass die Umgebung steht. Er trägt `environment: testflight` bei den Jobs

@@ -1,4 +1,4 @@
-"""Checks over all workflow files (plain text, no YAML library needed).
+"""Checks over all workflow files (plain text; PyYAML where it is installed, as on the runners).
 
 Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
@@ -14,6 +14,80 @@ WORKFLOWS = sorted(glob.glob(os.path.join(ROOT, ".github", "workflows", "*.yml")
 def read(path):
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+try:
+    import yaml
+except ImportError:  # PyYAML is on the hosted runners; without it the plain reading below is used
+    yaml = None
+
+# An input name that skips something, and a line of workflow code that skips or forces: an
+# input read ("inputs.force", "inputs.skip_ui"), the word force or forced on its own (not the
+# "--force" flag of git, codesign or simctl), or "untested".
+SKIP_INPUT = re.compile(r"(?i)force|skip|bypass|untested|emergency|no[-_]?tests?")
+SKIP_MARK = re.compile(r"(?i)inputs\.\w*(?:force|skip)|(?<![-\w])forced?\b|untested")
+
+
+def strip_comment(line):
+    """The line without its YAML comment: "#" at the start or after a space, outside quotes."""
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i]
+    return line
+
+
+def workflow_inputs(text, plain=False):
+    """Names of the workflow_dispatch and workflow_call inputs, in order. With PyYAML (and not
+    plain) from the parsed file; otherwise by indentation: the keys right under "inputs:" of the
+    top-level "on:"."""
+    if yaml is not None and not plain:
+        data = yaml.safe_load(text) or {}
+        on = data.get("on", data.get(True))  # YAML 1.1 reads the key on as true
+        names = []
+        if isinstance(on, dict):
+            for event in ("workflow_dispatch", "workflow_call"):
+                spec = on.get(event)
+                if isinstance(spec, dict) and isinstance(spec.get("inputs"), dict):
+                    names += list(spec["inputs"])
+        return names
+    names, inside_on, inputs_at, child_at = [], False, None, None
+    for raw in text.splitlines():
+        line = strip_comment(raw).rstrip()
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            inside_on, inputs_at = line.startswith("on:"), None
+            continue
+        if not inside_on:
+            continue
+        if inputs_at is not None and indent <= inputs_at:
+            inputs_at = None
+        if line.strip() == "inputs:":
+            inputs_at, child_at = indent, None
+        elif inputs_at is not None:
+            child_at = indent if child_at is None else child_at
+            if indent == child_at:
+                names.append(line.strip().split(":", 1)[0])
+    return names
+
+
+def job_field(text, job, field):
+    """A job's "if:" or "needs:" as one line (a list joined by ", ")."""
+    if yaml is not None:
+        value = (yaml.safe_load(text)["jobs"][job] or {}).get(field, "")
+        value = ", ".join(value) if isinstance(value, list) else str(value)
+    else:
+        block = re.split(r"\n  [A-Za-z0-9_-]+:\n", text.split(f"\n  {job}:\n", 1)[1], maxsplit=1)[0]
+        found = re.search(rf"\n    {field}: (?:>-\n)?(.*?)\n    [a-z-]+:", "\n" + block, re.S)
+        value = found.group(1) if found else ""
+    return " ".join(value.split())
 
 
 class CacheTests(unittest.TestCase):
@@ -77,13 +151,10 @@ class TestFlightWiringTests(unittest.TestCase):
         # the one before it alone.
         for path in WORKFLOWS:
             text = read(path)
-            code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
-            trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0] if "\non:\n" in text else ""
-            inputs = re.findall(r"^      ([A-Za-z0-9_-]+):\s*$", trigger, re.M)
+            code = "\n".join(strip_comment(line) for line in text.splitlines())
             with self.subTest(workflow=os.path.basename(path)):
-                self.assertEqual([name for name in inputs
-                                  if re.search(r"(?i)force|skip|bypass|untested|emergency|no[-_]?tests?", name)], [])
-                self.assertEqual(re.findall(r"(?i).*(?:\bforced?\b|untested).*", code), [])
+                self.assertEqual([name for name in workflow_inputs(text) if SKIP_INPUT.search(name)], [])
+                self.assertEqual([line.strip() for line in code.splitlines() if SKIP_MARK.search(line)], [])
         # Scripts: no flag that lets a run through without tests ("--forced" in earlier_attempts.py
         # and testflight_notes.py). ui_tests.py --skip names single tests that another group runs
         # (ui-groups.json); the UI gate needs every group green.
@@ -92,24 +163,36 @@ class TestFlightWiringTests(unittest.TestCase):
                 flags = re.findall(r"add_argument\(\s*[\"']--([\w-]+)[\"']", read(path))
                 self.assertEqual([f for f in flags if re.search(r"(?i)force|untested|skip[-_]?(?:tests?|gate)|no[-_]?tests?", f)], [])
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
-
-        def condition(job):
-            """The job's "if:", on one line."""
-            block = re.split(r"\n  [A-Za-z0-9_-]+:\n", text.split(f"\n  {job}:\n", 1)[1], maxsplit=1)[0]
-            found = re.search(r"\n    if: (?:>-\n)?(.*?)\n    [a-z-]+:", "\n" + block, re.S)
-            return " ".join(found.group(1).split()) if found else ""
-
-        self.assertEqual(condition("tests"), "needs.check.outputs.ready == 'true'")
-        self.assertIn("needs: tests", text.split("\n  ui:\n", 1)[1].split("\n  stress:\n", 1)[0])
-        self.assertIn("needs: tests", text.split("\n  stress:\n", 1)[1].split("\n  flaky:\n", 1)[0])
+        self.assertEqual(job_field(text, "tests", "if"), "needs.check.outputs.ready == 'true'")
+        self.assertEqual(job_field(text, "ui", "needs"), "tests")
+        self.assertEqual(job_field(text, "stress", "needs"), "tests")
         for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "ui-gate"))):
             with self.subTest(job=job):
-                rule = condition(job)
+                rule = job_field(text, job, "if")
                 self.assertNotIn("||", rule)
                 self.assertNotIn("inputs.", rule)
                 self.assertIn("needs.check.outputs.ready == 'true'", rule)
                 for need in needed:
                     self.assertIn(f"needs.{need}.result == 'success'", rule)
+
+    def test_the_skip_check_finds_force_and_nothing_else(self):
+        # Second review of 51e72f3: harmless "--force" flags of other tools are no skip, a
+        # re-added input is found by both ways of reading the inputs, "#" in quotes is no comment.
+        for harmless in ("git push --force-with-lease origin HEAD", "codesign --force --sign - App.app",
+                         "xcrun simctl io booted recordVideo --force out.mp4"):
+            self.assertIsNone(SKIP_MARK.search(harmless), harmless)
+        for skip in ("if: inputs.force", "if: ${{ !inputs.skip_ui }}", "FORCED: yes", "echo untested", "      force:"):
+            self.assertIsNotNone(SKIP_MARK.search(skip), skip)
+        sample = ("name: X\n\non:\n  workflow_dispatch:\n\n    inputs:\n      # an emergency switch\n\n      force:\n"
+                  "        type: boolean\n      ui_groups:\n        type: string\n  workflow_call:\n    inputs:\n"
+                  "      skip_gate: {type: boolean}\n\njobs:\n  a:\n    runs-on: x\n")
+        self.assertEqual(workflow_inputs(sample), ["force", "ui_groups", "skip_gate"])
+        self.assertEqual(workflow_inputs(sample, plain=True), ["force", "ui_groups", "skip_gate"])
+        for path in WORKFLOWS:
+            with self.subTest(workflow=os.path.basename(path)):
+                self.assertEqual(workflow_inputs(read(path), plain=True), workflow_inputs(read(path)))
+        self.assertEqual(strip_comment('run: echo "a # b" \'c # d\' # note'), 'run: echo "a # b" \'c # d\' ')
+        self.assertEqual(strip_comment("url: https://x.example/#anchor"), "url: https://x.example/#anchor")
 
     def test_ui_flow_plans_its_groups(self):
         text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))

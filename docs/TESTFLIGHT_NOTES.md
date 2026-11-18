@@ -9,8 +9,8 @@ Buildnummer und der Commit werden automatisch angehängt.
 - Markdown wird zu einfachem Text: Überschriften werden zu Zeilen, `-` zu `•`.
 - Text vor dem nächsten Build anpassen, der etwas Neues zum Testen hat. Der alte Text wandert
   darunter nach „Frühere Builds“.
-- Ein Push startet keinen Build (außer auf `claude/sortly-app`, solange dort die alte
-  `testflight.yml` liegt); TestFlight-Läufe startet man von Hand (`docs/TESTFLIGHT.md`).
+- Ein Push startet keinen Build; TestFlight-Läufe startet man von Hand auf `main`
+  (`docs/TESTFLIGHT.md`). Der alte Zweig `claude/sortly-app` lädt seit 18.11. nichts mehr hoch.
 - Jeder Build hat seine Tests bestanden; einen Notfall-Build ohne Tests gibt es nicht mehr
   (Beschluss 17.11.).
 

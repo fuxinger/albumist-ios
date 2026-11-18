@@ -12,10 +12,12 @@ public enum ProposalDecision: Hashable, Sendable, Codable {
     case extendExisting(CollectionID)
     case renameExisting(CollectionID, newTitle: String, extend: Bool)
     case moveExisting(CollectionID, folderPath: [String], extend: Bool)
-    /// Merge several albums into one target. `removeSourceAlbums` deletes only the old
-    /// album containers after all their media were added to the target.
-    /// `title` nil keeps an existing target's name exactly as the user wrote it.
-    case merge(target: CollectionID?, sources: [CollectionID], title: String?, folderPath: [String]?, removeSourceAlbums: Bool)
+    /// Merge several albums into one target: their media are added to it, the source albums
+    /// stay as they are. `title` nil keeps an existing target's name exactly as the user wrote it.
+    /// (Removing the source albums is not offered: it would delete the user's own albums without
+    /// a delete guard, review P2-06. Decisions stored with `removeSourceAlbums` still decode; the
+    /// key is ignored.)
+    case merge(target: CollectionID?, sources: [CollectionID], title: String?, folderPath: [String]?)
 }
 
 /// A proposal together with the user's selection.
@@ -143,7 +145,7 @@ public struct OrganizationPlanner: Sendable {
                     builder.add(filtered(for: albumID).filter { !album.assetIDs.contains($0) }, to: .existing(albumID), source: sourceID)
                 }
 
-            case .merge(let target, let sources, let title, let path, let removeSources):
+            case .merge(let target, let sources, let title, let path):
                 let validSources = sources.filter { requireEditable($0) }
                 guard validSources.count == sources.count else { continue }
                 var union = Set<AssetID>()
@@ -166,11 +168,6 @@ public struct OrganizationPlanner: Sendable {
                     targetMembers = []
                 }
                 builder.add(union.subtracting(targetMembers).sorted(), to: ref, source: sourceID)
-                if removeSources {
-                    for s in validSources where AlbumRef.existing(s) != ref {
-                        builder.append(.deleteCollection(s, title: inventory[s]?.title ?? ""), source: sourceID)
-                    }
-                }
             }
         }
 

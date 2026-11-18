@@ -8,7 +8,7 @@
 | Geocoder nur pro Rasterzelle, gedrosselt | Apples Limits, Datenschutz | pro Foto | Stadtnamen erscheinen schrittweise |
 | Analyse auf lokalen Vorschauen | kein iCloud-Download nötig | immer Originale | Klassifikation etwas gröber |
 | Originale nur für Screenshots/Dokumente, WLAN, Zustimmung | Datenvolumen, Speicher | gar nicht / immer | Texte aus iCloud-Dokumenten kommen später |
-| Pläne als geschlossene Operationsmenge ohne Löschen von Medien | Sicherheitsversprechen | freie Operationen | Zusammenführen löscht keine Alben |
+| Pläne als geschlossene Operationsmenge ohne Löschen von Medien | Sicherheitsversprechen | freie Operationen | Zusammenführen löscht keine Alben; den toten Schalter „Quell-Alben entfernen“ gibt es nicht mehr (Prüfer 2, P2-06, 18.11.2026: er hätte Alben des Nutzers ohne Lösch-Schutz gelöscht). Kein Plan des Planers löscht ein Album ohne Lösch-Schutz (Test `noPlanDeletesAnAlbumWithoutADeleteGuard`); gespeicherte Entscheidungen mit dem alten Schlüssel laden weiter und führen nur zusammen |
 | Fingerabdruck-Prüfung vor Ausführung | keine Überschreibung von Nutzeränderungen | blind ausführen | Plan muss ggf. neu erstellt werden |
 | Gesichter nur Opt-in, später | DSGVO Art. 9 | Standard an | Bereich in v1 ausgeblendet |
 | Design „Klar“, SF Pro | iOS-nah, ruhig, Barrierefreiheit | „Warm“, „Kontrast“ | — |

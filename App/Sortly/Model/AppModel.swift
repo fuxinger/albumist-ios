@@ -2620,7 +2620,7 @@ final class AppModel {
             let albums = suggestion.albumIDs.compactMap { current[$0] }
             guard let target = albums.max(by: { $0.assetIDs.count < $1.assetIDs.count }) else { return nil }
             let proposal = AlbumProposal(id: SortlyID(), kind: .rule, title: target.title, assetIDs: [], reliability: .certain)
-            let decision = ProposalDecision.merge(target: target.id, sources: albums.map(\.id), title: nil, folderPath: nil, removeSourceAlbums: false)
+            let decision = ProposalDecision.merge(target: target.id, sources: albums.map(\.id), title: nil, folderPath: nil)
             let overrides = OverrideSet(try await store.overrides())
             return OrganizationPlanner(rootFolderTitle: settings.rootFolderTitle)
                 .makePlan(from: [ConfirmedProposal(proposal: proposal, decision: decision)], inventory: current, overrides: overrides)

@@ -63,7 +63,7 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | A11 Kleine/große Geräte, Querformat | ❌ | — | zweites Simulator-Gerät (in Arbeit) |
 | A12 Dunkelmodus | 🟡 | AccessibilityUITests test1 und test3 (vorher Flow-test2, entfernt 18.11.2026) | Prüfung im Barrierefreiheits-Test (in Arbeit) |
 | A13 Sehr große Schrift | 🟡 | AccessibilityUITests test1 und test3 (vorher Flow-test2, entfernt 18.11.2026) | alle Bildschirme, abgeschnittener Text schlägt fehl (in Arbeit) |
-| A14 VoiceOver / Prüfung | 🟡 | AccessibilityUITests test1–5 (Befunde lassen den Test scheitern); in den Ablauf-Tests nur protokolliert: ganzer Ablauf test1, 1b („Zu Album hinzufügen“, Ignorieren-Hinweis), 1d, test4–6, Suche | Befunde lassen den Test scheitern (in Arbeit) |
+| A14 VoiceOver / Prüfung | 🟡 | AccessibilityUITests test1–5 (Befunde lassen den Test scheitern, ebenso ein Bildschirm, dessen Prüfung zweimal nicht fertig wird); in den Ablauf-Tests nur protokolliert: ganzer Ablauf test1, 1b („Zu Album hinzufügen“, Ignorieren-Hinweis), 1d, test4–6, Suche | Befunde lassen den Test scheitern (in Arbeit) |
 | A15 Weniger Bewegung | ❌ | — | Barrierefreiheits-Test (in Arbeit) |
 | A16 Deutsch und Englisch | 🟡 | appShipsEnglish; ProposalCuration: englishTitles | UI-Lauf auf Englisch |
 | A17 Zeitzonen, Zeitumstellung | ✅ | TripTimeZone: 11 Tests (Reise über Zonen, Rückkehr ohne Foto); ProposalCuration: aTripEndsOnTheDateWhereItEnded; dayTripUsesDestinationCalendar… | — |

@@ -26,8 +26,23 @@
   die Ortssuche (`SystemGeocoder`) bei einem Sprachwechsel mit der neuen Sprache neu anlegen
   (heute nur beim Start, `AppModel`), den Zwischenspeicher der Ortssuche je Sprache führen und
   die gespeicherten Städte zum erneuten Nachfragen vormerken (Netz und Apples Drosselung, eine
-  Entscheidung für Fuchs). Vorschläge für Regionen tragen den Regionsnamen in ihrer Kennung:
-  nach einem Sprachwechsel gelten „Nicht jetzt“ und eigene Namen bei Regionen nicht mehr.
+  Entscheidung für Fuchs). Die Kennungen von Städten und Regionen hängen nicht an der Sprache
+  (fester Regionsschlüssel je Mediathek, zweite Prüfung). Offen: eine Region, die die
+  Offline-Karte nicht kennt (Apple nennt sie anders als die Karte), behält ihren Namen als
+  Schlüssel; bei ihr und bei Städten, die Apple nach einem Neustart in der anderen Sprache
+  nennt („Rom“/„Rome“), entsteht nach einem Sprachwechsel eine neue Kennung.
+
+## Reisen
+
+- Fotos mit dem Ort des Zuhauses mitten in einer Reise (Prüfbefund P1-14, zweite Prüfung):
+  ob der Nutzer wirklich zu Hause war oder ein Foto von dort geschickt bekam, zeigt das Foto
+  nicht. Geht die Reise weit weg dort weiter, wo sie aufhörte, gilt ein Aufenthalt zu Hause
+  nur, wenn die Fotos eine Nacht zu Hause zeigen oder er 36 Stunden dauern konnte. Offen
+  bleiben zwei seltene Fälle: wer abends nach Hause fliegt, nur am Abend dort fotografiert und
+  am nächsten Morgen an denselben Ort zurückfliegt, bekommt eine Reise statt zwei; und ein
+  geschicktes Foto von zu Hause, auf das ein ganzer Reisetag ohne eigene Fotos folgt (nächstes
+  Reisefoto 36 Stunden später), teilt die Reise. Die Reise-Werkstatt (Teilen/Zusammenführen)
+  korrigiert beides.
 
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.
@@ -45,7 +60,14 @@
 - IBANs und Kartennummern werden maskiert, auch mit Punkten, Bindestrichen, Schrägstrichen,
   bis zu vier Leerzeichen oder über zwei Zeilen; Ausweise (auch die Rückseite mit der
   maschinenlesbaren Zeile) und medizinische Dokumente werden nicht als Text gespeichert
-  (Prüfbefund P2-04, Masken-Version 3). Andere Schreibweisen (Buchstaben zwischen den Gruppen,
+  (Prüfbefund P2-04, Masken-Version 3). Seit Version 4 (zweite Prüfung) auch mit Unterstrichen
+  und mit Leerzeichen oder Unterstrich nach dem Ländercode („DE 89 3704 …“). Eine IBAN gilt
+  ohne Prüfsumme nur in der gedruckten Form (Großbuchstaben, nur Leerzeichen); jede andere
+  Schreibweise braucht eine gültige Prüfsumme, damit Bestell- und Rechnungsnummern wie
+  „AB12-3456-7890-1234“ suchbar bleiben: eine IBAN mit Bindestrichen und einem Tippfehler
+  bleibt dadurch lesbar. Kartennummern mit Schrägstrich nur in Vierergruppen
+  („4111/1111/…“), damit Telefonnummern wie „04321/12345678“ bleiben; eine Amex-Nummer mit
+  Schrägstrichen (4-6-5) bleibt lesbar. Andere Schreibweisen (Buchstaben zwischen den Gruppen,
   stark verlesene Ziffern) können lesbar bleiben.
 - Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
   der Gesundheitskarte. Der Text bleibt auf dem Gerät.

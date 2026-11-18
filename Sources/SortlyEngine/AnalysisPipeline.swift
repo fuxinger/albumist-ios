@@ -224,6 +224,8 @@ public actor AnalysisPipeline {
         static let textMaskVersion = "analysis.textMaskVersion"
         /// The language the stored places' countries and regions are named in (review P1-12).
         static let placesLanguage = "analysis.placesLanguage"
+        /// The region part of place keys, fixed per region (`OfflineWorldMap.RegionKeys`).
+        static let regionKeys = "analysis.regionKeys"
         static let proposals = "analysis.proposals"
         /// Photos taken where the user lives (`TripAnalysis.atHome`), from the last analysis.
         static let home = "analysis.home"
@@ -289,6 +291,8 @@ public actor AnalysisPipeline {
     /// every later photo at region names for an hour (UI run 43779950348: "Latium" instead of
     /// "Rom", the Iceland trip "Reykjavík" instead of "Island", 5 instead of 22 towns).
     private var lastForegroundOnlineLookup: Date?
+    /// Finds the map region of stored places for `keyedRegions` (built once; its language is not used).
+    private var regionRenamer: OfflineWorldMap.Renamer?
     static let foregroundOnlineCooldown: TimeInterval = 60 * 60
 
     /// "Analyse neu aufbauen" cleared the place cache: the next run asks Apple again at once,
@@ -1083,6 +1087,10 @@ public actor AnalysisPipeline {
         onProgress: @escaping @Sendable (Progress) -> Void
     ) async throws -> PlaceResolutionService.Outcome {
         let policy = PlaceResolutionPolicy(settings: settings)
+        // Keys first, from the names as they are, then the names in the language.
+        let stored = try await store.places()
+        let keyed = try await keyedRegions(stored)
+        if !keyed.isEmpty { try await store.setPlaces(keyed) }
         try await renamePlaces(to: policy.language)
         let existing = try await store.places()
         let tripMembers = Set(trips.flatMap(\.geotaggedAssetIDs))
@@ -1128,8 +1136,10 @@ public actor AnalysisPipeline {
                                          paused: { control?.isPaused ?? false },
                                          waiting: { left in
                                              onProgress(Progress(stage: .places, completed: shown.withLock { $0 }, total: total, waitLeft: left))
-                                         }) { batch in
-            try await store.setPlaces(batch)
+                                         }) { [weak self] batch in
+            // New places get the key their region has, whatever language they are named in.
+            let keyed = try await self?.keyedRegions(batch) ?? [:]
+            try await store.setPlaces(batch.merging(keyed) { $1 })
         }
         // Only a refusal, a used-up lookup limit or a Pause in the middle of asking starts the hour.
         // A one-off error, being offline or towns that stay open after an answer (a border cell)
@@ -1145,6 +1155,19 @@ public actor AnalysisPipeline {
     /// stored before are named again from the offline map, which has both languages, so a
     /// country's photos never carry two names ("Countries/Italien" next to "Italy", review
     /// P1-12). Town names come from Apple's lookup in the language it was made in and stay.
+    /// The places of `places` whose region key changed, with it fixed (`RegionKeys`); new
+    /// regions are recorded at once, so a run that stops halfway keeps their keys.
+    private func keyedRegions(_ places: [AssetID: ResolvedPlace]) async throws -> [AssetID: ResolvedPlace] {
+        guard let map, !places.isEmpty else { return [:] }
+        let renamer = regionRenamer ?? map.renamer(to: .german)
+        regionRenamer = renamer
+        var keys = try await store.value(OfflineWorldMap.RegionKeys.self, forKey: Key.regionKeys) ?? OfflineWorldMap.RegionKeys()
+        let before = keys
+        let changed = keys.fix(places, with: renamer)
+        if keys != before { try await store.setValue(keys, forKey: Key.regionKeys) }
+        return changed
+    }
+
     private func renamePlaces(to language: TitleLanguage) async throws {
         guard let map, try await store.value(TitleLanguage.self, forKey: Key.placesLanguage) != language else { return }
         let renamer = map.renamer(to: language)
@@ -1370,10 +1393,13 @@ public actor AnalysisPipeline {
         guard done < TextMinimizer.maskVersion else { return }
         let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
         for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
-            guard let text = result.text?.text, !text.isEmpty else { continue }
-            let masked = TextMinimizer.storable(text)
-            // The subject line of a letter is stored with the document facts (review P2-04).
-            let subject = masked.isEmpty ? nil : result.document?.subject.map(TextMinimizer.masked)
+            guard let text = result.text?.text else { continue }
+            let masked = text.isEmpty ? "" : TextMinimizer.storable(text)
+            // The subject line of a letter is stored with the document facts (review P2-04). An ID
+            // or medical document keeps none: version 2 stored no text for it but its subject in
+            // full, so it is cleared here even though there is no text to mask (second review).
+            let sensitive = (result.document?.sensitivity ?? .normal) >= .identity || (!text.isEmpty && masked.isEmpty)
+            let subject = sensitive ? nil : result.document?.subject.map(TextMinimizer.masked)
             guard masked != text || subject != result.document?.subject else { continue }
             result.text?.text = masked
             result.document?.subject = subject

@@ -117,3 +117,91 @@ struct SearchDateRangeTests {
         #expect(index.search("29.2.2025", now: now).ids.count < index.search("2025", now: now).ids.count)
     }
 }
+
+/// Second review of P1-13 (18.11.2026): two bounds were joined as alternatives, so
+/// "nach 2022 und vor 2024" showed every photo under "Nach 2022 oder Vor 2024"; "Mai bis
+/// Juli 2024" was May of any year or anything up to July 2024; "bis Ende 2024" lost its "bis".
+/// Expectations come from the photos' dates.
+@Suite("Search: bounds on both sides and ranges between two dates (P1-13, second review)")
+struct SearchDateBetweenTests {
+    static let lab = SearchDateRangeTests.lab
+    static let index = SearchDateRangeTests.index
+    static func hits(_ query: String) -> Set<AssetID> { SearchDateRangeTests.hits(query) }
+    static func ignored(_ query: String) -> [String] { SearchDateRangeTests.ignored(query) }
+    static func labels(_ query: String) -> [String] { index.search(query, now: SearchLab.now).tokens.map(\.label) }
+
+    @Test func boundsOnBothSidesApplyTogether() {
+        let lab = Self.lab
+        let only2023 = lab.between("2023-01-01", "2024-01-01")
+        #expect(!only2023.isEmpty && only2023.count < lab.between("1900-01-01", "2100-01-01").count)
+        let cases: [(String, Set<AssetID>)] = [
+            ("nach 2022 und vor 2024", only2023), ("after 2022 before 2024", only2023), ("before 2024 and after 2022", only2023),
+            ("nach 2020 vor 2024", lab.between("2021-01-01", "2024-01-01")),
+            ("seit Mai 2024 bis Juli 2024", lab.between("2024-05-01", "2024-08-01")),
+            ("Italien nach 2022 und vor 2026", lab.between("2023-01-01", "2026-01-01").intersection(lab.country("IT"))),
+        ]
+        var wrong: [String] = []
+        for (query, expected) in cases {
+            let got = Self.hits(query)
+            if got != expected || expected.isEmpty || !Self.ignored(query).isEmpty {
+                wrong.append("„\(query)“: \(got.count) hits, expected \(expected.count), not understood \(Self.ignored(query))")
+            }
+        }
+        #expect(wrong.isEmpty, "\(wrong.joined(separator: "\n"))")
+        let tokens = Self.index.search("nach 2022 und vor 2024", now: SearchLab.now).tokens
+        #expect(tokens.map(\.label) == ["Nach 2022 und vor 2024"])
+        #expect(tokens.first?.detail == "2023")
+        #expect(Self.labels("after 2022 before 2024") == ["After 2022 and before 2024"])
+    }
+
+    /// No day lies after 2024 and before 2020: the search says so and finds nothing, rather
+    /// than dropping the words and showing photos the user did not ask for.
+    @Test func boundsThatExcludeEachOtherFindNothingAndSaySo() {
+        for query in ["vor 2020 nach 2024", "Juli 2024 bis Mai 2024"] {
+            #expect(Self.hits(query).isEmpty, "„\(query)“")
+            #expect(Self.ignored(query).isEmpty, "„\(query)“")
+            let tokens = Self.index.search(query, now: SearchLab.now).tokens
+            #expect(tokens.count == 1 && tokens.first?.detail == "kein gemeinsamer Zeitraum", "„\(query)“: \(tokens)")
+        }
+    }
+
+    @Test func aRangeBetweenTwoDatesIsOnePeriod() {
+        let lab = Self.lab
+        let cases: [(String, Set<AssetID>)] = [
+            ("Mai bis Juli 2024", lab.between("2024-05-01", "2024-08-01")),
+            ("von Mai bis Juli 2024", lab.between("2024-05-01", "2024-08-01")),
+            ("May until July 2024", lab.between("2024-05-01", "2024-08-01")),
+            ("Mai 2023 bis Juli 2024", lab.between("2023-05-01", "2024-08-01")),
+            ("November bis Februar 2025", lab.between("2024-11-01", "2025-03-01")),
+            ("24.12.2024 bis 6.1.2025", lab.between("2024-12-24", "2025-01-07")),
+        ]
+        var wrong: [String] = []
+        for (query, expected) in cases {
+            let got = Self.hits(query)
+            if got != expected || expected.isEmpty || !Self.ignored(query).isEmpty {
+                wrong.append("„\(query)“: \(got.count) hits, expected \(expected.count), not understood \(Self.ignored(query))")
+            }
+        }
+        #expect(wrong.isEmpty, "\(wrong.joined(separator: "\n"))")
+        #expect(Self.labels("Mai bis Juli 2024") == ["Mai bis Juli 2024"])
+    }
+
+    /// "bis Ende 2024" is up to the end of 2024; an edge that does not fit the word
+    /// ("bis Anfang 2024") is shown as not understood, never dropped without a word.
+    @Test func theEdgeOfADateAfterAPeriodWord() {
+        let lab = Self.lab
+        #expect(Self.hits("bis Ende 2024") == lab.between("1900-01-01", "2025-01-01"))
+        #expect(Self.ignored("bis Ende 2024").isEmpty)
+        #expect(Self.labels("bis Ende 2024") == ["Bis Ende 2024"])
+        #expect(Self.hits("until the end of May 2025") == lab.between("1900-01-01", "2025-06-01"))
+        #expect(Self.hits("seit Anfang 2024") == lab.between("2024-01-01", "2100-01-01"))
+        #expect(Self.ignored("bis Anfang 2024") == ["bis", "Anfang"])
+    }
+
+    /// Two dates written as numbers in one query crashed the search: the second one's place
+    /// was counted with the first still in the text.
+    @Test func twoDatesWrittenAsNumbers() {
+        #expect(Self.hits("24.12.2024 25.12.2024") == Self.lab.between("2024-12-24", "2024-12-26"))
+        #expect(Self.labels("24.12.2024 25.12.2024") == ["24. Dez. 2024 oder 25. Dez. 2024"])
+    }
+}

@@ -122,7 +122,8 @@ public struct TripDetector: Sendable {
             var members: [AssetSnapshot] = []
             var lastAway: Date
             var lastCoordinate: GeoCoordinate
-            var firstHomeAfterLastAway: Date?
+            /// Photos at home since the trip's last photo.
+            var home: [(date: Date, coordinate: GeoCoordinate)] = []
         }
 
         var segments: [[AssetSnapshot]] = []
@@ -157,7 +158,8 @@ public struct TripDetector: Sendable {
                         && home.distanceToHome(seg.lastCoordinate, at: seg.lastAway) > configuration.farAwayMeters
                         && GeoMath.distance(coordinate, seg.lastCoordinate) < configuration.farAwayMeters / 2
                     let allowedGap = bothFar ? configuration.maxGapFarAway : configuration.maxGap
-                    let cameHome = seg.firstHomeAfterLastAway.map { date.timeIntervalSince($0) > configuration.homeInterludeTolerance } ?? false
+                    let cameHome = cameHome(after: seg.lastAway, from: seg.lastCoordinate, photos: seg.home, before: date, at: coordinate,
+                                            resuming: bothFar)
                         || wentHomeUnseen(from: seg.lastCoordinate, at: seg.lastAway, to: coordinate, at: date, home: home)
                     let protected = joinProtects(seg.lastAway, date)
                     let mustBreak = forcedBreakBetween(seg.lastAway, date)
@@ -172,7 +174,7 @@ public struct TripDetector: Sendable {
                         seg.members.append(asset)
                         seg.lastAway = date
                         seg.lastCoordinate = coordinate
-                        seg.firstHomeAfterLastAway = nil
+                        seg.home = []
                         current = seg
                     }
                 } else {
@@ -180,14 +182,8 @@ public struct TripDetector: Sendable {
                     currentSplit = false
                 }
             } else if var seg = current {
-                // Only a photo the user can have taken at home, given where the trip's last
-                // photo was and when: three photos sent from home in the middle of a week in Rome
-                // cut it in two albums (review P1-14).
-                let way = GeoMath.distance(seg.lastCoordinate, coordinate)
-                if seg.firstHomeAfterLastAway == nil, date.timeIntervalSince(seg.lastAway) >= Self.minimumTravelTime(meters: way) {
-                    seg.firstHomeAfterLastAway = date
-                    current = seg
-                }
+                seg.home.append((date, coordinate))
+                current = seg
             }
         }
         if let seg = current {
@@ -237,6 +233,33 @@ public struct TripDetector: Sendable {
                             atHome: Set(atHome.map(\.id)),
                             detectedHome: detection.mainHome(at: geotagged.last!.creationDate!))
     }
+
+    /// Whether the photos at home between a trip's photo (`lastAway` at `last`) and the next one
+    /// (`next` at `coordinate`) show that the user came home, so the trip ended there.
+    ///
+    /// Only photos the user can have taken on a round trip count: home reached since the last
+    /// trip photo, and the next one reached after them (`minimumTravelTime` both ways). Three
+    /// photos sent from home in the middle of a week in Rome cut it in two albums (review
+    /// P1-14). The trip ends when the next photo comes more than `homeInterludeTolerance` after
+    /// the first of them. When the trip goes on where it stopped, far from home (`resuming`),
+    /// that is not enough: photos from home in the afternoon and evening with Rome again the next
+    /// morning cut it 16 + 16 (second review). There the stay at home must show a night (photos
+    /// at home on two days) or last `longStayAtHome`.
+    func cameHome(after lastAway: Date, from last: GeoCoordinate, photos: [(date: Date, coordinate: GeoCoordinate)],
+                  before next: Date, at coordinate: GeoCoordinate, resuming: Bool) -> Bool {
+        let possible = photos.filter { photo in
+            photo.date.timeIntervalSince(lastAway) >= Self.minimumTravelTime(meters: GeoMath.distance(last, photo.coordinate))
+                && next.timeIntervalSince(photo.date) >= Self.minimumTravelTime(meters: GeoMath.distance(photo.coordinate, coordinate))
+        }
+        guard let first = possible.first, next.timeIntervalSince(first.date) > configuration.homeInterludeTolerance else { return false }
+        guard resuming else { return true }
+        return possible.contains { !calendar.isDate($0.date, inSameDayAs: first.date) }
+            || next.timeIntervalSince(first.date) >= Self.longStayAtHome
+    }
+
+    /// A stay at home this long ends a trip far away even when no photo shows the night there
+    /// (a weekend at home with one photo on Friday evening).
+    static let longStayAtHome: TimeInterval = 36 * 3_600
 
     /// The fastest anyone gets from a trip back home: by plane at 900 km/h with half an hour on
     /// the ground, or over land at 250 km/h, whichever is quicker (Rome to Munich, 700 km:

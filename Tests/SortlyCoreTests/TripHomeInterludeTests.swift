@@ -84,6 +84,54 @@ struct TripHomeInterludeTests {
         #expect(tripsTouching(newYork + rome, in: lib.assets) == [Set(newYork), Set(rome)])
     }
 
+    // MARK: Second review: photos from home later on the day, the trip going on next morning
+
+    /// The reviewer's second library: Rome as above (last photo of 15 May at 11:51, the next one
+    /// at 10:00 on 16 May) and photos with the location of home on 15 May at `times`.
+    static func rome(homeAt times: [String]) -> (assets: [AssetSnapshot], rome: [AssetID]) {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2025-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-05-12", "2026-05-19")])
+        let rome = lib.daily(from: "2026-05-12", to: "2026-05-19", at: Fixture.Places.rome, perDay: 4, hour: 10)
+        for time in times { _ = lib.photo(at: Fixture.date("2026-05-15 \(time)"), Fixture.Places.munichHome) }
+        return (lib.assets, rome)
+    }
+
+    /// Home photos in the afternoon and evening, Rome again the next morning: the user would have
+    /// had to fly home and back overnight to the same place; one trip (was 16 + 16).
+    @Test func photosFromHomeLaterOnTheDayDoNotCutTheTrip() {
+        for times in [["13:20"], ["21:00"], ["18:00"], ["13:20", "14:00", "18:00", "21:00"]] {
+            let (assets, rome) = Self.rome(homeAt: times)
+            let trips = tripsTouching(rome, in: assets)
+            #expect(trips == [Set(rome)], "home at \(times): \(trips.map(\.count))")
+        }
+    }
+
+    /// A night at home that the photos show (evening and next morning at home), with time to get
+    /// back to Rome before its next photo: two trips.
+    @Test func aNightAtHomeShownByThePhotosEndsTheTrip() {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2025-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-05-12", "2026-05-21")])
+        let first = lib.daily(from: "2026-05-12", to: "2026-05-15", at: Fixture.Places.rome, perDay: 4, hour: 10)
+        _ = lib.photo(at: Fixture.date("2026-05-15 20:00"), Fixture.Places.munichHome)
+        _ = lib.photo(at: Fixture.date("2026-05-16 08:00"), Fixture.Places.munichHome)
+        var second = [lib.photo(at: Fixture.date("2026-05-16 18:00"), Fixture.Places.rome)]
+        second += lib.daily(from: "2026-05-17", to: "2026-05-21", at: Fixture.Places.rome, perDay: 4, hour: 10)
+        #expect(tripsTouching(first + second, in: lib.assets) == [Set(first), Set(second)])
+    }
+
+    /// A weekend at home between two trips, with a photo at home only on the Friday evening:
+    /// two trips, whether the next one goes elsewhere or back to Rome.
+    @Test func aWeekendAtHomeBetweenTwoTripsEndsTheFirst() {
+        for next in [Fixture.Places.naples, Fixture.Places.rome] {
+            var lib = LibraryBuilder()
+            _ = lib.daily(from: "2025-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-05-12", "2026-05-21")])
+            let rome = lib.daily(from: "2026-05-12", to: "2026-05-15", at: Fixture.Places.rome, perDay: 4, hour: 10)
+            _ = lib.photo(at: Fixture.date("2026-05-15 21:00"), Fixture.Places.munichHome)
+            let second = lib.daily(from: "2026-05-18", to: "2026-05-21", at: next, perDay: 4, hour: 10)
+            #expect(tripsTouching(rome + second, in: lib.assets) == [Set(rome), Set(second)], "\(next)")
+        }
+    }
+
     @Test func theFastestWayHome() {
         // 700 km: not in 40 minutes, but in an hour and a half by plane.
         #expect(TripDetector.minimumTravelTime(meters: 700_000) > 40 * 60)

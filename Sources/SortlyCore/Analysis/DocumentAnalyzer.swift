@@ -271,7 +271,7 @@ public struct DocumentAnalyzer: Sendable {
     /// IBAN with checksum validation (mod 97) to avoid false positives. Spaces, dots, hyphens
     /// and slashes between the groups do not count (review P2-04).
     static func containsIBAN(_ text: String) -> Bool {
-        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "./-–"))
+        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "./-–_"))
         let compact = String(String.UnicodeScalarView(text.uppercased().unicodeScalars.filter { !separators.contains($0) }))
         guard let regex = try? NSRegularExpression(pattern: #"[A-Z]{2}[0-9O]{2}[A-Z0-9]{11,30}"#) else { return false }
         let ns = compact as NSString

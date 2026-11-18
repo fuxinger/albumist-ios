@@ -361,6 +361,31 @@ struct AuditAnalysisTests {
         #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
     }
 
+    /// Second review of P2-04: version 2 stored no text for a medical or ID document, but its
+    /// subject line in full, and masking again skipped every result without text, so an IBAN
+    /// in such a subject stayed on disk.
+    @Test func subjectsOfDocumentsWithoutStoredTextAreClearedToo() async throws {
+        let (assets, ids) = screenshots(2)
+        let store = try SortlyStore(url: nil)
+        _ = try await store.upsertAssets(assets)
+        try await store.setValue(2, forKey: AnalysisPipeline.Key.textMaskVersion)
+        for (id, sensitivity) in zip(ids, ["medical", "identity"]) {
+            var result = TextResult(text: TextAnalysis(text: "", source: .original))
+            result.document = try JSONDecoder().decode(DocumentInfo.self, from: Data(#"""
+                {"type":"letter","typeReliability":1,"subject":"Befund, Erstattung auf DE89 3704 0044 0532 0130 00","keywords":[],"sensitivity":"\#(sensitivity)"}
+                """#.utf8))
+            try await store.saveResult(result, kind: "text", asset: id, version: AnalysisPipeline.textVersion)
+        }
+        let analyzer = ScriptedAnalyzer()
+        _ = try await pipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: analyzer).run()
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[0])?.document?.subject == nil)
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[1])?.document?.subject == nil)
+        for id in ids {
+            #expect(try await store.result(TextResult.self, kind: "text", asset: id)?.document?.type == .letter, "the facts stay")
+        }
+        #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
+    }
+
     /// Geocoder that runs a hook before it answers (the user changes a setting meanwhile).
     final class HookedGeocoder: ReverseGeocoding, @unchecked Sendable {
         let inner = FakeGeocoder()

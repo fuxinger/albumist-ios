@@ -1546,31 +1546,53 @@ final class AppModel {
     }
 
     /// Decisions set only for a preview opened straight from a button ("Dein Startpaket",
-    /// "Album anlegen"), with what was there before.
+    /// "Album anlegen"). Two previews can select the same suggestion, also with different
+    /// picks (one on each tab), and end in any order (`previewPicks`).
     struct PreviewSelection {
-        fileprivate var entries: [(proposal: AlbumProposal, previous: ProposalDecision?, chosen: ProposalDecision)]
+        fileprivate let id = UUID()
+        fileprivate let picks: [(proposal: SortlyID, chosen: ProposalDecision)]
     }
+
+    /// The picks of the open previews per suggestion, the latest last: the suggestion shows the
+    /// latest. They start anew with each preview-only mark (`previewOnly`): a preview that was
+    /// open when the user chose on purpose has nothing to give back any more.
+    @ObservationIgnored private var previewPicks: [SortlyID: [(selection: UUID, chosen: ProposalDecision)]] = [:]
 
     /// Selects suggestions for a preview. Leaving the preview without creating anything must
     /// undo this with `endPreview(_:)`: nothing may stay selected that the user never chose
     /// (Fuchs, 14.11.: "Ich hatte aber noch nichts ausgewählt").
     func selectForPreview(_ items: [(AlbumProposal, ProposalDecision)]) -> PreviewSelection {
-        let entries = items.map { (proposal: $0.0, previous: decisions[$0.0.id], chosen: $0.1) }
+        let selection = PreviewSelection(picks: items.map { (proposal: $0.0.id, chosen: $0.1) })
         // In memory only: if the app is closed during the preview, nothing stays selected.
-        for e in entries {
-            if previewOnly[e.proposal.id] == nil { previewOnly[e.proposal.id] = .some(e.previous) }
-            decisions[e.proposal.id] = e.chosen
+        for (id, chosen) in selection.picks {
+            if previewOnly[id] == nil {
+                previewOnly[id] = .some(decisions[id])
+                previewPicks[id] = []
+            }
+            previewPicks[id, default: []].append((selection: selection.id, chosen: chosen))
+            decisions[id] = chosen
         }
-        return PreviewSelection(entries: entries)
+        return selection
     }
 
-    /// Back from a preview: decisions that are still the preview's own go back to what they
-    /// were. Applied suggestions were already cleared by the execution and stay as they are.
+    /// Back from a preview: a suggestion that still shows its pick shows the pick of the latest
+    /// preview still open for it, or, with none left, what was there before them all; the mark
+    /// goes with the last of them. In any order: back from "Album anlegen" inside the starter
+    /// set's preview, the suggestion is the starter set's pick again, and leaving the starter set
+    /// then gives it back (it stayed "Ausgewählt" and was saved); with the starter set left
+    /// first, "Album anlegen" keeps its own pick until it ends, then gives back what was there
+    /// before both. Chosen on purpose meanwhile (the mark is gone), applied (cleared by the
+    /// execution) or changed some other way ("passt nicht", "Die ersten N jetzt anlegen"):
+    /// stays as it is.
     func endPreview(_ selection: PreviewSelection) {
-        for e in selection.entries {
-            // Chosen on purpose meanwhile (or already applied and cleared): stays as it is.
-            guard previewOnly.removeValue(forKey: e.proposal.id) != nil, decisions[e.proposal.id] == e.chosen else { continue }
-            decisions[e.proposal.id] = e.previous
+        for (id, chosen) in selection.picks.reversed() {
+            guard var picks = previewPicks[id],
+                  let index = picks.lastIndex(where: { $0.selection == selection.id }) else { continue }
+            picks.remove(at: index)
+            previewPicks[id] = picks.isEmpty ? nil : picks
+            guard let before = previewOnly[id] else { continue }
+            if decisions[id] == chosen { decisions[id] = picks.last?.chosen ?? before }
+            if picks.isEmpty { previewOnly[id] = nil }
         }
     }
 

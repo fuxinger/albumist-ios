@@ -20,10 +20,17 @@ struct PlanReceiptView: View {
     /// "Erneut versuchen": the plan with what is missing, opened in the normal review.
     @Environment(Navigator.self) private var navigator: Navigator?
     /// "Fehlendes erneut versuchen" is building its plan: the button waits (a second tap
-    /// pushed a second preview).
+    /// pushed a second preview), and so does "Rückgängig machen" (the plan would be made from a
+    /// library that is being taken back).
     @State private var retrying = false
-    /// On screen and on top: a plan that is ready after Back is not pushed.
-    @State private var visible = false
+    /// A plan of "Fehlendes erneut versuchen" that was ready while another tab was chosen:
+    /// offered again when this tab shows (`showWaiting()`).
+    @State private var waiting: WaitingRetry?
+
+    private struct WaitingRetry {
+        let plan: ChangePlan
+        let request: PlanRequest
+    }
     @State private var nothingToRetry = false
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     private let collapsedCount = 12
@@ -45,13 +52,14 @@ struct PlanReceiptView: View {
         // Opened from the result, the receipt belongs to it: the App Store rating question
         // waits until the user has left both (`ReviewPrompt`).
         .onAppear {
-            visible = true
             ReviewPrompt.shared.screenAppeared()
+            showWaiting()
         }
         .onDisappear {
-            visible = false
             ReviewPrompt.shared.screenDisappeared()
         }
+        // The tab shows again (`Navigator.appearances`): a result that waited is offered now.
+        .onChange(of: navigator?.appearances) { showWaiting() }
         .toolbar {
             if receipt != nil, let shareText {
                 ToolbarItem(placement: .primaryAction) {
@@ -201,18 +209,7 @@ struct PlanReceiptView: View {
             }
             if canRepair(receipt) {
                 Button {
-                    retrying = true
-                    let before = navigator?.path
-                    Task {
-                        defer { retrying = false }
-                        if let missing = await model.retryPlan(for: plan) {
-                            // Pushed onto the stack's path (`AppScreen`), if this receipt is
-                            // still the screen on top.
-                            Navigator.push(.prebuiltPlan(PlanToken(missing)), on: navigator, ifStill: before, visible: visible)
-                        } else if visible {
-                            nothingToRetry = true
-                        }
-                    }
+                    retry()
                 } label: {
                     Label("Fehlendes erneut versuchen", systemImage: "arrow.clockwise")
                 }
@@ -227,6 +224,55 @@ struct PlanReceiptView: View {
                 Text("Erneut versuchen legt nur an, was fehlt; nichts wird doppelt angelegt, und du siehst vorher, was passiert. Du kannst es auch so lassen: Das Erledigte bleibt, und die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
             }
         }
+    }
+
+    /// Makes the plan of what is missing; the button waits meanwhile.
+    private func retry(attempt: Int = 1) {
+        waiting = nil
+        retrying = true
+        let request = PlanRequest(model: model, navigator: navigator)
+        Task {
+            let missing = await model.retryPlan(for: plan)
+            retrying = false
+            guard let missing else {
+                if navigator?.isShowing(request.mark) == true { nothingToRetry = true }
+                return
+            }
+            offer(WaitingRetry(plan: missing, request: request), attempt: attempt)
+        }
+    }
+
+    /// A plan of "Fehlendes erneut versuchen" that is ready, or that waited for this tab, with
+    /// the same checks both times (`PlanRequest`): pushed onto the stack's path (`AppScreen`) if
+    /// it is still current; kept while another tab is chosen; made again once when the album
+    /// list changed meanwhile and the plan can still be completed (a second change says Albumist
+    /// is busy); dropped when the user went elsewhere on this stack. Never pushed twice:
+    /// `waiting` holds it only while it is not shown.
+    private func offer(_ ready: WaitingRetry, attempt: Int) {
+        switch ready.request.verdict(model: model, navigator: navigator) {
+        case .show:
+            Navigator.push(.prebuiltPlan(PlanToken(ready.plan)), on: navigator, ifStill: ready.request.mark)
+        case .wait:
+            waiting = ready
+        case .gone:
+            break
+        case .busy:
+            model.message = .busy
+        case .stale:
+            if attempt > 1 {
+                model.message = .busy
+            } else if let receipt, canRepair(receipt) {
+                retry(attempt: attempt + 1)
+            }
+            // Otherwise the plan was taken back meanwhile: the receipt says so.
+        }
+    }
+
+    /// The tab shows again: a plan that was ready meanwhile is offered now.
+    private func showWaiting() {
+        guard let ready = waiting, navigator?.showing == true else { return }
+        waiting = nil
+        offer(ready, attempt: 1)
     }
 
     /// Only plans that changed the library and were not taken back can be completed.
@@ -281,7 +327,7 @@ struct PlanReceiptView: View {
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                     Button("Rest rückgängig machen", role: .destructive) { confirmUndo = true }
-                        .disabled(model.execution.isRunning)
+                        .disabled(model.execution.isRunning || retrying)
                         .accessibilityIdentifier("receipt.undoRest")
                 } else if !undo.isComplete {
                     Text("Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist.")
@@ -298,7 +344,7 @@ struct PlanReceiptView: View {
                     && (plan.status == .completed || plan.status == .completedWithErrors) {
             Section {
                 Button("Rückgängig machen", role: .destructive) { confirmUndo = true }
-                    .disabled(model.execution.isRunning)
+                    .disabled(model.execution.isRunning || retrying)
                     .accessibilityIdentifier("receipt.undo")
             } footer: {
                 Text("Entfernt nur die neuen Alben und Zuordnungen dieser Änderungen. Deine Fotos bleiben.")

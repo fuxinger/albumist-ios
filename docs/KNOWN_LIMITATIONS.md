@@ -69,7 +69,8 @@
     nicht. Hat der Nutzer selbst das Album gewählt, das für die Kennung eingetragen ist und keine
     Fotos mit dem Vorschlag teilt, wird seine Wahl deshalb einmal wieder geöffnet (die Übersicht
     sagt „Vorschläge neu geprüft“); wählt er es erneut, bleibt es. Gemerkt wird das je Vorschlag
-    und Album in `user.reopenedExtensions` (wie alle `user.`-Werte auch in der Sicherheitskopie).
+    und Album in `user.reopenedExtensions` (wie alle `user.`-Werte auch in der Sicherheitskopie),
+    bis der Vorschlag weder eine Entscheidung noch ein eingetragenes Album hat.
   - Nach „Analyse neu aufbauen“ fehlen die vorigen Orte: Kennungen werden neu vergeben, ein Ort
     allein in seiner Zelle bekommt wieder die alte; von zwei Orten einer Zelle bekommt der in
     der App zuerst gezeigte die Zellkennung, der andere Zelle und erste Foto-ID, was nicht

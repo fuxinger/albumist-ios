@@ -415,6 +415,13 @@ struct DecisionLifecycleTests {
         #expect(try await w.store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions) == decisions)
         #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == 1)
 
+        // Third review: what is remembered goes once the suggestion has neither a decision nor a
+        // recorded album; the entry of this suggestion stays (its albums are still recorded).
+        let mine = ps[0].id.rawValue + "|sommer-rom"
+        try await w.store.setValue(Set([mine, "gone-suggestion|some-album"]), forKey: AnalysisPipeline.Key.reopenedExtensions)
+        _ = try await w.pipeline.refreshMatchesIfOutdated()
+        #expect(try await w.store.value(Set<String>.self, forKey: AnalysisPipeline.Key.reopenedExtensions) == [mine])
+
         stored = try #require(try await w.pipeline.latestProposals())
         // The rule above came with version 4: saved results of version 3 are matched again.
         #expect(AlbumMatcher.version >= 4)

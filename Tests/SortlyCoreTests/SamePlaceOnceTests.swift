@@ -39,9 +39,11 @@ struct SamePlaceOnceTests {
         all(analysis, names: names).open.filter { $0.kind == .frequentPlace }
     }
 
-    func all(_ analysis: AnalysisSnapshot, names: [SortlyID: String] = [:], rejected: [SortlyID] = []) -> Suggestions {
+    func all(_ analysis: AnalysisSnapshot, names: [SortlyID: String] = [:], rejected: [SortlyID] = [],
+             placeLevels: [PlaceLevel]? = nil) -> Suggestions {
         var settings = OrganizationSettings()
         settings.titleLanguage = .german
+        if let placeLevels { settings.places.levels = placeLevels }
         settings.frequentPlaces.names = names
         let overrides = OverrideSet(rejected.map { UserOverride(scope: .source($0), decision: .rejectProposal) })
         return ProposalEngine(settings: settings, calendar: Fixture.calendar).suggestions(for: analysis, overrides: overrides)
@@ -249,5 +251,27 @@ struct SamePlaceOnceTests {
                                         recurringPlaces: [Self.recurring(mine + other)])
         let found = suggestions(analysis, names: [SortlyID("frequent-mine"): "Waldhaus"])
         #expect(Set(found.map(\.id)) == [SortlyID("frequent-mine"), SortlyID("frequent-other")])
+    }
+
+    /// Third review: the ranking of the "same photos" step. A frequent place named only in the
+    /// app (`chosen`, its name in `user.titles`) and the town album "Zwiesel" with the same
+    /// photos: the place the user named is the one kept, the town album goes and its album
+    /// stands for them. Ranked as unnamed (last), the town album was kept first and both stayed.
+    @Test func aPlaceNamedInTheAppRanksBeforeTheTownAlbum() {
+        let munich = PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Bayern", locality: "München")
+        let home = (0..<400).map { i in
+            AssetFacts(asset: AssetSnapshot(id: AssetID("home-\(i)"), creationDate: Fixture.date("2026-01-01").addingTimeInterval(Double(i) * 86_400 / 2),
+                                            location: GeoCoordinate(latitude: 48.137, longitude: 11.575)),
+                       place: munich, placeSource: .gpsReverseGeocoded)
+        }
+        let spot = Self.facts("z", count: 100)
+        var analysis = AnalysisSnapshot(facts: home + spot, frequentPlaces: [Self.frequent(spot)])
+        analysis.chosen = [SortlyID("frequent-zwiesel")]
+        let found = all(analysis, placeLevels: [.locality])
+        let town = found.standIns.first { $0.suggestion == SortlyID("frequent-zwiesel") && $0.reason == .samePhotos }
+        #expect(found.open.contains { $0.id == SortlyID("frequent-zwiesel") })
+        #expect(!found.open.contains { $0.title == "Zwiesel" && $0.kind != .frequentPlace })
+        #expect(town?.assetIDs == Set(spot.map(\.id)))
+        #expect(town?.dropped != nil && town?.dropped != SortlyID("frequent-zwiesel"))
     }
 }

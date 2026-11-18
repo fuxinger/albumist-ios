@@ -1984,17 +1984,24 @@ public actor AnalysisPipeline {
         let ownAlbum = decisions.contains { id, decision in
             decision.isAccepted && decision.extendedAlbum.map { recorded[id]?.contains($0) == true } == true
         }
-        guard outdated || ownAlbum else { return MatchRefresh(snapshot: snapshot) }
+        // Remembered reopenings (below) of suggestions with neither a decision nor a recorded
+        // album any more are dropped.
+        let remembered = try await readable { try await store.value(Set<String>.self, forKey: Key.reopenedExtensions) } ?? []
+        let before = remembered.filter { entry in
+            let id = SortlyID(String(entry.prefix { $0 != "|" }))
+            return decisions[id] != nil || recorded[id] != nil
+        }
+        guard outdated || ownAlbum || before != remembered else { return MatchRefresh(snapshot: snapshot) }
+        var values: [String: any Encodable & Sendable] = [:]
+        if before != remembered { values[Key.reopenedExtensions] = before }
         let started = Set(try await store.unfinishedPlans().flatMap { $0.steps.compactMap(\.sourceID) })
         let suggested = snapshot.proposals + snapshot.dismissed
         var reopened = outdated ? ProposalDecision.uncertainExtensions(decisions, proposals: suggested, matches: snapshot.matches,
                                                                        protected: started) : []
-        var values: [String: any Encodable & Sendable] = [:]
         if ownAlbum {
             // Once per suggestion and album: an album the user picks again for it ("Anderes
             // Album wählen") is their choice and stays (re-review 18.11.). Which way a decision
             // was made is not stored, so the first time cannot be told apart.
-            let before = try await readable { try await store.value(Set<String>.self, forKey: Key.reopenedExtensions) } ?? []
             let found = ProposalDecision.extensionsOfOtherPhotos(
                 decisions, proposals: suggested, inventory: try await store.loadInventory(), recorded: recorded,
                 overrides: OverrideSet(try await store.overrides()), protected: started)
@@ -2006,7 +2013,7 @@ public actor AnalysisPipeline {
                 values[Key.reopenedExtensions] = before.union(new.values)
             }
         }
-        guard outdated || !reopened.isEmpty else { return MatchRefresh(snapshot: snapshot) }
+        guard outdated || !reopened.isEmpty || !values.isEmpty else { return MatchRefresh(snapshot: snapshot) }
         if outdated { values[Key.proposals] = snapshot }
         if !reopened.isEmpty {
             for id in reopened { decisions[id] = nil }

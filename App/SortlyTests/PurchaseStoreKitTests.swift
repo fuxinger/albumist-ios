@@ -938,8 +938,9 @@ enum StoreKitEnvironment {
         do {
             let url = try PurchaseStoreKitTests.configurationURL()
             // Kept until StoreKit lists the product, so the session cannot go away while StoreKit
-            // may still be taking its configuration.
-            var current = try await onSessionQueue("bring up the test session", seconds: left()) {
+            // may still be taking its configuration; released before a replacement is made and
+            // once the product is listed, so no two bring-up sessions exist side by side.
+            var current: PurchaseTestStore? = try await onSessionQueue("bring up the test session", seconds: left()) {
                 let session = try SKTestSession(contentsOf: url)
                 StoreKitEnvironment.configure(session)
                 return PurchaseTestStore(session)
@@ -970,6 +971,7 @@ enum StoreKitEnvironment {
                 }
                 if Date().timeIntervalSince(sessionSince) > waitCap {
                     storeKitTrace("StoreKit lists no product at \(elapsed()) ms (\(loads) loads, last error \(lastError)); new session \(sessions + 1)")
+                    _ = current.take()
                     current = try await onSessionQueue("bring up a new test session", seconds: left()) {
                         let session = try SKTestSession(contentsOf: url)
                         StoreKitEnvironment.configure(session)
@@ -981,7 +983,7 @@ enum StoreKitEnvironment {
                 try await Task.sleep(for: .milliseconds(500))
             }
             if sessions > 1 { done.append("product with session \(sessions)") }
-            withExtendedLifetime(current) {}
+            _ = current.take()
             done.append("product \(elapsed()) ms")
             let lead = listenerLead - Date().timeIntervalSince(listening)
             if lead > 0 { try await Task.sleep(for: .seconds(lead)) }

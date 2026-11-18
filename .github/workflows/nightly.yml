@@ -7,17 +7,14 @@ name: Nightly
 #   - a build in fresh DerivedData with the app tests in the simulator (CI builds without a
 #     cache too: its cache steps, off since 16.11., were removed on 17.11., Profi-Analyse Top 10).
 # Scheduled workflows only run from the default branch's copy of this file, so this starts once
-# it is on main. It tests the development branch (see "Pick the commit").
+# it is on main. It tests the commit it runs on: main at night, or the branch chosen under
+# "Run workflow" when started by hand.
 on:
   schedule:
     # 01:00 UTC = 02:00 in Berlin in winter (03:00 in summer; cron has no time zones).
     - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
-      ref:
-        description: Branch, tag or commit to test (empty = the development branch)
-        type: string
-        default: ''
       seeds:
         description: Random libraries for the stress test
         type: string
@@ -35,45 +32,15 @@ concurrency:
   group: nightly
   cancel-in-progress: false
 
-# Cache poisoning (CodeQL actions/cache-poisoning on PR #1, the checkouts of
-# needs.pick.outputs.sha below): a scheduled or manual run executes code of another ref (the
-# development branch, NIGHTLY_REF or the ref typed in by hand) in the context of the default
-# branch, where an Actions cache entry it saved would be readable by every branch. Accepted,
-# because:
-#   - no workflow of this repository restores any Actions cache (no actions/cache, no "cache:"
-#     of a setup action; owner decision 17.11.: no build cache), so an entry saved here would
-#     never be read; .github/scripts/tests/test_workflows.py fails as soon as one appears;
-#   - the ref comes from this repository only: a branch written by people with write access,
-#     the repository variable NIGHTLY_REF, or the input of a run started by such a person;
-#   - the tested code gets a read-only token (permissions above) and no token stays in
-#     .git/config (persist-credentials: false), and nothing of this workflow is used by a
-#     release (TestFlight builds and tests its own commit).
+# No checkout of another ref (CodeQL actions/cache-poisoning on PR #1 and PR #7): until 18.11. a
+# "Pick the commit" job chose the development branch (claude/sortly-app, NIGHTLY_REF or a typed-in
+# ref) and ran its code in the default branch's context. Since the release path merges into main,
+# the nightly run tests the commit it was started on; the old default would have tested the
+# retired claude/sortly-app. No workflow restores an Actions cache either (test_workflows.py).
 
 jobs:
-  pick:
-    name: Pick the commit
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      sha: ${{ steps.pick.outputs.sha }}
-    steps:
-      - id: pick
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # The repository variable NIGHTLY_REF can point the nightly run somewhere else.
-          WANTED: ${{ inputs.ref || vars.NIGHTLY_REF || 'claude/sortly-app' }}
-        run: |
-          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$WANTED" --jq .sha 2>/dev/null) || sha=""
-          if [ -z "$sha" ]; then
-            echo "::notice::$WANTED not found, testing $GITHUB_REF_NAME instead."
-            sha=$GITHUB_SHA
-          fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "### Nightly run of ${WANTED} (${sha:0:7})" >> "$GITHUB_STEP_SUMMARY"
-
   core-linux:
     name: Stress and load tests (Linux)
-    needs: pick
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
     timeout-minutes: 60
@@ -83,8 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.pick.outputs.sha }}
-          # The tested code never sees a token in .git/config (see "Cache poisoning" above).
+          # The tested code never sees a token in .git/config.
           persist-credentials: false
       - name: Install SQLite headers
         run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev python3 > /dev/null
@@ -108,14 +74,12 @@ jobs:
 
   macos:
     name: Clean build, stress, load and app tests (macOS)
-    needs: pick
     runs-on: xcode-27
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.pick.outputs.sha }}
-          # The tested code never sees a token in .git/config (see "Cache poisoning" above).
+          # The tested code never sees a token in .git/config.
           persist-credentials: false
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode --runtime
@@ -177,14 +141,12 @@ jobs:
 
   # TODO(ui.yml): the UI flow in English and on a second device size (test plan A11, A16).
   # ui.yml can be called now (`workflow_call`, testflight.yml uses it), but its only input is
-  # `release`. Once it also takes ref, language and device, add here (a call without
+  # `release`. Once it also takes language and device, add here (a call without
   # release: true joins the Mac queue, see ui.yml):
   #
   # ui-english:
-  #   needs: pick
   #   uses: ./.github/workflows/ui.yml
-  #   with: { ref: '${{ needs.pick.outputs.sha }}', language: en, device: 'iPhone 17 Pro' }
+  #   with: { language: en, device: 'iPhone 17 Pro' }
   # ui-second-device:
-  #   needs: pick
   #   uses: ./.github/workflows/ui.yml
-  #   with: { ref: '${{ needs.pick.outputs.sha }}', language: de, device: 'iPhone 16e' }
+  #   with: { language: de, device: 'iPhone 16e' }

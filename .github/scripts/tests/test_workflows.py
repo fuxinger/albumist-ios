@@ -18,8 +18,7 @@ def read(path):
 
 class CacheTests(unittest.TestCase):
     """No Actions cache anywhere: the owner's rule (a Mac build cache only if it provably cannot ship
-    stale code; none is used) and the reason the nightly checkout of another ref is safe
-    (nightly.yml, "Cache poisoning")."""
+    stale code; none is used)."""
 
     def test_no_workflow_restores_a_cache(self):
         self.assertTrue(WORKFLOWS)
@@ -36,6 +35,21 @@ class CacheTests(unittest.TestCase):
                 if "actions/checkout@" in step and re.search(r"\n\s+ref:", step):
                     with self.subTest(workflow=os.path.basename(path)):
                         self.assertIn("persist-credentials: false", step)
+
+
+    def test_scheduled_workflows_check_out_only_their_own_commit(self):
+        # CodeQL actions/cache-poisoning (PR #1, PR #7): nightly.yml checked out another ref
+        # (needs.pick.outputs.sha) in the default branch's context. A scheduled workflow tests
+        # the commit it runs on.
+        for path in WORKFLOWS:
+            text = read(path)
+            trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0]
+            if not re.search(r"^  schedule:", trigger, re.M):
+                continue
+            for step in re.split(r"\n\s+- ", text):
+                if "actions/checkout@" in step:
+                    with self.subTest(workflow=os.path.basename(path)):
+                        self.assertNotRegex(step, r"\n\s+ref:")
 
 
 class TestFlightWiringTests(unittest.TestCase):

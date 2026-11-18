@@ -376,16 +376,15 @@ Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-
   früheren App-Analysen (Kategorie `/language:swift`) werden von ihr weder bestätigt noch
   geschlossen (Schritt 1 unten).
 - Die ReDoS-Warnung in `test_summary.py` ist behoben (keine verschachtelten Wiederholungen mehr).
-- Die Warnung „cache poisoning“ in `nightly.yml` ist begründet und abgesichert: kein Workflow
-  liest einen Actions-Cache (ein Test prüft das), der nächtlich getestete Stand kommt nur aus
-  diesem Repository, und er bekommt kein Token.
+- Die Warnung „cache poisoning“ in `nightly.yml` ist behoben (18.11.): Der nächtliche Lauf
+  testet den Stand, auf dem er läuft (nachts main, von Hand der gewählte Branch), statt einen
+  anderen Branch auszuchecken. Ein Test prüft, dass kein geplanter Workflow einen anderen Ref
+  auscheckt, und dass kein Workflow einen Actions-Cache liest.
 
 ## Schritte für den Besitzer (18.11.2026)
 
 1. Nach dem Zusammenführen: Security > Code scanning. Die ReDoS-Warnung schließt sich beim
-   nächsten Scan von selbst. Bleibt „Cache poisoning“ in `nightly.yml` offen: die Warnung öffnen
-   > **Dismiss alert** > „Won't fix“, Begründung: „Kein Workflow liest einen Actions-Cache
-   (test_workflows.py), Ref nur aus diesem Repository, persist-credentials: false.“
+   nächsten Scan von selbst, ebenso „Cache poisoning“ in `nightly.yml` (Ursache entfernt).
    Alte Swift-Warnungen in `App/…` aus der früheren Kategorie `/language:swift`: Security >
    Code scanning > **Tool status** > CodeQL > die Konfiguration `/language:swift` > **Delete
    configuration** (ihre Warnungen schließen sich dann). Oder jede einzeln > **Dismiss alert**

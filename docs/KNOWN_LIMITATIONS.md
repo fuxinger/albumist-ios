@@ -6,10 +6,28 @@
   und `BGProcessingTask`, wie lange Albumist im Hintergrund rechnen darf. Endet die Zeit,
   hält iOS die App an, und die Analyse geht beim nächsten Öffnen an derselben Stelle weiter.
 - Apps können die Fotos-App öffnen, aber nicht ein bestimmtes Album darin.
-- Bei „Ausgewählte Fotos“ sieht Albumist nur diese Auswahl.
+- Bei „Ausgewählte Fotos“ sieht Albumist nur diese Auswahl. Die Analyse der übrigen Fotos wird
+  dabei gelöscht wie bei gelöschten Fotos (`removeAssets(notIn:)`, die Ergebnisse hängen mit
+  `ON DELETE CASCADE` daran); zurück auf „Alle Fotos“ werden sie neu analysiert, bei 14.000
+  Fotos Stunden (Prüfbefund P1-07, offen). Behebung: die nicht sichtbaren Fotos in der
+  Datenbank als „zurzeit nicht sichtbar“ markieren statt sie zu löschen (neue Spalte, also eine
+  Migration), sie aus allen Abfragen der Analyse, Zählung und Suche herausnehmen und erst
+  löschen, wenn Albumist wieder alle Fotos sieht und das Foto dann fehlt. Das berührt die
+  13 Abfragen auf die Tabelle `assets` in `SortlyStore` und die Anzeige der App bei eingeschränktem Zugriff und ist
+  darum nicht im Kern allein zu machen.
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
   Länder und Regionen kommen immer aus der Offline-Karte.
 - `CLGeocoder` ist in iOS 26 als veraltet markiert; der Nachfolger in MapKit ist geplant.
+- Sprache der Albumnamen gewechselt (Prüfbefund P1-12): Länder und Regionen aller
+  gespeicherten Orte werden beim nächsten Lauf aus der Offline-Karte neu benannt (der Wechsel
+  startet einen Lauf). Städte und Ortsteile kommen von Apples Ortssuche und bleiben in der
+  Sprache, in der sie bestimmt wurden; nach einem Neustart der App kommen neue Städte in der
+  neuen Sprache, so dass „Rom“ und „Rome“ nebeneinander stehen können. Dafür bräuchte die App:
+  die Ortssuche (`SystemGeocoder`) bei einem Sprachwechsel mit der neuen Sprache neu anlegen
+  (heute nur beim Start, `AppModel`), den Zwischenspeicher der Ortssuche je Sprache führen und
+  die gespeicherten Städte zum erneuten Nachfragen vormerken (Netz und Apples Drosselung, eine
+  Entscheidung für Fuchs). Vorschläge für Regionen tragen den Regionsnamen in ihrer Kennung:
+  nach einem Sprachwechsel gelten „Nicht jetzt“ und eigene Namen bei Regionen nicht mehr.
 
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.
@@ -22,6 +40,21 @@
   wurden, behalten dann ihre alte Markierung und bekommen nach dem Zurückwechseln keine neuen
   Labels; neue Fotos sind nicht betroffen (sie bekommen ihre Labels nachgeholt). Abhilfe:
   „Analyse neu aufbauen“.
+
+## Gespeicherter Text (Bildschirmfotos, Dokumente)
+- IBANs und Kartennummern werden maskiert, auch mit Punkten, Bindestrichen, Schrägstrichen,
+  bis zu vier Leerzeichen oder über zwei Zeilen; Ausweise (auch die Rückseite mit der
+  maschinenlesbaren Zeile) und medizinische Dokumente werden nicht als Text gespeichert
+  (Prüfbefund P2-04, Masken-Version 3). Andere Schreibweisen (Buchstaben zwischen den Gruppen,
+  stark verlesene Ziffern) können lesbar bleiben.
+- Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
+  der Gesundheitskarte. Der Text bleibt auf dem Gerät.
+
+## Jahreszeiten
+- Jahreszeiten sind noch nicht als Alben wählbar. Werden sie es, gilt: Frühling und Herbst
+  heißen auf beiden Halbkugeln gleich („Herbst 2026“ für April in Sydney und Oktober in
+  München) und wären zwei Alben gleichen Namens; wie sie unterschieden werden, ist offen
+  (Prüfbefund P1-04 hat nur Winter und Sommer benannt).
 
 ## Messenger-Herkunft
 iOS speichert keine verlässliche Quell-App. Albumist nutzt nur klare Hinweise (Messenger-

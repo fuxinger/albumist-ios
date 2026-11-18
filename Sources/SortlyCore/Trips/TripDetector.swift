@@ -50,7 +50,8 @@ public struct TripDetector: Sendable {
         /// (long vacation with photo-less days).
         public var maxGapFarAway: TimeInterval = 7 * 86_400
         public var farAwayMeters: Double = 300_000
-        /// A trip ends when the user is back home for longer than this.
+        /// A trip ends when the user is back home for longer than this, counted from the first
+        /// photo at home they can have taken on their own way home (`minimumTravelTime`).
         public var homeInterludeTolerance: TimeInterval = 10 * 3_600
         public var minPhotos: Int = 5
         /// Window around the trip in which non-GPS photos may be proposed.
@@ -179,7 +180,11 @@ public struct TripDetector: Sendable {
                     currentSplit = false
                 }
             } else if var seg = current {
-                if seg.firstHomeAfterLastAway == nil {
+                // Only a photo the user can have taken at home, given where the trip's last
+                // photo was and when: three photos sent from home in the middle of a week in Rome
+                // cut it in two albums (review P1-14).
+                let way = GeoMath.distance(seg.lastCoordinate, coordinate)
+                if seg.firstHomeAfterLastAway == nil, date.timeIntervalSince(seg.lastAway) >= Self.minimumTravelTime(meters: way) {
                     seg.firstHomeAfterLastAway = date
                     current = seg
                 }
@@ -231,6 +236,18 @@ public struct TripDetector: Sendable {
         return TripAnalysis(trips: trips, stays: stays, places: placesOftenVisited(oftenHere, photos: geotagged, home: home),
                             atHome: Set(atHome.map(\.id)),
                             detectedHome: detection.mainHome(at: geotagged.last!.creationDate!))
+    }
+
+    /// The fastest anyone gets from a trip back home: by plane at 900 km/h with half an hour on
+    /// the ground, or over land at 250 km/h, whichever is quicker (Rome to Munich, 700 km:
+    /// 1 h 17 min). A photo with the location of home taken sooner after the trip's last photo
+    /// was not taken by the user on their way home: a photo sent from home and saved, or a
+    /// family member's photo in a shared library (review P1-14).
+    static func minimumTravelTime(meters: Double) -> TimeInterval {
+        guard meters > 0 else { return 0 }
+        let overLand = meters / (250_000 / 3_600)
+        let flying = 30 * 60 + meters / (900_000 / 3_600)
+        return min(overLand, flying)
     }
 
     /// Within a day trip of the habitual area: a place the user can go to and come back from

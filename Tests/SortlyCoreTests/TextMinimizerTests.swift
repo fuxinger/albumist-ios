@@ -58,4 +58,68 @@ struct TextMinimizerTests {
         let order = "Bestellnummer 3021 4567\n8901 2345"
         #expect(TextMinimizer.storable(order) == order)
     }
+
+    /// Review finding P2-04 (18.11.2026): IBANs and card numbers written with dots, hyphens,
+    /// slashes or wide spaces stayed readable in the stored text.
+    @Test func numbersWithUnusualSeparatorsAreMasked() {
+        let ibans = [
+            "Bitte überweisen auf DE89.3704.0044.0532.0130.00 danke",
+            "Konto DE89-3704-0044-0532-0130-00",
+            "IBAN DE89   3704   0044   0532   0130   00",
+            "IBAN DE89    3704    0044    0532    0130    00",
+            "IBAN DE89/3704/0044/0532/0130/00",
+            "IBAN DE89 / 3704 / 0044 / 0532 / 0130 / 00",
+            "iban de89.3704.0044.0532.0130.00",
+            // OCR reads the digit 0 as the letter O: the checksum holds once it is read back.
+            "iban de89 37o4 0044 0532 0130 00",
+        ]
+        for text in ibans {
+            let stored = TextMinimizer.storable(text)
+            #expect(!stored.contains("0532"), "IBAN stays readable: \(stored)")
+            #expect(DocumentAnalyzer.containsIBAN(text), "not seen as an IBAN: \(text)")
+        }
+        let cards = ["Karte 4111.1111.1111.1111", "Karte 4111/1111/1111/1111", "Karte 4111    1111    1111    1111",
+                     "Karte 4111 / 1111 / 1111 / 1111", "Amex 3782.822463.10005"]
+        for text in cards {
+            let stored = TextMinimizer.storable(text)
+            #expect(!stored.contains("1111") && !stored.contains("822463"), "card stays readable: \(stored)")
+            #expect(stored.hasPrefix("Karte ") || stored.hasPrefix("Amex "))
+        }
+        // Dates, amounts, phone numbers and order numbers stay searchable.
+        for kept in ["Fahrt am 01.02.2021, 03.04.2022 und 05.06.2023", "Gültig 12/29 Betrag 1.234,56 EUR", "Tel. 0171/2345678",
+                     "Bestellnummer 3021.4567.8901.2345", "Version 2.4.11 vom 3.5.2026"] {
+            #expect(TextMinimizer.storable(kept) == kept, "\(kept) was changed")
+        }
+    }
+
+    /// Review finding P2-04: the back of a German ID card names no "Personalausweis"; its
+    /// eye colour, address and machine-readable zone were stored in full.
+    @Test func theBackOfAnIDCardIsNotStored() {
+        let back = "Augenfarbe BRAUN Größe 178 cm Datum 01.02.2021 Behörde Stadt Musterstadt Anschrift 12345 Musterstadt Heidestr. 17 "
+            + "IDD<<L01X00T471<<<<<<<<<<<<<<< 6408125<2702283D<<<<<<<<<<<<<4 MUSTERMANN<<ERIKA<<<<<<<<<<<<<"
+        #expect(TextMinimizer.storable(back) == "")
+        // The machine-readable zone alone (a passport page cut off at the top) is enough.
+        #expect(TextMinimizer.storable("P<D<<MUSTERMANN<<ERIKA<<<<<<<<<<<<<<<<<<<<<<<<\nC01X00T478D<<6408125F2702283<<<<<<<<<<<<<<<4") == "")
+        // English cards name the eye colour too.
+        #expect(TextMinimizer.storable("Eye colour BROWN Height 178 cm Address 1 High Street") == "")
+        // Ordinary text with an arrow or a size stays.
+        for kept in ["Größe 42, Farbe braun, Anschrift auf dem Paket", "a << b in code"] {
+            #expect(TextMinimizer.storable(kept) == kept)
+        }
+    }
+
+    /// The masks are newer than texts stored by version 2: they are masked once more.
+    @Test func theMaskVersionIsRaised() {
+        #expect(TextMinimizer.maskVersion == 3)
+    }
+
+    /// The subject line of a letter is stored with the document facts: it goes through the
+    /// same masks, and an ID or medical document keeps none.
+    @Test func theSubjectOfALetterIsMaskedToo() throws {
+        let letter = "Musterbank AG\nBetreff: Ihr Konto DE89.3704.0044.0532.0130.00\nSehr geehrte Frau Mustermann, Rechnung anbei"
+        let info = try #require(DocumentAnalyzer().analyze(text: letter))
+        #expect(info.subject?.contains("0532") == false, "\(info.subject ?? "")")
+        let medical = "Arztbrief\nBetreff: Diagnose Bronchitis bei Erika Mustermann\nSehr geehrte Kollegin"
+        #expect(try #require(DocumentAnalyzer().analyze(text: medical)).subject == nil)
+    }
 }

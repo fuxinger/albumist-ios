@@ -937,7 +937,9 @@ enum StoreKitEnvironment {
         done.append("run listener \(elapsed()) ms")
         do {
             let url = try PurchaseStoreKitTests.configurationURL()
-            _ = try await onSessionQueue("bring up the test session", seconds: left()) {
+            // Kept until StoreKit lists the product, so the session cannot go away while StoreKit
+            // may still be taking its configuration.
+            var current = try await onSessionQueue("bring up the test session", seconds: left()) {
                 let session = try SKTestSession(contentsOf: url)
                 StoreKitEnvironment.configure(session)
                 return PurchaseTestStore(session)
@@ -947,18 +949,39 @@ enum StoreKitEnvironment {
             // `requireTestEnvironment`); until the environment is up the list may come back empty.
             // StoreKit's own error is kept, so a signing or bundle-id problem says what it is
             // instead of only "no product" after the whole budget (second review 16.11.).
+            // While the list stays empty, a new session every `waitCap` seconds hands StoreKit the
+            // configuration again, and each one goes into the trace with the loads so far: CI run
+            // 44340950061 waited 300 s on one session with no product, no error and nothing that
+            // told a missing signature (the build now stops on that) from a daemon that never
+            // took the configuration. The tests' own checks are untouched.
             var lastError = "none"
+            var loads = 0
+            var sessions = 1
+            var sessionSince = Date()
             while true {
                 let load = try await within("load the product", seconds: left()) { () async -> ProductLoad in
                     do { return ProductLoad(count: try await Product.products(for: [unlock]).count, error: nil) } catch { return ProductLoad(count: 0, error: "\(error)") }
                 }
+                loads += 1
                 if load.count > 0 { break }
                 if let error = load.error { lastError = error }
                 if Date() > deadline {
-                    throw StoreKitStepTimedOut(description: "no product from the test session (is the test host signed with its bundle id?); last StoreKit error: \(lastError)")
+                    throw StoreKitStepTimedOut(description: "no product from the test session (is the test host signed with its bundle id?); \(loads) loads, \(sessions) sessions; last StoreKit error: \(lastError)")
+                }
+                if Date().timeIntervalSince(sessionSince) > waitCap {
+                    storeKitTrace("StoreKit lists no product at \(elapsed()) ms (\(loads) loads, last error \(lastError)); new session \(sessions + 1)")
+                    current = try await onSessionQueue("bring up a new test session", seconds: left()) {
+                        let session = try SKTestSession(contentsOf: url)
+                        StoreKitEnvironment.configure(session)
+                        return PurchaseTestStore(session)
+                    }
+                    sessions += 1
+                    sessionSince = Date()
                 }
                 try await Task.sleep(for: .milliseconds(500))
             }
+            if sessions > 1 { done.append("product with session \(sessions)") }
+            withExtendedLifetime(current) {}
             done.append("product \(elapsed()) ms")
             let lead = listenerLead - Date().timeIntervalSince(listening)
             if lead > 0 { try await Task.sleep(for: .seconds(lead)) }

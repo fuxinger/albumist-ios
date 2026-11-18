@@ -98,11 +98,17 @@ targets:
             ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
             LOG=$(mktemp)
             # The whole bundle; if a nested part refuses, at least the executable gets the id.
-            if codesign --force --deep --sign - --timestamp=none "$APP" 2> "$LOG" \
-              || codesign --force --sign - --timestamp=none --identifier "$ID" "$TEST_HOST" 2>> "$LOG"; then
-              echo "note: test host signed ad hoc for StoreKit testing: $(codesign -dv "$TEST_HOST" 2>&1 | grep '^Identifier=')"
+            codesign --force --deep --sign - --timestamp=none "$APP" 2> "$LOG" \
+              || codesign --force --sign - --timestamp=none --identifier "$ID" "$TEST_HOST" 2>> "$LOG"
+            # Checked, not assumed: with any other identifier StoreKit lists no product and every
+            # StoreKit test waits its whole budget for nothing (CI 44340950061 could not tell why,
+            # the result of this step was not in the job log). A wrong identifier stops the build.
+            SIGNED=$(codesign -dv "$TEST_HOST" 2>&1 | sed -n 's/^Identifier=//p')
+            if [ "$SIGNED" = "$ID" ]; then
+              echo "note: test host signed ad hoc for StoreKit testing: Identifier=$SIGNED"
             else
-              echo "warning: SortlyTests could not sign the test host for StoreKit testing: $(tr '\n' ' ' < "$LOG")"
+              echo "error: SortlyTests could not sign the test host for StoreKit testing: identifier '$SIGNED', expected '$ID'; $(tr '\n' ' ' < "$LOG")"
+              exit 1
             fi
           fi
     settings:

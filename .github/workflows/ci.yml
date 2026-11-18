@@ -167,8 +167,18 @@ jobs:
             COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1
           status=$?
-          grep -E "error:|warning: .*Sortly|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
+          grep -E "error:|warning: .*Sortly|test host signed ad hoc|STOREKIT|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
           exit $status
+      - name: StoreKit daemon log
+        # Only when the StoreKit test environment never came up: what the simulator's StoreKit
+        # daemon said meanwhile, so the cause is in the job log (the build log is an artifact).
+        if: failure() && hashFiles('build-log.txt') != ''
+        run: |
+          if grep -q "StoreKit test environment not" build-log.txt; then
+            xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log show --last 30m --style compact \
+              --predicate 'process == "storekitd" OR subsystem BEGINSWITH "com.apple.storekit" OR subsystem BEGINSWITH "com.apple.StoreKit"' \
+              2>&1 | tail -400 || true
+          fi
       - name: Build UI tests
         # The UI tests run in their own workflow (ui.yml); building them here finds a compile
         # error in them within this run instead of after the long simulator setup there.

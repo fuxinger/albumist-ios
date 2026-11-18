@@ -1047,10 +1047,13 @@ final class AppModel {
             } catch is CancellationError {
                 // Stopped on purpose ("Analyse neu aufbauen", a new scope): not an error to show
                 // (plugin review N3: "Swift.CancellationError error 1").
-            } catch is PhotosNotResponding {
+            } catch let quiet as PhotosNotResponding {
                 // Photos did not answer (app-speed): said on the card, not in an alert, and the
-                // run comes again by itself. Nothing of it counts as done.
-                photosRetryDue = true
+                // run comes again by itself. Nothing of it counts as done. A read that never
+                // began waited for Albumist's own work, not for Photos: not "Fotos antwortet
+                // gerade nicht"; the run goes on like after any other early end
+                // (`UnattendedRetry`, review of 045f297, S1).
+                photosRetryDue = !quiet.neverBegan
             } catch {
                 message = .failure(error.localizedDescription)
             }

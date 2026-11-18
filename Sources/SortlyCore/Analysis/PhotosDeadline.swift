@@ -21,7 +21,8 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
     /// The call never began: Albumist's own work kept every thread busy past the call's limit
     /// and grace, so it was given up before it reached Photos, and it never runs later. Nothing
     /// was asked of Photos and nothing hangs; trying again is safe (second review of 6c45378, P1).
-    /// Always with `notSent`.
+    /// Always with `notSent`. Only a call given up at its limit says this; a caller cancelled
+    /// before its call began gets `CancellationError` (that call never runs either).
     public var neverBegan: Bool
 
     public init(lane: PhotosDeadline.Lane, what: String, notSent: Bool, asksUser: Bool = false, neverBegan: Bool = false) {
@@ -30,6 +31,18 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
         self.notSent = notSent || neverBegan
         self.asksUser = asksUser
         self.neverBegan = neverBegan
+    }
+}
+
+extension PhotosNotResponding {
+    /// The same, reported by a library call after a change of that call had already been sent
+    /// (`PhotoKitLibrary.deleteCollections` reads back and may ask once more): the call as a
+    /// whole is a write whose outcome is not known, never "not sent", whatever the later call
+    /// was (a read-back that got no thread says nothing about the change before it; review of
+    /// 045f297, M2). The question iOS asks may only still be open if this was that change
+    /// itself, without an answer.
+    public var afterAChangeWasSent: PhotosNotResponding {
+        PhotosNotResponding(lane: .write, what: what, notSent: false, asksUser: lane == .write && !notSent && asksUser)
     }
 }
 
@@ -60,9 +73,10 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
 ///   so time the app did not run in never cuts a call off.
 /// - A call cancelled by its caller that began and has not returned counts as hanging the same
 ///   way; one that had not begun never runs.
-/// - `slowFor`: how long the oldest running call has gone without an answer (or a sign of
-///   progress), once that is `slowAfter` or more (a call still waiting for a thread waits for
-///   Albumist, not for Photos), for the honest "Fotos antwortet gerade nicht" on screen
+/// - `slowFor`: how long the oldest waiting call has gone without an answer (or a sign of
+///   progress), once that is `slowAfter` or more (a call handed to the pool that still waits
+///   for a thread waits for Albumist, not for Photos; one waiting for its lane waits for Photos
+///   and counts), for the honest "Fotos antwortet gerade nicht" on screen
 ///   while Albumist still waits (owner limit: nothing stands still for more than 10 s).
 public final class PhotosDeadline: @unchecked Sendable {
     public enum Lane: String, Sendable, Equatable {
@@ -85,6 +99,9 @@ public final class PhotosDeadline: @unchecked Sendable {
         private var last: ContinuousClock.Instant
         private var began = false
         private var stopped = false
+        /// Its task was handed to the pool (`run`): until it begins, it waits for a thread, that
+        /// is for Albumist's own work, not for Photos.
+        private var queued = false
 
         init(_ now: ContinuousClock.Instant) { last = now }
 
@@ -115,9 +132,13 @@ public final class PhotosDeadline: @unchecked Sendable {
             }
         }
 
-        var lastBeat: ContinuousClock.Instant { lock.withLock { last } }
-        /// The last beat, once the call has started running.
-        var quietSince: ContinuousClock.Instant? { lock.withLock { began ? last : nil } }
+        /// The call's task is handed to the pool.
+        func handedOver() { lock.withLock { queued = true } }
+
+        /// One look under one lock: the last beat, whether the call began running, and whether
+        /// its task was handed to the pool (review of 045f297, S2: two separate reads could see
+        /// a beat from before `begin` with "running").
+        var state: (last: ContinuousClock.Instant, began: Bool, queued: Bool) { lock.withLock { (last, began, queued) } }
     }
 
     /// How the watch goes on after one look at a call.
@@ -176,15 +197,20 @@ public final class PhotosDeadline: @unchecked Sendable {
     let grace: Duration
     /// Tests only: awaited by a call's task before it begins, to hold a call that has no thread.
     private let startGate: (@Sendable () async -> Void)?
+    /// Tests only: hears what `Heartbeat.begin` returned for each call's task, so a test knows
+    /// for certain that a call given up first did not run (instead of waiting a while).
+    private let begun: (@Sendable (Bool) -> Void)?
 
     public convenience init(slowAfter: Duration = .seconds(10)) {
         self.init(slowAfter: slowAfter, notBegunGrace: Self.notBegunGrace)
     }
 
-    init(slowAfter: Duration = .seconds(10), notBegunGrace: Duration, startGate: (@Sendable () async -> Void)? = nil) {
+    init(slowAfter: Duration = .seconds(10), notBegunGrace: Duration, startGate: (@Sendable () async -> Void)? = nil,
+         begun: (@Sendable (Bool) -> Void)? = nil) {
         self.slowAfter = slowAfter
         self.grace = notBegunGrace
         self.startGate = startGate
+        self.begun = begun
     }
 
     /// Calls of this kind that went past their limit and still have not returned.
@@ -197,14 +223,19 @@ public final class PhotosDeadline: @unchecked Sendable {
         for heartbeat in waiting { heartbeat.beat() }
     }
 
-    /// How long the oldest running call has gone without an answer or a beat, when that is
+    /// How long the oldest waiting call has gone without an answer or a beat, when that is
     /// `slowAfter` or more. Calls that wait for the user (`reportsSlow: false`) do not count, nor
-    /// do calls whose task has not begun.
+    /// do calls whose task was handed to the pool and has no thread yet. A call that waits for
+    /// its lane (an earlier one hangs) counts: it waits for Photos.
     public func slowFor(now: ContinuousClock.Instant = .now) -> Duration? {
         let longest = lock.withLock {
-            // Only calls that have begun: a call still waiting for a thread waits for Albumist's
-            // own work, not for Photos (second review of 6c45378, P2).
-            calls.values.filter(\.reportsSlow).compactMap(\.heartbeat.quietSince).map { now - $0 }.max()
+            calls.values.filter(\.reportsSlow).compactMap { call -> Duration? in
+                let state = call.heartbeat.state
+                // Waiting for a thread: for Albumist's own work, not for Photos (second review of
+                // 6c45378, P2). Not a call waiting for its lane (review of 045f297, M1).
+                if state.queued && !state.began { return nil }
+                return now - state.last
+            }.max()
         }
         guard let longest, longest >= slowAfter else { return nil }
         return longest
@@ -234,13 +265,17 @@ public final class PhotosDeadline: @unchecked Sendable {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
                 answer.set(continuation)
                 let gate = startGate
+                let begun = begun
                 // Not sent at all when the caller was cancelled before this point.
                 let started = answer.start {
-                    Task.detached(priority: priority) {
+                    heartbeat.handedOver()
+                    return Task.detached(priority: priority) {
                         if let gate { await gate() }
                         // Given up before it got a thread: never sent, never run (second review
                         // of 6c45378, P1). `giveUp` did not count it as hanging.
-                        guard heartbeat.begin() else { return }
+                        let running = heartbeat.begin()
+                        begun?(running)
+                        guard running else { return }
                         let result: Result<T, any Error>
                         do { result = .success(try await work(heartbeat)) } catch { result = .failure(error) }
                         self.returned(id, lane: lane, answer: answer, result: result)
@@ -269,7 +304,8 @@ public final class PhotosDeadline: @unchecked Sendable {
                           answer: Answer<T>, planned: ContinuousClock.Instant?, cameBack: Int) {
         guard !answer.isDone else { return }
         let now = ContinuousClock.now
-        let quiet = Self.quiet(now: now, lastBeat: heartbeat.lastBeat, running: heartbeat.quietSince != nil, grace: grace)
+        let state = heartbeat.state
+        let quiet = Self.quiet(now: now, lastBeat: state.last, running: state.began, grace: grace)
         let late = planned.map { max(.zero, now - $0) } ?? .zero
         let wait: Duration
         var inARow = 0

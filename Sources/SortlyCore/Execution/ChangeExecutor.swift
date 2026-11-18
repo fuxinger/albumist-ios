@@ -2,6 +2,11 @@ import Foundation
 
 /// The only write interface to the photo library. Implemented with PhotoKit in the app
 /// and in memory for tests. It has no method that could delete or alter original media.
+/// A write that Photos does not answer in time throws `PhotosNotResponding`. Its `notSent` (on
+/// the write lane) means that none of the call reached Photos: a call that makes several Photos
+/// calls and had already sent a change reports `notSent: false` for anything after it
+/// (`PhotosNotResponding.afterAChangeWasSent`), because the executor then leaves the step as it
+/// was and forgets what it wrote down for it (review of 045f297, M2).
 public protocol PhotoLibraryWriting: Sendable {
     func canWrite() async -> Bool
     func currentInventory() async throws -> CollectionInventory
@@ -425,14 +430,18 @@ public actor ChangeExecutor {
         }
     }
 
-    /// A write of a step: `sent` once it may have reached Photos (all but a request that was
-    /// never sent, `PhotosNotResponding.notSent`).
+    /// A write of a step: `sent` once it may have reached Photos (all but a change request
+    /// that was never sent: `PhotosNotResponding.notSent` on the write lane). A read-lane
+    /// `notSent` does not say that: the library call may have sent its change before that read
+    /// (a deletion's read-back), so it counts as sent, and the step stays running to be settled
+    /// from the library (review of 045f297, M2). The library reports `notSent` only when none
+    /// of the call reached Photos (`PhotoLibraryWriting`).
     private func sending<T>(_ sent: inout Bool, _ write: () async throws -> T) async throws -> T {
         do {
             let result = try await write()
             sent = true
             return result
-        } catch let quiet as PhotosNotResponding where quiet.notSent {
+        } catch let quiet as PhotosNotResponding where quiet.notSent && quiet.lane == .write {
             throw quiet
         } catch {
             sent = true

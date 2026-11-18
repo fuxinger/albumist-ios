@@ -9,10 +9,12 @@ extension PhotosNotResponding: @retroactive LocalizedError {
     public var errorDescription: String? {
         switch lane {
         case .write where neverBegan:
-            // Given up before it got a thread (Albumist's own work kept them all busy): Photos
-            // was never asked, nothing changed, nothing hangs. Trying again is safe; no restart
-            // needed (second review of 6c45378, P1).
-            String(localized: "Albumist war gerade zu beschäftigt und hat die Änderung nicht an Fotos geschickt. Geändert wurde nichts. Versuche es gleich noch einmal, bei einem Plan mit „Fortsetzen“ in der Übersicht.")
+            // Given up before it got a thread (Albumist's own work kept them all busy): this
+            // change was never sent, so it did not happen, and nothing hangs. Trying again is
+            // safe; no restart needed (second review of 6c45378, P1; wording: review of 045f297,
+            // S3). Only this change: a library call reports nothing as never begun once it sent
+            // one (`PhotosNotResponding.afterAChangeWasSent`).
+            String(localized: "Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie ist nicht passiert. Versuche es gleich noch einmal; bei einem Plan mit „Fortsetzen“ in der Übersicht.")
         case .write where notSent:
             // An earlier change still has no answer: nothing new was sent. Restarting, not
             // "Fortsetzen", is the way out when it lasts (second review of the PhotoKit limits, 11).
@@ -22,6 +24,10 @@ extension PhotosNotResponding: @retroactive LocalizedError {
             String(localized: "Die Rückfrage von iOS zum Löschen blieb ohne Antwort und ist vielleicht noch offen. Ob gelöscht wird, steht noch nicht fest. Sobald das geklärt ist, kannst du in der Übersicht fortsetzen.")
         case .write:
             String(localized: "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als zurückgenommen. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen.")
+        case .read where neverBegan, .image where neverBegan, .thumbnail where neverBegan:
+            // Given up before it got a thread: Photos was never asked, it is not Photos that is
+            // slow (review of 045f297, S1).
+            String(localized: "Albumist war gerade ausgelastet und hat Fotos noch nicht gefragt. Versuche es gleich noch einmal.")
         case .read, .image, .thumbnail:
             String(localized: "Fotos antwortet gerade nicht. Albumist versucht es gleich noch einmal.")
         }

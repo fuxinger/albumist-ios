@@ -105,9 +105,12 @@
 - Fotos-Grenzen: Eine Änderung, die Albumist aufgab, bevor sie überhaupt an Fotos ging (alle
   Threads mit der Analyse beschäftigt), lief später trotzdem noch und galt als hängend; die
   nächste Änderung wurde abgelehnt, mit dem Rat zum Neustart. Jetzt läuft sie nie, die Meldung
-  sagt „Albumist war gerade zu beschäftigt … Geändert wurde nichts“, und „Fortsetzen“ geht
-  sofort. „Fotos antwortet gerade nicht“ erscheint nicht mehr, nur weil Albumist selbst
-  ausgelastet ist.
+  sagt „Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie
+  ist nicht passiert“, und „Fortsetzen“ geht sofort. „Fotos antwortet gerade nicht“ erscheint
+  nicht mehr, nur weil Albumist selbst ausgelastet ist (wohl aber, solange ein Aufruf hinter
+  einem hängenden wartet); ein Lesen, das so nie begann, sagt das ebenso ehrlich. Ein Löschen
+  von Alben, das Fotos ausgeführt hat, bleibt auch dann aufgezeichnet (und Rückgängig kann es
+  zurückbringen), wenn das Nachlesen danach keine Antwort bekommt.
 ### Migrationen
 - v2: Spalte `asset_places.precision_m`.
 - v3: `text_plain` mit Zeilen-ID, damit der Volltextindex automatisch folgt.

@@ -51,6 +51,7 @@ struct LibraryView: View {
         }
         .background(Theme.background)
         .onAppear { model.showLibraryBuckets() }
+        .onDisappear { model.hideLibraryBuckets() }
         .navigationTitle("Mediathek")
         .toolbar {
             if bucket != .suggestions {

@@ -42,12 +42,12 @@ public struct RecountState: Codable, Equatable, Sendable {
     /// The hold after a newly derived status (`AppModel.assignDerived`).
     /// - `current`: the hold until now.
     /// - `shown`: the count on screen until now; held when a hold for the labels begins.
-    /// - `shownUntried`: the photos still waiting for their first look for labels when `shown`
-    ///   was counted (`DerivedLibraryStatus.labelsUntried`); `nil` before the first status.
+    /// - `shownLabels`: the photos waiting for labels when `shown` was counted
+    ///   (`LabelsWaiting`); `nil` before the first status.
     /// - `newSuggestions`: suggestions of a full run exist (not the early set of a first run).
     /// - `ended`: the last run's report while no run is busy; `nil` while one is, while the
     ///   analysis is being rebuilt, and before the first run after a launch.
-    public static func next(_ current: RecountState?, shown: OrganizationStatusResolver.Progress, shownUntried: Int?,
+    public static func next(_ current: RecountState?, shown: OrganizationStatusResolver.Progress, shownLabels: LabelsWaiting?,
                             derived: DerivedLibraryStatus, settings: OrganizationSettings, newSuggestions: Bool,
                             ended: AnalysisPipeline.Report?) -> RecountState? {
         let analysisDone = ended?.isComplete == true
@@ -67,26 +67,47 @@ public struct RecountState: Codable, Equatable, Sendable {
         // screen: while it does not, the ring shows its own (nothing shown yet after a launch:
         // the next status is compared).
         guard labelsPending, shown.total > 0, derived.progress.fully < shown.fully,
-              fallsForLabels(shown: shown, shownUntried: shownUntried, derived: derived) else { return nil }
+              fallsForLabels(shown: shown, shownLabels: shownLabels, derived: derived) else { return nil }
         return RecountState(fully: shown.fully, total: shown.total, labels: true)
+    }
+
+    /// The photos waiting for labels at one count: not looked at yet (`labelsUntried`), and all
+    /// still without them, those waiting for a retry included (`labelsMissing`).
+    public struct LabelsWaiting: Sendable, Equatable {
+        public var untried: Int
+        public var missing: Int
+
+        public init(untried: Int, missing: Int) {
+            self.untried = untried
+            self.missing = missing
+        }
+
+        public init(_ derived: DerivedLibraryStatus) {
+            self.init(untried: derived.labelsUntried, missing: derived.labelsMissing)
+        }
     }
 
     /// The fall from `shown` can come from the labels: photos were looked at for them since, and
     /// no more photos left "sortiert" than were looked at (a photo's labels move only that photo).
+    /// Looked at: fewer not looked at yet, or fewer without labels (a photo waiting for its retry
+    /// that got them now is no longer missing, though it was never "untried"; second review 3).
     /// A fall with nothing looked at, or a larger one, has another cause and is not held.
-    static func fallsForLabels(shown: OrganizationStatusResolver.Progress, shownUntried: Int?,
+    static func fallsForLabels(shown: OrganizationStatusResolver.Progress, shownLabels: LabelsWaiting?,
                                derived: DerivedLibraryStatus) -> Bool {
-        guard let shownUntried else { return false }
-        let lookedAt = shownUntried - derived.labelsUntried
+        guard let shownLabels else { return false }
+        let lookedAt = max(shownLabels.untried - derived.labelsUntried, shownLabels.missing - derived.labelsMissing)
         return lookedAt > 0 && shown.fully - derived.progress.fully <= lookedAt
     }
 
     /// Said once under the ring when the hold for the labels ended with a lower count than it
     /// held (app-speed 18.11.2026, open point A of the labels fix): "Neu gezählt: Zuvor waren es
-    /// 1.234 sortiert. Fotos mit Themen oder Dokumenten zählen jetzt erst als sortiert, wenn sie
-    /// auch in einem passenden Album sind." Without it the ring came back lower with no word,
-    /// which reads as a number going back. Kept until the user taps it away, the count is back
-    /// at the number held, or a hold begins again (it says its own words).
+    /// 1.234 sortiert. Die neue Zahl zählt alles, was sich seitdem geändert hat, etwa Fotos mit
+    /// Themen oder Dokumenten, die jetzt auch ein passendes Album brauchen." Without it the ring
+    /// came back lower with no word, which reads as a number going back. The words name the
+    /// labels only as an example: a fall from another cause can be held with them (a photo
+    /// ignored while the labels came in). Not when "Themen" and "Dokumente" no longer count
+    /// (the user changed the main areas; that ended the hold). Kept until the user taps it away,
+    /// the count is back at the number held, or a hold begins again (it says its own words).
     public struct LowerNote: Codable, Equatable, Sendable {
         /// The count the hold showed.
         public var held: Int
@@ -98,9 +119,11 @@ public struct RecountState: Codable, Equatable, Sendable {
         /// The note after a newly derived status: `before` and `after` are the hold until now
         /// and the one `RecountState.next` gave, `progress` the ring's own count now.
         public static func next(_ note: LowerNote?, before: RecountState?, after: RecountState?,
-                                progress: OrganizationStatusResolver.Progress) -> LowerNote? {
+                                progress: OrganizationStatusResolver.Progress, settings: OrganizationSettings) -> LowerNote? {
             if after != nil { return nil }
-            if let before, before.isForLabels, progress.fully < before.fully { return LowerNote(held: before.fully) }
+            let counted = settings.primaryAreas.intersection(settings.enabledAreas)
+            let labelsCount = counted.contains(.imageCategories) || counted.contains(.documents)
+            if let before, before.isForLabels, labelsCount, progress.fully < before.fully { return LowerNote(held: before.fully) }
             guard let note, progress.fully < note.held else { return nil }
             return note
         }

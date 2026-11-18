@@ -14,6 +14,10 @@ struct SortNewPhotosIntent: AppIntent {
         guard let model = await IntentData.readyModel() else {
             return .result(dialog: "Richte Albumist zuerst in der App ein.")
         }
+        // Paused by the user: the Pause stays until "Fortsetzen" in the app (AnalysisState.pausedByUser).
+        if model.analysis.isPausedByUser {
+            return .result(dialog: "Die Analyse ist pausiert. Tippe in Albumist auf „Fortsetzen“, damit sie weitergeht.")
+        }
         model.startAnalysis()
         return .result(dialog: "Albumist sucht nach neuen Fotos. Die Vorschläge findest du in der Übersicht.")
     }

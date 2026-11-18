@@ -42,15 +42,15 @@ struct LabelsHoldFollowUpTests {
         var hold: RecountState?
         var note: RecountState.LowerNote?
         var shown = OrganizationStatusResolver.Progress()
-        var shownUntried: Int?
+        var shownLabels: RecountState.LabelsWaiting?
         var seen: [Int] = []
         func assign(_ status: DerivedLibraryStatus, ended: AnalysisPipeline.Report?) {
-            let next = RecountState.next(hold, shown: shown, shownUntried: shownUntried, derived: status, settings: on,
+            let next = RecountState.next(hold, shown: shown, shownLabels: shownLabels, derived: status, settings: on,
                                          newSuggestions: true, ended: ended)
-            note = RecountState.LowerNote.next(note, before: hold, after: next, progress: status.progress)
+            note = RecountState.LowerNote.next(note, before: hold, after: next, progress: status.progress, settings: on)
             hold = next
             shown = status.progress
-            shownUntried = status.labelsUntried
+            shownLabels = RecountState.LabelsWaiting(status)
             seen.append(hold?.fully ?? status.progress.fully)
         }
 
@@ -104,17 +104,29 @@ struct LabelsHoldFollowUpTests {
             p.fully = fully
             return p
         }
+        var themen = LabelsLaterTests.settings(labels: true)
+        themen.primaryAreas = [.trips, .imageCategories]
+        func next(_ note: RecountState.LowerNote?, before: RecountState?, after: RecountState?, _ fully: Int,
+                  settings: OrganizationSettings = themen) -> RecountState.LowerNote? {
+            RecountState.LowerNote.next(note, before: before, after: after, progress: progress(fully), settings: settings)
+        }
         let labels = RecountState(fully: 80, total: 100, labels: true)
         let rebuild = RecountState(fully: 80, total: 100)
         let note = RecountState.LowerNote(held: 80)
-        #expect(RecountState.LowerNote.next(nil, before: labels, after: nil, progress: progress(70)) == note)
-        #expect(RecountState.LowerNote.next(nil, before: labels, after: nil, progress: progress(80)) == nil)
-        #expect(RecountState.LowerNote.next(nil, before: labels, after: labels, progress: progress(70)) == nil)
+        #expect(next(nil, before: labels, after: nil, 70) == note)
+        #expect(next(nil, before: labels, after: nil, 80) == nil)
+        #expect(next(nil, before: labels, after: labels, 70) == nil)
         // The rebuild's hold has its own words ("kommt mit den ersten Vorschlägen").
-        #expect(RecountState.LowerNote.next(nil, before: rebuild, after: nil, progress: progress(70)) == nil)
-        #expect(RecountState.LowerNote.next(note, before: nil, after: nil, progress: progress(75)) == note)
-        #expect(RecountState.LowerNote.next(note, before: nil, after: nil, progress: progress(81)) == nil)
-        #expect(RecountState.LowerNote.next(note, before: nil, after: rebuild, progress: progress(70)) == nil)
+        #expect(next(nil, before: rebuild, after: nil, 70) == nil)
+        #expect(next(note, before: nil, after: nil, 75) == note)
+        #expect(next(note, before: nil, after: nil, 81) == nil)
+        #expect(next(note, before: nil, after: rebuild, 70) == nil)
+        // "Themen" no longer a main area (or turned off): that ended the hold, the user's own
+        // change; no note that would name themes (second review 4).
+        var tripsOnly = themen
+        tripsOnly.primaryAreas = [.trips]
+        #expect(next(nil, before: labels, after: nil, 70, settings: tripsOnly) == nil)
+        #expect(next(nil, before: labels, after: nil, 70, settings: LabelsLaterTests.settings(labels: false)) == nil)
     }
 
     /// C: a run paused by the user, also when Pause came too late to stop it with work left,

@@ -63,40 +63,86 @@ public struct LibraryBuckets: Sendable, Equatable {
         return result
     }
 
-    /// The same areas after some photos changed their state (`old` to `new`), without making
-    /// them anew: the photos leave the areas they are no longer in and join the others at their
-    /// place in the order. Gives what `make` gives with the new states.
-    public func updating(_ ids: some Sequence<AssetID>, from old: [AssetID: AssetOrganizationState],
-                         to new: [AssetID: AssetOrganizationState], resolver: OrganizationStatusResolver) -> LibraryBuckets {
-        var result = self
+    /// The same areas after some photos changed their state to `new`, without making them
+    /// anew: each photo leaves the areas it is in now and joins the ones `new` puts it in, at its
+    /// place in the order. Where a photo is now is looked up in the areas themselves, not taken
+    /// from older states, so areas made from states a little older than the app's (a pass still
+    /// on its way) never keep a photo in two areas (second review of the app-speed branch, 5).
+    /// Gives what `make` gives with the new states for these photos.
+    ///
+    /// A few photos per area are moved by binary search; more are merged in one pass over the
+    /// area, so a large selection costs about one pass per area, not one per photo.
+    public func updating(_ ids: some Sequence<AssetID>, to new: [AssetID: AssetOrganizationState],
+                         resolver: OrganizationStatusResolver) -> LibraryBuckets {
         let all = self[.all]
-        var leaving: [InboxBucket: Set<AssetID>] = [:]
-        var joining: [InboxBucket: [Item]] = [:]
-        for id in Set(ids) {
+        var belongs: [AssetID: Set<InboxBucket>] = [:]
+        for id in ids {
             guard let position = rank[id], position < all.count else { continue }
-            let was = Self.buckets(old[id], resolver), now = Self.buckets(new[id], resolver)
-            guard was != now else { continue }
-            for bucket in was.subtracting(now) { leaving[bucket, default: []].insert(id) }
-            for bucket in now.subtracting(was) { joining[bucket, default: []].append(all[position]) }
+            belongs[id] = Self.buckets(new[id], resolver)
         }
-        for (bucket, ids) in leaving {
-            result.members[bucket]?.removeAll { ids.contains($0.id) }
-        }
-        for (bucket, items) in joining {
-            var list = result.members[bucket] ?? []
-            for item in items.sorted(by: { (rank[$0.id] ?? .max) < (rank[$1.id] ?? .max) }) {
-                let place = rank[item.id] ?? .max
-                // First member that comes after the photo in the order of all photos.
-                var low = 0, high = list.count
-                while low < high {
-                    let mid = (low + high) / 2
-                    if (rank[list[mid].id] ?? .max) < place { low = mid + 1 } else { high = mid }
-                }
-                list.insert(item, at: low)
+        guard !belongs.isEmpty else { return self }
+        let moved = belongs.keys.sorted { rank[$0]! < rank[$1]! }
+        var result = self
+        for bucket in InboxBucket.allCases where bucket != .all {
+            let list = self[bucket]
+            var leaving: Set<AssetID> = []
+            var joining: [Item] = []
+            for id in moved {
+                let isIn = index(of: id, in: list) != nil
+                let goes = belongs[id]!.contains(bucket)
+                if isIn && !goes { leaving.insert(id) }
+                if !isIn && goes { joining.append(all[rank[id]!]) }
             }
-            result.members[bucket] = list
+            guard !leaving.isEmpty || !joining.isEmpty else { continue }
+            result.members[bucket] = leaving.count + joining.count <= Self.fewMoves
+                ? moving(leaving, joining, in: list)
+                : merging(leaving, joining, into: list)
         }
         return result
+    }
+
+    /// Up to this many photos per area are moved one by one.
+    static let fewMoves = 16
+
+    /// Where the photo is in an area, by binary search on its place among all photos.
+    private func index(of id: AssetID, in list: [Item]) -> Int? {
+        guard let place = rank[id] else { return nil }
+        let i = firstIndex(atOrAfter: place, in: list)
+        return i < list.count && list[i].id == id ? i : nil
+    }
+
+    /// The first member at or after `place` in the order of all photos.
+    private func firstIndex(atOrAfter place: Int, in list: [Item]) -> Int {
+        var low = 0, high = list.count
+        while low < high {
+            let mid = (low + high) / 2
+            if (rank[list[mid].id] ?? .max) < place { low = mid + 1 } else { high = mid }
+        }
+        return low
+    }
+
+    private func moving(_ leaving: Set<AssetID>, _ joining: [Item], in list: [Item]) -> [Item] {
+        var list = list
+        for id in leaving { if let i = index(of: id, in: list) { list.remove(at: i) } }
+        for item in joining { list.insert(item, at: firstIndex(atOrAfter: rank[item.id] ?? .max, in: list)) }
+        return list
+    }
+
+    /// `joining` in the order of all photos.
+    private func merging(_ leaving: Set<AssetID>, _ joining: [Item], into list: [Item]) -> [Item] {
+        var merged: [Item] = []
+        merged.reserveCapacity(list.count + joining.count)
+        var next = 0
+        for item in list where !leaving.contains(item.id) {
+            let place = rank[item.id] ?? .max
+            while next < joining.count, (rank[joining[next].id] ?? .max) < place {
+                merged.append(joining[next])
+                next += 1
+            }
+            merged.append(item)
+        }
+        merged.append(contentsOf: joining[next...])
+        return merged
     }
 
     /// Same photos in the same areas in the same order (an area without photos is empty either way).

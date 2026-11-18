@@ -154,7 +154,7 @@ struct OverviewView: View {
                             // The hold for the labels ended lower than it held
                             // (`RecountState.LowerNote`): said once, so the lower number is not
                             // read as one going back.
-                            Text("Neu gezählt: Zuvor waren es \(note.held.formatted()) sortiert. Fotos mit Themen oder Dokumenten zählen jetzt erst als sortiert, wenn sie auch in einem passenden Album sind.")
+                            Text("Neu gezählt: Zuvor waren es \(note.held.formatted()) sortiert. Die neue Zahl zählt alles, was sich seitdem geändert hat, etwa Fotos mit Themen oder Dokumenten, die jetzt auch ein passendes Album brauchen.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()

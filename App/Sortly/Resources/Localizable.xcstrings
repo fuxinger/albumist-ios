@@ -12163,12 +12163,12 @@
         }
       }
     },
-    "Neu gezählt: Zuvor waren es %@ sortiert. Fotos mit Themen oder Dokumenten zählen jetzt erst als sortiert, wenn sie auch in einem passenden Album sind." : {
+    "Neu gezählt: Zuvor waren es %@ sortiert. Die neue Zahl zählt alles, was sich seitdem geändert hat, etwa Fotos mit Themen oder Dokumenten, die jetzt auch ein passendes Album brauchen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Recounted: before, %@ were sorted. Photos with themes or documents now count as sorted only once they are in a matching album too."
+            "value" : "Recounted: before, %@ were sorted. The new number takes in everything that changed since, for example photos with themes or documents that now need a matching album too."
           }
         }
       }
@@ -12179,6 +12179,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hide the note about the new number"
+          }
+        }
+      }
+    },
+    "Die Analyse ist pausiert. Tippe in Albumist auf „Fortsetzen“, damit sie weitergeht." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The analysis is paused. Tap “Resume” in Albumist to continue."
           }
         }
       }

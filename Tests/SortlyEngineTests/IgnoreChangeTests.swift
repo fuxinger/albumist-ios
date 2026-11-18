@@ -134,6 +134,33 @@ struct IgnoreChangeTests {
     }
 
     /// The store did not take the tap: the next count shows the photos as they are.
+    /// "Ignorieren", stored; then "Widerrufen" still being written, while one recount runs for
+    /// both (the app counts once the writes are done, not after each, second review 1). A count
+    /// that read only the first tap shows the photos as not ignored all the same, and the count
+    /// after the second write ends both.
+    @Test func countWithTheFirstTapOnlyKeepsTheSecond() async throws {
+        let lib = try await library()
+        let picked = picks(lib, lib.count([]))
+        let notIgnored = IgnoreChange.Shown(lib.count([]))
+        var shown = notIgnored
+        var changes = IgnoreChange()
+        let first = changes.record(picked, ignore: true, in: &shown)
+        changes.stored(first, nextCall: 3)
+        let second = changes.record(picked, ignore: false, in: &shown)
+        #expect(shown == notIgnored)
+        // Count 3 read the ignore but not the undo, which is still on its way.
+        var three = IgnoreChange.Shown(lib.count(ignore(picked)))
+        changes.settle(&three, call: 3)
+        #expect(three == notIgnored)
+        #expect(changes.pending == 1)
+        // The undo is stored; the count after it ends it.
+        changes.stored(second, nextCall: 4)
+        var four = IgnoreChange.Shown(lib.count([]))
+        changes.settle(&four, call: 4)
+        #expect(four == notIgnored)
+        #expect(changes.pending == 0)
+    }
+
     @Test func failedWriteIsNotLaidOverTheCount() async throws {
         let lib = try await library()
         let picked = picks(lib, lib.count([]))

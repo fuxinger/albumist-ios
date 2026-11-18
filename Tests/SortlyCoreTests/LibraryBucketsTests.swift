@@ -72,10 +72,45 @@ struct LibraryBucketsTests {
         }
         // Ids that do not change, or are no photo at all, change nothing.
         changed += [facts[0].id, "no-such-photo"]
-        let updated = buckets.updating(changed, from: old, to: new, resolver: Self.resolver)
+        let updated = buckets.updating(changed, to: new, resolver: Self.resolver)
         #expect(updated == LibraryBuckets.make(facts: facts, states: new, resolver: Self.resolver))
         #expect(updated != buckets)
-        #expect(buckets.updating([], from: old, to: new, resolver: Self.resolver) == buckets)
+        #expect(buckets.updating([], to: new, resolver: Self.resolver) == buckets)
+    }
+
+    /// A tap or two move by binary search (the many-photo test above merges): the same result.
+    @Test func aFewPhotosMovedOneByOneGiveWhatANewPassGives() throws {
+        let facts = SearchPerformanceTests.library(count: 1_000)
+        let old = Self.states(for: facts)
+        let buckets = try #require(LibraryBuckets.make(facts: facts, states: old, resolver: Self.resolver))
+        var new = old
+        let tapped = [facts[10].id, facts[500].id, facts[999].id]
+        for id in tapped {
+            let ignored = new[id]?.areas.values.contains(.ignored) ?? false
+            new[id] = AssetOrganizationState(assetID: id, areas: [.places: ignored ? .organized : .ignored, .trips: ignored ? .proposed : .ignored])
+        }
+        #expect(buckets.updating(tapped, to: new, resolver: Self.resolver) == LibraryBuckets.make(facts: facts, states: new, resolver: Self.resolver))
+    }
+
+    /// Areas made from states older than the app's (a pass still on its way when the photo was
+    /// tapped): the photo leaves the area it is really in, never stays in two (second review 5).
+    @Test func areasFromOlderStatesNeverKeepAPhotoTwice() throws {
+        let facts = SearchPerformanceTests.library(count: 500)
+        let id = facts[42].id
+        var made = Self.states(for: facts)
+        made[id] = AssetOrganizationState(assetID: id, areas: [.places: .organized, .trips: .organized])
+        let buckets = try #require(LibraryBuckets.make(facts: facts, states: made, resolver: Self.resolver))
+        // Meanwhile the count put the photo among the unsorted ones; the areas do not know yet.
+        var newer = made
+        newer[id] = AssetOrganizationState(assetID: id, areas: [.places: .unorganized, .trips: .unorganized])
+        // Then it is ignored.
+        var tapped = newer
+        tapped[id] = AssetOrganizationState(assetID: id, areas: [.places: .ignored, .trips: .ignored])
+        let updated = buckets.updating([id], to: tapped, resolver: Self.resolver)
+        let expected = Self.resolver.buckets(tapped[id]!)
+        for bucket in InboxBucket.allCases {
+            #expect(updated[bucket].contains { $0.id == id } == expected.contains(bucket), "\(bucket)")
+        }
     }
 
     @Test func stopsEarlyWhenNewerInputIsOnItsWay() {
@@ -102,7 +137,7 @@ struct LibraryBucketsTests {
         var new = states
         for id in tapped { new[id]?.areas = states[id]!.areas.mapValues { _ in .ignored } }
         var updated = made
-        let tap = clock.measure { updated = made.updating(tapped, from: states, to: new, resolver: Self.resolver) }
+        let tap = clock.measure { updated = made.updating(tapped, to: new, resolver: Self.resolver) }
         // The former code on the main thread, for one area (it ran for each area shown).
         let former = clock.measure { _ = Self.before(.unorganized, facts: facts, states: states) }
         print("LIBRARY_BUCKETS 50000 make \(make) (all areas, off the main thread), ignore tap \(tap); before: \(former) for one area on the main thread")

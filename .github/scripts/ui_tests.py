@@ -53,12 +53,14 @@ A crash of XCTest's daemon testmanagerd during a test ("Critical process testman
 the app lost with it; `daemon_crash`) also counts as such a failure: the failure lines it caused
 are taken out, anything else still counts, and the tests that did not pass are repeated. That
 goes beyond "a simulator failure before the first test": a test that had already started is
-run again (decision of 19.11., for the owner to confirm; docs/TESTFLIGHT.md). It is counted
+run again (decision of 18.11.2026, for the owner to confirm; docs/TESTFLIGHT.md). It is counted
 (FLAKY_RETRY with the reason, also "app lost + daemon crash in <test>" when the app was lost in
 that test without a crash report), and if the daemon crashes again in the same test in the
 repeat, the group is red (likely app-caused, e.g. a huge accessibility tree).
 A pass still running at --deadline (the job's time limit minus a margin, ui.yml) is stopped:
-a hang, red, never repeated (UI_HANG). While a pass runs, failed test cases and ": error: -["
+with a test still running a hang, red, never repeated (UI_HANG); with none running (between
+tests, before the first) a deadline line that counts as infrastructure (UI_DEADLINE). A repeat
+is not started with less than 30 min left (10 min after the erase): then no result. While a pass runs, failed test cases and ": error: -["
 lines are echoed into the job log at once (UI_LIVE), so a cancel after a failure stays red.
 A watchdog (class Watchdog) stops a pass early when the simulator leaves "Booted" before
 the first test started (two checks 20 s apart); the UI_WATCHDOG line it leaves in the log is
@@ -120,6 +122,9 @@ INFRA = [
     # Written by this script's watchdog (run_pass): the simulator left "Booted" before the first
     # test started, so the pass was stopped instead of waiting for xcodebuild to notice.
     (re.compile(r"^UI_WATCHDOG simulator \S+ left Booted"), "simulator shut down before the tests (watchdog)"),
+    # Written by run_pass: the deadline came while no test was running (between tests, before
+    # the first one, xcodebuild winding up): the time ran out, not a test.
+    (re.compile(r"^UI_DEADLINE\b"), "pass stopped at the job's deadline with no test running"),
 ]
 
 # Anything here is about the app or the tests: never repeated. Matched per line, on lines
@@ -136,8 +141,8 @@ REAL = [
     (re.compile(r"\bCrash:"), "a crash"),
     (re.compile(r"\bcrashed\b", re.I), "something crashed"),
     (re.compile(r"execution time allowance"), "a test ran out of time"),
-    # Written by run_pass when a pass did not end before the job's deadline (--deadline): a hang
-    # is a finding (the app or a test never got done), never repeated.
+    # Written by run_pass when a test was still running at the job's deadline (--deadline): a
+    # hang is a finding (the app or a test never got done), never repeated.
     (re.compile(r"^UI_HANG\b"), "hang: the pass did not end before the job's deadline"),
     (re.compile(r"\*\* (?:TEST )?BUILD FAILED \*\*"), "build failed"),
 ]
@@ -179,6 +184,11 @@ STARTED = re.compile(r"Test Case '-\[\w+\.\w+ \w+\]' started")
 # test result (exit NO_TEST_EXIT): the workflow fails the job in a step of its own, and
 # ui_evidence.py counts it neither green nor red.
 NO_TEST_RESULT = "no-test-result"
+# A repeat needs an erase and boot (up to ~25 min seen) and its tests: not started with less than
+# this left before --deadline, nor after an erase that left less than RETRY_AFTER_RESET. The
+# group then has no result (exit NO_TEST_EXIT) instead of a repeat cut off as a hang.
+RETRY_BEFORE_RESET = 30 * 60
+RETRY_AFTER_RESET = 10 * 60
 NO_TEST_EXIT = 75
 PASSED = ("Passed", "Skipped", "Expected Failure")
 
@@ -900,10 +910,15 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         watchdog.stop()
         watchdog.join(timeout=90)
     if hung:
+        with open(log_path, encoding="utf-8", errors="replace") as log:
+            test = running_test(log.read())
         with open(log_path, "a") as log:
-            log.write(f"\nUI_HANG pass {label} still running at the job's deadline; xcodebuild stopped\n")
-        print(f"::error title=UI {args.name}::The {label} pass did not end before the job's deadline "
-              "(a hang); stopped.", flush=True)
+            if test:
+                log.write(f"\nUI_HANG pass {label}: {test} still running at the job's deadline; xcodebuild stopped\n")
+            else:
+                log.write(f"\nUI_DEADLINE pass {label} stopped at the job's deadline with no test running\n")
+        print(f"::error title=UI {args.name}::The {label} pass did not end before the job's deadline"
+              + (f" ({test} hangs); stopped." if test else "; no test was running, stopped."), flush=True)
         status = status or 1
     if watchdog.fired:
         with open(log_path, "a") as log:
@@ -919,6 +934,21 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     with open(log_path, encoding="utf-8", errors="replace") as log:
         text = log.read()
     return status, text, result, started, bool(watchdog.fired)
+
+
+RUNNING = re.compile(r"Test Case '-\[\w+\.(\w+) (\w+)\]' (started|passed|failed|skipped)")
+
+
+def running_test(log: str) -> str | None:
+    """"Class/test" of a test case that started and has no passed/failed/skipped line yet."""
+    open_tests: list[str] = []
+    for match in RUNNING.finditer(log):
+        name = f"{match.group(1)}/{match.group(2)}"
+        if match.group(3) == "started":
+            open_tests.append(name)
+        elif name in open_tests:
+            open_tests.remove(name)
+    return open_tests[-1] if open_tests else None
 
 
 def wait_until(process, deadline: float, grace: float = 30) -> tuple[int, bool]:
@@ -994,7 +1024,19 @@ def command_run(args) -> int:
         else:
             print(f"::warning title=UI {args.name}::The simulator failed ({'; '.join(reasons)}); no test found a problem. "
                   "The tests that did not pass run once more on an erased simulator.")
-            if reset(args.udid, args.reduce_motion, args.increase_contrast):
+            deadline = getattr(args, "deadline", 0) or 0
+            if deadline and deadline - time.time() < RETRY_BEFORE_RESET:
+                print(f"UI_VERDICT retry skipped: {max(0, deadline - time.time()) / 60:.0f} min left before the job's "
+                      "deadline, too little for an erase and a repeat")
+                retry_result = "not started (too little time before the deadline)"
+            elif not reset(args.udid, args.reduce_motion, args.increase_contrast):
+                print("UI_VERDICT retry impossible: the simulator did not come back after the erase")
+                retry_result = "not started (simulator did not come back)"
+            elif deadline and deadline - time.time() < RETRY_AFTER_RESET:
+                print(f"UI_VERDICT retry skipped: the erase took until {max(0, deadline - time.time()) / 60:.0f} min "
+                      "before the job's deadline")
+                retry_result = "not started (too little time before the deadline)"
+            else:
                 status, text, bundle_path, started, stopped = run_pass(args, "retry", retry, build=False)
                 report(text, status, "retry")
                 crashes = crash_reports(started) if status else []
@@ -1013,9 +1055,6 @@ def command_run(args) -> int:
                 print_crash_reports(crashes + other_crash_reports(started) if status else [], "retry")
                 passes.append(("retry", 0 if final == "pass" else (status or 1), final, reasons, text))
                 retry_log, retry_result = text, final
-            else:
-                print("UI_VERDICT retry impossible: the simulator did not come back after the erase")
-                retry_result = "not started (simulator did not come back)"
         if retry is None:
             retry_reasons = []
     record = flaky_record(args.name, first_log, retry_reasons, retry_log, retry_result, boot_retries(args.out))

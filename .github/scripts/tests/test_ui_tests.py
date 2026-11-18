@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -397,7 +398,7 @@ class SelectionTests(unittest.TestCase):
             "AccessibilityUITests/test4_Landscape": "passed",
         })
 
-    def run_with_passes(self, logs, reset_ok=True):
+    def run_with_passes(self, logs, reset_ok=True, deadline=0):
         """command_run with faked passes (status 65 unless the log says otherwise)."""
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -416,7 +417,7 @@ class SelectionTests(unittest.TestCase):
         try:
             args = argparse.Namespace(
                 out=folder.name, only=[], skip=[], increase_contrast=False, reduce_motion=False, video=None,
-                a11y_summary=False, name="device", udid="X")
+                a11y_summary=False, name="device", udid="X", deadline=deadline)
             with contextlib.redirect_stdout(io.StringIO()) as log:
                 code = ui_tests.command_run(args)
         finally:
@@ -471,11 +472,24 @@ class SelectionTests(unittest.TestCase):
         self.assertLess(time.time() - started, 10)
         quick = subprocess.Popen(["true"])
         self.assertEqual(ui_tests.wait_until(quick, time.time() + 30), (0, False))
-        # The line run_pass writes: a finding, never repeated.
-        verdict, reasons = ui_tests.decide(1, "Test Case '-[SortlyUITests.A t]' started.\n"
-                                              "UI_HANG pass first still running at the job's deadline; xcodebuild stopped\n")
+        # The lines run_pass writes: with a test still running a hang, a finding, never repeated;
+        # with none running the time ran out (infrastructure).
+        log = ("Test Case '-[SortlyUITests.A t1]' started.\nTest Case '-[SortlyUITests.A t1]' passed (1.0 seconds).\n"
+               "Test Case '-[SortlyUITests.A t2]' started.\n")
+        self.assertEqual(ui_tests.running_test(log), "A/t2")
+        self.assertIsNone(ui_tests.running_test(log + "Test Case '-[SortlyUITests.A t2]' failed (9.0 seconds).\n"))
+        verdict, reasons = ui_tests.decide(1, log + "UI_HANG pass first: A/t2 still running at the job's deadline; "
+                                                    "xcodebuild stopped\n")
         self.assertEqual(verdict, "fail")
         self.assertIn("hang: the pass did not end before the job's deadline", reasons)
+        idle = log.rsplit("Test Case", 1)[0] + "UI_DEADLINE pass first stopped at the job's deadline with no test running\n"
+        self.assertEqual(ui_tests.decide(1, idle), ("retry", ["pass stopped at the job's deadline with no test running"]))
+        # No repeat this close to the deadline: no result rather than a repeat cut off as a hang.
+        code, marker, out = self.run_with_passes([idle], deadline=time.time() + 20 * 60)
+        self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True))
+        self.assertIn("UI_VERDICT retry skipped", out)
+        self.assertEqual(self.run_with_passes([idle, "** TEST SUCCEEDED **\n" + PASSED_ONE],
+                                              deadline=time.time() + 60 * 60)[:2], (0, False))
 
     def test_failures_are_echoed_while_the_pass_runs(self):
         folder = tempfile.TemporaryDirectory()

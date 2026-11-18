@@ -180,6 +180,11 @@ struct ProposalDetailView: View {
     /// Set when the trip was split or merged: this suggestion is gone, back to the list.
     @State private var reshaped = false
     @State private var confirmOftenHere = false
+    /// The keyboard is in the name field; "Namen eingeben" puts it there.
+    @FocusState private var nameFocused: Bool
+    /// VoiceOver goes along to the name field.
+    @AccessibilityFocusState private var nameFieldVoiceOverFocus: Bool
+    @Environment(\.colorSchemeContrast) private var contrast
 
     /// Only trips get a creative name; places and dates keep their exact titles.
     private var canSuggestTitle: Bool {
@@ -257,33 +262,31 @@ struct ProposalDetailView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .presentationCompactAdaptation(.popover)
                     }
-                    if proposal.requiresUserName {
-                        TextField(proposal.title, text: $name)
-                            .font(.title2.weight(.bold))
-                            .textFieldStyle(.roundedBorder)
-                            .disabled(preparing)
-                        Text("Gib diesem Ort oder dieser Gruppe einen Namen. Albumist benennt persönliche Orte nie selbst.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    } else {
-                        Text(model.userTitles[proposal.id] ?? proposal.title).font(.title2.weight(.bold))
-                        if canSuggestTitle {
-                            Button {
-                                Task { await suggestTitle() }
-                            } label: {
-                                if suggesting {
-                                    ProgressView().controlSize(.small)
-                                        .accessibilityLabel(Text("Name wird vorgeschlagen"))
-                                } else {
-                                    Label("Namen vorschlagen", systemImage: "apple.intelligence")
-                                }
+                    // A place only the user can name keeps its own title ("Häufiger Ort in
+                    // Zwiesel") like every other suggestion; its name goes in the field below.
+                    Text(proposal.requiresUserName ? proposal.title : (model.userTitles[proposal.id] ?? proposal.title))
+                        .font(.title2.weight(.bold))
+                    if canSuggestTitle {
+                        Button {
+                            Task { await suggestTitle() }
+                        } label: {
+                            if suggesting {
+                                ProgressView().controlSize(.small)
+                                    .accessibilityLabel(Text("Name wird vorgeschlagen"))
+                            } else {
+                                Label("Namen vorschlagen", systemImage: "apple.intelligence")
                             }
-                            .font(.subheadline.weight(.semibold))
-                            .disabled(suggesting || preparing)
                         }
+                        .font(.subheadline.weight(.semibold))
+                        .disabled(suggesting || preparing)
                     }
                     ForEach(Array(proposal.reasons.enumerated()), id: \.offset) { _, reason in
                         Text(ReasonText.text(reason)).font(.subheadline).foregroundStyle(Theme.secondaryText) // below the photo glow, on the plain background
                     }
+                }
+
+                if proposal.requiresUserName {
+                    nameSection
                 }
 
                 // Asked once per place, before the user decides on the album: the answer may
@@ -348,18 +351,23 @@ struct ProposalDetailView: View {
             }
             .padding(Theme.Spacing.l)
         }
+        // Dragging the page down puts the name field's keyboard away, as in Apple's apps.
+        .scrollDismissesKeyboard(.interactively)
         // Each suggestion gets its own soft colours from its cover photo: behind the photos above.
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle("Vorschlag")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            name = model.userTitles[proposal.id] ?? ""
+            // A name given before is where the field starts. A name typed here stays while
+            // another screen was on top (all photos, the preview): it was wiped on the way back.
+            if name.isEmpty { name = model.userTitles[proposal.id] ?? "" }
             showWaiting()
         }
         // The tab shows again (`Navigator.appearances`): a result that waited is offered now.
         .onChange(of: navigator?.appearances) { showWaiting() }
         .sheet(isPresented: $showAdjust) {
-            NavigationRoot { AdjustProposalView(proposal: proposal) }
+            // A place only the user can name: "Titel" in "Anpassen" is this name field.
+            NavigationRoot { AdjustProposalView(proposal: proposal, name: proposal.requiresUserName ? $name : nil) }
                 .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showWorkshop, onDismiss: { if reshaped { dismiss() } }) {
@@ -376,6 +384,68 @@ struct ProposalDetailView: View {
             // Back from the finished preview: the suggestion is done, return to the list.
             if applied { dismiss() }
         }
+    }
+
+    /// The name of a place or group only the user can name, as a section of the system's
+    /// grouped forms: a header, the field filled like a list row, a footer. The field with
+    /// `.roundedBorder` and the place's title as its grey prompt read as a title, and its edge
+    /// all but vanished in dark mode (owner's device test 18.11.: nobody saw where the name
+    /// goes). Grows with the text size; no fixed height.
+    private var nameSection: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+        return VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Name für das Album")
+                .font(.footnote)
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, Theme.Spacing.l)
+                // The field carries the same words as its label; VoiceOver says them once.
+                .accessibilityHidden(true)
+            TextField("Name für das Album", text: $name, prompt: nameExamples)
+                .font(.body)
+                .textInputAutocapitalization(.words)
+                // Return only closes the keyboard: an album is made by the button alone.
+                .submitLabel(.done)
+                .onSubmit { nameFocused = false }
+                .focused($nameFocused)
+                .accessibilityFocused($nameFieldVoiceOverFocus)
+                .accessibilityLabel(Text("Name für das Album"))
+                .accessibilityIdentifier("proposal.nameField")
+                .disabled(preparing)
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.vertical, Theme.Spacing.m)
+                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                .background {
+                    // A tap anywhere on the row puts the keyboard in the field, not only on its line.
+                    shape.fill(Theme.card)
+                        .onTapGesture { if !preparing { nameFocused = true } }
+                        .accessibilityHidden(true)
+                }
+                // With Increase Contrast the row gets an edge, like `Card`.
+                .overlay {
+                    if contrast == .increased {
+                        shape.strokeBorder(Color(uiColor: .separator), lineWidth: 1)
+                            .allowsHitTesting(false)
+                    }
+                }
+            nameFootnote
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Theme.Spacing.l)
+        }
+        .padding(.top, Theme.Spacing.s)
+    }
+
+    /// Examples in the empty field that fit what is named: a place, or a person or an animal.
+    private var nameExamples: Text {
+        proposal.kind == .personOrPet ? Text("z. B. Oma, Bello, Minka") : Text("z. B. Bei Oma, Garten, Ferienhaus")
+    }
+
+    private var nameFootnote: Text {
+        proposal.kind == .personOrPet
+            ? Text("Albumist benennt Personen und Tiere nie selbst.")
+            : Text("Albumist benennt persönliche Orte nie selbst.")
     }
 
     /// "Bist du hier öfter?": the user's answer is the only thing that says what a place is
@@ -493,8 +563,16 @@ struct ProposalDetailView: View {
 
     /// Several albums fit (or none clearly): the user picks one, Albumist does not guess.
     private var needsChoice: Bool {
-        if case .undecided = recommended { return !proposal.requiresUserName }
+        if case .undecided = recommended { return !needsName }
         return false
+    }
+
+    /// A place or group only the user can name has no name yet: the primary button leads to
+    /// the name field instead of waiting disabled ("Erst einen Namen eingeben" did not say
+    /// where the name goes). With a name it is decided like any other suggestion.
+    private var needsName: Bool {
+        guard case .undecided = recommended, proposal.requiresUserName else { return false }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// "Albumist legt ein neues Album an" is not true any more once the user picked the
@@ -522,7 +600,11 @@ struct ProposalDetailView: View {
     private var actions: some View {
         VStack(spacing: Theme.Spacing.s) {
             Button {
-                if needsChoice {
+                if needsName {
+                    // Opens the keyboard in the name field; nothing is chosen or created.
+                    nameFocused = true
+                    nameFieldVoiceOverFocus = true
+                } else if needsChoice {
                     showAdjust = true
                 } else {
                     Task { await applyNow() }
@@ -536,7 +618,7 @@ struct ProposalDetailView: View {
                 }
             }
             .buttonStyle(PrimaryButtonStyle())
-            .disabled((!recommended.isAccepted && !needsChoice) || preparing)
+            .disabled((!recommended.isAccepted && !needsChoice && !needsName) || preparing)
 
             HStack(spacing: Theme.Spacing.s) {
                 Button("Anpassen") { showAdjust = true }.buttonStyle(SecondaryButtonStyle())
@@ -702,7 +784,7 @@ struct ProposalDetailView: View {
                 "Album ergänzen"
             }
         case .createNew: "Album anlegen"
-        case .undecided: proposal.requiresUserName ? "Erst einen Namen eingeben" : "Album auswählen"
+        case .undecided: needsName ? "Namen eingeben" : "Album auswählen"
         default: "Auswählen"
         }
     }
@@ -713,7 +795,15 @@ struct AdjustProposalView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     var proposal: AlbumProposal
-    @State private var title = ""
+    /// For a place or group only the user can name: the suggestion's own name field. "Titel"
+    /// is the same text, so a name typed there is here, and a name changed here is there after
+    /// closing, also with "Abbrechen" (owner's device test 18.11.: "Dahoam" typed in the
+    /// suggestion, "Titel" here was empty). Nothing is stored before an album is chosen.
+    var name: Binding<String>? = nil
+    @State private var ownTitle = ""
+
+    /// The text of "Titel".
+    private var title: Binding<String> { name ?? $ownTitle }
 
     private var candidates: [MatchCandidate] {
         guard let match = model.match(for: proposal) else { return [] }
@@ -724,14 +814,16 @@ struct AdjustProposalView: View {
         Form {
             // Choosing only selects; nothing is created here (design review W3).
             Section {
-                TextField("Titel", text: $title)
+                TextField("Titel", text: title)
+                    .textInputAutocapitalization(proposal.requiresUserName ? .words : nil)
+                    .accessibilityIdentifier("adjust.titleField")
                 Button("Neues Album wählen") {
-                    let trimmed = title.trimmingCharacters(in: .whitespaces)
+                    let trimmed = title.wrappedValue.trimmingCharacters(in: .whitespaces)
                     if !trimmed.isEmpty { model.setUserTitle(trimmed, for: proposal) }
                     model.setDecision(.createNew(title: trimmed.isEmpty ? nil : trimmed, folderPath: nil), for: proposal)
                     dismiss()
                 }
-                .disabled(proposal.requiresUserName && title.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(proposal.requiresUserName && title.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
             } header: {
                 Text("Neues Album")
             } footer: {
@@ -765,7 +857,10 @@ struct AdjustProposalView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
         }
-        .onAppear { title = model.userTitles[proposal.id] ?? (proposal.requiresUserName ? "" : proposal.title) }
+        .onAppear {
+            // With the suggestion's name field, "Titel" already holds what was typed there.
+            if name == nil { ownTitle = model.userTitles[proposal.id] ?? (proposal.requiresUserName ? "" : proposal.title) }
+        }
     }
 }
 

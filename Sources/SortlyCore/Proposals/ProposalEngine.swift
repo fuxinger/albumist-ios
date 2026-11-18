@@ -459,7 +459,7 @@ public struct ProposalEngine: Sendable {
     }
 
     /// Towns by number of photos (ties: first visited first).
-    private static func rankedTowns(_ places: [PlaceComponents]) -> [(name: String, key: PlaceKey, count: Int, first: Int)] {
+    static func rankedTowns(_ places: [PlaceComponents]) -> [(name: String, key: PlaceKey, count: Int, first: Int)] {
         var towns: [PlaceKey: (name: String, count: Int, first: Int)] = [:]
         for (i, p) in places.enumerated() {
             guard let key = p.key(at: .locality), let name = p.locality else { continue }

@@ -59,6 +59,8 @@
   hat jeder Ort seine eigene und behält sie über seine Fotos, auch wenn Fotos dazukommen oder
   wegfallen. Name, „Nicht jetzt“ und Album bleiben bei dem der beiden Orte, den Albumist bisher
   gezeigt hat; der andere erscheint als neuer Vorschlag und braucht wieder einen Namen.
+- iPhone-Test Build 36: Ein Ort, an dem du öfter bist, heißt jetzt nach seiner Stadt (etwa
+  „Dorfen“), nicht mehr nach dem Bundesland („Bayern“).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

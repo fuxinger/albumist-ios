@@ -330,6 +330,18 @@ public enum RecurringPlaces {
 }
 
 extension ProposalEngine {
+    /// The name of a place the user is often at: one place, so a town (Fuchs, iPhone test of
+    /// build 36, 18.11.2026: "Bayern ist aber ein Bundesland in Deutschland und nenne Stadt").
+    /// The trip rule (`primaryPlaceName`, kind vacation) where it names a town or a lake;
+    /// otherwise the town with the most photos (ties: the first one in `places`), never the
+    /// state or country while any town is known. Without any town, the trip rule's name.
+    static func recurringPlaceName(_ places: [PlaceComponents], labels: Labels) -> (String?, PlaceKey?) {
+        let (name, key, _) = primaryPlaceName(places, kind: .vacation, labels: labels)
+        if let key, key.level == .locality || key.level == .pointOfInterest { return (name, key) }
+        if let town = rankedTowns(places).first { return (town.name, town.key) }
+        return (name, key)
+    }
+
     /// One album per place the user is often at, instead of a trip per stay. Named after the
     /// place (the town most photos were taken in), never after what the place is to the user.
     /// Personal like a frequent place: never chosen automatically.
@@ -342,7 +354,7 @@ extension ProposalEngine {
             let members = place.assetIDs.filter { byID[$0] != nil }
             guard members.count >= settings.trips.minPhotos else { return nil }
             let gps = members.compactMap { byID[$0]?.gpsPlace }
-            let (geoName, key, _) = Self.primaryPlaceName(gps, kind: .vacation, labels: labels)
+            let (geoName, key) = Self.recurringPlaceName(gps, labels: labels)
             let title = geoName ?? place.name ?? labels.unknownPlace
             let dates = members.compactMap { byID[$0]?.asset.creationDate }
             let days = Set(dates.map { calendar.startOfDay(for: $0) }).count

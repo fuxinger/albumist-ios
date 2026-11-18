@@ -14,7 +14,7 @@ extension PhotosNotResponding: @retroactive LocalizedError {
             // safe; no restart needed (second review of 6c45378, P1; wording: review of 045f297,
             // S3). Only this change: a library call reports nothing as never begun once it sent
             // one (`PhotosNotResponding.afterAChangeWasSent`).
-            String(localized: "Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie ist nicht passiert. Versuche es gleich noch einmal; bei einem Plan mit „Fortsetzen“ in der Übersicht.")
+            String(localized: "Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie ist nicht passiert. Versuche es gleich noch einmal – bei einem Plan mit „Fortsetzen“ in der Übersicht.")
         case .write where notSent:
             // An earlier change still has no answer: nothing new was sent. Restarting, not
             // "Fortsetzen", is the way out when it lasts (second review of the PhotoKit limits, 11).

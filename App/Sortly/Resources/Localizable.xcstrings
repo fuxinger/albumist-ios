@@ -12193,12 +12193,32 @@
         }
       }
     },
-    "Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie ist nicht passiert. Versuche es gleich noch einmal; bei einem Plan mit „Fortsetzen“ in der Übersicht." : {
+    "Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie ist nicht passiert. Versuche es gleich noch einmal – bei einem Plan mit „Fortsetzen“ in der Übersicht." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist was busy just now and did not send this change to Photos – it did not happen. Try again in a moment; for a plan, with “Resume” in the overview."
+            "value" : "Albumist was busy just now and did not send this change to Photos – it did not happen. Try again in a moment – for a plan, with “Resume” in the overview."
+          }
+        }
+      }
+    },
+    "Albumist war gerade ausgelastet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist was busy just now"
+          }
+        }
+      }
+    },
+    "Geht gleich von selbst weiter. Du musst nichts tun." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continues by itself in a moment. You don't need to do anything."
           }
         }
       }

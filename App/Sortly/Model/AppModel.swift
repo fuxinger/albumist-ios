@@ -498,10 +498,13 @@ final class AppModel {
     /// answering): tried again a little later instead of only at the next start of the app, and
     /// the end of a plan keeps that wait (`UnattendedRetry`, open point D of the labels fix).
     @ObservationIgnored private var retry = UnattendedRetry()
-    /// The last run ended because Photos did not answer (`PhotosNotResponding`): the card says
-    /// "Fotos antwortet gerade nicht" until the next run starts, and that run comes by itself
-    /// (`retryUnattendedRun`).
-    @ObservationIgnored private var photosRetryDue = false
+    /// The last run ended because Photos did not answer (`PhotosNotResponding`, `.photos`): the
+    /// card says "Fotos antwortet gerade nicht" until the next run starts, and that run comes by
+    /// itself (`retryUnattendedRun`). `.busy`: a call into Photos never got a thread (Albumist's
+    /// own work kept them all busy, nothing was asked of Photos): the card says so, and the run
+    /// comes again the same way (review of f7439fb, MF1: it ended silently and stopped for good
+    /// after two more such ends).
+    @ObservationIgnored private var retryCause: UnattendedRetry.Cause?
     /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile. Observed: the
     /// suggestion's "Ja, hier bin ich öfter" says why it waits.
     private(set) var analysisResetting = false
@@ -975,7 +978,7 @@ final class AppModel {
             return
         }
         analysis.isRunning = true
-        photosRetryDue = false
+        retryCause = nil
         retry.runStarted()
         // A run goes on: the Pause no longer stands.
         setPausedByUser(false)
@@ -1050,10 +1053,10 @@ final class AppModel {
             } catch let quiet as PhotosNotResponding {
                 // Photos did not answer (app-speed): said on the card, not in an alert, and the
                 // run comes again by itself. Nothing of it counts as done. A read that never
-                // began waited for Albumist's own work, not for Photos: not "Fotos antwortet
-                // gerade nicht"; the run goes on like after any other early end
-                // (`UnattendedRetry`, review of 045f297, S1).
-                photosRetryDue = !quiet.neverBegan
+                // began waited for Albumist's own work, not for Photos: the card says that
+                // instead of "Fotos antwortet gerade nicht", and the run comes again the same
+                // way (reviews of 045f297, S1, and f7439fb, MF1).
+                retryCause = quiet.neverBegan ? .busy : .photos
             } catch {
                 message = .failure(error.localizedDescription)
             }
@@ -1165,7 +1168,7 @@ final class AppModel {
     /// while a plan holds the analysis back does not start; the end of the plan starts it
     /// (`releaseExecution`).
     private func retryUnattendedRun(after run: Int) {
-        guard let delay = retry.schedule(photos: photosRetryDue, now: .now) else { return }
+        guard let delay = retry.schedule(after: retryCause, now: .now) else { return }
         Task {
             try? await Task.sleep(for: delay)
             guard analysisGeneration == run, analysis.needsResume, !analysis.isRunning, runMayStartNow else { return }
@@ -1458,7 +1461,9 @@ final class AppModel {
         ).slowerReason : nil
         i.appleWait = analysis.appleWait
         // Photos has had no answer for 10 s or more (still waiting), or the run ended on it.
-        i.photosNotResponding = photosRetryDue || (analysis.isRunning && PhotoKitLibrary.deadline.slowFor() != nil)
+        i.photosNotResponding = retryCause == .photos || (analysis.isRunning && PhotoKitLibrary.deadline.slowFor() != nil)
+        // The run ended because Albumist's own work kept every thread busy (MF1).
+        i.albumistBusy = retryCause == .busy
         i.pausingFor = analysis.pausing ? pausingSince.map { now - $0 } ?? .zero : nil
         i.pausedByUser = analysis.isPausedByUser
         i.pausedAt = analysis.stoppedAt

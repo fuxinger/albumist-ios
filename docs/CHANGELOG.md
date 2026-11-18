@@ -108,9 +108,12 @@
   sagt „Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie
   ist nicht passiert“, und „Fortsetzen“ geht sofort. „Fotos antwortet gerade nicht“ erscheint
   nicht mehr, nur weil Albumist selbst ausgelastet ist (wohl aber, solange ein Aufruf hinter
-  einem hängenden wartet); ein Lesen, das so nie begann, sagt das ebenso ehrlich. Ein Löschen
+  einem hängenden wartet); endet die Analyse an einem Lesen, das so nie begann, sagt die Karte
+  „Albumist war gerade ausgelastet“ und es geht jede Minute von selbst weiter. Ein Löschen
   von Alben, das Fotos ausgeführt hat, bleibt auch dann aufgezeichnet (und Rückgängig kann es
-  zurückbringen), wenn das Nachlesen danach keine Antwort bekommt.
+  zurückbringen), wenn das Nachlesen danach keine Antwort bekommt. Bekommt die Prüfung vor
+  einer Änderung keine Antwort (etwa ob das Album noch da ist), gilt der Schritt als nicht
+  begonnen, und „Fortsetzen“ fügt die Fotos normal hinzu.
 ### Migrationen
 - v2: Spalte `asset_places.precision_m`.
 - v3: `text_plain` mit Zeilen-ID, damit der Volltextindex automatisch folgt.

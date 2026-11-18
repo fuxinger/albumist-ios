@@ -24,17 +24,35 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
     /// Always with `notSent`. Only a call given up at its limit says this; a caller cancelled
     /// before its call began gets `CancellationError` (that call never runs either).
     public var neverBegan: Bool
+    /// Reported by a library call before it sent any change (a read it makes first, such as
+    /// the check that the album is still there): whatever happened to that read, nothing of
+    /// the call reached Photos as a change (`beforeAnyChange`, review of f7439fb, SF1).
+    public var noChangeSent: Bool
 
-    public init(lane: PhotosDeadline.Lane, what: String, notSent: Bool, asksUser: Bool = false, neverBegan: Bool = false) {
+    public init(lane: PhotosDeadline.Lane, what: String, notSent: Bool, asksUser: Bool = false, neverBegan: Bool = false,
+                noChangeSent: Bool = false) {
         self.lane = lane
         self.what = what
         self.notSent = notSent || neverBegan
         self.asksUser = asksUser
         self.neverBegan = neverBegan
+        self.noChangeSent = noChangeSent
     }
 }
 
 extension PhotosNotResponding {
+    /// The same, reported by a library call before it sent any change (a read it makes
+    /// first): the executor leaves the step as it was (`noChangeSent`).
+    public var beforeAnyChange: PhotosNotResponding {
+        var quiet = self
+        quiet.noChangeSent = true
+        return quiet
+    }
+
+    /// The library call that reported this sent no change, as far as it can say: a change
+    /// request never sent, or anything before the call's first change (`beforeAnyChange`).
+    public var reachedPhotosWithNoChange: Bool { noChangeSent || (notSent && lane == .write) }
+
     /// The same, reported by a library call after a change of that call had already been sent
     /// (`PhotoKitLibrary.deleteCollections` reads back and may ask once more): the call as a
     /// whole is a write whose outcome is not known, never "not sent", whatever the later call

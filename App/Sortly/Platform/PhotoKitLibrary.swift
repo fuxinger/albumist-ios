@@ -64,6 +64,19 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         try await deadline.runBlocking(what, lane: lane, limit: limit) { beat in try work(beat) }
     }
 
+    /// A read a change makes before its change request (does the album or folder exist):
+    /// without an answer, nothing of the call reached Photos as a change, and the executor
+    /// leaves the step as it was (`PhotosNotResponding.beforeAnyChange`, review of f7439fb,
+    /// SF1). Before, such a step stayed running, and adding to the user's own album was then
+    /// settled as "outcome unclear" although nothing had been sent.
+    static func readBeforeChange<T: Sendable>(_ what: String, _ work: @escaping @Sendable (PhotosDeadline.Heartbeat) throws -> T) async throws -> T {
+        do {
+            return try await read(what, work)
+        } catch let quiet as PhotosNotResponding {
+            throw quiet.beforeAnyChange
+        }
+    }
+
     /// PHAsset is thread-safe but not marked Sendable; a fetched asset is only handed on.
     struct FetchedAssets: @unchecked Sendable {
         let assets: [PHAsset]
@@ -326,7 +339,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
-        try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
+        try await Self.readBeforeChange("requireFolder") { _ in try Self.requireFolder(parentID) }
         try await Self.change("createFolder", answered: { Self.noteAnswered(created.value) }) {
             // Into its folder or not at all (see `parentRequest`).
             guard let folder = Self.parentRequest(parentID) else { return }
@@ -344,7 +357,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
-        try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
+        try await Self.readBeforeChange("requireFolder") { _ in try Self.requireFolder(parentID) }
         try await Self.change("createAlbum", answered: { Self.noteAnswered(created.value) }) {
             // Into its folder or not at all (see `parentRequest`).
             guard let folder = Self.parentRequest(parentID) else { return }
@@ -389,7 +402,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func addAssets(_ assets: [AssetID], to album: CollectionID) async throws {
         let albumID = album.rawValue
         let ids = assets.map(\.rawValue)
-        let exists = try await Self.read("album") { _ -> Bool in
+        let exists = try await Self.readBeforeChange("album") { _ -> Bool in
             PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumID], options: nil).firstObject != nil
         }
         guard exists else { throw PhotoKitError.collectionNotFound(albumID) }
@@ -469,7 +482,17 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         let allowedRaw: [String: Set<String>] = Dictionary(uniqueKeysWithValues: allowed.map { ($0.key.rawValue, Set($0.value.map(\.rawValue))) })
         var log = DeletionLog.Entry(requested: ids.count)
         defer { DeletionLog.record(log) }
-        var target = try await Self.deletableNow(ids.map(\.rawValue), log: &log)
+        // Before any request: no answer here means nothing of this call reached Photos.
+        var target: DeletionTarget
+        do {
+            target = try await Self.deletableNow(ids.map(\.rawValue), log: &log)
+        } catch let quiet as PhotosNotResponding {
+            log.outcome = quiet.neverBegan ? "not sent (tree read never began)" : "not sent (no answer to the tree read)"
+            throw quiet.beforeAnyChange
+        } catch {
+            log.outcome = "error before the request"
+            throw error
+        }
         guard !target.isEmpty else {
             log.outcome = "nothing deletable"
             return
@@ -700,7 +723,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func deleteCollection(_ id: CollectionID) async throws {
         let raw = id.rawValue
         // Never delete a folder that still holds something: Photos would delete its contents.
-        let holdsSomething = try await Self.read("folderContents") { _ -> Bool in
+        let holdsSomething = try await Self.readBeforeChange("folderContents") { _ -> Bool in
             guard let list = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject else { return false }
             return PHCollection.fetchCollections(in: list, options: nil).count > 0
         }

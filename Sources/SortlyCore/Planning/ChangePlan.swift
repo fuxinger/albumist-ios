@@ -189,6 +189,19 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
     }
 }
 
+extension ChangePlan {
+    /// This plan with the ids written down for its new albums and folders in `stored` (the same
+    /// plan's record as it is stored) that it lacks (`ExecutionRecord.takeNotedIDs`).
+    @discardableResult
+    public mutating func takeNotedIDs(from stored: ExecutionRecord?) -> Bool {
+        guard let stored, !stored.maybeCreated.isEmpty || !stored.earlierMaybeCreated.isEmpty else { return false }
+        var merged = record ?? ExecutionRecord()
+        guard merged.takeNotedIDs(from: stored) else { return false }
+        record = merged
+        return true
+    }
+}
+
 /// The journal of what a plan really changed.
 public struct ExecutionRecord: Hashable, Sendable, Codable {
     /// Step id → media the step added (addAssets) or removed (removeAssets, or our media
@@ -262,6 +275,39 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
         }
         maybeCreated[key] = id
         maybeCreatedAt[key] = nil
+    }
+
+    /// Takes the ids written down for new albums and folders in `stored` (the same plan as it is
+    /// stored) that this copy lacks: an id written from inside a change that Photos ran only
+    /// after the run stopped waiting reaches the stored plan, not the copy the app or a run
+    /// holds (second review of P2-01, S1). Never drops anything: a key this copy lacks takes the
+    /// stored id (and when it was given up); a different stored id for a key this copy knows
+    /// stays Albumist's as an earlier one (`earlierMaybeCreated`, which is joined too). Returns
+    /// whether anything was taken.
+    @discardableResult
+    public mutating func takeNotedIDs(from stored: ExecutionRecord) -> Bool {
+        var changed = false
+        // Only the entries that differ are sorted (a save of a large plan usually has none).
+        let differing = stored.maybeCreated.filter { maybeCreated[$0.key] != $0.value }
+        for (key, id) in differing.sorted(by: { $0.key < $1.key }) {
+            if let mine = maybeCreated[key] {
+                if mine != id, !earlierMaybeCreated.contains(id) {
+                    earlierMaybeCreated.append(id)
+                    changed = true
+                }
+            } else {
+                maybeCreated[key] = id
+                if let at = stored.maybeCreatedAt[key] { maybeCreatedAt[key] = at }
+                changed = true
+            }
+        }
+        guard !stored.earlierMaybeCreated.isEmpty else { return changed }
+        let current = Set(maybeCreated.values)
+        for id in stored.earlierMaybeCreated where !earlierMaybeCreated.contains(id) && !current.contains(id) {
+            earlierMaybeCreated.append(id)
+            changed = true
+        }
+        return changed
     }
 
     /// Until when the create of `key`, whose request got no answer (`maybeCreatedAt`), may

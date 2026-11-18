@@ -42,6 +42,11 @@ public actor SortlyStore: PlanJournal {
     /// What the database holds of each plan saved by this store: the next save of that plan
     /// writes only what differs (see `insertPlan`).
     var journalCache: [SortlyID: (steps: [PlanStep], media: [String: [AssetID]])] = [:]
+    /// The header row this store last wrote for each plan, and the ids written down for new
+    /// albums and folders it holds: a save that finds exactly that row stored takes them from
+    /// here instead of decoding it again (`storedNotedIDs`). A row written in another way (from
+    /// inside a change, `noteCreated`) differs and is read in full.
+    var headerCache: [SortlyID: (payload: Data, noted: ExecutionRecord)] = [:]
     func json<T: Encodable>(_ value: T) throws -> SQLValue { .blob(try encoder.encode(value)) }
     func decode<T: Decodable>(_ type: T.Type, _ value: SQLValue?) throws -> T? {
         guard let data = value?.data else { return nil }
@@ -659,18 +664,78 @@ public actor SortlyStore: PlanJournal {
     /// is stored, in one durable transaction, so a run that stopped waiting meanwhile (Photos
     /// answered late) loses nothing it wrote since. `async` like the requirement, so this, not
     /// the protocol's fallback (which replaces the stored plan), is what the executor calls.
+    /// Only the plan's header row is read and written (its steps and media stay as they are):
+    /// one per new album or folder, so a plan of hundreds of albums stays quick (Linux load
+    /// test 28 s instead of under 20 s when the whole plan was read and written here).
     public func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws {
         try journaling([plan.id]) {
             try db.durably {
                 try db.transaction {
-                    var stored = try self.plan(plan.id) ?? plan
-                    if stored.record == nil { stored.record = ExecutionRecord() }
-                    guard stored.record?.maybeCreated[key] != id else { return }
-                    stored.record?.noteRequested(id, key: key)
-                    try insertPlan(stored)
+                    let row = SQLValue.text(plan.id.rawValue)
+                    guard var header = try decode(ChangePlan.self, db.query("SELECT payload FROM plans WHERE id = ?", [row]).first?["payload"]) else {
+                        // Not stored yet: the plan as the run knows it, with the id.
+                        var noted = plan
+                        if noted.record == nil { noted.record = ExecutionRecord() }
+                        noted.record?.noteRequested(id, key: key)
+                        try insertPlan(noted)
+                        return
+                    }
+                    if header.record == nil { header.record = ExecutionRecord() }
+                    guard header.record?.maybeCreated[key] != id else { return }
+                    header.record?.noteRequested(id, key: key)
+                    if header.steps.isEmpty && header.record?.media.isEmpty != false {
+                        try db.execute("UPDATE plans SET payload = ? WHERE id = ?", [try json(header), row])
+                    } else if var stored = try self.plan(plan.id) {
+                        // Saved by a version before the step-by-step journal: written in full.
+                        if stored.record == nil { stored.record = ExecutionRecord() }
+                        stored.record?.noteRequested(id, key: key)
+                        try insertPlan(stored)
+                    }
                 }
             }
         }
+    }
+
+    /// The ids written down for the new albums and folders of plan `id` as it is stored, read
+    /// from its header row only (`plans.payload`: the record without media), so every save can
+    /// afford it (second review of P2-01, S1).
+    func storedNotedIDs(_ id: SortlyID) throws -> ExecutionRecord? {
+        guard let payload = try db.query("SELECT payload FROM plans WHERE id = ?", [.text(id.rawValue)]).first?["payload"]?.data else { return nil }
+        if let cached = headerCache[id], cached.payload == payload { return cached.noted }
+        guard let record = try decoder.decode(NotedHeader.self, from: payload).record else { return nil }
+        var result = ExecutionRecord()
+        result.maybeCreated = record.maybeCreated ?? [:]
+        result.maybeCreatedAt = record.maybeCreatedAt ?? [:]
+        result.earlierMaybeCreated = record.earlierMaybeCreated ?? []
+        return result
+    }
+
+    /// The part of `record` that `storedNotedIDs` reads.
+    static func notedPart(_ record: ExecutionRecord?) -> ExecutionRecord {
+        var noted = ExecutionRecord()
+        noted.maybeCreated = record?.maybeCreated ?? [:]
+        noted.maybeCreatedAt = record?.maybeCreatedAt ?? [:]
+        noted.earlierMaybeCreated = record?.earlierMaybeCreated ?? []
+        return noted
+    }
+
+    /// The part of a stored plan header `storedNotedIDs` reads.
+    private struct NotedHeader: Decodable {
+        struct Record: Decodable {
+            var maybeCreated: [String: CollectionID]?
+            var maybeCreatedAt: [String: Date]?
+            var earlierMaybeCreated: [CollectionID]?
+        }
+        var record: Record?
+    }
+
+    /// `plan` with the ids written down for its new albums and folders as stored
+    /// (`ChangePlanStoring.withNotedIDs`): an id written from inside a change Photos ran after the
+    /// run stopped waiting is in the stored plan, not in the copy the app holds (S1).
+    public func withNotedIDs(_ plan: ChangePlan) async throws -> ChangePlan {
+        var merged = plan
+        merged.takeNotedIDs(from: try storedNotedIDs(plan.id))
+        return merged
     }
 
     /// If a write fails (and its transaction is rolled back), what is known to be on disk for
@@ -679,7 +744,7 @@ public actor SortlyStore: PlanJournal {
         do {
             try write()
         } catch {
-            for id in ids { journalCache[id] = nil }
+            for id in ids { journalCache[id] = nil; headerCache[id] = nil }
             throw error
         }
     }
@@ -687,13 +752,21 @@ public actor SortlyStore: PlanJournal {
     /// The plan without its steps and media, its steps one row each, and the media of each
     /// step one row each (audit 2, 5.3). Only what changed since the last save of this plan
     /// is written: after a step that is the plan header, that step and its media.
-    func insertPlan(_ plan: ChangePlan) throws {
+    ///
+    /// The ids written down for new albums and folders in the plan as stored are kept (S1):
+    /// they may have been written from inside a change after the copy being saved was taken
+    /// (`noteCreated`), and are never lost by a save of that copy (`ChangePlan.takeNotedIDs`).
+    func insertPlan(_ input: ChangePlan) throws {
+        var plan = input
+        plan.takeNotedIDs(from: try storedNotedIDs(plan.id))
         var header = plan
         header.steps = []
         header.record?.media = [:]
+        let payload = try encoder.encode(header)
         try db.execute("INSERT OR REPLACE INTO plans (id, status, created_at, payload) VALUES (?, ?, ?, ?)", [
-            .text(plan.id.rawValue), .text(plan.status.rawValue), Self.date(plan.createdAt), try json(header),
+            .text(plan.id.rawValue), .text(plan.status.rawValue), Self.date(plan.createdAt), .blob(payload),
         ])
+        headerCache[plan.id] = (payload, Self.notedPart(plan.record))
         let id = SQLValue.text(plan.id.rawValue)
         let known = journalCache[plan.id]
         if let known, known.steps.count == plan.steps.count {
@@ -912,6 +985,7 @@ public actor SortlyStore: PlanJournal {
                 // The database stays the same database: its stamp stays.
                 try db.execute("DELETE FROM settings WHERE key NOT LIKE 'identity.%'")
                 journalCache = [:]
+                headerCache = [:]
             }
         }
     }

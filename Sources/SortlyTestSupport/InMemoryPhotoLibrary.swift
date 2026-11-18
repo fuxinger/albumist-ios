@@ -233,9 +233,19 @@ public actor InMemoryPhotoLibrary: PhotoLibraryWriting {
 public actor InMemoryPlanStore: PlanJournal {
     public private(set) var saved: [ChangePlan] = []
     public init() {}
-    public func save(_ plan: ChangePlan) async throws { saved.append(plan) }
-    public func save(_ plans: [ChangePlan]) async throws { saved.append(contentsOf: plans) }
+    /// Like `SortlyStore`: the ids written down for new albums and folders in the plan as
+    /// stored are kept by every save (S1).
+    public func save(_ plan: ChangePlan) async throws { saved.append(try await withNotedIDs(plan)) }
+    public func save(_ plans: [ChangePlan]) async throws {
+        for plan in plans { saved.append(try await withNotedIDs(plan)) }
+    }
     public func plan(_ id: SortlyID) async throws -> ChangePlan? { saved.last { $0.id == id } }
+    /// `plan` with the ids written down in its latest stored version (`ChangePlanStoring.withNotedIDs`).
+    public func withNotedIDs(_ plan: ChangePlan) async throws -> ChangePlan {
+        var merged = plan
+        merged.takeNotedIDs(from: saved.last { $0.id == plan.id }?.record)
+        return merged
+    }
     /// Added to the plan as it is stored (`ChangePlanStoring.noteCreated`).
     public func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws {
         var noted = saved.last { $0.id == plan.id } ?? plan

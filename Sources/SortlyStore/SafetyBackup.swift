@@ -295,6 +295,7 @@ extension SortlyStore {
             try db.execute("DELETE FROM plan_steps WHERE plan_id = ?", [.text(r.key)])
             try db.execute("DELETE FROM plan_media WHERE plan_id = ?", [.text(r.key)])
             journalCache[SortlyID(r.key)] = nil
+            headerCache[SortlyID(r.key)] = nil
         }
         // Only plans that are part of this copy.
         let planIDs = Set(backup.plans.map(\.key))

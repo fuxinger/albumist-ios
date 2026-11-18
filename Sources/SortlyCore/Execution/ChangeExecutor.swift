@@ -106,9 +106,17 @@ public protocol ChangePlanStoring: Sendable {
     /// adds the id to the plan as it is stored rather than replacing the stored plan: Photos
     /// may run that change only after the run that asked for it stopped waiting (review P2-01).
     func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws
+    /// `plan` with the ids written down for its new albums and folders in the plan as it is
+    /// stored (`ChangePlan.takeNotedIDs`): a change Photos ran only after the run stopped waiting
+    /// wrote its id there (`noteCreated`), not into the copy the app holds. The executor asks
+    /// before it decides anything from a plan it was handed (second review of P2-01, S1).
+    func withNotedIDs(_ plan: ChangePlan) async throws -> ChangePlan
 }
 
 extension ChangePlanStoring {
+    /// For a store that cannot read its plans back: `plan` as it is.
+    public func withNotedIDs(_ plan: ChangePlan) async throws -> ChangePlan { plan }
+
     /// For a store that cannot read its plans back: `plan`, as the run knows it, with the id.
     public func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws {
         var noted = plan
@@ -198,7 +206,10 @@ public actor ChangeExecutor {
         // An earlier change request has no answer yet: what the library shows is not final (an
         // album may still land), so nothing is decided or sent from it. The plan stays as it is.
         try await requireAnsweredWrites()
-        var plan = input
+        // The ids written down inside a change Photos ran after a run stopped waiting are in the
+        // stored plan, not in the copy handed in: without them the album would be taken over by
+        // its name (never removed by undo), and the next save would lose them (S1).
+        var plan = try await store.withNotedIDs(input)
         if plan.record == nil { plan.record = ExecutionRecord() }
 
         let inventory = try await library.currentInventory()
@@ -310,7 +321,8 @@ public actor ChangeExecutor {
         // Not while an earlier change request may still land: settled from a library that is
         // not final, a late album would be left behind by the undo.
         try await requireAnsweredWrites()
-        var plan = input
+        // With the ids written down inside a change Photos ran late (S1, as in `execute`).
+        var plan = try await store.withNotedIDs(input)
         if plan.record == nil { plan.record = ExecutionRecord() }
         let inventory = try await library.currentInventory()
         let now = clock()

@@ -272,4 +272,73 @@ struct OpenPlansTests {
         #expect(again.record?.maybeCreated["k"] == CollectionID("album-2"))
         #expect(again.record?.earlierMaybeCreated == [CollectionID("album-1")])
     }
+
+    /// Second review of P2-01 (S1): an id written down from inside a change that Photos ran
+    /// after the run stopped waiting is in the stored plan only. A later save of a copy taken
+    /// before it (the app's interrupted plan, the executor's own step saves) never loses it:
+    /// before, `insertPlan` replaced the stored plan and the id was gone.
+    @Test func aSaveOfAStaleCopyNeverRemovesANotedID() async throws {
+        let store = try SortlyStore(url: nil)
+        let library = InMemoryPhotoLibrary(assets: photos(0..<20))
+        var stale = try await parisAndRome(library)
+        stale.status = .running
+        stale.record = ExecutionRecord()
+        stale.record?.unavailable["x"] = 1
+        try await store.save(stale)
+        let journal: any ChangePlanStoring = store
+        try await journal.noteCreated(CollectionID("late-1"), key: "k", in: stale)
+        try await journal.noteCreated(CollectionID("late-2"), key: "k", in: stale)
+        try await journal.noteCreated(CollectionID("late-f"), key: "f", in: stale)
+
+        // The stale copy, saved again (one more step settled): the noted ids stay.
+        stale.record?.unavailable["y"] = 2
+        stale.steps[0].state = .succeeded(createdID: nil, verifiedAt: Date())
+        try await store.save(stale)
+        var stored = try #require(try await store.plan(stale.id))
+        #expect(stored.record?.maybeCreated == ["k": CollectionID("late-2"), "f": CollectionID("late-f")])
+        #expect(stored.record?.earlierMaybeCreated == [CollectionID("late-1")])
+        #expect(stored.record?.unavailable == ["x": 1, "y": 2])
+        #expect(stored.steps[0].state.isFinished)
+
+        // A copy that knows another id for the same key keeps it; the stored one stays
+        // Albumist's as an earlier one. Saved in a batch too (`save([...])`, the undo's way).
+        var other = stale
+        other.record?.maybeCreated["k"] = CollectionID("mine")
+        try await store.save([other])
+        stored = try #require(try await store.plan(stale.id))
+        #expect(stored.record?.maybeCreated == ["k": CollectionID("mine"), "f": CollectionID("late-f")])
+        #expect(Set(stored.record?.earlierMaybeCreated ?? []) == [CollectionID("late-1"), CollectionID("late-2")])
+
+        // Finalizing a stale copy keeps them as well.
+        try await store.finalize(stale, managedAlbums: [], values: [:])
+        stored = try #require(try await store.plan(stale.id))
+        #expect(Set(stored.record?.maybeCreated.values.map { $0 } ?? []) == [CollectionID("mine"), CollectionID("late-f")])
+        #expect(Set(stored.record?.earlierMaybeCreated ?? []) == [CollectionID("late-1"), CollectionID("late-2")])
+
+        // And the copy itself is brought up to date before anything is decided from it.
+        let refreshed = try await journal.withNotedIDs(stale)
+        #expect(refreshed.record?.maybeCreated["f"] == CollectionID("late-f"))
+        #expect(refreshed.record?.unavailable == ["x": 1, "y": 2])
+    }
+
+    /// The merge itself never drops anything (`ExecutionRecord.takeNotedIDs`).
+    @Test func takingNotedIDsNeverDropsAnything() {
+        var stored = ExecutionRecord()
+        stored.maybeCreated = ["a": "s-a", "b": "s-b", "c": "same"]
+        stored.maybeCreatedAt = ["a": Date(timeIntervalSince1970: 5)]
+        stored.earlierMaybeCreated = ["old-1", "c-copy"]
+        var copy = ExecutionRecord()
+        copy.maybeCreated = ["b": "c-b", "c": "same", "d": "c-d", "e": "c-copy"]
+        copy.earlierMaybeCreated = ["old-2"]
+        let took = copy.takeNotedIDs(from: stored)
+        #expect(took)
+        #expect(copy.maybeCreated == ["a": "s-a", "b": "c-b", "c": "same", "d": "c-d", "e": "c-copy"])
+        #expect(copy.maybeCreatedAt == ["a": Date(timeIntervalSince1970: 5)])
+        #expect(copy.earlierMaybeCreated == ["old-2", "s-b", "old-1"])
+        let again = copy.takeNotedIDs(from: stored)
+        #expect(!again)
+        var empty = ExecutionRecord()
+        let none = empty.takeNotedIDs(from: ExecutionRecord())
+        #expect(!none)
+    }
 }

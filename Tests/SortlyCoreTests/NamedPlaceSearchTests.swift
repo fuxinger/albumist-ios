@@ -234,4 +234,35 @@ struct NamedPlaceSearchTests {
         let index = appIndex(lib, titles: [lib.gardenID: "Mein Kleingarten"], suggestions: [])
         #expect(Set(index.search("Mein Kleingarten", now: now).ids) == lib.garden)
     }
+
+    /// Typing the start of a name of several words ("Mein Klein") offers the whole name in place
+    /// of the words typed, not after them ("Mein Mein Kleingarten"); typed in full, the name is
+    /// not offered again.
+    @Test func theStartOfANameIsCompletedWithoutDoublingWords() throws {
+        let lib = try library()
+        let index = appIndex(lib, titles: [lib.gardenID: "Mein Kleingarten"])
+        func completion(_ typed: String) -> String? {
+            index.suggestions(for: typed).first { $0.label == "Mein Kleingarten" }?.completion
+        }
+        #expect(completion("Klein") == "Mein Kleingarten")
+        #expect(completion("Mein Klein") == "Mein Kleingarten")
+        #expect(completion("mein klein") == "Mein Kleingarten")
+        #expect(completion("Rom Mein Klein") == "Rom Mein Kleingarten")
+        #expect(completion("Mai Klein") == "Mai Mein Kleingarten")
+        #expect(completion("Mein Kleingarten") == nil)
+        #expect(completion("Rom Mein Kleingarten") == nil)
+        let result = index.search("Rom Mein Kleingarten", now: now)
+        #expect(Set(result.ids) == lib.garden.union(lib.rome))
+        #expect(!result.tokens.contains { $0.kind == .ignored })
+        // The same for any name of several words, such as an album.
+        let album = CollectionSnapshot(id: "album-sea", title: "Tage am Meer", assetIDs: lib.rome)
+        let facts = lib.facts.map { f in
+            var f = f
+            if lib.rome.contains(f.id) { f.albumIDs.insert(album.id) }
+            return f
+        }
+        let withAlbum = appIndex(lib, titles: [:], inventory: CollectionInventory([album]), facts: facts)
+        #expect(withAlbum.suggestions(for: "Tage am Me").first { $0.label == "Tage am Meer" }?.completion == "Tage am Meer")
+        #expect(!withAlbum.suggestions(for: "Tage am Meer").contains { $0.label == "Tage am Meer" })
+    }
 }

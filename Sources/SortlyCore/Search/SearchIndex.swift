@@ -582,10 +582,10 @@ public struct SearchIndex: Sendable {
     /// Completions for the word being typed, from the user's own library, most photos first.
     /// Nothing is offered once the word is complete, so the results stay in view.
     public func suggestions(for text: String, limit: Int = 6) -> [SearchSuggestion] {
-        guard let last = text.split(whereSeparator: \.isWhitespace).last, text.last?.isWhitespace != true else { return [] }
+        let words = text.split(whereSeparator: \.isWhitespace)
+        guard let last = words.last, text.last?.isWhitespace != true else { return [] }
         let prefix = SearchText.key(String(last))
         guard prefix.count >= 2 else { return [] }
-        let head = String(text.dropLast(last.count))
         var seen = Set<String>()
         var result: [SearchSuggestion] = []
         for candidate in suggestionPool {
@@ -593,10 +593,21 @@ public struct SearchIndex: Sendable {
                 key.hasPrefix(prefix) || key.split(separator: "-").contains { $0.hasPrefix(prefix) }
             }
             guard !matching.isEmpty, !candidate.keys.contains(prefix) else { continue }
+            // Words typed before the last one that begin the name as well ("Mein Klein" for "Mein
+            // Kleingarten") are replaced by it instead of being written twice; a name of several
+            // words typed in full is complete.
+            var start = last.startIndex, complete = false
+            let longest = matching.map { $0.split(separator: "-").count }.max() ?? 1
+            for n in stride(from: min(words.count, longest), through: 2, by: -1) {
+                let typed = SearchText.key(words.suffix(n).joined(separator: " "))
+                if candidate.keys.contains(typed) { complete = true; break }
+                if matching.contains(where: { $0.hasPrefix(typed) }) { start = words[words.count - n].startIndex; break }
+            }
+            guard !complete else { continue }
             let english = matching.allSatisfy(candidate.englishKeys.contains)
             let label = english ? candidate.english : candidate.german
             guard seen.insert(label.lowercased()).inserted else { continue }
-            result.append(SearchSuggestion(completion: head + label, label: label, kind: candidate.kind, count: candidate.count))
+            result.append(SearchSuggestion(completion: String(text[..<start]) + label, label: label, kind: candidate.kind, count: candidate.count))
             if result.count == limit { break }
         }
         return result

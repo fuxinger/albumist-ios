@@ -64,6 +64,10 @@
   mehr; mit dem Album danach bleibt es ein Treffer mit denselben Fotos. Groß- und
   Kleinschreibung, Umlaute (auch „ae“) und „ß“ spielen keine Rolle. Das gilt auch für einen Ort,
   an dem du öfter bist, wenn du ihn unter „Anpassen“ umbenennst. Der Name bleibt auf dem iPhone.
+- Suche: Wer den Anfang eines Namens aus mehreren Wörtern tippte („Mein Klein“, „Tage am Me“),
+  bekam ihn hinter die schon getippten Wörter ergänzt („Mein Mein Kleingarten“), und ein ganz
+  getippter Name wurde noch einmal angeboten. Jetzt ersetzt der Vorschlag die getippten Wörter;
+  das gilt für Orte, Städte, Alben und Themen.
 - Erster iPhone-Test (15.11.): Analyse endet nicht mehr bei Wärme, Stromsparmodus oder
   wenn iOS die Hintergrundzeit beendet, sondern wird langsamer, wartet oder geht beim Öffnen
   weiter; jeder lange Lauf fragt nach Hintergrundzeit (Sperrbildschirm); Fortschritt zählt

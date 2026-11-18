@@ -138,6 +138,8 @@ struct FrequentPlaceIDTests {
         let run1 = detect(lib.assets)
         let a1 = try #require(place(near: Self.a, in: run1)), b1 = try #require(place(near: Self.b, in: run1))
         #expect(a1.id == roundedID(a1.centroid))
+        // Two places, two IDs: otherwise the checks below hold for one shared ID too.
+        #expect(a1.id != b1.id)
 
         let gone = Set(aIDs.dropFirst(8))
         let run2 = detect(lib.assets.filter { !gone.contains($0.id) }, previous: run1)
@@ -179,6 +181,8 @@ struct FrequentPlaceIDTests {
         lib.visits(Self.b, from: "2026-01-03", weeks: 0..<6)
         let run1 = detect(lib.assets)
         let a1 = try #require(place(near: Self.a, in: run1)), b1 = try #require(place(near: Self.b, in: run1))
+        // Two places, two IDs: otherwise "not swapped" holds for one shared ID too.
+        #expect(a1.id != b1.id)
 
         var imported = lib
         imported.visits(Self.b, from: "2025-11-01", weeks: 0..<4)

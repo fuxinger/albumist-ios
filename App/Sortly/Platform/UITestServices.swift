@@ -95,7 +95,7 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// The forms that report Photos' placeholder ID go to the real adapter too, so the
     /// executor can record "maybe created" before Photos answers.
     func createFolder(
-        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void
+        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void
     ) async throws -> CollectionID {
         try await Self.beforeChange()
         let id = try await base.createFolder(title: title, parent: parent, noted: noted)
@@ -104,7 +104,7 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     }
 
     func createAlbum(
-        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void
+        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void
     ) async throws -> CollectionID {
         try await Self.beforeChange()
         let id = try await base.createAlbum(title: title, parent: parent, noted: noted)
@@ -151,6 +151,11 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// adapter then throws `.notApplied` after reading the albums back). Photos is not asked
     /// in either case, so the albums really stay.
     func deleteCollections(_ ids: [CollectionID]) async throws {
+        try await deleteCollections(ids, onlyHolding: [:])
+    }
+
+    /// The count inside the change (review P2-08) goes to the real adapter too.
+    func deleteCollections(_ ids: [CollectionID], onlyHolding allowed: [CollectionID: Set<AssetID>]) async throws {
         try await Self.beforeChange()
         if Self.deletions.next() == 1 {
             switch UITestSupport.deletionFault {
@@ -159,7 +164,7 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             default: break
             }
         }
-        try await base.deleteCollections(ids)
+        try await base.deleteCollections(ids, onlyHolding: allowed)
         Self.afterChange()
     }
 

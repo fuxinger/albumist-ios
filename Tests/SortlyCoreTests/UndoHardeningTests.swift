@@ -101,7 +101,222 @@ struct UndoHardeningTests {
         #expect(try await library.currentInventory().collections.isEmpty)
     }
 
+    // MARK: The app ends before the new id is written down (review P2-01, 18.11.2026)
+
+    /// The app ends at a chosen save: that save and every one after it never reach the
+    /// journal (`EndingPlanStore` refuses only the one save and goes on storing).
+    actor DyingPlanStore: ChangePlanStoring {
+        private(set) var saved: [ChangePlan] = []
+        private var dead = false
+        private let diesAt: @Sendable (ChangePlan) -> Bool
+        init(diesAt: @escaping @Sendable (ChangePlan) -> Bool) { self.diesAt = diesAt }
+        func save(_ plan: ChangePlan) async throws {
+            if !dead, diesAt(plan) { dead = true }
+            guard !dead else { throw EndingPlanStore.Ended() }
+            saved.append(plan)
+        }
+    }
+
+    /// Photos created the album or folder, and the app ended before Albumist wrote its id
+    /// into the journal (the save right after the create never happened). Before, the next
+    /// launch found it by its name only, took it over as "adopted", and "Alles zurücknehmen"
+    /// left it behind, empty, without a word. Now its id is written down inside the change,
+    /// before Photos stores it (as the sample photos do): it is provably Albumist's, and the
+    /// undo removes it. The library is then exactly as before the plan.
+    @Test(arguments: ["Albumist", "Reisen", "Rom", "Paris"])
+    func undoAfterTheAppEndedBeforeTheNewIdWasWrittenLeavesNothing(title: String) async throws {
+        let library = representativeLibrary()
+        let before = try await library.currentInventory()
+        let plan = representativePlan(before)
+        // The app ends at the save that would write down the id Photos returned for `title`.
+        let store = DyingPlanStore { plan in
+            plan.steps.contains { step in
+                switch step.operation {
+                case .createAlbum(let key, title, _), .createFolder(let key, title, _): plan.resolvedKeys[key] != nil
+                default: false
+                }
+            }
+        }
+        _ = try? await ChangeExecutor(library: library, store: store).execute(plan)
+        let interrupted = try #require(await store.saved.last)
+        #expect(try await library.currentInventory().collections.values.contains { $0.title == title }, "\(title) was created")
+
+        let journal = InMemoryPlanStore()
+        let executor = ChangeExecutor(library: library, store: journal)
+        let settled = try await executor.reconcileInterrupted(interrupted)
+        #expect(settled.record?.adoptedKeys.isEmpty == true, "\(title): proven Albumist's, not adopted")
+        let way = InterruptedPlanUndo(settled: settled, current: try await library.currentInventory())
+        let outcome = try await way.carryOut(journal: journal, finalize: { _ in true }, run: { undo in
+            _ = try? await executor.execute(undo)
+        })
+        #expect(outcome == .undone, "\(title)")
+        let after = try await library.currentInventory()
+        #expect(after == before, "\(title): \(after.collections.values.map(\.title).sorted())")
+        #expect(await library.assets == allAssets)
+    }
+
+    /// Photos added Albumist's photos to the user's own album, and the app ended before the
+    /// step was settled. Whether Albumist or the user put them there cannot be proven, so the
+    /// undo leaves them. Before, "Alles zurücknehmen" then cancelled the plan: it left the
+    /// history, and nobody was told that 10 photos stayed in "Sommer". Now the plan stays in
+    /// the history and the outcome names what stays.
+    @Test func undoAfterTheAppEndedWhileAddingToTheUsersAlbumKeepsThePlanAndNamesTheRest() async throws {
+        let library = representativeLibrary()
+        let plan = representativePlan(try await library.currentInventory())
+        let addToSommer = try #require(plan.steps.first { if case .addAssets(.existing("sommer"), _) = $0.operation { true } else { false } })
+        // The app ends at the save that would settle the add (the photos are in "Sommer").
+        let store = DyingPlanStore { plan in
+            plan.record?.media[addToSommer.id] != nil && plan.record?.unverified.contains(addToSommer.id) == false
+        }
+        _ = try? await ChangeExecutor(library: library, store: store).execute(plan)
+        let interrupted = try #require(await store.saved.last)
+        #expect(try await library.currentInventory()["sommer"]?.assetIDs == Self.ownPhotos.union(ids("a", 100..<110)))
+
+        let journal = InMemoryPlanStore()
+        let executor = ChangeExecutor(library: library, store: journal)
+        let settled = try await executor.reconcileInterrupted(interrupted)
+        let way = InterruptedPlanUndo(settled: settled, current: try await library.currentInventory())
+        let outcome = try await way.carryOut(journal: journal, finalize: { _ in true }, run: { undo in
+            _ = try? await executor.execute(undo)
+        })
+        let inv = try await library.currentInventory()
+        // The app is told what stays, in which album, and how many photos.
+        #expect(outcome == .leftUnclear)
+        #expect(way.remainder.collections.isEmpty)
+        #expect(way.remainder.photos.map(\.album) == ["sommer"])
+        #expect(way.remainder.photos.first?.assets == ids("a", 100..<110))
+        // Read again after the undo (for the history): the same photos, under the album's name now.
+        let after = UndoRemainder(plan: try #require(try await journal.plan(plan.id)), current: inv)
+        #expect(after.photos.map(\.title) == ["Sommer"])
+        #expect(after.photos.first?.assets == ids("a", 100..<110))
+        // Everything Albumist provably made is gone; the photos in "Sommer" stay (unprovable).
+        #expect(inv.collections.values.map(\.title).sorted() == ["Familie", "Sommer"])
+        #expect(inv["sommer"]?.assetIDs == Self.ownPhotos.union(ids("a", 100..<110)))
+        // The plan is not dropped silently: it stays in the history.
+        let kept = try #require(try await journal.plan(plan.id))
+        #expect(kept.status != .cancelled)
+    }
+
+    /// The journal cannot take the id inside the change (a full disk for that moment): the
+    /// album is made all the same, recorded by the save once Photos answers, and the plan
+    /// and its undo run as before.
+    @Test func aJournalThatCannotTakeTheIdInsideTheChangeStopsNothing() async throws {
+        actor NoNoteStore: ChangePlanStoring {
+            struct Full: Error {}
+            private(set) var saved: [ChangePlan] = []
+            func save(_ plan: ChangePlan) async throws { saved.append(plan) }
+            func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws { throw Full() }
+        }
+        let library = representativeLibrary()
+        let before = try await library.currentInventory()
+        let store = NoNoteStore()
+        let executed = try await ChangeExecutor(library: library, store: store).execute(representativePlan(before))
+        #expect(executed.status == .completed)
+        #expect(executed.record?.adoptedKeys.isEmpty == true)
+        let undo = confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory()))
+        #expect(try await ChangeExecutor(library: library, store: store).execute(undo).status == .completed)
+        #expect(try await library.currentInventory() == before)
+    }
+
+    /// P2-07: only the first open step of a resumed plan can have run without its journal
+    /// entry. Photos the user put into their own album during the interruption, for a step
+    /// further on, are never taken for "maybe Albumist's" (nothing is named after the undo).
+    /// (A first run never finds them: a change to the album since the preview blocks it.)
+    @Test func photosTheUserAddedBeforeAStepRanAreNeverUnclear() async throws {
+        let again = representativeLibrary()
+        let second = representativePlan(try await again.currentInventory())
+        let store = DyingPlanStore { plan in plan.steps.contains { if case .succeeded = $0.state { true } else { false } } }
+        _ = try? await ChangeExecutor(library: again, store: store).execute(second)
+        let interrupted = try #require(await store.saved.last)
+        await again.userEdit { inv in
+            var sommer = inv["sommer"]!
+            sommer.assetIDs.formUnion(ids("a", 100..<103))
+            inv.upsert(sommer)
+        }
+        let resumed = try await ChangeExecutor(library: again, store: InMemoryPlanStore()).execute(interrupted)
+        #expect(resumed.status == .completed)
+        #expect(resumed.record?.unclear.isEmpty == true)
+        let undo = confirmed(UndoPlanner().undoPlan(for: resumed, current: try await again.currentInventory()))
+        _ = try await ChangeExecutor(library: again, store: InMemoryPlanStore()).execute(undo)
+        let inv = try await again.currentInventory()
+        #expect(UndoRemainder(plan: resumed, current: inv).isEmpty)
+        #expect(inv["sommer"]?.assetIDs == Self.ownPhotos.union(ids("a", 100..<103)))
+    }
+
     // MARK: Batch deletion
+
+    /// Before the album list is read for a deletion and the change goes out, someone else
+    /// changes an album (the user, or another device through iCloud).
+    struct HookedLibrary: PhotoLibraryWriting {
+        let inner: InMemoryPhotoLibrary
+        let beforeDelete: @Sendable (inout CollectionInventory) -> Void
+        func canWrite() async -> Bool { await inner.canWrite() }
+        func currentInventory() async throws -> CollectionInventory { try await inner.currentInventory() }
+        func availableAssets(_ ids: [AssetID]) async throws -> Set<AssetID> { try await inner.availableAssets(ids) }
+        func collection(_ id: CollectionID) async throws -> CollectionSnapshot? { try await inner.collection(id) }
+        func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID { try await inner.createFolder(title: title, parent: parent) }
+        func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID { try await inner.createAlbum(title: title, parent: parent) }
+        func addAssets(_ assets: [AssetID], to album: CollectionID) async throws { try await inner.addAssets(assets, to: album) }
+        func removeAssets(_ assets: [AssetID], from album: CollectionID) async throws { try await inner.removeAssets(assets, from: album) }
+        func renameCollection(_ id: CollectionID, to title: String) async throws { try await inner.renameCollection(id, to: title) }
+        func moveCollection(_ id: CollectionID, from oldParent: CollectionID?, to newParent: CollectionID?) async throws {
+            try await inner.moveCollection(id, from: oldParent, to: newParent)
+        }
+        func deleteCollection(_ id: CollectionID) async throws {
+            await inner.userEdit(beforeDelete)
+            try await inner.deleteCollection(id)
+        }
+        func deleteCollections(_ ids: [CollectionID]) async throws {
+            await inner.userEdit(beforeDelete)
+            try await inner.deleteCollections(ids)
+        }
+        // The user's change comes first; like PhotoKit, the deletion counts again in its change.
+        func deleteCollections(_ ids: [CollectionID], onlyHolding allowed: [CollectionID: Set<AssetID>]) async throws {
+            await inner.userEdit(beforeDelete)
+            try await inner.deleteCollections(ids, onlyHolding: allowed)
+        }
+    }
+
+    /// The count inside the change (P2-08), as PhotoKit's change block uses it: an album goes
+    /// only while it holds nothing but what it may; a folder only while all of it goes; what is
+    /// not there any more is left out.
+    @Test func deletionCheckKeepsAnAlbumThatGotAPhotoAndTheFoldersAboveIt() {
+        let albums: [CollectionID: Set<AssetID>] = ["rom": ["a-1", "a-299"], "paris": ["a-2"], "leer": []]
+        let folders: [CollectionID: [CollectionID]] = ["reisen": ["rom", "paris"], "albumist": ["reisen"], "frei": ["paris2"], "alt": ["leer"]]
+        let going = DeletionCheck.going(["rom", "paris", "leer", "reisen", "albumist", "frei", "alt", "weg"],
+                                        allowed: ["rom": ["a-1"], "paris": ["a-2"], "leer": []],
+                                        members: { albums[$0] }, children: { folders[$0] })
+        // "rom" got a-299: it stays, and so do "reisen" and "albumist" above it. "frei" holds an
+        // album that is not going ("paris2", moved in meanwhile). "weg" is gone already.
+        #expect(going == ["paris", "leer", "alt"])
+    }
+
+    /// Review P2-08: undo checks "only Albumist's photos in the album", then waits up to 30 s
+    /// until Albumist is on screen for the iOS question. A photo the user puts into the album
+    /// in that time kept nothing: the album went, and the photo lost its album. Now the change
+    /// itself counts again, right before Photos asks: the album stays with the user's photo,
+    /// only Albumist's photos leave it, and its folder stays.
+    @Test func aPhotoThatComesInBeforeTheDeletionGoesOutKeepsTheAlbum() async throws {
+        let library = InMemoryPhotoLibrary(assets: allAssets)
+        let plan = confirmed(planner.makePlan(from: [newAlbum("r", "Rom", ["Reisen"], ids("a", 0..<10))],
+                                              inventory: try await library.currentInventory()))
+        let executed = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(plan)
+        let rom = try #require(try await library.currentInventory().albums.first { $0.title == "Rom" }?.id)
+        let undo = confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory()))
+        let hooked = HookedLibrary(inner: library) { inv in
+            guard var album = inv[rom] else { return }
+            album.assetIDs.insert("a-299")
+            inv.upsert(album)
+        }
+        let undone = try await ChangeExecutor(library: hooked, store: InMemoryPlanStore()).execute(undo)
+        let inv = try await library.currentInventory()
+        #expect(inv[rom]?.assetIDs == ["a-299"], "\(undone.steps.map(\.state))")
+        #expect(inv.path(of: rom) == ["Albumist", "Reisen"])
+        let romStep = undone.steps.first { if case .deleteCollection(rom, _) = $0.operation { true } else { false } }
+        #expect(romStep?.state == .skipped(reason: "kept: the album holds photos added meanwhile; only Albumist's photos were taken out"))
+        #expect(undone.record?.deletedAlbums[rom] == nil)
+        #expect(await library.assets == allAssets)
+    }
 
     /// The user put an own photo into one of the albums after the undo was planned, and then
     /// declined the iOS question. Taking Albumist's photos out of that album needs no
@@ -253,6 +468,13 @@ struct UndoHardeningTests {
         func collection(_ id: CollectionID) async throws -> CollectionSnapshot? { try await inner.collection(id) }
         func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID { try await write { try await inner.createFolder(title: title, parent: parent) } }
         func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID { try await write { try await inner.createAlbum(title: title, parent: parent) } }
+        // Like PhotoKit, the new id is heard inside the change, before Photos stores it.
+        func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
+            try await write { try await inner.createFolder(title: title, parent: parent, noted: noted) }
+        }
+        func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
+            try await write { try await inner.createAlbum(title: title, parent: parent, noted: noted) }
+        }
         func addAssets(_ assets: [AssetID], to album: CollectionID) async throws { try await write { try await inner.addAssets(assets, to: album) } }
         func removeAssets(_ assets: [AssetID], from album: CollectionID) async throws { try await write { try await inner.removeAssets(assets, from: album) } }
         func renameCollection(_ id: CollectionID, to title: String) async throws { try await write { try await inner.renameCollection(id, to: title) } }
@@ -315,32 +537,28 @@ struct UndoHardeningTests {
         }
     }
 
-    /// After an undo: the user's album is back to its name and holds its own photos (plus,
-    /// by design, photos Albumist could not prove it added); everything else Albumist made
-    /// is gone, except albums it only found after an interruption (never deleted: it cannot
-    /// prove it made them), which are empty, and the folders holding them.
+    /// After an undo the library is as it was before the plan, or the app names what stays
+    /// (`UndoRemainder`, review P2-01): an album found by its name after an interruption (never
+    /// deleted, it is empty) with the folders holding it, and photos an interrupted add may
+    /// have put into the user's album (it cannot be proven whether Albumist or the user did).
+    /// Before, these were simply allowed, and "Alles zurücknehmen" left them without a word.
     func expectUndone(_ executed: ChangePlan, _ undone: ChangePlan, _ library: InMemoryPhotoLibrary, case label: String) async throws {
         #expect(undone.status == .completed, "\(label): \(undone.steps.map(\.state))")
         let inv = try await library.currentInventory()
-        let adopted = Set((executed.record?.adoptedKeys ?? []).compactMap { executed.resolvedKeys[$0] })
+        let remainder = UndoRemainder(plan: executed, current: inv)
+        let named = Set(remainder.collections.map(\.id))
         for c in inv.collections.values where c.id != "sommer" && c.id != "familie" {
-            let holdsAdopted = inv.collections.values.contains { adopted.contains($0.id) && inv.path(of: $0.id).contains(c.title) }
-            #expect(adopted.contains(c.id) || holdsAdopted, "\(c.title) left behind (\(label))")
+            let holdsNamed = inv.collections.values.contains { named.contains($0.id) && inv.path(of: $0.id).contains(c.title) }
+            #expect(named.contains(c.id) || holdsNamed, "\(c.title) left behind without a word (\(label))")
             #expect(c.assetIDs.isEmpty, "\(c.title) still holds photos (\(label))")
         }
         let sommer = try #require(inv["sommer"])
         #expect(sommer.title == "Sommer", "\(label)")
-        // Albumist's photos leave the user's album unless an interruption left it unprovable
-        // whether Albumist or the user put them there (audit 2, 1.1).
-        let unprovable = executed.steps.contains { step in
-            guard case .addAssets(.existing("sommer"), _) = step.operation else { return false }
-            return executed.record?.unverified.contains(step.id) == true
-        }
-        if unprovable {
-            #expect(sommer.assetIDs.isSuperset(of: Self.ownPhotos), "\(label)")
-        } else {
-            #expect(sommer.assetIDs == Self.ownPhotos, "\(label)")
-        }
+        #expect(inv["familie"] != nil, "\(label)")
+        // Albumist's photos leave the user's album; photos that stay are named.
+        let namedInSommer = remainder.photos.first { $0.album == "sommer" }?.assets ?? []
+        #expect(remainder.photos.allSatisfy { $0.album == "sommer" }, "\(label)")
+        #expect(sommer.assetIDs == Self.ownPhotos.union(namedInSommer), "\(label)")
         #expect(await library.assets == allAssets)
     }
 

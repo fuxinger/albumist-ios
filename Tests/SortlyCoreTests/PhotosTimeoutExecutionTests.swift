@@ -80,20 +80,20 @@ struct PhotosTimeoutExecutionTests {
         }
 
         private func create(_ what: String, title: String, parent: CollectionID?, folder: Bool,
-                            noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+                            noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
             try lane(what)
             guard stalls == what else {
-                let id = folder ? try await base.createFolder(title: title, parent: parent) : try await base.createAlbum(title: title, parent: parent)
-                noted(id)
-                return id
+                return folder ? try await base.createFolder(title: title, parent: parent, noted: noted)
+                    : try await base.createAlbum(title: title, parent: parent, noted: noted)
             }
             stalls = nil
             if later {
                 let id = CollectionID("late-\(what)")
-                noted(id)
+                await noted(id)
                 pending = (id, title, parent, folder)
             } else if lands {
-                noted(folder ? try await base.createFolder(title: title, parent: parent) : try await base.createAlbum(title: title, parent: parent))
+                _ = folder ? try await base.createFolder(title: title, parent: parent, noted: noted)
+                    : try await base.createAlbum(title: title, parent: parent, noted: noted)
             }
             throw PhotosNotResponding(lane: .write, what: what, notSent: false)
         }
@@ -115,10 +115,10 @@ struct PhotosTimeoutExecutionTests {
         func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID {
             try await createAlbum(title: title, parent: parent, noted: { _ in })
         }
-        func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+        func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
             try await create("createFolder", title: title, parent: parent, folder: true, noted: noted)
         }
-        func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+        func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
             try await create("createAlbum", title: title, parent: parent, folder: false, noted: noted)
         }
         func addAssets(_ assets: [AssetID], to album: CollectionID) async throws {
@@ -273,8 +273,11 @@ struct PhotosTimeoutExecutionTests {
         let resumed = try await ChangeExecutor(library: photos, store: store).execute(journal)
         #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
         #expect(try await albums(lib, titled: "Reise").count == 1)
-        // Never forgotten, but answered: it never comes, so it is not waited for.
-        #expect(resumed.record?.maybeCreated.values.contains(CollectionID("late-createAlbum")) == true)
+        // Never forgotten, but answered: it never comes, so it is not waited for. The album made
+        // instead has its id written down too (review P2-01), the earlier one stays on record.
+        #expect(resumed.record?.earlierMaybeCreated.contains(CollectionID("late-createAlbum")) == true)
+        let key = try albumKey(resumed)
+        #expect(resumed.record?.maybeCreated[key] == resumed.resolvedKeys[key])
         #expect(resumed.record?.adoptedKeys.isEmpty == true)
     }
 

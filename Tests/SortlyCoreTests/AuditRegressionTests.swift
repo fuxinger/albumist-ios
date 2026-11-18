@@ -458,7 +458,7 @@ struct AuditPlannerTests {
         ])
         let proposal = AlbumProposal(id: SortlyID("m"), kind: .rule, title: "— Sommerurlaub —", assetIDs: [], reliability: .certain)
         let plan = OrganizationPlanner().makePlan(
-            from: [ConfirmedProposal(proposal: proposal, decision: .merge(target: "a", sources: ["a", "b"], title: nil, folderPath: nil, removeSourceAlbums: false))],
+            from: [ConfirmedProposal(proposal: proposal, decision: .merge(target: "a", sources: ["a", "b"], title: nil, folderPath: nil))],
             inventory: inventory)
         #expect(!plan.steps.contains { if case .renameCollection = $0.operation { true } else { false } })
         #expect(plan.steps.contains { $0.operation == .addAssets(album: .existing("a"), assets: ["2"]) })

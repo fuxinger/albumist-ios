@@ -232,10 +232,12 @@ struct PlanReceiptView: View {
         retrying = true
         let request = PlanRequest(model: model, navigator: navigator)
         Task {
+            let said = model.message
             let missing = await model.retryPlan(for: plan)
             retrying = false
             guard let missing else {
-                if navigator?.isShowing(request.mark) == true { nothingToRetry = true }
+                // Not "Nichts mehr zu tun" when the app said why (an album that may still land).
+                if model.message == said, navigator?.isShowing(request.mark) == true { nothingToRetry = true }
                 return
             }
             offer(WaitingRetry(plan: missing, request: request), attempt: attempt)

@@ -92,18 +92,30 @@ public actor InMemoryPhotoLibrary: PhotoLibraryWriting {
     public func availableAssets(_ ids: [AssetID]) async throws -> Set<AssetID> { Set(ids).intersection(assets) }
 
     public func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID {
-        try countWrite()
-        let id = newID("folder")
-        inventory.upsert(CollectionSnapshot(id: id, title: title, kind: .folder, parentID: parent))
-        if let parent, var p = inventory[parent] { p.childIDs.append(id); inventory.upsert(p) }
-        try finishWrite()
-        return id
+        try await createFolder(title: title, parent: parent, noted: { _ in })
     }
 
     public func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID {
+        try await createAlbum(title: title, parent: parent, noted: { _ in })
+    }
+
+    /// Like PhotoKit: `noted` hears the new id inside the change, before it is stored (the
+    /// placeholder's identifier), and the change waits for it. A crash before the request
+    /// (`failAfterWrites`) gives no id; one after applying it leaves the id heard.
+    public func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
+        try await create(title: title, parent: parent, kind: .folder, noted: noted)
+    }
+
+    public func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
+        try await create(title: title, parent: parent, kind: .userAlbum, noted: noted)
+    }
+
+    private func create(title: String, parent: CollectionID?, kind: CollectionKind,
+                        noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         try countWrite()
-        let id = newID("album")
-        inventory.upsert(CollectionSnapshot(id: id, title: title, kind: .userAlbum, parentID: parent))
+        let id = newID(kind == .folder ? "folder" : "album")
+        await noted(id)
+        inventory.upsert(CollectionSnapshot(id: id, title: title, kind: kind, parentID: parent))
         if let parent, var p = inventory[parent] { p.childIDs.append(id); inventory.upsert(p) }
         try finishWrite()
         return id
@@ -200,6 +212,20 @@ public actor InMemoryPhotoLibrary: PhotoLibraryWriting {
         try finishWrite()
     }
 
+    /// Like PhotoKit's change block (review P2-08): counted again at the moment of the change.
+    /// Still one request (and one question) when nothing passes.
+    public func deleteCollections(_ ids: [CollectionID], onlyHolding allowed: [CollectionID: Set<AssetID>]) async throws {
+        let now = inventory
+        let going = DeletionCheck.going(ids, allowed: allowed, members: { id in
+            guard let c = now[id], c.kind != .folder else { return nil }
+            return c.assetIDs
+        }, children: { id in
+            guard now[id]?.kind == .folder else { return nil }
+            return now.collections.values.filter { $0.parentID == id }.map(\.id)
+        })
+        try await deleteCollections(going)
+    }
+
     public enum CocoaLikeError: Error { case missing, notEditable }
 }
 
@@ -210,5 +236,12 @@ public actor InMemoryPlanStore: PlanJournal {
     public func save(_ plan: ChangePlan) async throws { saved.append(plan) }
     public func save(_ plans: [ChangePlan]) async throws { saved.append(contentsOf: plans) }
     public func plan(_ id: SortlyID) async throws -> ChangePlan? { saved.last { $0.id == id } }
+    /// Added to the plan as it is stored (`ChangePlanStoring.noteCreated`).
+    public func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws {
+        var noted = saved.last { $0.id == plan.id } ?? plan
+        if noted.record == nil { noted.record = ExecutionRecord() }
+        noted.record?.noteRequested(id, key: key)
+        saved.append(noted)
+    }
     public var latest: ChangePlan? { saved.last }
 }

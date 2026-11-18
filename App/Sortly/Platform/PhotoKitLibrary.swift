@@ -317,10 +317,13 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         try await createAlbum(title: title, parent: parent, noted: { _ in })
     }
 
-    /// `noted` hears the placeholder's id inside the change block, before Photos commits it: a
-    /// request without an answer in time leaves the id in the plan's journal, and the album is
-    /// known as Albumist's if it lands later (`ExecutionRecord.maybeCreated`).
-    func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+    /// `noted` hears the placeholder's id inside the change block, before Photos commits it, and
+    /// the block waits for it (`waitInsideChange`): the executor writes the id into the plan's
+    /// journal there, the way the sample photos write theirs down (`SamplePhotos.save`). An app
+    /// ended right after Photos made the album, or a request without an answer in time, leaves
+    /// the id behind, and the album is known as Albumist's (`ExecutionRecord.maybeCreated`,
+    /// review P2-01).
+    func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
         try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
@@ -330,14 +333,15 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             let request = PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: title)
             let placeholder = request.placeholderForCreatedCollectionList
             created.value = placeholder.localIdentifier
-            noted(CollectionID(placeholder.localIdentifier))
+            let made = CollectionID(placeholder.localIdentifier)
+            Self.waitInsideChange { await noted(made) }
             folder?.addChildCollections([placeholder] as NSArray)
         }
         guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("folder") }
         return CollectionID(id)
     }
 
-    func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+    func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
         try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
@@ -347,11 +351,26 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: title)
             let placeholder = request.placeholderForCreatedAssetCollection
             created.value = placeholder.localIdentifier
-            noted(CollectionID(placeholder.localIdentifier))
+            let made = CollectionID(placeholder.localIdentifier)
+            Self.waitInsideChange { await noted(made) }
             folder?.addChildCollections([placeholder] as NSArray)
         }
         guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("album") }
         return CollectionID(id)
+    }
+
+    /// Inside a change block: runs `work` (writing the new id into the journal) and waits for
+    /// it, so it is on disk before Photos stores the change. Photos runs change blocks on its
+    /// own serial queue, never on Swift's shared pool, so waiting there holds none of the
+    /// threads `work` needs. At most `limit`: a journal that does not answer must not hold up
+    /// Photos; the id is then written once the create returns, as before (review P2-01).
+    private static func waitInsideChange(limit: TimeInterval = 10, _ work: @escaping @Sendable () async -> Void) {
+        let done = DispatchSemaphore(value: 0)
+        Task.detached(priority: .userInitiated) {
+            await work()
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + limit)
     }
 
     /// Inside a change block: the request that puts something into folder `id`. `.some(nil)`
@@ -442,6 +461,12 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     ///   `.declinedByUser`.
     /// The last outcome, with how long Photos took, goes into the diagnostic report.
     func deleteCollections(_ ids: [CollectionID]) async throws {
+        try await deleteCollections(ids, onlyHolding: [:])
+    }
+
+    /// `allowed`: what each album may hold when the change counts again (review P2-08).
+    func deleteCollections(_ ids: [CollectionID], onlyHolding allowed: [CollectionID: Set<AssetID>]) async throws {
+        let allowedRaw: [String: Set<String>] = Dictionary(uniqueKeysWithValues: allowed.map { ($0.key.rawValue, Set($0.value.map(\.rawValue))) })
         var log = DeletionLog.Entry(requested: ids.count)
         defer { DeletionLog.record(log) }
         var target = try await Self.deletableNow(ids.map(\.rawValue), log: &log)
@@ -460,9 +485,14 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                 // gerade nicht". Without an answer by then the outcome is not known (the user may
                 // still answer): `PhotosNotResponding`, never "deleted" or "not applied".
                 try await Self.change("deleteCollections", limit: Self.deletionLimit, asksUser: true) {
+                    // Counted again here, in the change itself (as `SamplePhotos.delete` does for
+                    // folders): an album that got a photo it may not hold since it was read
+                    // (the 30 s wait for the screen above, iCloud) stays, and so does every folder
+                    // holding it. Only the time the iOS question is open is left (P2-08).
+                    let going = Self.stillGoing(request, allowed: allowedRaw)
                     // Deletes only the album/folder containers. PhotoKit keeps the media.
-                    if !request.albums.isEmpty { PHAssetCollectionChangeRequest.deleteAssetCollections(request.albums as NSArray) }
-                    if !request.folders.isEmpty { PHCollectionListChangeRequest.deleteCollectionLists(request.folders as NSArray) }
+                    if !going.albums.isEmpty { PHAssetCollectionChangeRequest.deleteAssetCollections(going.albums as NSArray) }
+                    if !going.folders.isEmpty { PHCollectionListChangeRequest.deleteCollectionLists(going.folders as NSArray) }
                 }
             } catch let hung as PhotosNotResponding {
                 log.seconds.append(Date().timeIntervalSince(started))
@@ -590,6 +620,35 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         log.folders = lists.count
         log.foldersKept = lists.count - target.folders.count
         return target
+    }
+
+    /// Inside a change block: the part of `target` that may still go now (`DeletionCheck.going`),
+    /// read from Photos as it is at this moment. An album with an entry in `allowed` goes only
+    /// while it holds nothing else; a folder only while everything in it goes too.
+    private static func stillGoing(_ target: DeletionTarget, allowed: [String: Set<String>]) -> DeletionTarget {
+        var members: [CollectionID: Set<AssetID>] = [:]
+        let options = PHFetchOptions()
+        options.includeHiddenAssets = true
+        for album in target.albums where allowed[album.localIdentifier] != nil {
+            var inside = Set<AssetID>()
+            PHAsset.fetchAssets(in: album, options: options).enumerateObjects { asset, _, _ in inside.insert(AssetID(asset.localIdentifier)) }
+            members[CollectionID(album.localIdentifier)] = inside
+        }
+        var children: [CollectionID: [CollectionID]] = [:]
+        for folder in target.folders {
+            var inside: [CollectionID] = []
+            PHCollection.fetchCollections(in: folder, options: nil).enumerateObjects { child, _, _ in inside.append(CollectionID(child.localIdentifier)) }
+            children[CollectionID(folder.localIdentifier)] = inside
+        }
+        let albumIDs = Set(target.albums.map { CollectionID($0.localIdentifier) })
+        let may = Dictionary(uniqueKeysWithValues: allowed.map { (CollectionID($0.key), Set($0.value.map { AssetID($0) })) })
+        let going = Set(DeletionCheck.going(target.ids.map { CollectionID($0) }, allowed: may, members: { id in
+            albumIDs.contains(id) ? members[id] ?? [] : nil
+        }, children: { children[$0] }))
+        var result = DeletionTarget()
+        result.albums = target.albums.filter { going.contains(CollectionID($0.localIdentifier)) }
+        result.folders = target.folders.filter { going.contains(CollectionID($0.localIdentifier)) }
+        return result
     }
 
     /// Which of these albums and folders a new walk of the tree still finds.

@@ -131,18 +131,24 @@ public enum SampleLibrary {
                 }
             }
         }
-        let plans = history.filter { plan in
+        // Albums before the folders they are in.
+        let folders = going.subtracting(albums).sorted()
+        return Removal(assets: assets, albums: albums.sorted() + folders, plansToGiveBack: plansToGiveBack(history: history, gone: Set(albums)))
+    }
+
+    /// Plans that only made or filled albums that are gone: their free albums are given back.
+    /// After the deletion it is asked with the albums really gone (the change itself may have
+    /// kept one, review P2-05): a plan with an album still in Photos keeps its count.
+    public static func plansToGiveBack(history: [ChangePlan], gone: Set<CollectionID>) -> [SortlyID] {
+        history.filter { plan in
             guard plan.reverts == nil else { return false }
             let made = Set(plan.steps.compactMap { step -> CollectionID? in
                 guard case .createAlbum(let key, _, _) = step.operation else { return nil }
                 return plan.resolvedKeys[key]
             })
             let touched = made.union(plan.extendedAlbums)
-            return !touched.isEmpty && touched.isSubset(of: Set(albums))
-        }
-        // Albums before the folders they are in.
-        let folders = going.subtracting(albums).sorted()
-        return Removal(assets: assets, albums: albums.sorted() + folders, plansToGiveBack: plans.map(\.id))
+            return !touched.isEmpty && touched.isSubset(of: gone)
+        }.map(\.id)
     }
 
     // MARK: What Albumist wrote down
@@ -211,5 +217,64 @@ public enum SampleLibrary {
             }
         }
         return safe
+    }
+
+    // MARK: Checked again inside the deletion (review P2-05, 18.11.2026)
+
+    /// A photo as Photos shows it inside the change that deletes it.
+    public struct Seen: Hashable, Sendable {
+        /// The original file name of its photo resource.
+        public var filename: String?
+        public var created: Date?
+
+        public init(filename: String?, created: Date?) {
+            self.filename = filename
+            self.created = created
+        }
+    }
+
+    /// File name → date of every sample photo.
+    static let dates: [String: Date] = Dictionary(specs().map { ($0.filename, $0.date) }, uniquingKeysWith: { first, _ in first })
+
+    /// Whether a photo is one of Albumist's sample photos: its file name is exactly a sample
+    /// photo's name and it carries that photo's date (to the second). A photo of the user's,
+    /// even with a written-down id, a similar name or the same date, never is.
+    public static func isSample(_ seen: Seen) -> Bool {
+        guard let name = seen.filename, let created = seen.created, let date = dates[name] else { return false }
+        return abs(created.timeIntervalSince(date)) < 1
+    }
+
+    /// What the deletion of sample photos deletes, decided inside the change from Photos as it
+    /// is right then. The written-down ids alone are never enough to delete a photo.
+    public struct CheckedDeletion: Hashable, Sendable {
+        /// The photos that are surely sample photos.
+        public var assets: Set<String> = []
+        /// The albums that hold nothing but those, and the folders that hold nothing else.
+        public var collections: Set<String> = []
+        /// Written-down photos that are not (any more) sample photos: they stay.
+        public var kept: Set<String> = []
+
+        public init(assets: Set<String> = [], collections: Set<String> = [], kept: Set<String> = []) {
+            self.assets = assets
+            self.collections = collections
+            self.kept = kept
+        }
+    }
+
+    /// - Parameters:
+    ///   - photos: the written-down photos Photos still has, as it shows them now.
+    ///   - albums: the albums to delete → the photos in each now.
+    ///   - folders: the folders to delete → what is inside each now.
+    public static func checkedDeletion(photos: [String: Seen], albums: [String: Set<String>], folders: [String: [String]]) -> CheckedDeletion {
+        let assets = Set(photos.filter { isSample($0.value) }.keys)
+        let kept = Set(photos.keys).subtracting(assets)
+        // The same rule as for every deletion of albums (`DeletionCheck`): an album goes only
+        // while it holds nothing but sample photos that go, a folder only while all of it goes.
+        let allowed = Dictionary(uniqueKeysWithValues: albums.keys.map { (CollectionID($0), Set(assets.map { AssetID($0) })) })
+        let ids = (albums.keys.sorted() + folders.keys.sorted()).map { CollectionID($0) }
+        let going = DeletionCheck.going(ids, allowed: allowed,
+                                        members: { id in albums[id.rawValue].map { Set($0.map { AssetID($0) }) } },
+                                        children: { id in folders[id.rawValue]?.map { CollectionID($0) } })
+        return CheckedDeletion(assets: assets, collections: Set(going.map(\.rawValue)), kept: kept)
     }
 }

@@ -70,15 +70,27 @@ public struct InterruptedPlanUndo: Sendable {
     public var kept: ChangePlan
     /// The confirmed undo of what the plan did, or nil when there is nothing to take back.
     public var undo: ChangePlan?
+    /// What the plan may have left in Photos that the undo leaves alone, because Albumist
+    /// cannot prove it was its own (review P2-01): an album found by its name, photos in the
+    /// user's own album. While it is not empty the plan is never dropped: it stays in the
+    /// history, and the app names what stays.
+    public var remainder: UndoRemainder
 
     /// - Parameter settled: the interrupted plan after `ChangeExecutor.reconcileInterrupted`.
     public init(settled: ChangePlan, current: CollectionInventory, undoID: SortlyID = SortlyID(), now: Date = Date()) {
         var kept = settled.keptAsIs(current: current)
+        let remainder = UndoRemainder(plan: kept, current: current)
+        self.remainder = remainder
         var undo = UndoPlanner().undoPlan(for: kept, current: current, id: undoID, now: now)
         if undo.steps.isEmpty {
             // Nothing left that could be taken back (also after a rename the user changed
-            // again meanwhile): the plan goes away, as it always did.
-            kept.status = .cancelled
+            // again meanwhile): the plan goes away, as it always did, unless something of it
+            // may still be in Photos. Then it stays in the history (review P2-01).
+            if remainder.isEmpty {
+                kept.status = .cancelled
+            } else if kept.status == .cancelled {
+                kept.status = .completedWithErrors
+            }
             self.kept = kept
             self.undo = nil
             return
@@ -90,9 +102,11 @@ public struct InterruptedPlanUndo: Sendable {
     }
 
     /// Whether the plan is cancelled once the undo ran: only after this undo completed (nothing
-    /// of the plan is left in Photos) or when there was nothing to take back. `result` is the
-    /// undo as it ended, nil when it could not run.
+    /// of the plan is left in Photos) or when there was nothing to take back, and never while
+    /// something the undo cannot take back may be left (`remainder`). `result` is the undo as
+    /// it ended, nil when it could not run.
     public func cancelsPlan(after result: ChangePlan?) -> Bool {
+        guard remainder.isEmpty else { return false }
         guard let undo else { return true }
         return result?.id == undo.id && result?.status == .completed
     }
@@ -101,6 +115,10 @@ public struct InterruptedPlanUndo: Sendable {
     public enum Outcome: Hashable, Sendable {
         /// Nothing had changed in Photos: the plan is gone.
         case nothingToTakeBack
+        /// Everything Albumist can prove was its own is taken back, but something the plan may
+        /// have done stays in Photos (`remainder`): the plan stays in the history, and the app
+        /// says what stays (review P2-01). Before, the plan was dropped without a word.
+        case leftUnclear
         /// Everything is taken back: the plan is cancelled and leaves the history, as before.
         case undone
         /// The undo ran but did not get everything back ("Nicht erlauben" in the iOS question):
@@ -132,7 +150,11 @@ public struct InterruptedPlanUndo: Sendable {
                          run: @Sendable (ChangePlan) async -> Void) async throws -> Outcome {
         guard let undo else {
             try await journal.save(kept)
-            return .nothingToTakeBack
+            if remainder.isEmpty { return .nothingToTakeBack }
+            // Kept like "So lassen": its results are stored (or, if that fails, at the next
+            // launch), so its albums are Albumist's records like those of any plan in the history.
+            _ = await finalize(kept)
+            return .leftUnclear
         }
         try await journal.save([kept, undo])
         guard await finalize(kept) else { return .resultsNotStored }
@@ -144,6 +166,10 @@ public struct InterruptedPlanUndo: Sendable {
                 try await journal.save(plan)
             }
             return .undone
+        }
+        if ended?.id == undo.id, ended?.status == .completed {
+            // Everything that is provably Albumist's is back; what may not be stays, named.
+            return .leftUnclear
         }
         switch ended?.status {
         case .completedWithErrors?:
@@ -165,7 +191,7 @@ public struct InterruptedPlanUndo: Sendable {
     /// selection when the plan's results were stored): everything is taken back, so the
     /// selection is as it was before "Jetzt umsetzen" (as before K1). After any other ending,
     /// what the plan did stays in Photos, and its suggestions stay out of the selection like
-    /// those of any plan that ran.
+    /// those of any plan that ran (also `leftUnclear`: the plan stays in the history).
     public func selectionToRestore(after outcome: Outcome) -> Set<SortlyID> {
         outcome == .undone ? kept.appliedSources : []
     }

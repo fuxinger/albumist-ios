@@ -69,12 +69,47 @@ mit eingeschränkten Rechten: nur lesend.
 - **Nicht auf echten Geräten getestet.** Synthetisch geprüft: 100 000 Fotos (80 % nur in
   iCloud) in 54 s mit 563 MB Spitze auf dem Linux-Rechner der CI, ohne echte Bilderkennung.
   Laufzeit, Wärme und Akku auf iPhones sind ungemessen.
-- PhotoKit kennt kein bedingtes Löschen: Zwischen dem letzten Lesen und dem Löschen eines
-  leeren Albums kann noch ein Foto hineinkommen (Millisekunden). Albumist liest direkt davor.
-- Ein beim Wiederanlauf übernommenes leeres Album bleibt nach Rückgängig stehen (gewollt).
+- PhotoKit kennt kein bedingtes Löschen: Kommt ein Foto in ein Album von Albumist, solange die
+  Frage von iOS zum Löschen offen ist, geht das Album trotzdem (das Foto selbst bleibt in der
+  Mediathek). Albumist zählt im Änderungsblock selbst noch einmal nach, direkt bevor iOS fragt
+  (Prüfer 2, P2-08): Ein Foto, das vorher hineinkam (auch in den bis zu 30 Sekunden, in denen
+  Albumist wartet, bis es für die Frage auf dem Bildschirm ist), hält das Album und seine Ordner;
+  dann nimmt Albumist nur seine eigenen Fotos heraus. Die Frage selbst darf bis zu 300 Sekunden
+  offen sein.
+- Ein beim Wiederanlauf nur über den Namen übernommenes leeres Album bleibt nach Rückgängig
+  stehen (gewollt). Seit Prüfer 2, P2-01 (18.11.2026) selten: Die Kennung jedes neuen Albums
+  und Ordners steht schon im Änderungsblock im Journal, bevor Fotos speichert; übernommen wird
+  nur noch, wenn dieses Schreiben scheiterte (z. B. voller Speicher) oder bei Plänen älterer
+  Versionen. Albumist sagt es dann nach dem Rückgängig („Etwas bleibt in Fotos“, mit Name und
+  Ordner), und der Plan bleibt im Verlauf.
 - Wird ein Hinzufügen in ein Album des Nutzers unterbrochen und ist der Ausgang unklar, nimmt
   Rückgängig ein dort doch angekommenes Foto nicht heraus (gewollt, zweite Gegenprüfung 1.1).
-  Der Änderungsbeleg zeigt den Schritt als nicht bestätigt.
+  Der Änderungsbeleg zeigt den Schritt als nicht bestätigt; nach dem Rückgängig (auch nach
+  „Alles zurücknehmen“) sagt Albumist, wie viele Fotos in welchem Album bleiben, und der Plan
+  bleibt im Verlauf statt zu verschwinden (P2-01).
+- Zwei Pläne ergänzen dasselbe Album (Prüfer 2, P2-09): Ein Plan zeichnet nur auf, was er selbst
+  hinzugefügt hat. Wird der ältere zurückgenommen, nimmt er seine Fotos aus dem Album, auch die,
+  die der neuere Vorschlag ebenfalls dort haben wollte; der Beleg des neueren sagt weiter
+  „erledigt“. Fotos des Nutzers sind nie betroffen. Nicht geändert, weil zwei Wege möglich sind
+  und beide etwas versprechen, das der andere nicht hält: die Fotos beim Rückgängig des älteren
+  lassen (dann nimmt „Rückgängig“ des älteren nicht alles zurück, und ein späteres Rückgängig des
+  neueren kennt sie nicht als seine) oder es in der Rückfrage sagen. Offen für eine Entscheidung.
+- Beispielfotos entfernen (Prüfer 2, P2-05): Gelöscht wird nur ein Foto, dessen Dateiname und
+  Aufnahmedatum im Löschblock selbst noch zu einem Beispielfoto passen
+  (`SampleLibrary.isSample`), egal was in der gespeicherten Liste steht; ein Album nur, solange
+  es nichts anderes hält, ein Ordner nur, solange alles darin mitgeht. Hat der Nutzer Name oder
+  Datum eines Beispielfotos in Fotos geändert, bleibt es: Albumist sagt, wie viele Fotos
+  geblieben sind, und vergisst sie. Offen: Nach Löschen und Neuinstallieren von Albumist ist die
+  Liste weg; die Beispielfotos bleiben dann als normale Fotos in der Mediathek, und „Entfernen“
+  wird nicht mehr angeboten (die Prüfung könnte sie wiederfinden, das ist noch nicht gebaut).
+- Das Journal schreibt mit `synchronous = FULL`, aber ohne `PRAGMA fullfsync` (Prüfer 2,
+  P2-07): Nach einem Stromausfall kann auf Apple-Geräten der letzte Eintrag fehlen, obwohl Fotos
+  die Änderung hat. Seit P2-01/P2-07 legt „Fortsetzen“ dann nichts doppelt an (die Kennung neuer
+  Alben steht in einem eigenen Eintrag im Änderungsblock), und Fotos des ersten offenen Schritts,
+  die schon im Album liegen, gelten in Albumists eigenem Album als seine, im Album des Nutzers
+  als unklar (Rückgängig lässt sie und nennt sie). `fullfsync` ist nicht eingeschaltet: Es kostet
+  bei jedem Journal-Eintrag eine volle Leerung des Gerätespeichers, und wie lange das auf einem
+  iPhone bei Hunderten Schritten dauert, ist nicht gemessen. Offen für eine Messung auf dem Gerät.
 - Nimmt der Nutzer während einer Unterbrechung alle Fotos aus einem Album, das der Plan gerade
   angelegt hat, und tippt danach „Rest anlegen“, legt Albumist sie wieder hinein: Das lässt sich
   nicht von einer Anfrage unterscheiden, die Fotos nie erreicht hat (gewollt, `DECISIONS.md`).

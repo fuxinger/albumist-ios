@@ -164,26 +164,37 @@ final class SamplePhotos {
             let managed: [ManagedAlbumState] = try await store.managedAlbums()
             let removal: SampleLibrary.Removal = SampleLibrary.removal(sampleIDs: sampleIDs, libraryAssets: presentIDs,
                                                                        managedAlbums: managed, inventory: inventory, history: history)
+            var notSamples = Set<String>()
             if !removal.isEmpty {
                 let assetIDs: [String] = removal.assets.map(\AssetID.rawValue)
                 let collectionIDs: [String] = removal.albums.map(\CollectionID.rawValue)
-                try await Self.delete(assets: assetIDs, collections: collectionIDs)
+                notSamples = try await Self.delete(assets: assetIDs, collections: collectionIDs)
             }
             // The deleted albums are not the user's deletions: their records go, and plans that
-            // only made sample albums give their free albums back.
-            let gone = Set(removal.albums)
+            // only made sample albums give their free albums back. Only what is really gone: the
+            // change itself keeps an album that holds a photo that is not a sample (P2-05).
+            let after = try await model.library.currentInventory()
+            let gone = Set(removal.albums.filter { after[$0] == nil })
             let remaining = try await store.managedAlbums().filter { !gone.contains($0.albumID) }
             try await store.saveManagedAlbums(remaining)
             model.managedAlbums = remaining
-            for plan in history where removal.plansToGiveBack.contains(plan.id) {
+            let giveBack = Set(SampleLibrary.plansToGiveBack(history: history, gone: gone))
+            for plan in history where giveBack.contains(plan.id) {
                 Purchases.shared.returnUsage(plan: plan.id, albums: plan.freeAlbumUse(applied: true))
             }
             // Whatever is still there (the user deleted some in Photos already) is forgotten
             // only once it is really gone.
             let still = await Task.detached(priority: .userInitiated) { Self.existing(storedIDs) }.value
-            update { $0.keepOnly(still) }
-            model.inventory = try await model.library.currentInventory()
+            // A written-down photo that is not a sample photo (name or date do not match) is
+            // forgotten too: it stays in Photos, and Albumist never offers to delete it again.
+            update { $0.keepOnly(still.subtracting(notSamples)) }
+            model.inventory = after
             model.startAnalysis(userInitiated: true)
+            let stayed = notSamples.intersection(still).count
+            if stayed > 0 {
+                model.message = AppMessage(title: String(localized: "Nicht alles entfernt"),
+                                           text: String(localized: "\(stayed) Fotos bleiben in Fotos: Name oder Aufnahmedatum passen nicht zu den Beispielfotos von Albumist. Albumist löscht nur, was sicher ein Beispielfoto ist."))
+            }
         } catch let quiet as PhotosNotResponding where quiet.lane == .write {
             // Not known whether they go: the question iOS asks may still be on screen, or an
             // earlier change still has no answer (second review of the PhotoKit limits, 7).
@@ -208,34 +219,57 @@ final class SamplePhotos {
 
     /// One change request, so iOS asks once. Albums before the folders they are in.
     /// iOS asks first: the long limit for deletions, not said as "Fotos antwortet gerade nicht".
-    nonisolated static func delete(assets: [String], collections: [String]) async throws {
+    /// Everything is checked again inside the change, from Photos as it is right then (review
+    /// P2-05): a photo goes only while its file name and date are a sample photo's
+    /// (`SampleLibrary.isSample`), whatever the written-down list says; an album only while it
+    /// holds nothing but those; a folder only while all of it goes. Returns the written-down
+    /// photos that stayed because they are not (any more) sample photos.
+    nonisolated static func delete(assets: [String], collections: [String]) async throws -> Set<String> {
+        let kept = LockedBox<Set<String>>([])
         try await PhotoKitLibrary.change("samplePhotos.delete", limit: PhotoKitLibrary.deletionLimit, asksUser: true) {
+            var photos: [String: SampleLibrary.Seen] = [:]
+            var byAsset: [String: PHAsset] = [:]
             if !assets.isEmpty {
-                let photos = PHAsset.fetchAssets(withLocalIdentifiers: assets, options: nil)
-                if photos.count > 0 { PHAssetChangeRequest.deleteAssets(photos) }
+                let options = PHFetchOptions()
+                options.includeHiddenAssets = true
+                PHAsset.fetchAssets(withLocalIdentifiers: assets, options: options).enumerateObjects { asset, _, _ in
+                    let resources = PHAssetResource.assetResources(for: asset)
+                    let original = resources.first { $0.type == .photo } ?? resources.first
+                    photos[asset.localIdentifier] = SampleLibrary.Seen(filename: original?.originalFilename, created: asset.creationDate)
+                    byAsset[asset.localIdentifier] = asset
+                }
             }
+            var albums: [String: Set<String>] = [:]
+            var byAlbum: [String: PHAssetCollection] = [:]
+            var folders: [String: [String]] = [:]
+            var byFolder: [String: PHCollectionList] = [:]
             if !collections.isEmpty {
-                let albums = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: collections, options: nil)
-                if albums.count > 0 { PHAssetCollectionChangeRequest.deleteAssetCollections(albums) }
-                // Deleting a folder deletes everything in it. What is inside is read again here,
-                // in the change itself: a folder goes only while all of it goes too (an album the
-                // user put in after the list was read keeps it, and the folders above it).
-                var albumIDs = Set<String>()
-                albums.enumerateObjects { album, _, _ in albumIDs.insert(album.localIdentifier) }
-                let lists = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: collections, options: nil)
-                var children: [String: [String]] = [:]
-                var byID: [String: PHCollectionList] = [:]
-                lists.enumerateObjects { list, _, _ in
-                    byID[list.localIdentifier] = list
+                let options = PHFetchOptions()
+                options.includeHiddenAssets = true
+                PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: collections, options: nil).enumerateObjects { album, _, _ in
+                    var inside = Set<String>()
+                    PHAsset.fetchAssets(in: album, options: options).enumerateObjects { asset, _, _ in inside.insert(asset.localIdentifier) }
+                    albums[album.localIdentifier] = inside
+                    byAlbum[album.localIdentifier] = album
+                }
+                // Deleting a folder deletes everything in it: what is inside is read here too.
+                PHCollectionList.fetchCollectionLists(withLocalIdentifiers: collections, options: nil).enumerateObjects { list, _, _ in
                     var inside: [String] = []
                     PHCollection.fetchCollections(in: list, options: nil).enumerateObjects { child, _, _ in inside.append(child.localIdentifier) }
-                    children[list.localIdentifier] = inside
+                    folders[list.localIdentifier] = inside
+                    byFolder[list.localIdentifier] = list
                 }
-                let safe = SampleLibrary.foldersSafeToDelete(children, deletingAlbums: albumIDs)
-                let folders = safe.compactMap { byID[$0] }
-                if !folders.isEmpty { PHCollectionListChangeRequest.deleteCollectionLists(folders as NSArray) }
             }
+            let checked = SampleLibrary.checkedDeletion(photos: photos, albums: albums, folders: folders)
+            kept.value = checked.kept
+            let goingPhotos = checked.assets.sorted().compactMap { byAsset[$0] }
+            if !goingPhotos.isEmpty { PHAssetChangeRequest.deleteAssets(goingPhotos as NSArray) }
+            let goingAlbums = collections.filter(checked.collections.contains).compactMap { byAlbum[$0] }
+            if !goingAlbums.isEmpty { PHAssetCollectionChangeRequest.deleteAssetCollections(goingAlbums as NSArray) }
+            let goingFolders = collections.filter(checked.collections.contains).compactMap { byFolder[$0] }
+            if !goingFolders.isEmpty { PHCollectionListChangeRequest.deleteCollectionLists(goingFolders as NSArray) }
         }
+        return kept.value
     }
 
     // MARK: Drawing

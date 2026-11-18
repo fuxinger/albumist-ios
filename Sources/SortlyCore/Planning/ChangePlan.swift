@@ -209,23 +209,31 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
     /// Existing albums and folders the plan touched, with the name and folder path they had
     /// when it ran, so the receipt keeps showing those names after a later rename (audit 2, 7.2).
     public var names: [CollectionID: RecordedName] = [:]
-    /// Planned key → the id Photos gave the new album or folder of a request that then got no
-    /// answer in time (`PhotosNotResponding`): it may land later, and is never forgotten. If it
+    /// Planned key → the id Photos gave the new album or folder, written down inside the change
+    /// before Photos stored it (`noteRequested`, review P2-01), or of a request that then got no
+    /// answer in time (`PhotosNotResponding`, with `maybeCreatedAt`): it may land later, and is
+    /// never forgotten. If it
     /// is there when the plan goes on or is taken back, it is this plan's own (made, not
     /// adopted), never made a second time. While it may still land, no second one is made
     /// (`ChangeExecutor.lateCreateWait`); one that lands after the plan made the album anyway is
     /// still Albumist's: the album records keep it and undo deletes it (`mayStillLand`; second
     /// and third review of the PhotoKit limits, 1 and N2).
     public var maybeCreated: [String: CollectionID] = [:]
-    /// When the request of `maybeCreated[key]` was given up.
+    /// When the request of `maybeCreated[key]` was given up (only for a request that got no
+    /// answer: an id merely written down inside the change is not waited for).
     public var maybeCreatedAt: [String: Date] = [:]
     /// Earlier `maybeCreated` ids of a key whose later request got no answer either.
     public var earlierMaybeCreated: [CollectionID] = []
+    /// Step id → photos of an add step that were already in someone else's album when a
+    /// resumed plan reached it, while the journal may have been one entry behind Photos (review
+    /// P2-07): Albumist may have put them there, or the user. Never claimed (undo leaves them),
+    /// but named after an undo (`UndoRemainder`).
+    public var unclear: [String: [AssetID]] = [:]
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case media, unverified, adoptedKeys, deletedAlbums, unavailable, names, maybeCreated, maybeCreatedAt, earlierMaybeCreated
+        case media, unverified, adoptedKeys, deletedAlbums, unavailable, names, maybeCreated, maybeCreatedAt, earlierMaybeCreated, unclear
     }
 
     public init(from decoder: any Decoder) throws {
@@ -239,6 +247,33 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
         maybeCreated = try c.decodeIfPresent([String: CollectionID].self, forKey: .maybeCreated) ?? [:]
         maybeCreatedAt = try c.decodeIfPresent([String: Date].self, forKey: .maybeCreatedAt) ?? [:]
         earlierMaybeCreated = try c.decodeIfPresent([CollectionID].self, forKey: .earlierMaybeCreated) ?? []
+        unclear = try c.decodeIfPresent([String: [AssetID]].self, forKey: .unclear) ?? [:]
+    }
+
+    /// Photos gave this id to the new album or folder of `key`, inside the change and before
+    /// it stored it (`ChangePlanStoring.noteCreated`, review P2-01): if it is in the library,
+    /// Albumist made it. Unlike `noteMaybeCreated` nothing waits for it: after an app that
+    /// ended, Photos has stored the change or never will. An earlier id of the same key stays
+    /// Albumist's (`earlierMaybeCreated`).
+    public mutating func noteRequested(_ id: CollectionID, key: String) {
+        guard maybeCreated[key] != id else { return }
+        if let earlier = maybeCreated[key], !earlierMaybeCreated.contains(earlier) {
+            earlierMaybeCreated.append(earlier)
+        }
+        maybeCreated[key] = id
+        maybeCreatedAt[key] = nil
+    }
+
+    /// Until when the create of `key`, whose request got no answer (`maybeCreatedAt`), may
+    /// still land if it is not in the library (`ChangeExecutor.lateCreateWait`); nil when it
+    /// cannot any more: its request returned in this launch (`answered`), the wait is over, or
+    /// it was only written down inside the change (an app that ended, not a request without
+    /// an answer). A clock set back never makes it wait longer than the wait (round-3 review, L2).
+    public func lateCreateWaitsUntil(_ key: String, answered: Bool, now: Date) -> Date? {
+        guard maybeCreated[key] != nil, let since = maybeCreatedAt[key], !answered else { return nil }
+        let until = since.addingTimeInterval(ChangeExecutor.lateCreateWait)
+        if until.timeIntervalSince(now) > ChangeExecutor.lateCreateWait { return nil }
+        return now < until ? until : nil
     }
 
     /// A request that got no answer gave Photos this id for a new album or folder.

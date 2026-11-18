@@ -87,6 +87,29 @@ Testing failed:
 ** TEST FAILED **
 """
 
+# UI run 44202318875 attempt 2, job 134494213854 (flow-other): XCTest's daemon testmanagerd
+# crashed during test6 (SIGSEGV, com.apple.testmanagerd); the next class ran 0 tests.
+TESTMANAGERD_CRASH = """\
+Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' passed (50.0 seconds).
+Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' started.
+UI_STEP_OK progress moves in the foreground
+<unknown>:0: error: -[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs] : Failed to get matching snapshots: Lost connection to the application (pid 1951). (Underlying Error: Couldn’t communicate with a helper application. Try your operation again.)
+<unknown>:0: error: -[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs] : Critical process testmanagerd crashed in (null)
+Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' failed (229.078 seconds).
+\t Executed 8 tests, with 2 failures (0 unexpected) in 1871.445 (1871.476) seconds
+Test Case '-[SortlyUITests.SortlyLockedUITests test7_LockedPlanOffersTheFreeAlbumsLeft]' started.
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+\t Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' failed at 2026-11-18 02:00:59.000.
+** TEST FAILED **
+"""
+TESTMANAGERD_BUNDLE = [
+    "result bundle: Failed to get matching snapshots: Lost connection to the application (pid 1951). (Underlying Error: "
+    "Couldn’t communicate with a helper application. Try your operation again. If that fails, quit and re",
+    "result bundle: Critical process testmanagerd crashed in (null)",
+]
+PASSED_ONE = "Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' passed (9.0 seconds).\n"
+
 # Job 133113879733: a compile error (xcodebuild test builds first).
 COMPILE_ERROR = """\
 /Users/runner/work/sortly-ios/sortly-ios/App/Sortly/Platform/SamplePhotos.swift:162:66: error: cannot infer key path type from context; consider explicitly specifying a root type
@@ -399,21 +422,49 @@ class SelectionTests(unittest.TestCase):
         finally:
             for k, v in saved.items():
                 setattr(ui_tests, k, v)
-        marker = os.path.join(folder.name, ui_tests.NO_TEST_STARTED)
+        marker = os.path.join(folder.name, ui_tests.NO_TEST_RESULT)
         return code, os.path.exists(marker), log.getvalue()
 
-    def test_a_simulator_lost_before_the_first_test_is_no_result(self):
+    def test_a_simulator_lost_in_every_pass_is_no_result(self):
         # Both passes lost the simulator before any test started: exit 75 and the marker.
         code, marker, log = self.run_with_passes([AX_TIMEOUT, SERVICE_INTERRUPTED])
         self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True))
-        self.assertIn("No test started", log)
+        self.assertIn("No test result", log)
+        self.assertIn("UI_RESULT device infra", log)
         # No repeat possible (the simulator did not come back): the same.
         self.assertEqual(self.run_with_passes([RUNNER_TERMINATED], reset_ok=False)[:2], (ui_tests.NO_TEST_EXIT, True))
-        # A test started in a pass: a red, never "no result".
-        started = "Test Case '-[SortlyUITests.DeviceUITests test01_Hot]' started.\n" + SERVICE_INTERRUPTED
-        self.assertEqual(self.run_with_passes([AX_TIMEOUT, started])[:2], (1, False))
+        # The repeat failed in a test: red.
+        self.assertEqual(self.run_with_passes([AX_TIMEOUT, FLOW_ASSERTION])[:2], (1, False))
         # A failure that is not the simulator's (here a compile error): red.
-        self.assertEqual(self.run_with_passes([COMPILE_ERROR])[:2], (1, False))
+        code, marker, log = self.run_with_passes([COMPILE_ERROR])
+        self.assertEqual((code, marker), (1, False))
+        self.assertIn("UI_RESULT device fail", log)
+        self.assertIn("UI_RESULT device pass", self.run_with_passes(["** TEST SUCCEEDED **\n" + PASSED_ONE])[2])
+
+    def test_a_testmanagerd_crash_is_repeated_and_no_red_on_its_own(self):
+        verdict, reasons = ui_tests.decide(65, TESTMANAGERD_CRASH, bundle=TESTMANAGERD_BUNDLE)
+        self.assertEqual((verdict, reasons[0]), ("retry", "XCTest daemon testmanagerd crashed"))
+        # The repeat runs test6 and the test the restart left unfinished.
+        self.assertEqual(ui_tests.retry_arguments(["SortlyFlowUITests", "SortlyLockedUITests"], [], TESTMANAGERD_CRASH),
+                         ["-only-testing:SortlyUITests/SortlyFlowUITests", "-only-testing:SortlyUITests/SortlyLockedUITests",
+                          "-skip-testing:SortlyUITests/SortlyFlowUITests/test5_Earlier"])
+        # Crashed again in the repeat: no result; the repeat fails in a test: red; passes: green.
+        self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, TESTMANAGERD_CRASH])[:2], (ui_tests.NO_TEST_EXIT, True))
+        self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, FLOW_ASSERTION])[:2], (1, False))
+        self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, "** TEST SUCCEEDED **\n" + PASSED_ONE])[:2], (0, False))
+
+    def test_a_testmanagerd_crash_does_not_hide_a_real_failure(self):
+        other = ("Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' started.\n"
+                 "/x/SortlyFlowUITests.swift:12: error: -[SortlyUITests.SortlyFlowUITests test5_Earlier] : "
+                 "XCTAssertTrue failed\n"
+                 "Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' failed (3.0 seconds).\n")
+        verdict, reasons = ui_tests.decide(65, other + TESTMANAGERD_CRASH.split("\n", 1)[1])
+        self.assertEqual(verdict, "fail")
+        self.assertIn("a test failed", reasons)
+        # An app crash report is the app's side, also with the daemon crash.
+        self.assertEqual(ui_tests.decide(65, TESTMANAGERD_CRASH, ["/r/Sortly-2026-11-18-015619.ips"])[0], "fail")
+        # A bundle finding other than the lost connection still counts.
+        self.assertEqual(ui_tests.decide(65, TESTMANAGERD_CRASH, bundle=["result bundle: XCTAssertEqual failed"])[0], "fail")
 
     def test_space_separated_matrix_values(self):
         parsed = []

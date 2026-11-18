@@ -15,9 +15,10 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
         [--reduce-motion] [--increase-contrast] [--video F] [--out DIR]
       Runs the tests (T is "Class" or "Class/testMethod" of SortlyUITests), prints the
       report lines for the log (steps, screenshots, accessibility findings, restart context,
-      crash reports, SwiftUI runtime warnings) and exits with the result: 0, 1, or 75 when
-      the simulator was lost before the first test in every pass (no test result; it writes
-      DIR/no-test-started, and ui.yml fails the job in "Simulator lost before the first test",
+      crash reports, SwiftUI runtime warnings), a last line "UI_RESULT NAME pass|fail|infra"
+      (ui_evidence.py reads it) and exits with the result: 0, 1, or 75 when every pass failed
+      on the simulator or XCTest alone (no test result; it writes DIR/no-test-result, and
+      ui.yml fails the job in "No test result (simulator or XCTest failed in every pass)",
       which ui_evidence.py counts as no result rather than red). A test that reset
       the photo access (the CI simulator then answers "denied" without asking) prints
       UI_HOST_GRANT_PHOTOS; the access is given back from the Mac (`simctl privacy grant`)
@@ -86,7 +87,7 @@ BUNDLE_ID = "app.albumist.ios"
 
 # Lines of the xcodebuild log that go into the job log. PREVIEW_JPEG lines carry the
 # screenshots (the gallery is built from them), A11Y_ lines the accessibility findings.
-REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_HOST|UI_STRESS|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
+REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_HOST|UI_STRESS|UI_FLAKY|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
                     r"Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error")
 REPORT_LIMIT = 15000
 
@@ -135,14 +136,29 @@ STRONG_REAL = [
     (re.compile(r"Test crashed with signal (?!term)"), "a test crashed"),
 ]
 
+# XCTest's daemon testmanagerd crashed (UI run 44202318875 attempt 2, job 134494213854: SIGSEGV
+# in com.apple.testmanagerd, responsible process SimulatorTrampoline). The test that was running
+# then fails with "Lost connection to the application" and "Critical process testmanagerd
+# crashed", and the runner restarts. That is the simulator's XCTest side, not the app: those
+# lines, that test's "failed" line and the failure counts are taken out before the log is
+# judged (daemon_crash); anything else that failed still counts, and so does a crash report of
+# the app. The tests that did not pass run once more like after a simulator failure.
+DAEMON_CRASH = re.compile(r"Critical process testmanagerd crashed")
+DAEMON_LOST = re.compile(r"Critical process testmanagerd crashed|Lost connection to the application"
+                         r"|Couldn.t communicate with a helper application")
+ERROR_OF = re.compile(r": error: -\[\w+\.(\w+) (\w+)\] : ")
+FAILED_CASE = re.compile(r"Test [Cc]ase '-\[\w+\.(\w+) (\w+)\]' failed")
+AGGREGATE = re.compile(r"Test Suite '.*' failed|with [1-9]\d* failures?\b")
+
 # Lines that carry data, not messages (base64 screenshots and video).
 DATA_LINE = re.compile(r"PREVIEW_JPEG|UI_VIDEO_B64")
 
 CASE = re.compile(r"Test Case '-\[(?:[\w]+)\.(\w+) (\w+)\]' (passed|failed|skipped)")
 STARTED = re.compile(r"Test Case '-\[\w+\.\w+ \w+\]' started")
-# Written by `run` when the simulator was lost before the first test in every pass (exit
-# NO_TEST_EXIT): the workflow fails the job in a step of its own, a "no result" for the group.
-NO_TEST_STARTED = "no-test-started"
+# Written by `run` when every pass failed on the simulator or XCTest alone, so the group has no
+# test result (exit NO_TEST_EXIT): the workflow fails the job in a step of its own, and
+# ui_evidence.py counts it neither green nor red.
+NO_TEST_RESULT = "no-test-result"
 NO_TEST_EXIT = 75
 PASSED = ("Passed", "Skipped", "Expected Failure")
 
@@ -266,6 +282,30 @@ def lost_app_at_launch(log: str, crash_reports: list[str] | None = None) -> list
     return reasons
 
 
+def daemon_crash(log: str, bundle: list[str]) -> tuple[str, list[str], str | None]:
+    """(log, bundle findings, reason) with the failure that a crash of testmanagerd caused taken
+    out (see DAEMON_CRASH); unchanged and None when it did not crash."""
+    lines = log.splitlines()
+    if not any(DAEMON_CRASH.search(line) for line in lines):
+        return log, bundle, None
+    hit = set()
+    for line in lines:
+        match = ERROR_OF.search(line)
+        if match and DAEMON_CRASH.search(line):
+            hit.add(match.groups())
+    kept = []
+    for line in lines:
+        error, failed = ERROR_OF.search(line), FAILED_CASE.search(line)
+        if DAEMON_CRASH.search(line) or AGGREGATE.search(line):
+            continue  # the counts sum up the "failed" lines; another failure has its own line
+        if error and error.groups() in hit and DAEMON_LOST.search(line):
+            continue
+        if failed and failed.groups() in hit:
+            continue
+        kept.append(line)
+    return "\n".join(kept), [b for b in bundle if not DAEMON_LOST.search(b)], "XCTest daemon testmanagerd crashed"
+
+
 def decide(status: int, log: str, crash_reports: list[str] | None = None, probe: str = "",
            bundle: list[str] | None = None) -> tuple[str, list[str]]:
     """("pass" | "retry" | "fail", reasons) for one finished pass.
@@ -281,7 +321,10 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
         if not ran:
             return "fail", ["no test ran (a renamed test, or a selection that matches nothing)"]
         return "pass", []
+    log, bundle, daemon = daemon_crash(log, list(bundle or []))
     real, infra = scan(log)
+    if daemon:
+        infra.insert(0, daemon)
     real += [reason for reason in lost_app_at_launch(log, crash_reports) if reason not in real]
     if crash_reports:
         real.append("crash report " + ", ".join(os.path.basename(p) for p in crash_reports))
@@ -883,10 +926,12 @@ def command_run(args) -> int:
     print_crash_reports(crashes + other_crash_reports(started) if status else [], "first")
     passes = [("first", 0 if verdict == "pass" else (status or 1), verdict, reasons, text)]
     first_log, retry_reasons, retry_log, retry_result = text, [], None, None
+    stays_red = False
     if verdict == "retry":
         retry_reasons = reasons
         retry = retry_arguments(args.only, args.skip, text)
         if retry is None:
+            stays_red = True
             print(f"UI_VERDICT {args.name}: every selected test passed, nothing to repeat; the failed pass stays red")
         else:
             print(f"::warning title=UI {args.name}::The simulator failed ({'; '.join(reasons)}); no test found a problem. "
@@ -897,7 +942,8 @@ def command_run(args) -> int:
                 crashes = crash_reports(started) if status else []
                 bundle = read_bundle(bundle_path) if status else []
                 verdict, reasons = decide(status, text, crashes, bundle=watchdog_bundle(bundle) if stopped else bundle)
-                final = "pass" if verdict == "pass" else "fail"
+                # "infra": the repeat failed on the simulator or XCTest alone again.
+                final = {"pass": "pass", "retry": "infra"}.get(verdict, "fail")
                 print(f"UI_VERDICT {args.name} retry: {final}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
                 print_crash_reports(crashes + other_crash_reports(started) if status else [], "retry")
                 passes.append(("retry", 0 if final == "pass" else (status or 1), final, reasons, text))
@@ -913,31 +959,29 @@ def command_run(args) -> int:
     # The result is the last pass: the first one when nothing was repeated, else the repeat
     # (which ran every test that had not passed in the first one).
     failed = passes[-1][1] != 0
+    infra_only = failed and passes[-1][2] in ("retry", "infra") and not stays_red
     if swiftui_warnings(os.path.join(args.out, f"{args.name}-swiftui.txt")) != 0:
-        failed = True
+        failed, infra_only = True, False
     if args.video:
         video_to_log(args.video)
     if args.a11y_summary:
         joined = "\n".join(p[4] for p in passes)
         print(f"A11Y_SUMMARY {args.name} fails {joined.count('A11Y_FAIL ')} warnings {joined.count('A11Y_WARN ')}")
     write_summary(args.name, passes)
-    if failed and no_test_started(passes):
-        # The simulator service was lost before any test started, in every pass: no test result
-        # at all (ui_evidence.py counts the group neither green nor red). The workflow fails the
-        # job in its own step "Simulator lost before the first test" instead of "Run UI tests".
-        reasons = "; ".join(passes[0][3]) or "no reason found"
-        with open(os.path.join(args.out, NO_TEST_STARTED), "w", encoding="utf-8") as marker:
+    # The line ui_evidence.py reads in the job log: only "fail" is a red for the group's key.
+    result = "infra" if infra_only else ("fail" if failed else "pass")
+    print(f"UI_RESULT {args.name} {result}", flush=True)
+    if infra_only:
+        # Every pass failed on the simulator or XCTest alone (the repeat too, or it could not
+        # start): no test result for the group. The workflow fails the job in its own step "No
+        # test result (simulator or XCTest failed in every pass)" instead of "Run UI tests".
+        reasons = "; ".join(passes[-1][3]) or "no reason found"
+        with open(os.path.join(args.out, NO_TEST_RESULT), "w", encoding="utf-8") as marker:
             marker.write(reasons + "\n")
-        print(f"::warning title=UI {args.name}::No test started: the simulator was lost before the first test "
-              f"({reasons}). No result for this group; start it again.")
+        print(f"::warning title=UI {args.name}::No test result: the simulator or XCTest failed in every pass "
+              f"({reasons}). Neither green nor red for this group; start it again.")
         return NO_TEST_EXIT
     return 1 if failed else 0
-
-
-def no_test_started(passes) -> bool:
-    """Whether every pass failed on the simulator alone (verdict "retry" for the first pass) and
-    no test case started in any of them."""
-    return bool(passes) and passes[0][2] == "retry" and not any(STARTED.search(p[4]) for p in passes)
 
 
 def swiftui_warnings(path: str) -> int:

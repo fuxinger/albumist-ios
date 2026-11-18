@@ -212,6 +212,20 @@ public actor InMemoryPhotoLibrary: PhotoLibraryWriting {
         try finishWrite()
     }
 
+    /// Like PhotoKit's change block (review P2-08): counted again at the moment of the change.
+    /// Still one request (and one question) when nothing passes.
+    public func deleteCollections(_ ids: [CollectionID], onlyHolding allowed: [CollectionID: Set<AssetID>]) async throws {
+        let now = inventory
+        let going = DeletionCheck.going(ids, allowed: allowed, members: { id in
+            guard let c = now[id], c.kind != .folder else { return nil }
+            return c.assetIDs
+        }, children: { id in
+            guard now[id]?.kind == .folder else { return nil }
+            return now.collections.values.filter { $0.parentID == id }.map(\.id)
+        })
+        try await deleteCollections(going)
+    }
+
     public enum CocoaLikeError: Error { case missing, notEditable }
 }
 

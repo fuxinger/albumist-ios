@@ -18,6 +18,11 @@ public protocol PhotoLibraryWriting: Sendable {
     /// Removes several albums and folders in one request. Photos asks the user before it
     /// deletes albums, once per request: one request means one question instead of one per album.
     func deleteCollections(_ ids: [CollectionID]) async throws
+    /// Like `deleteCollections`, counted once more inside the change itself, right before
+    /// Photos asks the user (review P2-08): an album with an entry in `allowed` goes only while
+    /// it holds nothing else, a folder only while everything in it goes too
+    /// (`DeletionCheck.going`). What does not pass stays; the read-back afterwards says so.
+    func deleteCollections(_ ids: [CollectionID], onlyHolding allowed: [CollectionID: Set<AssetID>]) async throws
     /// One album or folder, read on its own. Execution checks every step this way instead of
     /// reading the whole album list (minutes saved on large plans).
     func collection(_ id: CollectionID) async throws -> CollectionSnapshot?
@@ -64,6 +69,12 @@ extension PhotoLibraryWriting {
         let id = try await createAlbum(title: title, parent: parent)
         await noted(id)
         return id
+    }
+
+    /// For a library that cannot count inside the change: as asked (the executor read the
+    /// albums right before).
+    public func deleteCollections(_ ids: [CollectionID], onlyHolding allowed: [CollectionID: Set<AssetID>]) async throws {
+        try await deleteCollections(ids)
     }
 
     public func hasUnansweredWrites() async -> Bool { false }
@@ -696,6 +707,7 @@ public actor ChangeExecutor {
         var deletionError: (any Error)?
         var allowed = Set<CollectionID>()
         var kept: [Int: (album: CollectionID, ours: [AssetID])] = [:]
+        var expected: [CollectionID: Set<AssetID>] = [:]
         var before = CollectionInventory()
         do {
             before = try await library.currentInventory()
@@ -718,6 +730,12 @@ public actor ChangeExecutor {
                     }
                 }
             }
+            // What each album may hold when the change counts again (P2-08): its guard, or (a plan
+            // from an older version without one) what it held when read above.
+            for id in allowed {
+                guard let c = before[id], c.kind != .folder else { continue }
+                expected[id] = plan.deleteGuards?[id] ?? c.assetIDs
+            }
             // What goes is written down first, so the deletion can be taken back later.
             for id in allowed {
                 guard let c = before[id], c.kind != .folder else { continue }
@@ -733,7 +751,7 @@ public actor ChangeExecutor {
             if !allowed.isEmpty {
                 // Said per step below, from what the library shows afterwards.
                 do {
-                    try await sending(&sent) { try await library.deleteCollections(allowed.sorted()) }
+                    try await sending(&sent) { try await library.deleteCollections(allowed.sorted(), onlyHolding: expected) }
                 } catch let notResponding as PhotosNotResponding {
                     throw notResponding
                 } catch {
@@ -775,7 +793,32 @@ public actor ChangeExecutor {
             StepState.deletionNotAppliedReason
         }
         // Read back: success only for what is really gone.
-        if let after = await readBack(after: before, deleting: allowed) {
+        var after = await readBack(after: before, deleting: allowed)
+        // Albums the change kept because something came into them after the read above (the
+        // user, iCloud; review P2-08): kept like the ones found so before, and only Albumist's
+        // photos leave them (no question from iOS needed).
+        var keptByTheChange = Set<CollectionID>()
+        if let read = after {
+            for (i, id) in targets.sorted(by: { $0.key < $1.key }) where kept[i] == nil {
+                guard let now = read[id], now.kind != .folder, let may = expected[id], !now.assetIDs.isSubset(of: may) else { continue }
+                let ours = now.assetIDs.intersection(plan.deleteGuards?[id] ?? []).sorted()
+                kept[i] = (id, ours)
+                keptByTheChange.insert(id)
+                plan.record?.deletedAlbums[id] = nil
+                plan.record?.begin(plan.steps[i].id, ours)
+                guard !ours.isEmpty else { continue }
+                do {
+                    try await sending(&sent) { try await library.removeAssets(ours, from: id) }
+                } catch let notResponding as PhotosNotResponding {
+                    try await store.save(plan)
+                    throw notResponding
+                } catch {
+                    states[i] = .failed(reason: String(describing: error))
+                }
+            }
+            if !keptByTheChange.isEmpty { after = await readBack(after: before, deleting: allowed.subtracting(keptByTheChange)) }
+        }
+        if let after {
             for (i, id) in targets {
                 if let k = kept[i] {
                     let stepID = plan.steps[i].id
@@ -793,7 +836,9 @@ public actor ChangeExecutor {
                     plan.record?.deletedAlbums[id] = nil
                     if states[i] == nil {
                         // A folder that now holds something that was not to go stays on purpose.
-                        let holdsOther = after.collections.values.contains { $0.parentID == id && !allowed.contains($0.id) }
+                        let holdsOther = after.collections.values.contains {
+                            $0.parentID == id && (!allowed.contains($0.id) || keptByTheChange.contains($0.id))
+                        }
                         states[i] = .failed(reason: !allowed.contains(id) || holdsOther ? "folder is not empty" : notGone)
                     }
                 }
@@ -1275,4 +1320,37 @@ final class NotedID: @unchecked Sendable {
 
     func note(_ id: CollectionID) { lock.withLock { value = id } }
     var id: CollectionID? { lock.withLock { value } }
+}
+
+/// Which albums and folders of one deletion may go, counted again at the moment of the change
+/// (review P2-08; `PhotoLibraryWriting.deleteCollections(_:onlyHolding:)`): an album with an
+/// entry in `allowed` only while it holds nothing else, and a folder only while everything in
+/// it goes too (Photos deletes a folder's contents with it). Albums and folders that are not
+/// found any more are left out.
+public enum DeletionCheck {
+    /// - Parameters:
+    ///   - members: the photos in an album now; nil when `id` is not an album.
+    ///   - children: the albums and folders in a folder now; nil when `id` is not a folder.
+    public static func going(_ ids: [CollectionID], allowed: [CollectionID: Set<AssetID>],
+                             members: (CollectionID) -> Set<AssetID>?, children: (CollectionID) -> [CollectionID]?) -> [CollectionID] {
+        var going = Set<CollectionID>()
+        var folders: [CollectionID: [CollectionID]] = [:]
+        for id in ids {
+            if let inside = members(id) {
+                if let may = allowed[id], !inside.isSubset(of: may) { continue }
+                going.insert(id)
+            } else if let inside = children(id) {
+                folders[id] = inside
+            }
+        }
+        var changed = true
+        while changed {
+            changed = false
+            for (id, inside) in folders.sorted(by: { $0.key < $1.key }) where !going.contains(id) && inside.allSatisfy(going.contains) {
+                going.insert(id)
+                changed = true
+            }
+        }
+        return ids.filter(going.contains)
+    }
 }

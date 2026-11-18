@@ -36,8 +36,13 @@ mit eingeschränkten Rechten: nur lesend.
 - **Nicht auf echten Geräten getestet.** Synthetisch geprüft: 100 000 Fotos (80 % nur in
   iCloud) in 54 s mit 563 MB Spitze auf dem Linux-Rechner der CI, ohne echte Bilderkennung.
   Laufzeit, Wärme und Akku auf iPhones sind ungemessen.
-- PhotoKit kennt kein bedingtes Löschen: Zwischen dem letzten Lesen und dem Löschen eines
-  leeren Albums kann noch ein Foto hineinkommen (Millisekunden). Albumist liest direkt davor.
+- PhotoKit kennt kein bedingtes Löschen: Kommt ein Foto in ein Album von Albumist, solange die
+  Frage von iOS zum Löschen offen ist, geht das Album trotzdem (das Foto selbst bleibt in der
+  Mediathek). Albumist zählt im Änderungsblock selbst noch einmal nach, direkt bevor iOS fragt
+  (Prüfer 2, P2-08): Ein Foto, das vorher hineinkam (auch in den bis zu 30 Sekunden, in denen
+  Albumist wartet, bis es für die Frage auf dem Bildschirm ist), hält das Album und seine Ordner;
+  dann nimmt Albumist nur seine eigenen Fotos heraus. Die Frage selbst darf bis zu 300 Sekunden
+  offen sein.
 - Ein beim Wiederanlauf nur über den Namen übernommenes leeres Album bleibt nach Rückgängig
   stehen (gewollt). Seit Prüfer 2, P2-01 (18.11.2026) selten: Die Kennung jedes neuen Albums
   und Ordners steht schon im Änderungsblock im Journal, bevor Fotos speichert; übernommen wird

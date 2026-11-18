@@ -245,6 +245,79 @@ struct UndoHardeningTests {
 
     // MARK: Batch deletion
 
+    /// Before the album list is read for a deletion and the change goes out, someone else
+    /// changes an album (the user, or another device through iCloud).
+    struct HookedLibrary: PhotoLibraryWriting {
+        let inner: InMemoryPhotoLibrary
+        let beforeDelete: @Sendable (inout CollectionInventory) -> Void
+        func canWrite() async -> Bool { await inner.canWrite() }
+        func currentInventory() async throws -> CollectionInventory { try await inner.currentInventory() }
+        func availableAssets(_ ids: [AssetID]) async throws -> Set<AssetID> { try await inner.availableAssets(ids) }
+        func collection(_ id: CollectionID) async throws -> CollectionSnapshot? { try await inner.collection(id) }
+        func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID { try await inner.createFolder(title: title, parent: parent) }
+        func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID { try await inner.createAlbum(title: title, parent: parent) }
+        func addAssets(_ assets: [AssetID], to album: CollectionID) async throws { try await inner.addAssets(assets, to: album) }
+        func removeAssets(_ assets: [AssetID], from album: CollectionID) async throws { try await inner.removeAssets(assets, from: album) }
+        func renameCollection(_ id: CollectionID, to title: String) async throws { try await inner.renameCollection(id, to: title) }
+        func moveCollection(_ id: CollectionID, from oldParent: CollectionID?, to newParent: CollectionID?) async throws {
+            try await inner.moveCollection(id, from: oldParent, to: newParent)
+        }
+        func deleteCollection(_ id: CollectionID) async throws {
+            await inner.userEdit(beforeDelete)
+            try await inner.deleteCollection(id)
+        }
+        func deleteCollections(_ ids: [CollectionID]) async throws {
+            await inner.userEdit(beforeDelete)
+            try await inner.deleteCollections(ids)
+        }
+        // The user's change comes first; like PhotoKit, the deletion counts again in its change.
+        func deleteCollections(_ ids: [CollectionID], onlyHolding allowed: [CollectionID: Set<AssetID>]) async throws {
+            await inner.userEdit(beforeDelete)
+            try await inner.deleteCollections(ids, onlyHolding: allowed)
+        }
+    }
+
+    /// The count inside the change (P2-08), as PhotoKit's change block uses it: an album goes
+    /// only while it holds nothing but what it may; a folder only while all of it goes; what is
+    /// not there any more is left out.
+    @Test func deletionCheckKeepsAnAlbumThatGotAPhotoAndTheFoldersAboveIt() {
+        let albums: [CollectionID: Set<AssetID>] = ["rom": ["a-1", "a-299"], "paris": ["a-2"], "leer": []]
+        let folders: [CollectionID: [CollectionID]] = ["reisen": ["rom", "paris"], "albumist": ["reisen"], "frei": ["paris2"], "alt": ["leer"]]
+        let going = DeletionCheck.going(["rom", "paris", "leer", "reisen", "albumist", "frei", "alt", "weg"],
+                                        allowed: ["rom": ["a-1"], "paris": ["a-2"], "leer": []],
+                                        members: { albums[$0] }, children: { folders[$0] })
+        // "rom" got a-299: it stays, and so do "reisen" and "albumist" above it. "frei" holds an
+        // album that is not going ("paris2", moved in meanwhile). "weg" is gone already.
+        #expect(going == ["paris", "leer", "alt"])
+    }
+
+    /// Review P2-08: undo checks "only Albumist's photos in the album", then waits up to 30 s
+    /// until Albumist is on screen for the iOS question. A photo the user puts into the album
+    /// in that time kept nothing: the album went, and the photo lost its album. Now the change
+    /// itself counts again, right before Photos asks: the album stays with the user's photo,
+    /// only Albumist's photos leave it, and its folder stays.
+    @Test func aPhotoThatComesInBeforeTheDeletionGoesOutKeepsTheAlbum() async throws {
+        let library = InMemoryPhotoLibrary(assets: allAssets)
+        let plan = confirmed(planner.makePlan(from: [newAlbum("r", "Rom", ["Reisen"], ids("a", 0..<10))],
+                                              inventory: try await library.currentInventory()))
+        let executed = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(plan)
+        let rom = try #require(try await library.currentInventory().albums.first { $0.title == "Rom" }?.id)
+        let undo = confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory()))
+        let hooked = HookedLibrary(inner: library) { inv in
+            guard var album = inv[rom] else { return }
+            album.assetIDs.insert("a-299")
+            inv.upsert(album)
+        }
+        let undone = try await ChangeExecutor(library: hooked, store: InMemoryPlanStore()).execute(undo)
+        let inv = try await library.currentInventory()
+        #expect(inv[rom]?.assetIDs == ["a-299"], "\(undone.steps.map(\.state))")
+        #expect(inv.path(of: rom) == ["Albumist", "Reisen"])
+        let romStep = undone.steps.first { if case .deleteCollection(rom, _) = $0.operation { true } else { false } }
+        #expect(romStep?.state == .skipped(reason: "kept: the album holds photos added meanwhile; only Albumist's photos were taken out"))
+        #expect(undone.record?.deletedAlbums[rom] == nil)
+        #expect(await library.assets == allAssets)
+    }
+
     /// The user put an own photo into one of the albums after the undo was planned, and then
     /// declined the iOS question. Taking Albumist's photos out of that album needs no
     /// question: it must still happen, and each step must say what really happened.

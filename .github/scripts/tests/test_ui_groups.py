@@ -175,6 +175,23 @@ class SwiftCodeTests(unittest.TestCase):
         self.same(code, "/* a /* nested */ comment */func f() {\n/** doc\n */ let a = 1 + 2\ng(a)\n}\n")
         self.same(code, "func f() {\r\n    let a = 1 + 2\r\n    g(a)\r\n}\r\n")
 
+    def test_carriage_returns_are_line_breaks_as_in_swift(self):
+        # Swift ends a // comment and a line at "\r" as at "\n" (second review of G5-04): code
+        # after "\r" is code.
+        self.different("a // x\rb", "a // x\rc")
+        self.different("let a = 1 // x\rlet b = 2\r", "let a = 1 // x\rlet b = 3\r")
+        self.same("a // x\r\nb", "a\nb")
+        self.same("a\r\n  b\r", "a\nb")
+        self.same("a\r(b)", "a\n(b)")
+        self.same("a /* x\r y */ (b)", "a\n(b)")
+        self.assertIsNone(ui_groups.swift_code('let s = "open\rlet b = 1'))
+        self.assertIsNone(ui_groups.swift_code("let `a\rb` = 1"))
+        # The reader of uses sees the code after "\r" too.
+        f = ui_groups.SwiftFile("x.swift", "let a = 1 // note\rlet b = Helper.make()\r")
+        self.assertIn("Helper", f.words)
+        f = ui_groups.SwiftFile("x.swift", "final class CRUITests: XCTestCase {\r    func testA() {}\r}\r")
+        self.assertEqual(f.methods, {"CRUITests": ["testA"]})
+
     def test_line_breaks_and_space_around_operators_count(self):
         # A line break ends a statement and makes "(" no call; space decides prefix/postfix/binary.
         self.different("let a = b\n(c)\n", "let a = b(c)\n")

@@ -407,7 +407,17 @@ struct DecisionLifecycleTests {
         #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == 1)
         #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened.isEmpty)
 
+        // Re-review: the user picks that album again ("Anderes Album wählen"). Their choice
+        // stands: the same album is reopened for the same suggestion only once, not after
+        // every analysis.
+        try await w.store.setValue(decisions, forKey: AnalysisPipeline.Key.decisions)
+        #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened.isEmpty)
+        #expect(try await w.store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions) == decisions)
+        #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == 1)
+
         stored = try #require(try await w.pipeline.latestProposals())
+        // The rule above came with version 4: saved results of version 3 are matched again.
+        #expect(AlbumMatcher.version >= 4)
         stored.matcherVersion = 3
         stored.matches = [:]
         try await w.store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)

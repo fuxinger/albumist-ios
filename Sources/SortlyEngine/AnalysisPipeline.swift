@@ -246,6 +246,9 @@ public actor AnalysisPipeline {
         /// The names the user typed for suggestions in the app (written by the app; read here so
         /// a named suggestion is kept, `AnalysisSnapshot.chosen`).
         static let titles = "user.titles"
+        /// "suggestion|album" of each "ergänzen" set back to open because the album recorded for
+        /// the suggestion holds other photos (`refreshMatchesIfOutdated`): never twice.
+        static let reopenedExtensions = "user.reopenedExtensions"
         /// Suggestions the user chose before a change in "Dein Zuhause" would have changed or
         /// dropped them: kept as chosen (`HeldSuggestions`).
         static let heldSuggestions = "user.heldSuggestions"
@@ -1986,13 +1989,24 @@ public actor AnalysisPipeline {
         let suggested = snapshot.proposals + snapshot.dismissed
         var reopened = outdated ? ProposalDecision.uncertainExtensions(decisions, proposals: suggested, matches: snapshot.matches,
                                                                        protected: started) : []
+        var values: [String: any Encodable & Sendable] = [:]
         if ownAlbum {
-            reopened.formUnion(ProposalDecision.extensionsOfOtherPhotos(
+            // Once per suggestion and album: an album the user picks again for it ("Anderes
+            // Album wählen") is their choice and stays (re-review 18.11.). Which way a decision
+            // was made is not stored, so the first time cannot be told apart.
+            let before = try await readable { try await store.value(Set<String>.self, forKey: Key.reopenedExtensions) } ?? []
+            let found = ProposalDecision.extensionsOfOtherPhotos(
                 decisions, proposals: suggested, inventory: try await store.loadInventory(), recorded: recorded,
-                overrides: OverrideSet(try await store.overrides()), protected: started))
+                overrides: OverrideSet(try await store.overrides()), protected: started)
+            let pairs = Dictionary(found.compactMap { id in decisions[id]?.extendedAlbum.map { (id, id.rawValue + "|" + $0.rawValue) } },
+                                   uniquingKeysWith: { first, _ in first })
+            let new = pairs.filter { !before.contains($0.value) }
+            if !new.isEmpty {
+                reopened.formUnion(new.keys)
+                values[Key.reopenedExtensions] = before.union(new.values)
+            }
         }
         guard outdated || !reopened.isEmpty else { return MatchRefresh(snapshot: snapshot) }
-        var values: [String: any Encodable & Sendable] = [:]
         if outdated { values[Key.proposals] = snapshot }
         if !reopened.isEmpty {
             for id in reopened { decisions[id] = nil }

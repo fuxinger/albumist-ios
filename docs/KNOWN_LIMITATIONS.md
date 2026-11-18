@@ -65,6 +65,11 @@
     „ergänzen“ dorthin ist nach der Analyse wieder offen. Ist das Album des alten Orts leer
     (alle Fotos gelöscht), bleibt es das Album der Kennung und der neue Ort kommt hinein.
     Selten (ein neuer Ort im selben Feld von etwa 110 m × 75 m); der Name lässt sich ändern.
+  - Ob ein „ergänzen“ vom Vorschlag kam oder über „Anderes Album wählen“, speichert Albumist
+    nicht. Hat der Nutzer selbst das Album gewählt, das für die Kennung eingetragen ist und keine
+    Fotos mit dem Vorschlag teilt, wird seine Wahl deshalb einmal wieder geöffnet (die Übersicht
+    sagt „Vorschläge neu geprüft“); wählt er es erneut, bleibt es. Gemerkt wird das je Vorschlag
+    und Album in `user.reopenedExtensions` (wie alle `user.`-Werte auch in der Sicherheitskopie).
   - Nach „Analyse neu aufbauen“ fehlen die vorigen Orte: Kennungen werden neu vergeben, ein Ort
     allein in seiner Zelle bekommt wieder die alte; von zwei Orten einer Zelle bekommt der in
     der App zuerst gezeigte die Zellkennung, der andere Zelle und erste Foto-ID, was nicht

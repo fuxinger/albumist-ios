@@ -61,7 +61,7 @@
   gezeigt hat; der andere erscheint als neuer Vorschlag und braucht wieder einen Namen.
   Ein Album, das Albumist für einen Vorschlag angelegt hat, wird nur noch mit dessen Fotos
   ergänzt; ein angenommenes „ergänzen“ in das Album eines früheren Orts ist nach der Analyse
-  wieder offen („Vorschläge neu geprüft“). Ein leeres Album nach einem abgebrochenen Plan füllt
+  einmal wieder offen („Vorschläge neu geprüft“); wählst du dasselbe Album wieder, bleibt es. Ein leeres Album nach einem abgebrochenen Plan füllt
   der nächste Plan, statt ein zweites gleichen Namens anzulegen.
 - iPhone-Test Build 36: Ein Ort, an dem du öfter bist, heißt jetzt nach seiner Stadt (etwa
   „Dorfen“), nicht mehr nach dem Bundesland („Bayern“).

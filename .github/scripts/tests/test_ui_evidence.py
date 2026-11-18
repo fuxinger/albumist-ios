@@ -18,7 +18,21 @@ import ui_evidence  # noqa: E402
 import ui_groups  # noqa: E402
 from test_ui_groups import DEVICE, FLOW, repo  # noqa: E402
 
-os.environ.setdefault("GITHUB_REPOSITORY", "owner/repo")
+# The fixtures belong to "owner/repo". On GitHub, GITHUB_REPOSITORY is the real repository, and
+# setdefault kept it, so every run of another repository looked like a fork (CI 44229902956).
+_REPOSITORY = {}
+
+
+def setUpModule():
+    _REPOSITORY["before"] = os.environ.get("GITHUB_REPOSITORY")
+    os.environ["GITHUB_REPOSITORY"] = "owner/repo"
+
+
+def tearDownModule():
+    if _REPOSITORY.get("before") is None:
+        os.environ.pop("GITHUB_REPOSITORY", None)
+    else:
+        os.environ["GITHUB_REPOSITORY"] = _REPOSITORY["before"]
 os.environ.setdefault("GH_TOKEN", "unused")
 
 HEAD = repo()

@@ -244,7 +244,7 @@ public struct TripDetector: Sendable {
     /// the first of them. When the trip goes on where it stopped, far from home (`resuming`),
     /// that is not enough: photos from home in the afternoon and evening with Rome again the next
     /// morning cut it 16 + 16 (second review). There the stay at home must show a night (photos
-    /// at home on two days) or last `longStayAtHome`.
+    /// at home on two days, or on a day between two days of the trip) or last `longStayAtHome`.
     func cameHome(after lastAway: Date, from last: GeoCoordinate, photos: [(date: Date, coordinate: GeoCoordinate)],
                   before next: Date, at coordinate: GeoCoordinate, resuming: Bool) -> Bool {
         let possible = photos.filter { photo in
@@ -253,7 +253,12 @@ public struct TripDetector: Sendable {
         }
         guard let first = possible.first, next.timeIntervalSince(first.date) > configuration.homeInterludeTolerance else { return false }
         guard resuming else { return true }
+        // A whole day with photos only at home, between a day on the trip and the next one,
+        // shows a night at home too, whenever on that day they were taken (third review: Rome
+        // on Friday and Sunday, home on Saturday 10:00-19:00 made one trip).
+        let lastDay = calendar.startOfDay(for: lastAway), nextDay = calendar.startOfDay(for: next)
         return possible.contains { !calendar.isDate($0.date, inSameDayAs: first.date) }
+            || possible.contains { let day = calendar.startOfDay(for: $0.date); return day > lastDay && day < nextDay }
             || next.timeIntervalSince(first.date) >= Self.longStayAtHome
     }
 

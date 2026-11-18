@@ -14,6 +14,13 @@ on:
         description: Also build the simulator app and upload it to Appetize
         type: boolean
         default: false
+  # testflight.yml runs CI for the commit it uploads, in the same run (release: true).
+  workflow_call:
+    inputs:
+      release:
+        description: Called by testflight.yml (own concurrency group, the iOS job always runs)
+        type: boolean
+        default: false
 
 # Read-only token: no job writes to the repository.
 permissions:
@@ -24,9 +31,15 @@ env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
 
-# A new push to the same branch or PR cancels the run of the previous one.
+# A new push to the same branch or PR cancels the run of the previous one. Called by
+# testflight.yml, CI has a group of its own for that TestFlight run, so a push to main never
+# cancels the tests of a build: release: true says so, and github.workflow, the caller's name
+# "TestFlight" in a called workflow, is a second guard. CI is not in the Mac queue of the UI
+# runs and stress passes (ui.yml, "concurrency"); see the ios job.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: >-
+    ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ci-{0}', github.run_id)
+    || format('ci-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
@@ -62,8 +75,10 @@ jobs:
   changes:
     # Decides whether the macOS job has to run: it is skipped when only *.md / docs/ changed
     # since the last commit whose iOS tests passed (pull_request path filters cannot do this,
-    # they look at the whole PR diff).
+    # they look at the whole PR diff). Not in a TestFlight run: there the iOS job always runs,
+    # so the run tests the commit it uploads itself.
     name: Changes
+    if: ${{ !inputs.release }}
     uses: ./.github/workflows/changes.yml
     permissions:
       contents: read
@@ -81,23 +96,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install SQLite headers
         run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev python3 > /dev/null
-      - name: Content-based file times (lets the build cache work, see the script)
-        run: python3 .github/scripts/stable_mtimes.py .
-      - name: Toolchain
-        id: toolchain
-        run: echo "id=$(swift --version 2>&1 | head -1 | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
-      # SwiftPM's .build from an earlier run. The key only picks the starting point: the
-      # compiler still checks every source (content-based times), so a stale entry costs time,
-      # never correctness. The nightly run builds without any cache.
-      - name: Build cache
-        # Off since 16.11.: a restored cache hid a change in SortlyCore (CI 43796841063: 'AlbumMatcher has no member tiedWithBest' although Linux built it). Back on only with a proven fix.
-        if: ${{ false }}
-        id: cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .build
-          key: spm-linux-${{ steps.toolchain.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
-          restore-keys: spm-linux-${{ steps.toolchain.outputs.id }}-
       - name: Build and test
         run: |
           set -o pipefail
@@ -114,29 +112,16 @@ jobs:
         run: |
           python3 .github/scripts/test_summary.py summary --title "Core tests (Linux)" \
             --swift-log core-linux.log --swift-log load.log --load-log load.log >> "$GITHUB_STEP_SUMMARY" || true
-      # Saved also when a test failed: the build products are valid either way, and the next
-      # run (usually the fix) starts from them.
-      - name: Save build cache
-        if: ${{ false }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .build
-          key: ${{ steps.cache.outputs.cache-primary-key }}
-
-  names:
-    # App name candidates against the App Store (the API is only reachable from CI).
-    name: App name check
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: python3 .github/scripts/name_check.py docs/launch/name-candidates.txt
 
   ios:
     name: iOS build and tests (macOS)
     # Fast first, then expensive (Fuchs 15.11.): the Mac job starts only when the Linux core
     # tests and the app rules passed. It still runs unless the changes job positively found a
     # docs-only change (also when that job failed).
+    # Not in the Mac queue ("mac-queue", ui.yml) on purpose: this is the quick verdict of every
+    # push (one Mac, ~20 min). In the queue it would wait behind the UI run of its own commit
+    # (about an hour), and since GitHub keeps only one waiting run per group, the next run to
+    # join would cancel it. Per branch only the newest CI run goes on (concurrency above).
     needs: [changes, lint, core-linux]
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' }}
     runs-on: xcode-27
@@ -144,37 +129,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select pinned Xcode
-        id: xcode
         # Xcode and simulator runtime pinned in .github/toolchain.json; the job stops when the
-        # image lacks them. The id output (Xcode version and build) is part of the cache key:
-        # products of another compiler are never reused.
-        run: |
-          python3 .github/scripts/toolchain.py xcode --runtime
-          # Files restored from the cache have new inode numbers; without this Xcode's build
-          # system would treat all of them as changed and rebuild everything.
-          defaults write com.apple.dt.XCBuild IgnoreFileSystemDeviceInodeChanges -bool YES
+        # image lacks them.
+        run: python3 .github/scripts/toolchain.py xcode --runtime
+      - name: Install XcodeGen
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py); a
+        # failed project generation is not.
+        if: hashFiles('App/project.yml') != ''
+        run: python3 .github/scripts/toolchain.py xcodegen
       - name: Generate Xcode project
         if: hashFiles('App/project.yml') != ''
-        run: |
-          brew install xcodegen
-          cd App && xcodegen generate
-      - name: Content-based file times (lets the build cache work, see the script)
-        run: python3 .github/scripts/stable_mtimes.py .
-      # DerivedData (app, package and SDK modules) and SwiftPM's .build from an earlier run.
-      # The key only picks the starting point; the build system still checks every input, and
-      # source files carry content-based times, so a changed file is always recompiled. The
-      # nightly run builds without any cache to catch an incremental-build problem within a day.
-      - name: Build cache
-        # Off since 16.11.: a restored cache hid a change in SortlyCore (CI 43796841063: 'AlbumMatcher has no member tiedWithBest' although Linux built it). Back on only with a proven fix.
-        if: ${{ false }}
-        id: cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/Library/Developer/Xcode/DerivedData
-            .build
-          key: ios-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**', 'App/**') }}
-          restore-keys: ios-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-
+        run: cd App && xcodegen generate
       - name: Pick simulator
         if: hashFiles('App/project.yml') != ''
         id: sim
@@ -230,6 +196,8 @@ jobs:
           name: localizations
           path: build/loc
           retention-days: 7
+          # "Re-run failed jobs" may upload it again under the same name.
+          overwrite: true
       - name: Job summary
         if: always()
         run: |
@@ -245,19 +213,8 @@ jobs:
             build-log.txt
             build/TestResults.xcresult
           retention-days: 7
-      # Saved also when a test failed: the build products are valid either way, and the next
-      # run (usually the fix) starts from them. Logs and the index are left out.
-      - name: Keep the build cache small
-        if: ${{ false }}
-        run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
-      - name: Save build cache
-        if: ${{ false }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/Library/Developer/Xcode/DerivedData
-            .build
-          key: ${{ steps.cache.outputs.cache-primary-key }}
+          # "Re-run failed jobs" uploads it again under the same name.
+          overwrite: true
 
   simulator:
     # Manual only (workflow_dispatch input "appetize"): builds the simulator app and uploads it
@@ -270,10 +227,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode
+      - name: Install XcodeGen
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py); a
+        # failed project generation is not.
+        run: python3 .github/scripts/toolchain.py xcodegen
       - name: Generate Xcode project
-        run: |
-          brew install xcodegen
-          cd App && xcodegen generate
+        run: cd App && xcodegen generate
       - name: Build simulator app for browser testing
         run: |
           set -o pipefail
@@ -299,6 +259,8 @@ jobs:
           name: Sortly-simulator-app
           path: build/Sortly-simulator.zip
           retention-days: 30
+          # "Re-run failed jobs" may upload it again under the same name.
+          overwrite: true
       - name: Upload to Appetize for browser testing
         # Runs only when the repository has the secret APPETIZE_TOKEN. Keeps one app
         # (note "sortly-ci") and updates it, so the test link stays the same.

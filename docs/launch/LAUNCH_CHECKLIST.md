@@ -14,6 +14,10 @@ Was vor dem Verkaufsstart erledigt sein muss. Wird bei jeder Entscheidung ergän
 - [ ] Testplan (`docs/TEST_PLAN.md`) ohne offene Fälle.
 - [ ] Letzte TestFlight-Version auf einem echten iPhone durchgespielt: Analyse, Wärme, Hintergrund,
       Rückgängig, Kauf, große Schrift, VoiceOver.
+- [ ] Voller Härtetest im Simulator auf genau dem Stand, der eingereicht wird (50.000 Fotos,
+      45 Minuten gemessen; Regel Fuchs 17.11.2026): Actions > **UI stress** > Run workflow mit
+      `photos` 50000 und `minutes` 45 (oder `gh workflow run ui-stress.yml --ref main -f photos=50000 -f minutes=45`);
+      Abstürze, Stillstand, Antwortzeiten und Speicher im Lauf ansehen.
 
 ## Marke und Recht
 - [ ] Markenprüfung „Albumist“ (EUIPO, DPMA, USPTO) und Domain.

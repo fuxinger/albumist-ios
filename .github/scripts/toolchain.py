@@ -1,7 +1,7 @@
 """Selects the pinned Xcode on a Mac job and checks it, or stops the job.
 
 Usage: python3 .github/scripts/toolchain.py xcode [--runtime]
-       python3 .github/scripts/toolchain.py id      (prints the id below, nothing else)
+       python3 .github/scripts/toolchain.py xcodegen
 
 Every Mac job calls this instead of picking "the newest Xcode" (which on image xcode-27-arm64
 20261112 is a beta, and a beta build is refused by App Store Connect). It:
@@ -10,17 +10,26 @@ Every Mac job calls this instead of picking "the newest Xcode" (which on image x
   - runs `sudo xcode-select -s` on it and checks `xcodebuild -version` for the pinned version
     and build number (a symlink or an updated app with the same path fails here);
   - with --runtime, also checks that the pinned iOS simulator runtime (identifier and build) is
-    installed and available, for the jobs that test on a simulator;
-  - writes `id=<Xcode version and build>` to $GITHUB_OUTPUT (cache keys, build-info.txt).
+    installed and available, for the jobs that test on a simulator.
+
+`xcodegen` installs the pinned XcodeGen (version, release zip and its sha256 in
+.github/toolchain.json) into $RUNNER_TEMP/xcodegen and puts it on $GITHUB_PATH, instead of
+`brew install xcodegen` (whatever Homebrew has that day). A download that does not match the
+checksum stops the job.
 """
 from __future__ import annotations
 
 import glob
+import hashlib
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import time
+import urllib.request
+import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pick_simulator import pins  # noqa: E402
@@ -58,13 +67,47 @@ def fail(message: str) -> int:
     return 1
 
 
-def xcode_id(pin: dict) -> str:
-    return f"Xcode-{pin['version']}-{pin['build']}"
+def install_xcodegen(pin: dict, dest: str, fetch=None) -> str:
+    """Downloads the pinned XcodeGen zip, checks its sha256, unpacks it into dest and returns the
+    directory of the xcodegen binary. Raises ValueError on a wrong checksum."""
+    def download(url):
+        last = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(url, timeout=120) as response:
+                    return response.read()
+            except OSError as error:
+                last = error
+                time.sleep(5 * (attempt + 1))
+        raise OSError(f"{url}: {last}")
+    data = (fetch or download)(pin["url"])
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != pin["sha256"]:
+        raise ValueError(f"XcodeGen {pin['version']} download has sha256 {digest}, pinned is {pin['sha256']}")
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for member in archive.namelist():
+            target = os.path.realpath(os.path.join(dest, member))
+            if not target.startswith(os.path.realpath(dest) + os.sep):
+                raise ValueError(f"unexpected path in the XcodeGen zip: {member}")
+        archive.extractall(dest)
+    binary = os.path.join(dest, "xcodegen", "bin", "xcodegen")
+    os.chmod(binary, 0o755)
+    return os.path.dirname(binary)
 
 
 def main(argv: list[str]) -> int:
-    if argv[:1] == ["id"]:
-        print(xcode_id(pins()["xcode"]))
+    if argv and argv[0] == "xcodegen":
+        pin = pins()["xcodegen"]
+        try:
+            folder = install_xcodegen(pin, os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "xcodegen"))
+        except ValueError as error:
+            return fail(str(error))
+        version = subprocess.run([os.path.join(folder, "xcodegen"), "--version"], capture_output=True, text=True).stdout
+        print(version.strip())
+        if pin["version"] not in version:
+            return fail(f"xcodegen --version says {version.strip()!r}, pinned is {pin['version']}")
+        with open(os.environ.get("GITHUB_PATH", os.devnull), "a", encoding="utf-8") as out:
+            out.write(folder + "\n")
         return 0
     if not argv or argv[0] != "xcode":
         print(__doc__)
@@ -89,9 +132,6 @@ def main(argv: list[str]) -> int:
         if problem:
             return fail(problem)
         print(f"iOS simulator runtime {toolchain['runtime']['identifier']} {toolchain['runtime']['build']}")
-    if os.environ.get("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-            out.write(f"id={xcode_id(pin)}\n")
     return 0
 
 

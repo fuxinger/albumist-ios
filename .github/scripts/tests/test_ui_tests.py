@@ -3,11 +3,14 @@
 The log snippets are cut from real UI runs of November 2026 (job ids in the comments).
 Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
+import argparse
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -84,6 +87,29 @@ Testing failed:
 \tSortlyUITests-Runner (15570) encountered an error (Test crashed with signal term while preparing to run tests.)
 ** TEST FAILED **
 """
+
+# UI run 44202318875 attempt 2, job 134494213854 (flow-other): XCTest's daemon testmanagerd
+# crashed during test6 (SIGSEGV, com.apple.testmanagerd); the next class ran 0 tests.
+TESTMANAGERD_CRASH = """\
+Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' passed (50.0 seconds).
+Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' started.
+UI_STEP_OK progress moves in the foreground
+<unknown>:0: error: -[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs] : Failed to get matching snapshots: Lost connection to the application (pid 1951). (Underlying Error: Couldn’t communicate with a helper application. Try your operation again.)
+<unknown>:0: error: -[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs] : Critical process testmanagerd crashed in (null)
+Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' failed (229.078 seconds).
+\t Executed 8 tests, with 2 failures (0 unexpected) in 1871.445 (1871.476) seconds
+Test Case '-[SortlyUITests.SortlyLockedUITests test7_LockedPlanOffersTheFreeAlbumsLeft]' started.
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+\t Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' failed at 2026-11-18 02:00:59.000.
+** TEST FAILED **
+"""
+TESTMANAGERD_BUNDLE = [
+    "result bundle: Failed to get matching snapshots: Lost connection to the application (pid 1951). (Underlying Error: "
+    "Couldn’t communicate with a helper application. Try your operation again. If that fails, quit and re",
+    "result bundle: Critical process testmanagerd crashed in (null)",
+]
+PASSED_ONE = "Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' passed (9.0 seconds).\n"
 
 # Job 133113879733: a compile error (xcodebuild test builds first).
 COMPILE_ERROR = """\
@@ -372,6 +398,126 @@ class SelectionTests(unittest.TestCase):
             "AccessibilityUITests/test4_Landscape": "passed",
         })
 
+    def run_with_passes(self, logs, reset_ok=True, deadline=0):
+        """command_run with faked passes (status 65 unless the log says otherwise)."""
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        queue = list(logs)
+
+        def fake_pass(args, label, chosen, build):
+            text = queue.pop(0)
+            return (0 if "** TEST SUCCEEDED **" in text else 65), text, "none.xcresult", 0.0, False
+        fakes = {"run_pass": fake_pass, "crash_reports": lambda since: [], "other_crash_reports": lambda since: [],
+                 "sh": lambda *a, **k: (0, "/Users/runner"), "read_bundle": lambda path: [],
+                 "reset": lambda *a: reset_ok, "swiftui_warnings": lambda path: 0, "boot_retries": lambda out: [],
+                 "write_flaky": lambda args, record: None}
+        saved = {k: getattr(ui_tests, k) for k in fakes}
+        for k, v in fakes.items():
+            setattr(ui_tests, k, v)
+        try:
+            args = argparse.Namespace(
+                out=folder.name, only=[], skip=[], increase_contrast=False, reduce_motion=False, video=None,
+                a11y_summary=False, name="device", udid="X", deadline=deadline)
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                code = ui_tests.command_run(args)
+        finally:
+            for k, v in saved.items():
+                setattr(ui_tests, k, v)
+        marker = os.path.join(folder.name, ui_tests.NO_TEST_RESULT)
+        return code, os.path.exists(marker), log.getvalue()
+
+    def test_a_simulator_lost_in_every_pass_is_no_result(self):
+        # Both passes lost the simulator before any test started: exit 75 and the marker.
+        code, marker, log = self.run_with_passes([AX_TIMEOUT, SERVICE_INTERRUPTED])
+        self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True))
+        self.assertIn("No test result", log)
+        self.assertIn("UI_RESULT device infra", log)
+        # No repeat possible (the simulator did not come back): the same.
+        self.assertEqual(self.run_with_passes([RUNNER_TERMINATED], reset_ok=False)[:2], (ui_tests.NO_TEST_EXIT, True))
+        # The repeat failed in a test: red.
+        self.assertEqual(self.run_with_passes([AX_TIMEOUT, FLOW_ASSERTION])[:2], (1, False))
+        # A failure that is not the simulator's (here a compile error): red.
+        code, marker, log = self.run_with_passes([COMPILE_ERROR])
+        self.assertEqual((code, marker), (1, False))
+        self.assertIn("UI_RESULT device fail", log)
+        self.assertIn("UI_RESULT device pass", self.run_with_passes(["** TEST SUCCEEDED **\n" + PASSED_ONE])[2])
+
+    def test_a_testmanagerd_crash_is_repeated_and_no_red_on_its_own(self):
+        verdict, reasons = ui_tests.decide(65, TESTMANAGERD_CRASH, bundle=TESTMANAGERD_BUNDLE)
+        self.assertEqual((verdict, reasons[0]), ("retry", "XCTest daemon testmanagerd crashed"))
+        # The repeat runs test6 and the test the restart left unfinished.
+        self.assertEqual(ui_tests.retry_arguments(["SortlyFlowUITests", "SortlyLockedUITests"], [], TESTMANAGERD_CRASH),
+                         ["-only-testing:SortlyUITests/SortlyFlowUITests", "-only-testing:SortlyUITests/SortlyLockedUITests",
+                          "-skip-testing:SortlyUITests/SortlyFlowUITests/test5_Earlier"])
+        # The app was lost in the same test, without an app crash report: still repeated, but named.
+        self.assertIn("app lost + daemon crash in SortlyFlowUITests/test6_AnalysisKeepsGoingThroughBackgroundAndTabs "
+                      "(no app crash report)", reasons)
+        # Crashed again in the same test: red (likely app-caused); the repeat lost the simulator
+        # alone: no result; the repeat fails in a test: red; passes: green.
+        code, marker, log = self.run_with_passes([TESTMANAGERD_CRASH, TESTMANAGERD_CRASH])
+        self.assertEqual((code, marker), (1, False))
+        self.assertIn("testmanagerd crashed again in the same test", log)
+        self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, AX_TIMEOUT])[:2], (ui_tests.NO_TEST_EXIT, True))
+        self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, FLOW_ASSERTION])[:2], (1, False))
+        self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, "** TEST SUCCEEDED **\n" + PASSED_ONE])[:2], (0, False))
+
+    def test_a_pass_past_the_deadline_is_stopped_and_red(self):
+        import subprocess
+        import time
+        process = subprocess.Popen(["sleep", "30"])
+        started = time.time()
+        status, hung = ui_tests.wait_until(process, time.time() + 1, grace=5)
+        self.assertTrue(hung)
+        self.assertNotEqual(status, 0)
+        self.assertLess(time.time() - started, 10)
+        quick = subprocess.Popen(["true"])
+        self.assertEqual(ui_tests.wait_until(quick, time.time() + 30), (0, False))
+        # The lines run_pass writes: with a test still running a hang, a finding, never repeated;
+        # with none running the time ran out (infrastructure).
+        log = ("Test Case '-[SortlyUITests.A t1]' started.\nTest Case '-[SortlyUITests.A t1]' passed (1.0 seconds).\n"
+               "Test Case '-[SortlyUITests.A t2]' started.\n")
+        self.assertEqual(ui_tests.running_test(log), "A/t2")
+        self.assertIsNone(ui_tests.running_test(log + "Test Case '-[SortlyUITests.A t2]' failed (9.0 seconds).\n"))
+        verdict, reasons = ui_tests.decide(1, log + "UI_HANG pass first: A/t2 still running at the job's deadline; "
+                                                    "xcodebuild stopped\n")
+        self.assertEqual(verdict, "fail")
+        self.assertIn("hang: the pass did not end before the job's deadline", reasons)
+        idle = log.rsplit("Test Case", 1)[0] + "UI_DEADLINE pass first stopped at the job's deadline with no test running\n"
+        self.assertEqual(ui_tests.decide(1, idle), ("retry", ["pass stopped at the job's deadline with no test running"]))
+        # No repeat this close to the deadline: no result rather than a repeat cut off as a hang.
+        code, marker, out = self.run_with_passes([idle], deadline=time.time() + 20 * 60)
+        self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True))
+        self.assertIn("UI_VERDICT retry skipped", out)
+        self.assertEqual(self.run_with_passes([idle, "** TEST SUCCEEDED **\n" + PASSED_ONE],
+                                              deadline=time.time() + 60 * 60)[:2], (0, False))
+
+    def test_failures_are_echoed_while_the_pass_runs(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = os.path.join(folder.name, "log.txt")
+        with open(path, "w", encoding="utf-8") as log:
+            log.write("Test Case '-[SortlyUITests.A t]' started.\n/x.swift:3: error: -[SortlyUITests.A t] : XCTAssertTrue failed\n"
+                      "Test Case '-[SortlyUITests.A t]' failed (1.0 seconds).\nPREVIEW_JPEG x: error: -[\nTest Case '-[Sort")
+        watcher = ui_tests.HostGrants("U", path, grant=lambda: None)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            watcher.check()
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines, ["UI_LIVE /x.swift:3: error: -[SortlyUITests.A t] : XCTAssertTrue failed",
+                                 "UI_LIVE Test Case '-[SortlyUITests.A t]' failed (1.0 seconds)."])
+
+    def test_a_testmanagerd_crash_does_not_hide_a_real_failure(self):
+        other = ("Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' started.\n"
+                 "/x/SortlyFlowUITests.swift:12: error: -[SortlyUITests.SortlyFlowUITests test5_Earlier] : "
+                 "XCTAssertTrue failed\n"
+                 "Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' failed (3.0 seconds).\n")
+        verdict, reasons = ui_tests.decide(65, other + TESTMANAGERD_CRASH.split("\n", 1)[1])
+        self.assertEqual(verdict, "fail")
+        self.assertIn("a test failed", reasons)
+        # An app crash report is the app's side, also with the daemon crash.
+        self.assertEqual(ui_tests.decide(65, TESTMANAGERD_CRASH, ["/r/Sortly-2026-11-18-015619.ips"])[0], "fail")
+        # A bundle finding other than the lost connection still counts.
+        self.assertEqual(ui_tests.decide(65, TESTMANAGERD_CRASH, bundle=["result bundle: XCTAssertEqual failed"])[0], "fail")
+
     def test_space_separated_matrix_values(self):
         parsed = []
 
@@ -423,12 +569,39 @@ class FlakyTests(unittest.TestCase):
         record = ui_tests.flaky_record("flow-full", "", [], None, None, ["bootstatus failed (attempt 1 of 3)"])
         self.assertEqual(ui_tests.flaky_lines(record), ["FLAKY_BOOT flow-full bootstatus failed (attempt 1 of 3)"])
 
+    def test_retries_inside_a_test_are_counted(self):
+        # DeviceConditionUITests test07 (claude/test-speed) prints this when it tries a second album.
+        line = ("UI_FLAKY_RETRY DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo slow plan for Trip was done "
+                "before the app was closed (31 s after the tap), retried with a second album\n")
+        log = "Test Case '-[SortlyUITests.DeviceConditionUITests test07_InterruptedPlanContinueAndUndo]' started.\n" + line
+        record = ui_tests.flaky_record("device", log + line, [], None, None)  # printed twice: counted once
+        self.assertEqual(record["flaky"], [{"test": "DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo",
+                                            "first": ui_tests.INSIDE, "reason": line.split(" ", 2)[2].strip()}])
+        self.assertEqual(record["retries"], [])
+        self.assertEqual(ui_tests.flaky_lines(record), [
+            "FLAKY DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo " + line.split(" ", 2)[2].strip()
+            + " (retried inside the test)"])
+        markdown, lines = ui_tests.flaky_summary([record])
+        self.assertIn("0 test(s) passed only on the repeat, 1 retry(ies) inside a test", markdown)
+        self.assertIn("| device | flaky | DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo | retried inside the test |",
+                      markdown)
+        # flaky-device.json and the warning that the TestFlight gate repeats for a reused green.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        args = argparse.Namespace(out=folder.name, name="device")
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            ui_tests.write_flaky(args, record)
+        with open(os.path.join(folder.name, "flaky-device.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["flaky"], record["flaky"])
+        self.assertIn("::warning title=UI device flaky::1 retry(ies) inside a test: DeviceConditionUITests.test07", printed.getvalue())
+
     def test_run_summary_counts_every_group(self):
         records = [ui_tests.flaky_record("accessibility", RESTART, ["simulator not booted"], self.RETRY_LOG, "fail"),
                    ui_tests.flaky_record("flow-full", RESTART, [], None, None, ["bootstatus failed (attempt 1 of 3)"]),
                    ui_tests.flaky_record("flow-other", "", [], None, None)]
         markdown, lines = ui_tests.flaky_summary(records)
-        self.assertIn("1 repeat(s) after a simulator failure, 1 test(s) passed only on the repeat, 1 failed boot attempt(s), "
+        self.assertIn("1 repeat(s) after a simulator failure, 1 test(s) passed only on the repeat, 0 retry(ies) inside a test, "
+                      "1 failed boot attempt(s), "
                       "over 3 pass record(s)", markdown)
         self.assertIn("| accessibility | flaky | AccessibilityUITests/test1_OnboardingAtLargestTextInDarkMode | not started |", markdown)
         self.assertEqual(len(lines), 3)
@@ -617,45 +790,24 @@ class GroupTests(unittest.TestCase):
         return open(os.path.join(self.ROOT, ".github", "workflows", "ui.yml"), encoding="utf-8").read()
 
     def groups(self):
-        """{group: {field: value}} of the matrix; a folded value (`only: >-` and the lines below
-        it) is joined with spaces, as GitHub hands it to the job."""
-        import re
-        text = self.workflow().split("include:", 1)[1].split("\n    env:", 1)[0]
-        groups = {}
-        for block in re.split(r"\n\s*- group: ", text)[1:]:
-            lines = block.split("\n")
-            name, fields, i = lines[0].strip(), {}, 1
-            while i < len(lines):
-                m = re.match(r"^(\s*)(only|skip|increase_contrast|reduce_motion|device): ?(.*)$", lines[i])
-                i += 1
-                if not m:
-                    continue
-                value = m.group(3).strip()
-                if value in (">-", ">"):
-                    parts = []
-                    while i < len(lines) and lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) > len(m.group(1)):
-                        parts.append(lines[i].strip())
-                        i += 1
-                    value = " ".join(parts)
-                fields[m.group(2)] = value.strip("'")
-            groups[name] = fields
-        return groups
+        """{group: {field: value}} of .github/ui-groups.json (ui.yml's matrix comes from it, see
+        ui_groups.py), in order; booleans as GitHub hands them to the job ("true")."""
+        with open(os.path.join(self.ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:
+            listed = json.load(f)["groups"]
+        return {g["group"]: {k: ("true" if v is True else v) for k, v in g.items() if v is not False and k != "group"}
+                for g in listed}
 
     def ui_tests(self):
-        """Every test method of the SortlyUITests target, as "Class/test"."""
+        """Every test method of the SortlyUITests target, as "Class/test", read from the files on
+        disk the same way ui_groups.py reads them (multi-line declarations, extensions, inherited
+        tests)."""
         import glob
-        import re
-        tests = []
+        import ui_groups
+        contents = {}
         for path in sorted(glob.glob(os.path.join(self.ROOT, "App", "SortlyUITests", "*.swift"))):
-            current = None
-            for line in open(path, encoding="utf-8"):
-                cls = re.match(r"\s*(?:@\w+\s+)*(?:final\s+)?class\s+(\w+)\s*:\s*XCTestCase", line)
-                if cls:
-                    current = cls.group(1)
-                test = re.match(r"\s*(?:@\w+\s+)*func\s+(test\w*)\s*\(\s*\)", line)
-                if test and current:
-                    tests.append(f"{current}/{test.group(1)}")
-        return tests
+            with open(path, encoding="utf-8") as f:
+                contents["App/SortlyUITests/" + os.path.basename(path)] = f.read()
+        return sorted(ui_groups.all_tests(ui_groups.ui_files(ui_groups.DictTree(contents))))
 
     @staticmethod
     def selected(test, only, skip):
@@ -710,7 +862,7 @@ class GroupTests(unittest.TestCase):
 
     def test_the_stress_run_is_not_part_of_the_ui_run(self):
         # DeviceConditionUITests/test12 skips itself without SORTLY_STRESS_PHOTOS; only
-        # ui-stress.yml (started by hand) sets it.
+        # ui-stress.yml (by hand, weekly and in every TestFlight run) sets it.
         self.assertNotIn("SORTLY_STRESS_PHOTOS", self.workflow())
         stress = open(os.path.join(self.ROOT, ".github", "workflows", "ui-stress.yml"), encoding="utf-8").read()
         self.assertIn("TEST_RUNNER_SORTLY_STRESS_PHOTOS", stress)

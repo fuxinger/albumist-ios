@@ -1,58 +1,82 @@
 name: TestFlight
 
 # Builds a signed App Store build and uploads it to TestFlight, so Albumist can be installed on
-# a real iPhone. Runs only when the four App Store Connect secrets exist (docs/TESTFLIGHT.md);
-# until then it stops after one quick check on Linux and costs no macOS minutes.
+# a real iPhone (docs/TESTFLIGHT.md). One run does it all for one commit (Profi-Analyse 16.11.,
+# Top 10 / G8, decided 17.11.): it tests exactly that commit itself and, only when every test is
+# green, archives, uploads and tags it. No job waits for or looks at other workflow runs.
 #
-# Only a commit whose tests are green goes to TestFlight. The job "Wait for green tests"
-# (.github/scripts/ci_gate.py) waits on a free Linux runner for the CI run and the UI flow run
-# of exactly this commit; the upload starts only when both passed and CI's iOS job really ran.
-# A commit without a UI flow run is never green: ui.yml runs for pull requests on the PR's head
-# commit. main is released by hand only: a manual "UI flow" run on it, then a manual run of
-# this workflow (the gate gives up 15 min after CI passed with no UI run in sight). A docs-only
-# commit (iOS job skipped) is not uploaded.
-# A manual run with "force" skips the wait for emergencies.
+#   1. TestFlight secrets: without the four App Store Connect secrets (docs/TESTFLIGHT.md), or
+#      on another branch, the run stops here, before any macOS minute.
+#   2. Tests: CI (ci.yml) with the app rules, the Linux core tests and then, on one Mac, the
+#      iOS build, core and app tests. Its iOS job always runs here.
+#   3. Then side by side: the UI flow (ui.yml, at most four Macs) and the small stress pass
+#      (ui-stress.yml with photos 10000 and minutes 15; the owner's rule 17.11.: before each
+#      TestFlight build). Five Macs at the peak. The UI flow runs with groups "auto" (input
+#      ui_groups): only the groups that have no green result yet for exactly this app and their
+#      own test code (the owner's rule 17.11.: a test-only change reruns only the groups it
+#      touches, any app change everything; ui.yml "UI plan"). "Repeats and flaky tests" then
+#      counts the simulator repeats and the flaky tests of both in one table.
+#   3b. UI gate (Linux): every UI group must be green for exactly this app fingerprint and its
+#      own test fingerprint, from this run or an earlier one, and none may be red for that pair
+#      (a red is fixed, never re-run to green; .github/scripts/ui_evidence.py gate). It names
+#      the reused results and their flaky tests.
+#   4. Archive and upload, one Mac job, only when 2, 3 and 3b are green: archives exactly this
+#      commit with the pinned Xcode and this run's number as the build number, checks the
+#      app's Info.plist (commit, build number, Xcode build), signs it for the App Store during
+#      the export and uploads it. Archive and export happen in the same job: nothing is handed
+#      between machines, so the app that is uploaded is the one built from the tested commit.
+#   5. The commit gets the annotated git tag build-<number>; "Was testen" is set from
+#      docs/TESTFLIGHT_NOTES.md.
+# Two to two and a half hours until the upload when every UI group runs (CI ~20 min, UI flow
+# 75-100 min observed, archive and upload ~15 min); after a test-only change only the touched
+# groups run, and the stress pass (~45 min) sets the time. Then up to 50 min until "Was testen"
+# is set (see concurrency).
 #
-# The release archive is built while the UI tests still run, not after them: as soon as the
-# CI run of this commit is green ("Wait for CI", ~20 min, Linux first, then its iOS job),
-# "Build release archive" archives exactly this commit on a Mac and keeps it as an artifact of
-# this run. Only when the full gate is green (the UI run too, ~45 min) does "Upload to
-# TestFlight" sign that archive for the App Store and upload it (about 3 min after the gate
-# instead of a whole build). It checks that the archive was built from the gated commit with
-# this run's build number and the pinned Xcode: build-info.txt, the app's own Info.plist
-# (AlbumistCommit, CFBundleVersion, DTXcodeBuild) and the SHA-256 of every file of the app as
-# the archive job recorded it (.github/scripts/archive_check.py; compared before signing). The export only signs that app; nothing is
-# rebuilt between the gate and the upload. After a successful upload the commit gets the git tag
-# build-<number> (job "tag", the only one with contents: write).
-# Waiting for CI rather than starting at once keeps a push at five Mac jobs at a time (CI's
-# iOS job and the four UI groups; the archive takes the place of CI's job when that is done),
-# and a commit whose Linux or iOS tests fail never starts it.
-# (`ci_gate.py --linux` would start it after CI's Linux jobs instead, ~15 min earlier, at the
-# cost of a sixth Mac job beside CI and UI; not needed while the UI run is the long part.)
-# The archive artifact is deleted at the end of the run. It holds the unsigned app with the
-# team id in its build settings; a team id is not secret (it is in the signature of every app
-# the team ships), and DEVELOPMENT_TEAM stays in the archive step because the export has only
-# been proven with it. Because of the deletion, after a failed upload use "Re-run all jobs"
-# (it archives again); "Re-run failed jobs" fails by design, the archive is gone.
+# Every part tests this run's commit (github.sha); only a UI group may instead be covered by an
+# earlier green result for a byte-identical app and the same test code of that group (3b; the
+# app fingerprint covers everything that goes into the app, ui_groups.py). The called workflows get a concurrency group
+# of their own for this run (inputs.release; github.workflow, which is "TestFlight" in a called
+# workflow, is a second guard): the Mac queue of ui.yml never holds or replaces them, and a push
+# to main never cancels them. Start a TestFlight run when the Mac queue is idle (one Mac-heavy
+# strand at a time).
 #
-# Why not `workflow_run`: that trigger only works from the workflow file on the default branch
-# (main), which lags behind the release branch, and it would run fork-PR code with these
-# secrets unless guarded. Waiting from the push itself works on every release branch as is.
+# When something fails (the owner's rule: flaky tests are counted and fixed, never hidden):
+#   - a red test: fix it and start a NEW run. A red test is never re-run to green: the upload
+#     job of a later attempt stops when an earlier attempt failed in a test, a rule, a build or
+#     the archive (.github/scripts/earlier_attempts.py).
+#   - the same across runs: a UI group that was red for this app and this test code in any
+#     earlier run (every run since this app first existed; when they cannot all be read, the
+#     gate fails) blocks the upload until the test or the app changes (ui-gate,
+#     .github/scripts/ui_evidence.py); a new run on the same code does not make it green.
+#     The upload needs full results: a quick UI result (pull requests) never counts.
+#   - "Re-run failed jobs" only for a failure of the machinery: a runner or container that did
+#     not start, a simulator that did not boot, build products, a checkout or XcodeGen
+#     (pinned download) that did not arrive, an upload to App Store Connect that broke off. The check
+#     goes by the step that did not pass, not by the cause: a runner lost or a run cancelled in
+#     the middle of a test step (e.g. "Run UI tests"), or a hiccup in "Select pinned Xcode" or
+#     "Generate Xcode project", needs a new run too. The upload job of an allowed re-run lists
+#     every earlier failure as a warning and in its summary, and the tag message names them.
+#     The UI build products are kept 3 days for this.
+#   - "force" (emergency) uploads without any test; the build is marked "FORCED – untested" in
+#     the upload job's summary, the tag message and the first line of "Was testen".
+#
+# Started by hand only: Actions > TestFlight > Run workflow on main
+# (gh workflow run testflight.yml --ref main). No push or merge starts a build from a branch
+# with this file. claude/sortly-app still has an older testflight.yml whose push trigger starts
+# an upload for every push there once its CI is green, until that branch gets this file or is
+# retired (Profi-Analyse Top 1); with this file, runs there are by hand too.
 on:
-  push:
-    # Only the release branch uploads by itself. A merge into main never starts a build
-    # (16.11.: merging the website into main started a build of an old app state); main is
-    # released by a manual run once its UI run is green. No paths filter: the "check" job asks
-    # app_changed.py instead, which compares with the last uploaded build (tag build-<n>), so a
-    # website- or docs-only push starts nothing (code pushed before such a push is still new;
-    # the test gate then decides whether it ships).
-    branches: [claude/sortly-app]
   workflow_dispatch:
     inputs:
       force:
-        description: 'Emergency: upload without waiting for green tests'
+        description: 'Emergency: upload without running the tests'
         type: boolean
         default: false
+      ui_groups:
+        description: 'UI groups: auto (only those without a green result for this app and their test code) or all'
+        type: choice
+        options: [auto, all]
+        default: auto
 
 permissions:
   contents: read
@@ -61,30 +85,29 @@ env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
 
+# One TestFlight run at a time and none is cancelled: a second run waits (a third one would
+# replace the waiting second), so builds reach App Store Connect in the order of their numbers.
+# The group is held until the last job of the run ends, "What to Test" included: that job waits
+# on Linux until Apple has processed the upload (usually 5-30 min, at most 50), and a second run
+# starts only then. A workflow's group cannot be let go earlier; job groups instead would let
+# two runs test at the same time (ten Macs).
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
 jobs:
   check:
     name: TestFlight secrets
-    # The App Store Connect secrets are only ever read on the release branches (push or manual
-    # run by someone with write access); this workflow has no pull_request trigger.
-    if: github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main'
+    # The App Store Connect secrets are only ever read on the release branch, in a run started
+    # by someone with write access; this workflow has no pull_request trigger. Planned on top:
+    # a GitHub Environment "testflight" with the owner as required reviewer (steps for the owner
+    # in docs/TESTFLIGHT.md; this file does not use it yet).
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/sortly-app'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      ready: ${{ steps.secrets.outputs.ready == 'true' && (github.event_name != 'push' || steps.app.outputs.changed == 'true') }}
+      ready: ${{ steps.secrets.outputs.ready }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'push'
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: App changes since the last TestFlight build
-        id: app
-        if: github.event_name == 'push'
-        run: |
-          python3 .github/scripts/app_changed.py >> "$GITHUB_OUTPUT"
-          if grep -q '^changed=false' "$GITHUB_OUTPUT"; then
-            echo "::notice::TestFlight skipped: only website or documents changed since the last uploaded build."
-          fi
       - id: secrets
         env:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -98,128 +121,195 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "::notice::TestFlight skipped: the App Store Connect secrets are not set yet (docs/TESTFLIGHT.md)."
           fi
+      - name: Forced upload
+        if: inputs.force && steps.secrets.outputs.ready == 'true'
+        run: echo "::warning title=FORCED – untested::Uploading without running any test (manual run with force)."
 
-  ci:
-    name: Wait for CI
+  tests:
+    name: Tests
     needs: check
-    if: needs.check.outputs.ready == 'true'
-    runs-on: ubuntu-24.04
-    # CI takes ~17-23 min plus queueing; the archive starts right after it.
-    timeout-minutes: 130
+    if: needs.check.outputs.ready == 'true' && !inputs.force
+    uses: ./.github/workflows/ci.yml
+    with:
+      release: true
+    # CI's changes job (changes.yml) asks for actions: read; it is skipped here, but a called
+    # workflow may never ask for more than its caller grants.
     permissions:
       contents: read
       actions: read
-    concurrency:
-      group: testflight-ci-${{ github.ref }}
-      cancel-in-progress: true
-    outputs:
-      ok: ${{ steps.force.outputs.ok || steps.ci.outputs.ok }}
+
+  ui:
+    name: UI flow
+    needs: tests
+    uses: ./.github/workflows/ui.yml
+    # actions: read for its "UI plan" (earlier results of the groups); checks: read for its
+    # "UI verdict" job, which is skipped here (release) but must not ask for more than it gets.
+    # quick stays false: the upload needs full results.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    with:
+      release: true
+      quick: false
+      groups: ${{ inputs.ui_groups || 'auto' }}
+
+  stress:
+    name: Stress pass
+    needs: tests
+    uses: ./.github/workflows/ui-stress.yml
+    with:
+      release: true
+      # The small pass (the owner's rule 17.11.), named here rather than left to defaults.
+      photos: '10000'
+      minutes: '15'
+
+  flaky:
+    # The simulator repeats and the tests that passed only on a repeat, over the UI groups and
+    # the stress pass of this run, in one table (ui_tests.py flaky-summary over their
+    # build/flaky-*.json): nothing that was repeated stays hidden in a single job's log. Never
+    # fails the run; the tests decide that.
+    name: Repeats and flaky tests (UI flow and stress pass)
+    needs: [ui, stress]
+    if: ${{ always() && (needs.ui.result != 'skipped' || needs.stress.result != 'skipped') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - name: Forced upload
-        id: force
-        if: inputs.force
-        run: echo "ok=true" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.force }}
         with:
-          sparse-checkout: .github/scripts
-      - name: Wait for the CI run of this commit
-        id: ci
-        if: ${{ !inputs.force }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.sha }}
-          WAIT_MINUTES: 120
-        run: python3 .github/scripts/ci_gate.py --ci
-
-  gate:
-    name: Wait for green tests
-    needs: check
-    if: needs.check.outputs.ready == 'true'
-    runs-on: ubuntu-24.04
-    # CI takes ~20 min, the UI run ~45 min, plus queueing when the Mac runners are busy; the
-    # script gives up after 3 hours (waiting on a Linux runner costs nothing in a public repo).
-    timeout-minutes: 190
-    permissions:
-      contents: read
-      actions: read
-    # A newer push to the same branch replaces a run that is still waiting (newest commit wins).
-    concurrency:
-      group: testflight-gate-${{ github.ref }}
-      cancel-in-progress: true
-    outputs:
-      ok: ${{ steps.force.outputs.ok || steps.gate.outputs.ok }}
-    steps:
-      - name: Forced upload
-        id: force
-        if: inputs.force
+          sparse-checkout: .github
+          persist-credentials: false
+      - name: Download retry records
+        # ui-flaky-<group>-attempt-<n> (ui.yml) and flaky-stress-attempt-<n> (ui-stress.yml): one
+        # per attempt, so "Re-run failed jobs" keeps the records of the earlier attempts. Not
+        # merged, as every attempt's record of a group has the same file name.
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: '*flaky-*'
+          path: flaky
+      - name: Count repeats and flaky tests
         run: |
-          echo "ok=true" >> "$GITHUB_OUTPUT"
-          echo "::warning title=Forced::Uploading without waiting for green tests (manual run with force)."
+          mapfile -t records < <(find flaky -name 'flaky-*.json' 2>/dev/null | sort)
+          python3 .github/scripts/ui_tests.py flaky-summary "${records[@]}" >> "$GITHUB_STEP_SUMMARY"
+
+  ui-gate:
+    # Every UI group green for exactly this app and its own test code (this run's groups or a
+    # reused earlier result), none red for that pair; see .github/scripts/ui_evidence.py. Linux,
+    # before the Mac job. If the API does not answer it fails; re-run this job then
+    # (earlier_attempts.py counts it as machinery: it decides from the results alone).
+    name: UI gate (every group green for this app and its test code)
+    needs: [check, tests, ui, stress]
+    if: >-
+      ${{ !cancelled() && needs.check.outputs.ready == 'true' && !inputs.force && needs.tests.result == 'success'
+      && needs.ui.result == 'success' && needs.stress.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # actions: read for the runs and jobs, checks: read for the flaky warnings of reused jobs.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      text: ${{ steps.gate.outputs.text }}
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: ${{ !inputs.force }}
         with:
-          sparse-checkout: .github/scripts
-      - name: Wait for CI and UI flow of this commit
+          fetch-depth: 0
+          persist-credentials: false
+      - name: UI groups green for this app and test code
         id: gate
-        if: ${{ !inputs.force }}
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.sha }}
-          WAIT_MINUTES: 180
-        run: python3 .github/scripts/ci_gate.py
+        run: python3 .github/scripts/ui_evidence.py gate
 
-  archive:
-    name: Build release archive
-    needs: [check, ci]
-    if: needs.ci.outputs.ok == 'true' && (github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main')
+  release:
+    name: Archive and upload to TestFlight
+    needs: [check, tests, ui, stress, ui-gate]
+    # The tests, the UI flow, the stress pass and the UI gate of this run must all be green (or
+    # skipped on purpose by force). !cancelled() instead of the default: with force, skipped jobs
+    # must not skip this one.
+    if: >-
+      ${{ !cancelled() && needs.check.outputs.ready == 'true' && (inputs.force
+      || (needs.tests.result == 'success' && needs.ui.result == 'success' && needs.stress.result == 'success'
+      && needs.ui-gate.result == 'success')) }}
     runs-on: xcode-27
-    timeout-minutes: 45
-    # A newer push replaces an archive that is still being built (its gate is replaced too).
-    concurrency:
-      group: testflight-archive-${{ github.ref }}
-      cancel-in-progress: true
-    env:
-      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    # Archive ~10-20 min, export and upload ~3-5 min.
+    timeout-minutes: 60
+    # actions: read for "Earlier attempts of this run".
+    permissions:
+      contents: read
+      actions: read
+    # For the tag message: the attempt that uploaded, and what failed before it.
+    outputs:
+      attempt: ${{ github.run_attempt }}
+      earlier: ${{ steps.earlier.outputs.text }}
+    # The App Store Connect key reaches this job only after the archive is built: its ids are
+    # in the upload step's environment, the private key is written to disk in the step before
+    # the export and removed right after it. The build steps (the repository's own code, no
+    # third-party packages; the pinned xcodegen as in every Mac job) never have them, but
+    # unlike the two Mac jobs before 17.11. they run on the same machine as the export. The
+    # team id (not secret) is only in the archive and upload steps.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Nothing here pushes; no token stays in .git/config next to the build.
           persist-credentials: false
+      - name: FORCED – untested
+        if: inputs.force
+        run: |
+          echo "::warning title=FORCED – untested::TestFlight build ${{ github.run_number }} is uploaded without running any test (manual run with force)."
+          echo "## FORCED – untested: build ${{ github.run_number }} (${GITHUB_SHA:0:7}) skipped every test (manual run with force)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Earlier attempts of this run
+        # "Re-run failed jobs" is only for a failure of the machinery (top of this file). This
+        # step reads every job and step of the earlier attempts of this run: a failure of the
+        # machinery is listed (warning and summary), any other failure (a test, a rule, a build,
+        # the archive) stops the upload: a red test is never re-run to green. A forced run is
+        # listed only. If the API does not answer, this step fails; re-run this job then.
+        id: earlier
+        if: github.run_attempt != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTEMPT: ${{ github.run_attempt }}
+          FORCED: ${{ inputs.force }}
+        run: |
+          answers=()
+          for n in $(seq 1 $((ATTEMPT - 1))); do
+            curl -fsS --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$n/jobs?per_page=100" \
+              -o "$RUNNER_TEMP/jobs-$n.json" \
+              || { echo "::error title=Earlier attempts::the jobs of attempt $n could not be read; re-run this job"; exit 1; }
+            answers+=("$RUNNER_TEMP/jobs-$n.json")
+          done
+          flags=()
+          if [ "$FORCED" = "true" ]; then flags+=(--forced); fi
+          python3 .github/scripts/earlier_attempts.py --attempt "$ATTEMPT" "${flags[@]}" "${answers[@]}"
       - name: Select pinned Xcode
-        id: xcode
         # The pinned release Xcode (.github/toolchain.json), never a beta: App Store Connect
-        # refuses beta builds. The id output names it in build-info.txt.
-        run: |
-          python3 .github/scripts/toolchain.py xcode
-          # Files restored from the cache have new inode numbers; without this Xcode's build
-          # system would treat all of them as changed.
-          defaults write com.apple.dt.XCBuild IgnoreFileSystemDeviceInodeChanges -bool YES
+        # refuses beta builds.
+        run: python3 .github/scripts/toolchain.py xcode
       - name: Paths
-        run: echo "ARCHIVE=$RUNNER_TEMP/Albumist.xcarchive" >> "$GITHUB_ENV"
-      - name: Generate Xcode project
         run: |
-          brew install xcodegen
-          cd App && xcodegen generate
-      - name: Content-based file times (lets the build cache work, see the script)
-        run: python3 .github/scripts/stable_mtimes.py .
-      # DerivedData of the previous archive (Release, device): package and SDK modules that did
-      # not change are reused. The key only picks the starting point; every input is still
-      # checked and changed files always recompile. Signing happens in the export, not here.
-      - name: Build cache
-        # Off since 16.11.: a restored cache hid a change in SortlyCore (CI 43796841063: 'AlbumMatcher has no member tiedWithBest' although Linux built it). Back on only with a proven fix.
-        if: ${{ false }}
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/Library/Developer/Xcode/DerivedData
-          key: archive-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-${{ hashFiles('Package.swift', 'Sources/**', 'App/**') }}
-          restore-keys: archive-${{ runner.arch }}-${{ steps.xcode.outputs.id }}-
+          {
+            echo "ARCHIVE=$RUNNER_TEMP/Albumist.xcarchive"
+            echo "KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8"
+            echo "EXPORT_OPTIONS=$RUNNER_TEMP/ExportOptions.plist"
+          } >> "$GITHUB_ENV"
+      - name: Install XcodeGen
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py); a
+        # failed project generation is not.
+        run: python3 .github/scripts/toolchain.py xcodegen
+      - name: Generate Xcode project
+        run: cd App && xcodegen generate
       # The archive is built unsigned: automatic signing would want a development profile,
-      # and Apple only makes one when an iPhone is registered to the team. The export (upload
-      # job) signs for the App Store with Apple's cloud-managed distribution certificate (needs
-      # the Admin key), which works without any registered device.
+      # and Apple only makes one when an iPhone is registered to the team. The export below
+      # signs for the App Store with Apple's cloud-managed distribution certificate (needs the
+      # Admin key), which works without any registered device. DEVELOPMENT_TEAM stays in the
+      # archive because the export has only been proven with it (a team id is not secret).
       # The build number is this workflow's run number: it only grows (build 27 was run 27).
       - name: Archive (unsigned; signed for the App Store during export)
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           cd App
           set +e
@@ -238,88 +328,13 @@ jobs:
           status=$?
           grep -E "error:|\*\* ARCHIVE" ../archive-log.txt | head -80
           exit $status
-      - name: Pack archive
-        # tar keeps file modes and links (an artifact alone would drop the executable bit).
-        # build-info.txt says which commit, build number and Xcode the archive is, the SHA-256
-        # of the app's executable and of its whole file tree (app-manifest.txt lists every file
-        # with its SHA-256, so a difference can be named); the app's Info.plist carries the
-        # commit, build number and Xcode build (DTXcodeBuild) itself. The upload checks all of
-        # it before it signs and ships the archive.
+      - name: Archive of the tested commit
+        # The checkout is this run's commit, and the app's own Info.plist says so too: it names
+        # the commit (AlbumistCommit), this run's build number (CFBundleVersion) and the build of
+        # the pinned Xcode (DTXcodeBuild), see .github/scripts/archive_check.py.
         run: |
           [ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ] || { echo "::error::checkout is not $GITHUB_SHA"; exit 1; }
           python3 .github/scripts/archive_check.py "$ARCHIVE" --sha "$GITHUB_SHA" --build "${{ github.run_number }}" --pinned-xcode
-          {
-            printf 'sha=%s\nbuild=%s\nxcode=%s\n' "$GITHUB_SHA" "${{ github.run_number }}" "${{ steps.xcode.outputs.id }}"
-            python3 .github/scripts/archive_check.py "$ARCHIVE" --print-hashes --manifest "$RUNNER_TEMP/app-manifest.txt"
-          } > "$RUNNER_TEMP/build-info.txt"
-          tar -czf release-archive.tgz -C "$RUNNER_TEMP" Albumist.xcarchive build-info.txt app-manifest.txt
-          ls -la release-archive.tgz
-          cat "$RUNNER_TEMP/build-info.txt"
-      - name: Keep archive for the upload
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: testflight-archive
-          path: release-archive.tgz
-          retention-days: 1
-          compression-level: 0
-          overwrite: true
-      - name: Keep the build cache small
-        if: ${{ false }}
-        run: rm -rf ~/Library/Developer/Xcode/DerivedData/*/Logs ~/Library/Developer/Xcode/DerivedData/*/Index.noindex
-
-  upload:
-    name: Upload to TestFlight
-    needs: [check, gate, archive]
-    if: needs.gate.outputs.ok == 'true' && needs.archive.result == 'success' && (github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main')
-    runs-on: xcode-27
-    timeout-minutes: 30
-    # Uploads run one after another and are never cancelled half way; a newer one waits.
-    concurrency:
-      group: testflight-upload
-      cancel-in-progress: false
-    env:
-      KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-    steps:
-      # Only the CI scripts and the toolchain pins of this commit; the app comes from the archive.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: .github
-          persist-credentials: false
-      - name: Select pinned Xcode
-        run: python3 .github/scripts/toolchain.py xcode
-      - name: Paths
-        run: |
-          echo "KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
-          echo "ARCHIVE=$RUNNER_TEMP/release/Albumist.xcarchive" >> "$GITHUB_ENV"
-          echo "EXPORT_OPTIONS=$RUNNER_TEMP/ExportOptions.plist" >> "$GITHUB_ENV"
-      - name: Download the archive of this run
-        # v8 is the download action that pairs with upload-artifact v7 (its README).
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: testflight-archive
-          path: ${{ runner.temp }}/download
-      - name: Archive of the gated commit
-        run: |
-          mkdir -p "$RUNNER_TEMP/release"
-          tar -xzf "$RUNNER_TEMP/download/release-archive.tgz" -C "$RUNNER_TEMP/release"
-          cat "$RUNNER_TEMP/release/build-info.txt"
-          # Exactly the commit the gate checked, with this run's build number.
-          grep -qx "sha=$GITHUB_SHA" "$RUNNER_TEMP/release/build-info.txt" \
-            || { echo "::error::The archive was not built from $GITHUB_SHA"; exit 1; }
-          version=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" "$ARCHIVE/Info.plist")
-          [ "$version" = "${{ github.run_number }}" ] \
-            || { echo "::error::The archive has build number $version, not ${{ github.run_number }}"; exit 1; }
-          # The app inside: its Info.plist names this commit, build and the pinned Xcode build,
-          # and every file of it is byte for byte the one the archive job hashed (checked before
-          # the export signs it; signing changes the executable, see archive_check.py).
-          python3 .github/scripts/archive_check.py "$ARCHIVE" --sha "$GITHUB_SHA" --build "${{ github.run_number }}" \
-            --pinned-xcode --build-info "$RUNNER_TEMP/release/build-info.txt" --manifest "$RUNNER_TEMP/release/app-manifest.txt"
-          echo "Archive of ${GITHUB_SHA:0:7}, build $version"
-          xcode="$(python3 .github/scripts/toolchain.py id)"
-          grep -qx "xcode=$xcode" "$RUNNER_TEMP/release/build-info.txt" \
-            || { echo "::error::The archive was not built with the pinned $xcode that this export uses"; exit 1; }
       - name: App Store Connect key
         env:
           KEY_P8: ${{ secrets.ASC_KEY_P8 }}
@@ -328,6 +343,11 @@ jobs:
           printf '%s\n' "$KEY_P8" > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
       - name: Upload to TestFlight
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          FORCED: ${{ inputs.force && ' – FORCED – untested' || '' }}
         run: |
           plutil -create xml1 "$EXPORT_OPTIONS"
           plutil -insert method -string app-store-connect "$EXPORT_OPTIONS"
@@ -347,20 +367,23 @@ jobs:
           status=$?
           grep -E "error:|Upload|EXPORT|\*\* " upload-log.txt | head -80
           [ $status -eq 0 ] && echo "TESTFLIGHT_BUILD ${{ github.run_number }} uploaded; it appears in TestFlight after Apple's processing (usually 5 to 30 minutes)."
-          [ $status -eq 0 ] && echo "### TestFlight build ${{ github.run_number }} uploaded (${GITHUB_SHA:0:7})" >> "$GITHUB_STEP_SUMMARY"
+          [ $status -eq 0 ] && echo "### TestFlight build ${{ github.run_number }} uploaded (${GITHUB_SHA:0:7})$FORCED" >> "$GITHUB_STEP_SUMMARY"
           exit $status
       - name: Remove key
         if: always()
         run: rm -rf "$(dirname "$KEY_PATH")"
 
   tag:
-    # Every uploaded build has a git tag build-<number> on exactly the commit it was built from,
-    # so "which code is TestFlight build 41?" is `git show build-41`. The only job of this
-    # workflow that may write to the repository, and it can only create a tag: an existing tag
-    # is left alone when it is on the same commit (a re-run) and fails the job otherwise.
+    # Every uploaded build has an annotated git tag build-<number> on exactly the commit it was
+    # built from, so "which code is TestFlight build 41?" is `git show build-41`; its message
+    # says whether the tests ran ("FORCED – untested" when not). The only job of this workflow
+    # that may write to the repository, and it can only create a tag: an existing tag is left
+    # alone when it is on the same commit (a re-run) and fails the job otherwise.
     name: Tag the TestFlight build
-    needs: upload
-    if: needs.upload.result == 'success'
+    needs: [release, ui-gate]
+    # always(), not the default success(): that would also look at the tests, which force
+    # skips; and an uploaded build gets its tag even when the run is cancelled after the upload.
+    if: ${{ always() && needs.release.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -370,58 +393,67 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: build-${{ github.run_number }}
+          FORCED: ${{ inputs.force }}
+          # The attempt whose upload job uploaded (a re-run of this job alone keeps it) and,
+          # from attempt 2 on, what failed before it (earlier_attempts.py).
+          ATTEMPT: ${{ needs.release.outputs.attempt }}
+          EARLIER: ${{ needs.release.outputs.earlier }}
+          # Which UI groups ran in this run and which green results were reused (ui_evidence.py).
+          UI_GATE: ${{ needs.ui-gate.outputs.text }}
         run: |
-          if existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null); then
+          about="TestFlight build $GITHUB_RUN_NUMBER of $GITHUB_SHA (run $GITHUB_RUN_ID, attempt ${ATTEMPT:-$GITHUB_RUN_ATTEMPT}${EARLIER:+; $EARLIER}${UI_GATE:+; $UI_GATE})"
+          if [ "$FORCED" = "true" ]; then
+            message="FORCED – untested: $about, uploaded without running any test (force)"
+          else
+            message="$about: CI, UI flow and stress pass green"
+          fi
+          if ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha' 2>/dev/null); then
+            read -r type existing <<< "$ref"
+            # An annotated tag points at a tag object, which points at the commit.
+            if [ "$type" = "tag" ]; then
+              existing=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$existing" --jq .object.sha)
+            fi
             [ "$existing" = "$GITHUB_SHA" ] \
               || { echo "::error::$TAG already points at $existing, not at $GITHUB_SHA; left as it is"; exit 1; }
             echo "$TAG is already on ${GITHUB_SHA:0:7}"
           else
-            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
-            echo "Tagged ${GITHUB_SHA:0:7} as $TAG"
+            object=$(gh api "repos/$GITHUB_REPOSITORY/git/tags" -f tag="$TAG" -f message="$message" \
+              -f object="$GITHUB_SHA" -f type=commit --jq .sha)
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$object" --silent
+            echo "Tagged ${GITHUB_SHA:0:7} as $TAG: $message"
           fi
-          echo "Git tag \`$TAG\` on ${GITHUB_SHA:0:7}" >> "$GITHUB_STEP_SUMMARY"
-
-  cleanup:
-    # The archive artifact (unsigned build with the team id in it) does not outlive the run.
-    name: Remove the archive artifact
-    needs: [archive, upload]
-    if: always() && needs.archive.result != 'skipped'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      actions: write
-    steps:
-      - env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | select(.name == "testflight-archive") | .id'); do
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" && echo "removed artifact $id"
-          done
+          echo "Git tag \`$TAG\` on ${GITHUB_SHA:0:7}: $message" >> "$GITHUB_STEP_SUMMARY"
 
   notes:
     # Sets the German "Was testen" text from docs/TESTFLIGHT_NOTES.md once App Store Connect
     # knows the build (bounded wait on a Linux runner, so no macOS runner is held). A failure
     # here never touches the upload, which is done already.
     name: What to Test
-    needs: upload
-    if: github.ref == 'refs/heads/claude/sortly-app' || github.ref == 'refs/heads/main'
+    needs: release
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set "Was testen" for this build
         env:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          FORCED: ${{ inputs.force }}
         run: |
           export KEY_PATH="$RUNNER_TEMP/asc/AuthKey.p8"
           mkdir -p "$(dirname "$KEY_PATH")"
           printf '%s\n' "$KEY_P8" > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
+          # A forced build starts its text with a warning for the testers ("FORCED – untested").
+          flags=()
+          if [ "$FORCED" = "true" ]; then flags+=(--forced); fi
           python3 .github/scripts/testflight_notes.py upload --notes docs/TESTFLIGHT_NOTES.md \
-            --build "${{ github.run_number }}" --sha "$GITHUB_SHA" --bundle-id app.albumist.ios --wait-minutes 40
+            --build "${{ github.run_number }}" --sha "$GITHUB_SHA" --bundle-id app.albumist.ios --wait-minutes 40 "${flags[@]}"
       - name: Remove key
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"

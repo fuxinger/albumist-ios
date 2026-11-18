@@ -12,10 +12,14 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       accessibility settings. With --ready-file it writes "ok" or "failed" there at the end,
       so the boot can run in the background while the build products are downloaded.
   run   --udid U --name N (--xctestrun F | --project P --scheme S) [--only T]... [--skip T]...
-        [--reduce-motion] [--increase-contrast] [--video F] [--out DIR]
+        [--reduce-motion] [--increase-contrast] [--video F] [--out DIR] [--deadline EPOCH]
       Runs the tests (T is "Class" or "Class/testMethod" of SortlyUITests), prints the
       report lines for the log (steps, screenshots, accessibility findings, restart context,
-      crash reports, SwiftUI runtime warnings) and exits with the result. A test that reset
+      crash reports, SwiftUI runtime warnings), a last line "UI_RESULT NAME pass|fail|infra"
+      (ui_evidence.py reads it) and exits with the result: 0, 1, or 75 when every pass failed
+      on the simulator or XCTest alone (no test result; it writes DIR/no-test-result, and
+      ui.yml fails the job in "No test result (simulator or XCTest failed in every pass)",
+      which ui_evidence.py counts as no result rather than red). A test that reset
       the photo access (the CI simulator then answers "denied" without asking) prints
       UI_HOST_GRANT_PHOTOS; the access is given back from the Mac (`simctl privacy grant`)
       while the pass runs (class HostGrants).
@@ -45,6 +49,19 @@ new one, and only for the tests that did not pass (-only-testing as before, plus
   - the result bundle agrees: no test case failed with a message other than the
     infrastructure ones above, no issue outside a test, and it can be read at all (a JSON
     object with a list "testNodes").
+A crash of XCTest's daemon testmanagerd during a test ("Critical process testmanagerd crashed",
+the app lost with it; `daemon_crash`) also counts as such a failure: the failure lines it caused
+are taken out, anything else still counts, and the tests that did not pass are repeated. That
+goes beyond "a simulator failure before the first test": a test that had already started is
+run again (decision of 18.11.2026, for the owner to confirm; docs/TESTFLIGHT.md). It is counted
+(FLAKY_RETRY with the reason, also "app lost + daemon crash in <test>" when the app was lost in
+that test without a crash report), and if the daemon crashes again in the same test in the
+repeat, the group is red (likely app-caused, e.g. a huge accessibility tree).
+A pass still running at --deadline (the job's time limit minus a margin, ui.yml) is stopped:
+with a test still running a hang, red, never repeated (UI_HANG); with none running (between
+tests, before the first) a deadline line that counts as infrastructure (UI_DEADLINE). A repeat
+is not started with less than 30 min left (10 min after the erase): then no result. While a pass runs, failed test cases and ": error: -["
+lines are echoed into the job log at once (UI_LIVE), so a cancel after a failure stays red.
 A watchdog (class Watchdog) stops a pass early when the simulator leaves "Booted" before
 the first test started (two checks 20 s apart); the UI_WATCHDOG line it leaves in the log is
 one of the infrastructure failures above, and the stop counts as FLAKY_BOOT. It never stops a
@@ -83,7 +100,7 @@ BUNDLE_ID = "app.albumist.ios"
 
 # Lines of the xcodebuild log that go into the job log. PREVIEW_JPEG lines carry the
 # screenshots (the gallery is built from them), A11Y_ lines the accessibility findings.
-REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_HOST|UI_STRESS|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
+REPORT = re.compile(r"error:|UI_STEP|UI_SWEEP|UI_TIMING|UI_FACT|UI_HOST|UI_STRESS|UI_FLAKY|A11Y_|PREVIEW_JPEG|Test Case|Executed|\*\* |"
                     r"Testing failed|Fatal error|crashed|Restarting after|unexpected exit|encountered an error")
 REPORT_LIMIT = 15000
 
@@ -105,6 +122,9 @@ INFRA = [
     # Written by this script's watchdog (run_pass): the simulator left "Booted" before the first
     # test started, so the pass was stopped instead of waiting for xcodebuild to notice.
     (re.compile(r"^UI_WATCHDOG simulator \S+ left Booted"), "simulator shut down before the tests (watchdog)"),
+    # Written by run_pass: the deadline came while no test was running (between tests, before
+    # the first one, xcodebuild winding up): the time ran out, not a test.
+    (re.compile(r"^UI_DEADLINE\b"), "pass stopped at the job's deadline with no test running"),
 ]
 
 # Anything here is about the app or the tests: never repeated. Matched per line, on lines
@@ -121,6 +141,9 @@ REAL = [
     (re.compile(r"\bCrash:"), "a crash"),
     (re.compile(r"\bcrashed\b", re.I), "something crashed"),
     (re.compile(r"execution time allowance"), "a test ran out of time"),
+    # Written by run_pass when a test was still running at the job's deadline (--deadline): a
+    # hang is a finding (the app or a test never got done), never repeated.
+    (re.compile(r"^UI_HANG\b"), "hang: the pass did not end before the job's deadline"),
     (re.compile(r"\*\* (?:TEST )?BUILD FAILED \*\*"), "build failed"),
 ]
 
@@ -132,11 +155,41 @@ STRONG_REAL = [
     (re.compile(r"Test crashed with signal (?!term)"), "a test crashed"),
 ]
 
+# XCTest's daemon testmanagerd crashed (UI run 44202318875 attempt 2, job 134494213854: SIGSEGV
+# in com.apple.testmanagerd, responsible process SimulatorTrampoline). The test that was running
+# then fails with "Lost connection to the application" and "Critical process testmanagerd
+# crashed", and the runner restarts. That is the simulator's XCTest side, not the app: those
+# lines, that test's "failed" line and the failure counts are taken out before the log is
+# judged (daemon_crash); anything else that failed still counts, and so does a crash report of
+# the app. The tests that did not pass run once more like after a simulator failure.
+DAEMON_CRASH = re.compile(r"Critical process testmanagerd crashed")
+# A testmanagerd crash in a test whose app was lost too, with no app crash report: still repeated,
+# but named in the reasons (and so in the flaky record) as "app lost + daemon crash".
+APP_LOST = re.compile(r"Lost connection to the application|does not have a process ID|is not running")
+DAEMON_LOST = re.compile(r"Critical process testmanagerd crashed|Lost connection to the application"
+                         r"|Couldn.t communicate with a helper application")
+ERROR_OF = re.compile(r": error: -\[\w+\.(\w+) (\w+)\] : ")
+FAILED_CASE = re.compile(r"Test [Cc]ase '-\[\w+\.(\w+) (\w+)\]' failed")
+AGGREGATE = re.compile(r"Test Suite '.*' failed|with [1-9]\d* failures?\b")
+
+# Echoed into the job log while a pass runs (HostGrants.check).
+LIVE = re.compile(r"Test [Cc]ase '.*' failed|: error: -\[")
+
 # Lines that carry data, not messages (base64 screenshots and video).
 DATA_LINE = re.compile(r"PREVIEW_JPEG|UI_VIDEO_B64")
 
 CASE = re.compile(r"Test Case '-\[(?:[\w]+)\.(\w+) (\w+)\]' (passed|failed|skipped)")
 STARTED = re.compile(r"Test Case '-\[\w+\.\w+ \w+\]' started")
+# Written by `run` when every pass failed on the simulator or XCTest alone, so the group has no
+# test result (exit NO_TEST_EXIT): the workflow fails the job in a step of its own, and
+# ui_evidence.py counts it neither green nor red.
+NO_TEST_RESULT = "no-test-result"
+# A repeat needs an erase and boot (up to ~25 min seen) and its tests: not started with less than
+# this left before --deadline, nor after an erase that left less than RETRY_AFTER_RESET. The
+# group then has no result (exit NO_TEST_EXIT) instead of a repeat cut off as a hang.
+RETRY_BEFORE_RESET = 30 * 60
+RETRY_AFTER_RESET = 10 * 60
+NO_TEST_EXIT = 75
 PASSED = ("Passed", "Skipped", "Expected Failure")
 
 
@@ -259,6 +312,42 @@ def lost_app_at_launch(log: str, crash_reports: list[str] | None = None) -> list
     return reasons
 
 
+def daemon_crash_tests(log: str) -> set[tuple[str, str]]:
+    """(class, test) of each test in which testmanagerd crashed."""
+    hit = set()
+    for line in log.splitlines():
+        match = ERROR_OF.search(line)
+        if match and DAEMON_CRASH.search(line):
+            hit.add(match.groups())
+    return hit
+
+
+def daemon_crash(log: str, bundle: list[str]) -> tuple[str, list[str], list[str]]:
+    """(log, bundle findings, reasons) with the failure that a crash of testmanagerd caused taken
+    out (see DAEMON_CRASH); unchanged and [] when it did not crash."""
+    lines = log.splitlines()
+    if not any(DAEMON_CRASH.search(line) for line in lines):
+        return log, bundle, []
+    hit = daemon_crash_tests(log)
+    lost = sorted({e.groups() for line in lines if (e := ERROR_OF.search(line)) and e.groups() in hit
+                   and APP_LOST.search(line)})
+    reasons = ["XCTest daemon testmanagerd crashed"]
+    if lost:
+        reasons.append("app lost + daemon crash in " + ", ".join(f"{c}/{t}" for c, t in lost)
+                       + " (no app crash report)")
+    kept = []
+    for line in lines:
+        error, failed = ERROR_OF.search(line), FAILED_CASE.search(line)
+        if DAEMON_CRASH.search(line) or AGGREGATE.search(line):
+            continue  # the counts sum up the "failed" lines; another failure has its own line
+        if error and error.groups() in hit and DAEMON_LOST.search(line):
+            continue
+        if failed and failed.groups() in hit:
+            continue
+        kept.append(line)
+    return "\n".join(kept), [b for b in bundle if not DAEMON_LOST.search(b)], reasons
+
+
 def decide(status: int, log: str, crash_reports: list[str] | None = None, probe: str = "",
            bundle: list[str] | None = None) -> tuple[str, list[str]]:
     """("pass" | "retry" | "fail", reasons) for one finished pass.
@@ -274,7 +363,9 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
         if not ran:
             return "fail", ["no test ran (a renamed test, or a selection that matches nothing)"]
         return "pass", []
+    log, bundle, daemon = daemon_crash(log, list(bundle or []))
     real, infra = scan(log)
+    infra[:0] = daemon
     real += [reason for reason in lost_app_at_launch(log, crash_reports) if reason not in real]
     if crash_reports:
         real.append("crash report " + ", ".join(os.path.basename(p) for p in crash_reports))
@@ -348,8 +439,11 @@ def flaky_record(name: str, first_log: str, retry_reasons: list[str], retry_log:
 
     retries: every repeat after a simulator failure (also one that failed, and one that could
     not start); flaky: every test that passed only in that repeat, with the reason and what
-    the first pass made of it ("failed" or "not started"); boot: failed boot attempts."""
+    the first pass made of it ("failed" or "not started"), and every test that retried a step
+    inside itself (its UI_FLAKY_RETRY line, first: INSIDE); boot: failed boot attempts."""
     record = {"group": name, "boot": list(boot_retries or []), "retries": [], "flaky": []}
+    for test, why in dict.fromkeys(INSIDE_RETRY.findall(first_log + "\n" + (retry_log or ""))):
+        record["flaky"].append({"test": test, "first": INSIDE, "reason": why})
     if retry_result is None and not retry_reasons:
         return record
     record["retries"].append({"reasons": retry_reasons, "result": retry_result or "not started"})
@@ -361,10 +455,20 @@ def flaky_record(name: str, first_log: str, retry_reasons: list[str], retry_log:
     return record
 
 
+# A UI test that retries a step inside itself prints "UI_FLAKY_RETRY <Class.test> <reason>"
+# (DeviceConditionUITests test07). Counted and shown like a test that passed only on a repeat
+# (flaky-*.json, FLAKY line, job and run summary, the flaky warning the TestFlight gate repeats
+# for reused results); it does not block, like the other flaky tests: the rule is to count and
+# fix them, and a test that still fails after its own retry is red anyway.
+INSIDE_RETRY = re.compile(r"\bUI_FLAKY_RETRY (\S+) (.+?)\s*$", re.M)
+INSIDE = "retried inside the test"
+
+
 def flaky_lines(record: dict) -> list[str]:
     lines = [f"FLAKY_BOOT {record['group']} {reason}" for reason in record.get("boot", [])]
     lines += [f"FLAKY_RETRY {record['group']} {r['result']} ({'; '.join(r['reasons'])})" for r in record.get("retries", [])]
-    lines += [f"FLAKY {f['test']} {f['reason']} (first pass: {f['first']}; passed on the repeat)"
+    lines += [f"FLAKY {f['test']} {f['reason']} " + (f"({INSIDE})" if f["first"] == INSIDE else
+                                                     f"(first pass: {f['first']}; passed on the repeat)")
               for f in record.get("flaky", [])]
     return lines
 
@@ -409,10 +513,12 @@ def flaky_summary(records: list[dict]) -> tuple[str, list[str]]:
     """(Markdown for the run summary, FLAKY lines) over every group's record."""
     boots = sum(len(r.get("boot", [])) for r in records)
     retries = sum(len(r.get("retries", [])) for r in records)
-    flaky = [f for r in records for f in r.get("flaky", [])]
+    flaky = [f for r in records for f in r.get("flaky", []) if f.get("first") != INSIDE]
+    inside = [f for r in records for f in r.get("flaky", []) if f.get("first") == INSIDE]
     lines = [line for r in records for line in flaky_lines(r)]
     md = ["### UI tests: simulator retries and flaky tests", "",
           f"{retries} repeat(s) after a simulator failure, {len(flaky)} test(s) passed only on the repeat, "
+          f"{len(inside)} retry(ies) inside a test, "
           f"{boots} failed boot attempt(s), over {len(records)} pass record(s). A real test failure is never repeated.", ""]
     if lines:
         md += ["| Group | Kind | Test | First pass | Reason / result |", "|---|---|---|---|---|"]
@@ -466,10 +572,19 @@ def pick(device: str) -> str:
 BOOT_RETRIES: list[str] = []
 
 
+def timing(what: str, started: float) -> None:
+    """UI_BOOT_TIMING lines: where the 2-5 min before the first test go (simulator boot, photo
+    access, settings), measured per job; docs/TESTFLIGHT.md, "Messung"."""
+    print(f"UI_BOOT_TIMING {what} {time.monotonic() - started:.1f} s", flush=True)
+
+
 def boot(udid: str) -> bool:
     for attempt in (1, 2, 3):
+        started = time.monotonic()
         sh(["xcrun", "simctl", "boot", udid], timeout=600, quiet=True)
+        timing(f"simctl boot (attempt {attempt})", started)
         code, _ = sh(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=900)
+        timing(f"booted (attempt {attempt}, bootstatus {code})", started)
         if code == 0:
             return True
         BOOT_RETRIES.append(f"bootstatus failed (attempt {attempt} of 3)")
@@ -481,11 +596,14 @@ def boot(udid: str) -> bool:
 def prepare(udid: str, reduce_motion: bool = False, increase_contrast: bool = False, basics: bool = True) -> None:
     """Photo access, status bar and the accessibility settings of the job."""
     spawn = ["xcrun", "simctl", "spawn", udid]
+    started = time.monotonic()
     if basics:
         if sh(["xcrun", "simctl", "privacy", udid, "grant", "photos", BUNDLE_ID], timeout=600)[0] != 0:
             print("privacy grant failed")
+        timing("photo access granted", started)
         sh(["xcrun", "simctl", "status_bar", udid, "override", "--time", "9:41", "--batteryState", "charged",
             "--batteryLevel", "100", "--cellularBars", "4", "--wifiBars", "3"], timeout=120)
+        timing("status bar set", started)
     if reduce_motion:
         # Settings › Accessibility › Motion. The app reads it at launch.
         sh(spawn + ["defaults", "write", "com.apple.Accessibility", "ReduceMotionEnabled", "-bool", "true"])
@@ -498,6 +616,7 @@ def prepare(udid: str, reduce_motion: bool = False, increase_contrast: bool = Fa
         _, darken = sh(spawn + ["defaults", "read", "com.apple.Accessibility", "DarkenSystemColors"], quiet=True)
         _, enhanced = sh(spawn + ["defaults", "read", "com.apple.Accessibility", "EnhancedBackgroundContrastEnabled"], quiet=True)
         print(f"A11Y_SETTING DarkenSystemColors={darken.strip()} EnhancedBackgroundContrastEnabled={enhanced.strip()}", flush=True)
+    timing("prepared", started)
 
 
 def reset(udid: str, reduce_motion: bool, increase_contrast: bool) -> bool:
@@ -677,6 +796,11 @@ class HostGrants(threading.Thread):
         complete, _, self.tail = (self.tail + chunk).rpartition("\n")
         for _ in range(host_grant_requests(complete)):
             self.grant()
+        # A failure shows in the job log at once, not only when the pass ends: a run cancelled
+        # (or a runner lost) after it is still red for ui_evidence.py.
+        for line in complete.splitlines():
+            if LIVE.search(line) and not DATA_LINE.search(line):
+                print(f"UI_LIVE {line[:400]}", flush=True)
 
     def run(self) -> None:
         while not self.stopped.wait(self.interval):
@@ -781,10 +905,21 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         watchdog.start()
         grants = HostGrants(args.udid, log_path)
         grants.start()
-        status = process.wait()
+        status, hung = wait_until(process, getattr(args, "deadline", 0) or 0)
         grants.stop()
         watchdog.stop()
         watchdog.join(timeout=90)
+    if hung:
+        with open(log_path, encoding="utf-8", errors="replace") as log:
+            test = running_test(log.read())
+        with open(log_path, "a") as log:
+            if test:
+                log.write(f"\nUI_HANG pass {label}: {test} still running at the job's deadline; xcodebuild stopped\n")
+            else:
+                log.write(f"\nUI_DEADLINE pass {label} stopped at the job's deadline with no test running\n")
+        print(f"::error title=UI {args.name}::The {label} pass did not end before the job's deadline"
+              + (f" ({test} hangs); stopped." if test else "; no test was running, stopped."), flush=True)
+        status = status or 1
     if watchdog.fired:
         with open(log_path, "a") as log:
             log.write(f"\nUI_WATCHDOG simulator {args.udid} left Booted (state {watchdog.fired}) before the first test; "
@@ -799,6 +934,37 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     with open(log_path, encoding="utf-8", errors="replace") as log:
         text = log.read()
     return status, text, result, started, bool(watchdog.fired)
+
+
+RUNNING = re.compile(r"Test Case '-\[\w+\.(\w+) (\w+)\]' (started|passed|failed|skipped)")
+
+
+def running_test(log: str) -> str | None:
+    """"Class/test" of a test case that started and has no passed/failed/skipped line yet."""
+    open_tests: list[str] = []
+    for match in RUNNING.finditer(log):
+        name = f"{match.group(1)}/{match.group(2)}"
+        if match.group(3) == "started":
+            open_tests.append(name)
+        elif name in open_tests:
+            open_tests.remove(name)
+    return open_tests[-1] if open_tests else None
+
+
+def wait_until(process, deadline: float, grace: float = 30) -> tuple[int, bool]:
+    """(exit status, whether it hung): waits for `process` until the epoch second `deadline`
+    (0: no deadline), then stops it (SIGTERM, after `grace` seconds SIGKILL)."""
+    if not deadline:
+        return process.wait(), False
+    try:
+        return process.wait(timeout=max(1.0, deadline - time.time())), False
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            return process.wait(timeout=grace) or 1, True
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return process.wait() or 1, True
 
 
 def report(text: str, status: int, label: str) -> None:
@@ -848,28 +1014,47 @@ def command_run(args) -> int:
     print_crash_reports(crashes + other_crash_reports(started) if status else [], "first")
     passes = [("first", 0 if verdict == "pass" else (status or 1), verdict, reasons, text)]
     first_log, retry_reasons, retry_log, retry_result = text, [], None, None
+    stays_red = False
     if verdict == "retry":
         retry_reasons = reasons
         retry = retry_arguments(args.only, args.skip, text)
         if retry is None:
+            stays_red = True
             print(f"UI_VERDICT {args.name}: every selected test passed, nothing to repeat; the failed pass stays red")
         else:
             print(f"::warning title=UI {args.name}::The simulator failed ({'; '.join(reasons)}); no test found a problem. "
                   "The tests that did not pass run once more on an erased simulator.")
-            if reset(args.udid, args.reduce_motion, args.increase_contrast):
+            deadline = getattr(args, "deadline", 0) or 0
+            if deadline and deadline - time.time() < RETRY_BEFORE_RESET:
+                print(f"UI_VERDICT retry skipped: {max(0, deadline - time.time()) / 60:.0f} min left before the job's "
+                      "deadline, too little for an erase and a repeat")
+                retry_result = "not started (too little time before the deadline)"
+            elif not reset(args.udid, args.reduce_motion, args.increase_contrast):
+                print("UI_VERDICT retry impossible: the simulator did not come back after the erase")
+                retry_result = "not started (simulator did not come back)"
+            elif deadline and deadline - time.time() < RETRY_AFTER_RESET:
+                print(f"UI_VERDICT retry skipped: the erase took until {max(0, deadline - time.time()) / 60:.0f} min "
+                      "before the job's deadline")
+                retry_result = "not started (too little time before the deadline)"
+            else:
                 status, text, bundle_path, started, stopped = run_pass(args, "retry", retry, build=False)
                 report(text, status, "retry")
                 crashes = crash_reports(started) if status else []
                 bundle = read_bundle(bundle_path) if status else []
                 verdict, reasons = decide(status, text, crashes, bundle=watchdog_bundle(bundle) if stopped else bundle)
-                final = "pass" if verdict == "pass" else "fail"
+                # "infra": the repeat failed on the simulator or XCTest alone again.
+                final = {"pass": "pass", "retry": "infra"}.get(verdict, "fail")
+                again = daemon_crash_tests(first_log) & daemon_crash_tests(text)
+                if final == "infra" and again:
+                    # The daemon crashed again in the same test: likely caused by what the test
+                    # does in the app (a huge accessibility tree, ...), so red, not "no result".
+                    final = "fail"
+                    reasons = ["testmanagerd crashed again in the same test: "
+                               + ", ".join(f"{c}/{t}" for c, t in sorted(again)) + " (likely app-caused)"] + reasons
                 print(f"UI_VERDICT {args.name} retry: {final}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
                 print_crash_reports(crashes + other_crash_reports(started) if status else [], "retry")
                 passes.append(("retry", 0 if final == "pass" else (status or 1), final, reasons, text))
                 retry_log, retry_result = text, final
-            else:
-                print("UI_VERDICT retry impossible: the simulator did not come back after the erase")
-                retry_result = "not started (simulator did not come back)"
         if retry is None:
             retry_reasons = []
     record = flaky_record(args.name, first_log, retry_reasons, retry_log, retry_result, boot_retries(args.out))
@@ -878,14 +1063,28 @@ def command_run(args) -> int:
     # The result is the last pass: the first one when nothing was repeated, else the repeat
     # (which ran every test that had not passed in the first one).
     failed = passes[-1][1] != 0
+    infra_only = failed and passes[-1][2] in ("retry", "infra") and not stays_red
     if swiftui_warnings(os.path.join(args.out, f"{args.name}-swiftui.txt")) != 0:
-        failed = True
+        failed, infra_only = True, False
     if args.video:
         video_to_log(args.video)
     if args.a11y_summary:
         joined = "\n".join(p[4] for p in passes)
         print(f"A11Y_SUMMARY {args.name} fails {joined.count('A11Y_FAIL ')} warnings {joined.count('A11Y_WARN ')}")
     write_summary(args.name, passes)
+    # The line ui_evidence.py reads in the job log: only "fail" is a red for the group's key.
+    result = "infra" if infra_only else ("fail" if failed else "pass")
+    print(f"UI_RESULT {args.name} {result}", flush=True)
+    if infra_only:
+        # Every pass failed on the simulator or XCTest alone (the repeat too, or it could not
+        # start): no test result for the group. The workflow fails the job in its own step "No
+        # test result (simulator or XCTest failed in every pass)" instead of "Run UI tests".
+        reasons = "; ".join(passes[-1][3]) or "no reason found"
+        with open(os.path.join(args.out, NO_TEST_RESULT), "w", encoding="utf-8") as marker:
+            marker.write(reasons + "\n")
+        print(f"::warning title=UI {args.name}::No test result: the simulator or XCTest failed in every pass "
+              f"({reasons}). Neither green nor red for this group; start it again.")
+        return NO_TEST_EXIT
     return 1 if failed else 0
 
 
@@ -956,9 +1155,12 @@ def write_flaky(args, record: dict) -> None:
     lines = flaky_lines(record)
     for line in lines:
         print(line, flush=True)
+    repeated = [f["test"] for f in record["flaky"] if f["first"] != INSIDE]
+    inside = [f["test"] for f in record["flaky"] if f["first"] == INSIDE]
     if record["flaky"]:
-        print(f"::warning title=UI {args.name} flaky::{len(record['flaky'])} test(s) passed only on the repeat: "
-              + ", ".join(f["test"] for f in record["flaky"]), flush=True)
+        parts = ([f"{len(repeated)} test(s) passed only on the repeat: {', '.join(repeated)}"] if repeated else []) \
+            + ([f"{len(inside)} retry(ies) inside a test: {', '.join(inside)}"] if inside else [])
+        print(f"::warning title=UI {args.name} flaky::{'; '.join(parts)}", flush=True)
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if path and (lines or record.get("sweep_skips")):
         with open(path, "a", encoding="utf-8") as out:
@@ -1008,6 +1210,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--video")
     r.add_argument("--a11y-summary", action="store_true")
     r.add_argument("--out", default="build")
+    r.add_argument("--deadline", type=float, default=0,
+                   help="epoch second by which a pass must end (the job's limit minus a margin); 0: none")
     c = sub.add_parser("classify")
     c.add_argument("log")
     c.add_argument("--status", type=int, default=65)

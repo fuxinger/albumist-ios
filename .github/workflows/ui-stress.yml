@@ -1,32 +1,81 @@
 name: UI stress
 
-# The 50,000-photo stress run of the app on the simulator: DeviceConditionUITests/test12
-# creates that many photos (iCloud-only, offline) and measures the analysis for a while:
-# speed, Pause reaction, how long a display stood still, and the app's memory (resident size
-# of the simulator's app process on the Mac, sampled every 5 s and tagged with the test's
-# phase). Too long for every UI run (creating the photos alone takes ~30 min), so it is not
-# part of ui.yml: started by hand on the branch to measure
-#   gh workflow run ui-stress.yml --ref BRANCH [-f photos=50000] [-f minutes=45]
-# In the normal UI run (ui.yml, group "device conditions") test12 skips itself, because only
-# this workflow sets SORTLY_STRESS_PHOTOS.
+# The stress pass of the app on the simulator: DeviceConditionUITests/test12 creates many
+# photos (iCloud-only, offline) and measures the analysis for a while: speed per step, Pause
+# reaction, how long a display stood still, the slowest answer of the app, and the app's memory
+# (resident size of the simulator's app process on the Mac, sampled every 5 s and tagged with
+# the test's phase).
+#
+# Which pass when (rule of the owner, 17.11.):
+#   - before each TestFlight build: the small pass, 10,000 photos and 15 min of measuring
+#     (~45 min in all). Every TestFlight run calls this workflow for its commit (photos 10000,
+#     minutes 15) and uploads only when the pass is green (testflight.yml). The same pass by
+#     hand (the defaults):
+#       gh workflow run ui-stress.yml --ref BRANCH
+#   - weekly at night and before the App Store launch: the full pass, 50,000 photos and 45 min
+#     of measuring (~1.5 h, up to ~2.5 h when creating the photos is slow). The schedule below
+#     starts it every Sunday night; by hand:
+#       gh workflow run ui-stress.yml --ref BRANCH -f photos=50000 -f minutes=45
+# GitHub starts scheduled runs only from the copy of this file on the default branch (main),
+# and they test main's newest commit. Until this file is on main the schedule does nothing, and
+# "Run workflow" (gh workflow run) is not offered either.
+#
+# Too long for every UI run, so not part of ui.yml: in its group "device conditions" test12
+# skips itself, because only this workflow sets SORTLY_STRESS_PHOTOS. Here a skipped test12 is
+# no pass: "Stress run" fails unless the log says test12 passed.
+#
+# The test tries Pause a tenth into the image step. The simulator analyses about 1.75 photos/s
+# there (stress runs 43833158673: 5,042 photos in 48 min; 44116350940: 3,419 in 31 min), so
+# with 10,000 photos Pause comes at about minute 12 to 13 of the 15 (later on a slow simulator,
+# then not at all: no line "UI_TIMING stress pause" in the log), and with 50,000 photos only
+# after about 60 min: the 45-minute full pass measures speed, stills, answers and memory, but
+# not Pause. (claude/ui-fix 9ff0dfc moves Pause to 200 photos or 2 min into the image step;
+# with it every pass measures Pause.)
+#
+# The full pass of 17.11., run 44116350940 (50,000 photos), FAILED: at the start of step 4 the
+# progress line stood still for 13.7 s ("0 von 50.246 Fotos", limit 10 s). The fix is on
+# claude/ui-fix 9ff0dfc; a new full pass with it is still to run.
 #
 # One macOS job (builds the tests itself), with the pinned Xcode and runtime and the pinned
 # Pro simulator (.github/toolchain.json, pick_simulator.py --role pro). It runs through
 # .github/scripts/ui_tests.py like every UI group: same retry rule for a lost simulator, and
 # the photo access is given back from the Mac when the test asks (UI_HOST_GRANT_PHOTOS).
 on:
+  schedule:
+    # Sunday 00:40 UTC = 01:40 in Berlin in winter, 02:40 in summer (cron has no time zones):
+    # the full pass (a scheduled run has no inputs, see STRESS_PHOTOS below). Usually done by
+    # about 03:20 Berlin time in winter (04:20 in summer; stress run 44116350940, which FAILED
+    # (see above), took 1 h 40 min: build 9, creating 23, measuring 45, diagnostics 14); the job
+    # ends 170 min after its start at the latest.
+    - cron: '40 0 * * 0'
   workflow_dispatch:
     inputs:
       photos:
-        description: Photos to create (iCloud-only, offline)
+        description: Photos to create (iCloud-only, offline); 50000 for the full pass
         type: string
-        default: '50000'
+        default: '10000'
       minutes:
         # The simulator's Vision needs about 8 h for 50,000 photos (a device is faster), so the
         # analysis is measured for this many minutes after the photos are created.
+        description: Minutes of analysis measured after the photos are created; 45 for the full pass
+        type: string
+        default: '15'
+  # testflight.yml runs the small pass for the commit it uploads, in the same run, and names
+  # its size itself (photos 10000, minutes 15).
+  workflow_call:
+    inputs:
+      release:
+        description: Called by testflight.yml (own concurrency group, outside the Mac queue)
+        type: boolean
+        default: false
+      photos:
+        description: Photos to create (iCloud-only, offline)
+        type: string
+        default: '10000'
+      minutes:
         description: Minutes of analysis measured after the photos are created
         type: string
-        default: '45'
+        default: '15'
 
 permissions:
   contents: read
@@ -34,19 +83,45 @@ permissions:
 env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
+  # The size of this pass. A run by hand takes its inputs (defaults: the small pass before each
+  # TestFlight build), and so does a TestFlight run (it passes 10000 and 15); a scheduled run
+  # has no inputs (they are empty then) and is the full pass. The job name repeats this fallback.
+  STRESS_PHOTOS: ${{ inputs.photos || (github.event_name == 'schedule' && '50000' || '10000') }}
+  STRESS_MINUTES: ${{ inputs.minutes || (github.event_name == 'schedule' && '45' || '15') }}
 
+# In the Mac queue with the UI runs (see ui.yml, "concurrency"): one UI run or stress pass at a
+# time across all branches. A running pass is never cancelled; at most one run waits, and a
+# run that joins later takes its place (the waiting one is cancelled and has to be started
+# again). So start a pass by hand when nothing else waits. Two kinds of pass have a group of
+# their own instead, so that the queue never holds or replaces them:
+#   - the pass of a TestFlight run, like its UI flow: "testflight-stress-<run id>". It is
+#     called with release: true, and github.workflow is the caller's name "TestFlight" in a
+#     called workflow (a second guard).
+#   - the weekly full pass (schedule): "stress-weekly". A run joining the queue at night can
+#     no longer cancel it while it waits; it may run beside a UI run then (one Mac more).
 concurrency:
-  group: ui-stress-${{ github.ref }}
+  group: >-
+    ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-stress-{0}', github.run_id)
+    || (github.event_name == 'schedule' && 'stress-weekly' || 'mac-queue') }}
   cancel-in-progress: false
 
 jobs:
   stress:
-    name: UI stress ${{ inputs.photos }} photos
+    name: UI stress ${{ inputs.photos || (github.event_name == 'schedule' && '50000' || '10000') }} photos
     runs-on: xcode-27
-    # Build ~10 min, simulator ~5 min, creating 50,000 photos ~30 min, measuring `minutes`;
-    # the pass itself is stopped after 130 min so the diagnostics below still run.
+    # Build ~10 min (the simulator boots meanwhile), creating ~0.6 min per 1,000 photos, then
+    # `minutes` of measuring. The watchdog in "Stress run" stops the pass itself in time for
+    # the diagnostics below (48 min for 10,000/15, 130 min for 50,000/45).
     timeout-minutes: 170
     steps:
+      - name: Size of this pass
+        # Stops at once on a typo instead of after the build: test12 would skip itself for a
+        # photo count it cannot read, and measure its own default of 45 min for such minutes.
+        run: |
+          for value in "$STRESS_PHOTOS" "$STRESS_MINUTES"; do
+            [[ "$value" =~ ^[1-9][0-9]{0,5}$ ]] || { echo "::error::photos and minutes must be whole numbers from 1 to 999999"; exit 1; }
+          done
+          echo "UI stress: $STRESS_PHOTOS photos, $STRESS_MINUTES min measured ($GITHUB_EVENT_NAME)"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -59,10 +134,14 @@ jobs:
           [ -n "$UDID" ] || { echo "no simulator"; exit 1; }
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           nohup python3 .github/scripts/ui_tests.py boot --udid "$UDID" --ready-file sim-ready > sim-boot.log 2>&1 &
+      - name: Install XcodeGen
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py); a
+        # failed project generation is not.
+        run: python3 .github/scripts/toolchain.py xcodegen
       - name: Build for testing
         run: |
           set +e
-          brew install xcodegen
           cd App && xcodegen generate
           xcodebuild build-for-testing \
             -project Sortly.xcodeproj \
@@ -83,8 +162,8 @@ jobs:
         env:
           UDID: ${{ steps.sim.outputs.udid }}
           # xcodebuild hands TEST_RUNNER_* variables to the tests without the prefix.
-          TEST_RUNNER_SORTLY_STRESS_PHOTOS: ${{ inputs.photos }}
-          TEST_RUNNER_SORTLY_STRESS_MINUTES: ${{ inputs.minutes }}
+          TEST_RUNNER_SORTLY_STRESS_PHOTOS: ${{ env.STRESS_PHOTOS }}
+          TEST_RUNNER_SORTLY_STRESS_MINUTES: ${{ env.STRESS_MINUTES }}
         run: |
           set +e
           XCTESTRUN=$(ls build/dd/Build/Products/*.xctestrun 2>/dev/null | head -1)
@@ -108,11 +187,32 @@ jobs:
               tail -1 memory.txt 2>/dev/null | awk -v s="$started" -v now="$(date +%s)" '{ if (now-$1 > 30) printf "STRESS_MEMORY %d min no app (last %d MB, %s)\n", (now-s)/60, $2/1024, $3; else printf "STRESS_MEMORY %d min %d MB %s\n", (now-s)/60, $2/1024, $3 }'
             done ) &
           TICKER=$!
-          ( sleep 7800; echo "::error::Stress run stopped after 130 minutes"; pkill -INT -f "xcodebuild test-without-building" ) &
+          # Watchdog for the pass: creating takes ~0.6 min per 1,000 photos (50,000: ~30 min) and
+          # is allowed about twice that, plus the measured minutes, plus 20 min for the launches,
+          # Pause and the library tab: 48 min for 10,000/15, 130 min for 50,000/45. At most 130,
+          # so that the diagnostics below still run within the job's 170 min.
+          limit=$(( STRESS_MINUTES + STRESS_PHOTOS * 13 / 10000 + 20 ))
+          if [ "$limit" -gt 130 ]; then
+            echo "::warning::This pass would need $limit min; it is stopped after 130 (raise this cap and timeout-minutes for a bigger pass)"
+            limit=130
+          fi
+          echo "STRESS_LIMIT $limit min"
+          ( sleep $(( limit * 60 )); echo "::error::Stress run stopped after $limit minutes"; pkill -INT -f "xcodebuild test-without-building" ) &
           WATCHDOG=$!
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name stress --xctestrun "$XCTESTRUN" \
             --only DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline | grep -av "PREVIEW_JPEG"
           status=${PIPESTATUS[0]}
+          # ui_tests.py counts a skipped test as done; a pass needs test12 to have passed (in the
+          # first run or in its repeat after a simulator failure, build/stress-retry-log.txt).
+          PASSED="Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' passed"
+          passed=no
+          for f in "$LOG" build/stress-retry-log.txt; do
+            if [ -f "$f" ] && grep -aqF "$PASSED" "$f"; then passed=yes; fi
+          done
+          if [ "$status" -eq 0 ] && [ "$passed" = no ]; then
+            echo "::error title=Stress pass::test12 did not pass (skipped or not run): no line \"$PASSED\" in the log"
+            status=1
+          fi
           kill "$WATCHDOG" "$SAMPLER" "$TICKER" 2>/dev/null
           sleep 2
           pkill -f "tail -n \+1 -F $LOG" 2>/dev/null
@@ -139,12 +239,22 @@ jobs:
           exit $status
       - name: Job summary
         if: always()
-        env:
-          PHOTOS: ${{ inputs.photos }}
         run: |
           args=()
           for log in build/*-log.txt; do [ -f "$log" ] && args+=(--swift-log "$log"); done
-          python3 .github/scripts/test_summary.py summary --title "UI stress $PHOTOS photos" "${args[@]}" >> "$GITHUB_STEP_SUMMARY" || true
+          python3 .github/scripts/test_summary.py summary --title "UI stress $STRESS_PHOTOS photos, $STRESS_MINUTES min" "${args[@]}" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Keep the retry record for the run summary
+        # build/flaky-stress.json (ui_tests.py): a repeat after a simulator failure and whether
+        # test12 passed only on it. A TestFlight run counts it with the UI groups' records
+        # ("Repeats and flaky tests" in testflight.yml); a pass on its own shows it in this
+        # job's summary. One record per attempt, like the UI groups' (ui.yml).
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: flaky-stress-attempt-${{ github.run_attempt }}
+          path: build/flaky-*.json
+          retention-days: 14
+          if-no-files-found: ignore
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -159,3 +269,5 @@ jobs:
             sim-boot.log
           retention-days: 7
           if-no-files-found: ignore
+          # "Re-run failed jobs" uploads it again under the same name.
+          overwrite: true

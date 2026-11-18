@@ -1,41 +1,51 @@
 name: UI flow
+# A pull request run names the merge commit it tests (github.sha): ui_evidence.py reads it from
+# the run list to tell that commit's app fingerprint without reading the run's jobs. Other runs
+# keep their usual name (an empty run-name falls back to it).
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('[merge {0}] {1}', github.sha, github.event.pull_request.title) || '' }}
 
-# End-to-end UI tests on the simulator. Separate from CI with its own queue: a new push does
-# not cancel a running UI run; the newest commit runs next.
+# End-to-end UI tests on the simulator. Separate from CI, in the repository's one Mac queue
+# (see "concurrency" below): one UI run or stress pass at a time across all branches; a new
+# push does not cancel a running UI run, the newest waiting run goes next.
 #
 #   1. Core tests (Linux): the core library's tests on a free Linux runner. No macOS runner
 #      starts for a commit whose core tests fail (fast first, then expensive).
 #   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
-#   3. Five test groups, each on its own runner and freshly booted simulator
-#      (test-without-building), at most four at a time (max-parallel), so the slowest group
-#      sets the wall time, not the sum. Job times measured in UI run 43906501407, including
-#      5-7 min simulator setup (device conditions: UI runs 43827092443 and 43795445305 of
-#      claude/pro-switches):
-#        - device conditions: DeviceConditionUITests 01-04, 06, 09-12 (hot iPhone, battery,
-#                          background expiry, iCloud offline, full disk, photo access, empty
-#                          and large library; test12 is the stress test and skips itself here,
-#                          see ui-stress.yml), ~65 min
-#        - full flow:      SortlyFlowUITests/test1_FullFlow (onboarding, demo library, plan,
-#                          the sorting-show video), 32 min
-#        - other flows:    every other UI test except the accessibility tests (flow tests 2-6,
-#                          locked purchase, search, and DeviceConditionUITests 05, 07, 08: undo
-#                          and interrupted plans, flows with a plan like flow test 5; each brings
-#                          the app to an onboarded demo library by itself, see
-#                          UITestOnboarding), 44 min + ~20 min
-#        - accessibility:  AccessibilityUITests 1-4 on a small iPhone with Reduce Motion,
-#                          ~48 min (56.5 min with the contrast pass, which is now apart)
-#        - contrast:       AccessibilityUITests test5 with Increase Contrast and Reduce
-#                          Transparency on its own small iPhone, ~18 min (it onboards first)
-#      "other flows" is defined as "everything the other groups do not run", so a new test
-#      class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests checks
-#      every UI test against the groups).
+#   3. The test groups (.github/ui-groups.json), each on its own runner and freshly booted
+#      simulator (test-without-building), at most four at a time (max-parallel), so the slowest
+#      group sets the wall time, not the sum. Measured times per group: docs/TESTFLIGHT.md
+#      ("Messung"). "other flows" is defined as "everything the other groups do not run", so a
+#      new test class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests
+#      checks every UI test against the groups).
 #      With CI's one macOS job this is at most five macOS jobs per push at the peak (the build
 #      job runs before the groups; max-parallel 4 holds the fifth group back), about all the
 #      repository has; accepted on 16.11. Contrast is listed last, so it is the group that
-#      waits: it starts when the first group (the full flow, ~32 min) is done and ends with
-#      the others.
-#      The 50,000-photo stress run is not part of this run: .github/workflows/ui-stress.yml,
-#      started by hand.
+#      waits.
+#      The stress pass is not part of this run: .github/workflows/ui-stress.yml (10,000 photos
+#      before each TestFlight build, 50,000 weekly at night and before the App Store launch).
+#
+# Which groups run (the owner's rule of 17.11., "UI plan" below, .github/scripts/ui_evidence.py):
+#   - auto (pull requests, and the default of a run by hand or from TestFlight): only the groups
+#     without a green result for exactly this app (app fingerprint) and their own test code (test
+#     fingerprint of the group: its test files, the shared helpers they use, its definition and
+#     the harness; .github/scripts/ui_groups.py). A test-only change runs the groups of the
+#     changed files, a change to a shared helper every group that uses it, any app change all.
+#   - all: every group; or group names (device flow-full flow-other accessibility contrast).
+#   Each group job carries both fingerprints in its name ("[device app ... tests ...]"); that is
+#   where later runs and the TestFlight gate find the result again. A group whose result for
+#   this app and test code was red runs again when asked, but its green never counts (a red test
+#   is fixed, not re-run to green).
+#   Quick mode (pull requests, or "quick" by hand; never in a TestFlight run): the tests get
+#   SORTLY_UI_QUICK=1 and DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips
+#   itself. Every group has another test fingerprint then, so a quick green never stands for a
+#   full one; a red in either mode blocks both.
+#   The last job, "UI verdict (full|quick)", checks every group for this app and its test code
+#   (the same check as the TestFlight gate), also when no group had to run; the release gate
+#   (ci_gate.py) needs "UI verdict (full)" green.
+#   A group whose every pass failed on the simulator or XCTest alone (lost before the first
+#   test, testmanagerd crashed, also in the repeat) has no result (neither green nor red): its job
+#   fails in "No test result (...)", not in "Run UI tests".
 #
 # Each group runs through .github/scripts/ui_tests.py: a pass that the simulator service lost
 # (an explicit "Error returned in reply from CoreSimulatorService", "Timed out waiting for AX
@@ -47,11 +57,36 @@ name: UI flow
 # when a group fails. Nothing is repeated silently: every repeat, every test that passed only
 # on it and every failed boot attempt is a FLAKY... line in the group's log and job summary
 # and goes into build/flaky-GROUP.json; 4. "UI summary" (Linux) counts them over all groups
-# and lists the rows the tap-through sweep did not tap (UI_SWEEP_SKIP, also in that JSON).
+# and lists the rows the tap-through sweep did not tap (UI_SWEEP_SKIP, also in that JSON). In a
+# TestFlight run, testflight.yml does that instead, together with the stress pass's record.
 on:
   pull_request:
     paths-ignore: ['**.md']
   workflow_dispatch:
+    inputs:
+      groups:
+        description: 'auto (groups without a green result for this app and their test code), all, or group names'
+        type: string
+        default: auto
+      quick:
+        description: Quick (SORTLY_UI_QUICK=1, device test11_LargeLibrary skips itself); a quick result never counts for an upload
+        type: boolean
+        default: false
+  # testflight.yml runs the UI flow for the commit it uploads, in the same run (release: true).
+  workflow_call:
+    inputs:
+      release:
+        description: Called by testflight.yml (own concurrency group, outside the Mac queue)
+        type: boolean
+        default: false
+      groups:
+        description: auto, all, or group names (see workflow_dispatch)
+        type: string
+        default: auto
+      quick:
+        description: Quick run (see workflow_dispatch); never with release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -59,16 +94,77 @@ permissions:
 env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
+  # Quick mode (top of this file): pull requests and runs started with quick, never a TestFlight
+  # run. The same expression is in the name of the "UI verdict" job (no env there).
+  UI_QUICK: ${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'true' || '' }}
 
+# The Mac queue (Profi-Analyse 16.11., Top 3, decided 17.11.: only one Mac-heavy strand at a
+# time). Every UI run and every stress pass (ui-stress.yml) of every branch shares the group
+# "mac-queue", and GitHub keeps such a group like this:
+#   - one run at a time; a running run is never cancelled (cancel-in-progress: false);
+#   - at most ONE run waits. A run that joins while another one waits takes its place: GitHub
+#     cancels the waiting one ("Canceling since a higher priority waiting request for
+#     'mac-queue' exists"). So the newest waiting run always goes next, also across branches
+#     and between UI runs and stress passes, and a run replaced like that has to be started
+#     again ("Re-run all jobs") once the queue is free. The agent rule "only one Mac-heavy
+#     strand at a time" (for the owner to add to the project rules) keeps that rare.
+# Not in the queue, so never kept waiting or replaced by another run:
+#   - the UI flow of a TestFlight run (testflight.yml calls this workflow with release: true;
+#     github.workflow is then the caller's name "TestFlight", a second guard below): a group
+#     of its own for that run, because a replaced or cancelled UI part would stop the upload.
+#     Start TestFlight when the queue is idle; then it is the one Mac-heavy strand. Not yet
+#     seen in a real run: check on the first TestFlight run that its UI flow and stress pass
+#     do not wait for "mac-queue".
+#   - the weekly full stress pass (ui-stress.yml, group "stress-weekly").
+#   - pull requests from forks: one group of their own ("ui-fork"), so that a run from outside
+#     the repository can neither replace nor hold up the runs in the queue.
+#   - CI's macOS job (ci.yml), the quick verdict of every push (one Mac, ~20 min): in this
+#     group it would wait behind the UI run of its own commit (about an hour), and while it
+#     waits the next run to join, e.g. the UI run of the next push, would cancel it.
+#   - the Mac jobs of nightly.yml and codeql.yml (one Mac each).
+# Not done: cancelling the older run of the same branch when a newer one starts (also in the
+# analysis). With one group for all branches, cancel-in-progress would cancel whatever runs,
+# another branch's run too.
 concurrency:
-  group: ui-${{ github.ref }}
+  group: >-
+    ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ui-{0}', github.run_id)
+    || (github.event.pull_request.head.repo.fork && 'ui-fork' || 'mac-queue') }}
   cancel-in-progress: false
 
 jobs:
+  plan:
+    # Which groups run (top of this file). Reads the earlier group jobs of ui.yml and
+    # testflight.yml through the API (actions: read); when it cannot, every group runs.
+    name: UI plan (which groups run)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commits of earlier results, to recompute their fingerprints from git.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan the UI groups
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UI_GROUPS: ${{ inputs.groups || 'auto' }}
+        run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick}
+
   core-linux:
     # Same tests as CI's "Core tests (Linux)" (CI runs them for this commit too, but a manual
-    # UI run on a branch has no CI run to wait for). ~4 min on a free runner.
+    # UI run on a branch has no CI run to wait for). ~4 min on a free runner. Not in a
+    # TestFlight run: there CI's own "Core tests (Linux)" of the same commit just passed (the
+    # UI flow starts only after CI), so this would only add ~5 min before the UI build.
     name: Core tests (Linux)
+    needs: plan
+    if: ${{ needs.plan.outputs.count != '0' && !inputs.release }}
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
     timeout-minutes: 30
@@ -77,6 +173,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install SQLite headers
         run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev > /dev/null
       - name: Build and test
@@ -84,17 +182,26 @@ jobs:
 
   build:
     name: UI build
-    needs: core-linux
+    needs: [plan, core-linux]
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.count != '0'
+      && (needs.core-linux.result == 'success' || (inputs.release && needs.core-linux.result == 'skipped')) }}
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode
+      - name: Install XcodeGen
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py); a
+        # failed project generation is not.
+        run: python3 .github/scripts/toolchain.py xcodegen
       - name: Build for testing
         run: |
           set +e
-          brew install xcodegen
           cd App && xcodegen generate
           xcodebuild build-for-testing \
             -project Sortly.xcodeproj \
@@ -117,84 +224,30 @@ jobs:
         with:
           name: ui-products
           path: ui-products.tgz
-          retention-days: 1
+          # "Re-run failed jobs" of a group (after a runner or simulator failure) downloads
+          # these again from the first attempt: 3 days for that, not just one.
+          retention-days: 3
           compression-level: 0
           overwrite: true
 
   ui:
-    name: UI ${{ matrix.title }}
-    needs: build
+    # The group's fingerprints in its name: later runs and the TestFlight gate read them there
+    # (.github/scripts/ui_evidence.py, JOB_NAME). Keep the bracket at the end.
+    name: UI ${{ matrix.title }} [${{ matrix.group }} app ${{ matrix.app }} tests ${{ matrix.tests }}]
+    needs: [plan, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: xcode-27
-    # A group takes 25-65 min; a repeat after a simulator failure can add up to its length.
-    timeout-minutes: 120
+    # A group takes 25-65 min with 5-7 min of simulator setup; a repeat after a simulator
+    # failure (erase, boot, the tests that did not pass) can add up to its length again, so the
+    # longest group with a full repeat needs about 135 min.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       # Four groups + CI's macOS job = five macOS jobs at the peak (see the top of this file).
       max-parallel: 4
-      matrix:
-        include:
-          # only / skip: "Class" or "Class/testMethod" of SortlyUITests, separated by spaces.
-          - group: device
-            # The device-condition switches (App/Sortly/Platform/UITestSwitches.swift) on the Pro
-            # simulator. A test that resets the photo access asks the Mac to give it back
-            # (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07 and
-            # 08 (undo, interrupted plan) run with the other flows.
-            title: device conditions
-            device: pro
-            only: >-
-              DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish
-              DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording
-              DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue
-              DeviceConditionUITests/test04_UnreadableICloudOfflineComplete
-              DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
-              DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked
-              DeviceConditionUITests/test10_EmptyLibrary
-              DeviceConditionUITests/test11_LargeLibrary
-              DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
-            skip: ''
-          - group: flow-full
-            title: full flow and video
-            device: pro
-            only: SortlyFlowUITests/test1_FullFlow
-            skip: ''
-            video: true
-          - group: flow-other
-            title: other flows, purchase and search
-            device: pro
-            only: ''
-            # Everything the other groups run (keep in step with them; GroupTests checks it).
-            skip: >-
-              SortlyFlowUITests/test1_FullFlow
-              AccessibilityUITests
-              DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish
-              DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording
-              DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue
-              DeviceConditionUITests/test04_UnreadableICloudOfflineComplete
-              DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
-              DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked
-              DeviceConditionUITests/test10_EmptyLibrary
-              DeviceConditionUITests/test11_LargeLibrary
-              DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
-          - group: accessibility
-            # AccessibilityUITests 1-4 on a small iPhone (SE, 375 pt) with Reduce Motion. These
-            # tests fail on findings.
-            title: accessibility (small iPhone)
-            device: se
-            only: AccessibilityUITests
-            skip: AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency
-            reduce_motion: true
-          - group: contrast
-            # AccessibilityUITests test5 on its own small iPhone with Reduce Motion, Increase
-            # Contrast and Reduce Transparency switched on before the first launch; the test
-            # brings the app to an onboarded demo library by itself (onboardAndSeed). Its own job
-            # since 16.11. (UI run 43906501407: 8 min after tests 1-4 made accessibility the
-            # longest group, 56.5 min).
-            title: contrast (small iPhone)
-            device: se
-            only: AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency
-            skip: ''
-            reduce_motion: true
-            increase_contrast: true
+      # The groups of .github/ui-groups.json that run (UI plan): group, title, device, only,
+      # skip, video, reduce_motion, increase_contrast, app, tests.
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       GROUP: ${{ matrix.group }}
       DEVICE: ${{ matrix.device }}
@@ -203,8 +256,18 @@ jobs:
       INCREASE_CONTRAST: ${{ matrix.increase_contrast }}
       REDUCE_MOTION: ${{ matrix.reduce_motion }}
       VIDEO: ${{ matrix.video }}
+      # Quick mode (SORTLY_UI_QUICK=1 in the tests; xcodebuild hands TEST_RUNNER_* variables to
+      # the test runner without the prefix): every group of a quick run (matrix.quick).
+      TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}
     steps:
+      - name: Note when the job started
+        # For the deadline of the test passes ("Run UI tests"): timeout-minutes above minus 12
+        # minutes for the steps after them, so a hang is stopped and reported as red by
+        # ui_tests.py instead of being cut off by GitHub without a result.
+        run: echo "UI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode --runtime
       - name: Boot simulator (in the background)
@@ -234,19 +297,38 @@ jobs:
           for _ in $(seq 1 180); do [ -f sim-ready ] && break; sleep 5; done
           cat sim-boot.log
           [ "$(cat sim-ready 2>/dev/null)" = ok ] || { echo "simulator did not boot"; exit 1; }
+      - name: Built tests present
+        # Its own step: a build without the .xctestrun is not a test result (ui_evidence.py
+        # counts only "Run UI tests"); earlier_attempts.py counts it as machinery.
+        id: built
+        run: |
+          XCTESTRUN=$(find products -maxdepth 1 -name '*.xctestrun' | sort | head -1)
+          [ -n "$XCTESTRUN" ] || { echo "::error::no .xctestrun in the build products"; exit 1; }
+          echo "xctestrun=$XCTESTRUN" >> "$GITHUB_OUTPUT"
       - name: Run UI tests
         env:
           UDID: ${{ steps.sim.outputs.udid }}
+          XCTESTRUN: ${{ steps.built.outputs.xctestrun }}
         run: |
           set +e
-          XCTESTRUN=$(ls products/*.xctestrun 2>/dev/null | head -1)
-          [ -n "$XCTESTRUN" ] || { echo "::error::no .xctestrun in the build products"; exit 1; }
           flags=()
           [ "$REDUCE_MOTION" = "true" ] && flags+=(--reduce-motion --a11y-summary)
           [ "$INCREASE_CONTRAST" = "true" ] && flags+=(--increase-contrast)
           [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
-            --only "$ONLY" --skip "$SKIP" "${flags[@]}"
+            --only "$ONLY" --skip "$SKIP" --deadline "$((UI_JOB_START + (150 - 12) * 60))" "${flags[@]}"
+          status=$?
+          # 75: every pass failed on the simulator or XCTest alone, no test result
+          # (build/no-test-result); the next step fails the job, not this one.
+          [ "$status" = 75 ] && exit 0
+          exit "$status"
+      - name: No test result (simulator or XCTest failed in every pass)
+        # No test result for this group (ui_evidence.py: neither green nor red); the job fails
+        # here so that the run is not green. earlier_attempts.py counts it as machinery.
+        if: hashFiles('build/no-test-result') != ''
+        run: |
+          echo "::error title=UI $GROUP::no test result: $(cat build/no-test-result). Start the group again."
+          exit 1
       - name: Job summary
         if: always()
         run: |
@@ -260,6 +342,8 @@ jobs:
           name: sorting-show-video
           path: build/sorting-show.mp4
           retention-days: 14
+          # "Re-run failed jobs" uploads it again under the same name.
+          overwrite: true
       - name: Upload results
         # Crash logs, screens and attachments of a failed test are in the result bundles.
         if: failure()
@@ -273,16 +357,47 @@ jobs:
             sim-boot.log
           retention-days: 7
           if-no-files-found: ignore
+          # "Re-run failed jobs" uploads it again under the same name.
+          overwrite: true
       - name: Keep the retry record for the run summary
         # build/flaky-*.json: repeats after a simulator failure and the tests that passed only
-        # on them (ui_tests.py); the summary job below counts them over all groups.
+        # on them (ui_tests.py); the summary job below counts them over all groups. One record
+        # per attempt: "Re-run failed jobs" keeps the earlier attempt's record next to its own.
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ui-flaky-${{ matrix.group }}
+          name: ui-flaky-${{ matrix.group }}-attempt-${{ github.run_attempt }}
           path: build/flaky-*.json
           retention-days: 14
           if-no-files-found: ignore
+
+  verdict:
+    # The run's verdict (the owner's rule of 17.11.): every group green for exactly this app and
+    # its own test code, from this run or an earlier one, and none red for that pair; the same
+    # check as the TestFlight gate (ui_evidence.py gate). Also when no group had to run. The
+    # release gate (ci_gate.py) needs this job green in its full form; a quick verdict (pull
+    # requests) never counts for an upload or a release. Not in a TestFlight run: there the
+    # "UI gate" of testflight.yml does this.
+    name: UI verdict (${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'quick' || 'full' }})
+    needs: [plan, ui]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # actions: read for the runs and jobs, checks: read for the flaky warnings of reused jobs.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commits of earlier results, to recompute their fingerprints from git.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: UI groups green for this app and test code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}
 
   summary:
     name: UI summary (retries and flaky tests)
@@ -290,8 +405,10 @@ jobs:
     # the groups decide that. Nothing that was repeated stays hidden in a single job's log, and
     # neither does a row the tap-through sweep (UI test 3) left out: the records carry its
     # UI_SWEEP_SKIP lines, listed here per group (a real row taken for a section header shows).
+    # In a TestFlight run, testflight.yml counts these records together with the stress pass's
+    # ("Repeats and flaky tests"), so this job is left out there.
     needs: ui
-    if: ${{ always() && needs.ui.result != 'skipped' }}
+    if: ${{ always() && needs.ui.result != 'skipped' && !inputs.release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -299,13 +416,14 @@ jobs:
         with:
           sparse-checkout: .github
           persist-credentials: false
-      - name: Retry records of the groups
+      - name: Download retry records
+        # ui-flaky-<group>-attempt-<n>, every attempt's own (not merged: the records of one group
+        # have the same file name in every attempt).
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ui-flaky-*
           path: flaky
-          merge-multiple: true
       - name: Count repeats and flaky tests
         run: |
-          shopt -s nullglob
-          python3 .github/scripts/ui_tests.py flaky-summary flaky/*.json >> "$GITHUB_STEP_SUMMARY"
+          mapfile -t records < <(find flaky -name 'flaky-*.json' 2>/dev/null | sort)
+          python3 .github/scripts/ui_tests.py flaky-summary "${records[@]}" >> "$GITHUB_STEP_SUMMARY"

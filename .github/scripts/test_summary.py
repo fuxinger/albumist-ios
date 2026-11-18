@@ -51,17 +51,65 @@ def test_inventory():
     return names, display
 
 
+SWIFT_FUNC = re.compile(r"\bfunc\s+(\w+)")
+SWIFT_TEST = re.compile(r"@Test\b")
+
+
+def swift_test_names(source):
+    """Names of the Swift Testing functions (`@Test`) in a file, sorted. Line by line instead of
+    one regular expression over the file: the attribute may carry arguments over several lines
+    and be followed by other attributes and blank lines before `func`, and a pattern for that
+    needed nested repetition (CodeQL py/redos, PR #1). Every expression here repeats a single
+    character class once; the arguments are skipped by counting parentheses."""
+    names, waiting, depth = set(), False, 0
+
+    def after_arguments(text):
+        """The rest of `text` once the open parentheses are closed (None while they are open)."""
+        nonlocal depth
+        for index, ch in enumerate(text):
+            if ch == "(":
+                depth += 1
+            elif ch == ")" and depth:
+                depth -= 1
+                if not depth:
+                    return text[index + 1:]
+        return None if depth else text
+
+    for line in source.splitlines():
+        if depth:                    # inside the arguments of an @Test(...)
+            rest = after_arguments(line)
+            if rest is None:
+                continue
+        else:
+            test = SWIFT_TEST.search(line)
+            if test:
+                waiting = True
+                rest = line[test.end():]
+                if rest.lstrip().startswith("("):  # @Test(...): skip its arguments
+                    rest = after_arguments(rest)
+                    if rest is None:
+                        continue
+            elif not waiting:
+                continue
+            else:
+                rest = line
+        stripped = rest.strip()
+        found = SWIFT_FUNC.search(stripped) if stripped.startswith("@") else SWIFT_FUNC.match(stripped)
+        if found:
+            names.add(found.group(1))
+            waiting = False
+        elif stripped and not stripped.startswith("@"):
+            waiting = False  # something else came between the attribute and a function
+    return sorted(names)
+
+
 def suite_files():
     """{file stem without "Tests": [test names]} for references like "Load:" or "DecisionLifecycle"."""
     result = {}
     for path in glob.glob(f"{ROOT}/Tests/**/*Tests.swift", recursive=True) + glob.glob(f"{ROOT}/App/SortlyTests/*.swift"):
         stem = os.path.basename(path)[:-len(".swift")]
         source = open(path, encoding="utf-8").read()
-        # One line per loop step (a line is blank or holds one attribute), so the match stays linear
-        # (CodeQL flagged the older pattern for exponential backtracking).
-        tests = re.findall(r"@Test\b[^\n]*\n(?:[ \t]*(?:@\w+[^\n]*)?\n)*[ \t]*func\s+(\w+)", source)
-        tests += re.findall(r"@Test\b[^\n]*?func\s+(\w+)", source)
-        result[stem.removesuffix("Tests")] = sorted(set(tests))
+        result[stem.removesuffix("Tests")] = swift_test_names(source)
     return result
 
 # ---------------------------------------------------------------------------------------------

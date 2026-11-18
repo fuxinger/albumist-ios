@@ -1,5 +1,5 @@
 {
-  "_comment": "The one place that names the Xcode, the simulator runtime and the simulators of every Mac job (.github/scripts/toolchain.py, pick_simulator.py). Change them here, together, after reading the runner image's README (installed Xcodes and runtimes). Values from image xcode-27-arm64 20261112.0361: Xcode_27.3.app is a beta there, 27.2 is the newest release.",
+  "_comment": "The one place that names the Xcode, the simulator runtime and the simulators of every Mac job (.github/scripts/toolchain.py, pick_simulator.py). Change them here, together, after reading the runner image's README (installed Xcodes and runtimes). Values from image xcode-27-arm64 20261112.0361: Xcode_27.3.app is a beta there, 27.2 is the newest release. XcodeGen is pinned too (download with checksum, toolchain.py xcodegen): it writes the Xcode project, so a new version could change the build; this file counts in the app fingerprint (ui_groups.py).",
   "xcode": {
     "app": "/Applications/Xcode_27.2.app",
     "version": "27.2",
@@ -11,8 +11,20 @@
     "build": "24B8117"
   },
   "simulators": {
-    "default": {"name": "iPhone 17e"},
-    "pro": {"name": "iPhone 18 Pro"},
-    "small": {"name": "Albumist SE", "create": "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation"}
+    "default": {
+      "name": "iPhone 17e"
+    },
+    "pro": {
+      "name": "iPhone 18 Pro"
+    },
+    "small": {
+      "name": "Albumist SE",
+      "create": "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation"
+    }
+  },
+  "xcodegen": {
+    "version": "2.46.0",
+    "url": "https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip",
+    "sha256": "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
   }
 }

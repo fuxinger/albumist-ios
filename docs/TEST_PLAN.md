@@ -8,6 +8,20 @@
   Begriffe gegen Vision, Texte. Läuft im iOS-27-Simulator auf GitHub Actions (Image `xcode-27`).
 - **Kein Test auf echten Geräten** bisher: Es steht weder ein Mac noch ein iPhone mit
   Entwicklerzugang zur Verfügung. Das wird in TestFlight nachgeholt.
+- **Härtetest im Simulator** (`.github/workflows/ui-stress.yml`, UI-Test
+  `DeviceConditionUITests/test12`): legt viele Fotos an (nur in iCloud, offline) und misst die
+  Analyse: Tempo je Schritt, Pause, längster Stillstand der Anzeige, langsamste Antwort, Speicher.
+  Regel (Fuchs, 17.11.2026): **vor jedem TestFlight-Build** der kleine Durchgang mit 10.000 Fotos
+  und 15 Minuten Messung (rund 45 Minuten, die Vorgaben des Workflows; der TestFlight-Lauf
+  startet ihn selbst und lädt nur hoch, wenn er grün ist); der **volle Durchgang**
+  mit 50.000 Fotos und 45 Minuten Messung nur **wöchentlich nachts** (Zeitplan Sonntag 00:40 UTC;
+  läuft erst, wenn der Workflow in `main` ist) und **vor dem Start im App Store**. Pause prüft der
+  Test nach einem Zehntel der Bildinhalte: beim kleinen Durchgang etwa in Minute 12–13, beim vollen
+  erst nach rund 60 Minuten, also dort nicht (Simulator ~1,75 Fotos/s; mit `claude/ui-fix`
+  9ff0dfc nach 200 Fotos oder 2 Minuten, dann in jedem Durchgang). Grün heißt, test12 ist
+  durchgelaufen; übersprungen zählt als Fehler. Der volle Durchgang 44116350940 (17.11.) ist
+  fehlgeschlagen (Fortschrittszeile zu Beginn von Schritt 4 13,7 s still, Grenze 10 s); die
+  Korrektur liegt auf `claude/ui-fix` (9ff0dfc), ein neuer voller Durchgang steht aus.
 
 ## Abnahmeszenarien (automatisiert)
 | Szenario | Test |

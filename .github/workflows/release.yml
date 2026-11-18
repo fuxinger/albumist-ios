@@ -2,8 +2,10 @@ name: Release
 
 # Manual: tags the commit this runs on as vX.Y.Z (MARKETING_VERSION in App/project.yml) and
 # creates a GitHub release whose notes are that version's section of docs/CHANGELOG.md.
-# Only from a release branch, only when the tests of that commit are green (same gate as
-# TestFlight, without waiting), and never over an existing tag: bump MARKETING_VERSION first.
+# Only from a release branch, only when the CI run and a full UI flow run of exactly that commit
+# are green, with its job "UI verdict (full)" (ci_gate.py, without waiting; the tests inside a
+# TestFlight run do not count, nor do the quick UI runs of pull requests, so start "UI flow" by
+# hand on the commit), and never over an existing tag: bump MARKETING_VERSION first.
 on:
   workflow_dispatch:
     inputs:

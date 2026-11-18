@@ -392,13 +392,8 @@ public actor ChangeExecutor {
     /// library, may still land; nil when it cannot any more (its request returned in this
     /// launch, or `lateCreateWait` passed).
     private func mayStillLand(_ key: String, _ plan: ChangePlan) async throws -> Date? {
-        guard let maybe = plan.record?.maybeCreated[key], let since = plan.record?.maybeCreatedAt[key] else { return nil }
-        if await library.createAnswered(maybe) { return nil }
-        let until = since.addingTimeInterval(Self.lateCreateWait)
-        let now = clock()
-        // The clock was set back: never wait longer than the wait itself (round-3 review, L2).
-        if until.timeIntervalSince(now) > Self.lateCreateWait { return nil }
-        return now < until ? until : nil
+        guard let record = plan.record, let maybe = record.maybeCreated[key], record.maybeCreatedAt[key] != nil else { return nil }
+        return record.lateCreateWaitsUntil(key, answered: await library.createAnswered(maybe), now: clock())
     }
 
     private func requireAnsweredWrites() async throws {

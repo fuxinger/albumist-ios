@@ -54,6 +54,59 @@ struct RetryPlannerTests {
         #expect(after.collections.values.filter { $0.title == "Italien" }.count == 1)
     }
 
+    // MARK: A create that may still land (open item of the app-speed review, 18.11.2026)
+
+    /// "So lassen" after Photos did not answer a create in time: the step is left undone, the
+    /// id Photos gave the album is on record and may still land. "Fehlendes erneut versuchen"
+    /// must not make a second "Reise" while it may still come, and must take the one that
+    /// landed instead of making another.
+    func keptAfterACreateGotNoAnswer(givenUpAt: Date) -> ChangePlan {
+        let left = StepState.skipped(reason: StepState.leftByUserReason)
+        var plan = executed([
+            PlanStep(id: "0", operation: .createAlbum(key: "A", title: "Reise", parent: .topLevel), sourceID: SortlyID("r"), state: left),
+            PlanStep(id: "1", operation: .addAssets(album: .planned("A"), assets: ["x", "y"]), sourceID: SortlyID("r"), state: left),
+        ], resolved: [:])
+        plan.record = ExecutionRecord()
+        plan.record?.maybeCreated["A"] = "late-1"
+        plan.record?.maybeCreatedAt["A"] = givenUpAt
+        return plan
+    }
+
+    @Test func retryNeverMakesASecondAlbumWhileTheFirstMayStillLand() {
+        let now = Date()
+        let kept = keptAfterACreateGotNoAnswer(givenUpAt: now.addingTimeInterval(-60))
+        let current = CollectionInventory([])
+        let retry = RetryPlanner().retryPlan(for: kept, current: current, now: now)
+        #expect(retry == nil, "\(String(describing: retry?.steps.map(\.operation)))")
+        // The app says until when (and that it then can be tried again).
+        #expect(RetryPlanner().waitsForLateCreate(kept, current: current, now: now) == now.addingTimeInterval(-60 + ChangeExecutor.lateCreateWait))
+        // Its request returned in this launch: it never comes, the album is made.
+        let answered = RetryPlanner().retryPlan(for: kept, current: current, answered: ["late-1"], now: now)
+        #expect(answered?.steps.map(\.operation) == [
+            .createAlbum(key: "A", title: "Reise", parent: .topLevel),
+            .addAssets(album: .planned("A"), assets: ["x", "y"]),
+        ])
+        #expect(RetryPlanner().waitsForLateCreate(kept, current: current, answered: ["late-1"], now: now) == nil)
+        // The wait is over: made again (one that lands later is still Albumist's).
+        let later = now.addingTimeInterval(ChangeExecutor.lateCreateWait)
+        #expect(RetryPlanner().retryPlan(for: kept, current: current, now: later)?.steps.count == 2)
+        #expect(RetryPlanner().waitsForLateCreate(kept, current: current, now: later) == nil)
+    }
+
+    @Test func retryFillsTheAlbumThatLandedInsteadOfMakingAnother() async throws {
+        let now = Date()
+        let kept = keptAfterACreateGotNoAnswer(givenUpAt: now.addingTimeInterval(-60))
+        let lib = InMemoryPhotoLibrary(assets: ["x", "y"], collections: [CollectionSnapshot(id: "late-1", title: "Reise")])
+        let current = try await lib.currentInventory()
+        #expect(RetryPlanner().waitsForLateCreate(kept, current: current, now: now) == nil)
+        var retry = try #require(RetryPlanner().retryPlan(for: kept, current: current, now: now))
+        #expect(retry.steps.map(\.operation) == [.addAssets(album: .existing("late-1"), assets: ["x", "y"])])
+        retry.status = .confirmed
+        retry.confirmedAt = now
+        #expect(try await ChangeExecutor(library: lib, store: InMemoryPlanStore()).execute(retry).status == .completed)
+        #expect(try await lib.currentInventory().albums.filter { $0.title == "Reise" }.map(\.assetIDs) == [["x", "y"]])
+    }
+
     @Test func retryRespectsDeletedAlbumsAndDeliberateSkips() {
         let current = CollectionInventory([CollectionSnapshot(id: "keep", title: "Familie", assetIDs: ["mine", "x"])])
         let first = executed([

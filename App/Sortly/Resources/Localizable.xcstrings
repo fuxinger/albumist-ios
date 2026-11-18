@@ -12332,6 +12332,16 @@
           }
         }
       }
+    },
+    "Ein Album, das Albumist vorhin anlegen wollte, ist in Fotos noch nicht angekommen und kann noch kommen. Damit es nicht doppelt entsteht, versuche es ab %@ noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An album Albumist asked for earlier has not arrived in Photos yet and may still come. So that it is not made twice, try again from %@."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

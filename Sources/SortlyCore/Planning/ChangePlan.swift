@@ -264,6 +264,18 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
         maybeCreatedAt[key] = nil
     }
 
+    /// Until when the create of `key`, whose request got no answer (`maybeCreatedAt`), may
+    /// still land if it is not in the library (`ChangeExecutor.lateCreateWait`); nil when it
+    /// cannot any more: its request returned in this launch (`answered`), the wait is over, or
+    /// it was only written down inside the change (an app that ended, not a request without
+    /// an answer). A clock set back never makes it wait longer than the wait (round-3 review, L2).
+    public func lateCreateWaitsUntil(_ key: String, answered: Bool, now: Date) -> Date? {
+        guard maybeCreated[key] != nil, let since = maybeCreatedAt[key], !answered else { return nil }
+        let until = since.addingTimeInterval(ChangeExecutor.lateCreateWait)
+        if until.timeIntervalSince(now) > ChangeExecutor.lateCreateWait { return nil }
+        return now < until ? until : nil
+    }
+
     /// A request that got no answer gave Photos this id for a new album or folder.
     mutating func noteMaybeCreated(_ id: CollectionID, key: String, at date: Date) {
         if let earlier = maybeCreated[key], earlier != id, !earlierMaybeCreated.contains(earlier) {

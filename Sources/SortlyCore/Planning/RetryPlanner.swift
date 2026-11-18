@@ -54,20 +54,27 @@ extension StepState {
 public struct RetryPlanner: Sendable {
     public init() {}
 
-    public func retryPlan(for executed: ChangePlan, current: CollectionInventory,
+    /// - Parameter answered: ids of new albums whose create request returned in this launch
+    ///   (`PhotoLibraryWriting.createAnswered`): such an album is there or never comes.
+    public func retryPlan(for executed: ChangePlan, current: CollectionInventory, answered: Set<CollectionID> = [],
                           id: SortlyID = SortlyID(), now: Date = Date()) -> ChangePlan? {
         guard executed.reverts == nil else { return nil }
         let retried = executed.steps.filter { $0.state.canBeRetried }
         guard !retried.isEmpty else { return nil }
+        let made = { (key: String) in Self.made(key, executed, current) }
 
         // Planned keys that this retry creates again (their create step did not happen).
         var recreated = Set<String>()
         for step in retried {
             switch step.operation {
             case .createFolder(let key, _, _), .createAlbum(let key, _, _):
-                // Created by the first run although its check failed: that one is used, no
-                // second album is made (audit 2, 1.7).
-                if let made = executed.resolvedKeys[key], current[made] != nil { continue }
+                // Created by the first run although its check failed, or landed after its
+                // request got no answer: that one is used, no second album is made (audit 2,
+                // 1.7; app-speed review).
+                if made(key) != nil { continue }
+                // It may still land: not made a second time now (nor what goes into it); the
+                // app says from when it can be tried again (`waitsForLateCreate`).
+                if Self.lateCreate(key, executed, answered: answered, now: now) != nil { continue }
                 recreated.insert(key)
             default: break
             }
@@ -80,13 +87,13 @@ public struct RetryPlanner: Sendable {
         func folder(_ ref: FolderRef) -> Resolution<FolderRef> {
             guard case .planned(let key) = ref else { return .ref(ref) }
             if recreated.contains(key) { return .ref(ref) }
-            if let id = executed.resolvedKeys[key], current[id] != nil { return .ref(.existing(id)) }
+            if let id = made(key) { return .ref(.existing(id)) }
             return .drop
         }
         func album(_ ref: AlbumRef) -> Resolution<AlbumRef> {
             guard case .planned(let key) = ref else { return .ref(ref) }
             if recreated.contains(key) { return .ref(ref) }
-            if let id = executed.resolvedKeys[key], current[id] != nil { return .ref(.existing(id)) }
+            if let id = made(key) { return .ref(.existing(id)) }
             return .drop
         }
 
@@ -152,14 +159,45 @@ public struct RetryPlanner: Sendable {
             resolvedKeys: [:]
         )
         plan.retries = executed.id
+        // An album that landed after its request got no answer counts like one the first run made.
+        let landed = executed.steps.compactMap { step -> CollectionID? in
+            guard let key = step.operation.plannedKey, let id = made(key), executed.resolvedKeys[key] != id else { return nil }
+            return id
+        }
         // Albums the first run made or verifiably extended were counted against the free
         // albums with it; filling them up now uses no further one (plugin review N4: an
         // existing album the first run had partly filled was counted a second time).
-        plan.albumsFromRetriedPlan = Set(executed.resolvedKeys.values).union(executed.extendedAlbums)
+        plan.albumsFromRetriedPlan = Set(executed.resolvedKeys.values).union(executed.extendedAlbums).union(landed)
         if let guards = executed.deleteGuards {
             let deleting = Set(steps.compactMap { if case .deleteCollection(let cid, _) = $0.operation { return cid }; return nil })
             plan.deleteGuards = guards.filter { deleting.contains($0.key) }
         }
         return plan
+    }
+
+    /// Until when "Fehlendes erneut versuchen" has to wait: a new album or folder the plan asked
+    /// for whose request got no answer is not in Photos and may still land
+    /// (`ChangeExecutor.lateCreateWait`). Nil when nothing has to wait.
+    public func waitsForLateCreate(_ executed: ChangePlan, current: CollectionInventory, answered: Set<CollectionID> = [],
+                                   now: Date = Date()) -> Date? {
+        guard executed.reverts == nil else { return nil }
+        return executed.steps.filter { $0.state.canBeRetried }.compactMap { step -> Date? in
+            guard let key = step.operation.plannedKey, Self.made(key, executed, current) == nil else { return nil }
+            return Self.lateCreate(key, executed, answered: answered, now: now)
+        }.max()
+    }
+
+    /// The album or folder the first run made for `key`, if it is still there: the id Photos
+    /// returned, or the one written down inside the change or of a request that got no answer
+    /// (it landed: Albumist's own).
+    static func made(_ key: String, _ executed: ChangePlan, _ current: CollectionInventory) -> CollectionID? {
+        if let id = executed.resolvedKeys[key], current[id] != nil { return id }
+        if let id = executed.record?.maybeCreated[key], current[id] != nil { return id }
+        return nil
+    }
+
+    static func lateCreate(_ key: String, _ executed: ChangePlan, answered: Set<CollectionID>, now: Date) -> Date? {
+        guard let record = executed.record, let maybe = record.maybeCreated[key] else { return nil }
+        return record.lateCreateWaitsUntil(key, answered: answered.contains(maybe), now: now)
     }
 }

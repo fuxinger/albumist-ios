@@ -2857,8 +2857,20 @@ final class AppModel {
     /// steps that did not happen, for the normal review. Nil when nothing is left to do.
     func retryPlan(for executed: ChangePlan) async -> ChangePlan? {
         guard let store, let current = await reconcileManagedAlbums() else { return nil }
+        // A new album the plan asked for whose request got no answer may still land: nothing
+        // is retried before then, so it is never made twice (`RetryPlanner.waitsForLateCreate`).
+        var answered = Set<CollectionID>()
+        for id in Set(executed.record?.maybeCreated.values.map { $0 } ?? []) {
+            if await library.createAnswered(id) { answered.insert(id) }
+        }
+        if let until = RetryPlanner().waitsForLateCreate(executed, current: current, answered: answered) {
+            let time = until.formatted(date: .omitted, time: .shortened)
+            message = AppMessage(title: String(localized: "Gerade nicht möglich"),
+                                 text: String(localized: "Ein Album, das Albumist vorhin anlegen wollte, ist in Fotos noch nicht angekommen und kann noch kommen. Damit es nicht doppelt entsteht, versuche es ab \(time) noch einmal."))
+            return nil
+        }
         do {
-            guard let retry = RetryPlanner().retryPlan(for: executed, current: current) else { return nil }
+            guard let retry = RetryPlanner().retryPlan(for: executed, current: current, answered: answered) else { return nil }
             // Photos the user took out of an album since then are not added again.
             return retry.respecting(OverrideSet(try await store.overrides()))
         } catch {

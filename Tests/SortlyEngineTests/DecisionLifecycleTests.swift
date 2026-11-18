@@ -377,6 +377,38 @@ struct DecisionLifecycleTests {
         #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == 1)
     }
 
+    /// Second review of the place IDs (18.11.): a suggestion ID can go to other photos (a
+    /// frequent place that is gone leaves its ID to a new place in its cell). The album recorded
+    /// for that ID shares no photo with them and is no longer its album (`AlbumMatcher`, version
+    /// 4). An accepted "ergänzen" into that album is set back to open after every analysis (the
+    /// app calls this after each run), not run on the new photos. An album the user picked is
+    /// left as chosen; results of version 3 are matched again.
+    @Test func anExtendIntoTheAlbumOfOtherPhotosIsReopened() async throws {
+        let w = try await world()
+        _ = try await w.pipeline.run()
+        var stored = try #require(try await w.pipeline.latestProposals())
+        let rome = Set(w.rome)
+        let ps = stored.proposals.filter { $0.assetIDs.isDisjoint(with: rome) }
+        #expect(ps.count >= 2)
+        let decisions: [SortlyID: ProposalDecision] = [ps[0].id: .extendExisting("sommer-rom"), ps[1].id: .extendExisting("sommer-rom")]
+        try await w.store.setValue(decisions, forKey: AnalysisPipeline.Key.decisions)
+        try await w.store.saveManagedAlbums([ManagedAlbumState(
+            albumID: "sommer-rom", sourceID: ps[0].id, lastKnownTitle: "Sommer in Rom", lastKnownParentID: nil,
+            lastKnownMembers: Set(w.rome.prefix(20)), addedBySortly: Set(w.rome.prefix(20)), createdBySortly: true)])
+        #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened == [ps[0].id])
+        #expect(try await w.store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions)
+                == [ps[1].id: .extendExisting("sommer-rom")])
+        #expect(try await w.store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) == 1)
+        #expect(try await w.pipeline.refreshMatchesIfOutdated().reopened.isEmpty)
+
+        stored = try #require(try await w.pipeline.latestProposals())
+        stored.matcherVersion = 3
+        stored.matches = [:]
+        try await w.store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)
+        #expect(try await w.pipeline.refreshMatchesIfOutdated().snapshot?.matches.isEmpty == false)
+        #expect(try await w.pipeline.latestProposals()?.matcherVersion == AlbumMatcher.version)
+    }
+
     /// Review 16.11. (A10): the user dismissed the trip ("Nicht jetzt"), whose own album
     /// "Italien" already holds it completely. The shown country must not extend that album with
     /// the photos of other years.

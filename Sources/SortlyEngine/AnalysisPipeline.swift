@@ -1911,8 +1911,10 @@ public actor AnalysisPipeline {
         /// The suggestions with their matches (nil: there are none).
         public var snapshot: ProposalSnapshot?
         /// Suggestions whose accepted "extend this album" decision was no longer a certain
-        /// match under the new rules (`ProposalDecision.uncertainExtensions`) and is open again
-        /// in the store. The app drops them from its decisions in memory too.
+        /// match under the new rules (`ProposalDecision.uncertainExtensions`), or went into the
+        /// album recorded for the ID while that album holds other photos
+        /// (`ProposalDecision.extensionsOfOtherPhotos`), and is open again in the store. The app
+        /// drops them from its decisions in memory too.
         public var reopened: Set<SortlyID> = []
     }
 
@@ -1926,6 +1928,11 @@ public actor AnalysisPipeline {
     /// extend an album without a certain match go back to open (`reopened`); suggestions of a
     /// plan that already started (not finished) are never among them.
     ///
+    /// Every time (the app calls this after each analysis too): an accepted "ergänzen" into the
+    /// album recorded for the suggestion's ID while that album was made for other photos goes
+    /// back to open (`ProposalDecision.extensionsOfOtherPhotos`, second review of the place IDs
+    /// 18.11.: a frequent place's ID can go to a new place).
+    ///
     /// The new matches with their version stamp, the decisions without the reopened ones and
     /// the count for the overview are written in one transaction (final check 16.11.): if the
     /// app is ended in between, nothing is written and the next launch does it again. Before,
@@ -1937,22 +1944,37 @@ public actor AnalysisPipeline {
     /// `afterEachWrite`: for tests, runs inside the transaction after each value (see
     /// `SortlyStore.setValues`); throwing there is the app ending half way.
     func refreshMatchesIfOutdated(afterEachWrite: (@Sendable (String) throws -> Void)?) async throws -> MatchRefresh {
-        guard let snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
-        guard snapshot.matcherVersion < AlbumMatcher.version else { return MatchRefresh(snapshot: snapshot) }
-        guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
+        guard var snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
+        let outdated = snapshot.matcherVersion < AlbumMatcher.version
+        if outdated {
+            guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
+            snapshot = rematched
+        }
         var decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
+        let assignments = Self.assignments(try await store.managedAlbums())
+        // Most refreshes have no "ergänzen" into an album recorded for the same suggestion.
+        let ownAlbum = decisions.contains { id, decision in decision.isAccepted && decision.extendedAlbum.map { assignments[id] == $0 } == true }
+        guard outdated || ownAlbum else { return MatchRefresh(snapshot: snapshot) }
         let started = Set(try await store.unfinishedPlans().flatMap { $0.steps.compactMap(\.sourceID) })
-        let reopened = ProposalDecision.uncertainExtensions(decisions, proposals: rematched.proposals + rematched.dismissed,
-                                                            matches: rematched.matches, protected: started)
-        var values: [String: any Encodable & Sendable] = [Key.proposals: rematched]
+        let suggested = snapshot.proposals + snapshot.dismissed
+        var reopened = outdated ? ProposalDecision.uncertainExtensions(decisions, proposals: suggested, matches: snapshot.matches,
+                                                                       protected: started) : []
+        if ownAlbum {
+            reopened.formUnion(ProposalDecision.extensionsOfOtherPhotos(
+                decisions, proposals: suggested, inventory: try await store.loadInventory(), assignments: assignments,
+                overrides: OverrideSet(try await store.overrides()), protected: started))
+        }
+        guard outdated || !reopened.isEmpty else { return MatchRefresh(snapshot: snapshot) }
+        var values: [String: any Encodable & Sendable] = [:]
+        if outdated { values[Key.proposals] = snapshot }
         if !reopened.isEmpty {
             for id in reopened { decisions[id] = nil }
             let shown = try await store.value(Int.self, forKey: Self.recheckedSuggestionsKey) ?? 0
             values[Key.decisions] = decisions
             values[Self.recheckedSuggestionsKey] = shown + reopened.count
         }
-        proposalsGeneration += 1
+        if outdated { proposalsGeneration += 1 }
         try await store.setValues(values, afterEach: afterEachWrite)
-        return MatchRefresh(snapshot: rematched, reopened: reopened)
+        return MatchRefresh(snapshot: snapshot, reopened: reopened)
     }
 }

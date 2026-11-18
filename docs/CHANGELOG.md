@@ -59,6 +59,10 @@
   hat jeder Ort seine eigene und behält sie über seine Fotos, auch wenn Fotos dazukommen oder
   wegfallen. Name, „Nicht jetzt“ und Album bleiben bei dem der beiden Orte, den Albumist bisher
   gezeigt hat; der andere erscheint als neuer Vorschlag und braucht wieder einen Namen.
+  Ein Album, das Albumist für einen Vorschlag angelegt hat, wird nur noch mit dessen Fotos
+  ergänzt; ein angenommenes „ergänzen“ in das Album eines früheren Orts ist nach der Analyse
+  wieder offen („Vorschläge neu geprüft“). Ein leeres Album nach einem abgebrochenen Plan füllt
+  der nächste Plan, statt ein zweites gleichen Namens anzulegen.
 - iPhone-Test Build 36: Ein Ort, an dem du öfter bist, heißt jetzt nach seiner Stadt (etwa
   „Dorfen“), nicht mehr nach dem Bundesland („Bayern“).
 - iPhone-Test Build 36: Derselbe Ort kam zweimal, als Ort, an dem du öfter bist („Bayern“), und

@@ -61,8 +61,10 @@
     wenn sie frei ist (meist seine alte). Entsteht später ein neuer Ort in derselben Zelle
     (Mittelpunkt auf drei Stellen gerundet), bekommt dieser die Kennung, wenn sie frei ist, und
     damit Name und „Nicht jetzt“ des verschwundenen Orts; ein Album des alten Orts wird mit
-    den neuen Fotos nicht ergänzt (es teilt keine Fotos mit ihm). Selten (ein neuer Ort im
-    selben Feld von etwa 110 m × 75 m); der Name lässt sich ändern.
+    den neuen Fotos nicht ergänzt (es teilt keine Fotos mit ihm), ein schon angenommenes
+    „ergänzen“ dorthin ist nach der Analyse wieder offen. Ist das Album des alten Orts leer
+    (alle Fotos gelöscht), bleibt es das Album der Kennung und der neue Ort kommt hinein.
+    Selten (ein neuer Ort im selben Feld von etwa 110 m × 75 m); der Name lässt sich ändern.
   - Nach „Analyse neu aufbauen“ fehlen die vorigen Orte: Kennungen werden neu vergeben, ein Ort
     allein in seiner Zelle bekommt wieder die alte; von zwei Orten einer Zelle bekommt der in
     der App zuerst gezeigte die Zellkennung, der andere Zelle und erste Foto-ID, was nicht

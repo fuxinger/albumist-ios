@@ -270,4 +270,14 @@ struct AssignedAlbumSharesPhotosTests {
         #expect(grows.status == .extendable)
         #expect(grows.best?.albumID == "a-garden")
     }
+
+    /// Second review: a plan stopped after it created the album and before it added photos
+    /// leaves an empty album recorded for the suggestion. It stays the suggestion's album and
+    /// the next plan fills it, instead of a second album of the same name.
+    @Test func anEmptyAlbumOfAStoppedPlanIsFilled() throws {
+        let empty = CollectionInventory([CollectionSnapshot(id: "a-garden", title: "Häufiger Ort in München", assetIDs: [])])
+        let result = try #require(matcher.match([place], against: empty, assignments: [place.id: "a-garden"])[place.id])
+        #expect(result.status == .extendable)
+        #expect(result.best?.albumID == "a-garden")
+    }
 }

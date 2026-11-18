@@ -77,6 +77,8 @@ final class AccessibilityUITests: XCTestCase {
         /// suggestion is left open, UI run 43796844064).
         var reviewSuggestions: String
         var suggestionTitle: String
+        /// The list "… Vorschläge prüfen" opens (all areas, so the plain title).
+        var suggestionsTitle: String
         var rowMarker: String
         var starterPattern: String
         var planTitle: String
@@ -92,14 +94,14 @@ final class AccessibilityUITests: XCTestCase {
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: ".*[0-9.]+ Vorschl(ag|äge) prüfen.*",
-                                  suggestionTitle: "Vorschlag", rowMarker: "Fotos",
+                                  suggestionTitle: "Vorschlag", suggestionsTitle: "Vorschläge", rowMarker: "Fotos",
                                   starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
                                   applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
                                   shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom", country: "Italien",
                                   receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ suggestions?.*",
-                                   suggestionTitle: "Suggestion", rowMarker: "photo",
+                                   suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
                                    starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
                                    applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
                                    shareAtlas: "Share Travel Atlas", searchQuery: "Rome", country: "Italy",
@@ -254,7 +256,9 @@ final class AccessibilityUITests: XCTestCase {
         }
 
         // Suggestions and one suggestion
-        if tap(app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.reviewSuggestions)).firstMatch, "\(tag) open suggestions", timeout: 20) {
+        // A tap that landed elsewhere (on a bar) fails here by its name, not steps later.
+        if tap(app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.reviewSuggestions)).firstMatch, "\(tag) open suggestions", timeout: 20),
+           opened(app.navigationBars[w.suggestionsTitle], "\(tag) suggestions") {
             sleep(1)
             check("\(tag) suggestions", english: english)
             // A List only creates the rows on screen; at the largest text size the first row
@@ -264,6 +268,8 @@ final class AccessibilityUITests: XCTestCase {
             while !row.exists && swipes < 6 { app.swipeUp(); swipes += 1; sleep(1) }
             if tap(row, "\(tag) open suggestion", timeout: 10) {
                 let detailShown = app.navigationBars[w.suggestionTitle].waitForExistence(timeout: 5)
+                print(detailShown ? "UI_STEP_OK \(tag) suggestion opened" : "UI_STEP_MISSING \(tag) suggestion opened")
+                XCTAssertTrue(detailShown, "Not opened: \(tag) suggestion (the tap landed elsewhere)")
                 sleep(1)
                 check("\(tag) suggestion detail", english: english)
                 if !short {
@@ -796,19 +802,26 @@ final class AccessibilityUITests: XCTestCase {
     /// Scrolls `element` by short drags (up above the tab bar, or down below the navigation bar
     /// for an element under it) until at least 30 pt of it are clear of both bars, then taps the
     /// middle of that part. False when it never got clear.
+    /// The part of `element` clear of both bars (top and bottom; empty or negative when none).
+    private func clearBand(_ element: XCUIElement) -> (top: CGFloat, bottom: CGFloat) {
+        let window = app.windows.firstMatch.frame
+        let bar = app.navigationBars.firstMatch
+        let tabs = app.tabBars.firstMatch
+        let frame = element.frame
+        let top = max(frame.minY, bar.exists ? bar.frame.maxY + 8 : window.minY + 60)
+        let bottom = min(frame.maxY, tabs.exists ? tabs.frame.minY - 24 : window.maxY - 24)
+        return (top, bottom)
+    }
+
     private func tapClearOfBars(_ element: XCUIElement, _ step: String) -> Bool {
         guard element.exists else { return false }
         let window = app.windows.firstMatch.frame
         let bar = app.navigationBars.firstMatch
         let tabs = app.tabBars.firstMatch
-        func band() -> (top: CGFloat, bottom: CGFloat) {
-            let frame = element.frame
-            let top = max(frame.minY, bar.exists ? bar.frame.maxY + 8 : window.minY + 60)
-            let bottom = min(frame.maxY, tabs.exists ? tabs.frame.minY - 24 : window.maxY - 24)
-            return (top, bottom)
-        }
+        func band() -> (top: CGFloat, bottom: CGFloat) { clearBand(element) }
         let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-        // Content under the navigation bar is dragged down, everything else up.
+        // Content under the navigation bar is dragged down, everything else up. (`tap` calls
+        // this only when the band is already 30 pt, so it drags only when called directly.)
         let down = bar.exists && element.frame.midY < bar.frame.maxY
         var drags = 0
         while band().bottom - band().top < 30 && drags < 6 {
@@ -849,32 +862,34 @@ final class AccessibilityUITests: XCTestCase {
             tabs.exists && !tabs.frame.contains(element.frame) && element.frame.midY > tabs.frame.minY - 24
         }
         var swipes = 0
+        var unmoved = 0
         var stuck = false
         while swipes < 10 {
             let before = element.frame
             if underBar() { app.swipeDown() } else if underTabs() || !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
-            // The list is at its end: more swipes do not move the element (accessibility run
-            // 44202318875: ten swipes, the row stayed at y 500-765 under the tab bar from 584).
-            if element.frame == before { stuck = true; break }
+            // The list is at its end: two swipes in a row did not move the element (accessibility
+            // run 44202318875: ten swipes, the row stayed at y 500-765 under the tab bar from 584).
+            unmoved = element.frame == before ? unmoved + 1 : 0
+            if unmoved >= 2 { stuck = true; break }
         }
         if tabs.exists, swipes > 0 || element.frame.maxY > tabs.frame.minY {
             print("UI_FACT tap \(step): element \(element.frame), tab bar \(tabs.frame), \(swipes) swipes\(stuck ? ", it no longer moves" : "")")
         }
-        // Never a tap on the centre of an element under a bar: the bar takes it. In accessibility
-        // run 44202318875 (test3) the tap meant for a suggestion row opened the Mediathek tab,
-        // and every later step ran on the wrong screen ("Missing: xxxl open atlas"). Such an
-        // element is tapped on its part clear of both bars, and when no part gets clear the
-        // step fails here, by its name.
+        // An element under a bar with at least 30 pt clear of both bars is tapped there, not on
+        // its centre, which the bar takes: in accessibility run 44202318875 (test3) the tap meant
+        // for a suggestion row (y 500-765, tab bar from 584) opened the Mediathek tab, and every
+        // later step ran on the wrong screen ("Missing: xxxl open atlas"). With less clear,
+        // `element.tap()` as before: XCTest scrolls it into view itself (green runs 44130058787,
+        // 44164854295: atlas teaser and seed button at y 592-690 after ten swipes). A tap that
+        // lands elsewhere fails where the walk checks the screen it opened (`opened`).
         if underBar() || underTabs() {
-            guard tapClearOfBars(element, step) else {
-                print("UI_STEP_MISSING \(step) (under a bar: element \(element.frame))")
-                shot("a11y-x-under-bar-" + slug(step))
-                XCTFail("Not tappable clear of the bars: \(step) (element \(element.frame))")
-                return false
+            let band = clearBand(element)
+            if band.bottom - band.top >= 30, tapClearOfBars(element, step) {
+                print("UI_STEP_OK \(step)")
+                return true
             }
-            print("UI_STEP_OK \(step)")
-            return true
+            print("UI_FACT tap \(step): under a bar with less than 30 pt clear (\(Int(band.top))-\(Int(band.bottom))), XCTest scrolls it")
         }
         UITestOnboarding.clock("tap \(step)")
         element.tap()

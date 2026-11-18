@@ -337,7 +337,7 @@ struct AssetDetailView: View {
                         LabeledContent("Ort", value: place)
                     }
                     if let state = model.states[facts.id] {
-                        LabeledContent("Status") { Text(model.resolver.overall(state).label) }
+                        LabeledContent("Status") { Text(statusLabel(state)) }
                     }
                 }
                 Section {
@@ -413,6 +413,16 @@ struct AssetDetailView: View {
                         .accessibilityIdentifier("detail.close")
                 }
             }
+        }
+    }
+
+    /// A photo the ring does not count (no main area applies, or outside the chosen year) is
+    /// not "Sortiert": it is not in that list either (one meaning of sorted, Fuchs 18.11.).
+    private func statusLabel(_ state: AssetOrganizationState) -> LocalizedStringKey {
+        let inScope = model.analysisScope.includes(facts, calendar: .sortlyDefault)
+        switch model.resolver.ringPart(state, inScope: inScope) {
+        case .outsideMainAreas, .outsideScope: return "Nicht mitgezählt"
+        default: return model.resolver.overall(state).label
         }
     }
 

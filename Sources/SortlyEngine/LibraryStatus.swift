@@ -287,6 +287,22 @@ public enum LibraryStatus {
     }
 }
 
+// MARK: The library tab's lists over the ring's part of the library
+
+extension LibraryBuckets {
+    /// The library tab's lists for the part of the library the ring counts (`scope`), with the
+    /// same test as `DerivedLibraryStatus.derive` (`OrganizationScope.includes`): "Sortiert"
+    /// shows the ring's number also with "Nur 2026" (decision Fuchs 18.11.).
+    public static func make(facts: [AssetFacts], states: [AssetID: AssetOrganizationState],
+                            resolver: OrganizationStatusResolver, scope: OrganizationScope,
+                            calendar: Calendar = .sortlyDefault,
+                            shouldStop: () -> Bool = { false }) -> LibraryBuckets? {
+        guard scope != .all else { return make(facts: facts, states: states, resolver: resolver, shouldStop: shouldStop) }
+        return make(facts: facts, states: states, resolver: resolver, shouldStop: shouldStop,
+                    inScope: { scope.includes($0, calendar: calendar) })
+    }
+}
+
 // MARK: Overlapping calls
 
 /// Calls that may overlap (`AppModel.refreshDerived` waits for detached work): only the newest

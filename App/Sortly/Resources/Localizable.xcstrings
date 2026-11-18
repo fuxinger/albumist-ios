@@ -121,6 +121,46 @@
         }
       }
     },
+    "%lld ignorierte Fotos" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ignoriertes Foto"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ignorierte Fotos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ignored photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ignored photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld Originale bearbeitet" : {
       "localizations" : {
         "en" : {
@@ -3017,6 +3057,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Not now"
+          }
+        }
+      }
+    },
+    "Nicht mitgezählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not counted"
           }
         }
       }

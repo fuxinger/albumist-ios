@@ -427,8 +427,9 @@ final class AppModel {
     }
     var analysisCounts = AnalysisCounts()
     /// The part of the library Albumist works on: everything, or the trial year chosen at
-    /// the start (kept for every later run).
-    var analysisScope: OrganizationScope = .all
+    /// the start (kept for every later run). The library tab's "Sortiert" and "Nicht sortiert"
+    /// follow it like the ring (`LibraryBuckets.make(…scope:)`).
+    var analysisScope: OrganizationScope = .all { didSet { if oldValue != analysisScope { libraryInputsChanged() } } }
     /// Photos changed while a run was busy (`LibraryChangeWatcher`): one more pass follows when
     /// it ends, unless the user paused it. Taken by the end of every run, in the app and the
     /// overnight refinement (`AnalysisRunEnd`). A change of the settings needs no request: the
@@ -2886,7 +2887,7 @@ final class AppModel {
         var lines = ["Albumist diagnostic report", "created \(iso.string(from: Date()))", ""]
         lines.append("app \(AppInfo.version), \(system), \(device), language \(Locale.current.language.languageCode?.identifier ?? "?")")
         lines.append("photo access \(access.rawValue), onboarding done \(onboardingDone)")
-        lines.append("photos \(progress.total), fully sorted \(progress.fully), partly \(progress.partially), unsorted \(progress.unorganized), pending \(progress.pending)")
+        lines.append("photos \(progress.total), fully sorted \(progress.fully), partly \(progress.partially), unsorted \(progress.unorganized), pending \(progress.pending), ignored \(progress.ignored), excluded \(progress.excluded)")
         // Where the sorted count comes from, per main area (device test 15.11.: 811 sorted before
         // "Analyse neu aufbauen", 141 after it).
         var areaLines: [String] = []
@@ -3034,12 +3035,13 @@ final class AppModel {
     private func makeLibraryBuckets() {
         guard libraryBucketsTask == nil else { return }
         let inputs = libraryInputs
-        let facts = facts, states = states, resolver = resolver
+        let facts = facts, states = states, resolver = resolver, scope = analysisScope
         libraryTapsDuringPass = []
         libraryTapInputs = 0
         libraryBucketsTask = Task { [weak self] in
             let made = await Task.detached(priority: .userInitiated) {
-                LibraryBuckets.make(facts: facts, states: states, resolver: resolver)
+                // The ring's part of the library: "Sortiert" shows the ring's number (Fuchs 18.11.).
+                LibraryBuckets.make(facts: facts, states: states, resolver: resolver, scope: scope)
             }.value
             guard let self else { return }
             self.libraryBucketsTask = nil

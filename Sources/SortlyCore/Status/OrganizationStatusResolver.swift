@@ -112,14 +112,69 @@ public struct OrganizationStatusResolver: Sendable {
         return done > 0 ? .partiallyOrganized : .unorganized
     }
 
-    /// Inbox buckets an asset belongs to (an asset can be in "all" plus one more).
-    public func buckets(_ state: AssetOrganizationState) -> Set<InboxBucket> {
+    /// Where a photo stands in the ring ("32 von 50 sortiert"). The one definition of "sorted"
+    /// that the ring (`progress`) and the library's lists (`buckets`) both use, so the list
+    /// "Sortiert" always holds exactly the ring's sorted photos and "Nicht sortiert" the rest of
+    /// its total (Fable review P1-05, P1-06; decisions Fuchs 18.11.).
+    public enum RingPart: Hashable, Sendable, CaseIterable {
+        /// Counted, and sorted in every main area that applies.
+        case sorted
+        /// Counted: sorted in some main areas, not yet in others.
+        case partlySorted
+        /// Counted, nothing sorted yet.
+        case unsorted
+        /// Counted, its analysis is not done yet.
+        case pending
+        /// The user ignored it: neither sorted nor open, so not counted (decision Fuchs
+        /// 18.11.: before, ignoring a photo made the ring smaller, and with ignored photos it
+        /// never reached 100 %).
+        case ignored
+        /// Excluded from the analysis: not counted either.
+        case excluded
+        /// No main area applies (a photo from home when only places and trips count).
+        case outsideMainAreas
+        /// Not in the part of the library the user chose ("Nur 2026").
+        case outsideScope
+
+        /// Part of the ring's total ("von y").
+        public var isCounted: Bool {
+            switch self {
+            case .sorted, .partlySorted, .unsorted, .pending: true
+            case .ignored, .excluded, .outsideMainAreas, .outsideScope: false
+            }
+        }
+    }
+
+    /// The photo's part of the ring. `inScope`: the photo is in the part of the library the
+    /// ring counts (`OrganizationScope`); the ring only ever sees such photos.
+    public func ringPart(_ state: AssetOrganizationState, inScope: Bool = true) -> RingPart {
+        let status = overall(state)
+        // The user's choice comes first: an ignored photo stays in "Ignoriert" wherever it is.
+        if status == .excluded { return .excluded }
+        if status == .ignored { return .ignored }
+        if !inScope { return .outsideScope }
+        if isOutsideMainAreas(state) { return .outsideMainAreas }
+        switch status {
+        case .fullyOrganized: return .sorted
+        case .partiallyOrganized: return .partlySorted
+        case .unorganized: return .unsorted
+        case .pending: return .pending
+        case .ignored: return .ignored
+        case .excluded: return .excluded
+        }
+    }
+
+    /// Inbox buckets an asset belongs to (an asset can be in "all" plus one more). "Sortiert"
+    /// and "Nicht sortiert" follow the ring (`ringPart`): a photo the ring does not count (no
+    /// main area applies, or outside the chosen part of the library) is only in "Alle".
+    public func buckets(_ state: AssetOrganizationState, inScope: Bool = true) -> Set<InboxBucket> {
         var result: Set<InboxBucket> = [.all]
-        switch overall(state) {
+        switch ringPart(state, inScope: inScope) {
         case .excluded: result.insert(.excluded); return result
         case .ignored: result.insert(.ignored); return result
-        case .fullyOrganized: result.insert(.organized)
-        case .partiallyOrganized, .unorganized, .pending: result.insert(.unorganized)
+        case .sorted: result.insert(.organized)
+        case .partlySorted, .unsorted, .pending: result.insert(.unorganized)
+        case .outsideMainAreas, .outsideScope: break
         }
         let primary = state.areas.filter { primaryAreas.contains($0.key) }.map(\.value)
         if primary.contains(.proposed) || primary.contains(.pendingConfirmation) { result.insert(.suggestions) }
@@ -130,39 +185,45 @@ public struct OrganizationStatusResolver: Sendable {
     /// Library-wide progress figures for the overview screen.
     public struct Progress: Hashable, Sendable {
         public init() {}
+        /// The ring's "von y": sorted, partly sorted, unsorted and pending photos. Ignored and
+        /// excluded photos are not part of it (decision Fuchs 18.11.), so the ring can reach
+        /// 100 % once everything not ignored is sorted.
         public var total = 0
         public var fully = 0
         public var partially = 0
         public var unorganized = 0
         public var pending = 0
+        /// Ignored by the user: not part of `total` (neither sorted nor open).
         public var ignored = 0
+        /// Excluded from the analysis: not part of `total`.
         public var excluded = 0
         /// Photos none of the main areas applies to (a screenshot without a place when only
         /// places and trips count). Not part of `total`: "13 von 246 sortiert" before anything
         /// was done confused testers (Fuchs, 14.11.).
         public var outsideMainAreas = 0
         /// Every photo the app sees.
-        public var allPhotos: Int { total + outsideMainAreas }
+        public var allPhotos: Int { total + outsideMainAreas + ignored + excluded }
 
         public var fullyShare: Double { total == 0 ? 0 : Double(fully) / Double(total) }
         public var partiallyShare: Double { total == 0 ? 0 : Double(partially) / Double(total) }
     }
 
+    /// The ring over `states` (the photos in the part of the library it counts), each photo
+    /// counted by its `ringPart`.
     public func progress<S: Sequence>(_ states: S) -> Progress where S.Element == AssetOrganizationState {
         var p = Progress()
         for s in states {
-            if isOutsideMainAreas(s) {
-                p.outsideMainAreas += 1
-                continue
-            }
-            p.total += 1
-            switch overall(s) {
-            case .fullyOrganized: p.fully += 1
-            case .partiallyOrganized: p.partially += 1
-            case .unorganized: p.unorganized += 1
+            let part = ringPart(s)
+            if part.isCounted { p.total += 1 }
+            switch part {
+            case .sorted: p.fully += 1
+            case .partlySorted: p.partially += 1
+            case .unsorted: p.unorganized += 1
             case .pending: p.pending += 1
             case .ignored: p.ignored += 1
             case .excluded: p.excluded += 1
+            case .outsideMainAreas: p.outsideMainAreas += 1
+            case .outsideScope: break
             }
         }
         return p

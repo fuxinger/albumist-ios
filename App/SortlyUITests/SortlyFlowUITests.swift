@@ -629,6 +629,11 @@ final class SortlyFlowUITests: XCTestCase {
                 sleep(2)
                 shot("14b-library-sorted")
             }
+            // "Sortiert" holds only what the ring counts (Fuchs 18.11.): with nothing open and
+            // nothing sorted (photos from home only), the photo is under "Alle".
+            if !photo.waitForExistence(timeout: 3), tap(button("Alle"), "all photos") {
+                sleep(2)
+            }
             // Design review W11/W12: a tap opens the photo large, its details behind "i",
             // and a pull down closes it, as in Photos.
             if tap(photo, "open photo") {

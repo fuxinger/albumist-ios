@@ -523,14 +523,11 @@ struct HabitualArea: Sendable {
             guard let c = asset.usableLocation, let d = asset.creationDate else { continue }
             perDay[calendar.startOfDay(for: d), default: []].append(c)
         }
-        // One representative point per day: the coordinate minimizing total distance (medoid
-        // of a small sample) – robust against a single far-away photo that day.
+        // One representative point per day: the most central of a sample spread over the whole
+        // day (`GeoMath.dayPoint`; `assets` come in time order), so the place of most of the
+        // day's photos wins, not the first 15 (review 18.11.2026, G1-02).
         let dayPoints = perDay.map { day, coordinates -> (Date, GeoCoordinate) in
-            let sample = Array(coordinates.prefix(15))
-            let medoid = sample.min { a, b in
-                sample.reduce(0) { $0 + GeoMath.distance($1, a) } < sample.reduce(0) { $0 + GeoMath.distance($1, b) }
-            } ?? coordinates[0]
-            return (day, medoid)
+            (day, GeoMath.dayPoint(coordinates) ?? coordinates[0])
         }.sorted { $0.0 < $1.0 }
 
         let clusterer = GeoClusterer(epsilonMeters: 15_000, minPoints: 3)

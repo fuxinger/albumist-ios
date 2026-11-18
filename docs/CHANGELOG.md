@@ -50,6 +50,10 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- Prüfung 18.11. (Zuhause): Albumist erkennt das Zuhause jetzt an den Fotos des ganzen Tages,
+  nicht nur an den ersten 15. Wer morgens regelmäßig woanders fotografiert (etwa bei der Arbeit),
+  bekommt den Alltag zu Hause nicht mehr als Reise vorgeschlagen; ebenso beim Ort eines
+  Urlaubsziels, an das du öfter fährst.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

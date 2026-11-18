@@ -33,6 +33,34 @@ public enum GeoMath {
 
     /// Metres per degree of latitude (approximately constant).
     public static let metersPerDegreeLatitude = 111_320.0
+
+    /// At most this many photos of one day are compared to find where the day was (`dayPoint`).
+    public static let daySample = 15
+
+    /// Where a day was: the most central of its photos (the one with the smallest sum of
+    /// distances to the others), robust against a few far-away photos that day. `coordinates`
+    /// are the day's photos in time order. A day with more than `daySample` photos is
+    /// represented by `daySample` photos spread evenly over all of them, so each part of the day
+    /// counts by its number of photos and the place of most of the day's photos wins; a burst at
+    /// the start of the day no longer decides (review 18.11.2026, G1-02: only the first 15
+    /// were read, and 8 early photos at work 49 km away moved home there). The cost stays at
+    /// `daySample`² distances per day, however many photos the day has.
+    public static func dayPoint(_ coordinates: [GeoCoordinate]) -> GeoCoordinate? {
+        let sample = daySampleIndices(count: coordinates.count).map { coordinates[$0] }
+        var best: (index: Int, sum: Double)?
+        for (i, candidate) in sample.enumerated() {
+            let sum = sample.reduce(0) { $0 + distance($1, candidate) }
+            if best == nil || sum < best!.sum { best = (i, sum) }
+        }
+        return best.map { sample[$0.index] }
+    }
+
+    /// The photos `dayPoint` compares: all up to `daySample`, otherwise the middle photo of each
+    /// of `daySample` equal parts of the day's photos.
+    static func daySampleIndices(count: Int) -> [Int] {
+        guard count > daySample else { return Array(0..<count) }
+        return (0..<daySample).map { ((2 * $0 + 1) * count) / (2 * daySample) }
+    }
 }
 
 /// Quantized geographic cell. Used as spatial index for clustering and as cache key for

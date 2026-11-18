@@ -308,13 +308,15 @@ public enum RecurringPlaces {
     public static func mainPlace(of photos: [(date: Date, coordinate: GeoCoordinate)], calendar: Calendar,
                                  radius: Double = RecurringPlaceAnswers.matchRadiusMeters) -> GeoCoordinate? {
         guard !photos.isEmpty else { return nil }
-        var perDay: [Date: [GeoCoordinate]] = [:]
-        for photo in photos { perDay[calendar.startOfDay(for: photo.date), default: []].append(photo.coordinate) }
+        var perDay: [Date: [(date: Date, coordinate: GeoCoordinate)]] = [:]
+        for photo in photos { perDay[calendar.startOfDay(for: photo.date), default: []].append(photo) }
+        // The day's point as in the home detection (`GeoMath.dayPoint`): a sample over the whole
+        // day in time order, not its first 15 photos (review 18.11.2026, G1-02).
         let points = perDay.keys.sorted().map { day -> GeoCoordinate in
-            let sample = Array(perDay[day]!.prefix(15))
-            return sample.min { a, b in
-                sample.reduce(0) { $0 + GeoMath.distance($1, a) } < sample.reduce(0) { $0 + GeoMath.distance($1, b) }
-            } ?? sample[0]
+            let inTimeOrder = perDay[day]!.sorted {
+                ($0.date, $0.coordinate.latitude, $0.coordinate.longitude) < ($1.date, $1.coordinate.latitude, $1.coordinate.longitude)
+            }.map(\.coordinate)
+            return GeoMath.dayPoint(inTimeOrder) ?? inTimeOrder[0]
         }
         // Long journeys have a few hundred days at most: the square is cheap.
         var best: [GeoCoordinate] = []

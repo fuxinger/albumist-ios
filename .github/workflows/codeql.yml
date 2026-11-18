@@ -11,8 +11,9 @@ name: CodeQL
 #     compiler cannot start Xcode's macro plugin server ("swift-plugin-server could not be
 #     loaded: Bad CPU type in executable", CodeQL run 44202319351, after 24 min of building),
 #     like sandbox-exec before it. The core package uses no macros. The app's own Swift
-#     (App/Sortly) is analysed again once CodeQL's tracer can start the plugin server on the
-#     arm64 runners (try: a manual run with the newest codeql-action; docs/TESTFLIGHT.md).
+#     (App/Sortly) is NOT analysed by CodeQL today; it is again once CodeQL's tracer can start
+#     the plugin server on the arm64 runners (try: a manual run with the newest codeql-action;
+#     docs/TESTFLIGHT.md), under its own category.
 # Sources/CSQLite is a module map and a header shim with no C code, so c-cpp is not analysed.
 # Not part of a TestFlight run (testflight.yml runs CI, the UI flow and the stress pass): a
 # finding never blocks a build for the testers; it is reviewed in the Security tab.
@@ -89,4 +90,7 @@ jobs:
           swift build --disable-sandbox --scratch-path "$RUNNER_TEMP/codeql-build" 2>&1 | tail -20
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
-          category: /language:swift
+          # Its own category: the core package only. Under "/language:swift" the earlier app
+          # analyses would stay the newest results for App/** and keep their alerts open as if
+          # still checked (docs/TESTFLIGHT.md, "Code-Scanning").
+          category: /language:swift-core

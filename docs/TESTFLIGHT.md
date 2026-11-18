@@ -130,7 +130,7 @@ Actions > **TestFlight feedback** > Run workflow.
   hoch, wenn einer in einem Test, einer Regel, einem Bau oder beim Archiv scheiterte
   (`.github/scripts/earlier_attempts.py`). **Re-run failed jobs** hilft nur, wenn die Technik
   versagt hat: Runner oder Container nicht gestartet, Simulator nicht hochgefahren, gebaute Tests,
-  Checkout oder XcodeGen (Homebrew, Schritt „Install XcodeGen“) nicht angekommen, Hochladen zu
+  Checkout oder XcodeGen (festgelegte Version 2.46.0 aus `.github/toolchain.json`, mit Prüfsumme, Schritt „Install XcodeGen“) nicht angekommen, Hochladen zu
   App Store Connect abgebrochen. Maßgeblich ist der Schritt, nicht die Ursache: geht der Runner
   mitten in einem Testschritt verloren (etwa „Run UI tests“), wird der Lauf dort abgebrochen
   oder hakt „Select pinned Xcode“ oder „Generate Xcode project“, braucht es ebenfalls einen
@@ -185,17 +185,23 @@ Testcode gibt.
 
 - **Fingerabdruck der App**: eine Prüfsumme über alle Dateien, aus denen die App gebaut wird.
   Gezählt wird alles außer UI-Tests (`App/SortlyUITests`), Unit-Tests (`App/SortlyTests`,
-  `Tests`), `docs/`, `*.md`, `.github/` (außer `.github/toolchain.json` mit dem festgelegten
-  Xcode, das zählt mit), `scripts/`, `tools/` und `design/`. Also zählen unter anderem
+  `Tests`), `docs/`, Markdown-Dateien im obersten Ordner (`README.md` usw.; eine `.md` in
+  `App/` zählt mit), `.github/` (außer `.github/toolchain.json` mit dem festgelegten Xcode und
+  XcodeGen, das zählt mit), `scripts/`, `tools/` und `design/`. Also zählen unter anderem
   `App/Sortly/**`, `Sources/**`, `Package.swift`, `App/project.yml` mit den Build-Einstellungen,
   Ressourcen und die StoreKit-Datei. Eine neue, unbekannte Datei zählt zur App: im Zweifel
   läuft eine Gruppe einmal zu viel, nie einmal zu wenig. Gleicher Fingerabdruck heißt:
   Byte für Byte dieselben Dateien.
 - **Fingerabdruck einer Gruppe**: ihre Testdateien, alle Hilfsdateien, die diese benutzen (zum
-  Beispiel `UITestOnboarding.swift`), ihre Zeile in `.github/ui-groups.json` und die Skripte,
-  über die jede Gruppe läuft (`ui_tests.py`, `pick_simulator.py`, `toolchain.py`). Welche Datei
-  welche benutzt, liest `.github/scripts/ui_groups.py` bei jedem Lauf aus den Swift-Dateien;
-  keine Liste von Testnamen ist fest eingetragen. Übersicht von Hand:
+  Beispiel `UITestOnboarding.swift`), ihre Zeile in `.github/ui-groups.json` und alles, über
+  das jede Gruppe läuft: die Skripte `ui_tests.py`, `pick_simulator.py`, `toolchain.py` und die
+  Workflows `ui.yml` und `testflight.yml` (eine Änderung daran lässt also alle Gruppen laufen).
+  Welche Datei welche benutzt, liest `.github/scripts/ui_groups.py` bei jedem Lauf aus den
+  Swift-Dateien (auch Klassen, deren Kopf über mehrere Zeilen geht, und Code in `\(…)` von
+  Zeichenketten); keine Liste von Testnamen ist fest eingetragen. Im Zweifel streng: eine
+  Swift-Datei der UI-Tests, die keiner Gruppe zugeordnet werden kann, zählt für alle Gruppen;
+  eine Gruppe, die keinen Test auswählt, ist ein Fehler (der Plan bricht ab), ebenso ein
+  Gruppenname, der nicht in einen Job-Namen passt. Übersicht von Hand:
   `python3 .github/scripts/ui_groups.py map`.
 - Daraus folgt: **nur Testcode geändert** → nur die Gruppen, deren Dateien sich geändert haben;
   **gemeinsame Hilfsdatei geändert** → jede Gruppe, die sie benutzt; **irgendetwas an der App
@@ -205,7 +211,15 @@ Testcode gibt.
   „UI device conditions [device app 1a2b3c4d5e6f tests 9f8e7d6c5b4a]“. Daran finden spätere
   Läufe das Ergebnis wieder (`.github/scripts/ui_evidence.py`). Gezählt wird ein grünes
   Ergebnis nur, wenn Git für den Commit dieses Laufs dieselben Fingerabdrücke ausrechnet, und
-  nur aus diesem Repository (nie aus einem Fork), aus den letzten 14 Tagen.
+  nur aus diesem Repository (nie aus einem Fork).
+- **Lückenlos gelesen**: Plan und Gate lesen jeden Lauf von `ui.yml` und `testflight.yml` seit
+  dem ersten Commit mit diesem App-Fingerabdruck (Seite für Seite, ohne Obergrenze vor dem
+  Filter). Geht das nicht vollständig (mehr als 1000 Läufe eines Workflows in diesem Zeitraum,
+  oder der Zeitraum ist älter als 85 Tage und GitHub hat ältere Läufe womöglich gelöscht),
+  laufen im Plan alle Gruppen und das Gate ist rot: ein altes Rot darf nicht aus dem Blick
+  fallen. Ein dauerhaftes Verzeichnis der roten Ergebnisse außerhalb von GitHubs Laufliste
+  gibt es nicht (es bräuchte ein Schreib-Token in den Testläufen; Artefakte laufen ab wie die
+  Läufe).
 - **Beispiel** (die Nacht zum 18.11.): Commit 4bb7fdd änderte nur eine Wartezeit in
   `SortlyFlowUITests.swift`. Bisher liefen danach alle fünf Gruppen (über 80 Minuten). Jetzt
   laufen „voller Ablauf“ und „übrige Abläufe“ (beide haben Tests in dieser Datei);
@@ -213,12 +227,19 @@ Testcode gibt.
   mit derselben App und demselben Testcode. Die Zusammenfassung des Jobs „UI plan“ zeigt für
   jede Gruppe, woher ihr Grün kommt oder warum sie läuft.
 - **Rot bleibt rot** (wie bei „Re-run failed jobs“): Ist eine Gruppe für dieselbe App und
-  denselben Testcode irgendwann rot gewesen (ein Test im Schritt „Run UI tests“ gescheitert oder
-  abgelaufen), zählt kein späteres Grün dieser Kombination, egal aus welchem Lauf. Ein
+  denselben Testcode irgendwann rot gewesen (der Schritt „Run UI tests“ hatte begonnen und ist
+  nicht grün geworden: ein Test gescheitert, Zeitlimit, Lauf abgebrochen, Runner verloren),
+  zählt kein späteres Grün dieser Kombination, egal aus welchem Lauf. Ein
   wackelnder Test wird so gezählt und behoben, nie durch Wiederholen versteckt. Die Gruppe darf
   zur Beobachtung noch einmal laufen; ihr Grün steht dann als „red before for this key“ in der
-  Tabelle und zählt für TestFlight nicht. Rot ohne Testlauf (Simulator nicht gestartet, Lauf
-  abgebrochen) ist kein Ergebnis und zählt weder als Rot noch als Grün.
+  Tabelle und zählt für TestFlight nicht. Kein Ergebnis (weder Rot noch Grün) ist nur, was
+  keinen Test gestartet hat: „Run UI tests“ hat nie begonnen (Simulator nicht gestartet,
+  Lauf vorher abgebrochen, gebaute Tests fehlen: Schritt „Built tests present“), oder der
+  Simulator ging in jedem Durchgang vor dem ersten Test verloren (`ui_tests.py` endet mit 75,
+  der Job scheitert im eigenen Schritt „Simulator lost before the first test“). Wurde ein Rot
+  nur durch eine gemeinsame Datei (Hilfsdatei, Skript, Workflow) zu einem neuen Schlüssel,
+  ohne dass sich eine eigene Testdatei der Gruppe änderte, warnen Plan und Gate („UI red
+  cleared by a shared change“): prüfen, ob das wirklich die Korrektur war.
 - **Längere Wartezeiten in Tests brauchen einen gemessenen Grund** (Regel 17.11.): wer ein
   `timeout` oder eine Wartezeit verlängert, nennt im Commit die Messung (Lauf und gemessene
   Sekunden), so wie 4bb7fdd („say how long it took“). Eine reine Verlängerung ohne Messung ist
@@ -230,9 +251,22 @@ Testcode gibt.
   Wiederholung grün); das Tag `build-<Nummer>` nennt sie ebenfalls („UI groups: device reused
   from run …“). Antwortet die GitHub-API nicht, lädt der Lauf nicht hoch; dann nur diesen Job
   wiederholen.
+- **Urteil jedes UI-Laufs**: der letzte Job **UI verdict (full)** bzw. **UI verdict (quick)**
+  macht dieselbe Prüfung wie das Gate von TestFlight, auch wenn keine Gruppe laufen musste.
+  Das Freigabe-Gate (`ci_gate.py`, Workflow „Release“) verlangt einen grünen Job
+  „UI verdict (full)“.
+- **Schnellmodus** (`quick`): Pull Requests laufen schnell. Die Tests bekommen
+  `SORTLY_UI_QUICK=1` (im Workflow als `TEST_RUNNER_SORTLY_UI_QUICK`), und der lange
+  Gerätetest (test11, große Mediathek) überspringt sich. Eine Gruppe, deren Dateien diesen
+  Schalter lesen, hat im Schnellmodus einen anderen Test-Fingerabdruck, und ihr Job heißt
+  „… (quick)“. Ein schnelles Grün zählt nie als volles: TestFlight und die Freigabe verlangen
+  volle Ergebnisse. Ein schneller Lauf darf dagegen ein volles Grün übernehmen. Für die
+  Freigabe eines Commits, der nur schnelle Läufe hat: „UI flow“ von Hand ohne `quick` starten;
+  dann laufen nur die Gruppen, deren schneller und voller Testcode sich unterscheiden.
 - Von Hand: Actions > **UI flow** > Run workflow, Feld **groups**: `auto` (Vorgabe), `all`
-  (alle Gruppen) oder Gruppennamen (`device flow-full flow-other accessibility contrast`). In
-  **TestFlight** gibt es dafür **ui_groups** (`auto` oder `all`).
+  (alle Gruppen) oder Gruppennamen (`device flow-full flow-other accessibility contrast`), und
+  **quick** (aus = voller Lauf). In **TestFlight** gibt es dafür **ui_groups** (`auto` oder
+  `all`); TestFlight läuft immer voll.
 
 ## Messung der Mac-Läufe (18.11.2026)
 
@@ -293,7 +327,10 @@ Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-
   lässt sich zurzeit nicht analysieren: unter dem CodeQL-Werkzeug kann der Compiler Xcodes
   Makro-Helfer nicht starten („swift-plugin-server … Bad CPU type in executable“, Lauf
   44202319351), und die App braucht Makros (`@Observable`, `@State`). Das Kernpaket braucht
-  keine.
+  keine. **Der Swift-Code der App (`App/Sortly`) wird von CodeQL also zurzeit nicht geprüft.**
+  Die Kern-Analyse meldet unter der eigenen Kategorie `/language:swift-core`; Warnungen aus
+  früheren App-Analysen (Kategorie `/language:swift`) werden von ihr weder bestätigt noch
+  geschlossen (Schritt 1 unten).
 - Die ReDoS-Warnung in `test_summary.py` ist behoben (keine verschachtelten Wiederholungen mehr).
 - Die Warnung „cache poisoning“ in `nightly.yml` ist begründet und abgesichert: kein Workflow
   liest einen Actions-Cache (ein Test prüft das), der nächtlich getestete Stand kommt nur aus
@@ -305,6 +342,12 @@ Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-
    nächsten Scan von selbst. Bleibt „Cache poisoning“ in `nightly.yml` offen: die Warnung öffnen
    > **Dismiss alert** > „Won't fix“, Begründung: „Kein Workflow liest einen Actions-Cache
    (test_workflows.py), Ref nur aus diesem Repository, persist-credentials: false.“
+   Alte Swift-Warnungen in `App/…` aus der früheren Kategorie `/language:swift`: Security >
+   Code scanning > **Tool status** > CodeQL > die Konfiguration `/language:swift` > **Delete
+   configuration** (ihre Warnungen schließen sich dann). Oder jede einzeln > **Dismiss alert**
+   > „Won't fix“, Begründung: „App/Sortly wird zurzeit nicht analysiert (Makros unter
+   CodeQL, docs/TESTFLIGHT.md); Befund von Hand geprüft.“ Vorher kurz lesen: ein echter
+   Befund dort ist weiter ein Befund, nur prüft ihn niemand mehr automatisch.
 2. Falls in den Branch-Regeln (Settings > Branches oder Rules) „Analyze (swift)“ als
    Pflicht-Check eingetragen ist: entfernen, denn er läuft bei Pull Requests nicht mehr.
 3. Settings > Code security > Code scanning: „Default setup“ muss aus bleiben (die Datei

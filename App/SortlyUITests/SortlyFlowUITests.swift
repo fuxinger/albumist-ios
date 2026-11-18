@@ -799,6 +799,10 @@ final class SortlyFlowUITests: XCTestCase {
                 (list.exists ? list : app).swipeUp()
                 swipes += 1
             }
+            // Disabled while the analysis started by the last merge still runs (as in the workshop).
+            let enabledAt = Date()
+            let enabled = waitStable("trip reset enabled", timeout: 180, stableChecks: 1) { reset.exists && reset.isEnabled }
+            print("UI_FACT trip reset enabled \(enabled) after \(String(format: "%.1f", Date().timeIntervalSince(enabledAt))) s")
             if tap(reset, "reset trip changes", timeout: 5) {
                 shot("66-settings-trips")
                 let confirm = app.buttons["Automatisch erkennen"]
@@ -986,10 +990,23 @@ final class SortlyFlowUITests: XCTestCase {
         swipes = 0
         // Rows of a List exist only once they are on screen.
         while !((after.exists && after.isHittable) || (before.exists && before.isHittable)) && swipes < 4 { app.swipeUp(); swipes += 1; sleep(1) }
-        guard tap(after.exists ? after : before, "merge with the other part", timeout: 5) else { return }
-        sleep(1)
+        let mergeRow = after.exists ? after : before
+        // The split starts an analysis, and while it runs the workshop's buttons are disabled
+        // (UI run 44375768011: the tap landed on the disabled row, nothing happened). The row is
+        // tapped once the analysis has ended; how long that took is logged.
+        let enabledAt = Date()
+        let enabled = waitStable("merge row enabled", timeout: 180, stableChecks: 1) { mergeRow.exists && mergeRow.isEnabled }
+        print("UI_FACT merge row enabled \(enabled) after \(String(format: "%.1f", Date().timeIntervalSince(enabledAt))) s")
+        guard tap(mergeRow, "merge with the other part", timeout: 5) else { return }
+        // The question may take a moment on a busy Mac; it is awaited, not looked for once.
+        var confirm: XCUIElement?
+        let asked = Date()
+        while confirm == nil && Date().timeIntervalSince(asked) < 10 {
+            confirm = app.buttons.matching(identifier: "Zusammenlegen").allElementsBoundByIndex.first(where: \.isHittable)
+            if confirm == nil { usleep(250_000) }
+        }
+        print("UI_FACT merge question shown \(confirm != nil) after \(String(format: "%.1f", Date().timeIntervalSince(asked))) s")
         shot("64b-merge-question")
-        let confirm = app.buttons.matching(identifier: "Zusammenlegen").allElementsBoundByIndex.first(where: \.isHittable)
         guard let confirm else {
             print("UI_STEP_MISSING confirm merge")
             XCTFail("Missing: confirm merge")

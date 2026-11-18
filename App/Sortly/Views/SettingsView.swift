@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var confirmReset = false
     @State private var redeeming = false
     @State private var rejectedCount = 0
@@ -137,7 +138,8 @@ struct SettingsView: View {
                 Section {
                     LabeledContent("Selbst geteilt oder zusammengelegt", value: model.tripCorrections.changeCount.formatted())
                     Button("Reisen wieder automatisch erkennen") { confirmTripReset = true }
-                        .disabled(model.analysis.isRunning || model.execution.isRunning)
+                        // Grey while an analysis runs or albums are made; the footer says why.
+                        .disabled(model.tripChangeWait != nil)
                         .accessibilityIdentifier("settings.resetTrips")
                         .confirmationDialog("Reisen wieder automatisch erkennen?", isPresented: $confirmTripReset, titleVisibility: .visible) {
                             Button("Automatisch erkennen") { Task { await model.resetTripCorrections() } }
@@ -147,7 +149,10 @@ struct SettingsView: View {
                 } header: {
                     Text("Reisen")
                 } footer: {
-                    Text("Albumist hält sich an deine Änderungen, auch bei jeder neuen Analyse.")
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        TripChangeWaitNote(identifier: "settings.resetTripsBusyNote")
+                        Text("Albumist hält sich an deine Änderungen, auch bei jeder neuen Analyse.")
+                    }
                 }
             }
 
@@ -201,6 +206,8 @@ struct SettingsView: View {
                 Text("Die Diagnose hilft bei Problemen. Sie enthält nur Zustände und Zahlen, keine Fotos, Albumnamen oder Orte, und du siehst sie vor dem Senden.")
             }
         }
+        // The trip reset greys and its note comes and goes with the run, without a jump.
+        .animation(reduceMotion ? nil : .smooth, value: model.tripChangeWait)
         .navigationTitle("Einstellungen")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

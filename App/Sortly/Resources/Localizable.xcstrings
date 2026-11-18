@@ -1151,6 +1151,16 @@
         }
       }
     },
+    "Albumist analysiert gerade deine Fotos. Danach wieder möglich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is analysing your photos. Possible again once it's done."
+          }
+        }
+      }
+    },
     "Albumist analysiert oder ändert gerade deine Mediathek. Versuche es gleich noch einmal." : {
       "localizations" : {
         "en" : {
@@ -1251,6 +1261,16 @@
         }
       }
     },
+    "Albumist legt gerade Alben an. Danach wieder möglich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is creating albums. Possible again once it's done."
+          }
+        }
+      }
+    },
     "Albumist legt ohnehin ein neues Album an und bietet dieses unter „Anpassen“ nicht mehr an. Am Album selbst ändert sich nichts." : {
       "localizations" : {
         "en" : {
@@ -1277,6 +1297,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist is planning your trips and suggestions again …"
+          }
+        }
+      }
+    },
+    "Albumist rechnet die Reisen gerade neu. Gleich wieder möglich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is recalculating your trips. Possible again in a moment."
           }
         }
       }

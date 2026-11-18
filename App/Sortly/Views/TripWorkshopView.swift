@@ -7,6 +7,7 @@ import SortlyCore
 struct TripWorkshopView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var proposal: AlbumProposal
     /// Called after a change: the suggestion this sheet came from no longer exists.
     var onChanged: () -> Void
@@ -40,10 +41,13 @@ struct TripWorkshopView: View {
                     .padding(.vertical, Theme.Spacing.xs)
                 }
             } else {
+                let around = model.tripNeighbours(of: proposal)
+                let mergeShown = around.before != nil || around.after != nil
                 header(days)
-                changesSection
+                // While the changes wait, why is said once, under the last of these controls.
+                changesSection(saysWhy: !mergeShown)
                 // Merging is one tap and short; the days list can be long, so it comes last.
-                mergeSection
+                if mergeShown { mergeSection(around) }
                 splitSection(days)
             }
         }
@@ -65,6 +69,9 @@ struct TripWorkshopView: View {
                     .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        // The controls grey and the note comes while the changes wait, and both go back by
+        // themselves when the run ends (they follow the model).
+        .animation(reduceMotion ? nil : .smooth, value: model.tripChangeWait)
         .interactiveDismissDisabled(working != nil)
         // The change shows once the analysis that applies it has finished.
         .onChange(of: model.analysis.isRunning) { _, running in
@@ -81,7 +88,9 @@ struct TripWorkshopView: View {
         }
     }
 
-    private var busy: Bool { model.analysis.isRunning || model.execution.isRunning }
+    /// An analysis runs (each change starts one) or albums are made: the changes wait, and
+    /// `TripChangeWaitNote` says so next to them.
+    private var busy: Bool { model.tripChangeWait != nil }
 
     private func perform(_ outcome: Outcome, _ change: @escaping @MainActor () async -> Bool) {
         Task {
@@ -111,9 +120,10 @@ struct TripWorkshopView: View {
         }
     }
 
-    /// What the user changed at this trip before, each with "Aufheben".
+    /// What the user changed at this trip before, each with "Aufheben". `saysWhy`: no merge
+    /// rows follow, so this footer says why "Aufheben" waits.
     @ViewBuilder
-    private var changesSection: some View {
+    private func changesSection(saysWhy: Bool) -> some View {
         let changes = model.tripChanges(around: proposal)
         if !changes.isEmpty {
             Section {
@@ -141,7 +151,10 @@ struct TripWorkshopView: View {
             } header: {
                 Text("Deine Änderungen")
             } footer: {
-                Text("Aufheben lässt Albumist diese Reisen wieder selbst erkennen.")
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    if saysWhy { TripChangeWaitNote() }
+                    Text("Aufheben lässt Albumist diese Reisen wieder selbst erkennen.")
+                }
             }
         }
     }
@@ -196,6 +209,8 @@ struct TripWorkshopView: View {
             .buttonStyle(PrimaryButtonStyle())
             .disabled(busy)
             .accessibilityIdentifier("workshop.split")
+            // The bar covers the end of the list, so it says itself why the button waits.
+            TripChangeWaitNote(identifier: "workshop.split.busyNote")
         }
         .padding(Theme.Spacing.m)
         .floatingPanel()
@@ -203,46 +218,31 @@ struct TripWorkshopView: View {
         .padding(.bottom, Theme.Spacing.s)
     }
 
-    @ViewBuilder
-    private var mergeSection: some View {
-        let around = model.tripNeighbours(of: proposal)
-        if around.before != nil || around.after != nil {
-            Section {
-                if let before = around.before {
-                    mergeButton(before, side: .before)
-                }
-                if let after = around.after {
-                    mergeButton(after, side: .after)
-                }
-            } header: {
-                Text("Zusammenlegen")
-            } footer: {
+    private func mergeSection(_ around: (before: AlbumProposal?, after: AlbumProposal?)) -> some View {
+        Section {
+            if let before = around.before {
+                mergeButton(before, side: .before)
+            }
+            if let after = around.after {
+                mergeButton(after, side: .after)
+            }
+        } header: {
+            Text("Zusammenlegen")
+        } footer: {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                TripChangeWaitNote()
                 Text("Für eine Reise mit Pause, zum Beispiel ein Wochenende zu Hause zwischen zwei Stationen.")
             }
         }
     }
 
     private func mergeButton(_ other: AlbumProposal, side: Side) -> some View {
-        Button {
+        let photos = Text("\(other.assetIDs.count) Fotos")
+        return Button {
             merging = side
         } label: {
-            HStack(spacing: Theme.Spacing.s) {
-                Image(systemName: "arrow.triangle.merge")
-                    .font(.title3)
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 32)
-                    .accessibilityHidden(true)
-                let photos = Text("\(other.assetIDs.count) Fotos")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(side == .before ? "Mit der Reise davor zusammenlegen" : "Mit der Reise danach zusammenlegen")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.accent)
-                    Text("\(title(other)) · \(photos)")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            MergeRowLabel(title: side == .before ? "Mit der Reise davor zusammenlegen" : "Mit der Reise danach zusammenlegen",
+                          detail: Text("\(title(other)) · \(photos)"))
         }
         .buttonStyle(.plain)
         .disabled(busy)
@@ -320,10 +320,74 @@ struct TripWorkshopView: View {
     }
 }
 
+/// Why splitting, merging, "Aufheben" and "Reisen wieder automatisch erkennen" wait, under the
+/// controls it explains: a small spinner and one sentence, only while they wait
+/// (`AppModel.tripChangeWait`). Controls and note follow the model, so both come back by
+/// themselves when the run ends (UI run 44375768011: right after a split the merge row was off,
+/// looked tappable and said nothing).
+struct TripChangeWaitNote: View {
+    @Environment(AppModel.self) private var model
+    var identifier = "workshop.busyNote"
+
+    var body: some View {
+        if let wait = model.tripChangeWait {
+            Label {
+                Text(Self.reason(wait))
+            } icon: {
+                ProgressView()
+                    .controlSize(.mini)
+                    .accessibilityHidden(true) // the text beside it says what runs
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(identifier)
+        }
+    }
+
+    static func reason(_ wait: TripWorkshop.Wait) -> LocalizedStringKey {
+        switch wait {
+        case .tripsAgain: LocalizedStringKey("Albumist rechnet die Reisen gerade neu. Gleich wieder möglich.")
+        // The first analysis or one that goes on can take long: no "gleich".
+        case .analysis: LocalizedStringKey("Albumist analysiert gerade deine Fotos. Danach wieder möglich.")
+        case .creatingAlbums: LocalizedStringKey("Albumist legt gerade Alben an. Danach wieder möglich.")
+        }
+    }
+}
+
 private extension TripChange {
     var isSplit: Bool {
         if case .split = self { return true }
         return false
+    }
+}
+
+/// "Mit der Reise davor/danach zusammenlegen": in the accent while it can be tapped, in the
+/// system's greys while it waits (a plain button keeps the colours it is given).
+private struct MergeRowLabel: View {
+    var title: LocalizedStringKey
+    var detail: Text
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.s) {
+            Image(systemName: "arrow.triangle.merge")
+                .font(.title3)
+                .foregroundStyle(isEnabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
+                .frame(width: 32)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                detail
+                    .font(.subheadline)
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+            }
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 }
 

@@ -2004,10 +2004,17 @@ final class AppModel {
         _ = await changeTrips { $0.withoutSplitsAndMerges() }
     }
 
+    /// Why a split, a merge, "Aufheben" or the reset in the settings waits now, nil when one can
+    /// be made. `changeTrips` refuses exactly then; the workshop and the settings grey these
+    /// controls and say why next to them (`TripChangeWaitNote`).
+    var tripChangeWait: TripWorkshop.Wait? {
+        TripWorkshop.wait(creatingAlbums: execution.isRunning, analysing: analysis.isRunning, check: analysis.kind == .check)
+    }
+
     /// Stores the change (it is part of the decisions copy in the backup) and starts the
     /// analysis that applies it. Not while an analysis already read the old corrections.
     private func changeTrips(_ change: (TripCorrections) -> TripCorrections) async -> Bool {
-        guard let pipeline, !analysis.isRunning, !execution.isRunning else { return false }
+        guard let pipeline, tripChangeWait == nil else { return false }
         do {
             let updated = change(try await pipeline.tripCorrections())
             try await pipeline.setTripCorrections(updated)

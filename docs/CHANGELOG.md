@@ -50,6 +50,13 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- Reise-Werkstatt (UI-Lauf 44375768011): Direkt nach dem Teilen war „Mit der Reise danach
+  zusammenlegen“ gesperrt, solange Albumist die Reisen neu rechnete, sah aber tippbar aus und sagte
+  nichts. Jetzt sind „Zusammenlegen“, „Aufheben“, „Reise teilen“ und in den Einstellungen „Reisen
+  wieder automatisch erkennen“ in dieser Zeit grau, und darunter steht mit kleinem Ladekreis,
+  warum: „Albumist rechnet die Reisen gerade neu. Gleich wieder möglich.“ (während der ersten
+  Analyse „Albumist analysiert gerade deine Fotos. Danach wieder möglich.“, beim Anlegen „Albumist
+  legt gerade Alben an. Danach wieder möglich.“). Danach werden sie von selbst wieder aktiv.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

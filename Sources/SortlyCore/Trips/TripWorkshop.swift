@@ -146,4 +146,29 @@ public enum TripWorkshop {
         }
         return (before, after)
     }
+
+    /// What a split, a merge, "Aufheben" and "Reisen wieder automatisch erkennen" wait for. A
+    /// change is applied by an analysis, so none is taken while one runs (it read the changes
+    /// before) or while albums are made (a check follows them); each change starts a check
+    /// itself, so right after one the next waits. The screens grey these controls and say why
+    /// next to them until it ends (UI run 44375768011: right after a split the merge row was
+    /// off, looked tappable and said nothing).
+    public enum Wait: Hashable, Sendable {
+        /// A check works out the trips again: the one a change starts, or one for new photos.
+        /// Soon done.
+        case tripsAgain
+        /// The first analysis, or one that goes on after an interruption: until it is done,
+        /// which can take a while.
+        case analysis
+        /// Albumist makes albums in Photos.
+        case creatingAlbums
+    }
+
+    /// Nil when a change can be made now. `check`: the running analysis is a check after a
+    /// complete one, not the first or a resumed one.
+    public static func wait(creatingAlbums: Bool, analysing: Bool, check: Bool) -> Wait? {
+        if creatingAlbums { return .creatingAlbums }
+        guard analysing else { return nil }
+        return check ? .tripsAgain : .analysis
+    }
 }

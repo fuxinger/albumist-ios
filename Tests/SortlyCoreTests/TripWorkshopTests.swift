@@ -159,4 +159,56 @@ struct TripWorkshopTests {
         #expect(parts.filter { $0.inferredAssetIDs.contains(between) }.count == 1)
         #expect(parts.last?.inferredAssetIDs.contains(between) == true)
     }
+
+    // MARK: Waiting (UI run 44375768011)
+
+    /// A split, a merge or "Aufheben" starts a check; until it ends, and while albums are made,
+    /// the next change waits. Whenever it waits there is a reason to say, and only then.
+    @Test func aChangeWaitsOnlyWithAReasonToSay() {
+        #expect(TripWorkshop.wait(creatingAlbums: false, analysing: false, check: false) == nil)
+        #expect(TripWorkshop.wait(creatingAlbums: false, analysing: false, check: true) == nil)
+        // The check a change starts (or one for new photos) is short: "Gleich wieder möglich".
+        #expect(TripWorkshop.wait(creatingAlbums: false, analysing: true, check: true) == .tripsAgain)
+        // The first analysis, or one that goes on after an interruption, can take long: no "gleich".
+        #expect(TripWorkshop.wait(creatingAlbums: false, analysing: true, check: false) == .analysis)
+        // Albums first: the check after them is said once they are made.
+        #expect(TripWorkshop.wait(creatingAlbums: true, analysing: false, check: false) == .creatingAlbums)
+        #expect(TripWorkshop.wait(creatingAlbums: true, analysing: true, check: true) == .creatingAlbums)
+    }
+
+    /// Right after a split the merge row was off while the check ran, looked tappable and said
+    /// nothing (the settings' "Reisen wieder automatisch erkennen" too). The model refuses a
+    /// change exactly while `TripWorkshop.wait` gives a reason, both screens take their state
+    /// from it and show the note next to the controls, and every reason is in the catalog with
+    /// English. The App does not build on Linux, so its sources are read.
+    @Test func waitingTripControlsSayWhyOnTheirScreen() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func source(_ path: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+        }
+        let model = try source("App/Sortly/Model/AppModel.swift")
+        let workshop = try source("App/Sortly/Views/TripWorkshopView.swift")
+        let settings = try source("App/Sortly/Views/SettingsView.swift")
+        // Booleans first: an expectation on `contains` would print the whole file.
+        let modelUsesTheRule = model.contains("TripWorkshop.wait(")
+        let refusesByTheRule = model.contains("tripChangeWait == nil else { return false }")
+        #expect(modelUsesTheRule, "AppModel does not take the waiting from TripWorkshop.wait")
+        #expect(refusesByTheRule, "changeTrips refuses for another reason than the screens say")
+        for (name, view) in [("TripWorkshopView", workshop), ("SettingsView", settings)] {
+            let showsTheNote = view.contains("TripChangeWaitNote(")
+            let waitsSilently = view.contains(".disabled(model.analysis.isRunning")
+            #expect(showsTheNote, "\(name): its trip controls wait without saying why")
+            #expect(!waitsSilently, "\(name): waits for the analysis without saying why")
+        }
+        let catalog = try StringCatalogTests.catalog()
+        for reason in ["Albumist rechnet die Reisen gerade neu. Gleich wieder möglich.",
+                       "Albumist analysiert gerade deine Fotos. Danach wieder möglich.",
+                       "Albumist legt gerade Alben an. Danach wieder möglich."] {
+            let shown = workshop.contains("\"\(reason)\"")
+            #expect(shown, "Not shown: \(reason)")
+            let english = catalog[reason].flatMap { StringCatalogTests.localization($0, "en") }
+                .flatMap { $0["stringUnit"] as? [String: Any] }?["value"] as? String
+            #expect(english?.isEmpty == false, "Not in the catalog with English: \(reason)")
+        }
+    }
 }

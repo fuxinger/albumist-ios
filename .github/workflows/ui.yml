@@ -31,6 +31,14 @@ name: UI flow
 #   where later runs and the TestFlight gate find the result again. A group whose result for
 #   this app and test code was red runs again when asked, but its green never counts (a red test
 #   is fixed, not re-run to green).
+#   Quick mode (pull requests, or "quick" by hand; never in a TestFlight run): the tests get
+#   SORTLY_UI_QUICK=1 and the long device test skips itself. A group whose files read that
+#   switch has another test fingerprint then, so a quick green never stands for a full one.
+#   The last job, "UI verdict (full|quick)", checks every group for this app and its test code
+#   (the same check as the TestFlight gate), also when no group had to run; the release gate
+#   (ci_gate.py) needs "UI verdict (full)" green.
+#   A group whose simulator was lost before its first test in every pass has no result (neither
+#   green nor red): its job fails in "Simulator lost before the first test", not in "Run UI tests".
 #
 # Each group runs through .github/scripts/ui_tests.py: a pass that the simulator service lost
 # (an explicit "Error returned in reply from CoreSimulatorService", "Timed out waiting for AX
@@ -53,6 +61,10 @@ on:
         description: 'auto (groups without a green result for this app and their test code), all, or group names'
         type: string
         default: auto
+      quick:
+        description: Quick (SORTLY_UI_QUICK=1, the long device test skips itself); a quick result never counts for an upload
+        type: boolean
+        default: false
   # testflight.yml runs the UI flow for the commit it uploads, in the same run (release: true).
   workflow_call:
     inputs:
@@ -64,6 +76,10 @@ on:
         description: auto, all, or group names (see workflow_dispatch)
         type: string
         default: auto
+      quick:
+        description: Quick run (see workflow_dispatch); never with release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -71,6 +87,9 @@ permissions:
 env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
+  # Quick mode (top of this file): pull requests and runs started with quick, never a TestFlight
+  # run. The same expression is in the name of the "UI verdict" job (no env there).
+  UI_QUICK: ${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'true' || '' }}
 
 # The Mac queue (Profi-Analyse 16.11., Top 3, decided 17.11.: only one Mac-heavy strand at a
 # time). Every UI run and every stress pass (ui-stress.yml) of every branch shares the group
@@ -129,7 +148,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           UI_GROUPS: ${{ inputs.groups || 'auto' }}
-        run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS"
+        run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick}
 
   core-linux:
     # Same tests as CI's "Core tests (Linux)" (CI runs them for this commit too, but a manual
@@ -147,6 +166,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install SQLite headers
         run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev > /dev/null
       - name: Build and test
@@ -162,6 +183,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode
       - name: Install XcodeGen
@@ -226,8 +249,13 @@ jobs:
       INCREASE_CONTRAST: ${{ matrix.increase_contrast }}
       REDUCE_MOTION: ${{ matrix.reduce_motion }}
       VIDEO: ${{ matrix.video }}
+      # Quick mode (SORTLY_UI_QUICK=1 in the tests; xcodebuild hands TEST_RUNNER_* variables to
+      # the test runner without the prefix). Only for groups whose tests read it (matrix.quick).
+      TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode --runtime
       - name: Boot simulator (in the background)
@@ -257,19 +285,38 @@ jobs:
           for _ in $(seq 1 180); do [ -f sim-ready ] && break; sleep 5; done
           cat sim-boot.log
           [ "$(cat sim-ready 2>/dev/null)" = ok ] || { echo "simulator did not boot"; exit 1; }
+      - name: Built tests present
+        # Its own step: a build without the .xctestrun is not a test result (ui_evidence.py
+        # counts only "Run UI tests"); earlier_attempts.py counts it as machinery.
+        id: built
+        run: |
+          XCTESTRUN=$(find products -maxdepth 1 -name '*.xctestrun' | sort | head -1)
+          [ -n "$XCTESTRUN" ] || { echo "::error::no .xctestrun in the build products"; exit 1; }
+          echo "xctestrun=$XCTESTRUN" >> "$GITHUB_OUTPUT"
       - name: Run UI tests
         env:
           UDID: ${{ steps.sim.outputs.udid }}
+          XCTESTRUN: ${{ steps.built.outputs.xctestrun }}
         run: |
           set +e
-          XCTESTRUN=$(ls products/*.xctestrun 2>/dev/null | head -1)
-          [ -n "$XCTESTRUN" ] || { echo "::error::no .xctestrun in the build products"; exit 1; }
           flags=()
           [ "$REDUCE_MOTION" = "true" ] && flags+=(--reduce-motion --a11y-summary)
           [ "$INCREASE_CONTRAST" = "true" ] && flags+=(--increase-contrast)
           [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
             --only "$ONLY" --skip "$SKIP" "${flags[@]}"
+          status=$?
+          # 75: the simulator was lost before the first test in every pass, no test ran
+          # (build/no-test-started); the next step fails the job, not this one.
+          [ "$status" = 75 ] && exit 0
+          exit "$status"
+      - name: Simulator lost before the first test
+        # No test result for this group (ui_evidence.py: neither green nor red); the job fails
+        # here so that the run is not green. earlier_attempts.py counts it as machinery.
+        if: hashFiles('build/no-test-started') != ''
+        run: |
+          echo "::error title=UI $GROUP::no test started: $(cat build/no-test-started). Start the group again."
+          exit 1
       - name: Job summary
         if: always()
         run: |
@@ -311,6 +358,34 @@ jobs:
           path: build/flaky-*.json
           retention-days: 14
           if-no-files-found: ignore
+
+  verdict:
+    # The run's verdict (the owner's rule of 17.11.): every group green for exactly this app and
+    # its own test code, from this run or an earlier one, and none red for that pair; the same
+    # check as the TestFlight gate (ui_evidence.py gate). Also when no group had to run. The
+    # release gate (ci_gate.py) needs this job green in its full form; a quick verdict (pull
+    # requests) never counts for an upload or a release. Not in a TestFlight run: there the
+    # "UI gate" of testflight.yml does this.
+    name: UI verdict (${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'quick' || 'full' }})
+    needs: [plan, ui]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # actions: read for the runs and jobs, checks: read for the flaky warnings of reused jobs.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commits of earlier results, to recompute their fingerprints from git.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: UI groups green for this app and test code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}
 
   summary:
     name: UI summary (retries and flaky tests)

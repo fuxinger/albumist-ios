@@ -54,6 +54,39 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertIn("matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}", text)
         self.assertIn("- name: Plan the UI groups", text)
 
+    def test_ui_flow_ends_in_a_verdict_and_quick_never_uploads(self):
+        text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        verdict = text.split("\n  verdict:\n", 1)[1].split("\n  summary:\n", 1)[0]
+        quick = "(!inputs.release && (github.event_name == 'pull_request' || inputs.quick))"
+        # ci_gate.py looks for this name; the gate runs also when no group ran.
+        self.assertIn(f"name: UI verdict (${{{{ {quick} && 'quick' || 'full' }}}})", verdict)
+        self.assertIn("if: ${{ !cancelled() && needs.plan.result == 'success' && !inputs.release }}", verdict)
+        self.assertIn("python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}", verdict)
+        self.assertIn(f"UI_QUICK: ${{{{ {quick} && 'true' || '' }}}}", text)
+        self.assertIn("plan --groups \"$UI_GROUPS\" ${UI_QUICK:+--quick}", text)
+        self.assertIn("TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}", text)
+        testflight = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        self.assertIn("python3 .github/scripts/ui_evidence.py gate\n", testflight)  # full, never --quick
+        self.assertIn("      release: true\n      quick: false\n", testflight)
+
+    def test_ui_flow_checkouts_keep_no_token(self):
+        for step in re.split(r"\n\s+- ", read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))):
+            if "actions/checkout@" in step:
+                with self.subTest(step=step[:80]):
+                    self.assertIn("persist-credentials: false", step)
+
+    def test_machinery_steps_exist(self):
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
+        import earlier_attempts
+        names = set()
+        for path in WORKFLOWS:
+            names |= set(re.findall(r"\n\s+(?:- )?name: (.+)", read(path)))
+        for step in earlier_attempts.MACHINERY_STEPS - {"Set up job", "Initialize containers", "Stop containers",
+                                                         "Complete job"}:
+            with self.subTest(step=step):
+                self.assertIn(step, names)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,10 @@ MACHINERY_STEPS = {
     # the groups alone, every time anew (ui_evidence.py): a red group stays red for them in
     # every attempt, so a re-run of them can hide nothing.
     "Plan the UI groups", "UI groups green for this app and test code",
+    # ui.yml: the build products without tests (a build or artifact problem, not a test), and
+    # a group whose simulator was lost before its first test in every pass (ui_tests.py exit
+    # 75): no test ran, so a re-run hides no test result.
+    "Built tests present", "Simulator lost before the first test",
 }
 MACHINERY_PREFIXES = ("Upload ", "Download ", "Post ", "Run actions/checkout@")
 NOT_PASSED = ("failure", "timed_out", "cancelled")

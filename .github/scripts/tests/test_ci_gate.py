@@ -63,20 +63,47 @@ class FullGateTests(unittest.TestCase):
         return {"id": 7 if workflow == "ci" else 8, "run_number": number, "name": workflow, "event": "push",
                 "html_url": f"https://example/{workflow}", "head_sha": os.environ["SHA"], "status": status, "conclusion": conclusion}
 
-    def fake(self, ci=("completed", "success"), ui=None):
-        """ui: None (no UI flow run for this commit) or (status, conclusion). Callables are re-read each call."""
+    def fake(self, ci=("completed", "success"), ui=None, verdict=("full", "success"), more=()):
+        """ui: None (no UI flow run for this commit) or (status, conclusion). Callables are re-read each call.
+        verdict: (mode, conclusion) of its "UI verdict" job, or None. more: older UI runs
+        (number, status, conclusion, verdict)."""
         def api(path, **params):
             ci_state = ci() if callable(ci) else ci
             ui_state = ui() if callable(ui) else ui
+            ui_runs = [(12, *ui_state, verdict)] if ui_state else []
+            ui_runs += list(more)
             if path == "actions/workflows/ci.yml/runs":
                 return {"workflow_runs": [self.run_("ci", *ci_state)] if ci_state else []}
             if path == "actions/workflows/ui.yml/runs":
-                return {"workflow_runs": [self.run_("ui", *ui_state)] if ui_state else []}
+                return {"workflow_runs": [dict(self.run_("ui", s, c, n), id=100 + n) for n, s, c, _ in ui_runs]}
             if path == "actions/runs/7/jobs":
                 return {"jobs": [{"name": "iOS build and tests (macOS)", "status": "completed",
                                   "conclusion": "success"}]}
+            for n, _, _, v in ui_runs:
+                if path == f"actions/runs/{100 + n}/jobs":
+                    return {"jobs": [{"name": "UI plan (which groups run)", "conclusion": "success"}]
+                            + ([{"name": f"UI verdict ({v[0]})", "conclusion": v[1]}] if v else [])}
             raise AssertionError(path)
         return api
+
+    def test_a_quick_ui_run_never_counts(self):
+        ci_gate.api = self.fake(ui=("completed", "success"), verdict=("quick", "success"))
+        done, ok, reason = ci_gate.check()
+        self.assertEqual((done, ok), (False, False))
+        self.assertTrue(reason.startswith("no UI flow run in full mode"), reason)
+        self.assertIn("1 quick run(s)", reason)
+        # An older full run of the same commit decides.
+        ci_gate.api = self.fake(ui=("completed", "success"), verdict=("quick", "success"),
+                                more=[(10, "completed", "success", ("full", "success"))])
+        self.assertEqual(ci_gate.check()[:2], (True, True))
+
+    def test_a_ui_run_without_a_green_full_verdict_is_not_green(self):
+        for verdict in (("full", "failure"), None):
+            with self.subTest(verdict=verdict):
+                ci_gate.api = self.fake(ui=("completed", "success"), verdict=verdict)
+                done, ok, reason = ci_gate.check()
+                self.assertEqual((done, ok), (True, False))
+                self.assertIn("no green 'UI verdict (full)' job", reason)
 
     def test_no_ui_run_is_not_green(self):
         # A push to main (merge commit) has no UI flow run; before 16.11. CI alone made it green.
@@ -138,6 +165,7 @@ class FullGateTests(unittest.TestCase):
         self.assertIn("ok=false", output)
         self.assertIn("needs a green UI flow run on exactly this commit", output)
         self.assertIn("start 'UI flow' by hand on this commit", output)
+        self.assertIn("'UI verdict (full)'", output)
         self.assertIn("Not green", printed)
 
     def test_missing_ui_run_is_waited_for_from_when_ci_passed(self):

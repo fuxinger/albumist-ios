@@ -140,12 +140,16 @@ jobs:
     name: UI flow
     needs: tests
     uses: ./.github/workflows/ui.yml
-    # actions: read for its "UI plan" (earlier results of the groups).
+    # actions: read for its "UI plan" (earlier results of the groups); checks: read for its
+    # "UI verdict" job, which is skipped here (release) but must not ask for more than it gets.
+    # quick stays false: the upload needs full results.
     permissions:
       contents: read
       actions: read
+      checks: read
     with:
       release: true
+      quick: false
       groups: ${{ inputs.ui_groups || 'auto' }}
 
   stress:

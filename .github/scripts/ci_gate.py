@@ -11,8 +11,13 @@ Used before a release tag (release.yml, without waiting). Green means:
      commit); a commit that never was a PR head, e.g. a merge commit pushed to main, needs a
      manual "UI flow" run on that commit first. Since 18.11. such a run (groups "auto") only
      runs the groups that have no green result yet for exactly this app and their own test
-     code (ui_evidence.py), so for a merge commit with an already tested app it takes minutes;
-     a green UI flow run therefore means: every group green for this app and its test code.
+     code (ui_evidence.py), so for a merge commit with an already tested app it takes minutes.
+     Since 19.11. the run must also have a green job "UI verdict (full)": its check
+     (ui_evidence.py gate) says every group is green, in full mode, for this app and its own
+     test code and none is red for that pair. A run whose verdict is "quick" (every pull
+     request; the long device test skips itself) never counts: the newest full run decides,
+     and a commit with quick runs only needs a full "UI flow" run by hand (only the groups
+     whose quick and full test code differ run then).
 
 TestFlight does not use this gate since 17.11.: testflight.yml runs CI, the UI flow and the
 stress pass itself, in the same run, before it uploads. Those called workflows are part of the
@@ -41,6 +46,7 @@ NO_RUN = float(os.environ.get("NO_RUN_MINUTES", "15")) * 60
 POLL = 60
 CI, CI_JOB = "ci.yml", "iOS build and tests"
 UI = "ui.yml"
+UI_VERDICT, UI_QUICK_VERDICT = "UI verdict (full)", "UI verdict (quick)"
 NO_CI, NO_UI = "no CI run", "no UI flow run"
 
 
@@ -103,15 +109,26 @@ def check():
         return True, False, (f"the iOS tests did not run for this commit ({state}); only documentation "
                              "changed since the last tested commit, so there is nothing new to ship (to test this exact "
                              "commit anyway, start CI by hand on it)")
-    ui = newest_run(UI)
-    if ui is None:
-        # Not green, ever: main() waits NO_RUN_MINUTES for one to appear, then gives up.
-        return False, False, f"{NO_UI} for {SHA[:7]} yet ({describe(ci)} passed)"
-    if ui["status"] != "completed":
-        return False, False, f"CI passed; waiting for {describe(ui)}"
-    if ui["conclusion"] != "success":
-        return True, False, f"CI passed, but {describe(ui)} ended with '{ui['conclusion']}'"
-    return True, True, f"{describe(ci)} and {describe(ui)} passed"
+    # The newest UI flow run in full mode decides; quick runs (pull requests) are passed over.
+    quick = 0
+    for ui in sorted(runs(UI), key=lambda r: -r["run_number"]):
+        jobs = api(f"actions/runs/{ui['id']}/jobs", per_page=100).get("jobs", [])  # its newest attempt
+        if any(j.get("name", "").endswith(UI_QUICK_VERDICT) for j in jobs):
+            quick += 1
+            continue
+        if ui["status"] != "completed":
+            return False, False, f"CI passed; waiting for {describe(ui)}"
+        if ui["conclusion"] != "success":
+            return True, False, f"CI passed, but {describe(ui)} ended with '{ui['conclusion']}'"
+        verdict = [j for j in jobs if j.get("name", "").endswith(UI_VERDICT)]
+        if not verdict or any(j.get("conclusion") != "success" for j in verdict):
+            return True, False, (f"CI passed, but {describe(ui)} has no green '{UI_VERDICT}' job "
+                                 f"({', '.join(str(j.get('conclusion')) for j in verdict) or 'none'}); start 'UI flow' "
+                                 "by hand on this commit")
+        return True, True, f"{describe(ci)} and {describe(ui)} ({UI_VERDICT}) passed"
+    # Not green, ever: main() waits NO_RUN_MINUTES for one to appear, then gives up.
+    only_quick = f", only {quick} quick run(s) of pull requests, which never count" if quick else ""
+    return False, False, f"{NO_UI} in full mode for {SHA[:7]} yet ({describe(ci)} passed{only_quick})"
 
 
 def missing_run(kind):
@@ -120,10 +137,10 @@ def missing_run(kind):
     if kind == NO_CI:
         return (f"{NO_CI} appeared for {SHA[:7]} within {minutes} min (CI runs for pull requests and "
                 "pushes to main; start it by hand)")
-    return (f"{NO_UI} for {SHA[:7]} (none appeared within {minutes} min after CI passed): the gate needs "
-            "a green UI flow run on exactly this commit. UI flow runs for pull requests on the PR's head "
-            "commit; for a commit that never was one (e.g. a merge commit pushed to main) start "
-            "'UI flow' by hand on this commit, then run this workflow again")
+    return (f"{NO_UI} in full mode for {SHA[:7]} (none appeared within {minutes} min after CI passed): the "
+            f"gate needs a green UI flow run on exactly this commit with a green '{UI_VERDICT}' job. Pull "
+            "request runs are quick and do not count; start 'UI flow' by hand on this commit (quick off), "
+            "then run this workflow again")
 
 
 def main():

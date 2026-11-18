@@ -55,7 +55,9 @@ Die Analyse liest den vollen Text, gespeichert wird nur eine verkleinerte Fassun
 
 ## Externe Dienste
 - **Apple-Geocoder** (`CLGeocoder`): Für Stadtnamen werden einzelne Koordinaten (eine pro
-  Rasterzelle, keine Fotos) an Apple gesendet. Abschaltbar; dann nur Offline-Karte.
+  Rasterzelle, keine Fotos) an Apple gesendet. Abschaltbar; dann nur Offline-Karte. Namen, die
+  du Orten gibst, und Suchbegriffe gehen nie dorthin: Die Suche nach einem selbst benannten Ort
+  liest den Namen nur aus dem Suchindex im Speicher des iPhones.
 - **iCloud-Fotos:** Originale von Screenshots/Dokumenten werden nur mit Zustimmung über
   Apples Fotosystem geladen.
 - **App Store (StoreKit):** einmaliger Kauf, abgewickelt von Apple.

@@ -58,6 +58,12 @@
   „oder“ zwischen Grenzen. Orte behalten ihre ID beim Sprachwechsel und beim Neuaufbau;
   Jahreszeiten der Südhalbkugel; Schwärzen von IBAN, Karten und Ausweisen in mehr Schreibweisen;
   ein ganzer Tag zu Hause trennt eine Reise. Release-Tor: ein Grün nach Wiederholung zählt nie.
+- Prüfung 18.11. (Suche): Einen Ort, dem du selbst einen Namen gegeben hast („Mein Kleingarten“),
+  fand die Suche erst, wenn sein Album angelegt war. Jetzt findet sie ihn gleich unter diesem
+  Namen und bietet ihn beim Tippen an, nach dem Umbenennen nur unter dem neuen, ohne Namen nicht
+  mehr; mit dem Album danach bleibt es ein Treffer mit denselben Fotos. Groß- und
+  Kleinschreibung, Umlaute (auch „ae“) und „ß“ spielen keine Rolle. Das gilt auch für einen Ort,
+  an dem du öfter bist, wenn du ihn unter „Anpassen“ umbenennst. Der Name bleibt auf dem iPhone.
 - Erster iPhone-Test (15.11.): Analyse endet nicht mehr bei Wärme, Stromsparmodus oder
   wenn iOS die Hintergrundzeit beendet, sondern wird langsamer, wartet oder geht beim Öffnen
   weiter; jeder lange Lauf fragt nach Hintergrundzeit (Sperrbildschirm); Fortschritt zählt

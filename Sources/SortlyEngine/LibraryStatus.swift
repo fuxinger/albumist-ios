@@ -83,6 +83,25 @@ public enum LibraryStatus {
         organizedBySortly: [OrganizationArea: Set<AssetID>] = [:],
         calendar: Calendar = .sortlyDefault
     ) -> (states: [AssetID: AssetOrganizationState], reasons: Reasons) {
+        let all = computeAll(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
+                             contentAnalyzed: contentAnalyzed, organizedBySortly: organizedBySortly, calendar: calendar)
+        return (all.states, all.reasons)
+    }
+
+    /// `computeWithReasons`, plus for every ignored photo the state it has once it is no longer
+    /// ignored (`ifNotIgnored`): "Nicht mehr ignorieren" shows it at once from there, before the
+    /// recount (`IgnoreChange`). An ignored photo's area facts do not depend on the ignore, so
+    /// this is exactly what the recount after "Nicht mehr ignorieren" gives.
+    static func computeAll(
+        facts: [AssetFacts],
+        snapshot: ProposalSnapshot?,
+        settings: OrganizationSettings,
+        overrides: OverrideSet,
+        contentAnalyzed: Set<AssetID>,
+        organizedBySortly: [OrganizationArea: Set<AssetID>],
+        calendar: Calendar
+    ) -> (states: [AssetID: AssetOrganizationState], reasons: Reasons, ifNotIgnored: [AssetID: AssetOrganizationState]) {
+        var ifNotIgnored: [AssetID: AssetOrganizationState] = [:]
         var proposedIn: [OrganizationArea: Set<AssetID>] = [:]
         var uncertainIn: [OrganizationArea: Set<AssetID>] = [:]
         /// Photos with an album in the area: a suggestion of their own, dismissed or standing in.
@@ -203,9 +222,13 @@ public enum LibraryStatus {
                     }
                 }
             }
-            result[f.id] = resolver.state(for: f.id, facts: areas, ignored: overrides.isIgnored(f.id), excluded: overrides.isExcluded(f.id))
+            let ignored = overrides.isIgnored(f.id), excluded = overrides.isExcluded(f.id)
+            result[f.id] = resolver.state(for: f.id, facts: areas, ignored: ignored, excluded: excluded)
+            if ignored && !excluded {
+                ifNotIgnored[f.id] = resolver.state(for: f.id, facts: areas, ignored: false, excluded: false)
+            }
         }
-        return (result, reasons)
+        return (result, reasons, ifNotIgnored)
     }
 
     /// The albums that make a suggestion's photos count as sorted (`AlbumMatcher.sortingAlbums`):
@@ -304,6 +327,11 @@ public struct DerivedLibraryStatus: Sendable {
     /// be read and wait for their retry. While any is left, the ring's count does not fall
     /// (`RecountState`, third review of the labels fix, finding 2).
     public var labelsUntried = 0
+    /// The photos the user ignored (from the overrides the status was derived with).
+    public var ignored: Set<AssetID> = []
+    /// For each ignored photo (not excluded), its state once it is no longer ignored
+    /// (`LibraryStatus.computeAll`), for "Nicht mehr ignorieren" at once (`IgnoreChange`).
+    public var ifNotIgnored: [AssetID: AssetOrganizationState] = [:]
 
     public init() {}
 
@@ -331,11 +359,13 @@ public struct DerivedLibraryStatus: Sendable {
         // Photos Albumist put into albums count as sorted in the area of their suggestion,
         // also once that suggestion is no longer shown.
         let byAlbumist = LibraryStatus.organizedBySortly(managed, inventory: inventory, snapshot: snapshot)
-        let (states, reasons) = LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                                                  contentAnalyzed: analyzed, organizedBySortly: byAlbumist,
-                                                                  calendar: calendar)
+        let all = LibraryStatus.computeAll(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
+                                           contentAnalyzed: analyzed, organizedBySortly: byAlbumist, calendar: calendar)
+        let states = all.states, reasons = all.reasons
         result.states = states
         result.reasons = reasons
+        result.ifNotIgnored = all.ifNotIgnored
+        result.ignored = overrides.ignored
         // The trial year counts only its own photos (the ring said "839 von 5.683" over the
         // whole library while the suggestions were for 2026).
         let resolver = OrganizationStatusResolver(primaryAreas: settings.primaryAreas)

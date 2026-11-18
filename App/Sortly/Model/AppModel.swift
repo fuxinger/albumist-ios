@@ -242,6 +242,14 @@ final class AppModel {
     var userTitles: [SortlyID: String] = [:]
     var facts: [AssetFacts] = [] { didSet { bucketCache = [:]; atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { bucketCache = [:] } }
+    /// The photos the user ignored, and the state of each once it is no longer ignored, from
+    /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
+    /// "Nicht mehr ignorieren" are shown at once, before the recount.
+    @ObservationIgnored private var ignoredIDs: Set<AssetID> = []
+    @ObservationIgnored private var statesIfNotIgnored: [AssetID: AssetOrganizationState] = [:]
+    @ObservationIgnored private var ignoreChanges = IgnoreChange()
+    /// The store writes of ignore taps, one after the other in the order of the taps.
+    @ObservationIgnored private var ignoreWrites: Task<Void, Never>?
     /// Filtered and sorted library buckets; rebuilt only when facts or states change, not on
     /// every redraw of the library (a selection tap redraws it).
     @ObservationIgnored private var bucketCache: [InboxBucket: [AssetFacts]] = [:]
@@ -1627,7 +1635,7 @@ final class AppModel {
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
             guard derivedCalls.isNewest(call), scope == analysisScope else { return }
-            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot) }
+            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot, call: call) }
         } catch {
             message = .failure(error.localizedDescription)
         }
@@ -1635,8 +1643,14 @@ final class AppModel {
     }
 
     /// `snapshot`: the one the status was derived from (read before the await).
-    private func assignDerived(_ derived: DerivedLibraryStatus, snapshot: ProposalSnapshot?) {
-        states = derived.states
+    /// `call`: the `refreshDerived` call that made `derived`; ignore taps it does not include yet
+    /// are laid over it (`IgnoreChange.settle`).
+    private func assignDerived(_ derived: DerivedLibraryStatus, snapshot: ProposalSnapshot?, call: Int) {
+        var visible = IgnoreChange.Shown(derived)
+        ignoreChanges.settle(&visible, call: call)
+        states = visible.states
+        ignoredIDs = visible.ignored
+        statesIfNotIgnored = visible.ifNotIgnored
         statusReasons = derived.reasons
         let shown = progress
         progress = derived.progress
@@ -2820,28 +2834,82 @@ final class AppModel {
     /// (design review D4: ignoring could not be taken back). A new id per action, so the
     /// note shows again and its timer starts over.
     struct IgnoreUndo: Identifiable, Equatable {
-        let id = UUID()
+        let id: UUID
         let assets: [AssetID]
+
+        init(id: UUID = UUID(), assets: [AssetID]) {
+            self.id = id
+            self.assets = assets
+        }
     }
 
     var lastIgnored: IgnoreUndo?
 
     /// "Ignorieren": no confirmation, because it can be taken back right away ("Widerrufen")
     /// and later in the "Ignoriert" area ("Nicht mehr ignorieren").
+    ///
+    /// Shown at once (app-speed, 18.11.2026: UI runs measured 1.2 to 1.3 s to the note, the
+    /// time of the store write and the whole recount): the photos move to "Ignoriert" and the
+    /// note comes on the main actor, from what is shown (`IgnoreChange`); the store write and
+    /// the recount follow in the background and give the same states. The ring's numbers come
+    /// with the recount, once, so none moves back. A write that fails says so, and the recount
+    /// shows the photos where they really are.
     func ignore(_ assets: [AssetID]) {
-        Task {
-            guard let store else { return }
-            do {
-                let added = try await store.ignoreAssets(assets)
-                saveSafetyBackup()
-                await refreshDerived()
-                guard !added.isEmpty else { lastIgnored = nil; return }
-                let undo = IgnoreUndo(assets: added)
-                lastIgnored = undo
-                announceAndExpire(undo)
-            } catch {
-                message = .failure(error.localizedDescription)
+        guard store != nil else { return }
+        let added = IgnoreChange.newlyIgnored(assets, ignored: ignoredIDs)
+        let step = showIgnore(assets, ignore: true)
+        let undo = added.isEmpty ? nil : IgnoreUndo(assets: added)
+        lastIgnored = undo
+        if let undo { announceAndExpire(undo) }
+        writeIgnore(step) { store in
+            let stored = try await store.ignoreAssets(assets)
+            // The store decides what was new; "Widerrufen" takes back exactly that. Differs
+            // only if the shown set was behind the store (then the note says the store's count).
+            if stored != added, let undo, self.lastIgnored?.id == undo.id {
+                self.lastIgnored = stored.isEmpty ? nil : IgnoreUndo(id: undo.id, assets: stored)
             }
+        }
+    }
+
+    /// "Nicht mehr ignorieren" and "Widerrufen": Albumist counts and suggests these photos
+    /// again. Shown at once like `ignore`.
+    func unignore(_ assets: [AssetID]) {
+        guard store != nil else { return }
+        if let last = lastIgnored, !Set(last.assets).isDisjoint(with: assets) { lastIgnored = nil }
+        let step = showIgnore(assets, ignore: false)
+        writeIgnore(step) { store in
+            _ = try await store.unignoreAssets(assets)
+        }
+    }
+
+    /// Lays one tap over what is shown; cheap: only the tapped photos change.
+    private func showIgnore(_ assets: [AssetID], ignore: Bool) -> Int {
+        MainThreadWatch.shared.section("ignore shown") {
+            var shown = IgnoreChange.Shown(states: states, ignored: ignoredIDs, ifNotIgnored: statesIfNotIgnored)
+            let step = ignoreChanges.record(assets, ignore: ignore, in: &shown)
+            states = shown.states
+            ignoredIDs = shown.ignored
+            statesIfNotIgnored = shown.ifNotIgnored
+            return step
+        }
+    }
+
+    /// Writes one tap to the store after the taps before it, then counts again in the
+    /// background. Counts that begin after the write read it (`IgnoreChange.stored`).
+    private func writeIgnore(_ step: Int, _ write: @escaping @Sendable @MainActor (SortlyStore) async throws -> Void) {
+        let previous = ignoreWrites
+        ignoreWrites = Task { [weak self] in
+            await previous?.value
+            guard let self, let store = self.store else { return }
+            do {
+                try await write(store)
+                self.ignoreChanges.stored(step, nextCall: self.derivedCalls.newest + 1)
+                self.saveSafetyBackup()
+            } catch {
+                self.ignoreChanges.failed(step)
+                self.message = .failure(error.localizedDescription)
+            }
+            await self.refreshDerived()
         }
     }
 
@@ -2860,21 +2928,6 @@ final class AppModel {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(voiceOver || UITestSupport.isRunning ? 20 : 6))
             if self?.lastIgnored?.id == undo.id { self?.lastIgnored = nil }
-        }
-    }
-
-    /// "Nicht mehr ignorieren" and "Widerrufen": Albumist counts and suggests these photos again.
-    func unignore(_ assets: [AssetID]) {
-        if let last = lastIgnored, !Set(last.assets).isDisjoint(with: assets) { lastIgnored = nil }
-        Task {
-            guard let store else { return }
-            do {
-                try await store.unignoreAssets(assets)
-                saveSafetyBackup()
-                await refreshDerived()
-            } catch {
-                message = .failure(error.localizedDescription)
-            }
         }
     }
 

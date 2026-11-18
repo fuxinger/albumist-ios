@@ -258,6 +258,8 @@ public struct OverrideSet: Sendable {
         alwaysAddInAlbum.contains(asset.rawValue + "|" + album.rawValue)
     }
     public func isIgnored(_ asset: AssetID) -> Bool { ignoredAssets.contains(asset) }
+    /// Every photo the user ignored.
+    public var ignored: Set<AssetID> { ignoredAssets }
     public func isExcluded(_ asset: AssetID) -> Bool { excludedAssets.contains(asset) }
     public func isExcludedAlbum(_ album: CollectionID) -> Bool { excludedAlbums.contains(album) }
     public func isRejected(_ source: SortlyID) -> Bool { rejectedSources.contains(source) }

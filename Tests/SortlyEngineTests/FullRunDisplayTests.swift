@@ -39,9 +39,13 @@ struct FullRunDisplayTests {
         #expect(sim.analyzer.contentCalls.withLock { $0 } == sim.library.total)
         // Every stage was shown, in order (places has work: town names are looked up).
         #expect(run.stagesShown == Stage.allCases, "\(run.stagesShown)")
-        // The online budget of a run in the app was used, then the rest waits for later.
-        #expect(run.report?.onlineRequests == 60)
+        // A run in the app asks what Albumist's limit allows without a wait (device test 18.11.,
+        // build 36: with a budget of 60 it waited for the minute, "Apple antwortet gleich" with
+        // the count standing still), then the rest waits for later.
+        #expect(run.report?.onlineRequests == RequestThrottle.apple.maxRequests)
         #expect((run.report?.placesPendingOnline ?? 0) > 0)
+        // The places step never stands still (invariant 11 checks every run for a wait).
+        #expect(sim.longestStill("a", in: .places) <= .seconds(10), "\(sim.longestStill("a", in: .places))")
         // Review I4: on a device 30 % slower than the usual times, every clock time shown is
         // within 2 min (or a tenth of the time left, when more) of the real end. Clock times
         // are rounded to the minute, and to 5 min above 30 min left.
@@ -52,16 +56,14 @@ struct FullRunDisplayTests {
         sim.finish()
     }
 
-    /// (b) Pause in places (while Apple's geocoder refuses), in content and in text; each
-    /// time a new run goes on.
+    /// (b) Pause in places (while the town names are looked up), in content and in text; each
+    /// time a new run goes on. (Until 18.11. the Pause came while the run waited 30 s for Apple
+    /// after a refusal; a run in the app no longer waits for it: `throttledGeocoderAndUsedUpBudget`.)
     @Test func pauseInEveryStageThenResume() async throws {
         let sim = try Sim()
-        // Apple refuses four lookups in a row: the run waits 30 s for it.
-        sim.geocoder.refuseCalls(10..<14)
-        let places = await sim.run("b1 pause in places", pause: .whenGeocoderRefusedFor(.seconds(5)))
+        let places = await sim.run("b1 pause in places", pause: .whenGeocoderCalled(10))
         #expect(places.report?.pausedBecause == .userPaused)
         #expect(places.lastStage == .places, "paused in \(String(describing: places.lastStage))")
-        sim.geocoder.refuseCalls(0..<0)
         // Fortsetzen within the hour does not ask Apple for town names again (device test
         // 15.11.: "es dauert lange, bis die App nach Pause weiterläuft").
         let askedInFirstRun = sim.geocoder.calls.withLock { $0 }
@@ -190,6 +192,9 @@ struct FullRunDisplayTests {
         let throttled = await sim.run("f1 geocoder throttled")
         sim.expectComplete(throttled)
         #expect(throttled.report?.placesThrottled == true)
+        // Refused once: no more asking, no wait (device test 18.11., build 36).
+        #expect(sim.geocoder.calls.withLock { $0 } == 6)
+        #expect(sim.geocoder.refusals.withLock { $0.count } == 1)
         sim.geocoder.refuseCalls(0..<0)
         let asked = sim.geocoder.calls.withLock { $0 }
         let soon = await sim.run("f2 within the hour")
@@ -200,7 +205,7 @@ struct FullRunDisplayTests {
         sim.clock.advance(.seconds(AnalysisPipeline.foregroundOnlineCooldown))
         let budget = await sim.run("f3 after the hour, budget used up")
         sim.expectComplete(budget)
-        #expect(budget.report?.onlineRequests == 60)
+        #expect(budget.report?.onlineRequests == RequestThrottle.apple.maxRequests)
         #expect((budget.report?.placesPendingOnline ?? 0) > 0)
         sim.finish()
     }
@@ -698,7 +703,8 @@ struct SimMarker {
 
 enum PauseTrigger: Sendable {
     case when(stage: Stage, atLeast: Double)
-    case whenGeocoderRefusedFor(Duration)
+    /// Once Apple's geocoder was asked this many times.
+    case whenGeocoderCalled(Int)
 }
 
 enum PauseAction: Sendable { case pause, cancel }
@@ -729,6 +735,8 @@ final class Sim: @unchecked Sendable {
     /// Every value the card's number showed (run, time, value), and the bar drawn then.
     private(set) var shownValues: [(run: String, t: Duration, value: Double)] = []
     private(set) var shownBars: [(run: String, t: Duration, bar: Double)] = []
+    /// The step each of `shownValues` was shown in.
+    private(set) var shownSteps: [Stage] = []
     /// The bar the card drew last, as a value and as the six segments' fills.
     private var lastShownBar: Double = 0
     private var lastFills: [Double] = []
@@ -797,9 +805,19 @@ final class Sim: @unchecked Sendable {
     /// The longest stretch of the run `label` in which the card stood still: the number on
     /// whole percent did not change and the bar did not move by 0.2 % (invariant 8's measure,
     /// without its exceptions for waiting).
-    func longestStill(_ label: String) -> Duration {
-        let values = shownValues.filter { $0.run == label }
-        let bars = shownBars.filter { $0.run == label }
+    /// `in`: only the time the card showed that stage (from its first report to the next
+    /// stage's first).
+    func longestStill(_ label: String, in stage: Stage? = nil) -> Duration {
+        let indices = shownValues.indices.filter { shownValues[$0].run == label }
+        var kept = indices
+        if let stage {
+            // Up to and with the next stage's first report: the time until it counts too.
+            guard let first = indices.first(where: { shownSteps[$0] == stage }) else { return .zero }
+            let end = indices.first { $0 > first && shownSteps[$0] != stage } ?? indices.last ?? first
+            kept = indices.filter { $0 >= first && $0 <= end }
+        }
+        let values = kept.map { shownValues[$0] }
+        let bars = kept.map { shownBars[$0] }
         var longest: Duration = .zero
         var since: Duration?
         var percentThen: Int?
@@ -847,9 +865,8 @@ final class Sim: @unchecked Sendable {
             case .when(let stage, let share):
                 guard let p = progress, p.stage == stage, p.total > 0 else { return nil }
                 due = Double(p.completed) >= share * Double(p.total)
-            case .whenGeocoderRefusedFor(let wait):
-                guard let refused = geocoder.refusals.withLock({ $0.first }) else { return nil }
-                due = t >= refused + wait
+            case .whenGeocoderCalled(let calls):
+                due = geocoder.calls.withLock { $0 } >= calls
             }
             guard due, current.action == .pause || current.task != nil else { return nil }
             armed = nil
@@ -1064,6 +1081,13 @@ final class Sim: @unchecked Sendable {
             }
         }
 
+        // 11. A run in the app never waits for Apple's geocoder (device test 18.11., build 36:
+        //     "Apple antwortet gleich" for 20–30 s while the count stood still). Only the
+        //     overnight refinement may wait; every run here is a run in the app.
+        if let wait = timeline.first(where: { if case .progress(let p) = $0.kind { p.waitLeft != nil } else { false } }) {
+            fail(run, 11, "the run waited for Apple's geocoder (\(describe(wait.kind)))", at: wait.t)
+        }
+
         // 6. Pause ends the run within one item plus 2 s.
         if let pause {
             let stage = timeline.last { if case .progress = $0.kind { $0.t <= pause } else { false } }.flatMap { e -> Stage? in
@@ -1083,7 +1107,8 @@ final class Sim: @unchecked Sendable {
     /// 3b. The drawn bar never goes back, also over Pause and restarts; never more than 1 % of a
     ///     step ahead of the real value.
     /// 8.  While the run works, something on the card changes at least every 10 s: the count,
-    ///     Apple's wait, or the gliding bar (limit set by the product owner, 15.11.).
+    ///     the countdown of a wait for Apple, or the gliding bar (limit set by the product owner,
+    ///     15.11.).
     /// 9.  No finish time while the run waits or after Pause; "Gleich fertig" only in the last
     ///     3 minutes (checked against the real end in `finish`).
     /// Each clock time the card showed in the run `label`: seconds left then, and how far it
@@ -1139,6 +1164,7 @@ final class Sim: @unchecked Sendable {
         // on): the count or the step's name, the finish time, the bar, Apple's wait spinner.
         var lastText: String?
         var lastPercent: Int?
+        var lastCountdown: Int?
         var lastFinishShown: FinishEstimate?
         var barAtChange = lastShownBar
         var shown: [(Duration, FinishEstimate)] = []
@@ -1235,6 +1261,7 @@ final class Sim: @unchecked Sendable {
                 title = newTitle
                 lastShown = max(lastShown, real)
                 shownValues.append((run.label, event.t, real))
+                shownSteps.append(p.stage)
                 // As AppModel.receive: the marker moves on only once the value is not held.
                 // As AppModel.receive: before the run is back, the marker keeps the stopped
                 // position with the value shown now.
@@ -1287,7 +1314,11 @@ final class Sim: @unchecked Sendable {
                 //    enough); Apple's wait shows its own spinner.
                 let barMoved = bar - barAtChange >= 0.002
                 let percent = Int((real * 100).rounded())
-                if percent != lastPercent || barMoved || p.waitLeft != nil || waiting || paused {
+                // A wait for Apple counts only while its countdown moves ("weiter in 25 s").
+                let countdown = p.waitLeft.map { Int($0.seconds.rounded(.up)) }
+                let countdownMoved = countdown != nil && countdown != lastCountdown
+                lastCountdown = countdown
+                if percent != lastPercent || barMoved || countdownMoved || waiting || paused {
                     if !waiting, !paused, event.t - lastChange > .seconds(10) {
                         fail(run, 8, "card stood still for \(String(format: "%.1f", (event.t - lastChange).seconds)) s while the run worked (\(p.stage) \(p.completed)/\(p.total))", at: lastChange)
                     }

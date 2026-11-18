@@ -312,11 +312,13 @@ public struct ProgressEstimator: Sendable {
     public mutating func setWorkload(_ workload: AnalysisWorkload) { self.workload = workload }
 
     /// A progress report of the run. `appleWait`: the report says the run waits for Apple's
-    /// geocoder (`Progress.waitLeft`). That time says nothing about the speed per item (the
-    /// limit is Apple's, and after its online budget the step resolves the rest offline in
-    /// seconds): it is not measured, and the speed settles again afterwards, but a time already
-    /// shown stays. Measured in the simulated run with a refusing geocoder: counted, the waits
-    /// put the finish time more than 5 min too late.
+    /// geocoder (`Progress.waitLeft`). Since 18.11. (device test, build 36) only the overnight
+    /// refinement waits; a run in the app never does, so its finish time never sees one. That
+    /// time says nothing about the speed per item (the limit is Apple's, and after its online
+    /// budget the step resolves the rest offline in seconds): it is not measured, and the speed
+    /// settles again afterwards, but a time already shown stays (the card shows the wait's
+    /// countdown meanwhile, not the time). Measured in the simulated run with a refusing
+    /// geocoder: counted, the waits put the finish time more than 5 min too late.
     public mutating func record(step: AnalysisStep, completed: Int, total: Int, at now: Instant, appleWait: Bool = false) {
         guard var r = running, r.step == step else {
             if let r = running { keepMeasured(r) }
@@ -975,6 +977,8 @@ public enum AnalysisCardState: Sendable, Equatable {
         public var catchingUpTo: Int?
         public var waiting: PauseReason?
         public var slower: SlowReason?
+        /// The places step waits for Apple's geocoder (the overnight refinement only): the card
+        /// shows the wait's countdown instead of the finish time.
         public var appleWait = false
         /// Photos has not answered for a while (`PhotosDeadline.slowFor`), or the last run ended
         /// on it and the next try is due (`AppModel`): said instead of a count standing still.

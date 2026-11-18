@@ -175,9 +175,13 @@ jobs:
         if: failure() && hashFiles('build-log.txt') != ''
         run: |
           if grep -q "StoreKit test environment not" build-log.txt; then
-            xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log show --last 30m --style compact \
-              --predicate 'process == "storekitd" OR subsystem BEGINSWITH "com.apple.storekit" OR subsystem BEGINSWITH "com.apple.StoreKit"' \
-              2>&1 | tail -400 || true
+            # xcodebuild shuts the simulator down after the tests (CI 44363508667: "device is not
+            # booted"); its log store survives that, so the simulator is booted again to read it.
+            UDID="${{ steps.sim.outputs.udid }}"
+            xcrun simctl bootstatus "$UDID" -b > /dev/null 2>&1 || true
+            xcrun simctl spawn "$UDID" log show --last 45m --style compact \
+              --predicate 'process CONTAINS[c] "storekit" OR subsystem CONTAINS[c] "storekit" OR process == "appstored"' \
+              2>&1 | tail -600 || true
           fi
       - name: Build UI tests
         # The UI tests run in their own workflow (ui.yml); building them here finds a compile

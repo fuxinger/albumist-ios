@@ -28,25 +28,13 @@ class CacheTests(unittest.TestCase):
                 self.assertNotRegex(text, r"actions/cache(?:/restore|/save)?@")
                 self.assertNotRegex(text, r"\n\s+cache(?:-dependency-path)?:\s*\S")
 
-    def test_checkouts_of_another_ref_keep_no_token(self):
-        for path in WORKFLOWS:
-            steps = re.split(r"\n\s+- ", read(path))
-            for step in steps:
-                if "actions/checkout@" in step and re.search(r"\n\s+ref:", step):
-                    with self.subTest(workflow=os.path.basename(path)):
-                        self.assertIn("persist-credentials: false", step)
-
-
-    def test_scheduled_workflows_check_out_only_their_own_commit(self):
+    def test_no_checkout_of_another_ref(self):
         # CodeQL actions/cache-poisoning (PR #1, PR #7): nightly.yml checked out another ref
-        # (needs.pick.outputs.sha) in the default branch's context. A scheduled workflow tests
-        # the commit it runs on.
+        # (needs.pick.outputs.sha) in the default branch's context. Every workflow tests the
+        # commit it runs on; a checkout with "ref:" needs a reason (and persist-credentials:
+        # false) before this test is changed.
         for path in WORKFLOWS:
-            text = read(path)
-            trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0]
-            if not re.search(r"^  schedule:", trigger, re.M):
-                continue
-            for step in re.split(r"\n\s+- ", text):
+            for step in re.split(r"\n\s+- ", read(path)):
                 if "actions/checkout@" in step:
                     with self.subTest(workflow=os.path.basename(path)):
                         self.assertNotRegex(step, r"\n\s+ref:")

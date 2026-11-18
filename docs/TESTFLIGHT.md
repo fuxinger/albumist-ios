@@ -111,7 +111,9 @@ Actions > **TestFlight feedback** > Run workflow.
   UI-Tests und den kleinen Härtetest. Nur wenn alles grün ist, baut ein Mac das Archiv, prüft
   es, signiert es beim Export und lädt es hoch; danach bekommt der Commit das Git-Tag
   `build-<Nummer>`, und „Was testen“ wird gesetzt. Zwei bis zweieinhalb Stunden bis zum
-  Hochladen (die UI-Tests allein 75–100 Minuten), danach bis zu 50 Minuten, bis „Was testen“
+  Hochladen, wenn alle UI-Gruppen laufen (die UI-Tests allein 75–100 Minuten); laufen nur
+  einzelne Gruppen oder keine (Abschnitt „UI-Tests: nur betroffene Gruppen“), bestimmt der
+  Härtetest (rund 45 Minuten) die Dauer. Danach bis zu 50 Minuten, bis „Was testen“
   steht. Kein Teil wartet auf andere Läufe. Ein zweiter TestFlight-Lauf wartet, bis der erste
   ganz fertig ist, „Was testen“ eingeschlossen. Wiederholungen nach einem Simulator-Ausfall und
   Tests, die erst in der Wiederholung grün wurden, zählt der Job „Repeats and flaky tests“ für
@@ -136,7 +138,10 @@ Actions > **TestFlight feedback** > Run workflow.
   der Nachricht des Tags („attempt 2; earlier attempts: …“). Kann der Upload-Job die früheren
   Versuche nicht lesen (GitHub-API antwortet nicht), lädt er ebenfalls nicht hoch; dann nur ihn
   wiederholen. Die gebauten UI-Tests bleiben für **Re-run failed jobs** 3 Tage liegen; danach
-  einen neuen Lauf starten.
+  einen neuen Lauf starten. Dasselbe gilt über Läufe hinweg: war eine UI-Gruppe für genau diese
+  App und genau ihren Testcode einmal rot, zählt ein späteres Grün derselben Kombination nicht,
+  auch nicht aus einem anderen Lauf. Erst eine Änderung am Test oder an der App (die Korrektur)
+  macht sie wieder hochladbar.
 - Notfall: **force** lädt ohne Tests hoch. So ein Build ist überall als „FORCED – untested“
   markiert: in der Zusammenfassung des Upload-Jobs, in der Nachricht des Tags `build-<Nummer>`
   und als erste Zeile von „Was testen“.
@@ -170,6 +175,142 @@ Actions > **TestFlight feedback** > Run workflow.
   `.github/toolchain.json`, nie mit einer Beta. Nach dem Hochladen trägt der Commit das Git-Tag
   `build-<Nummer>` (`git show build-41` zeigt den Code von Build 41 und in der Nachricht des
   Tags, ob die Tests liefen).
+
+## UI-Tests: nur betroffene Gruppen (Regel Fuchs, 17.11.2026)
+
+Die UI-Tests laufen in fünf Gruppen (`.github/ui-groups.json`): Gerätezustände, voller Ablauf
+mit Video, übrige Abläufe mit Kauf und Suche, Barrierefreiheit, Kontrast. Seit 18.11. läuft
+eine Gruppe nur noch, wenn es für sie kein grünes Ergebnis für genau diese App und genau ihren
+Testcode gibt.
+
+- **Fingerabdruck der App**: eine Prüfsumme über alle Dateien, aus denen die App gebaut wird.
+  Gezählt wird alles außer UI-Tests (`App/SortlyUITests`), Unit-Tests (`App/SortlyTests`,
+  `Tests`), `docs/`, `*.md`, `.github/` (außer `.github/toolchain.json` mit dem festgelegten
+  Xcode, das zählt mit), `scripts/`, `tools/` und `design/`. Also zählen unter anderem
+  `App/Sortly/**`, `Sources/**`, `Package.swift`, `App/project.yml` mit den Build-Einstellungen,
+  Ressourcen und die StoreKit-Datei. Eine neue, unbekannte Datei zählt zur App: im Zweifel
+  läuft eine Gruppe einmal zu viel, nie einmal zu wenig. Gleicher Fingerabdruck heißt:
+  Byte für Byte dieselben Dateien.
+- **Fingerabdruck einer Gruppe**: ihre Testdateien, alle Hilfsdateien, die diese benutzen (zum
+  Beispiel `UITestOnboarding.swift`), ihre Zeile in `.github/ui-groups.json` und die Skripte,
+  über die jede Gruppe läuft (`ui_tests.py`, `pick_simulator.py`, `toolchain.py`). Welche Datei
+  welche benutzt, liest `.github/scripts/ui_groups.py` bei jedem Lauf aus den Swift-Dateien;
+  keine Liste von Testnamen ist fest eingetragen. Übersicht von Hand:
+  `python3 .github/scripts/ui_groups.py map`.
+- Daraus folgt: **nur Testcode geändert** → nur die Gruppen, deren Dateien sich geändert haben;
+  **gemeinsame Hilfsdatei geändert** → jede Gruppe, die sie benutzt; **irgendetwas an der App
+  geändert** → alle Gruppen. Welche Gruppen eine Änderung wieder laufen lässt:
+  `python3 .github/scripts/ui_groups.py affected --base <alter Commit>`.
+- Jeder Gruppen-Job trägt beide Fingerabdrücke im Namen, zum Beispiel
+  „UI device conditions [device app 1a2b3c4d5e6f tests 9f8e7d6c5b4a]“. Daran finden spätere
+  Läufe das Ergebnis wieder (`.github/scripts/ui_evidence.py`). Gezählt wird ein grünes
+  Ergebnis nur, wenn Git für den Commit dieses Laufs dieselben Fingerabdrücke ausrechnet, und
+  nur aus diesem Repository (nie aus einem Fork), aus den letzten 14 Tagen.
+- **Beispiel** (die Nacht zum 18.11.): Commit 4bb7fdd änderte nur eine Wartezeit in
+  `SortlyFlowUITests.swift`. Bisher liefen danach alle fünf Gruppen (über 80 Minuten). Jetzt
+  laufen „voller Ablauf“ und „übrige Abläufe“ (beide haben Tests in dieser Datei);
+  Gerätezustände, Barrierefreiheit und Kontrast übernimmt der Lauf aus dem letzten grünen Lauf
+  mit derselben App und demselben Testcode. Die Zusammenfassung des Jobs „UI plan“ zeigt für
+  jede Gruppe, woher ihr Grün kommt oder warum sie läuft.
+- **Rot bleibt rot** (wie bei „Re-run failed jobs“): Ist eine Gruppe für dieselbe App und
+  denselben Testcode irgendwann rot gewesen (ein Test im Schritt „Run UI tests“ gescheitert oder
+  abgelaufen), zählt kein späteres Grün dieser Kombination, egal aus welchem Lauf. Ein
+  wackelnder Test wird so gezählt und behoben, nie durch Wiederholen versteckt. Die Gruppe darf
+  zur Beobachtung noch einmal laufen; ihr Grün steht dann als „red before for this key“ in der
+  Tabelle und zählt für TestFlight nicht. Rot ohne Testlauf (Simulator nicht gestartet, Lauf
+  abgebrochen) ist kein Ergebnis und zählt weder als Rot noch als Grün.
+- **Längere Wartezeiten in Tests brauchen einen gemessenen Grund** (Regel 17.11.): wer ein
+  `timeout` oder eine Wartezeit verlängert, nennt im Commit die Messung (Lauf und gemessene
+  Sekunden), so wie 4bb7fdd („say how long it took“). Eine reine Verlängerung ohne Messung ist
+  keine Korrektur.
+- **TestFlight**: der Lauf ruft die UI-Tests mit „auto“ auf. Vor dem Hochladen prüft der Job
+  **UI gate** auf Linux, dass jede Gruppe für genau diese App und ihren Testcode grün ist (aus
+  diesem Lauf oder einem früheren) und keine dafür rot war. Seine Zusammenfassung nennt jede
+  übernommene Gruppe mit Lauf und Commit und listet deren wackelnde Tests (Test erst in der
+  Wiederholung grün); das Tag `build-<Nummer>` nennt sie ebenfalls („UI groups: device reused
+  from run …“). Antwortet die GitHub-API nicht, lädt der Lauf nicht hoch; dann nur diesen Job
+  wiederholen.
+- Von Hand: Actions > **UI flow** > Run workflow, Feld **groups**: `auto` (Vorgabe), `all`
+  (alle Gruppen) oder Gruppennamen (`device flow-full flow-other accessibility contrast`). In
+  **TestFlight** gibt es dafür **ui_groups** (`auto` oder `all`).
+
+## Messung der Mac-Läufe (18.11.2026)
+
+Gemessen aus den Job-Protokollen der Läufe zu Commit 4bb7fdd (Pull Request 1): UI-Lauf
+44202318875, CI-Lauf 44202319006, CodeQL-Lauf 44202319351. Zeiten in Minuten.
+
+| Job | Start bis Xcode bereit | Gebaute Tests laden und entpacken | Warten auf den Simulator | Tests (davon reine Testzeit) | Ganzer Job |
+|---|---|---|---|---|---|
+| UI-Bau (bauen und hochladen) | 0,1 | – | – | Bau 1,4 | 1,7 |
+| Gerätezustände | 0,2 | 4,0 | 2,4 | 59,6 (58,2; test11 allein 25,9) | 66,7 |
+| voller Ablauf mit Video | 0,2 | 0,1 | 5,1 | 12,2 (10,0) | 18,1 |
+| übrige Abläufe (rot) | 0,3 | 0,7 | 4,3 | 55,8 (53,5) | 61,8 |
+| Barrierefreiheit (rot) | 0,2 | 0,0 | 4,9 | 24,1 (22,1) | 30,2 |
+| Kontrast | 0,2 | 1,7 | 2,3 | 13,1 (11,8) | 17,9 |
+| CI: Kern-Tests Linux | 0,6 (Container) | – | – | 3,9 (Bau 2,2, Lasttest 1,7) | 4,7 |
+| CI: iOS (macOS) | 0,3 | – | – | Kern 3,8, App bauen und testen 9,8, UI-Tests bauen 0,6, Texte 0,9 | 15,6 |
+| CodeQL Swift (macOS, rot) | 1,1 | – | – | Bau 24,4, dann Abbruch | 26,2 |
+
+- Der UI-Lauf dauerte 72,8 Minuten: Kern-Tests Linux 4,3, UI-Bau 1,7, dann die längste Gruppe
+  (Gerätezustände) 66,7. Gebaut wird schon nur einmal (UI-Bau), die Gruppen laden das Ergebnis.
+- Bauen ist billig (UI-Bau 1,4 Minuten). Ein Bau-Cache auf dem Mac lohnt sich darum nicht;
+  es gibt weiter keinen (Regel: nur, wenn er nachweislich keinen alten Stand ausliefern kann).
+- Jede Gruppe wartet 2,3–5,1 Minuten auf den Simulator, obwohl er schon ab der ersten
+  Sekunde im Hintergrund startet; dazu 1,3–2,3 Minuten im Testschritt vor dem ersten Test (App
+  und Test-Runner installieren). Wo die Simulator-Minuten bleiben (Start, Fotozugriff,
+  Einstellungen), zeigen ab jetzt die Zeilen `UI_BOOT_TIMING` im Schritt „Wait for the
+  simulator“. Ein vorgewärmter Simulator geht auf GitHubs Macs nicht: jeder Job bekommt eine
+  frische Maschine.
+- Laden und Entpacken der gebauten Tests dauerte bei zwei Gruppen 1,7 und 4,0 Minuten statt
+  Sekunden, weil der Simulator gleichzeitig startet und die Platte belegt. Nicht geändert.
+- Barrierefreiheit startete 14 Minuten später als die anderen Gruppen: alle fünf Macs waren
+  belegt (CIs iOS-Job, drei Gruppen und 26 Minuten lang die CodeQL-Swift-Analyse, die am Ende
+  scheiterte). Kontrast wartet ohnehin, bis eine Gruppe fertig ist (höchstens vier zugleich).
+
+Umgesetzt (18.11.):
+
+| Änderung | Ersparnis |
+|---|---|
+| Nur betroffene UI-Gruppen (oben) | Teständerung nur in `AccessibilityUITests.swift`: rund 37 statt 73 Minuten; Änderung nur in `SortlyFlowUITests.swift`: zwei statt fünf Gruppen, rund 115 Mac-Minuten weniger (die Dauer bestimmt dann „übrige Abläufe“, rund 62 Minuten) |
+| TestFlight ohne Änderung an App und Tests seit dem letzten grünen UI-Lauf | UI-Tests rund 2 statt 75–100 Minuten; der Lauf dauert dann etwa CI 20 + Härtetest 45 + Hochladen 15 Minuten |
+| TestFlight: die Kern-Tests unter Linux laufen nicht zweimal (CI hat sie für denselben Commit gerade bestanden) | rund 5 Minuten bis zum UI-Bau |
+| CodeQL Swift nicht mehr bei jedem Pull Request, sondern nachts, und nur das Kernpaket | 26 Mac-Minuten je Push; im gemessenen Lauf hätte Barrierefreiheit 14 Minuten früher begonnen |
+
+Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-Tests neu messen):
+
+1. Gruppen neu verteilen: Gerätezustände (58 Minuten Testzeit, test11 allein 26) und übrige
+   Abläufe (54) bestimmen die Dauer, voller Ablauf (10) und Kontrast (12) sind kurz. Zum
+   Beispiel test11 in die Gruppe „voller Ablauf“ und test05/07/08 zu den Gerätezuständen: die
+   längste Gruppe hätte dann etwa 45 statt 58 Minuten Testzeit.
+2. Im TestFlight-Lauf die UI-Tests schon nach den Linux-Teilen von CI starten statt nach dem
+   iOS-Job (rund 16 Minuten früher). Kostet Mac-Minuten, wenn der iOS-Job dann rot wird, und
+   weicht von „erst schnell, dann teuer“ ab.
+
+## Code-Scanning (CodeQL)
+
+- Python und Workflows: bei jedem Pull Request, auf Linux.
+- Swift: nachts um 01:30 UTC und von Hand, nur das Kernpaket (`Sources/**`). Die App selbst
+  lässt sich zurzeit nicht analysieren: unter dem CodeQL-Werkzeug kann der Compiler Xcodes
+  Makro-Helfer nicht starten („swift-plugin-server … Bad CPU type in executable“, Lauf
+  44202319351), und die App braucht Makros (`@Observable`, `@State`). Das Kernpaket braucht
+  keine.
+- Die ReDoS-Warnung in `test_summary.py` ist behoben (keine verschachtelten Wiederholungen mehr).
+- Die Warnung „cache poisoning“ in `nightly.yml` ist begründet und abgesichert: kein Workflow
+  liest einen Actions-Cache (ein Test prüft das), der nächtlich getestete Stand kommt nur aus
+  diesem Repository, und er bekommt kein Token.
+
+## Schritte für den Besitzer (18.11.2026)
+
+1. Nach dem Zusammenführen: Security > Code scanning. Die ReDoS-Warnung schließt sich beim
+   nächsten Scan von selbst. Bleibt „Cache poisoning“ in `nightly.yml` offen: die Warnung öffnen
+   > **Dismiss alert** > „Won't fix“, Begründung: „Kein Workflow liest einen Actions-Cache
+   (test_workflows.py), Ref nur aus diesem Repository, persist-credentials: false.“
+2. Falls in den Branch-Regeln (Settings > Branches oder Rules) „Analyze (swift)“ als
+   Pflicht-Check eingetragen ist: entfernen, denn er läuft bei Pull Requests nicht mehr.
+3. Settings > Code security > Code scanning: „Default setup“ muss aus bleiben (die Datei
+   `codeql.yml` ist das „Advanced setup“; beide zugleich gehen nicht).
+4. Beim ersten Lauf nach dem Zusammenführen laufen alle UI-Gruppen einmal (ältere Läufe tragen
+   noch keine Fingerabdrücke). Erst danach werden Ergebnisse übernommen.
 
 ## Freigabe vor dem Hochladen (geplant, Schritte für den Besitzer)
 

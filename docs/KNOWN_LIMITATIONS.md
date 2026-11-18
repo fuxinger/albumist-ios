@@ -70,6 +70,14 @@
     der App zuerst gezeigte die Zellkennung, der andere Zelle und erste Foto-ID, was nicht
     immer die Kennung von vorher ist (etwa wenn ältere Fotos nachgekommen sind).
 
+- Derselbe Ort als Ort, an dem du öfter bist, und als häufiger Ort (gleich ab der Hälfte der
+  Fotos des größeren): Bleibt der häufige Ort, weil er dir gehört (benannt, gewählt oder mit
+  Album), fällt der Ort, an dem du öfter bist, weg. Fotos, die nur er hatte (bei Fuchs 87 von
+  509 rund um Zwiesel), sind dann in keinem dieser beiden Vorschläge; ohne anderen Vorschlag
+  (etwa das Ortsalbum ihrer Stadt) bleiben sie „Nicht sortiert“, und ihre Reisen kommen nicht
+  zurück, weil du dort öfter bist. Mit Absicht so (Entscheidung vom
+  18.11.2026), damit kein zweites Album für fast dieselben Fotos vorgeschlagen wird.
+
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.
 - Analyse auf Vorschaubildern; kleine Motive werden eventuell nicht erkannt.

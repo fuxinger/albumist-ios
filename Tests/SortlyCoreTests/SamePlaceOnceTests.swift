@@ -185,4 +185,69 @@ struct SamePlaceOnceTests {
         let found = suggestions(analysis)
         #expect(Set(found.map(\.id)) == Set((1...5).map { SortlyID("frequent-\($0)") } + [Self.recurringID]))
     }
+
+    /// Re-review: both are the user's (the recurring place has its album, the frequent place
+    /// was named in the app) and share 480 of 500 photos. The curation's "same photos" step
+    /// (90 %) must not drop the frequent place either: only "Zwiesel" was left.
+    @Test func bothTheUsersStayAlsoAtNinetySixPercent() {
+        let shared = Self.facts("z", count: 480)
+        let around = Self.facts("y", count: 20, from: "2026-01-03")
+        var analysis = AnalysisSnapshot(facts: shared + around, frequentPlaces: [Self.frequent(shared)],
+                                        recurringPlaces: [Self.recurring(shared + around)])
+        analysis.applied = [Self.recurringID]
+        analysis.chosen = [SortlyID("frequent-zwiesel")]
+        #expect(Set(suggestions(analysis).map(\.id)) == [SortlyID("frequent-zwiesel"), Self.recurringID])
+        // The frequent place larger than the recurring one: the recurring place with its album stays too.
+        var larger = AnalysisSnapshot(facts: shared + around, frequentPlaces: [Self.frequent(shared + around)],
+                                      recurringPlaces: [Self.recurring(shared)])
+        larger.applied = [Self.recurringID]
+        larger.chosen = [SortlyID("frequent-zwiesel")]
+        #expect(Set(suggestions(larger).map(\.id)) == [SortlyID("frequent-zwiesel"), Self.recurringID])
+    }
+
+    /// Decision of the coordinator (re-review): the same place stays "half of the larger one".
+    /// When the recurring place goes for the user's frequent place, its own photos (the 87
+    /// around Zwiesel in Fuchs' library) have no place suggestion; they stay under "Nicht
+    /// sortiert". Pinned so that a change of this is deliberate.
+    @Test func theRecurringPlacesOwnPhotosHaveNoPlaceSuggestionWhenItGoes() {
+        let shared = Self.facts("z", count: 422)
+        let around = Self.facts("y", count: 87, from: "2026-01-03")
+        let analysis = AnalysisSnapshot(facts: shared + around, frequentPlaces: [Self.frequent(shared)],
+                                        recurringPlaces: [Self.recurring(shared + around)])
+        let found = all(analysis, names: [SortlyID("frequent-zwiesel"): "Waldhaus"])
+        let places = found.open.filter { $0.kind == .frequentPlace }
+        #expect(places.map(\.id) == [SortlyID("frequent-zwiesel")])
+        let aroundIDs = Set(around.map(\.id))
+        #expect(places.allSatisfy { $0.assetIDs.isDisjoint(with: aroundIDs) })
+        let standIn = found.standIns.first { $0.dropped == Self.recurringID }
+        #expect(standIn?.suggestion == SortlyID("frequent-zwiesel"))
+        #expect(standIn?.assetIDs == Set(shared.map(\.id)))
+    }
+
+    /// Re-review: the cap of five unnamed places counts no place the user named in the app or
+    /// chose (`chosen`): its name is in `user.titles`, not in the settings.
+    @Test func aPlaceNamedInTheAppIsNotCapped() {
+        var places: [FrequentPlace] = [], facts: [AssetFacts] = []
+        for n in 0...6 {
+            let own = Self.facts("p\(n)", count: 90 - n, from: "2026-01-0\(n + 1)")
+            facts += own
+            places.append(Self.frequent(own, id: "frequent-\(n)"))
+        }
+        var analysis = AnalysisSnapshot(facts: facts, frequentPlaces: places)
+        analysis.chosen = [SortlyID("frequent-6")]
+        let found = suggestions(analysis)
+        #expect(Set(found.map(\.id)) == Set([0, 1, 2, 3, 4, 6].map { SortlyID("frequent-\($0)") }))
+    }
+
+    /// Re-review (test gap): the user's frequent place and an unnamed one each hold half of a
+    /// recurring place of 100 photos. The recurring place goes for the user's place; the
+    /// unnamed place stays, because the recurring place that covered it is gone.
+    @Test func anUnnamedPlaceStaysWhenTheRecurringPlaceGoes() {
+        let mine = Self.facts("m", count: 50), other = Self.facts("o", count: 50, from: "2026-01-03")
+        let analysis = AnalysisSnapshot(facts: mine + other,
+                                        frequentPlaces: [Self.frequent(mine, id: "frequent-mine"), Self.frequent(other, id: "frequent-other")],
+                                        recurringPlaces: [Self.recurring(mine + other)])
+        let found = suggestions(analysis, names: [SortlyID("frequent-mine"): "Waldhaus"])
+        #expect(Set(found.map(\.id)) == [SortlyID("frequent-mine"), SortlyID("frequent-other")])
+    }
 }

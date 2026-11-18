@@ -85,7 +85,12 @@ extension ProposalEngine {
     ///   - home: which countries, regions and towns are home at some time (rule 1).
     ///   - standIns: gets, for every suggestion left out under rule 2 or 3, the suggestion that
     ///     stands for its photos. Rule 1 has none: home is no album at all.
-    func curated(_ proposals: [AlbumProposal], home: HomeContext, standIns: inout [StandIn]) -> [AlbumProposal] {
+    ///   - users: the suggestions that are the user's (named, chosen or with their album,
+    ///     `ProposalEngine.suggestEachPlaceOnce`). Such a frequent or recurring place is never
+    ///     left out under rule 3 for another place, trip or place album (re-review 18.11.: at
+    ///     480 of 500 shared photos the named place went).
+    func curated(_ proposals: [AlbumProposal], home: HomeContext, standIns: inout [StandIn],
+                 users: Set<SortlyID> = []) -> [AlbumProposal] {
         let tripFolder = labels.folder(for: .trips)
         func isPlaceAlbum(_ p: AlbumProposal) -> Bool {
             if case .placeCollection = p.kind { return p.folderPath.first != tripFolder }
@@ -139,7 +144,8 @@ extension ProposalEngine {
         // 3. The same photos under two names.
         func preference(_ p: AlbumProposal) -> Int? {
             switch p.kind {
-            case .frequentPlace: return p.requiresUserName ? 90 : 0
+            // Still without a name: after the others. Named in the app (`users`): like named.
+            case .frequentPlace: return p.requiresUserName && !users.contains(p.id) ? 90 : 0
             case .trip: return 10
             case .placeCollection(let level):
                 // Deeper levels first: a town before its country.
@@ -163,7 +169,15 @@ extension ProposalEngine {
             let p = list[offset]
             var shared: [Int: Int] = [:]
             for id in p.assetIDs { for k in keptOf[id] ?? [] { shared[k, default: 0] += 1 } }
+            func isPlace(_ q: AlbumProposal) -> Bool {
+                switch q.kind {
+                case .frequentPlace, .trip, .placeCollection: return true
+                default: return false
+                }
+            }
+            let isUsersPlace = p.kind == .frequentPlace && users.contains(p.id)
             let duplicate = shared.filter { kept, count in
+                if isUsersPlace && isPlace(list[kept]) { return false }
                 let larger = max(p.assetIDs.count, list[kept].assetIDs.count)
                 return Double(count) >= Double(larger) * Self.sameAlbumShare
             }.max { ($0.value, $1.key) < ($1.value, $0.key) }

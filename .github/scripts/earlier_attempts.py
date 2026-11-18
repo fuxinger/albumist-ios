@@ -43,7 +43,7 @@ MACHINERY_STEPS = {
     # ui.yml: the build products without tests (a build or artifact problem, not a test), and
     # a group whose every pass failed on the simulator or XCTest alone (ui_tests.py exit 75):
     # there is no test result, so a re-run hides none.
-    "Built tests present", "No test result (simulator or XCTest failed in every pass)",
+    "Note when the job started", "Built tests present", "No test result (simulator or XCTest failed in every pass)",
 }
 MACHINERY_PREFIXES = ("Upload ", "Download ", "Post ", "Run actions/checkout@")
 NOT_PASSED = ("failure", "timed_out", "cancelled")

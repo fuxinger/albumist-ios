@@ -56,7 +56,7 @@ def job(group, conclusion="success", step="success", job_id=None, end="2026-11-1
 def run(run_id, sha, jobs, event="workflow_dispatch", workflow="ui.yml", repo_name="owner/repo",
         created="2026-11-19T10:00:00Z", merge=None):
     """A run; a pull request run tests `merge` (its run-name ends "[merge <sha>]"), by default `sha`."""
-    title = f"A pull request [merge {merge or sha}]" if event == "pull_request" and merge != "" else "A title"
+    title = f"[merge {merge or sha}] A pull request" if event == "pull_request" and merge != "" else "A title"
     return ({"id": run_id, "run_number": run_id, "head_sha": sha, "event": event, "path": f".github/workflows/{workflow}",
              "created_at": created, "display_title": title, "status": "completed", "run_attempt": 1,
              "head_repository": {"full_name": repo_name}}, jobs)
@@ -78,6 +78,10 @@ class FakeVerifier:
 
     def changed_since(self, sha):
         return self.changed.get(sha)
+
+    def test_keys(self, sha):
+        _, *fps = self.commits.get(sha, (None, {}))
+        return {v[:12] for f in fps for v in f.values()}
 
 
 VERIFIER = FakeVerifier({"a" * 40: (APP, FPS), "b" * 40: (APP, TEST_ONLY_FPS), "c" * 40: ("f" * 64, {}),
@@ -231,6 +235,23 @@ class HistoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ui_evidence.CoverageError, "within one second"):
             ui_evidence.fetch_history(APP, None, VERIFIER, call=fake_api(same), now=NOW)
 
+    def test_runs_with_only_older_test_code_are_read_while_calls_are_left(self):
+        older = FakeVerifier(dict(VERIFIER.commits, **{"o" * 40: (APP, {g: "0" * 64 for g in NAMES})}))
+        runs = [run(i, "o" * 40, [job("device", tests="0" * 64, job_id=i)], created=f"2026-11-19T0{i}:00:00Z")
+                for i in range(1, 5)]
+        runs.append(run(9, "a" * 40, [job("device", job_id=9)]))
+        keys = ui_evidence.keys(ui_groups.Groups(HEAD))
+        info = {}
+        history = ui_evidence.fetch_history(APP, None, older, call=fake_api(runs), now=NOW, keys=keys, info=info)
+        self.assertEqual(len(history), 5)
+        self.assertEqual(info["older_skipped"], 0)
+        saved = ui_evidence.MAX_CALLS
+        ui_evidence.MAX_CALLS = ui_evidence.RESERVED_CALLS + 4  # two listings, run 9, one older run
+        self.addCleanup(setattr, ui_evidence, "MAX_CALLS", saved)
+        history = ui_evidence.fetch_history(APP, None, older, call=fake_api(runs), now=NOW, keys=keys, info=info)
+        self.assertEqual(sorted(r["id"] for r, _ in history), [4, 9])
+        self.assertEqual(info["older_skipped"], 3)
+
     def test_the_call_budget(self):
         runs = [run(i, "a" * 40, [job("device", job_id=i)]) for i in range(1, 6)]
         call = ui_evidence.counted(fake_api(runs), limit=3)
@@ -241,16 +262,34 @@ class HistoryTests(unittest.TestCase):
 class RedFromTheLogTests(unittest.TestCase):
     """A job stopped in "Run UI tests" is red only when its log shows a test result."""
 
-    def entries(self, logs):
-        runs = [run(1, "a" * 40, [job("device", "cancelled", "cancelled", job_id=11)])]
+    def entries(self, logs, **changes):
+        runs = [run(1, "a" * 40, [dict(job("device", "cancelled", "cancelled", job_id=11), **changes)])]
         return ui_evidence.results(runs, logs=ui_evidence.log_reader(fake_api(runs, logs=logs)))[0]["result"]
+
+    def test_the_last_result_line_of_this_group_decides(self):
+        stamp = "2026-11-19T02:01:06.8217400Z "
+        self.assertEqual(self.entries({11: stamp + "UI_RESULT device fail\n"}), "red")
+        self.assertEqual(self.entries({11: stamp + "UI_RESULT device infra\n" + FAILED_LOG}), "none")
+        # Another group's line, a line that only quotes one, or an earlier line do not decide.
+        self.assertEqual(self.entries({11: stamp + "UI_RESULT contrast fail\n"}), "none")
+        self.assertEqual(self.entries({11: stamp + "echo UI_RESULT device fail\n"}), "none")
+        self.assertEqual(self.entries({11: stamp + "UI_RESULT device fail\n" + stamp + "UI_RESULT device pass\n"}),
+                         "none")
+        # A failure echoed while the pass ran (UI_LIVE), then a cancel: red.
+        self.assertEqual(self.entries({11: stamp + "UI_LIVE " + FAILED_LOG + stamp + "##[error]The operation was canceled.\n"}),
+                         "red")
+
+    def test_a_job_stopped_by_its_time_limit_is_red(self):
+        cancelled = "##[error]The operation was canceled.\n"
+        self.assertEqual(self.entries({11: cancelled}, started_at="2026-11-19T09:00:00Z",
+                                      completed_at="2026-11-19T11:30:00Z"), "red")
+        self.assertEqual(self.entries({11: cancelled}, started_at="2026-11-19T09:00:00Z",
+                                      completed_at="2026-11-19T10:00:00Z"), "none")
 
     def test_logs(self):
         self.assertEqual(self.entries({}), "red")  # a failed test case
         self.assertEqual(self.entries({11: "UI_VERDICT device first: fail (a test failed)\n"}), "red")
         self.assertEqual(self.entries({11: "UI_RESULT device fail\n"}), "red")
-        self.assertEqual(self.entries({11: "##[error]The job running on runner X has exceeded the maximum execution "
-                                           "time of 150 minutes.\n"}), "red")
         # Cancelled while a test ran, no result in the log: no result.
         cancelled = "Test Case '-[SortlyUITests.DeviceUITests test01_Hot]' started.\n##[error]The operation was canceled.\n"
         self.assertEqual(self.entries({11: cancelled}), "none")

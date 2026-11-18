@@ -74,9 +74,20 @@ class TestFlightWiringTests(unittest.TestCase):
         sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
         import ui_evidence
         text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
-        self.assertIn("format('{0} [merge {1}]', github.event.pull_request.title, github.sha)", text)
-        run = {"event": "pull_request", "display_title": "Some PR [merge " + "a" * 40 + "]", "head_sha": "b" * 40}
+        self.assertIn("format('[merge {0}] {1}', github.sha, github.event.pull_request.title)", text)
+        run = {"event": "pull_request", "display_title": "[merge " + "a" * 40 + "] Some PR", "head_sha": "b" * 40}
         self.assertEqual(ui_evidence.tested_sha(run), "a" * 40)
+
+    def test_the_pass_deadline_and_the_evidence_follow_the_job_limit(self):
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
+        import ui_evidence
+        text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        group = text.split("\n  ui:\n", 1)[1].split("\n  verdict:\n", 1)[0]
+        limit = int(re.search(r"\n    timeout-minutes: (\d+)\n", group).group(1))
+        self.assertEqual(limit, ui_evidence.GROUP_TIMEOUT_MINUTES)
+        self.assertIn(f'--deadline "$((UI_JOB_START + ({limit} - 12) * 60))"', group)
+        self.assertLess(group.index("UI_JOB_START=$(date +%s)"), group.index("- name: Run UI tests"))
 
     def test_ui_flow_checkouts_keep_no_token(self):
         for step in re.split(r"\n\s+- ", read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))):

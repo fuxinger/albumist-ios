@@ -213,7 +213,7 @@ Testcode gibt.
   Läufe das Ergebnis wieder (`.github/scripts/ui_evidence.py`). Gezählt wird ein grünes
   Ergebnis nur, wenn Git für den getesteten Commit dieselben Fingerabdrücke ausrechnet, und
   nur aus diesem Repository (nie aus einem Fork). Ein Pull-Request-Lauf testet GitHubs
-  Merge-Commit; er steht deshalb im Namen des Laufs („… [merge <sha>]“).
+  Merge-Commit; er steht deshalb im Namen des Laufs („[merge <sha>] …“).
 - **Lückenlos gelesen**: Plan und Gate lesen jeden Lauf von `ui.yml` und `testflight.yml` der
   letzten 90 Tage (so lange hält GitHub Läufe; keiner vor dem 18.11.2026, als die Job-Namen
   die Fingerabdrücke bekamen). Bewusst nicht ab einem Commit-Datum: ein Rot auf einem Commit,
@@ -221,10 +221,17 @@ Testcode gibt.
   Blick. Ein Zeitraum mit mehr als 1000 Läufen (so viele liefert die API je Abfrage) wird
   geteilt. Die Jobs eines Laufs werden gelesen, wenn sein Commit diese App haben kann: Git
   kennt den Commit und er hat diese App, oder Git kennt ihn nicht (dann zählt sein Rot, sein
-  Grün nicht). Jeder Aufruf darf höchstens 300 API-Anfragen machen (das Token eines Laufs hat
-  1000 je Stunde für das ganze Repository; jeder UI-Lauf ruft zweimal auf, die Zahl steht als
-  `UI_API_CALLS` im Log). Reicht das nicht oder antwortet die API nicht, laufen im Plan alle
-  Gruppen und das Gate ist rot. Ein dauerhaftes Verzeichnis der roten Ergebnisse außerhalb
+  Grün nicht). Läufe dieser App, die für keine Gruppe den jetzigen Testcode haben, liest der
+  Aufruf zuletzt und nur, solange Anfragen übrig sind (sie braucht nur die Liste „Rot mit
+  älterem Testcode“). Jeder Aufruf darf höchstens 300 API-Anfragen machen (das Token eines
+  Laufs hat 1000 je Stunde für das ganze Repository; jeder UI-Lauf ruft zweimal auf, die Zahl
+  steht als `UI_API_CALLS` im Log). Reicht das nicht oder antwortet die API nicht, laufen im
+  Plan alle Gruppen und das Gate ist rot. **Grenze:** das passiert erst bei mehr als rund 200
+  Läufen in 90 Tagen, deren Commit diese App und den jetzigen Testcode einer Gruppe hat (oder
+  die Git nicht kennt), zusätzlich zur Laufliste (100 Läufe je Anfrage). Dann sperrt das Gate
+  jeden Upload dieses Stands, bis sich die App ändert oder `MAX_CALLS` in
+  `ui_evidence.py` erhöht wird. Ein Zwischenspeicher der ausgewerteten Läufe (als Artefakt)
+  würde das aufheben; er ist noch nicht gebaut. Ein dauerhaftes Verzeichnis der roten Ergebnisse außerhalb
   von GitHubs Laufliste gibt es nicht (es bräuchte ein Schreib-Token in den Testläufen;
   Artefakte laufen ab wie die Läufe).
 - **Beispiel** (die Nacht zum 18.11.): Commit 4bb7fdd änderte nur eine Wartezeit in
@@ -238,7 +245,14 @@ Testcode gibt.
   aus welchem Lauf und in welchem Modus (schnell oder voll). Rot heißt: „Run UI tests“ hatte
   begonnen, ist nicht grün geworden, und das Log zeigt ein Testergebnis, nämlich die Zeile
   `UI_RESULT <Gruppe> fail` von `ui_tests.py` (ältere Logs: ein gescheiterter Testfall) oder
-  das Zeitlimit des Jobs. Ein Log, das sich nicht lesen lässt, zählt als Rot. Ein
+  das Zeitlimit des Jobs. Damit ein Hänger nicht als „kein Ergebnis“ endet, stoppt
+  `ui_tests.py` einen Durchgang, der 12 Minuten vor dem Zeitlimit des Jobs (150 Minuten) noch
+  läuft, und meldet ihn als rot (`UI_HANG`, ein Befund, keine Wiederholung). Gescheiterte
+  Testfälle und `: error: -[`-Zeilen erscheinen schon während des Durchgangs im Log
+  (`UI_LIVE`), sodass auch ein Abbruch danach rot bleibt. Ein Job, der nach seinem vollen
+  Zeitlimit abgebrochen wurde, ist ebenfalls rot. Ein Log, das sich nicht lesen lässt, zählt
+  als Rot; GitHub löscht Logs spätestens mit dem Lauf (Antwort 410), und ein solches Rot
+  bleibt dann bestehen, bis sich App oder Test ändern. Ein
   wackelnder Test wird so gezählt und behoben, nie durch Wiederholen versteckt. Die Gruppe darf
   zur Beobachtung noch einmal laufen; ihr Grün steht dann als „red before for this key“ in der
   Tabelle und zählt für TestFlight nicht. Ein Test, der einen Schritt in sich selbst noch
@@ -255,8 +269,14 @@ Testcode gibt.
   im eigenen Schritt „No test result (simulator or XCTest failed in every pass)“). Dazu zählt
   seit 19.11. ein Absturz von XCTests Dienst `testmanagerd` („Critical process testmanagerd
   crashed“, „Lost connection to the application“; Lauf 44202318875, Versuch 2, Gruppe
-  flow-other): die betroffenen Tests laufen einmal neu wie nach einem Simulatorfehler; rot
-  wird es nur, wenn dabei ein Test aus Gründen der App scheitert. Wurde ein Rot
+  flow-other): die betroffenen Tests laufen einmal neu wie nach einem Simulatorfehler, gezählt
+  und sichtbar als wackelnd (auch „app lost + daemon crash in <Test>“, wenn die App im selben
+  Test ohne Absturzbericht verloren ging); rot wird es, wenn dabei ein Test aus Gründen der App
+  scheitert oder `testmanagerd` im selben Test noch einmal abstürzt (dann wohl von der App
+  ausgelöst, etwa durch einen riesigen Bedienungshilfen-Baum). **Meine Entscheidung, vom
+  Besitzer zu bestätigen:** einen Test, der schon begonnen hatte, nach dem Verlust von
+  `testmanagerd` oder CoreSimulator noch einmal laufen zu lassen, geht über die Regel „Ausfall
+  der Technik vor dem ersten Test = kein Ergebnis“ hinaus. Wurde ein Rot
   nur durch eine gemeinsame Datei (Hilfsdatei, Skript, Workflow) zu einem neuen Schlüssel,
   ohne dass sich eine eigene Testdatei der Gruppe änderte, warnen Plan und Gate („UI red
   cleared by a shared change“): prüfen, ob das wirklich die Korrektur war.

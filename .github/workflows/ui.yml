@@ -3,7 +3,7 @@ name: UI flow
 # the run list to tell that commit's app fingerprint without reading the run's jobs. Other runs
 # keep their usual name (an empty run-name falls back to it).
 run-name: >-
-  ${{ github.event_name == 'pull_request' && format('{0} [merge {1}]', github.event.pull_request.title, github.sha) || '' }}
+  ${{ github.event_name == 'pull_request' && format('[merge {0}] {1}', github.sha, github.event.pull_request.title) || '' }}
 
 # End-to-end UI tests on the simulator. Separate from CI, in the repository's one Mac queue
 # (see "concurrency" below): one UI run or stress pass at a time across all branches; a new
@@ -260,6 +260,11 @@ jobs:
       # the test runner without the prefix): every group of a quick run (matrix.quick).
       TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}
     steps:
+      - name: Note when the job started
+        # For the deadline of the test passes ("Run UI tests"): timeout-minutes above minus 12
+        # minutes for the steps after them, so a hang is stopped and reported as red by
+        # ui_tests.py instead of being cut off by GitHub without a result.
+        run: echo "UI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -311,7 +316,7 @@ jobs:
           [ "$INCREASE_CONTRAST" = "true" ] && flags+=(--increase-contrast)
           [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
-            --only "$ONLY" --skip "$SKIP" "${flags[@]}"
+            --only "$ONLY" --skip "$SKIP" --deadline "$((UI_JOB_START + (150 - 12) * 60))" "${flags[@]}"
           status=$?
           # 75: every pass failed on the simulator or XCTest alone, no test result
           # (build/no-test-result); the next step fails the job, not this one.

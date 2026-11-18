@@ -27,15 +27,23 @@ from commit dates: a red on a commit that was rebased, amended or whose branch w
 stays in sight. A time range with more runs than the API lists for one filter is split. Jobs
 are read for every run whose tested commit may have this app: the commit has it, or git does
 not know the commit (then its reds count, its greens cannot be checked and do not). The tested
-commit of a pull request run is the merge commit named in its run-name ("... [merge <sha>]",
-ui.yml). Each invocation may make MAX_CALLS API calls (GITHUB_TOKEN: 1000 per hour for the
-repository); beyond, `plan` runs every group and `gate` fails. A durable record of reds outside
+commit of a pull request run is the merge commit named in its run-name ("[merge <sha>] ...",
+ui.yml). Runs of this app with only older test code of every group are read last, while calls
+are left (RESERVED_CALLS stay for logs and annotations): only the "red with older test code"
+listing needs them. Each invocation may make MAX_CALLS API calls (GITHUB_TOKEN: 1000 per hour
+for the repository); beyond, `plan` runs every group and `gate` fails. That lock-out needs
+more than about 200 runs in 90 days whose commit has this app AND the current test code of a
+group (or a commit git cannot find), plus the run listing (100 runs per call): change the app
+or raise MAX_CALLS then. A cache of parsed results (an artifact) would lift it; not done. A durable record of reds outside
 GitHub's run list would need a token that can write from the test runs; not done.
   - green: the job succeeded. It counts as evidence only when the fingerprints in its name are
     those of the commit it tested, recomputed here from git.
   - red: the job did not pass "Run UI tests" after that step had started, and its log shows a
-    test result that failed: ui_tests.py's line "UI_RESULT <group> fail" (older logs: a failed
-    test case or a failing UI_VERDICT), or the job's time limit. An unreadable log is red.
+    test result that failed: ui_tests.py's last line "UI_RESULT <group> fail" (a hang past the
+    pass deadline is one), or without it a failed test case (echoed live as UI_LIVE, so also
+    before a cancel) or a failing UI_VERDICT; or the job was cancelled after its full time
+    limit. A log that cannot be read is red: GitHub deletes logs (HTTP 410) with the run or
+    earlier, and such a red then stays until the app or the test changes.
   - no result: the step never started (a simulator that did not boot, a download, the
     toolchain, a run cancelled before it); a job still running; a cancel or a lost runner while
     the tests ran with nothing failed in the log (the owner's rule: never cancel a running test
@@ -88,15 +96,24 @@ MAX_LISTED = 1000     # the run list answers at most this many runs for one filt
 MAX_CALLS = 300
 TEST_STEP = "Run UI tests"
 JOB_NAME = re.compile(r"\[([a-z0-9-]+) app ([0-9a-f]{12}) tests ([0-9a-f]{12})\]$")
-# ui.yml's run-name of a pull request run ends with the merge commit it tests.
-MERGE = re.compile(r"\[merge ([0-9a-f]{40})\]\s*$")
-# A job that did not pass "Run UI tests" is red only when its log shows a test result: a failed
-# test case, a failing verdict of ui_tests.py, or the job's time limit. A cancel or a lost runner
-# in the middle of the tests leaves none of these: no result (the owner's rule is anyway never
-# to cancel a running test run). An unreadable log counts as red.
-RESULT_LINE = re.compile(r"UI_RESULT \S+ (pass|fail|infra)\b")
+# ui.yml's run-name of a pull request run starts with the merge commit it tests.
+MERGE = re.compile(r"^\[merge ([0-9a-f]{40})\]")
+# timeout-minutes of ui.yml's group jobs (test_workflows.py checks it): a job cancelled after
+# running this long was stopped by its time limit, which is red (a hang), log or not.
+GROUP_TIMEOUT_MINUTES = 150
+# Of the calls, this many are kept for the logs of reds and the annotations of reused greens:
+# runs that only hold older test code of this app are read only while more are left.
+RESERVED_CALLS = 60
+# A job that did not pass "Run UI tests" is red only when its log shows a test result: the last
+# "UI_RESULT <its group> fail" line of ui_tests.py (at the start of a log line, after GitHub's
+# timestamp), or without such a line a failed test case (also one echoed live, UI_LIVE, before a
+# cancel), a failing verdict of older logs, or the job's time limit (also ran_out_of_time). A
+# cancel or a lost runner in the middle of the tests with nothing failed yet: no result (the
+# owner's rule is anyway never to cancel a running test run). An unreadable log (also an
+# expired one, HTTP 410) counts as red, so such a red stays for good.
+RESULT_LINE = re.compile(r"^(?:\ufeff)?(?:\d{4}-\d\d-\d\dT[\d:.]+Z )?UI_RESULT (\S+) (pass|fail|infra)\s*$", re.M)
 RED_IN_LOG = re.compile(r"Test Case '-\[[^\]]+\]' failed|UI_VERDICT \S+ (?:first|retry): fail|the failed pass stays red"
-                        r"|UI_RESULT \S+ fail|has exceeded the maximum execution time")
+                        r"|has exceeded the maximum execution time")
 
 
 class ApiError(Exception):
@@ -123,6 +140,8 @@ def api(path: str, **params):
                 return json.load(response)
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             last = error
+            if isinstance(error, urllib.error.HTTPError) and error.code in (404, 410):
+                break  # gone (an expired log): no use asking again
             time.sleep(5 * (attempt + 1))
     raise ApiError(f"GitHub API: {path}: {last}")
 
@@ -157,18 +176,28 @@ def classify(job: dict) -> str:
     return "none"
 
 
-def red_in_log(log: str | None) -> bool:
-    """Whether a job log shows a test result that is red. ui_tests.py's UI_RESULT line decides
-    when there is one (so a testmanagerd crash in every pass is no result, though a test case
-    "failed" in it); otherwise the markers of RED_IN_LOG (older logs, a time limit)."""
+def red_in_log(log: str | None, group: str) -> bool:
+    """Whether a job log shows a test result that is red. The last UI_RESULT line of ui_tests.py
+    for this group decides when there is one (so a testmanagerd crash in every pass is no result,
+    though a test case "failed" in it); otherwise the markers of RED_IN_LOG (a failure echoed
+    while the pass ran, UI_LIVE, then a cancel; older logs). An unreadable log is red."""
     if log is None:
         return True
-    if re.search(r"has exceeded the maximum execution time", log):
-        return True
-    verdicts = RESULT_LINE.findall(log)
+    verdicts = [v for g, v in RESULT_LINE.findall(log) if g == group]
     if verdicts:
-        return "fail" in verdicts
+        return verdicts[-1] == "fail"
     return bool(RED_IN_LOG.search(log))
+
+
+def ran_out_of_time(job: dict) -> bool:
+    """A job cancelled after GROUP_TIMEOUT_MINUTES: GitHub's time limit stopped it (the log says
+    only "The operation was canceled")."""
+    try:
+        start = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
+        end = datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
+    except (KeyError, AttributeError, TypeError, ValueError):
+        return False
+    return job.get("conclusion") == "cancelled" and end - start >= timedelta(minutes=GROUP_TIMEOUT_MINUTES - 1)
 
 
 def results(runs_and_jobs, logs=None) -> list[dict]:
@@ -185,7 +214,8 @@ def results(runs_and_jobs, logs=None) -> list[dict]:
                 continue
             seen.update({job.get("id"), key})
             result = classify(job)
-            if result == "red" and logs is not None and not red_in_log(logs(job.get("id"))):
+            if (result == "red" and logs is not None and not ran_out_of_time(job)
+                    and not red_in_log(logs(job.get("id")), match.group(1))):
                 result = "none"  # stopped during the tests without a test result (a cancel)
             found.append({
                 "group": match.group(1), "app": match.group(2), "tests": match.group(3),
@@ -259,7 +289,8 @@ def job_list(call, run: dict) -> list[dict]:
 
 
 def fetch_history(target_app: str, run_id: int | None, verifier, call=None,
-                  now: datetime | None = None) -> list[tuple[dict, list[dict]]]:
+                  now: datetime | None = None, keys: set[str] | None = None,
+                  info: dict | None = None) -> list[tuple[dict, list[dict]]]:
     """[(run, jobs of every attempt)] of ui.yml and testflight.yml of the last HISTORY_DAYS days
     (since FINGERPRINTS_SINCE at most), this repository only, the current run always. A run whose
     tested commit git can tell is skipped when its app fingerprint differs (no call for its
@@ -275,14 +306,32 @@ def fetch_history(target_app: str, run_id: int | None, verifier, call=None,
                 runs[run["id"]] = run
     if run_id and run_id not in runs:
         runs[run_id] = call(f"actions/runs/{run_id}")
-    history = []
+    # Must read: the current run, runs whose commit git does not know, and runs whose commit has
+    # this app and the test code of one of the groups now (`keys`: their short test fingerprints,
+    # full and quick). May read: runs of this app with only older test code (their reds are
+    # listed, "red with older test code", and feed the "cleared by a shared change" warning),
+    # newest first while calls are left.
+    must, may = [], []
     for run in sorted(runs.values(), key=lambda r: r.get("created_at", ""), reverse=True):
-        if run["id"] != run_id:
-            sha = tested_sha(run)
-            app = verifier.app(sha) if sha else None
-            if app is not None and app[:ui_groups.SHORT] != target_app[:ui_groups.SHORT]:
-                continue
+        sha = tested_sha(run) if run["id"] != run_id else None
+        app = verifier.app(sha) if sha else None
+        if run["id"] == run_id or app is None:
+            must.append(run)
+        elif app[:ui_groups.SHORT] != target_app[:ui_groups.SHORT]:
+            continue
+        elif keys is None or verifier.test_keys(sha) & keys:
+            must.append(run)
+        else:
+            may.append(run)
+    history = [(run, job_list(call, run)) for run in must]
+    skipped = 0
+    for run in may:
+        if call.count >= MAX_CALLS - RESERVED_CALLS:
+            skipped += 1
+            continue
         history.append((run, job_list(call, run)))
+    if info is not None:
+        info["older_skipped"] = skipped
     return history
 
 
@@ -330,6 +379,13 @@ class Verifier:
         app, full, quick = found
         keys = {full.get(entry["group"], "")[:ui_groups.SHORT], quick.get(entry["group"], "")[:ui_groups.SHORT]}
         return app[:ui_groups.SHORT] == entry["app"] and entry["tests"] in keys - {""}
+
+    def test_keys(self, sha: str) -> set[str]:
+        """The short test fingerprints (full and quick) of every group of a commit."""
+        found = self._groups(sha)
+        if not found:
+            return set()
+        return {v[:ui_groups.SHORT] for fps in found[1:] for v in fps.values()}
 
     def changed_since(self, sha: str) -> list[str] | None:
         if not self._have(sha):
@@ -451,6 +507,11 @@ def flaky_notes(decisions: list[dict], call=None) -> list[str]:
 # Commands
 
 
+def keys(groups) -> set[str]:
+    """The short test fingerprints, full and quick, of every group of this tree."""
+    return {fp[:ui_groups.SHORT] for quick in (False, True) for fp in groups.fingerprints(quick).values()}
+
+
 def current(tree=None):
     tree = tree or ui_groups.GitTree("HEAD")
     groups = ui_groups.Groups(tree)
@@ -472,7 +533,12 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
         verifier = verifier or Verifier()
         call = counted(call or api)
         try:
-            entries = results(fetch_history(app, None, verifier, call=call, now=now), logs=log_reader(call))
+            info = {}
+            entries = results(fetch_history(app, None, verifier, call=call, now=now, keys=keys(groups), info=info),
+                              logs=log_reader(call))
+            if info.get("older_skipped"):
+                print(f"UI_PLAN {info['older_skipped']} run(s) with only older test code of this app not read "
+                      "(call budget); their reds are not listed")
             decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in names]
             run = [d["group"] for d in decisions if d["state"] != "green"]
         except (ApiError, KeyError) as error:
@@ -521,7 +587,13 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
     mode = "quick" if quick else "full"
     call = counted(call or api)
     try:
-        entries = results(fetch_history(app, run_id, verifier, call=call, now=now), logs=log_reader(call))
+        info = {}
+        entries = results(fetch_history(app, run_id, verifier, call=call, now=now, keys=keys(groups), info=info),
+                          logs=log_reader(call))
+        if info.get("older_skipped"):
+            print(earlier_attempts.command("notice", "UI gate", f"{info['older_skipped']} run(s) with only older "
+                                           "test code of this app not read (call budget); the warning 'UI red cleared "
+                                           "by a shared change' may miss them"))
     except (ApiError, KeyError) as error:
         print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
         print(earlier_attempts.command("error", "UI gate", f"earlier results not readable completely ({error}); "

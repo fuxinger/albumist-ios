@@ -344,7 +344,13 @@ def load_groups(tree) -> list[dict] | None:
     text = tree.read(GROUPS_FILE)
     if text is None:
         return None
-    return json.loads(text)["groups"]
+    try:
+        groups = json.loads(text)["groups"]
+    except (ValueError, KeyError, TypeError) as error:
+        raise ValueError(f"{GROUPS_FILE} is not readable: {error}") from error
+    if not isinstance(groups, list) or not all(isinstance(g, dict) and g.get("group") for g in groups):
+        raise ValueError(f"{GROUPS_FILE}: every group needs a name")
+    return groups
 
 
 def definition(group: dict) -> dict:

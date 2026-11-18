@@ -5,6 +5,7 @@ Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -617,29 +618,12 @@ class GroupTests(unittest.TestCase):
         return open(os.path.join(self.ROOT, ".github", "workflows", "ui.yml"), encoding="utf-8").read()
 
     def groups(self):
-        """{group: {field: value}} of the matrix; a folded value (`only: >-` and the lines below
-        it) is joined with spaces, as GitHub hands it to the job."""
-        import re
-        text = self.workflow().split("include:", 1)[1].split("\n    env:", 1)[0]
-        groups = {}
-        for block in re.split(r"\n\s*- group: ", text)[1:]:
-            lines = block.split("\n")
-            name, fields, i = lines[0].strip(), {}, 1
-            while i < len(lines):
-                m = re.match(r"^(\s*)(only|skip|increase_contrast|reduce_motion|device): ?(.*)$", lines[i])
-                i += 1
-                if not m:
-                    continue
-                value = m.group(3).strip()
-                if value in (">-", ">"):
-                    parts = []
-                    while i < len(lines) and lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) > len(m.group(1)):
-                        parts.append(lines[i].strip())
-                        i += 1
-                    value = " ".join(parts)
-                fields[m.group(2)] = value.strip("'")
-            groups[name] = fields
-        return groups
+        """{group: {field: value}} of .github/ui-groups.json (ui.yml's matrix comes from it, see
+        ui_groups.py), in order; booleans as GitHub hands them to the job ("true")."""
+        with open(os.path.join(self.ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:
+            listed = json.load(f)["groups"]
+        return {g["group"]: {k: ("true" if v is True else v) for k, v in g.items() if v is not False and k != "group"}
+                for g in listed}
 
     def ui_tests(self):
         """Every test method of the SortlyUITests target, as "Class/test"."""

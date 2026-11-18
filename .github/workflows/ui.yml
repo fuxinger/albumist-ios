@@ -7,36 +7,30 @@ name: UI flow
 #   1. Core tests (Linux): the core library's tests on a free Linux runner. No macOS runner
 #      starts for a commit whose core tests fail (fast first, then expensive).
 #   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
-#   3. Five test groups, each on its own runner and freshly booted simulator
-#      (test-without-building), at most four at a time (max-parallel), so the slowest group
-#      sets the wall time, not the sum. Job times measured in UI run 43906501407, including
-#      5-7 min simulator setup (device conditions: UI runs 43827092443 and 43795445305 of
-#      claude/pro-switches):
-#        - device conditions: DeviceConditionUITests 01-04, 06, 09-12 (hot iPhone, battery,
-#                          background expiry, iCloud offline, full disk, photo access, empty
-#                          and large library; test12 is the stress test and skips itself here,
-#                          see ui-stress.yml), ~65 min
-#        - full flow:      SortlyFlowUITests/test1_FullFlow (onboarding, demo library, plan,
-#                          the sorting-show video), 32 min
-#        - other flows:    every other UI test except the accessibility tests (flow tests 2-6,
-#                          locked purchase, search, and DeviceConditionUITests 05, 07, 08: undo
-#                          and interrupted plans, flows with a plan like flow test 5; each brings
-#                          the app to an onboarded demo library by itself, see
-#                          UITestOnboarding), 44 min + ~20 min
-#        - accessibility:  AccessibilityUITests 1-4 on a small iPhone with Reduce Motion,
-#                          ~48 min (56.5 min with the contrast pass, which is now apart)
-#        - contrast:       AccessibilityUITests test5 with Increase Contrast and Reduce
-#                          Transparency on its own small iPhone, ~18 min (it onboards first)
-#      "other flows" is defined as "everything the other groups do not run", so a new test
-#      class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests checks
-#      every UI test against the groups).
+#   3. The test groups (.github/ui-groups.json), each on its own runner and freshly booted
+#      simulator (test-without-building), at most four at a time (max-parallel), so the slowest
+#      group sets the wall time, not the sum. Measured times per group: docs/TESTFLIGHT.md
+#      ("Messung"). "other flows" is defined as "everything the other groups do not run", so a
+#      new test class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests
+#      checks every UI test against the groups).
 #      With CI's one macOS job this is at most five macOS jobs per push at the peak (the build
 #      job runs before the groups; max-parallel 4 holds the fifth group back), about all the
 #      repository has; accepted on 16.11. Contrast is listed last, so it is the group that
-#      waits: it starts when the first group (the full flow, ~32 min) is done and ends with
-#      the others.
+#      waits.
 #      The stress pass is not part of this run: .github/workflows/ui-stress.yml (10,000 photos
 #      before each TestFlight build, 50,000 weekly at night and before the App Store launch).
+#
+# Which groups run (the owner's rule of 17.11., "UI plan" below, .github/scripts/ui_evidence.py):
+#   - auto (pull requests, and the default of a run by hand or from TestFlight): only the groups
+#     without a green result for exactly this app (app fingerprint) and their own test code (test
+#     fingerprint of the group: its test files, the shared helpers they use, its definition and
+#     the harness; .github/scripts/ui_groups.py). A test-only change runs the groups of the
+#     changed files, a change to a shared helper every group that uses it, any app change all.
+#   - all: every group; or group names (device flow-full flow-other accessibility contrast).
+#   Each group job carries both fingerprints in its name ("[device app ... tests ...]"); that is
+#   where later runs and the TestFlight gate find the result again. A group whose result for
+#   this app and test code was red runs again when asked, but its green never counts (a red test
+#   is fixed, not re-run to green).
 #
 # Each group runs through .github/scripts/ui_tests.py: a pass that the simulator service lost
 # (an explicit "Error returned in reply from CoreSimulatorService", "Timed out waiting for AX
@@ -54,6 +48,11 @@ on:
   pull_request:
     paths-ignore: ['**.md']
   workflow_dispatch:
+    inputs:
+      groups:
+        description: 'auto (groups without a green result for this app and their test code), all, or group names'
+        type: string
+        default: auto
   # testflight.yml runs the UI flow for the commit it uploads, in the same run (release: true).
   workflow_call:
     inputs:
@@ -61,6 +60,10 @@ on:
         description: Called by testflight.yml (own concurrency group, outside the Mac queue)
         type: boolean
         default: false
+      groups:
+        description: auto, all, or group names (see workflow_dispatch)
+        type: string
+        default: auto
 
 permissions:
   contents: read
@@ -103,10 +106,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan:
+    # Which groups run (top of this file). Reads the earlier group jobs of ui.yml and
+    # testflight.yml through the API (actions: read); when it cannot, every group runs.
+    name: UI plan (which groups run)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commits of earlier results, to recompute their fingerprints from git.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan the UI groups
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UI_GROUPS: ${{ inputs.groups || 'auto' }}
+        run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS"
+
   core-linux:
     # Same tests as CI's "Core tests (Linux)" (CI runs them for this commit too, but a manual
-    # UI run on a branch has no CI run to wait for). ~4 min on a free runner.
+    # UI run on a branch has no CI run to wait for). ~4 min on a free runner. Not in a
+    # TestFlight run: there CI's own "Core tests (Linux)" of the same commit just passed (the
+    # UI flow starts only after CI), so this would only add ~5 min before the UI build.
     name: Core tests (Linux)
+    needs: plan
+    if: ${{ needs.plan.outputs.count != '0' && !inputs.release }}
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
     timeout-minutes: 30
@@ -122,7 +154,10 @@ jobs:
 
   build:
     name: UI build
-    needs: core-linux
+    needs: [plan, core-linux]
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.count != '0'
+      && (needs.core-linux.result == 'success' || (inputs.release && needs.core-linux.result == 'skipped')) }}
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
@@ -165,8 +200,11 @@ jobs:
           overwrite: true
 
   ui:
-    name: UI ${{ matrix.title }}
-    needs: build
+    # The group's fingerprints in its name: later runs and the TestFlight gate read them there
+    # (.github/scripts/ui_evidence.py, JOB_NAME). Keep the bracket at the end.
+    name: UI ${{ matrix.title }} [${{ matrix.group }} app ${{ matrix.app }} tests ${{ matrix.tests }}]
+    needs: [plan, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: xcode-27
     # A group takes 25-65 min with 5-7 min of simulator setup; a repeat after a simulator
     # failure (erase, boot, the tests that did not pass) can add up to its length again, so the
@@ -176,70 +214,9 @@ jobs:
       fail-fast: false
       # Four groups + CI's macOS job = five macOS jobs at the peak (see the top of this file).
       max-parallel: 4
-      matrix:
-        include:
-          # only / skip: "Class" or "Class/testMethod" of SortlyUITests, separated by spaces.
-          - group: device
-            # The device-condition switches (App/Sortly/Platform/UITestSwitches.swift) on the Pro
-            # simulator. A test that resets the photo access asks the Mac to give it back
-            # (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07 and
-            # 08 (undo, interrupted plan) run with the other flows.
-            title: device conditions
-            device: pro
-            only: >-
-              DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish
-              DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording
-              DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue
-              DeviceConditionUITests/test04_UnreadableICloudOfflineComplete
-              DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
-              DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked
-              DeviceConditionUITests/test10_EmptyLibrary
-              DeviceConditionUITests/test11_LargeLibrary
-              DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
-            skip: ''
-          - group: flow-full
-            title: full flow and video
-            device: pro
-            only: SortlyFlowUITests/test1_FullFlow
-            skip: ''
-            video: true
-          - group: flow-other
-            title: other flows, purchase and search
-            device: pro
-            only: ''
-            # Everything the other groups run (keep in step with them; GroupTests checks it).
-            skip: >-
-              SortlyFlowUITests/test1_FullFlow
-              AccessibilityUITests
-              DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish
-              DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording
-              DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue
-              DeviceConditionUITests/test04_UnreadableICloudOfflineComplete
-              DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan
-              DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked
-              DeviceConditionUITests/test10_EmptyLibrary
-              DeviceConditionUITests/test11_LargeLibrary
-              DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline
-          - group: accessibility
-            # AccessibilityUITests 1-4 on a small iPhone (SE, 375 pt) with Reduce Motion. These
-            # tests fail on findings.
-            title: accessibility (small iPhone)
-            device: se
-            only: AccessibilityUITests
-            skip: AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency
-            reduce_motion: true
-          - group: contrast
-            # AccessibilityUITests test5 on its own small iPhone with Reduce Motion, Increase
-            # Contrast and Reduce Transparency switched on before the first launch; the test
-            # brings the app to an onboarded demo library by itself (onboardAndSeed). Its own job
-            # since 16.11. (UI run 43906501407: 8 min after tests 1-4 made accessibility the
-            # longest group, 56.5 min).
-            title: contrast (small iPhone)
-            device: se
-            only: AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency
-            skip: ''
-            reduce_motion: true
-            increase_contrast: true
+      # The groups of .github/ui-groups.json that run (UI plan): group, title, device, only,
+      # skip, video, reduce_motion, increase_contrast, app, tests.
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       GROUP: ${{ matrix.group }}
       DEVICE: ${{ matrix.device }}

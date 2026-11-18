@@ -7,6 +7,15 @@ import SortlyTestSupport
 struct NamingTests {
     let de = DateRangeFormatter(language: .german, timeZone: Fixture.utc)
 
+    /// A blank name is no name; spaces around a name are dropped.
+    @Test func blankUserTitleIsNoName() {
+        #expect(UserTitle.stored("") == nil)
+        #expect(UserTitle.stored("   ") == nil)
+        #expect(UserTitle.stored("\n\t ") == nil)
+        #expect(UserTitle.stored(" Dahoam ") == "Dahoam")
+        #expect(UserTitle.stored("Bei Oma und Opa") == "Bei Oma und Opa")
+    }
+
     @Test func rangeFormatsMatchProductSpec() {
         #expect(de.format(start: Fixture.date("2026-08-03"), end: Fixture.date("2026-08-14")) == "03.08.–14.08.2026")
         #expect(de.format(start: Fixture.date("2026-07-12 09:00"), end: Fixture.date("2026-07-12 18:00")) == "12.07.2026")

@@ -98,21 +98,22 @@ TEST_STEP = "Run UI tests"
 JOB_NAME = re.compile(r"\[([a-z0-9-]+) app ([0-9a-f]{12}) tests ([0-9a-f]{12})\]$")
 # ui.yml's run-name of a pull request run starts with the merge commit it tests.
 MERGE = re.compile(r"^\[merge ([0-9a-f]{40})\]")
-# timeout-minutes of ui.yml's group jobs (test_workflows.py checks it): a job cancelled after
-# running this long was stopped by its time limit, which is red (a hang), log or not.
+# timeout-minutes of ui.yml's group jobs (test_workflows.py checks it): a job that did not
+# succeed after running this long was stopped by its time limit, which is red (a hang), log or not.
 GROUP_TIMEOUT_MINUTES = 150
 # Of the calls, this many are kept for the logs of reds and the annotations of reused greens:
 # runs that only hold older test code of this app are read only while more are left.
 RESERVED_CALLS = 60
 # A job that did not pass "Run UI tests" is red only when its log shows a test result: the last
 # "UI_RESULT <its group> fail" line of ui_tests.py (at the start of a log line, after GitHub's
-# timestamp), or without such a line a failed test case (also one echoed live, UI_LIVE, before a
-# cancel), a failing verdict of older logs, or the job's time limit (also ran_out_of_time). A
+# timestamp), or without such a line a failed test case or an error line (also echoed live,
+# UI_LIVE, before a cancel: a test with continueAfterFailure that had not ended yet), a failing
+# verdict of older logs, or the job's time limit (also ran_out_of_time). A
 # cancel or a lost runner in the middle of the tests with nothing failed yet: no result (the
 # owner's rule is anyway never to cancel a running test run). An unreadable log (also an
 # expired one, HTTP 410) counts as red, so such a red stays for good.
 RESULT_LINE = re.compile(r"^(?:\ufeff)?(?:\d{4}-\d\d-\d\dT[\d:.]+Z )?UI_RESULT (\S+) (pass|fail|infra)\s*$", re.M)
-RED_IN_LOG = re.compile(r"Test Case '-\[[^\]]+\]' failed|UI_VERDICT \S+ (?:first|retry): fail|the failed pass stays red"
+RED_IN_LOG = re.compile(r"Test Case '-\[[^\]]+\]' failed|UI_LIVE .*: error: -\[|UI_VERDICT \S+ (?:first|retry): fail|the failed pass stays red"
                         r"|has exceeded the maximum execution time")
 
 
@@ -190,14 +191,14 @@ def red_in_log(log: str | None, group: str) -> bool:
 
 
 def ran_out_of_time(job: dict) -> bool:
-    """A job cancelled after GROUP_TIMEOUT_MINUTES: GitHub's time limit stopped it (the log says
-    only "The operation was canceled")."""
+    """A job that did not succeed after running GROUP_TIMEOUT_MINUTES: GitHub's time limit
+    stopped it (the log says only "The operation was canceled")."""
     try:
         start = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
         end = datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
     except (KeyError, AttributeError, TypeError, ValueError):
         return False
-    return job.get("conclusion") == "cancelled" and end - start >= timedelta(minutes=GROUP_TIMEOUT_MINUTES - 1)
+    return job.get("conclusion") != "success" and end - start >= timedelta(minutes=GROUP_TIMEOUT_MINUTES - 1)
 
 
 def results(runs_and_jobs, logs=None) -> list[dict]:

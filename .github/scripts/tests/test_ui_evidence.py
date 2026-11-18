@@ -275,6 +275,10 @@ class RedFromTheLogTests(unittest.TestCase):
         self.assertEqual(self.entries({11: stamp + "echo UI_RESULT device fail\n"}), "none")
         self.assertEqual(self.entries({11: stamp + "UI_RESULT device fail\n" + stamp + "UI_RESULT device pass\n"}),
                          "none")
+        # An assertion echoed while its test (continueAfterFailure) still ran, then a cancel: red.
+        self.assertEqual(self.entries({11: stamp + "UI_LIVE /x.swift:3: error: -[SortlyUITests.DeviceUITests test01_Hot] : "
+                                           "XCTAssertTrue failed\n" + stamp + "##[error]The operation was canceled.\n"}),
+                         "red")
         # A failure echoed while the pass ran (UI_LIVE), then a cancel: red.
         self.assertEqual(self.entries({11: stamp + "UI_LIVE " + FAILED_LOG + stamp + "##[error]The operation was canceled.\n"}),
                          "red")
@@ -285,6 +289,9 @@ class RedFromTheLogTests(unittest.TestCase):
                                       completed_at="2026-11-19T11:30:00Z"), "red")
         self.assertEqual(self.entries({11: cancelled}, started_at="2026-11-19T09:00:00Z",
                                       completed_at="2026-11-19T10:00:00Z"), "none")
+        # Any conclusion but success after the full limit.
+        self.assertEqual(self.entries({11: cancelled}, conclusion="failure", started_at="2026-11-19T09:00:00Z",
+                                      completed_at="2026-11-19T11:30:00Z"), "red")
 
     def test_logs(self):
         self.assertEqual(self.entries({}), "red")  # a failed test case

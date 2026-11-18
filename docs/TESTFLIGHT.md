@@ -247,10 +247,13 @@ Testcode gibt.
   `UI_RESULT <Gruppe> fail` von `ui_tests.py` (ältere Logs: ein gescheiterter Testfall) oder
   das Zeitlimit des Jobs. Damit ein Hänger nicht als „kein Ergebnis“ endet, stoppt
   `ui_tests.py` einen Durchgang, der 12 Minuten vor dem Zeitlimit des Jobs (150 Minuten) noch
-  läuft, und meldet ihn als rot (`UI_HANG`, ein Befund, keine Wiederholung). Gescheiterte
-  Testfälle und `: error: -[`-Zeilen erscheinen schon während des Durchgangs im Log
-  (`UI_LIVE`), sodass auch ein Abbruch danach rot bleibt. Ein Job, der nach seinem vollen
-  Zeitlimit abgebrochen wurde, ist ebenfalls rot. Ein Log, das sich nicht lesen lässt, zählt
+  läuft. Läuft dabei gerade ein Test, ist das rot (`UI_HANG`, ein Befund, keine Wiederholung);
+  läuft keiner (zwischen zwei Tests, vor dem ersten), war nur die Zeit um (`UI_DEADLINE`,
+  kein Ergebnis). Eine Wiederholung nach einem Simulatorfehler beginnt nur, wenn noch
+  mindestens 30 Minuten bis zu dieser Frist bleiben (und nach dem Zurücksetzen noch 10);
+  sonst hat die Gruppe kein Ergebnis. Gescheiterte Testfälle und `: error: -[`-Zeilen
+  erscheinen schon während des Durchgangs im Log (`UI_LIVE`), sodass auch ein Abbruch danach
+  rot bleibt. Ein Job, der nach seinem vollen Zeitlimit nicht grün endete, ist ebenfalls rot. Ein Log, das sich nicht lesen lässt, zählt
   als Rot; GitHub löscht Logs spätestens mit dem Lauf (Antwort 410), und ein solches Rot
   bleibt dann bestehen, bis sich App oder Test ändern. Ein
   wackelnder Test wird so gezählt und behoben, nie durch Wiederholen versteckt. Die Gruppe darf
@@ -267,13 +270,13 @@ Testcode gibt.
   Besitzers); oder jeder Durchgang scheiterte allein am Simulator oder an XCTest, auch die
   Wiederholung (`ui_tests.py` endet mit 75 und `UI_RESULT <Gruppe> infra`, der Job scheitert
   im eigenen Schritt „No test result (simulator or XCTest failed in every pass)“). Dazu zählt
-  seit 19.11. ein Absturz von XCTests Dienst `testmanagerd` („Critical process testmanagerd
+  seit 18.11.2026 ein Absturz von XCTests Dienst `testmanagerd` („Critical process testmanagerd
   crashed“, „Lost connection to the application“; Lauf 44202318875, Versuch 2, Gruppe
   flow-other): die betroffenen Tests laufen einmal neu wie nach einem Simulatorfehler, gezählt
   und sichtbar als wackelnd (auch „app lost + daemon crash in <Test>“, wenn die App im selben
   Test ohne Absturzbericht verloren ging); rot wird es, wenn dabei ein Test aus Gründen der App
   scheitert oder `testmanagerd` im selben Test noch einmal abstürzt (dann wohl von der App
-  ausgelöst, etwa durch einen riesigen Bedienungshilfen-Baum). **Meine Entscheidung, vom
+  ausgelöst, etwa durch einen riesigen Bedienungshilfen-Baum). **Meine Entscheidung vom 18.11.2026, vom
   Besitzer zu bestätigen:** einen Test, der schon begonnen hatte, nach dem Verlust von
   `testmanagerd` oder CoreSimulator noch einmal laufen zu lassen, geht über die Regel „Ausfall
   der Technik vor dem ersten Test = kein Ergebnis“ hinaus. Wurde ein Rot

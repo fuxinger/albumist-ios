@@ -12,7 +12,7 @@ Used before a release tag (release.yml, without waiting). Green means:
      manual "UI flow" run on that commit first. Since 18.11. such a run (groups "auto") only
      runs the groups that have no green result yet for exactly this app and their own test
      code (ui_evidence.py), so for a merge commit with an already tested app it takes minutes.
-     Since 19.11. the run must also have a green job "UI verdict (full)": its check
+     Since 18.11. the run must also have a green job "UI verdict (full)": its check
      (ui_evidence.py gate) says every group is green, in full mode, for this app and its own
      test code and none is red for that pair. A run whose verdict is "quick" (every pull
      request; the long device test skips itself) never counts: the newest full run decides,

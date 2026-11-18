@@ -44,11 +44,12 @@ class TestFlightWiringTests(unittest.TestCase):
     def test_no_upload_starts_by_itself(self):
         # Fable P5-15: the old testflight.yml on main uploaded the old app state, untested, on
         # every push to main (16.11.: the website merge started one). Uploads start by hand only,
-        # and no workflow that reads the App Store Connect key starts on a push, a pull request
-        # or a schedule.
+        # and no workflow that can read the App Store Connect key (named, or all secrets passed on
+        # with "secrets: inherit") starts on a push or a pull request. A schedule may read it
+        # (asc-feedback.yml fetches feedback and crash logs; it uploads nothing).
         for path in WORKFLOWS:
             text = read(path)
-            if "secrets.ASC_KEY_P8" not in text:
+            if "secrets.ASC_" not in text and not re.search(r"secrets:\s*inherit", text):
                 continue
             trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0]
             events = re.findall(r"^  ([a-z_]+):", trigger, re.M)

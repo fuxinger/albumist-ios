@@ -65,6 +65,21 @@ class CiPartTests(unittest.TestCase):
         self.assertIn("#11", reason)
         self.assertIn("never re-run to green", reason)
 
+    def test_a_red_run_re_run_to_green_then_a_new_run_is_not_green(self):
+        # Second review 18.11.: #11 red, re-run to green (attempt 2), then #12 skips the iOS job.
+        api = self.fake("success", "skipped")
+        rerun = {"id": 6, "run_number": 11, "run_attempt": 2, "name": "CI", "event": "pull_request",
+                 "html_url": "https://example/6", "head_sha": os.environ["SHA"], "status": "completed",
+                 "conclusion": "success"}
+        ci_gate.api = lambda path, **params: (
+            {"workflow_runs": api(path)["workflow_runs"] + [rerun]} if path == "actions/workflows/ci.yml/runs"
+            else {"jobs": [{"name": "iOS build and tests (macOS)", "conclusion": "success"}]} if path == "actions/runs/6/jobs"
+            else api(path, **params))
+        done, ok, reason = ci_gate.check()
+        self.assertEqual((done, ok), (True, False))
+        self.assertIn("#11", reason)
+        self.assertIn("attempt 2", reason)
+
     def test_skipped_ios_job_is_not_green(self):
         ci_gate.api = self.fake("success", "skipped")
         done, ok, reason = ci_gate.check()
@@ -136,6 +151,14 @@ class FullGateTests(unittest.TestCase):
         done, ok, reason = ci_gate.check()
         self.assertEqual((done, ok), (True, False))
         self.assertIn("attempt 3", reason)
+
+    def test_an_earlier_red_ui_run_is_not_cleared_by_a_new_one(self):
+        for older in ((10, "completed", "failure", ("full", "failure")), (10, "completed", "failure", ("quick", "failure"))):
+            with self.subTest(older=older):
+                ci_gate.api = self.fake(ui=("completed", "success"), more=[older])
+                done, ok, reason = ci_gate.check()
+                self.assertEqual((done, ok), (True, False))
+                self.assertIn("never re-run to green", reason)
 
     def test_no_ui_run_is_not_green(self):
         # A push to main (merge commit) has no UI flow run; before 16.11. CI alone made it green.

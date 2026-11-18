@@ -92,9 +92,14 @@ public struct FreeAlbumLedger: Hashable, Sendable, Codable {
     public func merged(with other: FreeAlbumLedger) -> FreeAlbumLedger {
         let returned = returned.union(other.returned)
         var byPlan = byPlan.merging(other.byPlan) { max($0, $1) }
+        // A plan either copy counted per plan was never part of the older total, so its
+        // give-back is the per-plan one only (second review 18.11.: never twice).
+        let countedPerPlan = Set(byPlan.keys)
         for plan in returned { byPlan[plan] = nil }
+        let legacyReturned = legacyReturned.merging(other.legacyReturned) { max($0, $1) }
+            .filter { !countedPerPlan.contains($0.key) }
         return FreeAlbumLedger(legacyUsed: max(legacyUsed, other.legacyUsed), byPlan: byPlan, returned: returned,
-                               legacyReturned: legacyReturned.merging(other.legacyReturned) { max($0, $1) })
+                               legacyReturned: legacyReturned)
     }
 
     /// Plans the store shows as taken back never count, even if the app ended between the

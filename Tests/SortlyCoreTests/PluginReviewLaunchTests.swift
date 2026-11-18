@@ -107,7 +107,7 @@ struct PluginReviewLaunchTests {
         #expect(ledger.used == 5)
         ledger.giveBack(plan: way.kept.id, albums: way.kept.freeAlbumUse(applied: true))
         #expect(ledger.used == 4)
-        #expect(ledger.legacyUsed == 4)
+        #expect(ledger.legacyLeft == 4)
 
         // A plan that made nothing is never counted, and giving it back takes nothing off the old total.
         var other = FreeAlbumLedger(legacyUsed: 4)
@@ -115,7 +115,23 @@ struct PluginReviewLaunchTests {
                                      state: .skipped(reason: StepState.leftByUserReason))])
         other.record(plan: nothing.id, albums: nothing.freeAlbumUse(applied: true))
         other.giveBack(plan: nothing.id, albums: nothing.freeAlbumUse(applied: true))
-        #expect(other.legacyUsed == 4)
+        #expect(other.used == 4)
+        #expect(other.legacyLeft == 4)
+    }
+
+    /// Second review 18.11.: one copy counted a plan per plan, the other gave the same plan
+    /// back from the older total. Put together, the plan comes back once, not twice.
+    @Test func aPlanCountedInOneCopyAndGivenBackFromTheOldTotalInTheOtherComesBackOnce() {
+        var perPlan = FreeAlbumLedger(legacyUsed: 4)
+        perPlan.record(plan: SortlyID("p"), albums: 2)
+        #expect(perPlan.used == 6)
+        var fromOld = FreeAlbumLedger(legacyUsed: 4)
+        fromOld.giveBack(plan: SortlyID("p"), albums: 2)
+        #expect(fromOld.legacyLeft == 2)
+        let merged = perPlan.merged(with: fromOld)
+        #expect(merged.used == 4)
+        #expect(fromOld.merged(with: perPlan) == merged)
+        #expect(merged.merged(with: perPlan) == merged)
     }
 
     /// Deleting and installing Albumist again: the user defaults are empty, the keychain copy

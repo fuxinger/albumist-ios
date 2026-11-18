@@ -232,7 +232,12 @@ Testcode gibt.
   zählt kein späteres Grün dieser Kombination, egal aus welchem Lauf. Ein
   wackelnder Test wird so gezählt und behoben, nie durch Wiederholen versteckt. Die Gruppe darf
   zur Beobachtung noch einmal laufen; ihr Grün steht dann als „red before for this key“ in der
-  Tabelle und zählt für TestFlight nicht. Kein Ergebnis (weder Rot noch Grün) ist nur, was
+  Tabelle und zählt für TestFlight nicht. Ein Test, der einen Schritt in sich selbst noch
+  einmal versucht und das mit `UI_FLAKY_RETRY <Test> <Grund>` meldet (Gerätetest test07), wird
+  wie ein erst in der Wiederholung grüner Test als wackelnd gezählt und gezeigt
+  (`flaky-*.json`, FLAKY-Zeile, Zusammenfassung, Warnung im Gate bei übernommenen Ergebnissen),
+  blockiert aber nicht: gezählt und behoben, nicht gesperrt. Scheitert er trotz seines eigenen
+  zweiten Versuchs, ist er ohnehin rot. Kein Ergebnis (weder Rot noch Grün) ist nur, was
   keinen Test gestartet hat: „Run UI tests“ hat nie begonnen (Simulator nicht gestartet,
   Lauf vorher abgebrochen, gebaute Tests fehlen: Schritt „Built tests present“), oder der
   Simulator ging in jedem Durchgang vor dem ersten Test verloren (`ui_tests.py` endet mit 75,

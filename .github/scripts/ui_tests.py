@@ -355,8 +355,11 @@ def flaky_record(name: str, first_log: str, retry_reasons: list[str], retry_log:
 
     retries: every repeat after a simulator failure (also one that failed, and one that could
     not start); flaky: every test that passed only in that repeat, with the reason and what
-    the first pass made of it ("failed" or "not started"); boot: failed boot attempts."""
+    the first pass made of it ("failed" or "not started"), and every test that retried a step
+    inside itself (its UI_FLAKY_RETRY line, first: INSIDE); boot: failed boot attempts."""
     record = {"group": name, "boot": list(boot_retries or []), "retries": [], "flaky": []}
+    for test, why in dict.fromkeys(INSIDE_RETRY.findall(first_log + "\n" + (retry_log or ""))):
+        record["flaky"].append({"test": test, "first": INSIDE, "reason": why})
     if retry_result is None and not retry_reasons:
         return record
     record["retries"].append({"reasons": retry_reasons, "result": retry_result or "not started"})
@@ -368,10 +371,20 @@ def flaky_record(name: str, first_log: str, retry_reasons: list[str], retry_log:
     return record
 
 
+# A UI test that retries a step inside itself prints "UI_FLAKY_RETRY <Class.test> <reason>"
+# (DeviceConditionUITests test07). Counted and shown like a test that passed only on a repeat
+# (flaky-*.json, FLAKY line, job and run summary, the flaky warning the TestFlight gate repeats
+# for reused results); it does not block, like the other flaky tests: the rule is to count and
+# fix them, and a test that still fails after its own retry is red anyway.
+INSIDE_RETRY = re.compile(r"\bUI_FLAKY_RETRY (\S+) (.+?)\s*$", re.M)
+INSIDE = "retried inside the test"
+
+
 def flaky_lines(record: dict) -> list[str]:
     lines = [f"FLAKY_BOOT {record['group']} {reason}" for reason in record.get("boot", [])]
     lines += [f"FLAKY_RETRY {record['group']} {r['result']} ({'; '.join(r['reasons'])})" for r in record.get("retries", [])]
-    lines += [f"FLAKY {f['test']} {f['reason']} (first pass: {f['first']}; passed on the repeat)"
+    lines += [f"FLAKY {f['test']} {f['reason']} " + (f"({INSIDE})" if f["first"] == INSIDE else
+                                                     f"(first pass: {f['first']}; passed on the repeat)")
               for f in record.get("flaky", [])]
     return lines
 
@@ -416,10 +429,12 @@ def flaky_summary(records: list[dict]) -> tuple[str, list[str]]:
     """(Markdown for the run summary, FLAKY lines) over every group's record."""
     boots = sum(len(r.get("boot", [])) for r in records)
     retries = sum(len(r.get("retries", [])) for r in records)
-    flaky = [f for r in records for f in r.get("flaky", [])]
+    flaky = [f for r in records for f in r.get("flaky", []) if f.get("first") != INSIDE]
+    inside = [f for r in records for f in r.get("flaky", []) if f.get("first") == INSIDE]
     lines = [line for r in records for line in flaky_lines(r)]
     md = ["### UI tests: simulator retries and flaky tests", "",
           f"{retries} repeat(s) after a simulator failure, {len(flaky)} test(s) passed only on the repeat, "
+          f"{len(inside)} retry(ies) inside a test, "
           f"{boots} failed boot attempt(s), over {len(records)} pass record(s). A real test failure is never repeated.", ""]
     if lines:
         md += ["| Group | Kind | Test | First pass | Reason / result |", "|---|---|---|---|---|"]
@@ -992,9 +1007,12 @@ def write_flaky(args, record: dict) -> None:
     lines = flaky_lines(record)
     for line in lines:
         print(line, flush=True)
+    repeated = [f["test"] for f in record["flaky"] if f["first"] != INSIDE]
+    inside = [f["test"] for f in record["flaky"] if f["first"] == INSIDE]
     if record["flaky"]:
-        print(f"::warning title=UI {args.name} flaky::{len(record['flaky'])} test(s) passed only on the repeat: "
-              + ", ".join(f["test"] for f in record["flaky"]), flush=True)
+        parts = ([f"{len(repeated)} test(s) passed only on the repeat: {', '.join(repeated)}"] if repeated else []) \
+            + ([f"{len(inside)} retry(ies) inside a test: {', '.join(inside)}"] if inside else [])
+        print(f"::warning title=UI {args.name} flaky::{'; '.join(parts)}", flush=True)
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if path and (lines or record.get("sweep_skips")):
         with open(path, "a", encoding="utf-8") as out:

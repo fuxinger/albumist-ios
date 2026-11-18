@@ -466,12 +466,39 @@ class FlakyTests(unittest.TestCase):
         record = ui_tests.flaky_record("flow-full", "", [], None, None, ["bootstatus failed (attempt 1 of 3)"])
         self.assertEqual(ui_tests.flaky_lines(record), ["FLAKY_BOOT flow-full bootstatus failed (attempt 1 of 3)"])
 
+    def test_retries_inside_a_test_are_counted(self):
+        # DeviceConditionUITests test07 (claude/test-speed) prints this when it tries a second album.
+        line = ("UI_FLAKY_RETRY DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo slow plan for Trip was done "
+                "before the app was closed (31 s after the tap), retried with a second album\n")
+        log = "Test Case '-[SortlyUITests.DeviceConditionUITests test07_InterruptedPlanContinueAndUndo]' started.\n" + line
+        record = ui_tests.flaky_record("device", log + line, [], None, None)  # printed twice: counted once
+        self.assertEqual(record["flaky"], [{"test": "DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo",
+                                            "first": ui_tests.INSIDE, "reason": line.split(" ", 2)[2].strip()}])
+        self.assertEqual(record["retries"], [])
+        self.assertEqual(ui_tests.flaky_lines(record), [
+            "FLAKY DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo " + line.split(" ", 2)[2].strip()
+            + " (retried inside the test)"])
+        markdown, lines = ui_tests.flaky_summary([record])
+        self.assertIn("0 test(s) passed only on the repeat, 1 retry(ies) inside a test", markdown)
+        self.assertIn("| device | flaky | DeviceConditionUITests.test07_InterruptedPlanContinueAndUndo | retried inside the test |",
+                      markdown)
+        # flaky-device.json and the warning that the TestFlight gate repeats for a reused green.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        args = argparse.Namespace(out=folder.name, name="device")
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            ui_tests.write_flaky(args, record)
+        with open(os.path.join(folder.name, "flaky-device.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["flaky"], record["flaky"])
+        self.assertIn("::warning title=UI device flaky::1 retry(ies) inside a test: DeviceConditionUITests.test07", printed.getvalue())
+
     def test_run_summary_counts_every_group(self):
         records = [ui_tests.flaky_record("accessibility", RESTART, ["simulator not booted"], self.RETRY_LOG, "fail"),
                    ui_tests.flaky_record("flow-full", RESTART, [], None, None, ["bootstatus failed (attempt 1 of 3)"]),
                    ui_tests.flaky_record("flow-other", "", [], None, None)]
         markdown, lines = ui_tests.flaky_summary(records)
-        self.assertIn("1 repeat(s) after a simulator failure, 1 test(s) passed only on the repeat, 1 failed boot attempt(s), "
+        self.assertIn("1 repeat(s) after a simulator failure, 1 test(s) passed only on the repeat, 0 retry(ies) inside a test, "
+                      "1 failed boot attempt(s), "
                       "over 3 pass record(s)", markdown)
         self.assertIn("| accessibility | flaky | AccessibilityUITests/test1_OnboardingAtLargestTextInDarkMode | not started |", markdown)
         self.assertEqual(len(lines), 3)

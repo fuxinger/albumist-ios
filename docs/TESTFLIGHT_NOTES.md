@@ -11,8 +11,8 @@ Buildnummer und der Commit werden automatisch angehängt.
   darunter nach „Frühere Builds“.
 - Ein Push startet keinen Build (außer auf `claude/sortly-app`, solange dort die alte
   `testflight.yml` liegt); TestFlight-Läufe startet man von Hand (`docs/TESTFLIGHT.md`).
-- Ein Notfall-Build ohne Tests („force“) bekommt automatisch eine Warnung davor
-  („FORCED – untested“).
+- Jeder Build hat seine Tests bestanden; einen Notfall-Build ohne Tests gibt es nicht mehr
+  (Beschluss 17.11.).
 
 <!-- testflight:start -->
 Danke fürs Testen! Dieser Build bringt vor allem Stabilität. Bitte achte besonders auf:

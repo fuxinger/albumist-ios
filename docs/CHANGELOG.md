@@ -64,6 +64,10 @@
   Laborberichte und ICD-Codes, auf Deutsch zusätzlich Entlassbrief, Anamnese, Medikation und
   Krankschreibung; Wortgruppen auch über zwei Zeilen. Schon gespeicherte Texte solcher Briefe
   werden einmal entfernt (Masken-Version 5), ohne die Fotos neu zu lesen.
+- Prüfungen 18.11. (G5-02/G6-02): Der TestFlight-Ablauf hatte noch den Notfall-Schalter
+  „force“, der einen Build ohne jeden Test hochlud, obwohl Fuchs ihn am 17.11. gestrichen hatte.
+  Er ist entfernt, samt `--forced` in `earlier_attempts.py` und `testflight_notes.py`; kein
+  Workflow kann Tests, Härtetest oder UI-Tor mehr überspringen, und ein Test wacht darüber.
 - Erster iPhone-Test (15.11.): Analyse endet nicht mehr bei Wärme, Stromsparmodus oder
   wenn iOS die Hintergrundzeit beendet, sondern wird langsamer, wartet oder geht beim Öffnen
   weiter; jeder lange Lauf fragt nach Hintergrundzeit (Sperrbildschirm); Fortschritt zählt

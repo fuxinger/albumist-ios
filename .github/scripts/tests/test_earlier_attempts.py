@@ -31,7 +31,7 @@ class FailureTests(unittest.TestCase):
             [(1, {"jobs": [GREEN, job("UI flow / UI device conditions", "failure", ["Wait for the simulator"])]})])
         self.assertEqual(len(rows), 1)
         self.assertTrue(rows[0]["machinery"])
-        lines, markdown, blocked = earlier_attempts.report(rows, 2, forced=False)
+        lines, markdown, blocked = earlier_attempts.report(rows, 2)
         self.assertFalse(blocked)
         self.assertTrue(lines[0].startswith("::warning title=Re-run after attempt 1::UI flow / UI device conditions"))
         self.assertIn("machinery: re-run allowed", markdown)
@@ -42,7 +42,7 @@ class FailureTests(unittest.TestCase):
                      "Build for testing", "Archive (unsigned; signed for the App Store during export)"):
             with self.subTest(step=step):
                 rows = earlier_attempts.earlier_failures([(1, {"jobs": [job("Some job", "failure", [step])]})])
-                lines, markdown, blocked = earlier_attempts.report(rows, 2, forced=False)
+                lines, markdown, blocked = earlier_attempts.report(rows, 2)
                 self.assertTrue(blocked)
                 self.assertTrue(lines[0].startswith("::error title=Red in attempt 1::Some job: failure in " + step))
                 self.assertIn("**Not uploaded**", markdown)
@@ -102,7 +102,7 @@ class FailureTests(unittest.TestCase):
     def test_a_job_without_a_failed_step_is_the_runner(self):
         rows = earlier_attempts.earlier_failures([(1, {"jobs": [job("Stress pass / UI stress 10000 photos", "failure")]})])
         self.assertTrue(rows[0]["machinery"])
-        self.assertIn("(no failed step)", earlier_attempts.report(rows, 2, forced=False)[0][0])
+        self.assertIn("(no failed step)", earlier_attempts.report(rows, 2)[0][0])
 
     def test_a_carried_over_failure_is_counted_once_and_each_job_is_one_row(self):
         device = job("UI flow / UI device conditions", "failure", ["Wait for the simulator"])
@@ -121,7 +121,7 @@ class FailureTests(unittest.TestCase):
                          "Stress pass / UI stress 10000 photos (attempt 1, 2: Boot simulator (in the background), "
                          "Wait for the simulator)")
         # The runner would end the title at the comma of "1, 2".
-        self.assertTrue(earlier_attempts.report(rows, 3, forced=False)[0][1].startswith(
+        self.assertTrue(earlier_attempts.report(rows, 3)[0][1].startswith(
             "::warning title=Re-run after attempt 1%2C 2::Stress pass / UI stress 10000 photos: failure/failure in "
             "Boot simulator (in the background), Wait for the simulator; machinery"))
 
@@ -129,19 +129,22 @@ class FailureTests(unittest.TestCase):
         self.assertEqual(earlier_attempts.command("error", "a, b: c", "50% done\nnext"),
                          "::error title=a%2C b%3A c::50%25 done%0Anext")
 
-    def test_forced_lists_and_never_blocks(self):
+    def test_a_red_archive_always_blocks(self):
+        # The emergency "force" listed this and uploaded anyway; it is gone (the owner's decision
+        # 17.11., G5-02/G6-02): no mode of this check lets a failure outside the machinery through.
         rows = earlier_attempts.earlier_failures(
             [(1, {"jobs": [job("Archive and upload to TestFlight", "failure", ["Archive of the tested commit"])]})])
-        lines, markdown, blocked = earlier_attempts.report(rows, 2, forced=True)
-        self.assertFalse(blocked)
-        self.assertTrue(lines[0].startswith("::warning title=FORCED – untested::"))
-        self.assertIn("FORCED – untested", markdown)
+        lines, markdown, blocked = earlier_attempts.report(rows, 2)
+        self.assertTrue(blocked)
+        self.assertTrue(lines[0].startswith("::error title=Red in attempt 1::"))
+        self.assertIn("**Not uploaded**", markdown)
+        self.assertNotIn("FORCED", markdown + "".join(lines))
 
     def test_nothing_failed_before(self):
         rows = earlier_attempts.earlier_failures([(1, {"jobs": [GREEN]})])
         self.assertEqual(rows, [])
         self.assertEqual(earlier_attempts.one_line(rows), "earlier attempts: no failed job")
-        self.assertIn("No job failed in attempts 1 to 1.", earlier_attempts.report(rows, 2, forced=False)[1])
+        self.assertIn("No job failed in attempts 1 to 1.", earlier_attempts.report(rows, 2)[1])
 
 
 class MainTests(unittest.TestCase):
@@ -188,6 +191,12 @@ class MainTests(unittest.TestCase):
             [{"jobs": [job("Archive and upload to TestFlight", "failure", ["Upload to TestFlight"])]}], 2)
         self.assertEqual(code, 0)
         self.assertIn("::warning title=Re-run after attempt 1::", log)
+
+    def test_there_is_no_forced_mode(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as stop:
+            self.run_main([{"jobs": [job("Tests / iOS build and tests (macOS)", "failure", ["Build and test app"])]}],
+                          2, "--forced")
+        self.assertEqual(stop.exception.code, 2)
 
     def test_fails_closed_when_an_attempt_is_missing_or_unreadable(self):
         self.assertEqual(self.run_main([{"jobs": []}], 3)[0], 1)

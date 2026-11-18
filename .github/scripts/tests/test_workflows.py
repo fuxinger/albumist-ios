@@ -70,6 +70,47 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertIn("needs: [check, tests, ui, stress, ui-gate]", release)
         self.assertIn("needs.ui-gate.result == 'success'", release)
 
+    def test_nothing_skips_the_tests_before_an_upload(self):
+        # G5-02/G6-02: the owner decided on 17.11. to remove the emergency input "force", which
+        # uploaded a TestFlight build without running any test. No workflow has an input or a
+        # flag to skip tests or the gate, and every job before the upload runs on the results of
+        # the one before it alone.
+        for path in WORKFLOWS:
+            text = read(path)
+            code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+            trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0] if "\non:\n" in text else ""
+            inputs = re.findall(r"^      ([A-Za-z0-9_-]+):\s*$", trigger, re.M)
+            with self.subTest(workflow=os.path.basename(path)):
+                self.assertEqual([name for name in inputs
+                                  if re.search(r"(?i)force|skip|bypass|untested|emergency|no[-_]?tests?", name)], [])
+                self.assertEqual(re.findall(r"(?i).*(?:\bforced?\b|untested).*", code), [])
+        # Scripts: no flag that lets a run through without tests ("--forced" in earlier_attempts.py
+        # and testflight_notes.py). ui_tests.py --skip names single tests that another group runs
+        # (ui-groups.json); the UI gate needs every group green.
+        for path in glob.glob(os.path.join(ROOT, ".github", "scripts", "*.py")):
+            with self.subTest(script=os.path.basename(path)):
+                flags = re.findall(r"add_argument\(\s*[\"']--([\w-]+)[\"']", read(path))
+                self.assertEqual([f for f in flags if re.search(r"(?i)force|untested|skip[-_]?(?:tests?|gate)|no[-_]?tests?", f)], [])
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+
+        def condition(job):
+            """The job's "if:", on one line."""
+            block = re.split(r"\n  [A-Za-z0-9_-]+:\n", text.split(f"\n  {job}:\n", 1)[1], maxsplit=1)[0]
+            found = re.search(r"\n    if: (?:>-\n)?(.*?)\n    [a-z-]+:", "\n" + block, re.S)
+            return " ".join(found.group(1).split()) if found else ""
+
+        self.assertEqual(condition("tests"), "needs.check.outputs.ready == 'true'")
+        self.assertIn("needs: tests", text.split("\n  ui:\n", 1)[1].split("\n  stress:\n", 1)[0])
+        self.assertIn("needs: tests", text.split("\n  stress:\n", 1)[1].split("\n  flaky:\n", 1)[0])
+        for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "ui-gate"))):
+            with self.subTest(job=job):
+                rule = condition(job)
+                self.assertNotIn("||", rule)
+                self.assertNotIn("inputs.", rule)
+                self.assertIn("needs.check.outputs.ready == 'true'", rule)
+                for need in needed:
+                    self.assertIn(f"needs.{need}.result == 'success'", rule)
+
     def test_ui_flow_plans_its_groups(self):
         text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
         self.assertIn("python3 .github/scripts/ui_evidence.py plan", text)

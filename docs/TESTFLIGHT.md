@@ -142,9 +142,11 @@ Actions > **TestFlight feedback** > Run workflow.
   App und genau ihren Testcode einmal rot, zählt ein späteres Grün derselben Kombination nicht,
   auch nicht aus einem anderen Lauf. Erst eine Änderung am Test oder an der App (die Korrektur)
   macht sie wieder hochladbar.
-- Notfall: **force** lädt ohne Tests hoch. So ein Build ist überall als „FORCED – untested“
-  markiert: in der Zusammenfassung des Upload-Jobs, in der Nachricht des Tags `build-<Nummer>`
-  und als erste Zeile von „Was testen“.
+- Kein Notfall-Weg ohne Tests: den Schalter **force** (lud ohne jeden Test hoch) hat Fuchs am
+  17.11.2026 gestrichen; er ist seit 18.11. auch aus `testflight.yml` und den Skripten entfernt
+  (Prüfbefund G5-02/G6-02). Auch ein eiliger Build wartet auf CI, UI-Tests, Härtetest und das
+  UI-Tor. Ein Test in `.github/scripts/tests/test_workflows.py` schlägt fehl, sobald ein
+  Workflow wieder eine Eingabe oder ein Skript einen Schalter zum Überspringen bekommt.
 - Härtetest (Regel Fuchs, 17.11.2026): vor jedem TestFlight-Build der kleine Durchgang mit
   10.000 Fotos und 15 Minuten Messung (rund 45 Minuten). Er läuft im TestFlight-Lauf neben den
   UI-Tests und muss grün sein, sonst wird nicht hochgeladen; grün heißt, test12 ist

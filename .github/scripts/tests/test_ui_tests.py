@@ -448,10 +448,48 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(ui_tests.retry_arguments(["SortlyFlowUITests", "SortlyLockedUITests"], [], TESTMANAGERD_CRASH),
                          ["-only-testing:SortlyUITests/SortlyFlowUITests", "-only-testing:SortlyUITests/SortlyLockedUITests",
                           "-skip-testing:SortlyUITests/SortlyFlowUITests/test5_Earlier"])
-        # Crashed again in the repeat: no result; the repeat fails in a test: red; passes: green.
-        self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, TESTMANAGERD_CRASH])[:2], (ui_tests.NO_TEST_EXIT, True))
+        # The app was lost in the same test, without an app crash report: still repeated, but named.
+        self.assertIn("app lost + daemon crash in SortlyFlowUITests/test6_AnalysisKeepsGoingThroughBackgroundAndTabs "
+                      "(no app crash report)", reasons)
+        # Crashed again in the same test: red (likely app-caused); the repeat lost the simulator
+        # alone: no result; the repeat fails in a test: red; passes: green.
+        code, marker, log = self.run_with_passes([TESTMANAGERD_CRASH, TESTMANAGERD_CRASH])
+        self.assertEqual((code, marker), (1, False))
+        self.assertIn("testmanagerd crashed again in the same test", log)
+        self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, AX_TIMEOUT])[:2], (ui_tests.NO_TEST_EXIT, True))
         self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, FLOW_ASSERTION])[:2], (1, False))
         self.assertEqual(self.run_with_passes([TESTMANAGERD_CRASH, "** TEST SUCCEEDED **\n" + PASSED_ONE])[:2], (0, False))
+
+    def test_a_pass_past_the_deadline_is_stopped_and_red(self):
+        import subprocess
+        import time
+        process = subprocess.Popen(["sleep", "30"])
+        started = time.time()
+        status, hung = ui_tests.wait_until(process, time.time() + 1, grace=5)
+        self.assertTrue(hung)
+        self.assertNotEqual(status, 0)
+        self.assertLess(time.time() - started, 10)
+        quick = subprocess.Popen(["true"])
+        self.assertEqual(ui_tests.wait_until(quick, time.time() + 30), (0, False))
+        # The line run_pass writes: a finding, never repeated.
+        verdict, reasons = ui_tests.decide(1, "Test Case '-[SortlyUITests.A t]' started.\n"
+                                              "UI_HANG pass first still running at the job's deadline; xcodebuild stopped\n")
+        self.assertEqual(verdict, "fail")
+        self.assertIn("hang: the pass did not end before the job's deadline", reasons)
+
+    def test_failures_are_echoed_while_the_pass_runs(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = os.path.join(folder.name, "log.txt")
+        with open(path, "w", encoding="utf-8") as log:
+            log.write("Test Case '-[SortlyUITests.A t]' started.\n/x.swift:3: error: -[SortlyUITests.A t] : XCTAssertTrue failed\n"
+                      "Test Case '-[SortlyUITests.A t]' failed (1.0 seconds).\nPREVIEW_JPEG x: error: -[\nTest Case '-[Sort")
+        watcher = ui_tests.HostGrants("U", path, grant=lambda: None)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            watcher.check()
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines, ["UI_LIVE /x.swift:3: error: -[SortlyUITests.A t] : XCTAssertTrue failed",
+                                 "UI_LIVE Test Case '-[SortlyUITests.A t]' failed (1.0 seconds)."])
 
     def test_a_testmanagerd_crash_does_not_hide_a_real_failure(self):
         other = ("Test Case '-[SortlyUITests.SortlyFlowUITests test5_Earlier]' started.\n"

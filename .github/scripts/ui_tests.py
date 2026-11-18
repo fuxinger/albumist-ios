@@ -12,7 +12,7 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       accessibility settings. With --ready-file it writes "ok" or "failed" there at the end,
       so the boot can run in the background while the build products are downloaded.
   run   --udid U --name N (--xctestrun F | --project P --scheme S) [--only T]... [--skip T]...
-        [--reduce-motion] [--increase-contrast] [--video F] [--out DIR]
+        [--reduce-motion] [--increase-contrast] [--video F] [--out DIR] [--deadline EPOCH]
       Runs the tests (T is "Class" or "Class/testMethod" of SortlyUITests), prints the
       report lines for the log (steps, screenshots, accessibility findings, restart context,
       crash reports, SwiftUI runtime warnings), a last line "UI_RESULT NAME pass|fail|infra"
@@ -49,6 +49,17 @@ new one, and only for the tests that did not pass (-only-testing as before, plus
   - the result bundle agrees: no test case failed with a message other than the
     infrastructure ones above, no issue outside a test, and it can be read at all (a JSON
     object with a list "testNodes").
+A crash of XCTest's daemon testmanagerd during a test ("Critical process testmanagerd crashed",
+the app lost with it; `daemon_crash`) also counts as such a failure: the failure lines it caused
+are taken out, anything else still counts, and the tests that did not pass are repeated. That
+goes beyond "a simulator failure before the first test": a test that had already started is
+run again (decision of 19.11., for the owner to confirm; docs/TESTFLIGHT.md). It is counted
+(FLAKY_RETRY with the reason, also "app lost + daemon crash in <test>" when the app was lost in
+that test without a crash report), and if the daemon crashes again in the same test in the
+repeat, the group is red (likely app-caused, e.g. a huge accessibility tree).
+A pass still running at --deadline (the job's time limit minus a margin, ui.yml) is stopped:
+a hang, red, never repeated (UI_HANG). While a pass runs, failed test cases and ": error: -["
+lines are echoed into the job log at once (UI_LIVE), so a cancel after a failure stays red.
 A watchdog (class Watchdog) stops a pass early when the simulator leaves "Booted" before
 the first test started (two checks 20 s apart); the UI_WATCHDOG line it leaves in the log is
 one of the infrastructure failures above, and the stop counts as FLAKY_BOOT. It never stops a
@@ -125,6 +136,9 @@ REAL = [
     (re.compile(r"\bCrash:"), "a crash"),
     (re.compile(r"\bcrashed\b", re.I), "something crashed"),
     (re.compile(r"execution time allowance"), "a test ran out of time"),
+    # Written by run_pass when a pass did not end before the job's deadline (--deadline): a hang
+    # is a finding (the app or a test never got done), never repeated.
+    (re.compile(r"^UI_HANG\b"), "hang: the pass did not end before the job's deadline"),
     (re.compile(r"\*\* (?:TEST )?BUILD FAILED \*\*"), "build failed"),
 ]
 
@@ -144,11 +158,17 @@ STRONG_REAL = [
 # judged (daemon_crash); anything else that failed still counts, and so does a crash report of
 # the app. The tests that did not pass run once more like after a simulator failure.
 DAEMON_CRASH = re.compile(r"Critical process testmanagerd crashed")
+# A testmanagerd crash in a test whose app was lost too, with no app crash report: still repeated,
+# but named in the reasons (and so in the flaky record) as "app lost + daemon crash".
+APP_LOST = re.compile(r"Lost connection to the application|does not have a process ID|is not running")
 DAEMON_LOST = re.compile(r"Critical process testmanagerd crashed|Lost connection to the application"
                          r"|Couldn.t communicate with a helper application")
 ERROR_OF = re.compile(r": error: -\[\w+\.(\w+) (\w+)\] : ")
 FAILED_CASE = re.compile(r"Test [Cc]ase '-\[\w+\.(\w+) (\w+)\]' failed")
 AGGREGATE = re.compile(r"Test Suite '.*' failed|with [1-9]\d* failures?\b")
+
+# Echoed into the job log while a pass runs (HostGrants.check).
+LIVE = re.compile(r"Test [Cc]ase '.*' failed|: error: -\[")
 
 # Lines that carry data, not messages (base64 screenshots and video).
 DATA_LINE = re.compile(r"PREVIEW_JPEG|UI_VIDEO_B64")
@@ -282,17 +302,29 @@ def lost_app_at_launch(log: str, crash_reports: list[str] | None = None) -> list
     return reasons
 
 
-def daemon_crash(log: str, bundle: list[str]) -> tuple[str, list[str], str | None]:
-    """(log, bundle findings, reason) with the failure that a crash of testmanagerd caused taken
-    out (see DAEMON_CRASH); unchanged and None when it did not crash."""
-    lines = log.splitlines()
-    if not any(DAEMON_CRASH.search(line) for line in lines):
-        return log, bundle, None
+def daemon_crash_tests(log: str) -> set[tuple[str, str]]:
+    """(class, test) of each test in which testmanagerd crashed."""
     hit = set()
-    for line in lines:
+    for line in log.splitlines():
         match = ERROR_OF.search(line)
         if match and DAEMON_CRASH.search(line):
             hit.add(match.groups())
+    return hit
+
+
+def daemon_crash(log: str, bundle: list[str]) -> tuple[str, list[str], list[str]]:
+    """(log, bundle findings, reasons) with the failure that a crash of testmanagerd caused taken
+    out (see DAEMON_CRASH); unchanged and [] when it did not crash."""
+    lines = log.splitlines()
+    if not any(DAEMON_CRASH.search(line) for line in lines):
+        return log, bundle, []
+    hit = daemon_crash_tests(log)
+    lost = sorted({e.groups() for line in lines if (e := ERROR_OF.search(line)) and e.groups() in hit
+                   and APP_LOST.search(line)})
+    reasons = ["XCTest daemon testmanagerd crashed"]
+    if lost:
+        reasons.append("app lost + daemon crash in " + ", ".join(f"{c}/{t}" for c, t in lost)
+                       + " (no app crash report)")
     kept = []
     for line in lines:
         error, failed = ERROR_OF.search(line), FAILED_CASE.search(line)
@@ -303,7 +335,7 @@ def daemon_crash(log: str, bundle: list[str]) -> tuple[str, list[str], str | Non
         if failed and failed.groups() in hit:
             continue
         kept.append(line)
-    return "\n".join(kept), [b for b in bundle if not DAEMON_LOST.search(b)], "XCTest daemon testmanagerd crashed"
+    return "\n".join(kept), [b for b in bundle if not DAEMON_LOST.search(b)], reasons
 
 
 def decide(status: int, log: str, crash_reports: list[str] | None = None, probe: str = "",
@@ -323,8 +355,7 @@ def decide(status: int, log: str, crash_reports: list[str] | None = None, probe:
         return "pass", []
     log, bundle, daemon = daemon_crash(log, list(bundle or []))
     real, infra = scan(log)
-    if daemon:
-        infra.insert(0, daemon)
+    infra[:0] = daemon
     real += [reason for reason in lost_app_at_launch(log, crash_reports) if reason not in real]
     if crash_reports:
         real.append("crash report " + ", ".join(os.path.basename(p) for p in crash_reports))
@@ -755,6 +786,11 @@ class HostGrants(threading.Thread):
         complete, _, self.tail = (self.tail + chunk).rpartition("\n")
         for _ in range(host_grant_requests(complete)):
             self.grant()
+        # A failure shows in the job log at once, not only when the pass ends: a run cancelled
+        # (or a runner lost) after it is still red for ui_evidence.py.
+        for line in complete.splitlines():
+            if LIVE.search(line) and not DATA_LINE.search(line):
+                print(f"UI_LIVE {line[:400]}", flush=True)
 
     def run(self) -> None:
         while not self.stopped.wait(self.interval):
@@ -859,10 +895,16 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         watchdog.start()
         grants = HostGrants(args.udid, log_path)
         grants.start()
-        status = process.wait()
+        status, hung = wait_until(process, getattr(args, "deadline", 0) or 0)
         grants.stop()
         watchdog.stop()
         watchdog.join(timeout=90)
+    if hung:
+        with open(log_path, "a") as log:
+            log.write(f"\nUI_HANG pass {label} still running at the job's deadline; xcodebuild stopped\n")
+        print(f"::error title=UI {args.name}::The {label} pass did not end before the job's deadline "
+              "(a hang); stopped.", flush=True)
+        status = status or 1
     if watchdog.fired:
         with open(log_path, "a") as log:
             log.write(f"\nUI_WATCHDOG simulator {args.udid} left Booted (state {watchdog.fired}) before the first test; "
@@ -877,6 +919,22 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
     with open(log_path, encoding="utf-8", errors="replace") as log:
         text = log.read()
     return status, text, result, started, bool(watchdog.fired)
+
+
+def wait_until(process, deadline: float, grace: float = 30) -> tuple[int, bool]:
+    """(exit status, whether it hung): waits for `process` until the epoch second `deadline`
+    (0: no deadline), then stops it (SIGTERM, after `grace` seconds SIGKILL)."""
+    if not deadline:
+        return process.wait(), False
+    try:
+        return process.wait(timeout=max(1.0, deadline - time.time())), False
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            return process.wait(timeout=grace) or 1, True
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return process.wait() or 1, True
 
 
 def report(text: str, status: int, label: str) -> None:
@@ -944,6 +1002,13 @@ def command_run(args) -> int:
                 verdict, reasons = decide(status, text, crashes, bundle=watchdog_bundle(bundle) if stopped else bundle)
                 # "infra": the repeat failed on the simulator or XCTest alone again.
                 final = {"pass": "pass", "retry": "infra"}.get(verdict, "fail")
+                again = daemon_crash_tests(first_log) & daemon_crash_tests(text)
+                if final == "infra" and again:
+                    # The daemon crashed again in the same test: likely caused by what the test
+                    # does in the app (a huge accessibility tree, ...), so red, not "no result".
+                    final = "fail"
+                    reasons = ["testmanagerd crashed again in the same test: "
+                               + ", ".join(f"{c}/{t}" for c, t in sorted(again)) + " (likely app-caused)"] + reasons
                 print(f"UI_VERDICT {args.name} retry: {final}" + (f" ({'; '.join(reasons)})" if reasons else ""), flush=True)
                 print_crash_reports(crashes + other_crash_reports(started) if status else [], "retry")
                 passes.append(("retry", 0 if final == "pass" else (status or 1), final, reasons, text))
@@ -1106,6 +1171,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--video")
     r.add_argument("--a11y-summary", action="store_true")
     r.add_argument("--out", default="build")
+    r.add_argument("--deadline", type=float, default=0,
+                   help="epoch second by which a pass must end (the job's limit minus a margin); 0: none")
     c = sub.add_parser("classify")
     c.add_argument("log")
     c.add_argument("--status", type=int, default=65)

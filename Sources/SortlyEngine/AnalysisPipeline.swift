@@ -1578,7 +1578,7 @@ public actor AnalysisPipeline {
         let overrides = OverrideSet(try await store.overrides())
         let scopedIDs = Set(facts.map(\.id))
         let oftenHere = try await recurringPlaceReport()?.places ?? []
-        let analysis = AnalysisSnapshot(
+        var analysis = AnalysisSnapshot(
             facts: facts,
             trips: scope == .all ? trips : trips.filter { !scopedIDs.isDisjoint(with: $0.geotaggedAssetIDs) },
             frequentPlaces: scope == .all ? frequent : [],
@@ -1587,8 +1587,10 @@ public actor AnalysisPipeline {
             recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) },
             home: try await homeSettings()
         )
+        analysis.applied = Set(Self.assignments(try await store.managedAlbums()).keys)
         let engine = ProposalEngine(settings: settings, calendar: calendar)
-        var suggestions = await offActor { engine.suggestions(for: analysis, overrides: overrides) }
+        let input = analysis
+        var suggestions = await offActor { engine.suggestions(for: input, overrides: overrides) }
         if abandonable { try Task.checkCancellation() }
         // Chosen before a change in "Dein Zuhause": stays as the user chose it, in this and
         // every later run, until it is created or deselected.

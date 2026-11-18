@@ -11,6 +11,9 @@ public struct AnalysisSnapshot: Sendable {
     public var recurringPlaces: [RecurringPlace]
     /// What the user set in "Dein Zuhause": the home of each date for trip names and place albums.
     public var home: HomeSettings
+    /// Suggestions that already have their album (from the managed-album records). Of a place
+    /// suggested both as recurring and as frequent place, the one with its album stays.
+    public var applied: Set<SortlyID> = []
 
     public init(facts: [AssetFacts], trips: [Trip] = [], frequentPlaces: [FrequentPlace] = [], groups: [ObservationGroup] = [],
                 recurringPlaces: [RecurringPlace] = [], home: HomeSettings = HomeSettings()) {
@@ -52,10 +55,12 @@ public struct ProposalEngine: Sendable {
         let areas = settings.enabledAreas
         if areas.contains(.places) { result += placeProposals(usable, profile: profile) }
         if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile, home: home, routineVisits: &standIns) }
-        if areas.contains(.frequentPlaces) { result += frequentPlaceProposals(analysis.frequentPlaces, facts: analysis.facts) }
+        var frequent = areas.contains(.frequentPlaces) ? frequentPlaceProposals(analysis.frequentPlaces, facts: analysis.facts) : []
         // A place the user is often at gets one album instead of its trips, so it comes with
         // either area (Trips/RecurringPlaces.swift).
-        if areas.contains(.frequentPlaces) || areas.contains(.trips) { result += recurringPlaceProposals(analysis.recurringPlaces, facts: usable) }
+        var recurring = areas.contains(.frequentPlaces) || areas.contains(.trips) ? recurringPlaceProposals(analysis.recurringPlaces, facts: usable) : []
+        Self.suggestEachPlaceOnce(frequent: &frequent, recurring: &recurring, applied: analysis.applied)
+        result += frequent + recurring
         if areas.contains(.chronology) { result += chronologyProposals(usable) }
         if areas.contains(.mediaTypes) { result += mediaTypeProposals(usable) }
         if areas.contains(.screenshots) { result += screenshotProposals(usable, profile: profile) }
@@ -481,6 +486,34 @@ public struct ProposalEngine: Sendable {
     }
 
     // MARK: Frequent places (4.3)
+
+    /// A place the user is often at (recurring) and a frequent place can be the same place
+    /// (Fuchs, build 36: "Bayern", 509 photos, and "Häufiger Ort in Zwiesel", 422 photos). They
+    /// are the same when they share at least half of the smaller one's photos (the rule that
+    /// keeps a place's ID). Then the place is suggested once:
+    /// - as the recurring place: the user said they are often there (or added it as their place),
+    ///   and its album replaces the trips there; the frequent places covering it go;
+    /// - as the frequent place instead when the user already named it or it already has its
+    ///   album (`applied`) while the recurring place has none: the user's name and album stay,
+    ///   and no second album for the same photos is suggested.
+    /// Both stay when both already have their albums.
+    static func suggestEachPlaceOnce(frequent: inout [AlbumProposal], recurring: inout [AlbumProposal], applied: Set<SortlyID>) {
+        guard !frequent.isEmpty, !recurring.isEmpty else { return }
+        func same(_ a: AlbumProposal, _ b: AlbumProposal) -> Bool {
+            let (small, large) = a.assetIDs.count <= b.assetIDs.count ? (a.assetIDs, b.assetIDs) : (b.assetIDs, a.assetIDs)
+            return !small.isEmpty && small.filter(large.contains).count * 2 >= small.count
+        }
+        var droppedFrequent = Set<SortlyID>()
+        recurring.removeAll { place in
+            let covering = frequent.filter { same($0, place) }
+            guard !covering.isEmpty else { return false }
+            let placeHasAlbum = applied.contains(place.id)
+            let keptFrequent = covering.filter { applied.contains($0.id) || (!placeHasAlbum && !$0.requiresUserName) }
+            droppedFrequent.formUnion(covering.filter { !applied.contains($0.id) && !keptFrequent.contains($0) }.map(\.id))
+            return !keptFrequent.isEmpty && !placeHasAlbum
+        }
+        frequent.removeAll { droppedFrequent.contains($0.id) }
+    }
 
     /// At most this many places without a name are offered, the most visited ones. A long tail
     /// of "Häufiger Ort 12 … 44" asks for names nobody can give (first device test 15.11.).

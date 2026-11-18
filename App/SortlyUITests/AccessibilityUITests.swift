@@ -793,8 +793,9 @@ final class AccessibilityUITests: XCTestCase {
         return false
     }
 
-    /// Scrolls `element` up by short drags above the tab bar until at least 30 pt of it are clear
-    /// of both bars, then taps the middle of that part. False when it never got clear.
+    /// Scrolls `element` by short drags (up above the tab bar, or down below the navigation bar
+    /// for an element under it) until at least 30 pt of it are clear of both bars, then taps the
+    /// middle of that part. False when it never got clear.
     private func tapClearOfBars(_ element: XCUIElement, _ step: String) -> Bool {
         guard element.exists else { return false }
         let window = app.windows.firstMatch.frame
@@ -807,11 +808,13 @@ final class AccessibilityUITests: XCTestCase {
             return (top, bottom)
         }
         let origin = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        // Content under the navigation bar is dragged down, everything else up.
+        let down = bar.exists && element.frame.midY < bar.frame.maxY
         var drags = 0
         while band().bottom - band().top < 30 && drags < 6 {
-            let from = (tabs.exists ? tabs.frame.minY : window.maxY) - 40
+            let from = down ? (bar.exists ? bar.frame.maxY : window.minY + 60) + 40 : (tabs.exists ? tabs.frame.minY : window.maxY) - 40
             origin.withOffset(CGVector(dx: window.midX, dy: from))
-                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.midX, dy: from - 220)))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.midX, dy: down ? from + 220 : from - 220)))
             drags += 1
             sleep(1)
         }
@@ -839,15 +842,39 @@ final class AccessibilityUITests: XCTestCase {
         // to be clear of the bar by the scroll edge it softens (see `chromeFrames`) and more.
         let bar = app.navigationBars.firstMatch
         let tabs = app.tabBars.firstMatch
+        func underBar() -> Bool {
+            bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY
+        }
+        func underTabs() -> Bool {
+            tabs.exists && !tabs.frame.contains(element.frame) && element.frame.midY > tabs.frame.minY - 24
+        }
         var swipes = 0
+        var stuck = false
         while swipes < 10 {
-            let underBar = bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY
-            let underTabs = tabs.exists && !tabs.frame.contains(element.frame) && element.frame.midY > tabs.frame.minY - 24
-            if underBar { app.swipeDown() } else if underTabs || !element.isHittable { app.swipeUp() } else { break }
+            let before = element.frame
+            if underBar() { app.swipeDown() } else if underTabs() || !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
+            // The list is at its end: more swipes do not move the element (accessibility run
+            // 44202318875: ten swipes, the row stayed at y 500-765 under the tab bar from 584).
+            if element.frame == before { stuck = true; break }
         }
         if tabs.exists, swipes > 0 || element.frame.maxY > tabs.frame.minY {
-            print("UI_FACT tap \(step): element \(element.frame), tab bar \(tabs.frame), \(swipes) swipes")
+            print("UI_FACT tap \(step): element \(element.frame), tab bar \(tabs.frame), \(swipes) swipes\(stuck ? ", it no longer moves" : "")")
+        }
+        // Never a tap on the centre of an element under a bar: the bar takes it. In accessibility
+        // run 44202318875 (test3) the tap meant for a suggestion row opened the Mediathek tab,
+        // and every later step ran on the wrong screen ("Missing: xxxl open atlas"). Such an
+        // element is tapped on its part clear of both bars, and when no part gets clear the
+        // step fails here, by its name.
+        if underBar() || underTabs() {
+            guard tapClearOfBars(element, step) else {
+                print("UI_STEP_MISSING \(step) (under a bar: element \(element.frame))")
+                shot("a11y-x-under-bar-" + slug(step))
+                XCTFail("Not tappable clear of the bars: \(step) (element \(element.frame))")
+                return false
+            }
+            print("UI_STEP_OK \(step)")
+            return true
         }
         UITestOnboarding.clock("tap \(step)")
         element.tap()

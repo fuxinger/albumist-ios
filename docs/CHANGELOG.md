@@ -50,6 +50,14 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- Testplan widersprach sich (Prüfung 18.11., G6-06): er verbot TestFlight mit offenen Fällen und
+  führte selbst 77. Jetzt gilt der Abschnitt „Tore“ (Entscheidungen 10 und 12): der tägliche Build
+  für Fuchs (noch nicht gebaut) braucht die schnellen Tests und einen kurzen Bedienungsdurchgang,
+  Builds für Tester und den App Store dazu alle UI-Gruppen, den kleinen Härtetest und keinen Fall
+  mit ⛔. Jeder offene Fall ist am Code geprüft: 36 jetzt mit ihrem Test belegt, 2 nur am iPhone
+  prüfbar, 1 sperrt (G1: das Zuhause wird zur Reise, ein fester Ort heißt „Bayern“), 39 offen mit
+  Grund, warum sie nicht sperren. Neu: „Am iPhone prüfen“ für Fuchs und die Lücken in den Tests
+  selbst (G5).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

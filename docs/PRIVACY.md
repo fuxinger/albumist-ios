@@ -9,7 +9,8 @@ Plan bestätigt: Es legt Alben und Ordner in Fotos an, benennt und verschiebt si
 Alben hinzu oder nimmt sie aus Alben heraus; „Rückgängig machen“ entfernt die Alben wieder, die
 Albumist angelegt hat. Originale werden nie verändert. Fotos fügt Albumist nur auf Wunsch hinzu
 („Mit Beispielfotos ausprobieren“) und löscht nur diese eigenen Beispielfotos, mit der
-Löschabfrage von iOS.
+Löschabfrage von iOS. Vor dem Löschen prüft Albumist jedes Foto noch einmal an Dateiname und
+Aufnahmedatum; was nicht passt, bleibt.
 
 ## Speicherorte
 Eine SQLite-Datenbank in *Application Support/Albumist* mit Metadaten, Analyseergebnissen,

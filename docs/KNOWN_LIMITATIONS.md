@@ -54,6 +54,21 @@ mit eingeschränkten Rechten: nur lesend.
   Der Änderungsbeleg zeigt den Schritt als nicht bestätigt; nach dem Rückgängig (auch nach
   „Alles zurücknehmen“) sagt Albumist, wie viele Fotos in welchem Album bleiben, und der Plan
   bleibt im Verlauf statt zu verschwinden (P2-01).
+- Zwei Pläne ergänzen dasselbe Album (Prüfer 2, P2-09): Ein Plan zeichnet nur auf, was er selbst
+  hinzugefügt hat. Wird der ältere zurückgenommen, nimmt er seine Fotos aus dem Album, auch die,
+  die der neuere Vorschlag ebenfalls dort haben wollte; der Beleg des neueren sagt weiter
+  „erledigt“. Fotos des Nutzers sind nie betroffen. Nicht geändert, weil zwei Wege möglich sind
+  und beide etwas versprechen, das der andere nicht hält: die Fotos beim Rückgängig des älteren
+  lassen (dann nimmt „Rückgängig“ des älteren nicht alles zurück, und ein späteres Rückgängig des
+  neueren kennt sie nicht als seine) oder es in der Rückfrage sagen. Offen für eine Entscheidung.
+- Beispielfotos entfernen (Prüfer 2, P2-05): Gelöscht wird nur ein Foto, dessen Dateiname und
+  Aufnahmedatum im Löschblock selbst noch zu einem Beispielfoto passen
+  (`SampleLibrary.isSample`), egal was in der gespeicherten Liste steht; ein Album nur, solange
+  es nichts anderes hält, ein Ordner nur, solange alles darin mitgeht. Hat der Nutzer Name oder
+  Datum eines Beispielfotos in Fotos geändert, bleibt es: Albumist sagt, wie viele Fotos
+  geblieben sind, und vergisst sie. Offen: Nach Löschen und Neuinstallieren von Albumist ist die
+  Liste weg; die Beispielfotos bleiben dann als normale Fotos in der Mediathek, und „Entfernen“
+  wird nicht mehr angeboten (die Prüfung könnte sie wiederfinden, das ist noch nicht gebaut).
 - Das Journal schreibt mit `synchronous = FULL`, aber ohne `PRAGMA fullfsync` (Prüfer 2,
   P2-07): Nach einem Stromausfall kann auf Apple-Geräten der letzte Eintrag fehlen, obwohl Fotos
   die Änderung hat. Seit P2-01/P2-07 legt „Fortsetzen“ dann nichts doppelt an (die Kennung neuer

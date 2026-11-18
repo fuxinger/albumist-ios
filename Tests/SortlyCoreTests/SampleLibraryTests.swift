@@ -78,6 +78,10 @@ struct SampleLibraryTests {
         // "Reisen" still holds "Gemischt": it stays.
         #expect(!removal.albums.contains(reisen))
         #expect(removal.plansToGiveBack == [first.id])
+        // The change itself kept "Lissabon" (P2-05): plan 1 still has an album in Photos and
+        // keeps its count; it is given back only once both are gone.
+        #expect(SampleLibrary.plansToGiveBack(history: [second, first], gone: [id("Rom")]).isEmpty)
+        #expect(SampleLibrary.plansToGiveBack(history: [second, first], gone: [id("Rom"), id("Lissabon")]) == [first.id])
         #expect(!removal.assets.contains { mine.contains($0) })
         #expect(!removal.albums.contains("family") && !removal.albums.contains("own") && !removal.albums.contains(id("Gemischt")))
 
@@ -159,5 +163,58 @@ struct SampleLibraryReviewTests {
         // A second folder next to it keeps "Albumist".
         let side = ["reisen": ["rom"], "albumist": ["reisen", "familie"]]
         #expect(SampleLibrary.foldersSafeToDelete(side, deletingAlbums: ["rom"]) == ["reisen"])
+    }
+
+    // MARK: Checked again inside the deletion (review P2-05)
+
+    func seen(_ spec: SampleLibrary.Spec, name: String? = nil, plus seconds: TimeInterval = 0) -> SampleLibrary.Seen {
+        SampleLibrary.Seen(filename: name ?? spec.filename, created: spec.date.addingTimeInterval(seconds))
+    }
+
+    @Test func aPhotoIsASamplePhotoOnlyWithItsNameAndItsDate() {
+        let specs = SampleLibrary.specs()
+        for spec in specs {
+            #expect(SampleLibrary.isSample(seen(spec)))
+        }
+        let first = specs[0], second = specs[1]
+        // The right name with another date (the user changed it, or a photo of their own
+        // happens to carry the name), the date of another sample photo, no date at all.
+        #expect(!SampleLibrary.isSample(seen(first, plus: 3600)))
+        #expect(!SampleLibrary.isSample(SampleLibrary.Seen(filename: first.filename, created: second.date)))
+        #expect(!SampleLibrary.isSample(SampleLibrary.Seen(filename: first.filename, created: nil)))
+        // The right date with another name, a name only like a sample photo's, no name.
+        #expect(!SampleLibrary.isSample(seen(first, name: "IMG_0001.HEIC")))
+        #expect(!SampleLibrary.isSample(seen(first, name: "Albumist-Beispiel-999.jpg")))
+        #expect(!SampleLibrary.isSample(seen(first, name: "albumist-beispiel-001.jpg")))
+        #expect(!SampleLibrary.isSample(SampleLibrary.Seen(filename: nil, created: first.date)))
+        // Photos keeps the date to the second: a fraction of a second off is still the photo.
+        #expect(SampleLibrary.isSample(seen(first, plus: 0.4)))
+    }
+
+    @Test func aForeignIdInTheRecordNeverDeletesThePhotoNorItsAlbumNorTheFolder() {
+        let specs = SampleLibrary.specs()
+        // "own" is the user's photo whose id got into the record by mistake.
+        let photos = ["s1": seen(specs[0]), "s2": seen(specs[1]),
+                      "own": SampleLibrary.Seen(filename: "IMG_4711.HEIC", created: specs[2].date)]
+        let albums: [String: Set<String>] = ["rom": ["s1", "s2"], "lis": ["s2", "own"]]
+        let folders = ["reisen": ["rom", "lis"], "albumist": ["reisen"], "andere": ["rom"]]
+        let checked = SampleLibrary.checkedDeletion(photos: photos, albums: albums, folders: folders)
+        #expect(checked.assets == ["s1", "s2"])
+        #expect(checked.kept == ["own"])
+        // "lis" holds the photo that stays, so it stays, and so do the folders above it.
+        #expect(checked.collections == ["rom", "andere"])
+    }
+
+    @Test func everythingThatIsSurelyASampleGoesInOneChange() {
+        let specs = SampleLibrary.specs()
+        let photos = Dictionary(uniqueKeysWithValues: specs.prefix(4).map { ("id\($0.index)", seen($0)) })
+        let checked = SampleLibrary.checkedDeletion(photos: photos, albums: ["rom": ["id1", "id2"], "lis": ["id3"]],
+                                                    folders: ["reisen": ["rom", "lis"], "albumist": ["reisen"]])
+        #expect(checked.assets == Set(photos.keys))
+        #expect(checked.kept.isEmpty)
+        #expect(checked.collections == ["rom", "lis", "reisen", "albumist"])
+        // Nothing found in Photos (an empty or emptied library): nothing goes.
+        let none = SampleLibrary.checkedDeletion(photos: [:], albums: [:], folders: [:])
+        #expect(none.assets.isEmpty && none.collections.isEmpty && none.kept.isEmpty)
     }
 }

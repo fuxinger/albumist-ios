@@ -466,10 +466,19 @@ def pick(device: str) -> str:
 BOOT_RETRIES: list[str] = []
 
 
+def timing(what: str, started: float) -> None:
+    """UI_BOOT_TIMING lines: where the 2-5 min before the first test go (simulator boot, photo
+    access, settings), measured per job; docs/TESTFLIGHT.md, "Messung"."""
+    print(f"UI_BOOT_TIMING {what} {time.monotonic() - started:.1f} s", flush=True)
+
+
 def boot(udid: str) -> bool:
     for attempt in (1, 2, 3):
+        started = time.monotonic()
         sh(["xcrun", "simctl", "boot", udid], timeout=600, quiet=True)
+        timing(f"simctl boot (attempt {attempt})", started)
         code, _ = sh(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=900)
+        timing(f"booted (attempt {attempt}, bootstatus {code})", started)
         if code == 0:
             return True
         BOOT_RETRIES.append(f"bootstatus failed (attempt {attempt} of 3)")
@@ -481,11 +490,14 @@ def boot(udid: str) -> bool:
 def prepare(udid: str, reduce_motion: bool = False, increase_contrast: bool = False, basics: bool = True) -> None:
     """Photo access, status bar and the accessibility settings of the job."""
     spawn = ["xcrun", "simctl", "spawn", udid]
+    started = time.monotonic()
     if basics:
         if sh(["xcrun", "simctl", "privacy", udid, "grant", "photos", BUNDLE_ID], timeout=600)[0] != 0:
             print("privacy grant failed")
+        timing("photo access granted", started)
         sh(["xcrun", "simctl", "status_bar", udid, "override", "--time", "9:41", "--batteryState", "charged",
             "--batteryLevel", "100", "--cellularBars", "4", "--wifiBars", "3"], timeout=120)
+        timing("status bar set", started)
     if reduce_motion:
         # Settings › Accessibility › Motion. The app reads it at launch.
         sh(spawn + ["defaults", "write", "com.apple.Accessibility", "ReduceMotionEnabled", "-bool", "true"])
@@ -498,6 +510,7 @@ def prepare(udid: str, reduce_motion: bool = False, increase_contrast: bool = Fa
         _, darken = sh(spawn + ["defaults", "read", "com.apple.Accessibility", "DarkenSystemColors"], quiet=True)
         _, enhanced = sh(spawn + ["defaults", "read", "com.apple.Accessibility", "EnhancedBackgroundContrastEnabled"], quiet=True)
         print(f"A11Y_SETTING DarkenSystemColors={darken.strip()} EnhancedBackgroundContrastEnabled={enhanced.strip()}", flush=True)
+    timing("prepared", started)
 
 
 def reset(udid: str, reduce_motion: bool, increase_contrast: bool) -> bool:

@@ -9,7 +9,10 @@ Used before a release tag (release.yml, without waiting). Green means:
      without a UI flow run is not green (owner decision 16.11.), so nothing is released that
      never ran the UI tests. ui.yml runs for pull requests (on the PR's head
      commit); a commit that never was a PR head, e.g. a merge commit pushed to main, needs a
-     manual "UI flow" run on that commit first.
+     manual "UI flow" run on that commit first. Since 18.11. such a run (groups "auto") only
+     runs the groups that have no green result yet for exactly this app and their own test
+     code (ui_evidence.py), so for a merge commit with an already tested app it takes minutes;
+     a green UI flow run therefore means: every group green for this app and its test code.
 
 TestFlight does not use this gate since 17.11.: testflight.yml runs CI, the UI flow and the
 stress pass itself, in the same run, before it uploads. Those called workflows are part of the

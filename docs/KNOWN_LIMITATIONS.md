@@ -19,6 +19,13 @@
   Länder und Regionen kommen immer aus der Offline-Karte. Ein Lauf in der App fragt höchstens
   40 Ortsnamen pro Minute und wartet nie darauf; was fehlt, kommt mit einem späteren Lauf
   (frühestens nach einer Stunde) oder der nächtlichen Verfeinerung.
+- Albumists Zähler dieser Ortsabfragen (`RequestLog`, 40 pro Minute) liegt nur im Speicher:
+  Wird die App beendet und innerhalb einer Minute wieder gestartet, kennt er die Abfragen davor
+  nicht, und in dieser Minute können bis zu 80 an Apple gehen. Lehnt Apple dann ab, hört ein
+  Lauf in der App sofort auf; die Verfeinerung wartet. Bewusst nicht gespeichert (Zweitprüfung
+  des Fixes, 18.11.).
+- Die Karte der nächtlichen Verfeinerung (bei geöffneter App) nennt keine Fertig-Uhrzeit, und
+  ihr Titel ist der Name des Schritts, nicht „Verfeinerung“.
 - `CLGeocoder` ist in iOS 26 als veraltet markiert; der Nachfolger in MapKit ist geplant.
 - Sprache der Albumnamen gewechselt (Prüfbefund P1-12): Länder und Regionen aller
   gespeicherten Orte werden beim nächsten Lauf aus der Offline-Karte neu benannt (der Wechsel

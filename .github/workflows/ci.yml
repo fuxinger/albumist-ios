@@ -165,10 +165,11 @@ jobs:
         # with the boot then), and its StoreKit log is recorded live: after xcodebuild has shut
         # it down, `log show` gave only "<compose failure>" lines from after a new boot
         # (CI 44368423344). Boot like ui_tests.py: up to three attempts, each counted.
-        # From here on no step asks hashFiles(): it walks the whole workspace (with .build from the
-        # core tests) and timed out after 120 s while the fresh simulator settled (CI 44376522818,
-        # "hashFiles('App/project.yml') couldn't finish within 120 seconds"). The steps ask
-        # whether a simulator was picked instead (only when App/project.yml exists).
+        # After the fresh boot the whole Mac was starved for 2-3 min: even a one-file
+        # hashFiles('App/project.yml') timed out after 120 s (CI 44376522818; under 1 s before the
+        # boot). So the step waits until the load has gone down (at most 5 min, every value in the
+        # log as SIM_SETTLE), and the later steps ask whether a simulator was picked (only when
+        # App/project.yml exists) instead of hashFiles().
         if: steps.sim.outputs.udid != ''
         timeout-minutes: 20
         run: |
@@ -183,6 +184,12 @@ jobs:
             xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
             sleep 15
           done
+          for i in $(seq 1 30); do
+            load=$(sysctl -n vm.loadavg | awk '{print $2}')
+            echo "SIM_SETTLE load(1m)=$load after $((i * 10 - 10)) s"
+            awk -v l="$load" 'BEGIN { exit !(l < 3.5) }' && break
+            sleep 10
+          done
           nohup xcrun simctl spawn "$UDID" log stream --style compact --level debug \
             --predicate 'process CONTAINS[c] "storekit" OR subsystem CONTAINS[c] "storekit" OR process == "appstored" OR process == "itunesstored" OR subsystem == "com.apple.AppleMediaServices"' \
             > storekit-live.log 2>&1 &
@@ -190,6 +197,7 @@ jobs:
       - name: Build and test app
         if: steps.sim.outputs.udid != ''
         run: |
+          echo "LOAD at start: $(sysctl -n vm.loadavg)"
           set +e
           cd App
           xcodebuild test \
@@ -237,6 +245,7 @@ jobs:
       - name: Export strings for translation
         if: success() && steps.sim.outputs.udid != ''
         run: |
+          set -o pipefail
           cd App
           xcodebuild -exportLocalizations -project Sortly.xcodeproj -localizationPath ../build/loc -exportLanguage en CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO | tail -3
           find ../build/loc -name "*.xliff" -exec sh -c 'base64 -i "$1" | tr -d "\n" | fold -w 4000 | sed "s/^/XLIFF /"' _ {} \;
@@ -246,6 +255,7 @@ jobs:
         with:
           name: localizations
           path: build/loc
+          if-no-files-found: ignore
           retention-days: 7
           # "Re-run failed jobs" may upload it again under the same name.
           overwrite: true
@@ -264,6 +274,7 @@ jobs:
             build-log.txt
             build/TestResults.xcresult
             storekit-live.log
+          if-no-files-found: ignore
           retention-days: 7
           # "Re-run failed jobs" uploads it again under the same name.
           overwrite: true

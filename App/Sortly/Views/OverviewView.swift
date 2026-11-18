@@ -150,6 +150,21 @@ struct OverviewView: View {
                                 .font(.subheadline)
                                 .monospacedDigit()
                         }
+                        if let note = model.recountNote {
+                            // The hold for the labels ended lower than it held
+                            // (`RecountState.LowerNote`): said once, so the lower number is not
+                            // read as one going back.
+                            Text("Neu gezählt: Zuvor waren es \(note.held.formatted()) sortiert. Fotos mit Themen oder Dokumenten zählen jetzt erst als sortiert, wenn sie auch in einem passenden Album sind.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("overview.recountNote")
+                            Button("OK") { model.dismissRecountNote() }
+                                .font(.subheadline)
+                                .accessibilityLabel("Hinweis zur neuen Zahl ausblenden")
+                                .accessibilityIdentifier("overview.recountNote.ok")
+                        }
                         Text(primaryAreasText)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)

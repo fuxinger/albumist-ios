@@ -465,10 +465,13 @@ struct LabelsLaterTests {
         // or the ring's own.
         var hold: RecountState?
         var shown = OrganizationStatusResolver.Progress()
+        var shownUntried: Int?
         var seen: [Int] = []
         func assign(_ status: DerivedLibraryStatus, ended: AnalysisPipeline.Report?) {
-            hold = RecountState.next(hold, shown: shown, derived: status, settings: on, newSuggestions: true, ended: ended)
+            hold = RecountState.next(hold, shown: shown, shownUntried: shownUntried, derived: status, settings: on,
+                                     newSuggestions: true, ended: ended)
             shown = status.progress
+            shownUntried = status.labelsUntried
             seen.append(hold?.fully ?? status.progress.fully)
         }
 
@@ -539,9 +542,11 @@ struct LabelsLaterTests {
         higher.fully += 1
         higher.total = max(higher.total, higher.fully)
         let held = RecountState(fully: higher.fully, total: higher.total, labels: true)
+        // One photo was looked at since the count shown: a fall the labels can explain.
         func next(_ current: RecountState?, shown: OrganizationStatusResolver.Progress = higher,
                   ended: AnalysisPipeline.Report?) -> RecountState? {
-            RecountState.next(current, shown: shown, derived: status, settings: on, newSuggestions: false, ended: ended)
+            RecountState.next(current, shown: shown, shownUntried: status.labelsUntried + 1, derived: status, settings: on,
+                              newSuggestions: false, ended: ended)
         }
         // A run that did not ask for the labels (they were turned on after it) leaves it held.
         #expect(next(held, ended: first) == held)
@@ -586,10 +591,12 @@ struct LabelsLaterTests {
         let withoutLabels = report(complete: true, labels: false)
         let through = report(complete: true, labels: true)
         let paused = report(complete: false, labels: true)
+        // 60 photos waited for their labels when 120 of 200 were shown: 20 were looked at since.
         func next(_ current: RecountState?, _ derived: DerivedLibraryStatus, _ settings: OrganizationSettings,
-                  shown: OrganizationStatusResolver.Progress = shown, suggestions: Bool = false,
+                  shown: OrganizationStatusResolver.Progress = shown, shownUntried: Int? = 60, suggestions: Bool = false,
                   ended: AnalysisPipeline.Report? = nil) -> RecountState? {
-            RecountState.next(current, shown: shown, derived: derived, settings: settings, newSuggestions: suggestions, ended: ended)
+            RecountState.next(current, shown: shown, shownUntried: shownUntried, derived: derived, settings: settings,
+                              newSuggestions: suggestions, ended: ended)
         }
         let labels = RecountState(fully: 120, total: 200, labels: true)
         // Begins when the count would fall, with the count on screen; not while it does not fall,
@@ -598,6 +605,13 @@ struct LabelsLaterTests {
         #expect(next(nil, waiting, documents, ended: withoutLabels) == labels)
         #expect(next(nil, rising, themen) == nil)
         #expect(next(nil, waiting, themen, shown: .init()) == nil)
+        // Only a fall the labels can explain (open point B): no more photos fell than were looked
+        // at for their labels since the count shown. None looked at, or a larger fall (a sorted
+        // photo left its album in Photos, the main areas changed): the new count is shown.
+        #expect(next(nil, waiting, themen, shownUntried: 50) == labels)
+        #expect(next(nil, waiting, themen, shownUntried: 45) == nil)
+        #expect(next(nil, waiting, themen, shownUntried: 40) == nil)
+        #expect(next(nil, waiting, themen, shownUntried: nil) == nil)
         // Not where the ring does not count the two areas, nor for photos waiting for a retry.
         #expect(next(nil, waiting, notMain) == nil)
         #expect(next(nil, retrying, themen) == nil)

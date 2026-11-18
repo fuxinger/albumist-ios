@@ -11,13 +11,18 @@ import SortlyStore
 /// - while photos analysed before "Themen" or "Dokumente" became a main area get their image
 ///   labels: a photo sorted by its trip that gets a theme needs a theme album from then on, and
 ///   the sorted count fell photo by photo while the labels came in (third review of the labels
-///   fix, finding 2; Fuchs: no number goes back). Begins when the count would fall, with the
-///   count on screen then; held until every such photo was looked at once
+///   fix, finding 2; Fuchs: no number goes back). Begins when the count would fall because of
+///   the labels, with the count on screen then; held until every such photo was looked at once
 ///   (`DerivedLibraryStatus.labelsUntried`), or a run went through with the labels asked for. A
 ///   photo whose labels could not be read yet waits for its retry without holding the ring.
+///   A fall with another cause (a sorted photo left its album in Photos, the main areas changed)
+///   is shown as it is, also while labels are still to come (app-speed 18.11.2026, open point B
+///   of the labels fix): only as many photos can fall because of their labels as were looked at
+///   for them since the count on screen, each moving only itself.
 ///
 /// After either, the ring shows the new count. It can be lower than the one held: it counts
-/// what the main areas ask for now (a photo with a theme also needs its theme album).
+/// what the main areas ask for now (a photo with a theme also needs its theme album); after the
+/// labels, the overview then says why once (`LowerNote`).
 public struct RecountState: Codable, Equatable, Sendable {
     public var fully: Int
     public var total: Int
@@ -37,11 +42,14 @@ public struct RecountState: Codable, Equatable, Sendable {
     /// The hold after a newly derived status (`AppModel.assignDerived`).
     /// - `current`: the hold until now.
     /// - `shown`: the count on screen until now; held when a hold for the labels begins.
+    /// - `shownUntried`: the photos still waiting for their first look for labels when `shown`
+    ///   was counted (`DerivedLibraryStatus.labelsUntried`); `nil` before the first status.
     /// - `newSuggestions`: suggestions of a full run exist (not the early set of a first run).
     /// - `ended`: the last run's report while no run is busy; `nil` while one is, while the
     ///   analysis is being rebuilt, and before the first run after a launch.
-    public static func next(_ current: RecountState?, shown: OrganizationStatusResolver.Progress, derived: DerivedLibraryStatus,
-                            settings: OrganizationSettings, newSuggestions: Bool, ended: AnalysisPipeline.Report?) -> RecountState? {
+    public static func next(_ current: RecountState?, shown: OrganizationStatusResolver.Progress, shownUntried: Int?,
+                            derived: DerivedLibraryStatus, settings: OrganizationSettings, newSuggestions: Bool,
+                            ended: AnalysisPipeline.Report?) -> RecountState? {
         let analysisDone = ended?.isComplete == true
         // A run went through with the labels asked for: each photo waiting for them was looked
         // at once. One the analyzer failed on last in that run has no attempt noted (no photo
@@ -55,10 +63,47 @@ public struct RecountState: Codable, Equatable, Sendable {
             guard newSuggestions || analysisDone else { return held }
             return labelsPending ? RecountState(fully: held.fully, total: held.total, labels: true) : nil
         }
-        // Begins when the sorted count would fall, with the count on screen: while it does not,
-        // the ring shows its own (nothing shown yet after a launch: the next status is compared).
-        guard labelsPending, shown.total > 0, derived.progress.fully < shown.fully else { return nil }
+        // Begins when the sorted count would fall because of the labels, with the count on
+        // screen: while it does not, the ring shows its own (nothing shown yet after a launch:
+        // the next status is compared).
+        guard labelsPending, shown.total > 0, derived.progress.fully < shown.fully,
+              fallsForLabels(shown: shown, shownUntried: shownUntried, derived: derived) else { return nil }
         return RecountState(fully: shown.fully, total: shown.total, labels: true)
+    }
+
+    /// The fall from `shown` can come from the labels: photos were looked at for them since, and
+    /// no more photos left "sortiert" than were looked at (a photo's labels move only that photo).
+    /// A fall with nothing looked at, or a larger one, has another cause and is not held.
+    static func fallsForLabels(shown: OrganizationStatusResolver.Progress, shownUntried: Int?,
+                               derived: DerivedLibraryStatus) -> Bool {
+        guard let shownUntried else { return false }
+        let lookedAt = shownUntried - derived.labelsUntried
+        return lookedAt > 0 && shown.fully - derived.progress.fully <= lookedAt
+    }
+
+    /// Said once under the ring when the hold for the labels ended with a lower count than it
+    /// held (app-speed 18.11.2026, open point A of the labels fix): "Neu gezählt: Zuvor waren es
+    /// 1.234 sortiert. Fotos mit Themen oder Dokumenten zählen jetzt erst als sortiert, wenn sie
+    /// auch in einem passenden Album sind." Without it the ring came back lower with no word,
+    /// which reads as a number going back. Kept until the user taps it away, the count is back
+    /// at the number held, or a hold begins again (it says its own words).
+    public struct LowerNote: Codable, Equatable, Sendable {
+        /// The count the hold showed.
+        public var held: Int
+
+        public init(held: Int) {
+            self.held = held
+        }
+
+        /// The note after a newly derived status: `before` and `after` are the hold until now
+        /// and the one `RecountState.next` gave, `progress` the ring's own count now.
+        public static func next(_ note: LowerNote?, before: RecountState?, after: RecountState?,
+                                progress: OrganizationStatusResolver.Progress) -> LowerNote? {
+            if after != nil { return nil }
+            if let before, before.isForLabels, progress.fully < before.fully { return LowerNote(held: before.fully) }
+            guard let note, progress.fully < note.held else { return nil }
+            return note
+        }
     }
 
     /// Photos analysed before "Themen" or "Dokumente" was turned on wait for their first look for

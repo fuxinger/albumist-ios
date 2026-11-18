@@ -12162,6 +12162,26 @@
           }
         }
       }
+    },
+    "Neu gezählt: Zuvor waren es %@ sortiert. Fotos mit Themen oder Dokumenten zählen jetzt erst als sortiert, wenn sie auch in einem passenden Album sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recounted: before, %@ were sorted. Photos with themes or documents now count as sorted only once they are in a matching album too."
+          }
+        }
+      }
+    },
+    "Hinweis zur neuen Zahl ausblenden" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide the note about the new number"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

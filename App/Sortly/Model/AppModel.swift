@@ -371,6 +371,16 @@ final class AppModel {
     var recount: RecountState? = RecountState.load() {
         didSet { RecountState.save(recount) }
     }
+    /// The hold for the labels ended lower than the count it held: said once under the ring
+    /// (`RecountState.LowerNote`; app-speed 18.11.2026, open point A of the labels fix). Kept
+    /// across launches: it may end in the overnight refinement, before anyone looks.
+    var recountNote: RecountState.LowerNote? = RecountState.LowerNote.load() {
+        didSet { RecountState.LowerNote.save(recountNote) }
+    }
+    /// The photos still waiting for their first look for labels when the count on screen was
+    /// made (`DerivedLibraryStatus.labelsUntried`): only a fall the labels can explain is held
+    /// (`RecountState.next`, open point B). `nil` until the first status of this launch.
+    @ObservationIgnored private var shownLabelsUntried: Int?
     var inventory = CollectionInventory() { didSet { resetSearchIndex(); inventoryVersion &+= 1 } }
     /// Counts changes of `inventory`: a screen that works something out from the inventory off
     /// the main thread (the plan preview, `PlanReviewFacts`) watches this number instead.
@@ -466,9 +476,10 @@ final class AppModel {
     @ObservationIgnored private var analysisControl: AnalysisRunControl?
     /// Counts runs: progress that arrives late from an earlier run is dropped.
     @ObservationIgnored private var analysisGeneration = 0
-    /// Runs in a row that ended early by themselves (an error, Vision failing): tried again
-    /// a little later instead of only at the next start of the app.
-    @ObservationIgnored private var unattendedRetries = 0
+    /// Runs in a row that ended early by themselves (an error, Vision failing, Photos not
+    /// answering): tried again a little later instead of only at the next start of the app, and
+    /// the end of a plan keeps that wait (`UnattendedRetry`, open point D of the labels fix).
+    @ObservationIgnored private var retry = UnattendedRetry()
     /// The last run ended because Photos did not answer (`PhotosNotResponding`): the card says
     /// "Fotos antwortet gerade nicht" until the next run starts, and that run comes by itself
     /// (`retryUnattendedRun`).
@@ -633,6 +644,11 @@ final class AppModel {
     /// overview says so until the user taps OK. The count is stored by the pipeline in the
     /// same transaction as the reopened decisions (`AnalysisPipeline.recheckedSuggestionsKey`).
     var recheckedSuggestions = 0
+
+    /// "OK" under the ring: the note that the count came back lower after the labels is gone.
+    func dismissRecountNote() {
+        recountNote = nil
+    }
 
     /// "OK" on the card.
     func dismissRecheckNotice() {
@@ -922,6 +938,9 @@ final class AppModel {
         }
         analysis.isRunning = true
         photosRetryDue = false
+        retry.runStarted()
+        // A run goes on: the Pause no longer stands (`AnalysisMarker.pausedByUser`).
+        AnalysisMarker.pausedByUser = false
         analysis.needsResume = false
         analysis.pausing = false
         analysis.stage = nil
@@ -959,7 +978,7 @@ final class AppModel {
                 ContinuedAnalysis.requestNotificationPermission()
                 ContinuedAnalysis.begin()
             }
-            unattendedRetries = 0
+            retry.reset()
         }
         analysisGeneration += 1
         let generation = analysisGeneration
@@ -1006,6 +1025,7 @@ final class AppModel {
             let end = AnalysisRunEnd(report: finished, settings: settings, pauseTapped: control.isPaused,
                                      catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow)
             catchUpAfterRun = false
+            AnalysisMarker.pausedByUser = end.keepsPause
             if let report = end.report { analysis.lastReport = report }
             // This run's own outcome (nil when it threw): the 100 % follows only a finished analysis.
             analysis.outcome.ended(with: end.isFinished ? end.report : nil)
@@ -1071,7 +1091,7 @@ final class AppModel {
                 }
             }
             BackgroundWork.scheduleRefinement()
-            if end.isFinished { unattendedRetries = 0 }
+            if end.isFinished { retry.reset() }
             follow(settled.next, after: generation)
         }
     }
@@ -1094,32 +1114,21 @@ final class AppModel {
     /// A run that ended early by itself (an error, Vision failing, the app's time ran out)
     /// goes on a little later, a few times, instead of waiting until the app is opened again.
     /// Nothing happens when another run started meanwhile or the user paused.
+    ///
+    /// The waits are `UnattendedRetry`'s: 30 s, then 60 s, then none until a tap, the app on
+    /// screen or a finished analysis; every minute without a cap when Photos did not answer (a
+    /// try never sends a second call while the first still hangs, `PhotosDeadline`, so it costs
+    /// nothing; the card says "Fotos antwortet gerade nicht" meanwhile). A try that comes due
+    /// while a plan holds the analysis back does not start; the end of the plan starts it
+    /// (`releaseExecution`).
     private func retryUnattendedRun(after run: Int) {
-        // Photos did not answer: tried again every minute, for as long as that lasts. A try
-        // never sends a second call while the first still hangs (`PhotosDeadline`), so it costs
-        // nothing; the card says "Fotos antwortet gerade nicht" meanwhile.
-        if photosRetryDue {
-            Task {
-                try? await Task.sleep(for: Self.photosRetryDelay)
-                guard analysisGeneration == run, analysis.needsResume, !analysis.isRunning,
-                      phase == .ready, access.canRead, !execution.isRunning, !analysisResetting else { return }
-                startAnalysis()
-            }
-            return
-        }
-        guard unattendedRetries < 2 else { return }
-        unattendedRetries += 1
-        let delay = 30 * unattendedRetries
+        guard let delay = retry.schedule(photos: photosRetryDue, now: .now) else { return }
         Task {
-            try? await Task.sleep(for: .seconds(delay))
-            guard analysisGeneration == run, analysis.needsResume, !analysis.isRunning,
-                  phase == .ready, access.canRead, !execution.isRunning, !analysisResetting else { return }
+            try? await Task.sleep(for: delay)
+            guard analysisGeneration == run, analysis.needsResume, !analysis.isRunning, runMayStartNow else { return }
             startAnalysis()
         }
     }
-
-    /// The next try after Photos did not answer.
-    static let photosRetryDelay: Duration = .seconds(60)
 
     /// Until the run in progress and the ends of the runs before it are done: a follow-up starts
     /// while the end of the run before still refreshes the overview and writes the safety copy
@@ -1487,7 +1496,7 @@ final class AppModel {
             return
         }
         guard analysis.needsResume, phase == .ready, !execution.isRunning, !analysisResetting else { return }
-        unattendedRetries = 0
+        retry.reset()
         guard access.canRead else {
             // The run ended because the access was taken away: it may be back from Settings.
             Task {
@@ -1534,6 +1543,8 @@ final class AppModel {
     /// the next window or when the app is opened (`needsResume`).
     private func refine() async -> (succeeded: Bool, next: AnalysisRunEnd.Next) {
         if phase == .loading { await bootstrap() }
+        // Paused by the user: nothing to do in this window (open point C).
+        if refinementHeldByPause { return (true, .nothing) }
         var outcome: (succeeded: Bool, next: AnalysisRunEnd.Next) = (false, .nothing)
         var generation: Int?
         for _ in 0..<3 {
@@ -1557,7 +1568,8 @@ final class AppModel {
         // the labels fix, finding 6).
         await runsEnded()
         if let previous, analysisGeneration != previous { return nil }
-        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !Task.isCancelled else { return nil }
+        guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !refinementHeldByPause,
+              !Task.isCancelled else { return nil }
         analysis.isRunning = true
         updateCard()
         // Late progress of the run before must not show up during this one.
@@ -1579,6 +1591,7 @@ final class AppModel {
         let end = AnalysisRunEnd(report: report, settings: settings, pauseTapped: control.isPaused,
                                  catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow, background: true)
         catchUpAfterRun = false
+        AnalysisMarker.pausedByUser = end.keepsPause
         if let ended = end.report {
             analysis.lastReport = ended
             if end.isFinished, analysis.outcome.refined(with: ended) {
@@ -1600,6 +1613,15 @@ final class AppModel {
         await refreshDerived()
         saveSafetyBackup(immediately: true)
         return (ran.pausedBecause == nil, end.next, generation)
+    }
+
+    /// The analysis stands paused by the user, in this launch or before it (iOS often starts
+    /// the app in the night for the refinement alone, `AnalysisMarker.pausedByUser`): the
+    /// refinement does not run, the Pause stays until "Fortsetzen" (app-speed 18.11.2026, open
+    /// point C of the labels fix: before, the refinement went on with a paused analysis). Also
+    /// a Pause tapped on a run from the app that this window waited for.
+    private var refinementHeldByPause: Bool {
+        analysis.pausing || analysis.isPausedByUser || AnalysisMarker.pausedByUser
     }
 
     /// Until no run is busy and the end of the last one is done too (its overview refresh, its
@@ -1697,9 +1719,15 @@ final class AppModel {
         // would be shown as final hours before the image analysis is done (review minor). Nor by
         // the report of the run before "Analyse neu aufbauen": its own refresh ended the hold at
         // once when that run was complete.
-        let held = RecountState.next(recount, shown: shown, derived: derived, settings: settings,
+        // Only a fall the labels can explain is held (open point B): a photo taken out of its
+        // album in Photos, or other main areas, show their count at once.
+        let held = RecountState.next(recount, shown: shown, shownUntried: shownLabelsUntried, derived: derived, settings: settings,
                                      newSuggestions: snapshot?.isEarly == false && !proposals.isEmpty,
                                      ended: (analysis.isRunning || analysisResetting) ? nil : analysis.lastReport)
+        shownLabelsUntried = derived.labelsUntried
+        // Ended lower than it held: said once under the ring (open point A).
+        let note = RecountState.LowerNote.next(recountNote, before: recount, after: held, progress: derived.progress)
+        if note != recountNote { recountNote = note }
         if held != recount { recount = held }
         analysisCounts = AnalysisCounts(photos: derived.photos, analyzed: derived.analyzed, unreadable: derived.unreadable,
                                         labelsMissing: derived.labelsMissing)
@@ -2303,9 +2331,15 @@ final class AppModel {
     /// on now, not only when the app is opened next (third review of the labels fix, finding 5:
     /// "So lassen", a refused plan or a missing write access ended the claim without a run). A
     /// plan that ran started its run already (`run(_:)`); a Pause stays (`needsResume` is false).
+    ///
+    /// A run that ended early by itself keeps its wait (`UnattendedRetry`; app-speed 18.11.2026,
+    /// open point D of the labels fix): before, the end of a plan started it at once, and a Vision
+    /// that had just failed on a hot iPhone was asked again within seconds. Its try starts it when
+    /// due; a try that came due during the plan starts here.
     private func releaseExecution() {
         executionClaimed = false
-        if analysis.needsResume, !analysis.isRunning, runMayStartNow { startAnalysis() }
+        guard analysis.needsResume, !analysis.isRunning, runMayStartNow, retry.startsOnRelease(now: .now) else { return }
+        startAnalysis()
     }
 
     /// Runs a plan; the caller holds the execution claim. `resume`: an interrupted plan that
@@ -3132,6 +3166,25 @@ extension RecountState {
 
     static func save(_ state: RecountState?) {
         if let state, let data = try? JSONEncoder().encode(state) {
+            UserDefaults.standard.set(data, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+}
+
+/// The note that the count came back lower after the labels (`RecountState.LowerNote`): kept
+/// across launches until it is tapped away or no longer true.
+extension RecountState.LowerNote {
+    private static let key = "overview.recountLower"
+
+    static func load() -> RecountState.LowerNote? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(RecountState.LowerNote.self, from: data)
+    }
+
+    static func save(_ note: RecountState.LowerNote?) {
+        if let note, let data = try? JSONEncoder().encode(note) {
             UserDefaults.standard.set(data, forKey: key)
         } else {
             UserDefaults.standard.removeObject(forKey: key)

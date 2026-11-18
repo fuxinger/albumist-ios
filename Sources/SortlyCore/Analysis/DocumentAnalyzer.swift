@@ -65,7 +65,9 @@ public struct DocumentAnalyzer: Sendable {
     ]
 
     static let sensitivityKeywords: [(DocumentSensitivity, [String])] = [
-        (.identity, ["personalausweis", "reisepass", "passport", "identity card", "führerschein", "driving licence", "aufenthaltstitel", "nationalität", "date of birth", "geburtsdatum"]),
+        (.identity, ["personalausweis", "reisepass", "passport", "identity card", "führerschein", "driving licence", "aufenthaltstitel", "nationalität", "date of birth", "geburtsdatum",
+                     // The back of an ID card names no document (review P2-04).
+                     "augenfarbe", "eye colour", "eye color", "colour of eyes", "color of eyes", "ordensname", "künstlername"]),
         (.medical, ["diagnose", "befund", "rezept", "arztbrief", "krankenkasse", "versichertennummer", "arbeitsunfähigkeit", "patient", "medikament", "prescription"]),
         (.financial, ["kontoauszug", "iban", "bic", "lohnabrechnung", "gehaltsabrechnung", "kreditkarte", "steuerbescheid", "kontostand", "bank statement", "salary"]),
     ]
@@ -99,6 +101,10 @@ public struct DocumentAnalyzer: Sendable {
             sensitivity = max(sensitivity, level)
         }
         if Self.containsIBAN(rawText) { sensitivity = max(sensitivity, .financial) }
+        if sensitivity < .identity, Self.hasMachineReadableZone(rawText) { sensitivity = .identity }
+        // The subject line is stored with these facts: masked like the text, and not kept at all
+        // for an ID or a medical document (whose text is not stored either).
+        let subject = sensitivity >= .identity ? nil : Self.subject(in: rawText).map(TextMinimizer.masked)
 
         return DocumentInfo(
             type: best.key,
@@ -108,7 +114,7 @@ public struct DocumentAnalyzer: Sendable {
             orderNumber: Self.labeledNumber(in: rawText, labels: ["bestellnummer", "bestell-nr", "bestellnr", "order number", "order no", "order #", "auftragsnummer"]),
             invoiceNumber: Self.labeledNumber(in: rawText, labels: ["rechnungsnummer", "rechnungs-nr", "rechnungsnr", "invoice number", "invoice no", "invoice #"]),
             totalAmount: amount,
-            subject: Self.subject(in: rawText),
+            subject: subject,
             keywords: Self.typeKeywords.flatMap(\.1).filter { text.contains($0) }.prefix(8).map { $0 },
             sensitivity: sensitivity
         )
@@ -262,18 +268,38 @@ public struct DocumentAnalyzer: Sendable {
         return nil
     }
 
-    /// IBAN with checksum validation (mod 97) to avoid false positives.
+    /// IBAN with checksum validation (mod 97) to avoid false positives. Spaces, dots, hyphens
+    /// and slashes between the groups do not count (review P2-04).
     static func containsIBAN(_ text: String) -> Bool {
-        let compact = text.uppercased().replacingOccurrences(of: " ", with: "")
-        guard let regex = try? NSRegularExpression(pattern: #"[A-Z]{2}\d{2}[A-Z0-9]{11,30}"#) else { return false }
+        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "./-–"))
+        let compact = String(String.UnicodeScalarView(text.uppercased().unicodeScalars.filter { !separators.contains($0) }))
+        guard let regex = try? NSRegularExpression(pattern: #"[A-Z]{2}[0-9O]{2}[A-Z0-9]{11,30}"#) else { return false }
         let ns = compact as NSString
         for m in regex.matches(in: compact, range: NSRange(location: 0, length: ns.length)) {
-            let candidate = ns.substring(with: m.range)
-            for length in stride(from: min(candidate.count, 34), through: 15, by: -1) {
-                if isValidIBAN(String(candidate.prefix(length))) { return true }
+            if startsWithValidIBAN(ns.substring(with: m.range)) { return true }
+        }
+        return false
+    }
+
+    /// Whether `compact` (upper case, no separators) starts with an IBAN whose checksum holds,
+    /// also when OCR read a 0 as the letter O or a 1 as I or L after the country code.
+    static func startsWithValidIBAN(_ compact: String) -> Bool {
+        let ocr = String(compact.prefix(2)) + String(compact.dropFirst(2).map { c -> Character in
+            switch c { case "O": "0"; case "I", "L": "1"; default: c }
+        })
+        for candidate in Set([compact, ocr]) {
+            for length in stride(from: min(candidate.count, 34), through: 15, by: -1) where isValidIBAN(String(candidate.prefix(length))) {
+                return true
             }
         }
         return false
+    }
+
+    /// The machine-readable zone of an ID card or passport: long runs of "<" fillers
+    /// ("IDD<<L01X00T471<<<<<<<<<"). OCR sometimes reads them as "«" or "‹".
+    static func hasMachineReadableZone(_ text: String) -> Bool {
+        let fillers = text.filter { $0 == "<" || $0 == "«" || $0 == "‹" }.count
+        return fillers >= 10 && (text.contains("<<<") || text.contains("«««") || text.contains("‹‹‹"))
     }
 
     static func isValidIBAN(_ iban: String) -> Bool {

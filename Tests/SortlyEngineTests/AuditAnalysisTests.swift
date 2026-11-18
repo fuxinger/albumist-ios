@@ -329,6 +329,38 @@ struct AuditAnalysisTests {
         #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
     }
 
+    /// Review finding P2-04: texts stored with the masks of version 2 (IBAN with dots, the back
+    /// of an ID card) are masked again once, without reading the photos again.
+    @Test func textsStoredByMaskVersionTwoAreMaskedAgain() async throws {
+        let (assets, ids) = screenshots(2)
+        let store = try SortlyStore(url: nil)
+        _ = try await store.upsertAssets(assets)
+        try await store.setValue(2, forKey: AnalysisPipeline.Key.textMaskVersion)
+        let iban = "Bitte überweisen auf DE89.3704.0044.0532.0130.00 danke"
+        let idBack = "Augenfarbe BRAUN Größe 178 IDD<<L01X00T471<<<<<<<<<<<<<<< MUSTERMANN<<ERIKA<<<<<<<<<<<<<"
+        for (id, text) in zip(ids, [iban, idBack]) {
+            var result = TextResult(text: TextAnalysis(text: text, source: .original))
+            // Document facts as version 2 stored them, with the subject line unmasked.
+            result.document = try JSONDecoder().decode(DocumentInfo.self, from: Data(#"""
+                {"type":"letter","typeReliability":1,"subject":"Ihr Konto DE89-3704-0044-0532-0130-00","keywords":[],"sensitivity":"financial"}
+                """#.utf8))
+            try await store.saveResult(result, kind: "text", asset: id, version: AnalysisPipeline.textVersion)
+            try await store.indexText(text, for: id)
+        }
+        let analyzer = ScriptedAnalyzer()
+        _ = try await pipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: analyzer).run()
+        let first = try await store.result(TextResult.self, kind: "text", asset: ids[0])?.text?.text
+        #expect(first?.contains("0532") == false)
+        #expect(first?.contains("danke") == true)
+        #expect(try await store.searchText("0532").isEmpty)
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[0])?.document?.subject == "Ihr Konto IBAN ••••")
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[1])?.text?.text == "")
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[1])?.document?.subject == nil)
+        #expect(try await store.searchText("Augenfarbe").isEmpty)
+        #expect(try await store.searchText("danke") == [ids[0]])
+        #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
+    }
+
     /// Geocoder that runs a hook before it answers (the user changes a setting meanwhile).
     final class HookedGeocoder: ReverseGeocoding, @unchecked Sendable {
         let inner = FakeGeocoder()

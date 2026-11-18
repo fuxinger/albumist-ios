@@ -23,6 +23,15 @@
   Labels; neue Fotos sind nicht betroffen (sie bekommen ihre Labels nachgeholt). Abhilfe:
   „Analyse neu aufbauen“.
 
+## Gespeicherter Text (Bildschirmfotos, Dokumente)
+- IBANs und Kartennummern werden maskiert, auch mit Punkten, Bindestrichen, Schrägstrichen,
+  bis zu vier Leerzeichen oder über zwei Zeilen; Ausweise (auch die Rückseite mit der
+  maschinenlesbaren Zeile) und medizinische Dokumente werden nicht als Text gespeichert
+  (Prüfbefund P2-04, Masken-Version 3). Andere Schreibweisen (Buchstaben zwischen den Gruppen,
+  stark verlesene Ziffern) können lesbar bleiben.
+- Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
+  der Gesundheitskarte. Der Text bleibt auf dem Gerät.
+
 ## Messenger-Herkunft
 iOS speichert keine verlässliche Quell-App. Albumist nutzt nur klare Hinweise (Messenger-
 Screenshots, vorhandene Alben, optional Dateinamen-Muster) und markiert alles andere als

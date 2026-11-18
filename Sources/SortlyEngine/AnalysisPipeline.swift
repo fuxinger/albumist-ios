@@ -1348,8 +1348,11 @@ public actor AnalysisPipeline {
         for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
             guard let text = result.text?.text, !text.isEmpty else { continue }
             let masked = TextMinimizer.storable(text)
-            guard masked != text else { continue }
+            // The subject line of a letter is stored with the document facts (review P2-04).
+            let subject = masked.isEmpty ? nil : result.document?.subject.map(TextMinimizer.masked)
+            guard masked != text || subject != result.document?.subject else { continue }
             result.text?.text = masked
+            result.document?.subject = subject
             // An outdated result keeps its old version, so it is still read again later.
             let version = current[asset] != nil ? Self.textVersion : 0
             try await store.saveResult(result, kind: "text", asset: asset, version: version)

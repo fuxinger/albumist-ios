@@ -12232,6 +12232,106 @@
           }
         }
       }
+    },
+    "Albumist hat zurückgenommen, was sicher von Albumist war." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist took back everything that was surely its own."
+          }
+        }
+      }
+    },
+    "Der Ordner „%@“ bleibt in Fotos." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The folder “%@” stays in Photos."
+          }
+        }
+      }
+    },
+    "Das Album „%@“ bleibt in Fotos." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The album “%@” stays in Photos."
+          }
+        }
+      }
+    },
+    "%lld Fotos bleiben im Album „%@“." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Foto bleibt im Album „%2$@“."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld Fotos bleiben im Album „%2$@“."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld photo stays in the album “%2$@”."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld photos stay in the album “%2$@”."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Albumist kann nicht sicher sagen, ob das von Albumist ist oder von dir, und lässt es deshalb, wie es ist. Sieh in Fotos nach, ob du es behalten möchtest." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist cannot tell for sure whether this came from Albumist or from you, so it leaves it as it is. Check in Photos whether you want to keep it."
+          }
+        }
+      }
+    },
+    "Der Vorgang bleibt unter Einstellungen › Verlauf und Rückgängig." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The run stays in Settings › History and Undo."
+          }
+        }
+      }
+    },
+    "Etwas bleibt in Fotos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Something stays in Photos"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

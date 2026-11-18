@@ -2784,6 +2784,14 @@ final class AppModel {
             switch outcome {
             case .nothingToTakeBack:
                 try? await setPendingFinalization(removing: [interrupted.id])
+            case .leftUnclear:
+                // Something the plan may have done stays in Photos (review P2-01): the plan stays
+                // in the history, and the user is told what stays and where.
+                let reasons = [execution.failure, message?.text].compactMap { $0 }
+                if let said = Self.remainderMessage(way.remainder, inHistory: true) {
+                    message = AppMessage(title: said.title, text: ([said.text] + reasons.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } })
+                        .joined(separator: "\n\n"))
+                }
             case .undone:
                 for id in way.selectionToRestore(after: outcome) {
                     decisions[id] = selection[id]
@@ -2944,6 +2952,32 @@ final class AppModel {
         }
         // Free albums and suggestions come back in `finalize`, with the undo itself.
         await run(undoPlan)
+        // What the undo left because Albumist cannot prove it was its own (an album found by its
+        // name after an interruption, photos in the user's own album) is said, not left to be
+        // found in Photos (review P2-01).
+        if let finished = execution.finished, finished.id == undoPlan.id, finished.status == .completed,
+           let said = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false) {
+            message = said
+        }
+    }
+
+    /// What an undo left in Photos because Albumist cannot prove it was its own doing
+    /// (`UndoRemainder`, review P2-01), in words: which album or folder, how many photos where.
+    /// Nil when nothing stays.
+    static func remainderMessage(_ remainder: UndoRemainder, inHistory: Bool) -> AppMessage? {
+        guard !remainder.isEmpty else { return nil }
+        func name(_ path: [String], _ title: String) -> String { (path + [title]).joined(separator: " › ") }
+        var lines = [String(localized: "Albumist hat zurückgenommen, was sicher von Albumist war.")]
+        for c in remainder.collections {
+            let n = name(c.folderPath, c.title)
+            lines.append(c.isFolder ? String(localized: "Der Ordner „\(n)“ bleibt in Fotos.") : String(localized: "Das Album „\(n)“ bleibt in Fotos."))
+        }
+        for p in remainder.photos {
+            lines.append(String(localized: "\(p.assets.count) Fotos bleiben im Album „\(name(p.folderPath, p.title))“."))
+        }
+        lines.append(String(localized: "Albumist kann nicht sicher sagen, ob das von Albumist ist oder von dir, und lässt es deshalb, wie es ist. Sieh in Fotos nach, ob du es behalten möchtest."))
+        if inHistory { lines.append(String(localized: "Der Vorgang bleibt unter Einstellungen › Verlauf und Rückgängig.")) }
+        return AppMessage(title: String(localized: "Etwas bleibt in Fotos"), text: lines.joined(separator: "\n"))
     }
 
     /// The change receipt of an executed plan (I01) and, if it was taken back, of its undo.

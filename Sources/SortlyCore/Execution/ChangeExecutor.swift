@@ -22,10 +22,14 @@ public protocol PhotoLibraryWriting: Sendable {
     /// reading the whole album list (minutes saved on large plans).
     func collection(_ id: CollectionID) async throws -> CollectionSnapshot?
     /// Like `createFolder` and `createAlbum`; `noted` hears the new id as soon as Photos assigns
-    /// it, before the change is committed, so a request Photos does not answer in time
-    /// (`PhotosNotResponding`) leaves its id behind (second review of the PhotoKit limits, 1).
-    func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID
-    func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID
+    /// it (the placeholder's `localIdentifier`), inside the change and before Photos stores it,
+    /// and the change waits for it: Albumist writes the id into the plan's journal there, so an
+    /// app that ends right after Photos made the album, or a request Photos does not answer in
+    /// time (`PhotosNotResponding`), still leaves the id behind, and the album is provably
+    /// Albumist's (second review of the PhotoKit limits, 1; review P2-01). An id written down
+    /// for a change that never went through is simply not found.
+    func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID
+    func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID
     /// A change request sent earlier has not been answered yet: Photos may still carry it out,
     /// so what the library shows now is not final (`PhotosDeadline`).
     func hasUnansweredWrites() async -> Bool
@@ -49,15 +53,16 @@ extension PhotoLibraryWriting {
         try await currentInventory()[id]
     }
 
-    public func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+    /// For a library that cannot hear the id inside the change: only once it returned.
+    public func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let id = try await createFolder(title: title, parent: parent)
-        noted(id)
+        await noted(id)
         return id
     }
 
-    public func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+    public func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let id = try await createAlbum(title: title, parent: parent)
-        noted(id)
+        await noted(id)
         return id
     }
 
@@ -84,6 +89,22 @@ extension PhotoLibraryWriting {
 /// Persists plans so execution can resume after a crash (prompt §16.3).
 public protocol ChangePlanStoring: Sendable {
     func save(_ plan: ChangePlan) async throws
+    /// Writes down, durably, that Photos gave the new album or folder of `key` in `plan` the id
+    /// `id` (`ExecutionRecord.noteRequested`). Called from inside the change that creates it,
+    /// before Photos stores it (`PhotoLibraryWriting.createAlbum(title:parent:noted:)`), so it
+    /// adds the id to the plan as it is stored rather than replacing the stored plan: Photos
+    /// may run that change only after the run that asked for it stopped waiting (review P2-01).
+    func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws
+}
+
+extension ChangePlanStoring {
+    /// For a store that cannot read its plans back: `plan`, as the run knows it, with the id.
+    public func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws {
+        var noted = plan
+        if noted.record == nil { noted.record = ExecutionRecord() }
+        noted.record?.noteRequested(id, key: key)
+        try await save(noted)
+    }
 }
 
 /// The plan journal as the ways out of an interrupted plan use it (`SortlyStore` in the app).
@@ -467,23 +488,40 @@ public actor ChangeExecutor {
             if let parent, try await library.collection(parent) == nil {
                 return .failed(reason: "parent folder no longer exists")
             }
-            // The id Photos gives the new album, heard before the change is committed: a request
-            // without an answer in time leaves it in the journal (`maybeCreated`).
+            // The id Photos gives the new album, heard inside the change before Photos stores it,
+            // and written into the journal right there (review P2-01): an app that ends right
+            // after Photos made the album, before the save below, still knows it as its own (the
+            // next launch finds it by this id, not by its name), and a request without an
+            // answer in time leaves it too (`maybeCreated`).
             let noted = NotedID()
+            let store = self.store
+            let journaled = plan
+            let note: @Sendable (CollectionID) async -> Void = { made in
+                noted.note(made)
+                // Not written (a full disk): the album is still recognised by the save below
+                // once Photos answers; only an app ending in between leaves it to the search by
+                // name, as before.
+                try? await store.noteCreated(made, key: key, in: journaled)
+            }
             let id: CollectionID
             do {
                 id = try await sending(&sent) {
                     isFolder
-                        ? try await library.createFolder(title: title, parent: parent, noted: { noted.note($0) })
-                        : try await library.createAlbum(title: title, parent: parent, noted: { noted.note($0) })
+                        ? try await library.createFolder(title: title, parent: parent, noted: note)
+                        : try await library.createAlbum(title: title, parent: parent, noted: note)
                 }
             } catch let quiet as PhotosNotResponding {
                 if let maybe = noted.id { plan.record?.noteMaybeCreated(maybe, key: key, at: clock()) }
                 throw quiet
+            } catch {
+                // Photos may have made it all the same: its id is never forgotten.
+                if let maybe = noted.id { plan.record?.noteRequested(maybe, key: key) }
+                throw error
             }
             // Photos returned the new id: it is written down before the check, so a failed
             // check never leads to a second album on retry, and undo can still remove this
             // one (audit 2, 1.7).
+            plan.record?.noteRequested(id, key: key)
             plan.resolvedKeys[key] = id
             try await store.save(plan)
             let created: CollectionSnapshot?

@@ -317,10 +317,13 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         try await createAlbum(title: title, parent: parent, noted: { _ in })
     }
 
-    /// `noted` hears the placeholder's id inside the change block, before Photos commits it: a
-    /// request without an answer in time leaves the id in the plan's journal, and the album is
-    /// known as Albumist's if it lands later (`ExecutionRecord.maybeCreated`).
-    func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+    /// `noted` hears the placeholder's id inside the change block, before Photos commits it, and
+    /// the block waits for it (`waitInsideChange`): the executor writes the id into the plan's
+    /// journal there, the way the sample photos write theirs down (`SamplePhotos.save`). An app
+    /// ended right after Photos made the album, or a request without an answer in time, leaves
+    /// the id behind, and the album is known as Albumist's (`ExecutionRecord.maybeCreated`,
+    /// review P2-01).
+    func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
         try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
@@ -330,14 +333,15 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             let request = PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: title)
             let placeholder = request.placeholderForCreatedCollectionList
             created.value = placeholder.localIdentifier
-            noted(CollectionID(placeholder.localIdentifier))
+            let made = CollectionID(placeholder.localIdentifier)
+            Self.waitInsideChange { await noted(made) }
             folder?.addChildCollections([placeholder] as NSArray)
         }
         guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("folder") }
         return CollectionID(id)
     }
 
-    func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+    func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
         try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
@@ -347,11 +351,26 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: title)
             let placeholder = request.placeholderForCreatedAssetCollection
             created.value = placeholder.localIdentifier
-            noted(CollectionID(placeholder.localIdentifier))
+            let made = CollectionID(placeholder.localIdentifier)
+            Self.waitInsideChange { await noted(made) }
             folder?.addChildCollections([placeholder] as NSArray)
         }
         guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("album") }
         return CollectionID(id)
+    }
+
+    /// Inside a change block: runs `work` (writing the new id into the journal) and waits for
+    /// it, so it is on disk before Photos stores the change. Photos runs change blocks on its
+    /// own serial queue, never on Swift's shared pool, so waiting there holds none of the
+    /// threads `work` needs. At most `limit`: a journal that does not answer must not hold up
+    /// Photos; the id is then written once the create returns, as before (review P2-01).
+    private static func waitInsideChange(limit: TimeInterval = 10, _ work: @escaping @Sendable () async -> Void) {
+        let done = DispatchSemaphore(value: 0)
+        Task.detached(priority: .userInitiated) {
+            await work()
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + limit)
     }
 
     /// Inside a change block: the request that puts something into folder `id`. `.some(nil)`

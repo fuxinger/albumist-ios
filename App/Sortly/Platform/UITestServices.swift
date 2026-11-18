@@ -95,7 +95,7 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// The forms that report Photos' placeholder ID go to the real adapter too, so the
     /// executor can record "maybe created" before Photos answers.
     func createFolder(
-        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void
+        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void
     ) async throws -> CollectionID {
         try await Self.beforeChange()
         let id = try await base.createFolder(title: title, parent: parent, noted: noted)
@@ -104,7 +104,7 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     }
 
     func createAlbum(
-        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void
+        title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void
     ) async throws -> CollectionID {
         try await Self.beforeChange()
         let id = try await base.createAlbum(title: title, parent: parent, noted: noted)

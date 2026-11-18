@@ -654,6 +654,25 @@ public actor SortlyStore: PlanJournal {
         try journaling(plans.map(\.id)) { try db.durably { try db.transaction { for plan in plans { try insertPlan(plan) } } } }
     }
 
+    /// The id Photos gave a new album or folder of the plan, written down from inside the
+    /// change that creates it, before Photos stores it (review P2-01): added to the plan as it
+    /// is stored, in one durable transaction, so a run that stopped waiting meanwhile (Photos
+    /// answered late) loses nothing it wrote since. `async` like the requirement, so this, not
+    /// the protocol's fallback (which replaces the stored plan), is what the executor calls.
+    public func noteCreated(_ id: CollectionID, key: String, in plan: ChangePlan) async throws {
+        try journaling([plan.id]) {
+            try db.durably {
+                try db.transaction {
+                    var stored = try self.plan(plan.id) ?? plan
+                    if stored.record == nil { stored.record = ExecutionRecord() }
+                    guard stored.record?.maybeCreated[key] != id else { return }
+                    stored.record?.noteRequested(id, key: key)
+                    try insertPlan(stored)
+                }
+            }
+        }
+    }
+
     /// If a write fails (and its transaction is rolled back), what is known to be on disk for
     /// these plans is forgotten: the next save writes them in full again.
     func journaling(_ ids: [SortlyID], _ write: () throws -> Void) throws {

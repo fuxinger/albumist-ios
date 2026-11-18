@@ -243,4 +243,33 @@ struct OpenPlansTests {
             #expect(undos.first?.status == .completedWithErrors)
         }
     }
+
+    /// The id Photos gave a new album, written down from inside the change (review P2-01), is
+    /// added to the plan as it is stored now: a change Photos runs late (after the run stopped
+    /// waiting and wrote more) never puts an older plan back. Written twice, it stays once.
+    @Test func idWrittenDownInsideTheChangeIsAddedToTheStoredPlan() async throws {
+        let store = try SortlyStore(url: nil)
+        let library = InMemoryPhotoLibrary(assets: photos(0..<20))
+        var plan = try await parisAndRome(library)
+        let early = plan
+        plan.status = .running
+        plan.record = ExecutionRecord()
+        plan.record?.unavailable["x"] = 1
+        try await store.save(plan)
+        // As the executor calls it: through the protocol.
+        let journal: any ChangePlanStoring = store
+        try await journal.noteCreated(CollectionID("album-1"), key: "k", in: early)
+        try await journal.noteCreated(CollectionID("album-1"), key: "k", in: early)
+        let stored = try #require(try await store.plan(plan.id))
+        #expect(stored.status == .running)
+        #expect(stored.record?.unavailable["x"] == 1)
+        #expect(stored.record?.maybeCreated["k"] == CollectionID("album-1"))
+        #expect(stored.record?.maybeCreatedAt["k"] == nil)
+        #expect(stored.record?.earlierMaybeCreated.isEmpty == true)
+        // A second request for the same key: the first id stays Albumist's.
+        try await journal.noteCreated(CollectionID("album-2"), key: "k", in: early)
+        let again = try #require(try await store.plan(plan.id))
+        #expect(again.record?.maybeCreated["k"] == CollectionID("album-2"))
+        #expect(again.record?.earlierMaybeCreated == [CollectionID("album-1")])
+    }
 }

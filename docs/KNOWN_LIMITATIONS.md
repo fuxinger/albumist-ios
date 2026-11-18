@@ -38,10 +38,17 @@ mit eingeschränkten Rechten: nur lesend.
   Laufzeit, Wärme und Akku auf iPhones sind ungemessen.
 - PhotoKit kennt kein bedingtes Löschen: Zwischen dem letzten Lesen und dem Löschen eines
   leeren Albums kann noch ein Foto hineinkommen (Millisekunden). Albumist liest direkt davor.
-- Ein beim Wiederanlauf übernommenes leeres Album bleibt nach Rückgängig stehen (gewollt).
+- Ein beim Wiederanlauf nur über den Namen übernommenes leeres Album bleibt nach Rückgängig
+  stehen (gewollt). Seit Prüfer 2, P2-01 (18.11.2026) selten: Die Kennung jedes neuen Albums
+  und Ordners steht schon im Änderungsblock im Journal, bevor Fotos speichert; übernommen wird
+  nur noch, wenn dieses Schreiben scheiterte (z. B. voller Speicher) oder bei Plänen älterer
+  Versionen. Albumist sagt es dann nach dem Rückgängig („Etwas bleibt in Fotos“, mit Name und
+  Ordner), und der Plan bleibt im Verlauf.
 - Wird ein Hinzufügen in ein Album des Nutzers unterbrochen und ist der Ausgang unklar, nimmt
   Rückgängig ein dort doch angekommenes Foto nicht heraus (gewollt, zweite Gegenprüfung 1.1).
-  Der Änderungsbeleg zeigt den Schritt als nicht bestätigt.
+  Der Änderungsbeleg zeigt den Schritt als nicht bestätigt; nach dem Rückgängig (auch nach
+  „Alles zurücknehmen“) sagt Albumist, wie viele Fotos in welchem Album bleiben, und der Plan
+  bleibt im Verlauf statt zu verschwinden (P2-01).
 - Nimmt der Nutzer während einer Unterbrechung alle Fotos aus einem Album, das der Plan gerade
   angelegt hat, und tippt danach „Rest anlegen“, legt Albumist sie wieder hinein: Das lässt sich
   nicht von einer Anfrage unterscheiden, die Fotos nie erreicht hat (gewollt, `DECISIONS.md`).

@@ -9,35 +9,101 @@ import SortlyTestSupport
 /// in; continuing or taking the plan back then settles it from what the library shows.
 @Suite("Writes Photos did not answer")
 struct PhotosTimeoutExecutionTests {
-    /// Photos that does not answer one kind of write in time: the change lands (late) or not,
-    /// and the caller gets `PhotosNotResponding` either way. Every later call goes through.
+    /// Photos that does not answer one kind of write in time: the change lands (at once, or
+    /// only when `land()` is called: `later`) or not, and the caller gets `PhotosNotResponding`
+    /// either way. A create hears its id before that, as from PhotoKit's placeholder. While a
+    /// late change has no answer, no write is sent (`PhotosDeadline`) and the executor is told
+    /// (`hasUnansweredWrites`). `stallRead`: the n-th read of the album or folder with this
+    /// title gets no answer.
     actor SlowPhotos: PhotoLibraryWriting {
         let base: InMemoryPhotoLibrary
         var stalls: String?
         var lands: Bool
+        let later: Bool
+        var stallRead: (title: String, nth: Int)?
+        private var reads = 0
+        /// A create without an answer yet, which lands with `land()`.
+        private var pending: (id: CollectionID, title: String, parent: CollectionID?, folder: Bool)?
+        private(set) var sentWrites = 0
 
-        init(_ base: InMemoryPhotoLibrary, stalls: String, lands: Bool) {
+        init(_ base: InMemoryPhotoLibrary, stalls: String?, lands: Bool, later: Bool = false,
+             stallRead: (title: String, nth: Int)? = nil) {
             self.base = base
             self.stalls = stalls
             self.lands = lands
+            self.later = later
+            self.stallRead = stallRead
+        }
+
+        /// The late create is carried out now.
+        func land() async {
+            guard let c = pending else { return }
+            pending = nil
+            await base.userEdit { inventory in
+                inventory.upsert(CollectionSnapshot(id: c.id, title: c.title, kind: c.folder ? .folder : .userAlbum, parentID: c.parent))
+                if let parent = c.parent, var p = inventory[parent] { p.childIDs.append(c.id); inventory.upsert(p) }
+            }
+        }
+
+        /// The late create is answered with a failure: it never lands.
+        func neverLands() { pending = nil }
+
+        func hasUnansweredWrites() async -> Bool { pending != nil }
+
+        private func lane(_ what: String) throws {
+            if pending != nil { throw PhotosNotResponding(lane: .write, what: what, notSent: true) }
+            sentWrites += 1
         }
 
         private func stall<T>(_ what: String, _ write: () async throws -> T) async throws -> T {
+            try lane(what)
             guard stalls == what else { return try await write() }
             stalls = nil
             if lands { _ = try await write() }
             throw PhotosNotResponding(lane: .write, what: what, notSent: false)
         }
 
+        private func create(_ what: String, title: String, parent: CollectionID?, folder: Bool,
+                            noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+            try lane(what)
+            guard stalls == what else {
+                let id = folder ? try await base.createFolder(title: title, parent: parent) : try await base.createAlbum(title: title, parent: parent)
+                noted(id)
+                return id
+            }
+            stalls = nil
+            if later {
+                let id = CollectionID("late-\(what)")
+                noted(id)
+                pending = (id, title, parent, folder)
+            } else if lands {
+                noted(folder ? try await base.createFolder(title: title, parent: parent) : try await base.createAlbum(title: title, parent: parent))
+            }
+            throw PhotosNotResponding(lane: .write, what: what, notSent: false)
+        }
+
         func canWrite() async -> Bool { await base.canWrite() }
         func currentInventory() async throws -> CollectionInventory { try await base.currentInventory() }
         func availableAssets(_ ids: [AssetID]) async throws -> Set<AssetID> { try await base.availableAssets(ids) }
-        func collection(_ id: CollectionID) async throws -> CollectionSnapshot? { try await base.collection(id) }
+        func collection(_ id: CollectionID) async throws -> CollectionSnapshot? {
+            let found = try await base.collection(id)
+            if let stallRead, found?.title == stallRead.title {
+                reads += 1
+                if reads == stallRead.nth { throw PhotosNotResponding(lane: .read, what: "collection", notSent: false) }
+            }
+            return found
+        }
         func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID {
-            try await stall("createFolder") { try await base.createFolder(title: title, parent: parent) }
+            try await createFolder(title: title, parent: parent, noted: { _ in })
         }
         func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID {
-            try await stall("createAlbum") { try await base.createAlbum(title: title, parent: parent) }
+            try await createAlbum(title: title, parent: parent, noted: { _ in })
+        }
+        func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+            try await create("createFolder", title: title, parent: parent, folder: true, noted: noted)
+        }
+        func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+            try await create("createAlbum", title: title, parent: parent, folder: false, noted: noted)
         }
         func addAssets(_ assets: [AssetID], to album: CollectionID) async throws {
             try await stall("addAssets") { try await base.addAssets(assets, to: album) }
@@ -115,17 +181,120 @@ struct PhotosTimeoutExecutionTests {
         #expect(resumed.appliedAssets == ["x", "y"])
     }
 
-    /// The album came late: taken over, never made a second time; marked as found, so an undo
-    /// leaves it alone (`adoptionCandidate`, the same rule as after the app was closed).
+    /// The album came late (before the plan went on): Photos had given its id to the request,
+    /// so it is this plan's own, never made a second time, and undo removes it (second review
+    /// of the PhotoKit limits, 1: before, it was only adopted and stayed after undo).
     @Test func albumThatCameLateIsNotMadeTwice() async throws {
         let (lib, plan) = try await setup()
         let store = InMemoryPlanStore()
         let journal = try await stopped(plan, on: SlowPhotos(lib, stalls: "createAlbum", lands: true), store)
-        #expect(journal.resolvedKeys[try albumKey(journal)] == nil)
+        let key = try albumKey(journal)
+        #expect(journal.resolvedKeys[key] == nil)
+        let maybe = try #require(journal.record?.maybeCreated[key])
+        let resumed = try await ChangeExecutor(library: lib, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").map(\.id) == [maybe])
+        #expect(resumed.resolvedKeys[key] == maybe)
+        #expect(resumed.record?.adoptedKeys.isEmpty == true)
+        try await expectUndoRemovesReise(resumed, lib)
+    }
+
+    /// Undo of a plan whose album is Albumist's: the album goes.
+    private func expectUndoRemovesReise(_ applied: ChangePlan, _ lib: InMemoryPhotoLibrary) async throws {
+        let undo = confirmed(UndoPlanner().undoPlan(for: applied, current: try await lib.currentInventory()))
+        let undone = try await ChangeExecutor(library: lib, store: InMemoryPlanStore()).execute(undo)
+        #expect(undone.status == .completed, "\(undone.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").isEmpty)
+    }
+
+    /// The create lands only later. Going on while it has no answer sends nothing (no second
+    /// "Reise" next to the late one); once it landed, the plan goes on with it.
+    @Test func lateCreateLandsWhileThePlanWaits() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: "createAlbum", lands: false, later: true)
+        let journal = try await stopped(plan, on: photos, store)
+        let key = try albumKey(journal)
+        #expect(journal.record?.maybeCreated[key] == CollectionID("late-createAlbum"))
+        let writes = await photos.sentWrites
+        // "Rest anlegen" right away: refused before anything is read or sent.
+        await #expect(throws: PhotosNotResponding.self) { try await ChangeExecutor(library: photos, store: store).execute(journal) }
+        #expect(await photos.sentWrites == writes)
+        #expect(try await store.latest == journal)
+        await photos.land()
+        let resumed = try await ChangeExecutor(library: photos, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").map(\.id) == [CollectionID("late-createAlbum")])
+        #expect(try await albums(lib, titled: "Reise").first?.assetIDs == ["x", "y"])
+        #expect(resumed.record?.adoptedKeys.isEmpty == true)
+        try await expectUndoRemovesReise(resumed, lib)
+    }
+
+    /// Taking the plan back while the create has no answer: not settled from a library that may
+    /// still change. Once the album landed, the undo finds it as this plan's and removes it.
+    @Test func lateCreateLandsBeforeTheUndoSettles() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: "createAlbum", lands: false, later: true)
+        let journal = try await stopped(plan, on: photos, store)
+        await #expect(throws: PhotosNotResponding.self) { try await ChangeExecutor(library: photos, store: store).reconcileInterrupted(journal) }
+        await photos.land()
+        let settled = try await ChangeExecutor(library: photos, store: store).reconcileInterrupted(journal)
+        let key = try albumKey(settled)
+        #expect(settled.resolvedKeys[key] == CollectionID("late-createAlbum"))
+        #expect(settled.record?.adoptedKeys.isEmpty == true)
+        try await expectUndoRemovesReise(settled, lib)
+    }
+
+    /// The create is answered with a failure: it never lands, and the plan makes the album when
+    /// it goes on, once.
+    @Test func lateCreateThatNeverLandsIsMadeOnce() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: "createAlbum", lands: false, later: true)
+        let journal = try await stopped(plan, on: photos, store)
+        await photos.neverLands()
+        let resumed = try await ChangeExecutor(library: photos, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").count == 1)
+        #expect(resumed.record?.maybeCreated.isEmpty == true)
+        #expect(resumed.record?.adoptedKeys.isEmpty == true)
+    }
+
+    /// No answer to the check after the album was made: the step stays running with the id
+    /// written down (not "failed"), and is checked when the plan goes on (second review, 8).
+    @Test func checkWithoutAnswerAfterCreateStaysRunning() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let journal = try await stopped(plan, on: SlowPhotos(lib, stalls: nil, lands: false, stallRead: ("Reise", 1)), store)
+        let key = try albumKey(journal)
+        let made = try #require(journal.resolvedKeys[key])
+        let resumed = try await ChangeExecutor(library: lib, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").map(\.id) == [made])
+    }
+
+    /// Nothing reached Photos (a read before the write got no answer): the step is as it was,
+    /// waiting, not "running" to be settled by adoption later (second review, 9).
+    @Test func stepOfWhichNothingWasSentIsPendingAgain() async throws {
+        let lib = InMemoryPhotoLibrary(assets: ["x", "y"], collections: [])
+        let proposals = [ConfirmedProposal(
+            proposal: AlbumProposal(id: SortlyID("reise"), kind: .trip, title: "Reise", folderPath: ["Urlaub"], assetIDs: ["x", "y"]),
+            decision: .createNew(title: nil, folderPath: nil))]
+        let plan = confirmed(OrganizationPlanner().makePlan(from: proposals, inventory: try await lib.currentInventory()))
+        let albumStep = try #require(plan.steps.firstIndex { if case .createAlbum(_, _, .planned) = $0.operation { true } else { false } },
+                                     "\(plan.steps.map(\.operation))")
+        let store = InMemoryPlanStore()
+        // The new folder is read for its check, then by the album step before the album is made.
+        let photos = SlowPhotos(lib, stalls: nil, lands: false, stallRead: ("Urlaub", 2))
+        await #expect(throws: PhotosNotResponding.self) { try await ChangeExecutor(library: photos, store: store).execute(plan) }
+        let journal = try #require(await store.latest)
+        #expect(journal.steps[albumStep].state == .pending)
+        #expect(try await albums(lib, titled: "Reise").isEmpty)
         let resumed = try await ChangeExecutor(library: lib, store: store).execute(journal)
         #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
         #expect(try await albums(lib, titled: "Reise").count == 1)
-        #expect(resumed.record?.adoptedKeys.isEmpty == false)
+        #expect(resumed.record?.adoptedKeys.isEmpty == true)
     }
 
     /// Taking a plan back: a deletion Photos did not answer is not "rückgängig gemacht". What

@@ -184,4 +184,20 @@ struct LabelsHoldFollowUpTests {
         #expect(retry.tries == 0)
         #expect(retry.schedule(photos: false, now: start) == .seconds(30))
     }
+
+    /// A photo Photos does not hand over in time ends the run with that error (the card says
+    /// "Fotos antwortet gerade nicht"), and nothing is counted against the photo: the next run
+    /// looks at it like any other (second review of the PhotoKit limits, 4).
+    @Test func aPhotoPhotosDoesNotHandOverEndsTheRunWithoutMarks() async throws {
+        let s = try LabelsLaterTests.setup(photos: 12, screenshots: 0, labels: true)
+        let stuck = try #require(s.photos.dropFirst(3).first)
+        s.analyzer.quiet.withLock { $0 = [stuck] }
+        await #expect(throws: PhotosNotResponding.self) { try await s.pipeline.run() }
+        #expect(try await s.store.result(ContentAnalysis.self, kind: "content", asset: stuck) == nil)
+        s.analyzer.quiet.withLock { $0 = [] }
+        let next = try await s.pipeline.run()
+        #expect(next.isComplete)
+        #expect(try await s.store.result(ContentAnalysis.self, kind: "content", asset: stuck)?.failedAttempts == nil)
+        #expect(try await s.store.result(ContentAnalysis.self, kind: "content", asset: stuck) != nil)
+    }
 }

@@ -21,6 +21,14 @@ public protocol PhotoLibraryWriting: Sendable {
     /// One album or folder, read on its own. Execution checks every step this way instead of
     /// reading the whole album list (minutes saved on large plans).
     func collection(_ id: CollectionID) async throws -> CollectionSnapshot?
+    /// Like `createFolder` and `createAlbum`; `noted` hears the new id as soon as Photos assigns
+    /// it, before the change is committed, so a request Photos does not answer in time
+    /// (`PhotosNotResponding`) leaves its id behind (second review of the PhotoKit limits, 1).
+    func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID
+    func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID
+    /// A change request sent earlier has not been answered yet: Photos may still carry it out,
+    /// so what the library shows now is not final (`PhotosDeadline`).
+    func hasUnansweredWrites() async -> Bool
 }
 
 /// Why Photos did not carry out a deletion, as far as the library adapter can tell. Other
@@ -36,6 +44,20 @@ extension PhotoLibraryWriting {
     public func collection(_ id: CollectionID) async throws -> CollectionSnapshot? {
         try await currentInventory()[id]
     }
+
+    public func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+        let id = try await createFolder(title: title, parent: parent)
+        noted(id)
+        return id
+    }
+
+    public func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
+        let id = try await createAlbum(title: title, parent: parent)
+        noted(id)
+        return id
+    }
+
+    public func hasUnansweredWrites() async -> Bool { false }
 
     /// One by one: albums first, then folders from the inside out.
     public func deleteCollections(_ ids: [CollectionID]) async throws {
@@ -126,6 +148,9 @@ public actor ChangeExecutor {
     /// Runs (or resumes) a plan. `onEvent` reports progress for the UI.
     public func execute(_ input: ChangePlan, onEvent: @Sendable (ExecutionEvent) -> Void = { _ in }) async throws -> ChangePlan {
         guard input.confirmedAt != nil, input.status != .draft, input.status != .cancelled else { throw ExecutionError.notConfirmed }
+        // An earlier change request has no answer yet: what the library shows is not final (an
+        // album may still land), so nothing is decided or sent from it. The plan stays as it is.
+        try await requireAnsweredWrites()
         var plan = input
         if plan.record == nil { plan.record = ExecutionRecord() }
 
@@ -171,6 +196,8 @@ public actor ChangeExecutor {
             onEvent(.stepStarted(index: index, total: plan.steps.count))
             let wasRunning: Bool
             if case .running = step.state { wasRunning = true } else { wasRunning = false }
+            // The journal before this step, for a step of which nothing reached Photos.
+            let beforeStep = plan
 
             // Adding and removing media journal `running` together with their intent (in
             // `perform`); the other steps are journaled here.
@@ -180,14 +207,18 @@ public actor ChangeExecutor {
             }
 
             let state: StepState
+            var sent = false
             do {
-                state = try await perform(index, plan: &plan, reconcile: wasRunning, available: available)
+                state = try await perform(index, plan: &plan, reconcile: wasRunning, available: available, sent: &sent)
             } catch let notResponding as PhotosNotResponding {
                 // Photos did not answer (app-speed, docs/DECISIONS.md): the outcome of this step
                 // is not known, Photos may still carry it out. It is neither done nor failed: it
-                // stays journaled as running, with its intent, like a step the app was closed in,
-                // and the run stops here. The ways out of an interrupted plan settle it later
-                // from what the library shows then.
+                // stays journaled as running, with its intent (and the id Photos gave a new album,
+                // `maybeCreated`), like a step the app was closed in, and the run stops here. The
+                // ways out of an interrupted plan settle it later from what the library shows
+                // then. A step of which nothing reached Photos (the request was never sent, or a
+                // read before it got no answer) is as it was before (second review, 9).
+                if !wasRunning && !sent { plan = beforeStep }
                 try await store.save(plan)
                 throw notResponding
             } catch {
@@ -214,6 +245,9 @@ public actor ChangeExecutor {
     /// the interrupted run really did (an album created or media added right before the app
     /// was closed). Steps that never started stay as they are.
     public func reconcileInterrupted(_ input: ChangePlan) async throws -> ChangePlan {
+        // Not while an earlier change request may still land: settled from a library that is
+        // not final, a late album would be left behind by the undo.
+        try await requireAnsweredWrites()
         var plan = input
         if plan.record == nil { plan.record = ExecutionRecord() }
         let inventory = try await library.currentInventory()
@@ -229,6 +263,12 @@ public actor ChangeExecutor {
                     // Photos returned this id before the app stopped: created by this run, so
                     // undo may remove it (not merely found, which undo would have to keep).
                     if inventory[made] != nil { state = .succeeded(createdID: made, verifiedAt: now) }
+                } else if let maybe = plan.record?.maybeCreated[key], inventory[maybe] != nil {
+                    // Photos gave this id to this run's request, which then got no answer in time:
+                    // it landed, so it is Albumist's like any album it made (undo removes it).
+                    plan.resolvedKeys[key] = maybe
+                    plan.record?.maybeCreated[key] = nil
+                    state = .succeeded(createdID: maybe, verifiedAt: now)
                 } else if let parent = resolve(parentRef, plan),
                    let found = adoptionCandidate(title: title, parent: parent, folder: isFolder, plan: plan, inventory: inventory) {
                     plan.resolvedKeys[key] = found
@@ -292,7 +332,30 @@ public actor ChangeExecutor {
         }
     }
 
-    private func perform(_ index: Int, plan: inout ChangePlan, reconcile: Bool, available: Set<AssetID>) async throws -> StepState {
+    /// An earlier change request has no answer yet (`PhotoLibraryWriting.hasUnansweredWrites`).
+    private func requireAnsweredWrites() async throws {
+        if await library.hasUnansweredWrites() {
+            throw PhotosNotResponding(lane: .write, what: "earlierChange", notSent: true)
+        }
+    }
+
+    /// A write of a step: `sent` once it may have reached Photos (all but a request that was
+    /// never sent, `PhotosNotResponding.notSent`).
+    private func sending<T>(_ sent: inout Bool, _ write: () async throws -> T) async throws -> T {
+        do {
+            let result = try await write()
+            sent = true
+            return result
+        } catch let quiet as PhotosNotResponding where quiet.notSent {
+            throw quiet
+        } catch {
+            sent = true
+            throw error
+        }
+    }
+
+    private func perform(_ index: Int, plan: inout ChangePlan, reconcile: Bool, available: Set<AssetID>,
+                         sent: inout Bool) async throws -> StepState {
         let now = clock()
         let step = plan.steps[index]
         switch step.operation {
@@ -314,6 +377,23 @@ public actor ChangeExecutor {
                     return .failed(reason: "created collection could not be verified")
                 }
                 return .succeeded(createdID: made, verifiedAt: now)
+            }
+            if reconcile, let maybe = plan.record?.maybeCreated[key] {
+                // Photos gave this id to this run's request, which then got no answer in time
+                // (second review of the PhotoKit limits, 1). It landed: provably Albumist's, taken
+                // as made by this run (undo removes it), never made a second time. Not there: the
+                // request did not land (no request is unanswered any more, `execute`), and the
+                // album is made below as after any interruption.
+                if let found = try await library.collection(maybe) {
+                    plan.resolvedKeys[key] = maybe
+                    plan.record?.maybeCreated[key] = nil
+                    try await store.save(plan)
+                    guard found.title == title, found.parentID == parent else {
+                        return .failed(reason: "created collection could not be verified")
+                    }
+                    return .succeeded(createdID: maybe, verifiedAt: now)
+                }
+                plan.record?.maybeCreated[key] = nil
             }
             if reconcile {
                 // The app stopped while this was being created. A collection with the same
@@ -344,16 +424,35 @@ public actor ChangeExecutor {
             if let parent, try await library.collection(parent) == nil {
                 return .failed(reason: "parent folder no longer exists")
             }
-            let id = isFolder
-                ? try await library.createFolder(title: title, parent: parent)
-                : try await library.createAlbum(title: title, parent: parent)
+            // The id Photos gives the new album, heard before the change is committed: a request
+            // without an answer in time leaves it in the journal (`maybeCreated`).
+            let noted = NotedID()
+            let id: CollectionID
+            do {
+                id = try await sending(&sent) {
+                    isFolder
+                        ? try await library.createFolder(title: title, parent: parent, noted: { noted.note($0) })
+                        : try await library.createAlbum(title: title, parent: parent, noted: { noted.note($0) })
+                }
+            } catch let quiet as PhotosNotResponding {
+                if let maybe = noted.id { plan.record?.maybeCreated[key] = maybe }
+                throw quiet
+            }
             // Photos returned the new id: it is written down before the check, so a failed
             // check never leads to a second album on retry, and undo can still remove this
             // one (audit 2, 1.7).
             plan.resolvedKeys[key] = id
             try await store.save(plan)
             let created: CollectionSnapshot?
-            do { created = try await library.collection(id) } catch { return .failed(reason: "created collection could not be verified") }
+            do {
+                created = try await library.collection(id)
+            } catch let quiet as PhotosNotResponding {
+                // No answer to the check: the step stays running with the id written down, and is
+                // checked again when the plan goes on (second review, 8).
+                throw quiet
+            } catch {
+                return .failed(reason: "created collection could not be verified")
+            }
             guard let created, created.title == title, created.parentID == parent else {
                 return .failed(reason: "created collection could not be verified")
             }
@@ -403,7 +502,7 @@ public actor ChangeExecutor {
             plan.record?.begin(step.id, missing)
             plan.steps[index].state = .running(startedAt: now)
             try await store.save(plan)
-            if !missing.isEmpty { try await library.addAssets(missing, to: albumID) }
+            if !missing.isEmpty { try await sending(&sent) { try await library.addAssets(missing, to: albumID) } }
             guard let verified = try await library.collection(albumID) else {
                 plan.record?.settle(step.id, [])
                 return .failed(reason: "album no longer exists")
@@ -415,7 +514,7 @@ public actor ChangeExecutor {
 
         case .renameCollection(let id, _, let to):
             guard let c = try await library.collection(id) else { return .failed(reason: "album no longer exists") }
-            if c.title != to { try await library.renameCollection(id, to: to) }
+            if c.title != to { try await sending(&sent) { try await library.renameCollection(id, to: to) } }
             guard try await library.collection(id)?.title == to else { return .failed(reason: "rename could not be verified") }
             return .succeeded(createdID: nil, verifiedAt: now)
 
@@ -430,7 +529,7 @@ public actor ChangeExecutor {
                 }
                 // Out of the folder it is in now, not the one it was in when the plan was
                 // made: the user may have moved it since (an undo runs long after its plan).
-                try await library.moveCollection(id, from: c.parentID, to: target)
+                try await sending(&sent) { try await library.moveCollection(id, from: c.parentID, to: target) }
             }
             guard try await library.collection(id)?.parentID == target else { return .failed(reason: "move could not be verified") }
             return .succeeded(createdID: nil, verifiedAt: now)
@@ -450,7 +549,7 @@ public actor ChangeExecutor {
             plan.record?.begin(step.id, present)
             plan.steps[index].state = .running(startedAt: now)
             try await store.save(plan)
-            if !present.isEmpty { try await library.removeAssets(present, from: albumID) }
+            if !present.isEmpty { try await sending(&sent) { try await library.removeAssets(present, from: albumID) } }
             guard let after = try await library.collection(albumID) else {
                 plan.record?.settle(step.id, [])
                 return .failed(reason: "album no longer exists")
@@ -489,6 +588,9 @@ public actor ChangeExecutor {
     /// it stays and only those media leave it.
     private func deleteBatch(_ indices: [Int], plan: inout ChangePlan, onEvent: @Sendable (ExecutionEvent) -> Void) async throws {
         let now = clock()
+        // The journal before this batch, for a batch of which nothing reached Photos.
+        let beforeBatch = plan
+        var sent = false
         for i in indices {
             onEvent(.stepStarted(index: i, total: plan.steps.count))
             if case .running = plan.steps[i].state { continue }
@@ -540,7 +642,7 @@ public actor ChangeExecutor {
             if !allowed.isEmpty {
                 // Said per step below, from what the library shows afterwards.
                 do {
-                    try await library.deleteCollections(allowed.sorted())
+                    try await sending(&sent) { try await library.deleteCollections(allowed.sorted()) }
                 } catch let notResponding as PhotosNotResponding {
                     throw notResponding
                 } catch {
@@ -552,7 +654,7 @@ public actor ChangeExecutor {
             // is only this album's.
             for (i, k) in kept.sorted(by: { $0.key < $1.key }) where !k.ours.isEmpty {
                 do {
-                    try await library.removeAssets(k.ours, from: k.album)
+                    try await sending(&sent) { try await library.removeAssets(k.ours, from: k.album) }
                 } catch let notResponding as PhotosNotResponding {
                     throw notResponding
                 } catch {
@@ -562,6 +664,8 @@ public actor ChangeExecutor {
         } catch let notResponding as PhotosNotResponding {
             // As in `execute`: the deletion may still happen (iOS may still be asking the
             // user). The steps stay running, with what goes written down, and the run stops.
+            // Nothing sent (never sent, or a read before it got no answer): as before the batch.
+            if !sent { plan = beforeBatch }
             try await store.save(plan)
             throw notResponding
         } catch {
@@ -1062,4 +1166,15 @@ public struct UndoPlanner: Sendable {
         plan.deleteGuards = guards
         return plan
     }
+}
+
+/// The id Photos gives a new album or folder, heard from inside the change request
+/// (`PhotoLibraryWriting.createAlbum(title:parent:noted:)`), possibly after the caller stopped
+/// waiting.
+final class NotedID: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: CollectionID?
+
+    func note(_ id: CollectionID) { lock.withLock { value = id } }
+    var id: CollectionID? { lock.withLock { value } }
 }

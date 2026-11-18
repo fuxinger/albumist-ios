@@ -25,6 +25,8 @@ struct LabelsLaterTests {
         /// Photos the analyzer itself fails on (not `AnalysisError`): counted against a photo only
         /// once a photo after it works.
         let failing = Mutex<Set<AssetID>>([])
+        /// Photos Photos does not hand over in time (`PhotosNotResponding`).
+        let quiet = Mutex<Set<AssetID>>([])
         struct VisionFailed: Error {}
         let delay: Duration
         init(delay: Duration = .zero) { self.delay = delay }
@@ -36,6 +38,7 @@ struct LabelsLaterTests {
             if delay > .zero { try await Task.sleep(for: delay) } else { await Task.yield() }
             if unreadable.withLock({ $0.contains(asset.id) }) { throw AnalysisError.unreadable }
             if failing.withLock({ $0.contains(asset.id) }) { throw VisionFailed() }
+            if quiet.withLock({ $0.contains(asset.id) }) { throw PhotosNotResponding(lane: .image, what: "fetchAsset", notSent: false) }
             let labels = !request.classify ? []
                 : Self.isReceipt(asset.id) ? [LabelScore("receipt", 0.9, isPrecise: true)] : [LabelScore("dog", 0.9, isPrecise: true)]
             // Only a full look has a feature print (the labels-only look asks for none).

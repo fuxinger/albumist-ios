@@ -184,6 +184,12 @@ final class SamplePhotos {
             update { $0.keepOnly(still) }
             model.inventory = try await model.library.currentInventory()
             model.startAnalysis(userInitiated: true)
+        } catch let quiet as PhotosNotResponding where quiet.lane == .write {
+            // Not known whether they go: the question iOS asks may still be on screen, or an
+            // earlier change still has no answer (second review of the PhotoKit limits, 7).
+            model.message = .failure(quiet.asksUser && !quiet.notSent
+                ? String(localized: "Ob die Beispielfotos entfernt werden, steht noch nicht fest: Die Rückfrage von iOS ist vielleicht noch offen. Schau in Fotos nach und versuche es danach noch einmal.")
+                : quiet.localizedDescription)
         } catch {
             let ns = error as NSError
             if ns.domain == PHPhotosErrorDomain, ns.code == PHPhotosError.Code.userCancelled.rawValue { return }

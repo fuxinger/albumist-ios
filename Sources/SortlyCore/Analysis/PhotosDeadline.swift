@@ -14,11 +14,15 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
     public var what: String
     /// The call was never sent: an earlier call of the same kind still had no answer.
     public var notSent: Bool
+    /// The call waited for the user: iOS asks before albums are deleted, and that question may
+    /// still be on screen (its own words, second review of the PhotoKit limits, 7).
+    public var asksUser: Bool
 
-    public init(lane: PhotosDeadline.Lane, what: String, notSent: Bool) {
+    public init(lane: PhotosDeadline.Lane, what: String, notSent: Bool, asksUser: Bool = false) {
         self.lane = lane
         self.what = what
         self.notSent = notSent
+        self.asksUser = asksUser
     }
 }
 
@@ -32,17 +36,30 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
 ///   pool neither delays it nor cuts off a call that has not started.
 /// - After the limit the caller gets `PhotosNotResponding` and goes on. The call itself cannot
 ///   be taken back from Photos: it goes on in the background and its answer is dropped.
-/// - While such a call still hangs, no new call of the same kind is sent (`Lane`): a new one
-///   waits up to its own limit for the old one and then fails without being sent. So there is
-///   never a second write while an earlier one may still land (a second album next to a late
-///   first one), and a stuck Photos does not collect one stuck thread per retry.
+/// - While such a call still hangs, no new call of the same kind is sent (`Lane`). A write fails
+///   at once without being sent: it was decided from a library that the hanging write may still
+///   change, so it is never sent after waiting for it (second review: a create that landed during
+///   the wait was followed by a second album). A read or an image request waits up to its own
+///   limit for the old one and then fails without being sent. A stuck Photos does not collect
+///   one stuck thread per retry.
+/// - Synchronous PhotoKit work runs on a queue of its own (`runBlocking`), not on Swift's shared
+///   pool, so a hanging fetch never holds a thread the analysis needs.
+/// - A look at a call that comes much later than planned means the app was suspended: the call
+///   gets its limit again from then (`cameBack` does the same when the app is on screen again),
+///   so time the app did not run in never cuts a call off.
 /// - A call cancelled by its caller that has not returned counts as hanging the same way.
 /// - `slowFor`: how long the oldest call has gone without an answer (or a sign of progress),
 ///   once that is `slowAfter` or more, for the honest "Fotos antwortet gerade nicht" on screen
 ///   while Albumist still waits (owner limit: nothing stands still for more than 10 s).
 public final class PhotosDeadline: @unchecked Sendable {
     public enum Lane: String, Sendable, Equatable {
-        case read, write
+        /// Fetches for the analysis's lists, plans and the overview.
+        case read
+        /// Change requests.
+        case write
+        /// One photo's fetch or image for the analysis, the grid, the atlas: apart from the
+        /// reads, so a photo that hangs never holds up a plan's reads.
+        case image
     }
 
     /// A long call says it is still moving (a read every 250 photos): its limit counts from
@@ -71,6 +88,39 @@ public final class PhotosDeadline: @unchecked Sendable {
         var quietSince: ContinuousClock.Instant? { lock.withLock { began ? last : nil } }
     }
 
+    /// How the watch goes on after one look at a call.
+    enum Look: Equatable {
+        /// The limit passed without an answer or a beat.
+        case giveUp
+        /// The look came much later than planned (the app was suspended): the call gets its
+        /// limit again from now.
+        case cameBack
+        /// Looked at again after this long.
+        case again(Duration)
+    }
+
+    /// A look later than planned by this much means the app was suspended (a Dispatch timer does
+    /// not run while it is; `ContinuousClock` does).
+    static let suspendedAfter: Duration = .seconds(2)
+
+    /// A call whose task has not got a thread yet waits this much longer than its limit before
+    /// it is given up: it is never kept for good, and a busy moment of the thread pool (seconds
+    /// in the full test run) does not cut off a call Photos was never asked.
+    static let notBegunGrace: Duration = .seconds(60)
+
+    /// One look at a call: `quiet` since its last beat (for a call not running yet, beyond
+    /// `notBegunGrace`), `late` how much later than planned this look came.
+    static func quiet(now: ContinuousClock.Instant, lastBeat: ContinuousClock.Instant, running: Bool) -> Duration {
+        // Not running yet (its task has no thread): only its wait beyond the grace counts.
+        running ? now - lastBeat : max(.zero, now - lastBeat - notBegunGrace)
+    }
+
+    static func look(quiet: Duration, limit: Duration, late: Duration) -> Look {
+        if late >= suspendedAfter { return .cameBack }
+        if quiet >= limit { return .giveUp }
+        return .again(min(limit - quiet, check(limit)))
+    }
+
     private struct Call {
         var lane: Lane
         var heartbeat: Heartbeat
@@ -90,6 +140,13 @@ public final class PhotosDeadline: @unchecked Sendable {
     /// Calls of this kind that went past their limit and still have not returned.
     public func hangingCalls(_ lane: Lane) -> Int { lock.withLock { hanging[lane] ?? 0 } }
 
+    /// The app is on screen again: every call waiting gets its limit again from now. While the
+    /// app was suspended, Photos could not answer it.
+    public func cameBack() {
+        let waiting = lock.withLock { calls.values.map(\.heartbeat) }
+        for heartbeat in waiting { heartbeat.beat() }
+    }
+
     /// How long the oldest waiting call has gone without an answer or a beat, when that is
     /// `slowAfter` or more. Calls that wait for the user (`reportsSlow: false`) do not count.
     public func slowFor(now: ContinuousClock.Instant = .now) -> Duration? {
@@ -108,21 +165,24 @@ public final class PhotosDeadline: @unchecked Sendable {
         let id = UUID()
         let heartbeat = Heartbeat(.now)
         lock.withLock { calls[id] = Call(lane: lane, heartbeat: heartbeat, reportsSlow: reportsSlow) }
-        // An earlier call of this kind still hangs: wait for it, but never send a second one.
-        let clear = await waitForLane(lane, limit: limit)
+        // An earlier call of this kind still hangs: never send a second one. A write is not
+        // waited for (see above); a read waits for it up to its limit.
+        let clear = lane == .write ? hangingCalls(.write) == 0 : await waitForLane(lane, limit: limit)
         guard clear else {
             lock.withLock { calls[id] = nil }
             if Task.isCancelled { throw CancellationError() }
-            throw PhotosNotResponding(lane: lane, what: what, notSent: true)
+            throw PhotosNotResponding(lane: lane, what: what, notSent: true, asksUser: !reportsSlow)
         }
         heartbeat.beat()
         let answer = Answer<T>()
+        // The call runs with the caller's priority (a detached task would drop it).
+        let priority = Task.currentPriority
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
                 answer.set(continuation)
                 // Not sent at all when the caller was cancelled before this point.
                 let started = answer.start {
-                    Task.detached {
+                    Task.detached(priority: priority) {
                         let result: Result<T, any Error>
                         heartbeat.begin()
                         do { result = .success(try await work(heartbeat)) } catch { result = .failure(error) }
@@ -133,7 +193,8 @@ public final class PhotosDeadline: @unchecked Sendable {
                     lock.withLock { calls[id] = nil }
                     return
                 }
-                watch(id, lane: lane, what: what, limit: limit, heartbeat: heartbeat, answer: answer)
+                watch(id, lane: lane, what: what, limit: limit, asksUser: !reportsSlow, heartbeat: heartbeat, answer: answer,
+                      planned: nil)
             }
         } onCancel: {
             self.giveUp(id, lane: lane, answer: answer, error: CancellationError())
@@ -147,20 +208,44 @@ public final class PhotosDeadline: @unchecked Sendable {
     /// thread of Swift's shared pool busy, a sleeping task wakes late and the limit with it.
     private static let timers = DispatchQueue(label: "PhotosDeadline.timers")
 
-    private func watch<T>(_ id: UUID, lane: Lane, what: String, limit: Duration, heartbeat: Heartbeat, answer: Answer<T>) {
+    private func watch<T>(_ id: UUID, lane: Lane, what: String, limit: Duration, asksUser: Bool, heartbeat: Heartbeat,
+                          answer: Answer<T>, planned: ContinuousClock.Instant?) {
         guard !answer.isDone else { return }
-        // Not running yet: looked at again later.
-        let quiet = heartbeat.quietSince.map { ContinuousClock.now - $0 } ?? .zero
-        if quiet >= limit {
-            giveUp(id, lane: lane, answer: answer, error: PhotosNotResponding(lane: lane, what: what, notSent: false))
+        let now = ContinuousClock.now
+        let quiet = Self.quiet(now: now, lastBeat: heartbeat.lastBeat, running: heartbeat.quietSince != nil)
+        let late = planned.map { max(.zero, now - $0) } ?? .zero
+        let wait: Duration
+        switch Self.look(quiet: quiet, limit: limit, late: late) {
+        case .giveUp:
+            giveUp(id, lane: lane, answer: answer,
+                   error: PhotosNotResponding(lane: lane, what: what, notSent: false, asksUser: asksUser))
             return
+        case .cameBack:
+            heartbeat.beat()
+            wait = Self.check(limit)
+        case .again(let next):
+            wait = next
         }
-        let wait = min(limit - quiet, Self.check(limit))
         let seconds = Double(wait.components.seconds) + Double(wait.components.attoseconds) / 1e18
+        let next = now + wait
         Self.timers.asyncAfter(deadline: .now() + seconds) {
-            self.watch(id, lane: lane, what: what, limit: limit, heartbeat: heartbeat, answer: answer)
+            self.watch(id, lane: lane, what: what, limit: limit, asksUser: asksUser, heartbeat: heartbeat, answer: answer,
+                       planned: next)
         }
     }
+
+    /// Like `run`, for synchronous PhotoKit work (fetches): it runs on a queue of its own, so a
+    /// fetch that hangs holds one of that queue's threads, never one of Swift's shared pool.
+    public func runBlocking<T: Sendable>(_ what: String, lane: Lane, limit: Duration, reportsSlow: Bool = true,
+                                         _ work: @escaping @Sendable (Heartbeat) throws -> T) async throws -> T {
+        try await run(what, lane: lane, limit: limit, reportsSlow: reportsSlow) { beat in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
+                Self.photoKit.async { continuation.resume(with: Result { try work(beat) }) }
+            }
+        }
+    }
+
+    private static let photoKit = DispatchQueue(label: "PhotosDeadline.photoKit", qos: .userInitiated, attributes: .concurrent)
 
     /// Waits until no call of this kind hangs, up to `limit`. False if one still does (or the
     /// caller was cancelled meanwhile).

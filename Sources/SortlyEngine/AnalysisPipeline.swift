@@ -770,6 +770,11 @@ public actor AnalysisPipeline {
                 var stopped: PauseReason?
                 var stopSeen: ContinuousClock.Instant?
                 var cancelled = false
+                // Photos did not hand over a photo in time (`PhotosNotResponding`, second review of
+                // the PhotoKit limits, 4): not the photo's fault and not Vision's. Nothing is
+                // counted for it; the photos in work finish, and the run ends with the error (the
+                // card says "Fotos antwortet gerade nicht", the run comes again by itself).
+                var photosQuiet: PhotosNotResponding?
                 // Saved and shown at least once a second: a batch of 50 photos took 5 s, on a warm
                 // device 18 s, and the count stood still meanwhile (simulated full run). The photos
                 // after the cut stay for the next batch.
@@ -820,7 +825,7 @@ public actor AnalysisPipeline {
                     while true {
                         // Fill the lanes. Heat, low battery or Pause are checked before every
                         // photo, so a stop takes effect within one photo per lane.
-                        while stopped == nil, !cancelled, next < batch.count, inFlight < width {
+                        while stopped == nil, !cancelled, photosQuiet == nil, next < batch.count, inFlight < width {
                             if next > 0, now().timeIntervalSince(batchStart) >= 1 { cut = true; break }
                             let (reason, lanes) = await admission(lanes: contentLanes)
                             if let reason { stopped = reason; stopSeen = .now; break }
@@ -867,6 +872,8 @@ public actor AnalysisPipeline {
                             if error is CancellationError || Task.isCancelled {
                                 // Stopped, not unreadable: what is done stays done, the rest waits.
                                 cancelled = true
+                            } else if let quiet = error as? PhotosNotResponding {
+                                if photosQuiet == nil { photosQuiet = quiet }
                             } else if !(error is AnalysisError) {
                                 suspects.append(asset.id)
                                 if suspects.count >= Self.analyzerFailureLimit, stopped == nil {
@@ -896,6 +903,7 @@ public actor AnalysisPipeline {
                 let read = Set(results.map(\.0))
                 try await store.removeResults(kind: "labels", assets: labelAttempts.keys.filter(read.contains))
                 if cancelled { throw CancellationError() }
+                if let photosQuiet { throw photosQuiet }
                 if cut {
                     // Goes on behind the last photo looked at (same order as the store's query);
                     // without a date, from the start of the photos still to analyse.

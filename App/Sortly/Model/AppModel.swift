@@ -1524,6 +1524,9 @@ final class AppModel {
     /// The app is on screen again: a run that iOS ended goes on by itself, and a run still
     /// busy asks for background time again (the last request may have run out).
     func sceneBecameActive() {
+        // A call into Photos that waited while the app was suspended gets its limit again from
+        // now: Photos could not answer it meanwhile (second review of the PhotoKit limits, 3).
+        PhotoKitLibrary.deadline.cameBack()
         // Back from the Settings app on the "Kein Zugriff" screen: the access may be back (W4).
         if phase == .noAccess {
             Task { await refreshAccess() }
@@ -2453,7 +2456,10 @@ final class AppModel {
         keepAwake.end()
         execution.isRunning = false
         self.plan = nil
-        startAnalysis()
+        // A run that ended early by itself keeps its wait here too (like `releaseExecution`):
+        // only a try that came due during the plan starts now (second review of the PhotoKit
+        // limits, 5).
+        if !analysis.needsResume || retry.startsOnRelease(now: .now) { startAnalysis() }
     }
 
     /// What the user reads when a plan could not run: a plan stopped by a change in Photos

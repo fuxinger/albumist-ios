@@ -37,11 +37,12 @@ enum PreviewCache {
         return options
     }
 
-    static func start(_ ids: [AssetID]) {
-        guard !ids.isEmpty else { return }
-        var assets: [PHAsset] = []
-        PHAsset.fetchAssets(withLocalIdentifiers: ids.map(\.rawValue), options: nil).enumerateObjects { asset, _, _ in assets.append(asset) }
-        manager.startCachingImages(for: assets, targetSize: size, contentMode: .aspectFit, options: options())
+    /// The fetch is bounded on the image lane; a Photos that does not answer only means no
+    /// previews are loaded ahead (the analysis hears of it with its next photo).
+    static func start(_ ids: [AssetID]) async {
+        guard !ids.isEmpty,
+              let fetched = try? await PhotoKitLibrary.fetchAssets(ids, what: "fetchPreviewAssets") else { return }
+        manager.startCachingImages(for: fetched.assets, targetSize: size, contentMode: .aspectFit, options: options())
     }
 
     /// Analysed: its preview is not kept for longer than needed.
@@ -82,8 +83,10 @@ enum ImageLoadStats {
 
 /// Loads images from PhotoKit for analysis.
 enum ImageLoader {
+    /// Throws `PhotosNotResponding` when Photos does not hand over the photo in time (the fetch
+    /// is bounded on the image lane, `PhotoKitLibrary.fetchAssets`).
     static func image(for id: AssetID, quality: ImageQuality, allowNetwork: Bool) async throws -> LoadedImage? {
-        guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id.rawValue], options: nil).firstObject else {
+        guard let asset = try await PhotoKitLibrary.fetchAssets([id]).assets.first else {
             ImageLoadStats.note("asset missing")
             throw AnalysisError.unreadable
         }
@@ -299,14 +302,23 @@ struct VisionAnalyzer: ContentAnalyzing {
     }
 
     func willAnalyze(_ upcoming: [AssetSnapshot]) async {
-        PreviewCache.start(upcoming.filter { $0.kind == .image || $0.kind == .video }.map(\.id))
+        // Not waited for: a fetch Photos is slow to answer never holds up the photo analysed now.
+        let ids = upcoming.filter { $0.kind == .image || $0.kind == .video }.map(\.id)
+        Task { await PreviewCache.start(ids) }
     }
 
     func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {
         // OCR needs the full resolution. Screenshots are usually on the device anyway; other
         // originals come from iCloud only with consent (allowNetwork). Fallback: local preview.
         var source: AnalysisImageSource = .original
-        var loaded = try? await ImageLoader.image(for: asset.id, quality: .original, allowNetwork: allowNetwork)
+        var loaded: LoadedImage?
+        do {
+            loaded = try await ImageLoader.image(for: asset.id, quality: .original, allowNetwork: allowNetwork)
+        } catch let quiet as PhotosNotResponding {
+            throw quiet // Photos does not answer: the preview would wait behind it.
+        } catch {
+            loaded = nil
+        }
         if loaded == nil {
             loaded = try await ImageLoader.image(for: asset.id, quality: .localPreview, allowNetwork: false)
             source = .localPreview

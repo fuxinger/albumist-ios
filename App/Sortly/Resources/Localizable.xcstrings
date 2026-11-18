@@ -12192,6 +12192,36 @@
           }
         }
       }
+    },
+    "Fotos hat eine frühere Änderung noch nicht beantwortet, deshalb schickt Albumist nichts Neues. Hält das an, beende Albumist und öffne es neu, notfalls starte das iPhone neu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos has not answered an earlier change yet, so Albumist sends nothing new. If this lasts, close Albumist and open it again, or restart the iPhone if need be."
+          }
+        }
+      }
+    },
+    "Die Rückfrage von iOS zum Löschen blieb ohne Antwort und ist vielleicht noch offen. Ob gelöscht wird, steht noch nicht fest. Sobald das geklärt ist, kannst du in der Übersicht fortsetzen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The iOS question about deleting got no answer and may still be open. Whether anything is deleted is not known yet. Once that is settled, you can continue in the overview."
+          }
+        }
+      }
+    },
+    "Ob die Beispielfotos entfernt werden, steht noch nicht fest: Die Rückfrage von iOS ist vielleicht noch offen. Schau in Fotos nach und versuche es danach noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Whether the sample photos are removed is not known yet: the iOS question may still be open. Check in Photos, then try again."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

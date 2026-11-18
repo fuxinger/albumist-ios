@@ -38,8 +38,13 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// "Fotos antwortet gerade nicht" (`AppModel.updateCard`). Not bounded: the question for
     /// photo access (`requestAccess`, the user decides) and the status reads (local, no answer
     /// from Photos needed). Image requests for the analysis have their own limit
-    /// (`ImageLoader`, 30 s, 180 s from iCloud).
+    /// (`ImageLoader`, 30 s, 180 s from iCloud); the fetch of a photo before it is bounded on the
+    /// image lane (`imageFetchLimit`), apart from these reads, so a photo that hangs never holds
+    /// up a plan.
     static let deadline = PhotosDeadline()
+    /// Fetching one photo (or a few) before its image is asked for: the analysis, the grid, the
+    /// atlas (second review of the PhotoKit limits, 4).
+    static let imageFetchLimit: Duration = .seconds(30)
     /// A read without an answer, or a long read without a sign of progress.
     static let readLimit: Duration = .seconds(60)
     /// A change request. Photos answers within a second or two, adding thousands of photos
@@ -48,10 +53,28 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// Deleting albums or photos: iOS asks the user first, and the request waits for the answer.
     static let deletionLimit: Duration = .seconds(300)
 
-    /// A read of Photos, bounded (`readLimit` without an answer or a `beat`).
-    static func read<T: Sendable>(_ what: String, limit: Duration = readLimit,
+    /// A read of Photos, bounded (`readLimit` without an answer or a `beat`), on the deadline's
+    /// own queue, not on Swift's shared pool (a hanging fetch holds none of its threads).
+    static func read<T: Sendable>(_ what: String, limit: Duration = readLimit, lane: PhotosDeadline.Lane = .read,
                                   _ work: @escaping @Sendable (PhotosDeadline.Heartbeat) throws -> T) async throws -> T {
-        try await deadline.run(what, lane: .read, limit: limit) { beat in try work(beat) }
+        try await deadline.runBlocking(what, lane: lane, limit: limit) { beat in try work(beat) }
+    }
+
+    /// PHAsset is thread-safe but not marked Sendable; a fetched asset is only handed on.
+    struct FetchedAssets: @unchecked Sendable {
+        let assets: [PHAsset]
+    }
+
+    /// The photos among `ids` that Photos knows, fetched on the image lane (`imageFetchLimit`):
+    /// for one photo's image (the analysis, the atlas cover), apart from the plan's reads.
+    /// Throws `PhotosNotResponding` when Photos does not answer in time.
+    static func fetchAssets(_ ids: [AssetID], what: String = "fetchAsset") async throws -> FetchedAssets {
+        try await read(what, limit: imageFetchLimit, lane: .image) { _ in
+            var assets: [PHAsset] = []
+            PHAsset.fetchAssets(withLocalIdentifiers: ids.map(\.rawValue), options: nil)
+                .enumerateObjects { asset, _, _ in assets.append(asset) }
+            return FetchedAssets(assets: assets)
+        }
     }
 
     /// One change request, bounded. Without an answer in time the caller gets
@@ -255,7 +278,23 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
     }
 
+    /// A change request has no answer yet: Photos may still carry it out (`PhotosDeadline`).
+    func hasUnansweredWrites() async -> Bool {
+        Self.deadline.hangingCalls(.write) > 0
+    }
+
     func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID {
+        try await createFolder(title: title, parent: parent, noted: { _ in })
+    }
+
+    func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID {
+        try await createAlbum(title: title, parent: parent, noted: { _ in })
+    }
+
+    /// `noted` hears the placeholder's id inside the change block, before Photos commits it: a
+    /// request without an answer in time leaves the id in the plan's journal, and the album is
+    /// known as Albumist's if it lands later (`ExecutionRecord.maybeCreated`).
+    func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
         try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
@@ -265,13 +304,14 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             let request = PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: title)
             let placeholder = request.placeholderForCreatedCollectionList
             created.value = placeholder.localIdentifier
+            noted(CollectionID(placeholder.localIdentifier))
             folder?.addChildCollections([placeholder] as NSArray)
         }
         guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("folder") }
         return CollectionID(id)
     }
 
-    func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID {
+    func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
         try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
@@ -281,6 +321,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             let request = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: title)
             let placeholder = request.placeholderForCreatedAssetCollection
             created.value = placeholder.localIdentifier
+            noted(CollectionID(placeholder.localIdentifier))
             folder?.addChildCollections([placeholder] as NSArray)
         }
         guard let id = created.value else { throw parentID.map { PhotoKitError.collectionNotFound($0) } ?? PhotoKitError.changeFailed("album") }

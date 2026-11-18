@@ -209,10 +209,15 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
     /// Existing albums and folders the plan touched, with the name and folder path they had
     /// when it ran, so the receipt keeps showing those names after a later rename (audit 2, 7.2).
     public var names: [CollectionID: RecordedName] = [:]
+    /// Planned key → the id Photos gave the new album or folder of a request that then got no
+    /// answer in time (`PhotosNotResponding`): it may land later. If it is there when the plan
+    /// goes on or is taken back, it is this plan's own (made, not adopted), never made a second
+    /// time; if not, the request did not land (second review of the PhotoKit limits, 1).
+    public var maybeCreated: [String: CollectionID] = [:]
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case media, unverified, adoptedKeys, deletedAlbums, unavailable, names }
+    enum CodingKeys: String, CodingKey { case media, unverified, adoptedKeys, deletedAlbums, unavailable, names, maybeCreated }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -222,6 +227,7 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
         deletedAlbums = try c.decodeIfPresent([CollectionID: DeletedAlbumRecord].self, forKey: .deletedAlbums) ?? [:]
         unavailable = try c.decodeIfPresent([String: Int].self, forKey: .unavailable) ?? [:]
         names = try c.decodeIfPresent([CollectionID: RecordedName].self, forKey: .names) ?? [:]
+        maybeCreated = try c.decodeIfPresent([String: CollectionID].self, forKey: .maybeCreated) ?? [:]
     }
 
     /// Notes the current name and path of every existing album or folder the plan refers to,

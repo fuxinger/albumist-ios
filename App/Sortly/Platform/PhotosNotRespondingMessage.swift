@@ -8,9 +8,16 @@ import SortlyCore
 extension PhotosNotResponding: @retroactive LocalizedError {
     public var errorDescription: String? {
         switch lane {
+        case .write where notSent:
+            // An earlier change still has no answer: nothing new was sent. Restarting, not
+            // "Fortsetzen", is the way out when it lasts (second review of the PhotoKit limits, 11).
+            String(localized: "Fotos hat eine frühere Änderung noch nicht beantwortet, deshalb schickt Albumist nichts Neues. Hält das an, beende Albumist und öffne es neu, notfalls starte das iPhone neu.")
+        case .write where asksUser:
+            // A deletion: the question iOS asks before it may still be on screen (7).
+            String(localized: "Die Rückfrage von iOS zum Löschen blieb ohne Antwort und ist vielleicht noch offen. Ob gelöscht wird, steht noch nicht fest. Sobald das geklärt ist, kannst du in der Übersicht fortsetzen.")
         case .write:
             String(localized: "Fotos antwortet gerade nicht. Was Albumist gerade ändern wollte, gilt weder als erledigt noch als zurückgenommen. Sobald Fotos wieder reagiert, kannst du in der Übersicht fortsetzen.")
-        case .read:
+        case .read, .image:
             String(localized: "Fotos antwortet gerade nicht. Albumist versucht es gleich noch einmal.")
         }
     }

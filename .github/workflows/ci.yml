@@ -133,10 +133,11 @@ jobs:
         # image lacks them.
         run: python3 .github/scripts/toolchain.py xcode --runtime
       - name: Install XcodeGen
-        # Its own step: a failed Homebrew download is machinery for "Re-run failed jobs"
-        # (earlier_attempts.py); a failed project generation is not.
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py); a
+        # failed project generation is not.
         if: hashFiles('App/project.yml') != ''
-        run: brew install xcodegen
+        run: python3 .github/scripts/toolchain.py xcodegen
       - name: Generate Xcode project
         if: hashFiles('App/project.yml') != ''
         run: cd App && xcodegen generate
@@ -227,9 +228,10 @@ jobs:
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode
       - name: Install XcodeGen
-        # Its own step: a failed Homebrew download is machinery for "Re-run failed jobs"
-        # (earlier_attempts.py); a failed project generation is not.
-        run: brew install xcodegen
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py); a
+        # failed project generation is not.
+        run: python3 .github/scripts/toolchain.py xcodegen
       - name: Generate Xcode project
         run: cd App && xcodegen generate
       - name: Build simulator app for browser testing

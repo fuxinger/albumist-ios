@@ -101,5 +101,40 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNotNone(toolchain.runtime_problem(self.runtime(buildversion="24B9000"), self.PIN))
 
 
+class XcodeGenTests(unittest.TestCase):
+    """The pinned XcodeGen: downloaded, checked against its sha256, unpacked."""
+
+    @staticmethod
+    def archive(members):
+        import io
+        import zipfile
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w") as z:
+            for name, text in members.items():
+                z.writestr(name, text)
+        return data.getvalue()
+
+    def test_pinned_in_the_toolchain_file(self):
+        pin = pick_simulator.pins()["xcodegen"]
+        self.assertRegex(pin["sha256"], r"^[0-9a-f]{64}$")
+        self.assertIn(f"/download/{pin['version']}/", pin["url"])
+
+    def test_install_checks_the_checksum(self):
+        import hashlib
+        import tempfile
+        data = self.archive({"xcodegen/bin/xcodegen": "#!/bin/sh\necho 2.46.0\n",
+                             "xcodegen/share/xcodegen/SettingPresets/base.yml": "x"})
+        pin = {"version": "2.46.0", "url": "https://example/x.zip", "sha256": hashlib.sha256(data).hexdigest()}
+        with tempfile.TemporaryDirectory() as dest:
+            folder = toolchain.install_xcodegen(pin, dest, fetch=lambda url: data)
+            self.assertTrue(os.access(os.path.join(folder, "xcodegen"), os.X_OK))
+            self.assertTrue(os.path.isdir(os.path.join(dest, "xcodegen", "share", "xcodegen", "SettingPresets")))
+        with tempfile.TemporaryDirectory() as dest, self.assertRaisesRegex(ValueError, "sha256"):
+            toolchain.install_xcodegen(dict(pin, sha256="0" * 64), dest, fetch=lambda url: data)
+        bad = self.archive({"../evil": "x"})
+        with tempfile.TemporaryDirectory() as dest, self.assertRaisesRegex(ValueError, "unexpected path"):
+            toolchain.install_xcodegen(dict(pin, sha256=hashlib.sha256(bad).hexdigest()), dest, fetch=lambda url: bad)
+
+
 if __name__ == "__main__":
     unittest.main()

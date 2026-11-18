@@ -4,7 +4,7 @@ The owner's rule: flaky tests are counted and fixed, never hidden. So a red test
 to green: after a red test the fix goes into a new commit and a NEW run. "Re-run failed jobs" is
 only for a failure of the machinery, a step in MACHINERY_STEPS or with a MACHINERY_PREFIXES name:
 a runner or container that did not start, a simulator that did not boot, an artifact, a checkout
-or XcodeGen (Homebrew) that did not arrive, an upload to App Store Connect that broke off. Every
+or XcodeGen (pinned download) that did not arrive, an upload to App Store Connect that broke off. Every
 other step that did not pass blocks: tests, lint rules, builds, the archive and its check, the
 pinned toolchain, the project generation. It goes by the step, not by the cause: a step stopped
 by a cancel or a timeout, or one a lost runner left unfinished, counts like a failed one (a test

@@ -119,10 +119,11 @@ jobs:
           persist-credentials: false
       - name: Select pinned Xcode
         run: python3 .github/scripts/toolchain.py xcode --runtime
+      - name: Install XcodeGen
+        # The pinned version (.github/toolchain.json), checked against its sha256.
+        run: python3 .github/scripts/toolchain.py xcodegen
       - name: Generate Xcode project
-        run: |
-          brew install xcodegen
-          cd App && xcodegen generate
+        run: cd App && xcodegen generate
       - name: Pick simulator
         id: sim
         run: |

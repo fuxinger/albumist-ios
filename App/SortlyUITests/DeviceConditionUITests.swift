@@ -179,6 +179,13 @@ final class DeviceConditionUITests: XCTestCase {
         return nil
     }
 
+    /// The headline says every photo is analysed ("Alle 246 Fotos analysiert"). An idle card
+    /// with "239 von 246 Fotos analysiert" is work left that nothing does: never "goes on".
+    private var everyPhotoAnalysed: Bool {
+        guard let counts = analysedPhotos() else { return false }
+        return counts.total > 0 && counts.analysed == counts.total
+    }
+
     /// Every label inside `element`, read from one snapshot.
     private func allLabels(_ element: XCUIElement) -> String {
         guard let snapshot = try? element.snapshot() else { return "" }
@@ -210,23 +217,37 @@ final class DeviceConditionUITests: XCTestCase {
         seen.append(count)
     }
 
+    /// The analysis goes on by itself, waiting until it does: its count moved at least `by`
+    /// photos (or to a later step) from the first count read here, or it is done with every
+    /// photo analysed. An idle card with photos left, no count at all, or a count that stands
+    /// still is not "going on", so a run that stopped with work left fails (review of 5e01883).
+    private func waitAnalysisMoves(_ what: String, timeout: TimeInterval, by: Int = 1, dismissing: Bool = false, each: () -> Void = {}) -> Bool {
+        var from = analysisCount()
+        return waitStable(what, timeout: timeout, stableChecks: 1) {
+            each()
+            if dismissing, app.alerts.firstMatch.exists { dismissNotices() }
+            if analysisIdle { return everyPhotoAnalysed }
+            guard let now = analysisCount() else { return false }
+            guard let start = from else {
+                from = now
+                return false
+            }
+            return now.step > start.step || (now.step == start.step && now.done >= start.done + by)
+        }
+    }
+
     /// The analysis visibly goes on: within `timeout` its count moves past where it stood at
-    /// the call (or it is done), the count never goes back (`record`), and nothing waits for a
-    /// tap. That such a run then ends with every photo is the pipeline's work, checked in the
-    /// fast tests (`DeviceConditionRunTests`); waiting for the whole demo library here took 2 to
-    /// 3 min per test (docs/TEST_PLAN.md, "UI-Tests: Dauer und Verlagerung").
-    /// `dismissing`: notices on the way are closed (the full disk of test06).
+    /// the call (or it ends with every photo analysed), the count never goes back (`record`),
+    /// and nothing waits for a tap. That such a run then ends with every photo is the pipeline's
+    /// work, checked in the fast tests (`DeviceConditionRunTests`); waiting for the whole demo
+    /// library here took 2 to 3 min per test (docs/TEST_PLAN.md, "UI-Tests: Dauer und
+    /// Verlagerung"). The app's own part (it starts again by itself after the condition, after
+    /// a relaunch, after the disk had space) is what this checks: the fast tests cover only the
+    /// pipeline. `dismissing`: notices on the way are closed (the full disk of test06).
     @discardableResult
     private func expectAnalysisGoesOn(_ context: String, timeout: TimeInterval = 120, dismissing: Bool = false) -> Bool {
-        let from = analysisCount()
         record("\(context), before")
-        let moved = waitStable("analysis goes on \(context)", timeout: timeout, stableChecks: 1) {
-            if dismissing, app.alerts.firstMatch.exists { dismissNotices() }
-            if analysisIdle { return true }
-            guard let now = analysisCount() else { return false }
-            guard let from else { return analysisRunning }
-            return now.step > from.step || (now.step == from.step && now.done > from.done)
-        }
+        let moved = waitAnalysisMoves("analysis goes on \(context)", timeout: timeout, dismissing: dismissing)
         record(context)
         print(moved ? "UI_STEP_OK analysis goes on \(context)" : "UI_STEP_MISSING analysis goes on \(context)")
         XCTAssertTrue(moved, "The analysis did not go on \(context)")
@@ -246,6 +267,13 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// Each test may be the first on a fresh simulator: the onboarding counts as done, the
     /// demo library is created and analysed. Later tests on the same simulator find it ready.
+    ///
+    /// Ready means: the demo library is there (headline with at least 200 photos) and nothing
+    /// runs. It does NOT mean every photo is analysed: tests 01, 02, 03, 06 and 09 now end
+    /// while the analysis still runs, and a UI run does not resume it at launch, so the next
+    /// test can find "180 von 246 Fotos analysiert". Every test after them starts its own run
+    /// ("Analyse neu aufbauen") or waits for every photo itself (test11); a new test that needs
+    /// a fully analysed library checks `everyPhotoAnalysed` after `prepare()`.
     private func prepare() {
         let started = Date()
         start()
@@ -749,13 +777,8 @@ final class DeviceConditionUITests: XCTestCase {
         // 12 s) and the card never says "pausiert" meanwhile. That the run ends with every
         // photo is DeviceConditionRunTests.lowBatteryThenLowPowerModeEndsWithEveryPhoto.
         var pausedForLowPower = false
-        let from = analysisCount()
-        let goesOn = waitStable("analysis goes on in Low Power Mode", timeout: 150, stableChecks: 1) {
+        let goesOn = waitAnalysisMoves("analysis goes on in Low Power Mode", timeout: 150, by: 20) {
             if text("Pausiert im Stromsparmodus").exists || (progressText() ?? "").contains("pausiert") { pausedForLowPower = true }
-            if analysisIdle { return true }
-            guard let now = analysisCount() else { return false }
-            guard let from else { return analysisRunning }
-            return now.step > from.step || now.done >= from.done + 20
         }
         record("in Low Power Mode")
         print(goesOn ? "UI_STEP_OK analysis goes on in Low Power Mode" : "UI_STEP_MISSING analysis goes on in Low Power Mode")

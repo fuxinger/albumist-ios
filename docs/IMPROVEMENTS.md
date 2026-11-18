@@ -168,6 +168,7 @@ Je Test: Lauf, Ursache, Behebung. Branch `claude/test-speed`, 18.11.2026.
 | Status | Punkt | Aufwand | Quelle |
 |---|---|---|---|
 | ✅ | Ortsnamen beim ersten Durchgang begrenzt nachschlagen (60), Rest nachts; Pause wirkt sofort. Erste Vorschläge bis zu einer Stunde früher. | S | E1 Tempo |
+| ✅ | Ein Lauf in der App wartet nie auf Apples Ortsabfragen (Gerätetest 18.11., Build 36: „Apple antwortet gleich“ 20–30 s mit stehender Zahl): so viele Abfragen, wie Albumists Grenze von 40 pro Minute ohne Warten zulässt (auch über Läufe hinweg), Schluss bei der ersten Ablehnung; die nächtliche Verfeinerung zeigt beim Warten Grund und Countdown. | S | U Gerätetest 18.11. |
 | ✅ | Orte ohne Ergebnis (See, Meer, Wildnis) werden gemerkt und nicht jede Nacht erneut nachgeschlagen. | S | E1 Tempo |
 | ✅ | „Nächste 50 Fotos“-Abfrage mit Lesezeichen statt Suche von vorn (17,7 s → 0,3 s bei 100.000 Fotos). | S | E1 Tempo |
 | ✅ | Beim Umsetzen nur das betroffene Album prüfen, nicht jedes Mal die ganze Albenliste (große Pläne: Minuten statt Viertelstunden). | M | E1 Tempo/Technik |

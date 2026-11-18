@@ -16,7 +16,9 @@
   13 Abfragen auf die Tabelle `assets` in `SortlyStore` und die Anzeige der App bei eingeschränktem Zugriff und ist
   darum nicht im Kern allein zu machen.
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
-  Länder und Regionen kommen immer aus der Offline-Karte.
+  Länder und Regionen kommen immer aus der Offline-Karte. Ein Lauf in der App fragt höchstens
+  40 Ortsnamen pro Minute und wartet nie darauf; was fehlt, kommt mit einem späteren Lauf
+  (frühestens nach einer Stunde) oder der nächtlichen Verfeinerung.
 - `CLGeocoder` ist in iOS 26 als veraltet markiert; der Nachfolger in MapKit ist geplant.
 - Sprache der Albumnamen gewechselt (Prüfbefund P1-12): Länder und Regionen aller
   gespeicherten Orte werden beim nächsten Lauf aus der Offline-Karte neu benannt (der Wechsel

@@ -50,6 +50,14 @@
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
 ### Korrigiert
+- Gerätetest 18.11. (Build 36): Während der Analyse stand „Apple antwortet gleich“ 20–30 s lang
+  mit stehender Zahl. Apple war nicht langsam, Albumist bremste sich selbst (höchstens 40
+  Ortsabfragen pro Minute, im Lauf aber 60 erlaubt; nach einer Ablehnung bis zu 30 s Warten).
+  Ein Lauf in der App wartet jetzt nie auf Apple: Er fragt nur so oft, wie es ohne Warten geht
+  (Abfragen eines Laufs kurz davor zählen mit), und hört bei der ersten Ablehnung sofort auf;
+  die übrigen Ortsnamen kommen mit einem späteren Lauf oder der nächtlichen Verfeinerung.
+  Wartet die Verfeinerung, sagt die Karte ehrlich warum, mit Countdown: „Ortsnamen: Apple
+  erlaubt nur einige Abfragen pro Minute · weiter in 25 s“.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

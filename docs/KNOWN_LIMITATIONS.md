@@ -80,14 +80,26 @@
 - Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
   der Gesundheitskarte. Der Text bleibt auf dem Gerät.
 - Vorschauen und Titelbilder lassen sensible Dokumente weg (`PreviewRank`), erkennen sie aber
-  nur aus dem Gespeicherten: der Dokument-Einordnung und den maskierten Karten- und
-  Kontonummern im Text. Die Stufe selbst (`TextMinimizer.sensitivity`) wird nicht gespeichert:
-  Ein Ausweis oder Arztbrief ohne erkannte Dokumentart (sein Text wird nicht gespeichert) gilt
-  deshalb nur als Dokument und füllt eine Vorschau, wenn gewöhnliche Fotos fehlen. Ein Foto, das
-  die Bildanalyse nicht für ein Dokument hielt und dessen Text nie gelesen wurde (auch wenn
-  Screenshots, Dokumente und Messenger alle aus sind), gilt als gewöhnliches Foto. Eine
-  maskierte Bestell- oder Sendungsnummer, die die Kartenprüfung besteht, macht einen Screenshot
-  zum sensiblen Dokument: er fehlt dann nur in der Vorschau.
+  nur aus dem, was die Analyse gespeichert hat. Im Zweifel wird ausgeblendet: Ein Bild, das die
+  Bildanalyse für ein Dokument hielt, gilt als sensibel, solange sein Text es nicht als harmloses
+  Dokument erklärt (Text noch nicht gelesen, Original nur in iCloud, unlesbar wegen Spiegelung
+  oder Winkel, Kartennummer auf der Rückseite oder verlesen, Ausweis oder Arztbrief ohne
+  erkannte Dokumentart). Was trotzdem durchrutschen kann:
+  - Ein Foto, das die Bildanalyse **nicht** für ein Dokument hielt, wird nie gelesen und gilt als
+    gewöhnliches Foto, auch eine Bankkarte. Welche Bildmerkmale Vision einem Kartenfoto gibt,
+    ist noch nicht auf einem Gerät geprüft (Liste `ContentAnalysis.documentLabels` kennt kein
+    Karten-Merkmal); Idee in `IMPROVEMENTS.md` (Kartenform ID-1).
+  - Sind „Themen“ und „Dokumente“ aus, fragt die Bildanalyse keine Merkmale ab: dann zählt nur
+    Visions Kennzeichen für Gebrauchsbilder. Sind „Screenshots“, „Dokumente“ und „Messenger“ aus,
+    wird kein Text gelesen: dann zählt nur, ob die Bildanalyse ein Dokument sah.
+  - Fotos, die die Bildanalyse noch nicht angesehen hat (vor allem während der ersten Analyse:
+    frühe Vorschläge, das Mosaik), kommen erst nach allen angesehenen gewöhnlichen Fotos, werden
+    aber gezeigt, wenn es keine angesehenen gibt; ein Kartenfoto darunter ist dann noch nicht
+    erkannt. Das Teilen-Bild des Atlas nimmt nie ein solches Foto.
+  - Ein Beleg, der „VISA“ oder „girocard“ nennt, gilt für Vorschauen als sensibel und fehlt dort;
+    im Beleg-Album bleibt er (die Kartenwörter ändern die Dokument-Einordnung nicht).
+  - Eine maskierte Bestell- oder Sendungsnummer, die die Kartenprüfung besteht, macht einen
+    Screenshot zum sensiblen Dokument: er fehlt dann nur in der Vorschau.
 
 ## Jahreszeiten
 - Jahreszeiten sind noch nicht als Alben wählbar. Werden sie es, gilt: Frühling und Herbst

@@ -329,10 +329,12 @@ final class AppModel {
         return dates
     }
 
-    /// How well each photo suits a preview or cover (`PreviewRank`): screenshots and documents
-    /// only when there are too few ordinary photos, sensitive documents (bank cards, statements,
-    /// IDs, medical papers) never. Ordinary photos are not listed (owner's iPhone, build 36: a
-    /// bank card among the preview photos of "Häufiger Ort in Zwiesel").
+    /// How well each photo suits a preview or cover (`PreviewRank`): photos not analysed yet,
+    /// screenshots and documents only when there are too few analysed ordinary photos, sensitive
+    /// documents (bank cards, statements, IDs, medical papers, pictures taken for documents that
+    /// their text does not explain) never. Ordinary photos are not listed (owner's iPhone, build
+    /// 36: a bank card among the preview photos of "Häufiger Ort in Zwiesel"). Worked out off the
+    /// main thread when the facts are refreshed; computed here only when that did not happen.
     var previewRanks: [AssetID: PreviewRank] {
         access(keyPath: \.facts)
         if let previewRanksCache { return previewRanksCache }
@@ -369,6 +371,15 @@ final class AppModel {
             return cover
         }
         return PreviewPicker.cover(proposal.assetIDs.subtracting(removed), preferred: proposal.coverAssetID, proposal: proposal.id, ranks: ranks)
+    }
+
+    /// Every photo of the suggestion is a sensitive document: its preview is the tile "Vorschau
+    /// ausgeblendet" (`ThumbnailGrid`), which VoiceOver says as the grid's value.
+    func previewHidden(for proposal: AlbumProposal) -> Bool {
+        let removed = removedFromProposals[proposal.id] ?? []
+        let ranks = previewRanks
+        let members = proposal.assetIDs.lazy.filter { !removed.contains($0) }
+        return !members.isEmpty && !members.contains { ranks[$0] != .sensitive }
     }
 
     /// Takes photos out of one suggestion only; they stay in the library and in other suggestions.
@@ -1734,7 +1745,13 @@ final class AppModel {
             detectedHome = try await pipeline.detectedHome()
             homeChangeNotice = try await pipeline.homeChangeNotice()
             let newFacts = try await pipeline.currentFacts()
-            MainThreadWatch.shared.section("refresh: facts") { facts = newFacts }
+            // The preview ranks of the whole library, worked out off the main thread with the
+            // facts (second review of the build 36 fix; `previewRanks` only falls back to it).
+            let newRanks = await Task.detached(priority: .userInitiated) { PreviewRank.ranks(of: newFacts) }.value
+            MainThreadWatch.shared.section("refresh: facts") {
+                facts = newFacts
+                previewRanksCache = newRanks
+            }
             inventory = try await store.loadInventory()
             let inventory = inventory
             // Albumist's own albums overlap on purpose (a country holds its trips).

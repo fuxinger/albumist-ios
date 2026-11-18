@@ -641,8 +641,10 @@ private struct PlanAlbumRow: View {
 
     @ViewBuilder
     private var cover: some View {
-        if let id = album.coverAssetID {
-            AssetThumbnail(id: id, side: side)
+        if album.coverAssetID != nil || album.addedCount > 0 {
+            // No cover although photos are added: every one is a sensitive document, and the
+            // tile says the preview is hidden, as in the lists (`CoverThumbnail`).
+            CoverThumbnail(id: album.coverAssetID, side: side)
         } else {
             Theme.accent.opacity(0.15)
         }

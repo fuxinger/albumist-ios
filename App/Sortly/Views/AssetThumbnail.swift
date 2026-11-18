@@ -378,7 +378,9 @@ struct ThumbnailGrid: View {
     private var hiddenPreview: some View {
         VStack(spacing: Theme.Spacing.s) {
             Image(systemName: "eye.slash").font(.title2)
+                .accessibilityHidden(true)
             Text("Vorschau ausgeblendet").font(.subheadline)
+                .multilineTextAlignment(.center)
         }
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, minHeight: 120)

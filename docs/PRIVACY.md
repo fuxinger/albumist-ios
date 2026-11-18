@@ -42,19 +42,26 @@ Die Analyse liest den vollen Text, gespeichert wird nur eine verkleinerte Fassun
 - „Analyse neu aufbauen“ löscht den gesamten Suchindex.
 
 ### Sensible Dokumente in Vorschauen
-Fotos von Bankkarten, Kontoauszügen, Ausweisen und medizinischen Dokumenten erscheinen nie als
-Vorschau oder Titelbild (`PreviewRank`, `PreviewPicker`; iPhone-Test Build 36: der Vorschlag
-„Häufiger Ort in Zwiesel“ zeigte unter seinen acht Vorschaufotos eine DKB-Karte mit lesbarer
-Nummer). Das gilt für die Vorschaufotos und den Farbschein eines Vorschlags, die Titelbilder in
-den Listen (Vorschläge, Startpaket, Alben, „Schon gefunden“, Tage der Reise-Werkstatt), die
-Vorschau und den Beleg eines Plans, die Sortier-Show, das Mosaik der ersten Analyse, den
-Farbschein eines Atlas-Lands und das Foto im teilbaren Reise-Atlas-Bild.
+Fotos von Bankkarten, Kontoauszügen, Ausweisen und medizinischen Dokumenten erscheinen nicht als
+Vorschau oder Titelbild, **wenn die Analyse sie erkannt hat** (`PreviewRank`, `PreviewPicker`;
+iPhone-Test Build 36: der Vorschlag „Häufiger Ort in Zwiesel“ zeigte unter seinen acht
+Vorschaufotos eine DKB-Karte mit lesbarer Nummer). Was die Analyse nicht erkennen kann, steht in
+[KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) („Vorschauen und Titelbilder“). Im Zweifel wird ein
+Bild ausgeblendet. Das gilt für die Vorschaufotos und den Farbschein eines Vorschlags, die
+Titelbilder in den Listen (Vorschläge, Startpaket, Alben, „Schon gefunden“, Tage der
+Reise-Werkstatt), die Vorschau und den Beleg eines Plans, die Sortier-Show, das Mosaik der
+ersten Analyse, „Gerade angesehen“ auf der Analyse-Karte, den Farbschein eines Atlas-Lands und
+das Foto im teilbaren Reise-Atlas-Bild.
 - **Sensibel** ist ein Foto, dessen Dokument-Einordnung finanziell, Ausweis oder medizinisch
-  sagt, oder in dessen gespeichertem Text eine Kartennummer oder IBAN maskiert wurde (eine
-  Karte nennt keine Dokumentart, ihre Nummer wird aber maskiert).
-- **Dokument** (Bildschirmfoto, von der Bildanalyse als Dokument, Beleg, Karte oder Ticket
-  erkannt, mit Dokument-Einordnung oder Screenshot-Thema) füllt nur die Plätze, für die es zu
-  wenige gewöhnliche Fotos gibt; das Teilen-Bild des Atlas zeigt nie eines.
+  sagt; in dessen gespeichertem Text eine Kartennummer oder IBAN maskiert wurde oder ein Wort
+  einer Bankkarte oder eines Kontoauszugs steht („Visa Debit“, „girocard“, „Kontostand“); und
+  jedes Foto, das die Bildanalyse für ein Dokument hielt, dessen Text es aber nicht als
+  harmloses Dokument erklärt (Text noch nicht gelesen, unlesbar, keine Dokumentart erkannt).
+- **Dokument** (Bildschirmfoto, oder ein Dokument, das sein Text erklärt: Brief, Ticket, Beleg)
+  füllt nur die Plätze, für die es zu wenige gewöhnliche Fotos gibt.
+- **Noch nicht angesehen**: Fotos, die die Bildanalyse noch nicht angesehen hat, kommen erst nach
+  allen angesehenen gewöhnlichen Fotos. Das Teilen-Bild des Atlas (es verlässt das Gerät) zeigt
+  nur ein angesehenes gewöhnliches Foto, sonst keines.
 - Entschieden: Gibt es zu wenige andere Fotos, zeigt die Vorschau **weniger Kacheln**, statt mit
   sensiblen Dokumenten aufzufüllen; „+N“ zählt weiter alle Fotos des Vorschlags. Besteht ein
   Vorschlag oder Album nur aus sensiblen Dokumenten, steht statt eines Bildes „Vorschau

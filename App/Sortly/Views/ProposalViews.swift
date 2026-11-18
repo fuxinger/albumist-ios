@@ -220,6 +220,8 @@ struct ProposalDetailView: View {
                 .buttonStyle(.plain)
                 .disabled(preparing)
                 .accessibilityLabel(Text("Alle \(model.members(of: proposal).count) Fotos ansehen"))
+                // The label above replaces the tile's own text: VoiceOver says it here.
+                .accessibilityValue(model.previewHidden(for: proposal) ? Text("Vorschau ausgeblendet") : Text(verbatim: ""))
                 // The cover's colours glow behind the photos and end just below them, so the
                 // text under them sits on the plain background. Behind the text, XCTest's
                 // contrast audit kept failing clearly readable lines (8.9:1 measured in the

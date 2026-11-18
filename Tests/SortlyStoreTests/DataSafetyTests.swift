@@ -139,7 +139,7 @@ struct DataSafetyTests {
 
     /// Everything of `makeDatabase` reads back through the store, unchanged.
     func expectIntact(_ s: SortlyStore, _ c: Contents, version: Int) async throws {
-        #expect(await s.schemaVersion == 4)
+        #expect(await s.schemaVersion == 5)
         #expect(try await s.integrityReport() == "ok")
         #expect(try await s.asset("a") == c.asset)
         // Same fingerprint: the photo is not taken as changed and analysed again.
@@ -188,7 +188,7 @@ struct DataSafetyTests {
         }
         // Opened again: nothing runs twice, the data is still there.
         let reopened = try SortlyStore(url: url)
-        #expect(await reopened.schemaVersion == 4)
+        #expect(await reopened.schemaVersion == 5)
         #expect(try await reopened.overrides() == [c.override])
         #expect(try await reopened.searchText("Bordkarte") == ["a"])
     }
@@ -216,7 +216,7 @@ struct DataSafetyTests {
             #expect(try old.query("SELECT 1 FROM sqlite_master WHERE name = 'text_plain_v3' OR name = 'plan_steps'").isEmpty)
         }
         let s = try SortlyStore(url: url)
-        #expect(await s.schemaVersion == 4)
+        #expect(await s.schemaVersion == 5)
         #expect(try await s.integrityReport() == "ok")
         #expect(try await s.searchText("Bäckerei", limit: 10_000).count == 3_000)
         #expect(try await s.searchText("Hotel") == ["a"])
@@ -330,7 +330,7 @@ struct DataSafetyTests {
         let url = dir.appendingPathComponent("sortly.sqlite")
         FileManager.default.createFile(atPath: url.path, contents: Data())
         let s = try SortlyStore(url: url)
-        #expect(await s.schemaVersion == 4)
+        #expect(await s.schemaVersion == 5)
         #expect(try await s.hasSafetyData() == false)
     }
 
@@ -364,7 +364,7 @@ struct DataSafetyTests {
         for suffix in ["", "-wal", "-shm"] { #expect(!FileManager.default.fileExists(atPath: url.path + suffix)) }
 
         let rebuilt = try SortlyStore(url: url)
-        #expect(await rebuilt.schemaVersion == 4)
+        #expect(await rebuilt.schemaVersion == 5)
         let backup = try #require(try SafetyBackup.read(from: backupURL))
         #expect(try await rebuilt.restore(backup, includingLibraryState: backup.belongsToLibrary(access: .full, visibleAlbums: Set(c.inventory.collections.keys)) == true))
         #expect(try await rebuilt.overrides() == [c.override])

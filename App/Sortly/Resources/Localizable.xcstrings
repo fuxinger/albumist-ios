@@ -6843,6 +6843,16 @@
         }
       }
     },
+    "Fotos werden für die neuen Bereiche angesehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Looking at photos for the new areas"
+          }
+        }
+      }
+    },
     "Neue Fotos werden analysiert" : {
       "localizations" : {
         "en" : {
@@ -7003,6 +7013,46 @@
         }
       }
     },
+    "Beim Prüfen %lld Fotos für die neuen Bereiche angesehen." : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Looked at %lld photo for the new areas in this check."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Looked at %lld photos for the new areas in this check."
+                }
+              }
+            }
+          }
+        },
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Beim Prüfen %lld Foto für die neuen Bereiche angesehen."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Beim Prüfen %lld Fotos für die neuen Bereiche angesehen."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Beim Prüfen %lld neue Fotos analysiert." : {
       "localizations" : {
         "en" : {
@@ -7036,6 +7086,106 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "Beim Prüfen %lld neue Fotos analysiert."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Beim Prüfen %lld neue Fotos analysiert und %lld weitere für die neuen Bereiche angesehen." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Prüfen %#@new@ analysiert und %#@more@ für die neuen Bereiche angesehen."
+          },
+          "substitutions" : {
+            "new" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg neues Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg neue Fotos"
+                    }
+                  }
+                }
+              }
+            },
+            "more" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg weiteres"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg weitere"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analyzed %#@new@ and looked at %#@more@ for the new areas in this check."
+          },
+          "substitutions" : {
+            "new" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg new photos"
+                    }
+                  }
+                }
+              }
+            },
+            "more" : {
+              "argNum" : 2,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg more"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg more"
+                    }
+                  }
                 }
               }
             }
@@ -7086,6 +7236,46 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "%lld Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Für die neuen Bereiche fehlen noch %lld Fotos." : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Für die neuen Bereiche fehlt noch %lld Foto."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Für die neuen Bereiche fehlen noch %lld Fotos."
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo still to look at for the new areas."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos still to look at for the new areas."
                 }
               }
             }
@@ -7509,6 +7699,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Last count: %1$@ of %2$@ sorted. The new number arrives with the first suggestions."
+          }
+        }
+      }
+    },
+    "Zuletzt %@ von %@ sortiert. Die neue Zahl kommt, sobald die Fotos für die neuen Bereiche angesehen sind." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last count: %1$@ of %2$@ sorted. The new number arrives once the photos have been looked at for the new areas."
           }
         }
       }

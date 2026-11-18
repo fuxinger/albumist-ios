@@ -5,7 +5,7 @@ SQLite, Version über `PRAGMA user_version`, Migrationen in `Sources/SortlyStore
 ## Tabellen
 | Tabelle | Schlüssel | Inhalt |
 |---|---|---|
-| `assets` | `id` (PhotoKit localIdentifier) | Metadaten, Fingerabdruck, `analysis_version` |
+| `assets` | `id` (PhotoKit localIdentifier) | Metadaten, Fingerabdruck, `analysis_version`, `labels_version` (v5) |
 | `collections` | `id` | Alben und Ordner: Titel, Art, Rechte, Eltern, Kinder |
 | `collection_members` | (`collection_id`, `asset_id`) | Album-Mitgliedschaften |
 | `place_cache` | `cell` (Rasterzelle) | aufgelöste Ortsnamen je Zelle |
@@ -40,4 +40,12 @@ Idempotenzschlüssel (Plan-ID + Index + Inhalts-Hash).
 - v4: `plan_steps` und `plan_media`. Gespeichert wird nur, was sich seit dem letzten Speichern
   geändert hat; gelesen wird der Plan wieder ganz. Ältere Pläne liegen noch als Ganzes in
   `plans` und werden beim nächsten Speichern aufgeteilt.
+- v5: `assets.labels_version`: ob ein Foto Bildlabels hat (0: keine). Labels werden nur
+  berechnet, solange „Themen“ oder „Dokumente“ an ist; wird einer der Bereiche später
+  eingeschaltet, holt der nächste Lauf sie für genau diese Fotos nach (nur die Labels).
+  Fotos älterer Versionen gelten nur dann als erledigt, wenn ihr gespeichertes Ergebnis
+  mindestens ein Label hat; ob ein Foto ohne Labels mit eingeschalteter Erkennung angesehen
+  wurde, ist nicht bekannt, es wird einmal nachklassifiziert. Kann ein Foto beim Nachholen
+  nicht gelesen werden, zählt `analysis_results` (Art `labels`, `LabelAttempts`) die Versuche;
+  sein Inhaltsergebnis bleibt unverändert.
 Migrationen laufen nur vorwärts, jede in einer Transaktion.

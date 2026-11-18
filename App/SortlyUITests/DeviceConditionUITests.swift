@@ -1220,7 +1220,14 @@ final class DeviceConditionUITests: XCTestCase {
 
     /// 3,000 more photos (120 trips): created once, then analysed. Prints the times and checks
     /// that lists, the overview, search and the atlas stay quick with a real-sized library.
-    func test11_LargeLibrary() {
+    /// It takes about 25 minutes (creating and analysing 3,000 photos), so a run per change can
+    /// leave it out with SORTLY_UI_QUICK=1 (passed as TEST_RUNNER_SORTLY_UI_QUICK); the nightly run
+    /// and the run before an upload keep it. LoadTests checks 20,000 and 100,000 photos on Linux
+    /// at every change (docs/TEST_PLAN.md, "UI-Tests: Dauer und Verlagerung").
+    func test11_LargeLibrary() throws {
+        if ProcessInfo.processInfo.environment["SORTLY_UI_QUICK"] == "1" {
+            throw XCTSkip("Quick UI run (SORTLY_UI_QUICK): the large library runs nightly and before an upload")
+        }
         continueAfterFailure = true
         prepare()
         let started = Date()

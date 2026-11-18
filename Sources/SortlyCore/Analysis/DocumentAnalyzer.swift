@@ -281,19 +281,36 @@ public struct DocumentAnalyzer: Sendable {
         return false
     }
 
-    /// Whether `compact` (upper case, no separators) starts with an IBAN whose checksum holds,
-    /// also when OCR read a 0 as the letter O or a 1 as I or L after the country code.
+    /// Whether `compact` (upper case, no separators) starts with an IBAN of its country's length
+    /// whose checksum holds, also when OCR read a 0 as the letter O or a 1 as I or L after the
+    /// country code. Only the country's length is tried: trying every length from 34 to 15 let
+    /// about one order number in five in IBAN shape pass ("AB68-9302-4282-7546", third review
+    /// of P2-04).
     static func startsWithValidIBAN(_ compact: String) -> Bool {
+        guard let length = ibanLengths[String(compact.prefix(2))], compact.count >= length else { return false }
         let ocr = String(compact.prefix(2)) + String(compact.dropFirst(2).map { c -> Character in
             switch c { case "O": "0"; case "I", "L": "1"; default: c }
         })
-        for candidate in Set([compact, ocr]) {
-            for length in stride(from: min(candidate.count, 34), through: 15, by: -1) where isValidIBAN(String(candidate.prefix(length))) {
-                return true
-            }
-        }
-        return false
+        return Set([compact, ocr]).contains { isValidIBAN(String($0.prefix(length))) }
     }
+
+    /// IBAN length by country: the SWIFT IBAN registry, the French overseas territories and
+    /// Åland (they use the French and Finnish forms), and the countries whose banks use IBANs
+    /// outside the registry (West and Central Africa, Algeria, Iran, Madagascar, Morocco,
+    /// Mozambique, Angola, Cape Verde). One too many only masks more.
+    static let ibanLengths: [String: Int] = [
+        "AD": 24, "AE": 23, "AL": 28, "AT": 20, "AZ": 28, "BA": 20, "BE": 16, "BG": 22, "BH": 22, "BI": 27, "BR": 29, "BY": 28,
+        "CH": 21, "CR": 22, "CY": 28, "CZ": 24, "DE": 22, "DJ": 27, "DK": 18, "DO": 28, "EE": 20, "EG": 29, "ES": 24, "FI": 18,
+        "FK": 18, "FO": 18, "FR": 27, "GB": 22, "GE": 22, "GI": 23, "GL": 18, "GR": 27, "GT": 28, "HN": 28, "HR": 21, "HU": 28,
+        "IE": 22, "IL": 23, "IQ": 23, "IS": 26, "IT": 27, "JO": 30, "KW": 30, "KZ": 20, "LB": 28, "LC": 32, "LI": 21, "LT": 20,
+        "LU": 20, "LV": 21, "LY": 25, "MC": 27, "MD": 24, "ME": 22, "MK": 19, "MN": 20, "MR": 27, "MT": 31, "MU": 30, "NI": 28,
+        "NL": 18, "NO": 15, "OM": 23, "PK": 24, "PL": 28, "PS": 29, "PT": 25, "QA": 29, "RO": 24, "RS": 22, "RU": 33, "SA": 24,
+        "SC": 31, "SD": 18, "SE": 24, "SI": 19, "SK": 24, "SM": 27, "SO": 23, "ST": 25, "SV": 28, "TL": 23, "TN": 24, "TR": 26,
+        "UA": 29, "VA": 22, "VG": 24, "XK": 20, "YE": 30,
+        "AX": 18, "BL": 27, "GF": 27, "GP": 27, "MF": 27, "MQ": 27, "NC": 27, "PF": 27, "PM": 27, "RE": 27, "TF": 27, "WF": 27, "YT": 27,
+        "AO": 25, "BF": 28, "BJ": 28, "CF": 27, "CG": 27, "CI": 28, "CM": 27, "CV": 25, "DZ": 26, "GA": 27, "GQ": 27, "GW": 25,
+        "IR": 26, "KM": 27, "MA": 28, "MG": 27, "ML": 28, "MZ": 25, "NE": 28, "SN": 28, "TD": 27, "TG": 28,
+    ]
 
     /// The machine-readable zone of an ID card or passport: long runs of "<" fillers
     /// ("IDD<<L01X00T471<<<<<<<<<"). OCR sometimes reads them as "«" or "‹".

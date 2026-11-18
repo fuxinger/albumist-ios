@@ -70,7 +70,10 @@
   ohne Prüfsumme nur in der gedruckten Form (Großbuchstaben, nur Leerzeichen); jede andere
   Schreibweise braucht eine gültige Prüfsumme, damit Bestell- und Rechnungsnummern wie
   „AB12-3456-7890-1234“ suchbar bleiben: eine IBAN mit Bindestrichen und einem Tippfehler
-  bleibt dadurch lesbar. Kartennummern mit Schrägstrich nur in Vierergruppen
+  bleibt dadurch lesbar. Die Prüfsumme gilt nur bei der IBAN-Länge des Ländercodes (dritte
+  Prüfung); eine IBAN mit Trennzeichen aus einem Land, das in der Liste fehlt, bleibt lesbar,
+  Bestellnummern, die vor der dritten Prüfung maskiert gespeichert wurden, bleiben maskiert
+  (bis „Analyse neu aufbauen“). Kartennummern mit Schrägstrich nur in Vierergruppen
   („4111/1111/…“), damit Telefonnummern wie „04321/12345678“ bleiben; eine Amex-Nummer mit
   Schrägstrichen (4-6-5) bleibt lesbar. Andere Schreibweisen (Buchstaben zwischen den Gruppen,
   stark verlesene Ziffern) können lesbar bleiben.

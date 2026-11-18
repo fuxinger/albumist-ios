@@ -319,10 +319,12 @@ def plan(choice: str, call=None, verifier=None, tree=None) -> int:
                 print(f"UI_PLAN reuse {d['group']}: green in {where(d['evidence'])}")
     else:
         md.append("Runs: " + (", ".join(run) or "nothing"))
-    reused = [n for n in names if n not in run]
-    if reused:
-        md += ["", f"Not run again: {', '.join(reused)} (green for this app and their own test code; the gate "
+    left = [n for n in names if n not in run]
+    if left and decisions:
+        md += ["", f"Not run again: {', '.join(left)} (green for this app and their own test code; the gate "
                "of a TestFlight run checks that again)."]
+    elif left:
+        md += ["", f"Not chosen: {', '.join(left)}."]
     append("GITHUB_STEP_SUMMARY", "\n".join(md) + "\n")
     append("GITHUB_OUTPUT", f"matrix={json.dumps(matrix, separators=(',', ':'))}\ncount={len(run)}\n")
     return 0

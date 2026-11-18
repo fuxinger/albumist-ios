@@ -27,7 +27,11 @@
   (heute nur beim Start, `AppModel`), den Zwischenspeicher der Ortssuche je Sprache führen und
   die gespeicherten Städte zum erneuten Nachfragen vormerken (Netz und Apples Drosselung, eine
   Entscheidung für Fuchs). Die Kennungen von Städten und Regionen hängen nicht an der Sprache
-  (fester Regionsschlüssel je Mediathek, zweite Prüfung). Offen: eine Region, die die
+  (fester Regionsschlüssel je Mediathek, zweite Prüfung; seit der dritten Prüfung als
+  Entscheidung gespeichert, `user.regionKeys`: er übersteht „Analyse neu aufbauen“ und kommt
+  mit der Sicherheitskopie zurück). Die Tabelle zählt wie die Reise-Kennungen
+  (`user.tripIdentities`) als Inhalt der Sicherheitskopie, auch wenn der Nutzer noch nichts
+  entschieden hat. Offen: eine Region, die die
   Offline-Karte nicht kennt (Apple nennt sie anders als die Karte), behält ihren Namen als
   Schlüssel; bei ihr und bei Städten, die Apple nach einem Neustart in der anderen Sprache
   nennt („Rom“/„Rome“), entsteht nach einem Sprachwechsel eine neue Kennung.
@@ -37,12 +41,13 @@
 - Fotos mit dem Ort des Zuhauses mitten in einer Reise (Prüfbefund P1-14, zweite Prüfung):
   ob der Nutzer wirklich zu Hause war oder ein Foto von dort geschickt bekam, zeigt das Foto
   nicht. Geht die Reise weit weg dort weiter, wo sie aufhörte, gilt ein Aufenthalt zu Hause
-  nur, wenn die Fotos eine Nacht zu Hause zeigen oder er 36 Stunden dauern konnte. Offen
-  bleiben zwei seltene Fälle: wer abends nach Hause fliegt, nur am Abend dort fotografiert und
-  am nächsten Morgen an denselben Ort zurückfliegt, bekommt eine Reise statt zwei; und ein
-  geschicktes Foto von zu Hause, auf das ein ganzer Reisetag ohne eigene Fotos folgt (nächstes
-  Reisefoto 36 Stunden später), teilt die Reise. Die Reise-Werkstatt (Teilen/Zusammenführen)
-  korrigiert beides.
+  nur, wenn die Fotos eine Nacht zu Hause zeigen (Fotos zu Hause an zwei Tagen oder an einem
+  ganzen Tag zwischen zwei Reisetagen) oder er 36 Stunden dauern konnte. Offen bleiben seltene
+  Fälle: wer abends nach Hause fliegt, nur am Abend dort fotografiert und am nächsten Morgen an
+  denselben Ort zurückfliegt, bekommt eine Reise statt zwei; und ein geschicktes Foto von zu
+  Hause an einem Reisetag ohne eigene Fotos (auch nur eines, dritte Prüfung) oder vor einem
+  solchen Tag (nächstes Reisefoto 36 Stunden später) teilt die Reise. Die Reise-Werkstatt
+  (Teilen/Zusammenführen) korrigiert beides.
 
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.
@@ -65,7 +70,10 @@
   ohne Prüfsumme nur in der gedruckten Form (Großbuchstaben, nur Leerzeichen); jede andere
   Schreibweise braucht eine gültige Prüfsumme, damit Bestell- und Rechnungsnummern wie
   „AB12-3456-7890-1234“ suchbar bleiben: eine IBAN mit Bindestrichen und einem Tippfehler
-  bleibt dadurch lesbar. Kartennummern mit Schrägstrich nur in Vierergruppen
+  bleibt dadurch lesbar. Die Prüfsumme gilt nur bei der IBAN-Länge des Ländercodes (dritte
+  Prüfung); eine IBAN mit Trennzeichen aus einem Land, das in der Liste fehlt, bleibt lesbar,
+  Bestellnummern, die vor der dritten Prüfung maskiert gespeichert wurden, bleiben maskiert
+  (bis „Analyse neu aufbauen“). Kartennummern mit Schrägstrich nur in Vierergruppen
   („4111/1111/…“), damit Telefonnummern wie „04321/12345678“ bleiben; eine Amex-Nummer mit
   Schrägstrichen (4-6-5) bleibt lesbar. Andere Schreibweisen (Buchstaben zwischen den Gruppen,
   stark verlesene Ziffern) können lesbar bleiben.

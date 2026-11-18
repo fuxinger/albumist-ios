@@ -137,6 +137,24 @@ struct TextMinimizerTests {
         #expect(TextMinimizer.luhnValid("0432112345678".compactMap(\.wholeNumberValue)))
     }
 
+    /// Third review of P2-04: every length from 34 down to 15 was tried, so about one order
+    /// number in five in IBAN shape passed the checksum at some length and was masked. An IBAN
+    /// has the one length its country gives it (DE 22, FR 27, an unknown code none).
+    @Test func onlyTheLengthOfTheCountryCounts() {
+        // Each of these passes the checksum for its first 15 or 16 characters.
+        for kept in ["Bestellung AB68-9302-4282-7546", "Auftrag DE41-5489-6599-1447", "Ticket FR79.9121.1911.2583",
+                     "Ref. XY12-8548-5068-3004"] {
+            #expect(TextMinimizer.storable(kept) == kept, "\(kept) was changed to \(TextMinimizer.storable(kept))")
+            #expect(!DocumentAnalyzer.containsIBAN(kept), "\(kept)")
+        }
+        // Real IBANs of other lengths in unusual forms stay masked.
+        for iban in ["no 93 8601 1117 947", "be68-5390-0754-7034", "fr14_2004_1010_0505_0001_3m02_606", "mt84-malt-0110-0001-2345-mtlc-ast0-01s",
+                     "DE 89 3704 0044 0532 0130 00"] {
+            let stored = TextMinimizer.storable("Konto " + iban)
+            #expect(stored == "Konto IBAN ••••", "\(iban): \(stored)")
+        }
+    }
+
     /// The subject line of a letter is stored with the document facts: it goes through the
     /// same masks, and an ID or medical document keeps none.
     @Test func theSubjectOfALetterIsMaskedToo() throws {

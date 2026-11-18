@@ -47,6 +47,9 @@ public struct QueryParser: Sendable {
         var end: Int?
         /// A period open to one side ("seit 2024", "vor 2020"): bounds of one query apply together.
         var bound: Bound?
+        /// The last word a period open to one side was read from (for a date written as numbers,
+        /// the word before it), to see whether "oder" stands between two of them.
+        var lastWord: Int?
     }
 
     public func parse(_ text: String) -> SearchQuery {
@@ -797,8 +800,12 @@ extension QueryParser {
                    !used.contains(j) && isDate(drafts[j]) && (drafts[j].end == i - 1 || (drafts[j].end == nil && drafts[j].position == i))
                }) {
                 if case .month(let m) = single(drafts[before]), drafts[before].dimension == "month" {
+                    // "November bis Februar 2025" reaches back over the turn of the year; before a
+                    // whole year ("Mai bis 2024") the month is in that year, not the one before
+                    // (third review: it read 1.5.2023–31.12.2024).
                     var year = calendar.component(.year, from: interval.start)
-                    if let candidate = monthInterval(m, year), candidate.start > interval.start { year -= 1 }
+                    let endsWithAYear = if case .year = single(drafts[first]) { true } else { false }
+                    if !endsWithAYear, let candidate = monthInterval(m, year), candidate.start > interval.start { year -= 1 }
                     if let range = monthInterval(m, year) {
                         start = (range, drafts[before].position, drafts[before].end)
                         used.append(before)
@@ -840,11 +847,14 @@ extension QueryParser {
             var draft = Draft(alternatives: [.dateRange(period)], kind: .date, german: label, english: label, dimension: "date", importance: 4,
                               position: start?.position ?? i, language: language, end: last)
             (draft.detailGerman, draft.detailEnglish) = detail(period)
-            if start == nil { draft.bound = bound }
+            if start == nil {
+                draft.bound = bound
+                draft.lastWord = last ?? next - 1
+            }
             for index in used.sorted(by: >) { drafts.remove(at: index) }
             drafts.append(draft)
         }
-        return together(drafts)
+        return together(drafts, words: words)
     }
 
     /// What a period covers, as shown under its term: "bis 31. Dez. 2023", "2023",
@@ -864,33 +874,60 @@ extension QueryParser {
                 SearchDateFormat.interval(period, english: true, calendar: calendar))
     }
 
+    /// "oder"/"or" between two bounds keeps them apart: "vor 2022 oder nach 2024" is either
+    /// (third review of P1-13).
+    static let alternativeWords: Set<String> = ["oder", "or"]
+
     /// "nach 2022 und vor 2024": a bound from below and one from above are one period, the
     /// days that lie after the one and before the other. When no day does ("vor 2020 nach
     /// 2024") the term says so and finds nothing. Bounds of one side alone stay as they are.
-    private func together(_ input: [Draft]) -> [Draft] {
+    /// An "oder" between two bounds ends such a period: "vor 2022 oder nach 2024" stays two
+    /// alternatives, "nach 2020 und vor 2022 oder nach 2024" is 2021 or after 2024.
+    private func together(_ input: [Draft], words: [Word]) -> [Draft] {
         let bounded = input.indices.filter { input[$0].bound != nil }.sorted { input[$0].position < input[$1].position }
-        let lower = bounded.filter { input[$0].bound == .from || input[$0].bound == .after }
-        let upper = bounded.filter { input[$0].bound == .before || input[$0].bound == .through }
-        guard !lower.isEmpty, !upper.isEmpty else { return input }
-        var start = Date.distantPast, end = Date.distantFuture
+        var groups: [[Int]] = []
         for index in bounded {
-            guard case .dateRange(let range) = input[index].alternatives.first else { continue }
+            if let previous = groups.last?.last, let from = input[previous].lastWord.map({ $0 + 1 }),
+               from < input[index].position, words[from..<input[index].position].contains(where: { Self.alternativeWords.contains($0.key) }) {
+                groups.append([index])
+            } else if groups.isEmpty {
+                groups.append([index])
+            } else {
+                groups[groups.count - 1].append(index)
+            }
+        }
+        var replaced = Set<Int>()
+        var joined: [Draft] = []
+        for group in groups {
+            guard let draft = together(group.map { input[$0] }) else { continue }
+            replaced.formUnion(group)
+            joined.append(draft)
+        }
+        return input.enumerated().filter { !replaced.contains($0.offset) }.map(\.element) + joined
+    }
+
+    /// One period from bounds of both sides (sorted by position); nil when all are of one side.
+    private func together(_ bounded: [Draft]) -> Draft? {
+        let lower = bounded.filter { $0.bound == .from || $0.bound == .after }
+        let upper = bounded.filter { $0.bound == .before || $0.bound == .through }
+        guard !lower.isEmpty, !upper.isEmpty, let first = bounded.first else { return nil }
+        var start = Date.distantPast, end = Date.distantFuture
+        for bound in bounded {
+            guard case .dateRange(let range) = bound.alternatives.first else { continue }
             start = max(start, range.start)
             end = min(end, range.end)
         }
         let period = start < end ? DateInterval(start: start, end: end) : DateInterval(start: start, duration: 0)
-        let first = input[bounded[0]]
         func lowered(_ s: String) -> String { s.prefix(1).lowercased() + s.dropFirst() }
         var draft = first
         draft.alternatives = [.dateRange(period)]
-        draft.german = ([first.german] + bounded.dropFirst().map { lowered(input[$0].german) }).joined(separator: " und ")
-        draft.english = ([first.english] + bounded.dropFirst().map { lowered(input[$0].english) }).joined(separator: " and ")
+        draft.german = ([first.german] + bounded.dropFirst().map { lowered($0.german) }).joined(separator: " und ")
+        draft.english = ([first.english] + bounded.dropFirst().map { lowered($0.english) }).joined(separator: " and ")
         (draft.detailGerman, draft.detailEnglish) = detail(period)
-        draft.end = bounded.compactMap { input[$0].end }.max()
+        draft.end = bounded.compactMap(\.end).max()
         draft.bound = nil
-        var drafts = input.enumerated().filter { !bounded.contains($0.offset) }.map(\.element)
-        drafts.append(draft)
-        return drafts
+        draft.lastWord = nil
+        return draft
     }
 }
 

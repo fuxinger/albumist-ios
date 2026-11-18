@@ -198,6 +198,55 @@ struct SearchDateBetweenTests {
         #expect(Self.ignored("bis Anfang 2024") == ["bis", "Anfang"])
     }
 
+    /// Third review: "oder"/"or" between two bounds keeps them as alternatives. "vor 2022 oder
+    /// nach 2024" found 221 photos before 60c8974, then none, with "kein gemeinsamer Zeitraum"
+    /// and the label rewritten to "und". Without a word between them, or with "und"/"and",
+    /// bounds from below and above stay one period.
+    @Test func anOrBetweenBoundsKeepsThemAsAlternatives() {
+        let lab = Self.lab
+        let outside = lab.between("1900-01-01", "2022-01-01").union(lab.between("2025-01-01", "2100-01-01"))
+        #expect(!outside.isEmpty)
+        let cases: [(String, Set<AssetID>)] = [
+            ("vor 2022 oder nach 2024", outside), ("before 2022 or after 2024", outside),
+            ("nach 2024 oder vor 2022", outside),
+            ("vor dem 1.1.2022 oder nach dem 31.12.2024", outside),
+            ("nach 2020 und vor 2022 oder nach 2024", lab.between("2021-01-01", "2022-01-01").union(lab.between("2025-01-01", "2100-01-01"))),
+            ("Italien vor 2022 oder nach 2024", outside.intersection(lab.country("IT"))),
+        ]
+        var wrong: [String] = []
+        for (query, expected) in cases {
+            let got = Self.hits(query)
+            if got != expected || expected.isEmpty || !Self.ignored(query).isEmpty {
+                wrong.append("„\(query)“: \(got.count) hits, expected \(expected.count), not understood \(Self.ignored(query))")
+            }
+        }
+        #expect(wrong.isEmpty, "\(wrong.joined(separator: "\n"))")
+        let tokens = Self.index.search("vor 2022 oder nach 2024", now: SearchLab.now).tokens
+        #expect(tokens.map(\.label) == ["Vor 2022 oder Nach 2024"], "\(tokens.map(\.label))")
+        #expect(!tokens.contains { $0.detail == "kein gemeinsamer Zeitraum" })
+        // "und", "and" or nothing between them: one period, here one without a day.
+        for query in ["vor 2022 und nach 2024", "before 2022 and after 2024", "vor 2022 nach 2024"] {
+            #expect(Self.hits(query).isEmpty, "„\(query)“")
+            let tokens = Self.index.search(query, now: SearchLab.now).tokens
+            #expect(tokens.count == 1 && ["kein gemeinsamer Zeitraum", "no common period"].contains(tokens.first?.detail), "„\(query)“: \(tokens)")
+        }
+    }
+
+    /// "Mai bis 2024": a month alone before "bis" and a whole year after it. Read as May to
+    /// December 2024 (the month in the year the period ends), as "Mai bis Juli 2024" reads May
+    /// in July's year; it read 1.5.2023–31.12.2024, a year and eight months nobody typed.
+    @Test func aMonthUntilAYearIsThatMonthOfTheYear() {
+        let lab = Self.lab
+        #expect(Self.hits("Mai bis 2024") == lab.between("2024-05-01", "2025-01-01"))
+        #expect(Self.hits("May until 2024") == lab.between("2024-05-01", "2025-01-01"))
+        #expect(Self.ignored("Mai bis 2024").isEmpty)
+        let token = Self.index.search("Mai bis 2024", now: SearchLab.now).tokens.first
+        #expect(token?.label == "Mai bis 2024")
+        #expect(token?.detail?.contains("2023") == false, "\(String(describing: token?.detail))")
+        // A month at the end still reaches back over the turn of the year.
+        #expect(Self.hits("November bis Februar 2025") == lab.between("2024-11-01", "2025-03-01"))
+    }
+
     /// Two dates written as numbers in one query crashed the search: the second one's place
     /// was counted with the first still in the text.
     @Test func twoDatesWrittenAsNumbers() {

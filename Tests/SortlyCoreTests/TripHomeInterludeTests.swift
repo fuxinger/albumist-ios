@@ -119,6 +119,22 @@ struct TripHomeInterludeTests {
         #expect(tripsTouching(first + second, in: lib.assets) == [Set(first), Set(second)])
     }
 
+    /// Third review: a whole day at home (photos only at home that day, none on the trip) between
+    /// two days in Rome is a night at home, whenever on that day the photos were taken. Rome on
+    /// Friday and Sunday, three photos at home on Saturday 10:00-19:00: 16 + 36 photos before
+    /// f103cf5, then one trip of 52.
+    @Test func aWholeDayAtHomeBetweenTwoDaysOnTheTripEndsIt() {
+        for times in [["10:00", "15:00", "19:00"], ["12:00"], ["10:00", "19:00"]] {
+            var lib = LibraryBuilder()
+            _ = lib.daily(from: "2025-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-05-12", "2026-05-25")])
+            let first = lib.daily(from: "2026-05-12", to: "2026-05-15", at: Fixture.Places.rome, perDay: 4, hour: 10)
+            for t in times { _ = lib.photo(at: Fixture.date("2026-05-16 \(t)"), Fixture.Places.munichHome) }
+            let second = lib.daily(from: "2026-05-17", to: "2026-05-25", at: Fixture.Places.rome, perDay: 4, hour: 10)
+            let trips = tripsTouching(first + second, in: lib.assets)
+            #expect(trips == [Set(first), Set(second)], "home on Saturday at \(times): \(trips.map(\.count))")
+        }
+    }
+
     /// A weekend at home between two trips, with a photo at home only on the Friday evening:
     /// two trips, whether the next one goes elsewhere or back to Rome.
     @Test func aWeekendAtHomeBetweenTwoTripsEndsTheFirst() {

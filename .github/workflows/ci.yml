@@ -165,7 +165,11 @@ jobs:
         # with the boot then), and its StoreKit log is recorded live: after xcodebuild has shut
         # it down, `log show` gave only "<compose failure>" lines from after a new boot
         # (CI 44368423344). Boot like ui_tests.py: up to three attempts, each counted.
-        if: hashFiles('App/project.yml') != ''
+        # From here on no step asks hashFiles(): it walks the whole workspace (with .build from the
+        # core tests) and timed out after 120 s while the fresh simulator settled (CI 44376522818,
+        # "hashFiles('App/project.yml') couldn't finish within 120 seconds"). The steps ask
+        # whether a simulator was picked instead (only when App/project.yml exists).
+        if: steps.sim.outputs.udid != ''
         timeout-minutes: 20
         run: |
           UDID="${{ steps.sim.outputs.udid }}"
@@ -184,7 +188,7 @@ jobs:
             > storekit-live.log 2>&1 &
           echo "simulator $UDID erased and booted; StoreKit log recorded live (pid $!)"
       - name: Build and test app
-        if: hashFiles('App/project.yml') != ''
+        if: steps.sim.outputs.udid != ''
         run: |
           set +e
           cd App
@@ -203,9 +207,9 @@ jobs:
         # daemon said during the tests (recorded live, see "Fresh simulator") and whether Apple's
         # store hosts answer from this runner, so the cause is in the job log (the build log is
         # an artifact).
-        if: failure() && hashFiles('build-log.txt') != ''
+        if: failure() && steps.sim.outputs.udid != ''
         run: |
-          if grep -q "StoreKit test environment not" build-log.txt; then
+          if [ -f build-log.txt ] && grep -q "StoreKit test environment not" build-log.txt; then
             [ -f storekit-live.log ] && echo "StoreKit log: $(wc -l < storekit-live.log | tr -d ' ') lines" || echo "no live StoreKit log"
             echo "--- errors and failures (last 300)"
             grep -iE "error|fail|denied|timed? ?out|invalid|unable|refus|not (found|allowed|available)|configuration|products?" storekit-live.log | tail -300 || true
@@ -219,7 +223,7 @@ jobs:
       - name: Build UI tests
         # The UI tests run in their own workflow (ui.yml); building them here finds a compile
         # error in them within this run instead of after the long simulator setup there.
-        if: hashFiles('App/project.yml') != ''
+        if: steps.sim.outputs.udid != ''
         run: |
           cd App
           xcodebuild build-for-testing \
@@ -231,13 +235,13 @@ jobs:
           grep -E "warning: .*SortlyUITests" ../build-ui-log.txt | head -40 || true
           tail -2 ../build-ui-log.txt
       - name: Export strings for translation
-        if: success() && hashFiles('App/project.yml') != ''
+        if: success() && steps.sim.outputs.udid != ''
         run: |
           cd App
           xcodebuild -exportLocalizations -project Sortly.xcodeproj -localizationPath ../build/loc -exportLanguage en CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO | tail -3
           find ../build/loc -name "*.xliff" -exec sh -c 'base64 -i "$1" | tr -d "\n" | fold -w 4000 | sed "s/^/XLIFF /"' _ {} \;
       - name: Upload strings
-        if: success() && hashFiles('build/loc/**') != ''
+        if: success() && steps.sim.outputs.udid != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: localizations
@@ -252,7 +256,7 @@ jobs:
           python3 .github/scripts/test_summary.py summary --title "iOS build and tests (macOS)" \
             --swift-log build/core-macos.log --xcresult-json build/app-tests.json >> "$GITHUB_STEP_SUMMARY" || true
       - name: Upload logs
-        if: always() && hashFiles('build-log.txt') != ''
+        if: always() && steps.sim.outputs.udid != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-build-log

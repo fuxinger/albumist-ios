@@ -243,9 +243,8 @@ final class SortlySearchUITests: XCTestCase {
         XCTAssertTrue(search("search.count").exists, "No hit count for Italien 2022")
         audit("search chips")
 
-        // 2. Country and month: Lisbon in April 2022.
-        check("Portugal April", in: field, expect: ["Portugal", "April"], shotName: "s2-portugal-april")
-        XCTAssertTrue(search("search.result").waitForExistence(timeout: 10), "Portugal April found nothing")
+        // 2. Country and month ("Portugal April") left the UI test: the chips look as in 1, and
+        // what such a query finds is checked in SearchQuerySetTests ("Rom Juli 2025").
 
         // 3. A typo is corrected and the correction is shown.
         check("Frankriech", in: field, expect: ["Frankreich"], shotName: "s3-typo")

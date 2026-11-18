@@ -36,19 +36,19 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 
 | Fall | Stand | Test heute | Lücke / in Arbeit |
 |---|---|---|---|
-| A1 Gerät warm / heiß | 🟡 | DeviceState: everyCombination, appRunsNeverEndBecauseOfTheDevice; FirstDeviceTest | UI-Schalter (in Arbeit); echte Wärme 📱 |
+| A1 Gerät warm / heiß | 🟡 | DeviceState: everyCombination, appRunsNeverEndBecauseOfTheDevice; FirstDeviceTest; DeviceConditionRun: heatScript…, lowBattery… | UI-Schalter (in Arbeit); echte Wärme 📱 |
 | A2 Akku, Stromsparmodus, Laden | 🟡 | DeviceState: everyCombination; FirstDeviceTest: pauseWhileWaiting… | UI-Schalter (in Arbeit) |
 | A3 App verlassen und zurück | ✅ | UI test6 | — |
-| A4 App beendet während der Analyse | 🟡 | AnalysisCoverage: runKilledMidwayGoesOnWithAReopenedDatabase; secondRunCountsOn… | UI: beenden und neu starten (in Arbeit) |
+| A4 App beendet während der Analyse | 🟡 | AnalysisCoverage: runKilledMidwayGoesOnWithAReopenedDatabase; secondRunCountsOn…; DeviceConditionRun: backgroundTimeOverThenRelaunch… | UI: beenden und neu starten (in Arbeit) |
 | A5 App beendet beim Umsetzen | 🟡 | UndoHardening: resumeAfterTheAppEndedRightAfterCreating…, interruptedUndoIsNotTaken…; ResumeFill: planCreatedAlbumGetsItsPhotos, photoIgnoredSinceIsNotFilledIn, ignoredPhotoDoesNotTouchTheUsersAlbumOnResume, userAlbumUntouched, userAlbumUntouchedWhenTheNewAlbumWasInterrupted, secondInterruptionThenResume, secondInterruptionBeforeTheRequestThenResume, undoAfterwardsRemovesExactlyWhatAlbumistAdded, undoAfterwardsRemovesTheFilledAlbum, managedRecordKnowsTheFilledPhotos; UI test5, Gerätebedingungen test07 („Rest anlegen“: Album hat danach seine 2 Fotos) | UI test5 wird repariert (in Arbeit) |
 | A6 Hintergrundzeit läuft ab | 🟡 | AnalysisReliability: controlPausesTheRunInProgress, pauseBeforeTheRunBeginsIsNotLost | UI-Schalter (in Arbeit) |
 | A7 Fortschritt auf dem Sperrbildschirm | 🟡 | ContinuedTaskHeartbeat (Linux); App: ContinuedAnalysisIdentifierTests, ContinuedAnalysisEndingTests (fertig, pausiert, Gerät/iOS, Fehler nach fertigem Lauf) | echtes Anzeigen nur am iPhone, Zustand per Diagnosebericht |
-| A8 Speicher voll | 🟡 | DataSafety: fullDiskDuringAnalysisWrite…, …JournalWrite…, …Finalization…, …Restore…; OpenPlans: planFailingHalfWayIsOfferedAtOnceAndTheSamePlanWaits | UI-Schalter für die Meldung (in Arbeit) |
+| A8 Speicher voll | 🟡 | DataSafety: fullDiskDuringAnalysisWrite…, …JournalWrite…, …Finalization…, …Restore…; DeviceConditionRun: fullDiskDuringTheAnalysisThenSpaceAgain…; OpenPlans: planFailingHalfWayIsOfferedAtOnceAndTheSamePlanWaits | UI-Schalter für die Meldung (in Arbeit) |
 | A9 Offline | 🟡 | PlaceResolution: offline…; AnalysisReliability: runInTheAppGoesOnWhenTheGeocoderRefuses; PurchaseStoreKit: offlineSaysSo… | UI-Schalter (in Arbeit) |
 | A10 Mitteilungen abgelehnt | ❌ | — | UI: „Nicht erlauben“ |
 | A11 Kleine/große Geräte, Querformat | ❌ | — | zweites Simulator-Gerät (in Arbeit) |
-| A12 Dunkelmodus | 🟡 | UI test2 | Prüfung im Barrierefreiheits-Test (in Arbeit) |
-| A13 Sehr große Schrift | 🟡 | UI test2 | alle Bildschirme, abgeschnittener Text schlägt fehl (in Arbeit) |
+| A12 Dunkelmodus | 🟡 | AccessibilityUITests test1 und test3 (vorher Flow-test2, entfernt 18.11.2026) | Prüfung im Barrierefreiheits-Test (in Arbeit) |
+| A13 Sehr große Schrift | 🟡 | AccessibilityUITests test1 und test3 (vorher Flow-test2, entfernt 18.11.2026) | alle Bildschirme, abgeschnittener Text schlägt fehl (in Arbeit) |
 | A14 VoiceOver / Prüfung | 🟡 | audit() in test1–7 | Befunde lassen den Test scheitern (in Arbeit) |
 | A15 Weniger Bewegung | ❌ | — | Barrierefreiheits-Test (in Arbeit) |
 | A16 Deutsch und Englisch | 🟡 | appShipsEnglish; ProposalCuration: englishTitles | UI-Lauf auf Englisch |
@@ -56,7 +56,7 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | B1 Voller Zugriff | ✅ | UI test1 | — |
 | B2 Nur ausgewählte Fotos | 🟡 | authorizationMapping; AnalysisCoverage: accessReducedToLimited… | UI über das echte Onboarding |
 | B3 Zugriff abgelehnt | 🟡 | deniedAccessStopsImmediately | UI |
-| B4 Zugriff im Lauf entzogen | 🟡 | AnalysisCoverage: accessRevokedDuringARunStopsCleanlyAndResumes | UI (in Arbeit) |
+| B4 Zugriff im Lauf entzogen | 🟡 | AnalysisCoverage: accessRevokedDuringARunStopsCleanlyAndResumes; DeviceConditionRun: accessTakenAwayThenBack… | UI (in Arbeit) |
 | B5 Leere Mediathek | 🟡 | AnalysisCoverage: emptyLibraryFinishes | UI-Schalter (in Arbeit) |
 | B6 Winzige Mediathek | ✅ | ProposalCuration: tinyLibrary; AnalysisCoverage: fivePhotosFinish | — |
 | B7 Riesige Mediathek | 🟡 | Load: 20.000 / 100.000; AnalysisCoverage: twoThousandPhotos… | Zeit und Speicher 📱 |
@@ -96,7 +96,7 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | E4 Zurücksetzen | ✅ | DataSafety: resetClearsTheAnalysisAndNothingElse, resetIncludingDecisionsLeavesNoJournalBehind | — |
 | F1 Jede Wahl beim Einstieg | 🟡 | UI test1 | Varianten (in Arbeit) |
 | F2 Jeder Bildschirm hin und zurück | 🟡 | UI test3 | tiefer, ohne Auslassliste (in Arbeit) |
-| F3 Suche mit echten Anfragen | 🟡 | SearchQuerySet: 100 echte Anfragen (alle 100 finden, was sie sollen); SearchPerformance: 50.000 Fotos; SortlySearchUITests: 6 Anfragen in der UI | erster UI-Lauf steht aus |
+| F3 Suche mit echten Anfragen | 🟡 | SearchQuerySet: 100 echte Anfragen (alle 100 finden, was sie sollen); SearchPerformance: 50.000 Fotos; SortlySearchUITests: 5 Anfragen in der UI (Land und Monat nur noch in SearchQuerySet) | erster UI-Lauf steht aus |
 | F4 Probejahr bleibt | 🟡 | trialYearIsKeptForLaterRuns, UI test6 | Neustart, Wahl im Onboarding |
 | F5 Foto groß ansehen | 🟡 | UI test1 | Zoom |
 | F6 Sortiert-Ring mit eigenen Alben (Gerätetest 15.11.: 811, dann 157) | 🟡 | SortedCount: eigene Reisealben zählen für ihr Land, Zuhause zählt nicht für Länder und Orte, Neuaufbau, zweiter Lauf, Übernehmen und Rückgängig, „Nicht jetzt“ und „Albumists Fotos herausnehmen“, leere Mediathek, eingeschränkter Zugriff, 100.000 Fotos, alter Stand lädt, mehrere gleich gut passende Alben zählen alle, neue Fotos nach einer Reise bleiben unsortiert im Ring | Ring-Text und Diagnosezeile nur syntaxgeprüft; Zahl auf dem iPhone 📱 |

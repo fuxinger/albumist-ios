@@ -585,13 +585,16 @@ final class SortlyFlowUITests: XCTestCase {
     }
 
     /// Atlas, library, albums and search on the analysed demo library.
+    /// No audits of atlas, country, share card, library, photo, albums and search here: their
+    /// audit here only printed findings, and `AccessibilityUITests` audits the same screens and
+    /// fails on findings (docs/TEST_PLAN.md, "UI-Tests: Dauer und Verlagerung").
     func test1b_AtlasLibrarySearch() {
         continueAfterFailure = true
         prepare()
         // Travel atlas
         if tap(button("Reise-Atlas"), "open atlas", timeout: 30) {
             sleep(8)
-            shot("12-atlas"); audit("atlas")
+            shot("12-atlas")
             app.swipeUp(); sleep(1)
             shot("12b-atlas-list")
             // A country opens its photos (list row; the map does the same for sighted users).
@@ -604,12 +607,12 @@ final class SortlyFlowUITests: XCTestCase {
                 print("UI_FACT country photos \(photos)")
                 XCTAssertGreaterThan(photos, 5, "The country screen shows no photos")
                 sleep(1)
-                shot("12c-country"); audit("country")
+                shot("12c-country")
                 back(); sleep(1)
             }
             if tap(app.buttons["Reise-Atlas teilen"], "share atlas") {
                 sleep(3)
-                shot("13-share-card"); audit("share card")
+                shot("13-share-card")
                 tap(button("Fertig"), "close share")
                 sleep(2) // the sheet slides away before the navigation bar answers again
             }
@@ -619,7 +622,7 @@ final class SortlyFlowUITests: XCTestCase {
         // Library
         if tap(tabButton("Mediathek"), "library tab") {
             sleep(2)
-            shot("14-library"); audit("library")
+            shot("14-library")
             let photo = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*20[0-9][0-9].*")).firstMatch
             // After the plan ran, "Nicht sortiert" can be empty: show the sorted photos instead.
             if !photo.waitForExistence(timeout: 3), tap(button("Sortiert"), "sorted photos") {
@@ -630,10 +633,10 @@ final class SortlyFlowUITests: XCTestCase {
             // and a pull down closes it, as in Photos.
             if tap(photo, "open photo") {
                 sleep(2)
-                shot("15-photo-viewer"); audit("photo viewer")
+                shot("15-photo-viewer")
                 if tap(app.buttons["viewer.info"], "photo info") {
                     sleep(1)
-                    shot("15a-photo-detail"); audit("photo detail")
+                    shot("15a-photo-detail")
                     tap(app.buttons["detail.close"], "close photo info")
                     sleep(1)
                 }
@@ -662,7 +665,7 @@ final class SortlyFlowUITests: XCTestCase {
         // Albums
         if tap(tabButton("Alben"), "albums tab") {
             sleep(2)
-            shot("18-albums"); audit("albums")
+            shot("18-albums")
             // Design review W12: an album shows all its photos, and each opens large.
             // An album with photos: an empty one has none to open.
             let album = app.buttons.matching(NSPredicate(format: "label MATCHES %@", "(.*[^0-9.])?[1-9][0-9.]* Fotos?")).firstMatch
@@ -688,7 +691,7 @@ final class SortlyFlowUITests: XCTestCase {
                 field.tap()
                 field.typeText("Rom")
                 sleep(3)
-                shot("20-search-rom"); audit("search")
+                shot("20-search-rom")
                 // Close the keyboard: it covers the tab bar, and a tap on "Übersicht" would hit it.
                 field.typeText("\n")
                 sleep(1)
@@ -705,10 +708,10 @@ final class SortlyFlowUITests: XCTestCase {
         if tap(tabButton("Übersicht"), "overview tab") {
             if tap(app.buttons["Einstellungen"], "settings") {
                 sleep(1)
-                shot("21-settings"); audit("settings")
+                shot("21-settings")
                 // Design review W16: history and undo are the first row, on their own screen.
                 let history = tap(app.buttons["settings.history"], "open history and undo", timeout: 5)
-                if history { sleep(1); shot("21h-history"); audit("history") }
+                if history { sleep(1); shot("21h-history") }
                 let row = app.buttons["history.row"].firstMatch
                 // A history row opens the plan's change receipt; undo lives there.
                 let opened = history && tap(row, "history row opens receipt", timeout: 10)
@@ -1031,29 +1034,6 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(done, "The plan for the backup did not finish")
         back(); sleep(2)
         _ = waitStable("analysis before backup", timeout: 180) { analysisIdle }
-    }
-
-    /// Same app state, but with the largest accessibility text size in dark mode.
-    func test2_LargeTextDarkMode() {
-        continueAfterFailure = true
-        // Whether test 1 reached its end is checked by test 1 itself (its teardown block): the
-        // two run in different groups on different simulators now.
-        completeOnboardingIfCutOff("test2")
-        prepare()
-        XCUIDevice.shared.appearance = .dark
-        launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-SortlyUITestDark"])
-        sleep(5)
-        shot("30-overview-xxxl-dark"); audit("overview xxxl dark")
-        if tap(button("Reise-Atlas"), "open atlas xxxl", timeout: 20) {
-            sleep(6)
-            shot("31-atlas-xxxl-dark")
-            back()
-        }
-        if tap(tabButton("Mediathek"), "library xxxl") {
-            sleep(2)
-            shot("32-library-xxxl-dark"); audit("library xxxl dark")
-        }
-        XCUIDevice.shared.appearance = .light
     }
 
     // MARK: Tap-through sweep

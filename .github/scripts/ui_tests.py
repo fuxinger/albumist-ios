@@ -15,7 +15,10 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
         [--reduce-motion] [--increase-contrast] [--video F] [--out DIR]
       Runs the tests (T is "Class" or "Class/testMethod" of SortlyUITests), prints the
       report lines for the log (steps, screenshots, accessibility findings, restart context,
-      crash reports, SwiftUI runtime warnings) and exits with the result. A test that reset
+      crash reports, SwiftUI runtime warnings) and exits with the result: 0, 1, or 75 when
+      the simulator was lost before the first test in every pass (no test result; it writes
+      DIR/no-test-started, and ui.yml fails the job in "Simulator lost before the first test",
+      which ui_evidence.py counts as no result rather than red). A test that reset
       the photo access (the CI simulator then answers "denied" without asking) prints
       UI_HOST_GRANT_PHOTOS; the access is given back from the Mac (`simctl privacy grant`)
       while the pass runs (class HostGrants).
@@ -137,6 +140,10 @@ DATA_LINE = re.compile(r"PREVIEW_JPEG|UI_VIDEO_B64")
 
 CASE = re.compile(r"Test Case '-\[(?:[\w]+)\.(\w+) (\w+)\]' (passed|failed|skipped)")
 STARTED = re.compile(r"Test Case '-\[\w+\.\w+ \w+\]' started")
+# Written by `run` when the simulator was lost before the first test in every pass (exit
+# NO_TEST_EXIT): the workflow fails the job in a step of its own, a "no result" for the group.
+NO_TEST_STARTED = "no-test-started"
+NO_TEST_EXIT = 75
 PASSED = ("Passed", "Skipped", "Expected Failure")
 
 
@@ -899,7 +906,23 @@ def command_run(args) -> int:
         joined = "\n".join(p[4] for p in passes)
         print(f"A11Y_SUMMARY {args.name} fails {joined.count('A11Y_FAIL ')} warnings {joined.count('A11Y_WARN ')}")
     write_summary(args.name, passes)
+    if failed and no_test_started(passes):
+        # The simulator service was lost before any test started, in every pass: no test result
+        # at all (ui_evidence.py counts the group neither green nor red). The workflow fails the
+        # job in its own step "Simulator lost before the first test" instead of "Run UI tests".
+        reasons = "; ".join(passes[0][3]) or "no reason found"
+        with open(os.path.join(args.out, NO_TEST_STARTED), "w", encoding="utf-8") as marker:
+            marker.write(reasons + "\n")
+        print(f"::warning title=UI {args.name}::No test started: the simulator was lost before the first test "
+              f"({reasons}). No result for this group; start it again.")
+        return NO_TEST_EXIT
     return 1 if failed else 0
+
+
+def no_test_started(passes) -> bool:
+    """Whether every pass failed on the simulator alone (verdict "retry" for the first pass) and
+    no test case started in any of them."""
+    return bool(passes) and passes[0][2] == "retry" and not any(STARTED.search(p[4]) for p in passes)
 
 
 def swiftui_warnings(path: str) -> int:

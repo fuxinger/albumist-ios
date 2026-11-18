@@ -3,6 +3,7 @@
 The log snippets are cut from real UI runs of November 2026 (job ids in the comments).
 Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
+import argparse
 import contextlib
 import io
 import json
@@ -372,6 +373,47 @@ class SelectionTests(unittest.TestCase):
             "AccessibilityUITests/test3_LargestTextDarkModeReduceMotion": "passed",
             "AccessibilityUITests/test4_Landscape": "passed",
         })
+
+    def run_with_passes(self, logs, reset_ok=True):
+        """command_run with faked passes (status 65 unless the log says otherwise)."""
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        queue = list(logs)
+
+        def fake_pass(args, label, chosen, build):
+            text = queue.pop(0)
+            return (0 if "** TEST SUCCEEDED **" in text else 65), text, "none.xcresult", 0.0, False
+        fakes = {"run_pass": fake_pass, "crash_reports": lambda since: [], "other_crash_reports": lambda since: [],
+                 "sh": lambda *a, **k: (0, "/Users/runner"), "read_bundle": lambda path: [],
+                 "reset": lambda *a: reset_ok, "swiftui_warnings": lambda path: 0, "boot_retries": lambda out: [],
+                 "write_flaky": lambda args, record: None}
+        saved = {k: getattr(ui_tests, k) for k in fakes}
+        for k, v in fakes.items():
+            setattr(ui_tests, k, v)
+        try:
+            args = argparse.Namespace(
+                out=folder.name, only=[], skip=[], increase_contrast=False, reduce_motion=False, video=None,
+                a11y_summary=False, name="device", udid="X")
+            with contextlib.redirect_stdout(io.StringIO()) as log:
+                code = ui_tests.command_run(args)
+        finally:
+            for k, v in saved.items():
+                setattr(ui_tests, k, v)
+        marker = os.path.join(folder.name, ui_tests.NO_TEST_STARTED)
+        return code, os.path.exists(marker), log.getvalue()
+
+    def test_a_simulator_lost_before_the_first_test_is_no_result(self):
+        # Both passes lost the simulator before any test started: exit 75 and the marker.
+        code, marker, log = self.run_with_passes([AX_TIMEOUT, SERVICE_INTERRUPTED])
+        self.assertEqual((code, marker), (ui_tests.NO_TEST_EXIT, True))
+        self.assertIn("No test started", log)
+        # No repeat possible (the simulator did not come back): the same.
+        self.assertEqual(self.run_with_passes([RUNNER_TERMINATED], reset_ok=False)[:2], (ui_tests.NO_TEST_EXIT, True))
+        # A test started in a pass: a red, never "no result".
+        started = "Test Case '-[SortlyUITests.DeviceUITests test01_Hot]' started.\n" + SERVICE_INTERRUPTED
+        self.assertEqual(self.run_with_passes([AX_TIMEOUT, started])[:2], (1, False))
+        # A failure that is not the simulator's (here a compile error): red.
+        self.assertEqual(self.run_with_passes([COMPILE_ERROR])[:2], (1, False))
 
     def test_space_separated_matrix_values(self):
         parsed = []

@@ -49,7 +49,7 @@ Rückgängig, Vorschläge, Analyse sowie Kauf und Daten. „in Arbeit“: ein Ag
 | A11 Kleine/große Geräte, Querformat | ❌ | — | zweites Simulator-Gerät (in Arbeit) |
 | A12 Dunkelmodus | 🟡 | AccessibilityUITests test1 und test3 (vorher Flow-test2, entfernt 18.11.2026) | Prüfung im Barrierefreiheits-Test (in Arbeit) |
 | A13 Sehr große Schrift | 🟡 | AccessibilityUITests test1 und test3 (vorher Flow-test2, entfernt 18.11.2026) | alle Bildschirme, abgeschnittener Text schlägt fehl (in Arbeit) |
-| A14 VoiceOver / Prüfung | 🟡 | audit() in test1–7 | Befunde lassen den Test scheitern (in Arbeit) |
+| A14 VoiceOver / Prüfung | 🟡 | AccessibilityUITests test1–5 (Befunde lassen den Test scheitern); in den Ablauf-Tests nur protokolliert: ganzer Ablauf test1, 1b („Zu Album hinzufügen“, Ignorieren-Hinweis), 1d, test4–6, Suche | Befunde lassen den Test scheitern (in Arbeit) |
 | A15 Weniger Bewegung | ❌ | — | Barrierefreiheits-Test (in Arbeit) |
 | A16 Deutsch und Englisch | 🟡 | appShipsEnglish; ProposalCuration: englishTitles | UI-Lauf auf Englisch |
 | A17 Zeitzonen, Zeitumstellung | ✅ | TripTimeZone: 11 Tests (Reise über Zonen, Rückkehr ohne Foto); ProposalCuration: aTripEndsOnTheDateWhereItEnded; dayTripUsesDestinationCalendar… | — |
@@ -284,11 +284,24 @@ Analyse: 235–254 s); später kostet `prepare` nur 16–40 s. „Neu“ ist ges
 | test06 Speicher voll | 342 / 368 | Meldung, mit der man etwas anfangen kann, kein Absturz, der Plan wird zum unterbrochenen Plan · danach Analyse bis zum Ende | Nutzerweg · Logik | Ende: `fullDiskDuringTheAnalysisThenSpaceAgainEndsWithEveryPhoto` (echter SQLite-Fehler „voll“, Datenbank bleibt heil) | ~230 |
 | test09 Fotozugriff | 426 / 746 | echte Systemfrage abgelehnt und eingeschränkt, Zugriff im Lauf entzogen · danach Analyse bis zum Ende | Nutzerweg · Logik | Ende: `accessTakenAwayThenBackEndsWithEveryPhoto` | ~270 |
 | test10 leere Mediathek | 47 / 71 | ruhiger leerer Zustand, kein Fehler | Nutzerweg | bleibt | 47 |
-| test11 große Mediathek (3.000 Fotos) | 1551 / 1716 | 3.000 Fotos anlegen und analysieren (~25 Min.), dann bleiben Listen, Übersicht, Suche und Atlas flott | Last · Nutzerweg | bei jeder Änderung auf Linux: `LoadTests` (20.000 und 100.000 Fotos). Mit `SORTLY_UI_QUICK=1` (`TEST_RUNNER_SORTLY_UI_QUICK`) übersprungen, sonst unverändert: nachts und vor dem Hochladen | 0 bzw. ~1640 |
+| test11 große Mediathek (3.000 Fotos) | 1551 / 1716 | 3.000 Fotos anlegen und analysieren (~25 Min.), dann bleiben Listen, Übersicht, Suche und Atlas flott | Last · Nutzerweg | bei jeder Änderung auf Linux: `LoadTests` (20.000 und 100.000 Fotos). Mit `SORTLY_UI_QUICK=1` (`TEST_RUNNER_SORTLY_UI_QUICK`) übersprungen, sonst unverändert. Ein schneller Lauf zählt nie für das Hochladen (Tor in der Pipeline); einen nächtlichen UI-Lauf gibt es noch nicht | 0 bzw. ~1640 |
 | test12 Stress | übersprungen | nur im Stress-Lauf | – | bleibt | – |
 
 test11 braucht im vollen Lauf etwa 90 s mehr als bisher: test01 bis test09 enden jetzt, während
-die Analyse noch läuft, und test11 analysiert den Rest der Beispiel-Mediathek mit.
+die Analyse noch läuft, und test11 analysiert den Rest der Beispiel-Mediathek mit. Deshalb
+garantiert `prepare()` der Gerätetests keine ganz analysierte Mediathek mehr (nur: Beispiel-
+Mediathek da, nichts läuft); jeder Test danach startet seine eigene Analyse oder wartet selbst
+auf alle Fotos (steht so am `prepare()`).
+
+**Was die schnellen Tests nicht abdecken.** `DeviceConditionRunTests` prüft nur die Pipeline:
+dass ein Lauf mit diesen Bedingungen mit allen Fotos endet. Ob die App den Lauf überhaupt
+wieder anstößt, prüft er nicht: `AppModel.sceneBecameActive`, `needsResume`, der Start der
+Analyse beim Öffnen (`startsAnalysisAtLaunch`), `retryUnattendedRun` und der Umgang mit
+`StorageFault`. Das bleibt in den UI-Tests: test01, 03, 06 und 09 verlangen nach der Bedingung,
+dass die Zahl sich bewegt (oder alle Fotos analysiert sind). Eine ruhende Karte mit Fotos übrig
+(„180 von 246 Fotos analysiert“, kein „Pause“) lässt sie scheitern. Ob die App am Ende „fertig“
+sagt, obwohl noch Arbeit übrig ist, sieht der UI-Test nicht mehr; ein schneller Test dafür fehlt
+(App-Code, `AppModel` gehört nicht zu diesem Branch).
 
 ### Übrige Abläufe, Kauf und Suche (Job ~62 Min.)
 
@@ -306,7 +319,7 @@ die Analyse noch läuft, und test11 analysiert den Rest der Beispiel-Mediathek m
 | Ablauf test5 Erledigtes behalten, Fehlendes erneut | 271 / 270 | Karte nach Unterbrechung, Beleg, Plan nur mit dem Fehlenden | Nutzerweg | bleibt (Log-Zeile „lief noch“ liest jetzt eine Kennung statt eines verdeckten Titels) | 271 |
 | Ablauf test6 Analyse durch Hintergrund und Tabs | 325 / 313 | läuft weiter nach Hintergrund und Tabwechsel, Zahl nie zurück, endet mit allen Fotos (~2 Min. Warten) · Probejahr | Nutzerweg | bleibt: einziger UI-Test für A3, und die Suche danach braucht die fertig analysierte Mediathek | 325 |
 | Kauf test7 gesperrter Plan | 227 / 242 | Freischalt-Karte, freie Alben | Nutzerweg | bleibt | 227 |
-| Suche | 116 / 127 | sechs Anfragen, Chips, Hinweise, leerer Zustand | Nutzerweg · Logik | „Portugal April“ gestrichen: sieht aus wie „Italien 2022“, was Land und Monat finden, prüft `SearchQuerySetTests` („Rom Juli 2025“). Tippfehler, Lockerung, Vervollständigung und unverstandenes Wort bleiben (je eigener Zustand auf dem Bildschirm) | ~105 |
+| Suche | 116 / 127 | sechs Anfragen, Chips, Hinweise, leerer Zustand | Nutzerweg · Logik | „Portugal April“ gestrichen: sieht aus wie „Italien 2022“; dieselbe Anfrage (Land und Monat ohne Jahr) steht jetzt in `SearchQuerySetTests`. Tippfehler, Lockerung, Vervollständigung und unverstandenes Wort bleiben (je eigener Zustand auf dem Bildschirm) | ~105 |
 
 ### Ganzer Ablauf, Barrierefreiheit, Kontrast
 
@@ -321,7 +334,7 @@ die Analyse noch läuft, und test11 analysiert den Rest der Beispiel-Mediathek m
 | Gruppe | vorher (Job) | Tests vorher | Tests neu | Job neu |
 |---|---|---|---|---|
 | Gerätebedingungen, schnell (`SORTLY_UI_QUICK=1`) | ~67 Min. | ~58 Min. | ~22 Min. | ~31 Min. |
-| Gerätebedingungen, voll (nachts, vor dem Hochladen) | ~67 Min. | ~58 Min. | ~50 Min. | ~59 Min. |
+| Gerätebedingungen, voll (vor dem Hochladen) | ~67 Min. | ~58 Min. | ~50 Min. | ~59 Min. |
 | Übrige Abläufe, Kauf und Suche | ~62 Min. | ~54 Min. | ~46 Min. | ~54 Min. |
 | Ganzer Ablauf | ~18 Min. | ~10 Min. | ~10 Min. | ~18 Min. |
 | Barrierefreiheit | ~30 Min. | ~22 Min. | ~22 Min. | ~30 Min. |
@@ -334,8 +347,8 @@ Simulator starten).
 **Die 15 Minuten je Gruppe erreichen die Testinhalte allein nicht.** Dazu braucht es den
 Pipeline-Teil (Workflows gehören einem anderen Agenten, hier nicht geändert):
 
-1. Bei jeder Änderung `TEST_RUNNER_SORTLY_UI_QUICK=1` setzen; der volle Lauf nur nachts und
-   vor dem Hochladen.
+1. Bei jeder Änderung `TEST_RUNNER_SORTLY_UI_QUICK=1` setzen; der volle Lauf vor dem Hochladen
+   (ein schneller Lauf zählt nie dafür) und, sobald es ihn gibt, nachts.
 2. Die zwei langen Gruppen teilen, z. B. Geräte A (test01–03, ~18 Min.), Geräte B (test04, 06,
    09, 10, ~24 Min.), Abläufe A (Gerät test05, 07, 08, ~20 Min.), Abläufe B (1b, 1c, 1d, test3,
    ~22 Min.), Abläufe C (test4, 5, 6, Kauf, Suche, ~28 Min.). Jeder neue Job zahlt einmal das

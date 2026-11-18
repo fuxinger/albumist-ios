@@ -22,6 +22,7 @@ struct SearchLab: Sendable {
         static let palma = GeoCoordinate(latitude: 39.5696, longitude: 2.6502)
         static let newYork = GeoCoordinate(latitude: 40.7128, longitude: -74.0060)
         static let vienna = GeoCoordinate(latitude: 48.2082, longitude: 16.3738)
+        static let lisbon = GeoCoordinate(latitude: 38.7223, longitude: -9.1393)
     }
 
     /// Reverse geocoding as an iPhone set to German answers it.
@@ -36,6 +37,7 @@ struct SearchLab: Sendable {
         (Spot.palma, .init(isoCountryCode: "ES", country: "Spanien", administrativeArea: "Balearische Inseln", subAdministrativeArea: "Mallorca", locality: "Palma")),
         (Spot.newYork, .init(isoCountryCode: "US", country: "Vereinigte Staaten", administrativeArea: "New York", locality: "New York")),
         (Spot.vienna, .init(isoCountryCode: "AT", country: "Österreich", administrativeArea: "Wien", locality: "Wien")),
+        (Spot.lisbon, .init(isoCountryCode: "PT", country: "Portugal", administrativeArea: "Lissabon", locality: "Lissabon")),
     ]
 
     private(set) var facts: [AssetFacts] = []
@@ -159,6 +161,12 @@ struct SearchLab: Sendable {
             lab.add(d, Spot.garmisch, labels: [("snow", 0.95), ("skiing", 0.85), ("mountain", 0.8)])
         }
 
+        // Lisbon, April 2022 (before Easter): country and a bare month, as the search UI test
+        // asked "Portugal April" on the demo library until it moved here.
+        for d in ["2022-04-11 10:00", "2022-04-12 11:00", "2022-04-13 17:00"] {
+            lab.add(d, Spot.lisbon, labels: [("cityscape", 0.8)], trip: "trip-lisbon")
+        }
+
         // Mallorca, August 2026.
         for d in ["2026-08-10", "2026-08-11", "2026-08-12", "2026-08-13"] {
             lab.add(d + " 11:00", Spot.palma, labels: [("beach", 0.92), ("palm_tree", 0.7)], trip: "trip-mallorca")
@@ -234,7 +242,7 @@ enum SearchQuerySet {
         let text = { (word: String) in lab.ids { f, _ in f.recognizedText?.contains(word) == true } }
         let year = { (y: Int) in lab.ids { f, _ in lab.comp(.year, f) == y } }
         let summer2026 = lab.between("2026-06-01", "2026-09-01")
-        let europe: Set<String> = ["DE", "IT", "ES", "AT"]
+        let europe: Set<String> = ["DE", "IT", "ES", "AT", "PT"]
         return [
             // Content, German and English, singular and plural, lower case.
             QueryCase(query: "Hund am Strand", expected: dogs.intersection(beach)),
@@ -260,6 +268,7 @@ enum SearchQuerySet {
             // Places: city, country, region, island, lake, landmark, exonyms, umlauts, typos.
             QueryCase(query: "Italien 2024", expected: italy.intersection(year(2024))),
             QueryCase(query: "Rom Juli 2025", expected: rome.intersection(lab.between("2025-07-01", "2025-08-01"))),
+            QueryCase(query: "Portugal April", expected: lab.country("PT").intersection(lab.ids { f, _ in lab.comp(.month, f) == 4 })),
             QueryCase(query: "Muenchen", expected: munich),
             QueryCase(query: "munich", expected: munich),
             QueryCase(query: "Rome", expected: rome),

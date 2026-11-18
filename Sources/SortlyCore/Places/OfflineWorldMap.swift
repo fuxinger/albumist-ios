@@ -188,6 +188,58 @@ public struct OfflineWorldMap: Sendable {
         return regions.first { $0.level == .country && $0.isoCode.uppercased() == upper }
     }
 
+    /// Names stored places in one language (review P1-12: after the language of album names was
+    /// switched, stored places kept the country and region names of the old one). Built once
+    /// for many places.
+    public struct Renamer: Sendable {
+        public let language: TitleLanguage
+        /// Countries by two-letter code (Cyprus and Northern Cyprus share one).
+        let countries: [String: [Region]]
+        /// Regions by "<country index>|<name in either language, normalized>".
+        let regions: [String: Region]
+
+        /// `place` with its country and first-level region named in `language`, as far as the
+        /// map knows them: the country by its code (and its name, where two share a code), the
+        /// region by its name in either language. Towns and everything else stay as they are
+        /// (they come from Apple's lookup, not from the map).
+        public func renamed(_ place: PlaceComponents) -> PlaceComponents {
+            guard let code = place.isoCountryCode?.uppercased(), let candidates = countries[code], !candidates.isEmpty else { return place }
+            let stored = place.country.map(PlaceKey.normalize)
+            let country = candidates.first { stored != nil && (PlaceKey.normalize($0.nameDE) == stored || PlaceKey.normalize($0.nameEN) == stored) }
+                ?? candidates.first { $0.isoCode.uppercased() == code }
+            guard let country else { return place }
+            var result = place
+            result.country = country.name(language)
+            if let area = place.administrativeArea, let region = regions["\(country.index)|\(PlaceKey.normalize(area))"] {
+                result.administrativeArea = region.name(language)
+            }
+            return result
+        }
+    }
+
+    public func renamer(to language: TitleLanguage) -> Renamer {
+        var countries: [String: [Region]] = [:]
+        var named: [String: Region] = [:]
+        for r in regions {
+            switch r.level {
+            case .country:
+                guard r.isoCode.count >= 2 else { continue }
+                countries[String(r.isoCode.prefix(2)).uppercased(), default: []].append(r)
+            case .region:
+                guard let parent = r.parent else { continue }
+                for name in [r.nameDE, r.nameEN] where named["\(parent)|\(PlaceKey.normalize(name))"] == nil {
+                    named["\(parent)|\(PlaceKey.normalize(name))"] = r
+                }
+            }
+        }
+        return Renamer(language: language, countries: countries, regions: named)
+    }
+
+    /// One place named in `language` (see `Renamer`).
+    public func renamed(_ place: PlaceComponents, to language: TitleLanguage) -> PlaceComponents {
+        renamer(to: language).renamed(place)
+    }
+
     private func region(_ coordinate: GeoCoordinate, inCountry country: Int) -> (region: Region, isCertain: Bool)? {
         guard let children = regionsByCountry[country] else { return nil }
         let candidates = evaluate(coordinate, among: children)

@@ -10,6 +10,16 @@
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
   Länder und Regionen kommen immer aus der Offline-Karte.
 - `CLGeocoder` ist in iOS 26 als veraltet markiert; der Nachfolger in MapKit ist geplant.
+- Sprache der Albumnamen gewechselt (Prüfbefund P1-12): Länder und Regionen aller
+  gespeicherten Orte werden beim nächsten Lauf aus der Offline-Karte neu benannt (der Wechsel
+  startet einen Lauf). Städte und Ortsteile kommen von Apples Ortssuche und bleiben in der
+  Sprache, in der sie bestimmt wurden; nach einem Neustart der App kommen neue Städte in der
+  neuen Sprache, so dass „Rom“ und „Rome“ nebeneinander stehen können. Dafür bräuchte die App:
+  die Ortssuche (`SystemGeocoder`) bei einem Sprachwechsel mit der neuen Sprache neu anlegen
+  (heute nur beim Start, `AppModel`), den Zwischenspeicher der Ortssuche je Sprache führen und
+  die gespeicherten Städte zum erneuten Nachfragen vormerken (Netz und Apples Drosselung, eine
+  Entscheidung für Fuchs). Vorschläge für Regionen tragen den Regionsnamen in ihrer Kennung:
+  nach einem Sprachwechsel gelten „Nicht jetzt“ und eigene Namen bei Regionen nicht mehr.
 
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.

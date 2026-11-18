@@ -222,6 +222,8 @@ public actor AnalysisPipeline {
         static let groupingFeedback = "user.groupingFeedback"
         /// Version of the masks the stored texts went through (see `TextMinimizer.maskVersion`).
         static let textMaskVersion = "analysis.textMaskVersion"
+        /// The language the stored places' countries and regions are named in (review P1-12).
+        static let placesLanguage = "analysis.placesLanguage"
         static let proposals = "analysis.proposals"
         /// Photos taken where the user lives (`TripAnalysis.atHome`), from the last analysis.
         static let home = "analysis.home"
@@ -379,6 +381,7 @@ public actor AnalysisPipeline {
     /// - labels wanted ("Themen" or "Dokumente" on): photos analysed without them get them,
     /// - the text step on (screenshots, documents or messenger pictures): they are read,
     /// - finer places (towns, also for trips) or online lookups allowed: places are resolved further,
+    /// - another language of album names: stored countries and regions are named again (P1-12),
     /// - hidden photos included: they are read in and analysed.
     /// Faces are not computed yet (`VisionAnalyzer`), so people and pets need no run here.
     /// A change that only shows or hides suggestions needs none: the suggestions follow the
@@ -422,6 +425,8 @@ public actor AnalysisPipeline {
             if let places {
                 let after = PlaceResolutionPolicy(settings: new)
                 if after.deepestLevel > places.deepestLevel || (!places.onlineAllowed && after.onlineAllowed) { return true }
+                // Another language of album names: stored countries and regions are named again.
+                if after.language != places.language { return true }
             }
             return hidden == false && new.privacy.includeHiddenAssets
         }
@@ -1078,6 +1083,7 @@ public actor AnalysisPipeline {
         onProgress: @escaping @Sendable (Progress) -> Void
     ) async throws -> PlaceResolutionService.Outcome {
         let policy = PlaceResolutionPolicy(settings: settings)
+        try await renamePlaces(to: policy.language)
         let existing = try await store.places()
         let tripMembers = Set(trips.flatMap(\.geotaggedAssetIDs))
         let frequentMembers = Set(frequent.flatMap(\.assetIDs))
@@ -1133,6 +1139,24 @@ public actor AnalysisPipeline {
             lastForegroundOnlineLookup = now()
         }
         return outcome
+    }
+
+    /// After the language of album names changed, the countries and regions of the places
+    /// stored before are named again from the offline map, which has both languages, so a
+    /// country's photos never carry two names ("Countries/Italien" next to "Italy", review
+    /// P1-12). Town names come from Apple's lookup in the language it was made in and stay.
+    private func renamePlaces(to language: TitleLanguage) async throws {
+        guard let map, try await store.value(TitleLanguage.self, forKey: Key.placesLanguage) != language else { return }
+        let renamer = map.renamer(to: language)
+        var renamed: [AssetID: ResolvedPlace] = [:]
+        for (id, var place) in try await store.places() {
+            let components = renamer.renamed(place.components)
+            guard components != place.components else { continue }
+            place.components = components
+            renamed[id] = place
+        }
+        if !renamed.isEmpty { try await store.setPlaces(renamed) }
+        try await store.setValue(language, forKey: Key.placesLanguage)
     }
 
     struct TextOutcome {

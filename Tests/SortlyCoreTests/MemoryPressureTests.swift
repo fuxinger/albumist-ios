@@ -82,21 +82,78 @@ struct MemoryPressureTests {
         #expect(pressure.warnings == 2)
     }
 
-    /// Second review: after a warning, a swipe in the photo view looked up one photo and made the
-    /// index for all photos again. Without the index each lookup searches for its one photo.
-    @Test func aLookupWithoutTheIndexFindsTheOnePhotoLikeTheIndex() {
-        func facts(_ id: String, trip: String) -> AssetFacts {
-            AssetFacts(asset: AssetSnapshot(id: AssetID(id), creationDate: Fixture.date("2024-05-01")), tripID: SortlyID(trip))
+    /// Stands for `AppModel.factsByID` (re-review of P4-06): the index of all photos, made at the
+    /// first lookup the same way, kept until the facts change or a warning drops it.
+    final class FactsOwner {
+        let facts: [AssetFacts]
+        private(set) var builds = 0
+        private var factsIndex: [AssetID: AssetFacts]?
+        var indexIsDropped: Bool { factsIndex == nil }
+
+        init(_ facts: [AssetFacts]) { self.facts = facts }
+
+        var factsByID: [AssetID: AssetFacts] {
+            if let factsIndex { return factsIndex }
+            builds += 1
+            let index = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            factsIndex = index
+            return index
         }
-        let all = [facts("p1", trip: "t1"), facts("p2", trip: "t2"), facts("p1", trip: "t3")]
-        let index = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let indexed = FactsLookup(index: index), searched = FactsLookup(facts: all)
-        for id in [AssetID("p1"), AssetID("p2"), AssetID("p9")] {
-            #expect(searched[id] == indexed[id], "\(id.rawValue) differs without the index")
-        }
-        #expect(searched[AssetID("p1")]?.tripID == SortlyID("t1"))
-        #expect(indexed[AssetID("p2")]?.tripID == SortlyID("t2"))
-        #expect(searched[AssetID("p9")] == nil)
+
+        func dropCaches() { factsIndex = nil }
+    }
+
+    static func photo(_ id: String, trip: String) -> AssetFacts {
+        AssetFacts(asset: AssetSnapshot(id: AssetID(id), creationDate: Fixture.date("2024-05-01")), tripID: SortlyID(trip))
+    }
+
+    static let photos = [photo("p1", trip: "t1"), photo("p2", trip: "t2"), photo("p1", trip: "t3")]
+
+    @Test func aWarningDropsTheFactsIndex() {
+        let pressure = MemoryPressure()
+        let owner = FactsOwner(Self.photos)
+        _ = owner.factsByID
+        pressure.register("library caches", owner: owner) { $0.dropCaches() }
+
+        pressure.warning()
+
+        #expect(owner.indexIsDropped, "the facts index was kept through a memory warning")
+        #expect(owner.facts == Self.photos, "the facts were touched")
+    }
+
+    @Test func theNextLookupMakesTheFactsIndexAgainWithTheSameResult() {
+        let pressure = MemoryPressure()
+        let owner = FactsOwner(Self.photos)
+        let before = owner.factsByID
+        pressure.register("library caches", owner: owner) { $0.dropCaches() }
+        pressure.warning()
+
+        let after = owner.factsByID
+
+        #expect(owner.builds == 2)
+        #expect(after == before)
+        #expect(after[AssetID("p1")]?.tripID == SortlyID("t1"), "the first photo with an id no longer wins")
+        #expect(after[AssetID("p2")]?.tripID == SortlyID("t2"))
+        #expect(after[AssetID("p9")] == nil)
+        // Made once, then kept: no lookup searches the facts one by one.
+        _ = owner.factsByID
+        #expect(owner.builds == 2)
+    }
+
+    /// Re-review: the App's `factsByID` is the dictionary again, made at the next lookup after a
+    /// warning exactly like `FactsOwner.factsByID`; no lookup stays a search through all photos.
+    @Test func theAppMakesTheFactsIndexAgainAtTheNextLookup() throws {
+        let model = AppSource.code(try AppSource.read("App/Sortly/Model/AppModel.swift"))
+        let lookup = AppSource.body(of: "var factsByID: [AssetID: AssetFacts]", in: model) ?? ""
+        let rebuilds = lookup.contains("if let factsIndex { return factsIndex }")
+            && lookup.contains("Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })")
+            && lookup.contains("factsIndex = index")
+        #expect(rebuilds, "the next lookup does not make the facts index again")
+        let purge = AppSource.body(of: "func dropCaches(", in: model) ?? ""
+        let dropped = purge.contains("factsIndex = nil")
+        #expect(dropped, "the facts index is kept through a memory warning")
+        let searches = model.contains("FactsLookup") || model.contains("factsIndexDropped")
+        #expect(!searches, "lookups stay a search through all photos after a warning")
     }
 
     @Test func theDiagnosticLineHasCountsAndNamesOfCachesOnly() {
@@ -147,21 +204,13 @@ struct MemoryPressureTests {
         }
     }
 
-    /// Second review, 3, 6 and 7: the photo view's lookups never make the whole index again
-    /// while it is dropped; the previews loaded ahead for the analysis and the thumbnails'
+    /// Second review, 6 and 7: the previews loaded ahead for the analysis and the thumbnails'
     /// image manager let go of their images; the report says this launch's warnings.
-    @Test func theAppLooksUpSinglePhotosAndLetsGoOfLoadedImages() throws {
+    @Test func theAppLetsGoOfLoadedImagesAndSaysThisLaunchsWarnings() throws {
         let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
         let thumbnails = AppSource.code(try AppSource.read("App/Sortly/Views/AssetThumbnail.swift"))
         let analyzer = try AppSource.read("App/Sortly/Platform/VisionAnalyzer.swift")
         let log = try AppSource.read("App/Sortly/Platform/BackgroundRunLog.swift")
-
-        let lookup = AppSource.code(AppSource.body(of: "var factsByID: FactsLookup", in: model) ?? "")
-        let searchesWhileDropped = lookup.contains("factsIndexDropped") && lookup.contains("FactsLookup(facts:")
-        #expect(searchesWhileDropped, "a lookup after a warning makes the index for all photos again")
-        let purge = AppSource.code(AppSource.body(of: "func dropCaches(", in: model) ?? "")
-        let marksDropped = purge.contains("factsIndexDropped = true")
-        #expect(marksDropped, "the lookups do not know the index was dropped")
 
         let register = AppSource.code(AppSource.body(of: "func registerForMemoryWarnings(", in: analyzer) ?? "")
         let previews = register.contains("MemoryPressure.shared.register(") && register.contains("stopCachingImagesForAllAssets()")

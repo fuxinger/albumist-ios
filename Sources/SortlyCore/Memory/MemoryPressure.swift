@@ -64,28 +64,3 @@ public final class MemoryPressure {
             + "available \(availableMB.map(String.init) ?? "?") MB, emptied \(caches)"
     }
 }
-
-/// The facts of single photos by id, for the photo view and the search hits: from the index of
-/// all photos when there is one. After a memory warning dropped it, each lookup searches the
-/// facts for its one photo, so a swipe in the photo view does not make the index for all photos
-/// again on the main thread (second review of P4-06). The first photo with an id wins, as in
-/// the index.
-public struct FactsLookup: Sendable {
-    private let index: [AssetID: AssetFacts]?
-    private let facts: [AssetFacts]
-
-    public init(index: [AssetID: AssetFacts]) {
-        self.index = index
-        facts = []
-    }
-
-    public init(facts: [AssetFacts]) {
-        index = nil
-        self.facts = facts
-    }
-
-    public subscript(_ id: AssetID) -> AssetFacts? {
-        if let index { return index[id] }
-        return facts.first { $0.id == id }
-    }
-}

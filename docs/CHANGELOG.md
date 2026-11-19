@@ -64,7 +64,9 @@
   Apples Antwort die Seite bestimmt: nennt Apple dort das Gebiet oder eine Region darin, bleibt
   der Ort „Unsicher“. Nennt Apple an der Grenze das Nachbarland, gilt dieses (siehe
   `KNOWN_LIMITATIONS.md`). Die Golanhöhen enden im Westen an der Linie von 1949 (Gonen, Kfar
-  Szold und Kibbutz Dan bleiben in Israel). Eine Stadt aus Apples Antwort gilt nur, wenn das
+  Szold und Kibbutz Dan bleiben in Israel); im Osten und auf dem Hermon reichen sie bis an die
+  Linie von 1974, so weit die Karte dort Israel zeichnet (vorher hieß etwa Alonei HaBashan
+  „Israel“). Eine Stadt aus Apples Antwort gilt nur, wenn das
   gefragte Foto auf derselben Seite der Linie liegt wie das Foto, um das es geht. Im Reise-Atlas
   zählt ein Gebiet nicht als Land, seine Reisen und Orte zählen aber und tragen den
   Gebietsnamen; „Ausland“ in der Suche und das erkannte Zuhause kennen die Gebiete. Orte, die

@@ -34,6 +34,11 @@ struct DisputedAreaTests {
         ("Katzrin", 32.9925, 35.6914, "golan"),
         ("Suchumi", 43.0015, 41.0234, "abkhazia"),
         ("Banias", 33.2486, 35.6944, "golan"),
+        // The map's Israel reaches past the 1974 line's outline in the east and on the Hermon
+        // (review of bundle-i, 19.11.): Alonei HaBashan was "Israel" and called certain.
+        ("Alonei HaBashan", 33.0447, 35.8347, "golan"),
+        ("Golan-Ostrand bei Ein Zivan", 33.17, 35.83, "golan"),
+        ("Hermon, israelisch gehalten", 33.34, 35.77, "golan"),
         // At sea, where the map draws no country (second review of 752ba07): the area's own
         // waters say "nicht sicher" too, whatever Apple's lookup would answer.
         ("vor El Aaiún, 20 km", 27.15, -13.45, "western-sahara"),
@@ -76,6 +81,8 @@ struct DisputedAreaTests {
         ("Kibbutz Dan", 33.2386, 35.6522, "IL"),
         ("Tel Dan", 33.2487, 35.6522, "IL"),
         ("She'ar Yashuv", 33.2250, 35.6450, "IL"),
+        ("Snir", 33.2430, 35.6680, "IL"),
+        ("Ein Gev", 32.7820, 35.6400, "IL"),
         // An outline only overrides the countries the map gives the area: the Syrian-held
         // Golan east of the 1974 line and Mauritania along 12° W keep their country.
         ("Hader", 33.2700, 35.8000, "SY"),
@@ -89,6 +96,21 @@ struct DisputedAreaTests {
         #expect(m.disputedArea == nil, "\(name)")
         #expect(m.country?.isoCode == code, "\(name)")
         #expect(m.components(language: .german)?.isoCountryCode == code, "\(name)")
+    }
+
+    /// Israel inside its 1949 lines lies west of 35.70° E between the Yarmouk and the Hermon;
+    /// everything the map gives Israel east of it is the Golan (review of bundle-i, 19.11.: a
+    /// strip along the 1974 line and the Hermon were "Israel", certain).
+    @Test func theMapsIsraelEastOfTheHulaValleyIsAllGolan() {
+        var leaks: [String] = []
+        for i in 0...70 {
+            for j in 0...25 {
+                let lat = 32.70 + Double(i) * 0.01, lon = 35.70 + Double(j) * 0.01
+                let m = at(lat, lon)
+                if m.disputedArea == nil, m.countryCandidates.first?.isoCode == "IL" { leaks.append("\(lat),\(lon)") }
+            }
+        }
+        #expect(leaks.isEmpty, "\(leaks)")
     }
 
     /// Northern Cyprus has "CY" in the map too: Apple's "CY" for a photo in south Nicosia, near

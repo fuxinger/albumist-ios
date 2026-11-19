@@ -113,10 +113,13 @@ public enum DisputedAreas {
                      // The part west of the 1974 line of separation; the map counts it to Israel.
                      // To the west the 1949 line: the Jordan from the Sea of Galilee to the Bnot
                      // Ya'akov bridge, then the foot of the heights east of the Hula valley
-                     // (Gonen, Kfar Szold, Dan and Tel Dan stay in Israel, Banias is in the area).
-                     outlines: [[(33.31, 35.70), (33.33, 35.78), (33.29, 35.85), (33.10, 35.81), (32.95, 35.86),
-                                 (32.80, 35.84), (32.70, 35.78), (32.68, 35.65), (32.83, 35.645), (32.90, 35.63),
-                                 (33.00, 35.628), (33.05, 35.64), (33.12, 35.66), (33.20, 35.67), (33.245, 35.675)]],
+                     // (Gonen, Kfar Szold, Dan, Tel Dan and Snir stay in Israel, Banias is in the area).
+                     // To the north and east well past the 1974 line and the Hermon: the outline
+                     // only counts where the map says Israel, and the map's Israel reaches up to
+                     // 3 km past the line (review of bundle-i: Alonei HaBashan was "Israel").
+                     outlines: [[(33.40, 35.70), (33.40, 35.95), (32.88, 35.95), (32.80, 35.84), (32.70, 35.78),
+                                 (32.68, 35.65), (32.83, 35.645), (32.90, 35.63), (33.00, 35.628), (33.05, 35.64),
+                                 (33.12, 35.66), (33.20, 35.67), (33.245, 35.675), (33.27, 35.655), (33.30, 35.665)]],
                      outlineCountries: ["Israel"]),
         DisputedArea(id: "abkhazia", nameDE: "Abchasien", nameEN: "Abkhazia", continent: .asia,
                      mapCountries: [], mapRegions: ["GE-AB"], outlines: []),

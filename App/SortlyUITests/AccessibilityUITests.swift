@@ -20,6 +20,8 @@ import UIKit
 /// - a visible format placeholder ("%lld", "%@") and, in the English run, German words
 ///   left in the interface (untranslated strings)
 /// - text that runs off the side of the screen
+/// - the folder label in the settings cut on one line at any size (review P3-17,
+///   `checkFullyShown`)
 ///
 /// Also failing: an audit that does not complete in two attempts ("Audit failed to complete in
 /// time", each attempt printed as `A11Y_AUDIT_ERROR`): the screen would otherwise pass unchecked.
@@ -96,6 +98,8 @@ final class AccessibilityUITests: XCTestCase {
         /// Titles of screens the walk opens and goes back from: it waits for their bar.
         var receiptTitle: String
         var historyTitle: String
+        /// The label of the folder field in the settings (review P3-17: cut at the default size).
+        var folderLabel: String
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: ".*[0-9.]+ Vorschl(ag|äge) prüfen.*",
@@ -103,14 +107,16 @@ final class AccessibilityUITests: XCTestCase {
                                   starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
                                   applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
                                   shareAtlas: "Reise-Atlas teilen", sharePreview: "Vorschau des Teilen-Bilds", searchQuery: "Rom", country: "Italien",
-                                  receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig")
+                                  receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig",
+                                  folderLabel: "Ordner für neue Alben")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ [Ss]uggestions?.*",
                                    suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
                                    starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
                                    applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
                                    shareAtlas: "Share Travel Atlas", sharePreview: "Preview of the share image", searchQuery: "Rome", country: "Italy",
-                                   receiptTitle: "Changes", historyTitle: "History and Undo")
+                                   receiptTitle: "Changes", historyTitle: "History and Undo",
+                                   folderLabel: "Folder for New Albums")
     }
 
     // MARK: Tests
@@ -399,6 +405,7 @@ final class AccessibilityUITests: XCTestCase {
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
                 check("\(tag) settings lower", english: english)
+                checkFullyShown(w.folderLabel, identifier: "settings.rootFolder.label", "\(tag) settings", in: list.exists ? list : app)
             }
             tap(button(w.done), "\(tag) close settings")
             sleep(1)
@@ -720,6 +727,42 @@ final class AccessibilityUITests: XCTestCase {
             }
         }
         print("A11Y_TREE \(screen) \(seen) elements, \(texts.count) texts")
+    }
+
+    // MARK: Layout checks the audit does not make
+
+    /// A label shown in full, not ending in "…" (review P3-17 / G3-08: "Ordner für neue Al…"
+    /// in the settings at the default text size; the audit leaves clipped text at standard
+    /// sizes to the largest-size run, see `record`). On one line the label is as wide as the
+    /// text needs; wrapped, it is at least two lines tall. Scrolls the list until the label is
+    /// on screen.
+    private func checkFullyShown(_ text: String, identifier: String, _ screen: String, in list: XCUIElement) {
+        var element = app.staticTexts[text]
+        if !element.exists { element = app.staticTexts[identifier] }
+        func visible() -> Bool {
+            element.exists && !element.frame.isEmpty && app.frame.contains(element.frame)
+        }
+        var swipes = 0
+        while !visible() && swipes < 4 { list.swipeDown(); swipes += 1; sleep(1); if !element.exists { element = app.staticTexts[identifier] } }
+        swipes = 0
+        while !visible() && swipes < 6 { list.swipeUp(); swipes += 1; sleep(1); if !element.exists { element = app.staticTexts[identifier] } }
+        guard visible() else {
+            print("UI_STEP_MISSING \(screen) label '\(text)' on screen")
+            XCTFail("\(screen): the label '\(text)' was not found on screen")
+            return
+        }
+        let category: UIContentSizeCategory = accessibilitySize ? .accessibilityExtraExtraExtraLarge : .large
+        let font = UIFont.preferredFont(forTextStyle: .body, compatibleWith: UITraitCollection(preferredContentSizeCategory: category))
+        let needed = (text as NSString).size(withAttributes: [.font: font]).width
+        let frame = element.frame
+        let oneLineInFull = frame.width + 2 >= needed
+        let wrapped = frame.height >= 1.8 * font.lineHeight
+        if oneLineInFull || wrapped {
+            print("UI_STEP_OK \(screen) label '\(text)' shown in full (\(Int(frame.width))x\(Int(frame.height)), needs \(Int(needed)) on one line)")
+        } else {
+            print("A11Y_FAIL \(screen) | label cut | label '\(text)' | \(Int(frame.width))x\(Int(frame.height)), needs \(Int(needed)) pt on one line")
+            XCTFail("\(screen): the label '\(text)' is cut: \(Int(frame.width)) pt wide on one line, it needs \(Int(needed)) pt")
+        }
     }
 
     /// "chevron.right", "square.and.arrow.up": a symbol name read out instead of a label.

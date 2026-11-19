@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import os
 import SortlyCore
 
 /// What happened to the analysis in the background, for the diagnostic report: counts, times
@@ -26,6 +27,9 @@ enum BackgroundRunLog {
         var lastEndState: String?
         /// How the last analysis run ended: when, why, and whether the app was on screen.
         var lastRunEnd: String?
+        /// iOS's last memory warning (P4-06, `MemoryPressure.line`), kept across launches: iOS
+        /// may end the app right after it. The report adds this launch's count.
+        var lastMemoryWarning: String?
     }
 
     private static let key = "diagnostics.backgroundRun"
@@ -49,6 +53,17 @@ enum BackgroundRunLog {
         let outcome = complete ? "complete" : (paused.map { "paused \($0)" } ?? "ended without report")
         let line = "\(stamp) \(outcome), analyzer failing \(analyzerFailing), stage \(stage.map(String.init) ?? "-"), \(deviceState())"
         update { $0.lastRunEnd = line }
+    }
+
+    /// iOS warned that memory runs low (`AppModel.memoryWarning`).
+    static func memoryWarning(_ line: String) {
+        update { $0.lastMemoryWarning = line }
+    }
+
+    /// The memory iOS still allows the app, in MB; `nil` where it sets no limit (the simulator).
+    static var availableMemoryMB: Int? {
+        let bytes = os_proc_available_memory()
+        return bytes > 0 ? bytes / 1_048_576 : nil
     }
 
     static func deviceState() -> String {
@@ -87,6 +102,7 @@ enum BackgroundRunLog {
             "background time requested \(e.requested), started \(e.started), refused \(e.refused) (\(e.lastRefusal ?? "-")), "
                 + "last start \(start) at \(percent(e.lastStartProgress)), last end \(end) \(e.lastEndReason ?? "-") at \(progress), \(e.lastEndState ?? "-")",
             "last analysis run \(e.lastRunEnd ?? "-")",
+            "memory warnings this launch \(MemoryPressure.shared.warnings), last \(e.lastMemoryWarning ?? "-")",
             "device now \(deviceState()), hottest during the last run \(HeatLog.hottest)",
         ]
     }

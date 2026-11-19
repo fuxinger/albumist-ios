@@ -15,6 +15,13 @@ import UIKit
 final class AppModel {
     static let shared = AppModel()
 
+    init() {
+        // The copies made from the facts go when iOS warns that memory runs low (P4-06), and the
+        // previews loaded ahead for the analysis.
+        MemoryPressure.shared.register("library caches", owner: self) { $0.dropCaches() }
+        PreviewCache.registerForMemoryWarnings()
+    }
+
     enum Phase: Equatable {
         case loading
         case onboarding
@@ -353,6 +360,33 @@ final class AppModel {
         let ranks = MainThreadWatch.shared.section("preview ranks") { PreviewRank.ranks(of: facts) }
         previewRanksCache = ranks
         return ranks
+    }
+
+    /// iOS warned that memory runs low (review 18.11., P4-06): every registered cache is emptied
+    /// (`MemoryPressure`), and the warning is written for the diagnostic report at once, so the
+    /// report has it even when iOS ends the app right after.
+    func memoryWarning() {
+        let emptied = MemoryPressure.shared.warning()
+        BackgroundRunLog.memoryWarning(MemoryPressure.line(at: Date(), analysisRunning: analysis.isRunning, onScreen: isOnScreen,
+                                                           availableMB: BackgroundRunLog.availableMemoryMB, emptied: emptied))
+    }
+
+    /// The copies made from the facts that are made again at their next use: the search index
+    /// (off the main thread, at the next search), the facts by id (at the next lookup, as after
+    /// every change of the facts), the capture dates and the atlas's country photos. Never the
+    /// facts, states, suggestions or decisions. A search index still being made is left to
+    /// finish: a search waits for it. Kept (second review of P4-06): the library tab's areas (a
+    /// few MB; the grid under the photo view would lose its place), the atlas (a few KB, 100 to
+    /// 250 ms to make again on the main thread) and the preview ranks (small, made off the main
+    /// thread only when the facts are refreshed).
+    private func dropCaches() {
+        let dropped = (searchIndexCache, factsIndex, datesCache, countryCache)
+        searchIndexCache = nil
+        factsIndex = nil
+        datesCache = nil
+        countryCache = [:]
+        // Freed off the main thread: letting go of 100,000 entries takes a moment.
+        Task.detached(priority: .background) { withExtendedLifetime(dropped) {} }
     }
 
     /// Photos the user took out of a suggestion ("Aus Vorschlag entfernen").

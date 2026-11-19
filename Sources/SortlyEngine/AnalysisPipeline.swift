@@ -31,6 +31,10 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
     /// `AlbumMatcher.version` of `matches`. Results of an older version (0: stored before the
     /// stamp) are matched again at launch (`refreshMatchesIfOutdated`).
     public var matcherVersion: Int
+    /// Photos the suggestions were made with although their date is later than `generatedAt`
+    /// (a camera with its clock set wrong, "2031"). They count like every photo the suggestions
+    /// saw, not as taken afterwards (`LibraryStatus`, review P1-03). Usually none.
+    public var datedAfterwards: Set<AssetID> = []
 
     public init(generatedAt: Date, scope: OrganizationScope, proposals: [AlbumProposal], matches: [SortlyID: MatchResult],
                 dismissed: [AlbumProposal] = [], standIns: [StandIn] = [], isEarly: Bool = false,
@@ -45,7 +49,7 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         self.matcherVersion = matcherVersion
     }
 
-    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly, matcherVersion }
+    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly, matcherVersion, datedAfterwards }
 
     /// Snapshots stored before dismissed suggestions and stand-ins were kept still load.
     public init(from decoder: any Decoder) throws {
@@ -58,6 +62,7 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         standIns = try c.decodeIfPresent([StandIn].self, forKey: .standIns) ?? []
         isEarly = try c.decodeIfPresent(Bool.self, forKey: .isEarly) ?? false
         matcherVersion = try c.decodeIfPresent(Int.self, forKey: .matcherVersion) ?? 0
+        datedAfterwards = try c.decodeIfPresent(Set<AssetID>.self, forKey: .datedAfterwards) ?? []
     }
 }
 
@@ -1666,8 +1671,9 @@ public actor AnalysisPipeline {
             }
         }
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
-        let snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
+        var snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
                                         dismissed: suggestions.dismissed, standIns: suggestions.standIns, isEarly: early)
+        snapshot.datedAfterwards = Set(facts.filter { ($0.asset.creationDate ?? .distantPast) > snapshot.generatedAt }.map(\.id))
         var values: [String: any Encodable & Sendable] = [Key.proposals: snapshot, Key.heldSuggestions: held]
         var removing: Set<String> = []
         if let pending {

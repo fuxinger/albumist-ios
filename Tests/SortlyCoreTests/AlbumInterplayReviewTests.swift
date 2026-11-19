@@ -611,6 +611,70 @@ struct SameNameWinsTests {
         #expect(ProposalDecision.recommended(for: country, match: r[country.id]) == .extendExisting("it"))
     }
 
+    /// P1-02 (review 18.11.2026): the rule held only while the country would extend the album by
+    /// itself (at least 25 % of the country in it). After five trips the user's "Italien", made
+    /// after the first one, holds 100 of the country's 600 photos: the country got only a
+    /// possible match, the 2019 trip took the album, and a second "Italien" was offered.
+    @Test func sameNameWinsAlsoWhenTheAlbumHoldsLittleOfTheCountry() throws {
+        let years = [2019, 2021, 2022, 2023, 2024]
+        let sets = years.map { set("it\($0)", 0..<120) }
+        let trips = zip(years, sets).map {
+            AlbumProposal(id: SortlyID("t\($0)"), kind: .trip, title: "Italien · Mai \($0)", folderPath: ["Reisen", "\($0)"], assetIDs: $1)
+        }
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: sets.reduce(into: Set<AssetID>()) { $0.formUnion($1) })
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it2019", 0..<100))
+        for ps in [trips + [country], [country] + trips, [country]] {
+            let results = matcher.match(ps, against: CollectionInventory([album]), trips: sets)
+            let c = try #require(results[country.id])
+            #expect(ProposalDecision.recommended(for: country, match: c) == .extendExisting("it"), "\(ps.count) suggestions: \(c.status)")
+            #expect(c.reasons.contains(.missingItems(count: 500)))
+            guard ps.count > 1 else { continue }
+            let t = try #require(results[trips[0].id])
+            #expect(ProposalDecision.recommended(for: trips[0], match: t) == .createNew(title: nil, folderPath: nil), "\(t.status)")
+            #expect(t.alternatives.contains { $0.albumID == "it" })
+        }
+    }
+
+    /// P1-02: "Italien" holds 150 of the country's 300 photos and 50 from the way there through
+    /// Austria (75 % of the album is Italy, below the 80 % for extending by content). It is the
+    /// country's album all the same: extended (only Italy photos are added, nothing taken out),
+    /// not a second "Italien". Because it holds other photos too, it is not chosen without the
+    /// user looking at it ("Empfohlene auswählen").
+    @Test func sameNameWinsAlsoWhenTheAlbumHoldsOtherPhotosToo() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it", 0..<150).union(set("at", 0..<50)))
+        let c = try #require(matcher.match([country], against: CollectionInventory([album]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: c) == .extendExisting("it"), "\(c.status)")
+        #expect(c.reasons.contains(.missingItems(count: 150)))
+        #expect(!ProposalDecision.isSafeToAcceptUnseen(country, match: c))
+        // The same album with only Italy photos may be chosen unseen, as before.
+        let pure = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it", 0..<150))
+        let p = try #require(matcher.match([country], against: CollectionInventory([pure]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: p) == .extendExisting("it"))
+        #expect(ProposalDecision.isSafeToAcceptUnseen(country, match: p))
+    }
+
+    /// P1-02, the limits: with two albums of that name, or an album that is mostly something
+    /// else, the content decides as before (no album of the user is changed by default).
+    @Test func sameNameDecidesOnlyForOneAlbumThatIsMostlyThisSuggestion() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"], assetIDs: italy)
+        let first = CollectionSnapshot(id: "it1", title: "Italien", assetIDs: set("it", 0..<60))
+        let second = CollectionSnapshot(id: "it2", title: "Italien", assetIDs: set("it", 100..<130))
+        func extends(_ match: MatchResult) -> Bool {
+            if case .extendExisting = ProposalDecision.recommended(for: country, match: match) { return true }
+            return false
+        }
+        let two = try #require(matcher.match([country], against: CollectionInventory([first, second]))[country.id])
+        #expect(!extends(two), "\(two.status)")
+        let mostlyOther = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it", 0..<40).union(set("food", 0..<200)))
+        let other = try #require(matcher.match([country], against: CollectionInventory([mostlyOther]))[country.id])
+        #expect(!extends(other), "\(other.status)")
+    }
+
     /// A year in the name stays a part: the trip keeps "Italien 2019", the country does not
     /// grow it. Another name: the content decides, as before.
     @Test func yearOrOtherNameDoNotWin() throws {

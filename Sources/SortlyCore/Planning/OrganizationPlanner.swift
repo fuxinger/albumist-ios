@@ -328,10 +328,16 @@ extension ProposalDecision {
     /// An album that already holds everything is no action: "15 empfohlene auswählen" turned
     /// 15 complete suggestions into "Ausgewählt" without anything to create (UI run
     /// 43823834271), and once their albums were taken back they stayed that way.
+    ///
+    /// An album of the user that also holds other photos is extended only when the user looked
+    /// at it: "Italien" with the way there through Austria, extended because of its name
+    /// ("Gleicher Name gewinnt", review P1-02).
     public static func isSafeToAcceptUnseen(_ proposal: AlbumProposal, match: MatchResult?) -> Bool {
         let recommended = recommended(for: proposal, match: match)
+        let extendsMixedAlbum = recommended.extendedAlbum != nil && match?.best?.relation == .partialOverlap
         return proposal.reliability >= .likely && !proposal.isSensitive && !proposal.requiresUserName
             && match?.status != .possibleMatch && recommended.isAccepted && !recommended.isKeepExisting
+            && !extendsMixedAlbum
     }
 
     /// "So lassen" decisions for albums an undo deleted: such a decision changes nothing and

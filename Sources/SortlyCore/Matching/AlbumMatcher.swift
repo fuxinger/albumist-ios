@@ -139,7 +139,9 @@ public struct AlbumMatcher: Sendable {
     /// 4: the album recorded for a suggestion stays its album only while it shares photos with it
     ///    (`isStillAlbum`, second review of the place IDs 18.11.): saved matches that still offer
     ///    "ergänzen" into an album made for other photos are matched again.
-    public static let version = 4
+    /// 5: "Gleicher Name gewinnt" also below the shares for extending by content (review P1-02):
+    ///    saved matches that offer a second "Italien" next to the user's are matched again.
+    public static let version = 5
 
     /// Matches all proposals in one pass using an inverted membership index.
     /// - Parameters:
@@ -161,7 +163,9 @@ public struct AlbumMatcher: Sendable {
     /// - an album named exactly like a suggestion (normalised: "Italien" for the country
     ///   Italien) belongs to that suggestion when it would extend it, even if a trip of the run
     ///   wants it or already is complete in it (decision Fuchs 16.11.). That trip gets an album
-    ///   of its own and sees this one only under "Anpassen";
+    ///   of its own and sees this one only under "Anpassen". The suggestion extends the user's
+    ///   only album of its name whenever that album is mostly its photos, however little of it
+    ///   the album holds yet (review P1-02);
     /// - otherwise an album that already holds all of one suggestion ("schon vollständig",
     ///   whether or not the user tapped "Album so lassen") is that suggestion's album, and no
     ///   other suggestion extends it;
@@ -489,6 +493,9 @@ public struct AlbumMatcher: Sendable {
         parts.sort { ($0.score, $0.albumID.rawValue) > ($1.score, $1.albumID.rawValue) }
 
         let sameName = (titleIndex[AlbumTitle.normalized(proposal.title)] ?? []).sorted()
+        // The one album of the user named exactly like this suggestion (`isNamedLike`).
+        let sameNamed = sameName.filter { inventory[$0]?.isEditableAlbum == true }
+        let namedAlbum = sameNamed.count == 1 ? sameNamed.first : nil
         var reasons: [MatchReason] = []
 
         // Prefer editable albums; a read-only smart album must not block a real album.
@@ -552,6 +559,13 @@ public struct AlbumMatcher: Sendable {
             status = .alreadyComplete
         case .partOfProposal where best.metrics.coverage >= thresholds.extendableCoverage && isCertain(best, for: proposal):
             status = .extendable
+        case _ where best.albumID == namedAlbum:
+            // Gleicher Name gewinnt (decision Fuchs 16.11., review P1-02): the user's only album
+            // named like the suggestion is its album, also when it holds little of it ("Italien"
+            // made after the first of five trips) or other photos too (the way there through
+            // Austria), as long as it is mostly this suggestion's (`candidatePurity`). Otherwise
+            // a second "Italien" was offered next to it.
+            status = addable == 0 ? .alreadyComplete : .extendable
         default:
             status = .possibleMatch
         }

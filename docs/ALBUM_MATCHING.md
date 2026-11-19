@@ -125,7 +125,13 @@ In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen V
   es ergänzen will oder schon ganz darin steckt, und auch gegenüber zurückgestellten
   Vorschlägen. Das Land ergänzt dann „Italien“ (in der Vorschau unter „Ergänzt“, rückgängig
   zu machen); die Reise „Italien · Mai 2019“ bekommt ein eigenes Album und sieht „Italien“
-  nur unter „Anpassen“. Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
+  nur unter „Anpassen“. Ergänzen will der Vorschlag das einzige bearbeitbare Album dieses
+  Namens schon, wenn es überwiegend (≥ 50 %) seine Fotos enthält, auch mit wenig davon
+  (17 % des Landes nach fünf Reisen) oder mit anderen Fotos dazu (Prüfung 18.11.2026, P1-02;
+  vorher erst ab 25 % des Vorschlags und 80 % des Albums, sonst kam ein zweites „Italien“).
+  Enthält es auch andere Fotos, wählt „Empfohlene auswählen“ es nicht von selbst aus. Bei
+  zwei Alben dieses Namens oder einem Album mit überwiegend anderen Fotos entscheidet der
+  Inhalt wie sonst. Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
   die Reise. Ausnahmen: Albumist hat das Album schon für einen anderen Vorschlag angelegt
   oder ergänzt („Alben anderer Vorschläge“), oder ein Vorschlag mit genau diesem Namen ist
   schon vollständig darin.

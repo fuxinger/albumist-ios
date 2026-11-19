@@ -1201,6 +1201,16 @@
         }
       }
     },
+    "Alben werden geändert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updating albums"
+          }
+        }
+      }
+    },
     "Album anlegen" : {
       "localizations" : {
         "en" : {
@@ -2371,6 +2381,16 @@
         }
       }
     },
+    "Ergebnis" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Result"
+          }
+        }
+      }
+    },
     "Ergänzte Alben" : {
       "localizations" : {
         "en" : {
@@ -2441,12 +2461,12 @@
         }
       }
     },
-    "Es gibt schon ein anderes Album „%@“. Das neue bekommt einen Zusatz." : {
+    "Es gibt schon ein anderes Album „%@“. Danach hast du zwei Alben mit diesem Namen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "There is already another album “%@”. The new one gets a suffix."
+            "value" : "There’s already another album named “%@”. You’ll then have two albums with this name."
           }
         }
       }

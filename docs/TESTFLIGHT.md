@@ -113,8 +113,8 @@ Actions > **TestFlight feedback** > Run workflow.
 - Ablauf in GitHub (ein Lauf, Profi-Analyse, 17.11.2026): Actions > **TestFlight** > Run workflow
   auf `main` (oder `gh workflow run testflight.yml --ref main`). Der Lauf prüft genau diesen Commit
   selbst: erst CI (Regeln, Kern-Tests, iOS-Tests auf einem Mac), dann nebeneinander die UI-Tests
-  (kleines Tor: nur zwei Gruppen, Abschnitt „Zwei Tore“) und den kleinen Härtetest, bei beiden
-  Toren. Nur wenn alles grün ist und du freigegeben hast (`docs/launch/FREIGABE_EINRICHTEN.md`),
+  (kleines Tor: nur zwei Gruppen, Abschnitt „Zwei Tore“), den kleinen Härtetest und den
+  Release-Kurztest (unten), bei beiden Toren. Nur wenn alles grün ist und du freigegeben hast (`docs/launch/FREIGABE_EINRICHTEN.md`),
   baut ein Mac das Archiv, prüft es, signiert es beim Export, lädt es hoch und setzt „Was testen“;
   danach bekommt der Commit das Git-Tag `build-<Nummer>`. Zwei bis zweieinhalb Stunden bis zur
   Freigabe, wenn alle UI-Gruppen laufen (die UI-Tests allein 75–100 Minuten); laufen nur einzelne
@@ -124,7 +124,17 @@ Actions > **TestFlight feedback** > Run workflow.
   (höchstens 20). Kein Teil wartet auf andere Läufe. Ein zweiter TestFlight-Lauf wartet, bis der
   erste ganz fertig ist, auch während der erste auf deine Freigabe wartet. Wiederholungen nach einem
   Simulator-Ausfall und Tests, die erst in der Wiederholung grün wurden, zählt der Job „Repeats and
-  flaky tests“ für UI-Tests und Härtetest zusammen.
+  flaky tests“ für UI-Tests, Härtetest und Release-Kurztest zusammen.
+- Release-Kurztest (Prüfbefund P5-03, 19.11.2026): alle UI-Tests laufen auf einem Debug-Build mit
+  Test-Schaltern; die Release-Fassung, die hochgeladen wird, startete vorher kein Test. Der Job
+  „Release build smoke test (UI)“ baut die UI-Tests mit `-configuration Release` und lässt einen
+  Test laufen (`App/SortlyUITests/ReleaseSmokeUITests.swift`): Einführung, Beispiel-Mediathek und
+  Analyse, empfohlene Vorschläge, ein Plan in den Gratis-Alben, in Fotos angelegt, ohne
+  Test-Schalter wie bei einem neuen Nutzer. Bei beiden Toren, neben UI-Tests und Härtetest (rund
+  25–35 Minuten, kürzer als der Härtetest), und er muss grün sein, sonst wird nicht hochgeladen; ein
+  übersprungener Test zählt als Fehler. Beim großen Tor ist er der sechste Mac-Job: eine kurze
+  UI-Gruppe wartet dann unter Umständen auf einen Mac, bis er fertig ist. **Ungeprüft bis zum
+  ersten Lauf auf einem Mac.**
 - Kein Push und kein Merge in `main` startet einen Build (16.11.: das Zusammenführen der
   Webseite startete sonst einen Build mit altem App-Stand). Von selbst startet nur der tägliche
   Build mit kleinem Tor (`daily-build.yml`, Abschnitt „Zwei Tore“), und auch er lädt erst nach
@@ -474,6 +484,7 @@ brauchen sie nicht.
 | UI-Tests | nur die zwei kurzen Gruppen `flow-full` (ganzer Ablauf mit Video) und `contrast` (Kontrast), je Job rund 18 Minuten, nebeneinander | alle Gruppen (`auto`: jede ohne Grün für genau diese App und ihren Testcode) |
 | UI-Tor | diese zwei Gruppen grün für genau diese App und ihren Testcode, keine davon je rot dafür | alle Gruppen, gleiche Regeln |
 | Härtetest 10.000 Fotos | ja (vor jedem Upload: Regel 17.11., Entscheidung 4), neben den zwei Gruppen | ja |
+| Release-Kurztest | ja (P5-03: die Release-Fassung einmal gestartet), daneben | ja |
 | Bis zur Freigabe | rund 70 Minuten (CI rund 20, dann bestimmt der Härtetest mit rund 45 die Dauer) | 2–2,5 Stunden (ohne UI-Gruppen rund 65–70 Minuten wie das kleine Tor) |
 | Hochladen | erst nach deiner Freigabe | erst nach deiner Freigabe |
 | Erkennbar an | Laufname „TestFlight daily build (small gate, only for the owner)“, Nachricht des Tags, letzte Zeile von „Was testen“ | Laufname „TestFlight“ |
@@ -492,7 +503,8 @@ brauchen sie nicht.
   Bau-Strecke ändert, nie durch Wiederholen grün, und einen abgelehnten Build bietet er nicht jeden
   Tag neu an, auch nicht, wenn danach nur Doku dazukommt. Von Hand geht es trotzdem.
 - Der tägliche Build achtet nicht auf die Mac-Warteschlange (eigene Gruppen wie jeder
-  TestFlight-Lauf); er braucht höchstens drei Macs zugleich (zwei UI-Gruppen und den Härtetest), um
+  TestFlight-Lauf); er braucht höchstens vier Macs zugleich (zwei UI-Gruppen, den Härtetest und den
+  Release-Kurztest), um
   03:30 UTC sind die nächtlichen Läufe meist fertig.
 - **Nicht in `nightly.yml`**: dessen Jobs sind seit 18.11. bewusst unverändert der Vergleichslauf
   für den StoreKit-Fall („no product“), und ein TestFlight-Build braucht die Laufnummern von

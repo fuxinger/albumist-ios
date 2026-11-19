@@ -5,7 +5,7 @@ Review P5-06 (18.11.2026): 8 of 15 red UI runs were no app bug, and the same tes
 five times, but every run counted only its own repeats (ui_tests.py flaky-summary). This reads
 the UI runs of the last DAYS days (ui.yml, testflight.yml, ui-stress.yml) through the API:
 
-  - every group job (also of earlier attempts: a red that a re-run turned green still counts),
+  - every group job, the stress pass and the Release smoke test (also of earlier attempts: a red that a re-run turned green still counts),
     sorted by why it did not pass: "test red" (the step "Run UI tests" or "Stress run" failed,
     which is a test or the app), "no result" (the step "No test result ...": the simulator or
     XCTest failed in every pass), "machinery" (any other step: runner, download, checkout),
@@ -43,6 +43,7 @@ RESERVE = 300  # calls of the hour left for ui_evidence.py (MAX_CALLS 300 per in
 
 GROUP_JOB = re.compile(r"\[([a-z0-9-]+) app [0-9a-f]+ tests [0-9a-f]+\]\s*$")
 STRESS_JOB = re.compile(r"\bUI stress \d+ photos\s*$")
+SMOKE_JOB = re.compile(r"\bRelease build smoke test \(UI\)\s*$")  # testflight.yml release-smoke
 RECORD = re.compile(r"^(?:ui-)?flaky-([a-z0-9-]+)-attempt-(\d+)$")
 TEST_STEPS = ("Run UI tests", "Stress run")
 NO_RESULT_STEP = "No test result"
@@ -110,7 +111,9 @@ def group_of(job_name: str) -> str | None:
     found = GROUP_JOB.search(name)
     if found:
         return found.group(1)
-    return "stress" if STRESS_JOB.search(name) else None
+    if STRESS_JOB.search(name):
+        return "stress"
+    return "release-smoke" if SMOKE_JOB.search(name) else None
 
 
 def records_of(blob: bytes) -> list[dict]:

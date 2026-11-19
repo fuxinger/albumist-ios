@@ -37,12 +37,16 @@ run-name: >-
 #      iOS build, core and app tests. Its iOS job always runs here.
 #   3. Then side by side: the UI flow (ui.yml, at most four Macs) and the small stress pass
 #      (ui-stress.yml with photos 10000 and minutes 15; the owner's rule 17.11.: before each
-#      TestFlight build), with either gate. Five Macs at the peak (small gate: three). The big
+#      TestFlight build), with either gate, and the Release smoke test (job release-smoke: the
+#      UI test target built with -configuration Release, one test that onboards, analyses and
+#      applies a plan as a new user would; review P5-03: no test ever started the configuration
+#      that is uploaded). Six Mac jobs at the peak (small gate: four), so in the big gate one
+#      short UI group may wait for a Mac until the smoke test ends (~25-35 min). The big
 #      gate runs the UI flow with groups "auto" (input ui_groups): only the groups that have no
 #      green result yet for exactly this app and their own test code (the owner's rule 17.11.: a
 #      test-only change reruns only the groups it touches, any app change everything; ui.yml "UI
 #      plan"); the small gate runs its two groups. "Repeats and flaky tests" then counts the
-#      simulator repeats and the flaky tests of both in one table.
+#      simulator repeats and the flaky tests of all three in one table.
 #   3b. UI gate (Linux): every UI group of the gate must be green for exactly this app
 #      fingerprint and its own test fingerprint, from this run or an earlier one, and none may be
 #      red for that pair (a red is fixed, never re-run to green; .github/scripts/ui_evidence.py
@@ -221,14 +225,158 @@ jobs:
       photos: '10000'
       minutes: '15'
 
+  release-smoke:
+    # Review P5-03: every UI test runs a Debug build (ui.yml builds without a configuration),
+    # where UITestSupport.isRunning and the app's #if DEBUG code change what runs; the Release
+    # build that is uploaded was never started before (only the archive below and ci.yml's
+    # manual Appetize job build Release, and neither runs it). Here the UI test target is built
+    # with -configuration Release and one test (App/SortlyUITests/ReleaseSmokeUITests.swift)
+    # does what a new user does: onboarding, demo library and analysis, a plan applied in
+    # Photos. Both gates; the upload needs it green.
+    # Beside the UI flow and the stress pass (it needs the tests only), so the upload waits no
+    # longer: ~10-20 min Release build (the simulator boots meanwhile) and ~10-15 min test,
+    # less than the stress pass (~45 min) or the longest UI group. In the big gate it is a sixth
+    # Mac job: one short UI group may wait for a Mac until this one ends.
+    # Unverified until a Mac run.
+    name: Release build smoke test (UI)
+    needs: tests
+    runs-on: xcode-27
+    timeout-minutes: 75
+    steps:
+      - name: Note when the job started
+        # For the deadline of the test pass (ui_tests.py --deadline): timeout-minutes above minus
+        # 12 minutes for the steps after it, as in ui.yml.
+        run: echo "UI_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode --runtime
+      - name: Boot simulator (in the background)
+        id: sim
+        run: |
+          UDID=$(python3 .github/scripts/ui_tests.py pick --device pro)
+          [ -n "$UDID" ] || { echo "no simulator"; exit 1; }
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          nohup python3 .github/scripts/ui_tests.py boot --udid "$UDID" --ready-file sim-ready > sim-boot.log 2>&1 &
+      - name: Install XcodeGen
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py).
+        run: python3 .github/scripts/toolchain.py xcodegen
+      - name: Build for testing (Release)
+        run: |
+          set +e
+          cd App && xcodegen generate
+          xcodebuild build-for-testing \
+            -project Sortly.xcodeproj \
+            -scheme SortlyUI \
+            -configuration Release \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath ../build/dd \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1
+          status=$?
+          grep -aE "error:|\*\* " ../build-log.txt | grep -v "/SourcePackages/" | head -100
+          [ $status = 0 ] || exit $status
+          # The app under test is the Release build and nothing else.
+          products=../build/dd/Build/Products
+          ls "$products"
+          [ -d "$products/Release-iphonesimulator/Sortly.app" ] || { echo "::error::no Release-iphonesimulator/Sortly.app in the build products"; exit 1; }
+          [ ! -d "$products/Debug-iphonesimulator" ] || { echo "::error::a Debug build in the products of the Release smoke test"; exit 1; }
+      - name: Wait for the simulator
+        run: |
+          for _ in $(seq 1 180); do [ -f sim-ready ] && break; sleep 5; done
+          cat sim-boot.log
+          [ "$(cat sim-ready 2>/dev/null)" = ok ] || { echo "simulator did not boot"; exit 1; }
+      - name: Built tests present
+        id: built
+        run: |
+          XCTESTRUN=$(find build/dd/Build/Products -maxdepth 1 -name '*.xctestrun' | sort | head -1)
+          [ -n "$XCTESTRUN" ] || { echo "::error::no .xctestrun in the build products"; exit 1; }
+          echo "xctestrun=$XCTESTRUN" >> "$GITHUB_OUTPUT"
+      - name: Run UI tests
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          XCTESTRUN: ${{ steps.built.outputs.xctestrun }}
+          # xcodebuild hands TEST_RUNNER_* variables to the tests without the prefix; without it
+          # the test skips itself (as in ui.yml).
+          TEST_RUNNER_SORTLY_RELEASE_SMOKE: '1'
+        run: |
+          set +e
+          python3 .github/scripts/ui_tests.py run --udid "$UDID" --name release-smoke --xctestrun "$XCTESTRUN" \
+            --only ReleaseSmokeUITests --deadline "$((UI_JOB_START + (75 - 12) * 60))" --budget-min 30
+          status=$?
+          # 75: every pass failed on the simulator or XCTest alone; the next step fails the job.
+          [ "$status" = 75 ] && exit 0
+          [ "$status" = 0 ] || exit "$status"
+          # ui_tests.py counts a skipped test as done; a pass needs the test to have passed (in
+          # the first pass or in its repeat after a simulator failure).
+          PASSED="Test Case '-[SortlyUITests.ReleaseSmokeUITests test1_ReleaseBuildOnboardsAnalysesAndApplies]' passed"
+          for f in build/release-smoke-log.txt build/release-smoke-retry-log.txt; do
+            if [ -f "$f" ] && grep -aqF "$PASSED" "$f"; then exit 0; fi
+          done
+          echo "::error title=Release smoke test::the test did not pass (skipped: SORTLY_RELEASE_SMOKE did not reach it?)"
+          exit 1
+      - name: No test result (simulator or XCTest failed in every pass)
+        if: hashFiles('build/no-test-result') != ''
+        run: |
+          echo "::error title=Release smoke test::no test result: $(cat build/no-test-result). Re-run this job."
+          exit 1
+      - name: Job summary
+        if: always()
+        run: |
+          args=()
+          for log in build/*-log.txt; do [ -f "$log" ] && args+=(--swift-log "$log"); done
+          python3 .github/scripts/test_summary.py summary --title "Release build smoke test" "${args[@]}" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Upload results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-results-release-smoke
+          path: |
+            build/*.xcresult
+            build/*-log.txt
+            build-log.txt
+            sim-boot.log
+          retention-days: 7
+          if-no-files-found: ignore
+          overwrite: true
+      - name: Keep the retry record for the run summary
+        # build/flaky-release-smoke.json, counted by the job "flaky" below and by the UI history
+        # (flaky_history.py); a second try a minute later, as in ui.yml.
+        id: flaky_upload
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-flaky-release-smoke-attempt-${{ github.run_attempt }}
+          path: build/flaky-*.json
+          retention-days: 14
+          if-no-files-found: ignore
+          overwrite: true
+      - name: Wait before the second try of the retry record
+        if: always() && steps.flaky_upload.outcome == 'failure'
+        run: echo "FLAKY_UPLOAD retry record upload failed, second try in 60 s"; sleep 60
+      - name: Keep the retry record for the run summary (second try)
+        if: always() && steps.flaky_upload.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-flaky-release-smoke-attempt-${{ github.run_attempt }}
+          path: build/flaky-*.json
+          retention-days: 14
+          if-no-files-found: ignore
+          overwrite: true
+
   flaky:
-    # The simulator repeats and the tests that passed only on a repeat, over the UI groups and
-    # the stress pass of this run, in one table (ui_tests.py flaky-summary over their
-    # build/flaky-*.json): nothing that was repeated stays hidden in a single job's log. Never
-    # fails the run; the tests decide that.
+    # The simulator repeats and the tests that passed only on a repeat, over the UI groups, the
+    # stress pass and the Release smoke test of this run, in one table (ui_tests.py
+    # flaky-summary over their build/flaky-*.json): nothing that was repeated stays hidden in a
+    # single job's log. Never fails the run; the tests decide that.
     name: Repeats and flaky tests (UI flow and stress pass)
-    needs: [ui, stress]
-    if: ${{ always() && (needs.ui.result != 'skipped' || needs.stress.result != 'skipped') }}
+    needs: [ui, stress, release-smoke]
+    if: >-
+      ${{ always() && (needs.ui.result != 'skipped' || needs.stress.result != 'skipped'
+      || needs.release-smoke.result != 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     # actions: read for the runs, jobs and retry records of the last days (UI history).
@@ -303,12 +451,13 @@ jobs:
 
   release:
     name: Archive and upload to TestFlight
-    needs: [check, tests, ui, stress, ui-gate]
-    # The tests, the UI flow, the stress pass and the UI gate of this run must all be green, with
-    # either gate; nothing skips them.
+    needs: [check, tests, ui, stress, release-smoke, ui-gate]
+    # The tests, the UI flow, the stress pass, the Release smoke test and the UI gate of this run
+    # must all be green, with either gate; nothing skips them.
     if: >-
       ${{ !cancelled() && needs.check.outputs.ready == 'true' && needs.tests.result == 'success'
-      && needs.ui.result == 'success' && needs.stress.result == 'success' && needs.ui-gate.result == 'success' }}
+      && needs.ui.result == 'success' && needs.stress.result == 'success'
+      && needs.release-smoke.result == 'success' && needs.ui-gate.result == 'success' }}
     # The owner's approval (decision 5 of 18.11.2026): the job waits until the environment's
     # required reviewer approves it, and only then gets its secrets (the four App Store Connect
     # secrets are environment secrets there, docs/launch/FREIGABE_EINRICHTEN.md). The only job of

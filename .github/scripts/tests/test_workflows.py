@@ -260,7 +260,7 @@ class TestFlightWiringTests(unittest.TestCase):
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         self.assertIn("python3 .github/scripts/ui_evidence.py gate", text)
         release = text.split("\n  release:\n", 1)[1].split("\n  tag:\n", 1)[0]
-        self.assertIn("needs: [check, tests, ui, stress, ui-gate]", release)
+        self.assertIn("needs: [check, tests, ui, stress, release-smoke, ui-gate]", release)
         self.assertIn("needs.ui-gate.result == 'success'", release)
 
     def test_nothing_skips_the_tests_before_an_upload(self):
@@ -296,7 +296,7 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertNotIn("gate", stress)  # the same small pass with either gate
         self.assertIn("photos: '10000'", stress)
         self.assertIn("minutes: '15'", stress)
-        for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "ui-gate"))):
+        for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "release-smoke", "ui-gate"))):
             with self.subTest(job=job):
                 rule = job_field(text, job, "if")
                 self.assertNotIn("||", rule)
@@ -424,6 +424,8 @@ def job_steps(text, job):
             if value in (">-", ">", "|"):
                 more = []
                 for later in lines[n + 1:]:
+                    if not later.strip():
+                        continue  # an empty line, or a comment line of the script (left out)
                     if not later.startswith("          "):
                         break
                     more.append(later.strip())
@@ -465,6 +467,54 @@ class ReleaseSkipTests(unittest.TestCase):
                 "          xcodebuild build-for-testing -scheme S\n      - uses: actions/checkout@v1\n      - name: Two\n"
                 "        run: echo\n")
         self.assertEqual([(n, r) for n, r, _ in job_steps(text, "a")], [("One", "x && !inputs.release"), ("", ""), ("Two", "")])
+        # A comment line inside a script does not end it.
+        text = "on: push\njobs:\n  a:\n    steps:\n      - name: One\n        run: |\n          a\n          # note\n          b\n"
+        self.assertEqual(job_steps(text, "a")[0][2], "a\nb")
+
+
+class ReleaseSmokeTests(unittest.TestCase):
+    """Review P5-03: every UI test ran a Debug build with -SortlyUITest switches, and the Release
+    build that is uploaded was never started before the upload (the archive and the manual
+    Appetize job were the only Release builds). One UI test now runs on a Release build in every
+    TestFlight run, beside the UI flow and the stress pass, and the upload needs it green."""
+
+    def test_the_uploaded_configuration_is_ui_tested_first(self):
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        jobs = job_blocks(text)
+        self.assertIn("release-smoke", jobs)
+        smoke = jobs["release-smoke"]
+        steps = {name: run for name, _, run in job_steps(text, "release-smoke")}
+        build = steps["Build for testing (Release)"]
+        self.assertRegex(build, r"xcodebuild build-for-testing\b")
+        self.assertIn("-scheme SortlyUI", build)
+        self.assertIn("-configuration Release", build)
+        self.assertIn("Release-iphonesimulator/Sortly.app", build)
+        run = steps["Run UI tests"]
+        self.assertIn("--only ReleaseSmokeUITests", run)
+        self.assertIn("TEST_RUNNER_SORTLY_RELEASE_SMOKE: '1'", smoke)
+        # A skipped test is no pass (the test skips itself without the variable).
+        self.assertIn("Test Case '-[SortlyUITests.ReleaseSmokeUITests test1_ReleaseBuildOnboardsAnalysesAndApplies]' passed", run)
+        # Beside the UI flow and the stress pass, not after them: it needs the tests only.
+        self.assertEqual([n.strip() for n in job_field(text, "release-smoke", "needs").split(",")], ["tests"])
+        self.assertEqual(job_field(text, "release-smoke", "if"), "")
+        # The upload needs it green, with either gate.
+        self.assertIn("release-smoke", [n.strip() for n in job_field(text, "release", "needs").split(",")])
+        self.assertIn("needs.release-smoke.result == 'success'", job_field(text, "release", "if"))
+        # Its repeats and flaky tests are counted with the others (flaky_history.RECORD).
+        self.assertIn("name: ui-flaky-release-smoke-attempt-${{ github.run_attempt }}", smoke)
+        self.assertIn("release-smoke", [n.strip() for n in job_field(text, "flaky", "needs").split(",")])
+
+    def test_the_smoke_test_runs_only_there_and_as_a_user_would(self):
+        path = os.path.join(ROOT, "App", "SortlyUITests", "ReleaseSmokeUITests.swift")
+        swift = read(path)
+        self.assertIn('environment["SORTLY_RELEASE_SMOKE"] == "1"', swift)
+        self.assertIn("throw XCTSkip(", swift)
+        self.assertIn("func test1_ReleaseBuildOnboardsAnalysesAndApplies()", swift)
+        # No test switch of the app: a Release build ignores them, and the test must not lean on one.
+        self.assertNotIn('"-SortlyUITest', swift)
+        for name in ("ui.yml", "ui-stress.yml", "ci.yml"):
+            with self.subTest(workflow=name):
+                self.assertNotIn("SORTLY_RELEASE_SMOKE", read(os.path.join(ROOT, ".github", "workflows", name)))
 
 
 if __name__ == "__main__":

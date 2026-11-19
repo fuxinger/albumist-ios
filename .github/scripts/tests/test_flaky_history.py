@@ -104,6 +104,7 @@ class OutcomeTests(unittest.TestCase):
         self.assertEqual(flaky_history.group_of(OTHER), "flow-other")
         self.assertEqual(flaky_history.group_of(STRESS), "stress")
         self.assertEqual(flaky_history.group_of("UI stress 50000 photos"), "stress")
+        self.assertEqual(flaky_history.group_of("Release build smoke test (UI)"), "release-smoke")
         self.assertIsNone(flaky_history.group_of("UI build"))
         self.assertIsNone(flaky_history.group_of("UI verdict (full)"))
 
@@ -119,6 +120,10 @@ class OutcomeTests(unittest.TestCase):
         self.assertIn("name: ui-flaky-${{ matrix.group }}-attempt-${{ github.run_attempt }}", ui)
         self.assertIn("- name: Stress run\n", stress)
         self.assertIn("name: flaky-stress-attempt-${{ github.run_attempt }}", stress)
+        with open(os.path.join(root, "testflight.yml"), encoding="utf-8") as f:
+            testflight = f.read()
+        self.assertIn("    name: Release build smoke test (UI)\n", testflight)
+        self.assertTrue(flaky_history.RECORD.match("ui-flaky-release-smoke-attempt-1"))
         self.assertTrue(flaky_history.RECORD.match("ui-flaky-flow-other-attempt-2"))
         self.assertTrue(flaky_history.RECORD.match("flaky-stress-attempt-1"))
         self.assertFalse(flaky_history.RECORD.match("ui-results-device"))

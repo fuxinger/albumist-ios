@@ -38,6 +38,13 @@ class ReviewTests(unittest.TestCase):
                 self.assertEqual(len(problems), 1)
                 self.assertIn(why, problems[0])
 
+    def test_a_private_repository_stops_the_upload_even_with_a_reviewer(self):
+        # GitHub Free, Pro and Team enforce required reviewers in public repositories only; the rule
+        # may still be listed after a switch to private. No upload then until another way is set up.
+        problems, warnings, reviewers = upload_approval.review(SET_UP, public=False)
+        self.assertEqual(problems, [upload_approval.NOT_PUBLIC])
+        self.assertEqual((warnings, reviewers), ([], []))
+
     def test_a_missing_branch_rule_and_self_review_are_warnings(self):
         open_to_all = dict(SET_UP, deployment_branch_policy=None)
         problems, warnings, _ = upload_approval.review(open_to_all)
@@ -63,13 +70,18 @@ class CheckTests(unittest.TestCase):
         with open(path, encoding="utf-8") as f:
             return f.read()
 
-    def check(self, answer):
+    def check(self, answer, public=True):
         def fetcher():
             if isinstance(answer, Exception):
                 raise answer
             return answer
+
+        def visibility():
+            if isinstance(public, Exception):
+                raise public
+            return public
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            code = upload_approval.check(fetcher)
+            code = upload_approval.check(fetcher, visibility)
         return code, log.getvalue()
 
     def test_set_up(self):
@@ -89,10 +101,32 @@ class CheckTests(unittest.TestCase):
                 self.assertEqual(self.read(self.output), "")
 
     def test_no_answer_is_no_upload(self):
-        code, log = self.check(upload_approval.ApiError("down"))
+        for answer, public in ((upload_approval.ApiError("down"), True), (SET_UP, upload_approval.ApiError("down"))):
+            with self.subTest(answer=answer, public=public):
+                code, log = self.check(answer, public)
+                self.assertEqual(code, 1)
+                self.assertIn("re-run this job", log)
+                self.assertEqual(self.read(self.output), "")
+
+    def test_a_private_repository_stops_the_run(self):
+        code, log = self.check(SET_UP, public=False)
         self.assertEqual(code, 1)
-        self.assertIn("re-run this job", log)
+        self.assertIn("not public", log)
         self.assertEqual(self.read(self.output), "")
+
+    def test_visibility_is_read_from_the_repository(self):
+        originals = upload_approval._get
+        self.addCleanup(setattr, upload_approval, "_get", originals)
+        for answer, public in (({"private": False, "visibility": "public"}, True),
+                               ({"private": True, "visibility": "private"}, False),
+                               ({"private": True, "visibility": "internal"}, False),
+                               ({"private": False}, True), ({}, False)):
+            with self.subTest(answer=answer):
+                upload_approval._get = lambda path, answer=answer: answer
+                self.assertEqual(upload_approval.fetch_public(), public)
+        upload_approval._get = lambda path: None
+        with self.assertRaises(upload_approval.ApiError):
+            upload_approval.fetch_public()
 
 
 APPROVED = upload_approval.review(SET_UP)
@@ -115,9 +149,11 @@ class DailyBuildTests(unittest.TestCase):
         self.assertIn("small gate", why)
 
     def test_never_before_the_approval_is_set_up(self):
-        start, why = self.decide(approval=upload_approval.review(None))
-        self.assertFalse(start)
-        self.assertIn(upload_approval.SETUP, why)
+        for approval in (upload_approval.review(None), upload_approval.review(SET_UP, public=False)):
+            with self.subTest(approval=approval):
+                start, why = self.decide(approval=approval)
+                self.assertFalse(start)
+                self.assertIn(upload_approval.SETUP, why)
 
     def test_never_behind_a_run_that_runs_or_waits_for_the_owner(self):
         for status in ("queued", "in_progress", "waiting"):
@@ -210,8 +246,10 @@ class DailyBuildTests(unittest.TestCase):
         os.environ.update(GITHUB_OUTPUT=output, GITHUB_STEP_SUMMARY=summary)
         self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
                                  for k, v in saved.items()])
-        originals = (upload_approval.fetch, ui_evidence.api)
-        self.addCleanup(lambda: (setattr(upload_approval, "fetch", originals[0]), setattr(ui_evidence, "api", originals[1])))
+        originals = (upload_approval.fetch, ui_evidence.api, upload_approval.fetch_public)
+        self.addCleanup(lambda: (setattr(upload_approval, "fetch", originals[0]), setattr(ui_evidence, "api", originals[1]),
+                                 setattr(upload_approval, "fetch_public", originals[2])))
+        upload_approval.fetch_public = lambda: True
 
         def runs(path, **params):
             if path.endswith("/runs"):

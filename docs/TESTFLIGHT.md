@@ -443,10 +443,11 @@ brauchen sie nicht.
 - **Feedback-Abruf**: `asc-feedback.yml` hat einen eigenen Schlüssel mit Rolle Developer
   (Abschnitt „Abstürze und Feedback abholen“), damit er nicht jeden Morgen auf dich wartet.
 - Die Freigabe gibt nur Fuchs, nie ein Agent.
-- **Grenze:** Prüfer für eine Umgebung gibt es bei GitHub Free, Pro und Team nur in öffentlichen
-  Repositorys (bei Free in privaten auch keine Umgebungs-Secrets). Ob der erste Job es bemerkt,
-  wenn das Repository privat wird und die Regel nicht mehr gilt, ist nicht erprobt. Vor einem
-  Wechsel auf privat die Freigabe darum neu lösen.
+- **Grenze:** Prüfer für eine Umgebung setzt GitHub bei Free, Pro und Team nur in öffentlichen
+  Repositorys durch (bei Free in privaten auch keine Umgebungs-Secrets). Darum hält der erste Job
+  jeden Lauf an, sobald das Repository nicht öffentlich ist (`upload_approval.py` liest die
+  Sichtbarkeit): nach einem Wechsel auf privat lädt nichts mehr hoch, bis die Freigabe neu gelöst
+  ist. Vor dem Wechsel darum zuerst die Freigabe neu lösen.
 
 ## Zwei Tore: täglicher Build und Build für Tester (Entscheidung Fuchs 18.11.2026, Nr. 10)
 

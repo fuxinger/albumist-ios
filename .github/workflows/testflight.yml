@@ -26,8 +26,9 @@ run-name: >-
 # them, and only after the owner's click (docs/launch/FREIGABE_EINRICHTEN.md). No other job of
 # any workflow names them (.github/scripts/tests/test_workflows.py).
 #
-#   1. Upload approval (Linux, a minute): only on main, and only when the environment
-#      testflight-upload asks a required reviewer first (.github/scripts/upload_approval.py);
+#   1. Upload approval (Linux, a minute): only on main, and only when the repository is public
+#      and the environment testflight-upload asks a required reviewer first (GitHub enforces
+#      that rule in a private repository only with Enterprise; .github/scripts/upload_approval.py);
 #      otherwise the run stops here, before any macOS minute, and names the setup steps. GitHub
 #      would create a missing environment without any rule as soon as the upload job names it, so
 #      this check is what keeps an upload from starting without the owner. It reads no secret.

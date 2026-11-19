@@ -14,6 +14,11 @@ in the repository. So no run gets past its first job unless the environment asks
 That the secrets left the repository cannot be read from here (a job outside the environment
 would have to read them for that); the setup steps say to delete them.
 
+It also stops when the repository is not public: on GitHub Free, Pro and Team a required
+reviewer of an environment is enforced in public repositories only, and whether the API still
+lists such a rule after a switch to private is not known. Going private needs another approval
+path first (docs/launch/FREIGABE_EINRICHTEN.md); until then nothing is uploaded.
+
 Warnings, no block: a branch rule is missing (every branch may use the environment; it should be
 main only), or "Prevent self-review" is on (the owner could not approve a run he started himself;
 the daily build is started by GitHub Actions, so it does not matter there).
@@ -48,8 +53,21 @@ class ApiError(Exception):
 
 def fetch(name: str = ENVIRONMENT) -> dict | None:
     """The environment as the REST API describes it, None when it does not exist (HTTP 404)."""
+    return _get(f"environments/{urllib.parse.quote(name, safe='')}")
+
+
+def fetch_public() -> bool:
+    """Whether the repository is public (GET /repos/{repo}; any token that can read it)."""
+    repository = _get("")
+    if repository is None:
+        raise ApiError("GitHub API: the repository could not be read")
+    return repository.get("private") is False and repository.get("visibility", "public") == "public"
+
+
+def _get(path: str) -> dict | None:
     repo = os.environ["GITHUB_REPOSITORY"]
-    url = f"{API}/repos/{repo}/environments/{urllib.parse.quote(name, safe='')}"
+    url = f"{API}/repos/{repo}" + (f"/{path}" if path else "")
+    name = path or repo
     request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
                                                    "X-GitHub-Api-Version": "2022-11-28",
                                                    "Authorization": f"Bearer {os.environ['GH_TOKEN']}"})
@@ -65,11 +83,18 @@ def fetch(name: str = ENVIRONMENT) -> dict | None:
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             last = error
         time.sleep(5 * (attempt + 1))
-    raise ApiError(f"GitHub API: environments/{name}: {last}")
+    raise ApiError(f"GitHub API: {name}: {last}")
 
 
-def review(environment: dict | None) -> tuple[list[str], list[str], list[str]]:
-    """(problems that block the upload, warnings, reviewers) of an environment; None: it does not exist."""
+NOT_PUBLIC = ("the repository is not public, and GitHub enforces a required reviewer of an environment in a "
+              "private repository only with GitHub Enterprise")
+
+
+def review(environment: dict | None, public: bool = True) -> tuple[list[str], list[str], list[str]]:
+    """(problems that block the upload, warnings, reviewers) of an environment; None: it does not exist.
+    public: whether the repository is public (fetch_public)."""
+    if not public:
+        return [NOT_PUBLIC], [], []
     if environment is None:
         return [f"the environment {ENVIRONMENT} does not exist"], [], []
     rules = environment.get("protection_rules") or []
@@ -91,14 +116,15 @@ def review(environment: dict | None) -> tuple[list[str], list[str], list[str]]:
     return [], warnings, reviewers
 
 
-def check(fetcher=fetch) -> int:
+def check(fetcher=fetch, public=fetch_public) -> int:
     try:
         environment = fetcher()
+        is_public = public()
     except ApiError as error:
         print(command("error", "Upload approval", f"the environment {ENVIRONMENT} could not be read ({error}); "
                       "re-run this job when the API answers"))
         return 1
-    problems, warnings, reviewers = review(environment)
+    problems, warnings, reviewers = review(environment, is_public)
     for text in warnings:
         print(command("warning", "Upload approval", text))
     with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:

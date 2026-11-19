@@ -5,8 +5,8 @@ testers and the App Store). For daily-build.yml: Linux, no secret.
   python3 .github/scripts/daily_build.py decide
       Writes start=true|false to $GITHUB_OUTPUT and why to the log and the job summary. true only
       when all of these hold:
-        1. The upload asks the owner first (upload_approval.py: the environment exists and has a
-           required reviewer). The daily build never uploads on its own: its upload job waits for
+        1. The upload asks the owner first (upload_approval.py: the repository is public, and the
+           environment exists and has a required reviewer). The daily build never uploads on its own: its upload job waits for
            the owner's click like every other.
         2. No TestFlight run is running or waiting. A run that waits for the owner's approval still
            holds the group "testflight" (testflight.yml); a run started now would wait behind it
@@ -125,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     app = ui_groups.app_fingerprint(ui_groups.GitTree(head))
     try:
         environment = upload_approval.fetch()
+        public = upload_approval.fetch_public()
         call = ui_evidence.api
         runs = runs_of(call)
     except (upload_approval.ApiError, ui_evidence.ApiError) as error:
@@ -132,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         verifier = ui_evidence.Verifier()
         try:
-            start, why = decide(head, app, runs, build_tags(), upload_approval.review(environment), verifier.app,
+            start, why = decide(head, app, runs, build_tags(), upload_approval.review(environment, public), verifier.app,
                                 lambda run: got_past_the_check(call, run), lambda sha: docs_only_since(sha, head))
         except ui_evidence.ApiError as error:
             start, why = False, f"GitHub API did not answer ({error}); no daily build today, or start it by hand"

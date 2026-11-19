@@ -8,6 +8,12 @@ GitHub, eine „Umgebung“. Nur der Upload-Schritt kommt an ihn heran, und erst
 ersten Schritt („Upload approval“) an und verweist auf diese Seite. Auch der tägliche Build
 startet erst danach.
 
+**Wichtig, bevor das Repository privat wird:** Den Prüfer für eine Umgebung setzt GitHub ohne
+Enterprise-Abo nur in öffentlichen Repositorys durch (auch GitHub Pro oder Team reichen nicht).
+Darum hält der erste Job jeden TestFlight-Lauf an, sobald das Repository nicht mehr öffentlich
+ist, und es wird nichts mehr hochgeladen. Bevor du es auf privat stellst, bitte zuerst einen
+Agenten fragen: die Freigabe braucht dann einen anderen Weg.
+
 Am besten am Windows-PC im Browser (wegen der Datei in Schritt 4). Der Rest geht auch auf dem
 iPhone im Browser. Die Knöpfe bei GitHub sind englisch; sie stehen unten **fett**.
 
@@ -120,9 +126,6 @@ Gut zu wissen:
 - Der tägliche Build wartet morgens ab etwa 6 Uhr (im Sommer 7 Uhr) auf dich, aber nur an
   Tagen, an denen sich die App geändert hat.
 - **Die Freigabe gibst nur du.** Kein Agent gibt sie für dich.
-- **Nur solange das Repository öffentlich ist:** Den Prüfer für eine Umgebung bietet GitHub ohne
-  Enterprise-Abo nur für öffentliche Repositorys an. Bevor du das Repository auf privat stellst,
-  bitte zuerst einen Agenten fragen: dann braucht die Freigabe einen anderen Weg.
 - Aus Versehen abgelehnt? Im Lauf **Re-run failed jobs**: GitHub fragt dich noch einmal, die Tests
   laufen nicht neu.
 

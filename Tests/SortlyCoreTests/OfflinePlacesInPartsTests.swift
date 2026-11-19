@@ -4,9 +4,9 @@ import Testing
 import SortlyWorldMap
 import SortlyTestSupport
 
-/// Review evidence (uncommitted): places saved in parts of 2,000.
-@Suite("Review evidence: offline places in parts")
-struct ReviewPlacesEvidenceTests {
+/// Offline places (from a review of the place resolution): places saved in parts of 2,000.
+@Suite("Offline places in parts")
+struct OfflinePlacesInPartsTests {
     static let map: OfflineWorldMap = try! WorldMapResource.load()
 
     func requests(_ place: GeoCoordinate, count: Int, prefix: String) -> [PlaceResolutionService.Request] {

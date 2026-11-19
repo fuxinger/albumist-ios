@@ -13,8 +13,8 @@ extension SortlyStore {
 }
 
 /// Re-review of "Dein Zuhause" (16.11.): the scenarios of its findings, kept as tests.
-@Suite("Re-review: Dein Zuhause stored values")
-struct ReReviewHomeStoreTests {
+@Suite("Dein Zuhause: damaged stored values")
+struct HomeDamagedValuesTests {
     /// `readable` catches only `DecodingError`. The values read with `defaults:` (`user.home`,
     /// `user.recurringPlaces`) go through `StoredDefaults.decode`, which reports bytes that are not
     /// JSON as `DecodingError.dataCorrupted`: such a value is read as not stored.

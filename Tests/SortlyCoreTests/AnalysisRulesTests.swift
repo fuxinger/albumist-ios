@@ -5,8 +5,8 @@ import SortlyTestSupport
 
 /// Core-level regression tests for the analysis findings of the cross-review of 14.11.2026
 /// (docs/review/AUDIT_2026-11-14.md, group 2).
-@Suite("Audit 14.11.2026: analysis rules")
-struct AuditAnalysisCoreTests {
+@Suite("Analysis rules")
+struct AnalysisRulesTests {
     // MARK: 2.1 trip identity
 
     @Test func splitTripKeepsItsIdOnTheBiggerPart() {

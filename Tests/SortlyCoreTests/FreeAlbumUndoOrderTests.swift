@@ -6,8 +6,8 @@ import SortlyTestSupport
 /// Small findings of the plugin review (15.11.) about free albums and undo: N4 the free-album
 /// count, N5 an album left empty after two undos in the other order, N6 a deletion whose
 /// read-back failed. (N7 is in `SortlyStoreTests`, K6 in `EmptyLibraryStateTests`.)
-@Suite("Plugin review: free-album count, undo order, unverified deletions")
-struct PluginReviewLaunchTests {
+@Suite("Free-album count, undo order, unverified deletions")
+struct FreeAlbumUndoOrderTests {
     let planner = OrganizationPlanner(rootFolderTitle: "", chunkSize: 50)
     let allAssets: Set<AssetID> = ids("a", 0..<100)
     let done = StepState.succeeded(createdID: nil, verifiedAt: Date(timeIntervalSince1970: 1))

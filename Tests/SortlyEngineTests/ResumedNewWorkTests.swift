@@ -3,9 +3,9 @@ import Testing
 @testable import SortlyEngine
 @testable import SortlyCore
 
-/// Third-pass review evidence (uncommitted): a floor from before a big new workload.
-@Suite("Review evidence 3: floor and new work")
-struct ReviewThirdPassEvidenceTests {
+/// Resumed run, new work (from the third review pass of the progress work): a floor from before a big new workload.
+@Suite("Resumed run: floor and new work")
+struct ResumedNewWorkTests {
     /// Stopped in the text step (stage 5) at 90 %. An update asks for every image again, so
     /// the run spends hours in the image step (stage 4), which counts as "catching up": the card
     /// says "Macht da weiter … Gleich wieder bei Schritt 5" and holds 90 % the whole time.

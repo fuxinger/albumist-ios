@@ -4,9 +4,9 @@ import Testing
 import SortlyTestSupport
 
 /// Our own tests for the fixes of the second review (docs/review/AUDIT2_2026-11-15.md),
-/// next to the cases the reviewers supplied (Audit2RegressionTests).
-@Suite("Audit 2: counting, receipt, free albums")
-struct Audit2FixTests {
+/// next to the cases the reviewers supplied (ExecutionEdgeCaseTests).
+@Suite("Counting, receipt, free albums")
+struct FreeAlbumsAndReceiptTests {
     private func confirmed(_ plan: ChangePlan) -> ChangePlan {
         var p = plan; p.confirmedAt = Date(); p.status = .confirmed; return p
     }

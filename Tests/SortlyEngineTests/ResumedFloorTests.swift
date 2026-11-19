@@ -3,10 +3,10 @@ import Testing
 @testable import SortlyEngine
 @testable import SortlyCore
 
-/// Second-pass review evidence (uncommitted): `ResumedRun.back` drops the floor whenever the
+/// Resumed run, the floor (from the second review pass of the progress work): `ResumedRun.back` drops the floor whenever the
 /// stopped step's total did not grow, also when the library was not rebuilt.
-@Suite("Review evidence 2: resumed floor")
-struct ReviewSecondPassEvidenceTests {
+@Suite("Resumed run: the floor")
+struct ResumedFloorTests {
     /// Paused at 30,000 of 50,000 photos in the image step; the user then deletes 5,000 photos
     /// that were already analysed (a clean-up). Back at step 4: 25,000 of 45,000. Same work
     /// left (20,000), nothing stale, but the total shrank, so the floor is dropped and the

@@ -3,8 +3,8 @@ import Testing
 @testable import SortlyCore
 
 /// Small findings of the design review (15.11.2026) whose logic lives in the core.
-@Suite("Design review: covers and world share")
-struct DesignReviewMinorTests {
+@Suite("Album covers and world share")
+struct AlbumCoverAndWorldShareTests {
     /// N4: the album cover was the photo with the smallest id, a random photo.
     @Test func albumCoverIsTheNewestPhoto() {
         let day: TimeInterval = 86_400

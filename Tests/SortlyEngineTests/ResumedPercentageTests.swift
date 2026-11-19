@@ -3,9 +3,9 @@ import Testing
 @testable import SortlyEngine
 @testable import SortlyCore
 
-/// Review evidence (uncommitted): the "never lower" percentage of a resumed run.
-@Suite("Review evidence: resumed percentage")
-struct ReviewSwitchesEvidenceTests {
+/// Resumed run, the percentage (from a review of the progress work): the "never lower" percentage of a resumed run.
+@Suite("Resumed run: percentage")
+struct ResumedPercentageTests {
     typealias Instant = ContinuousClock.Instant
     static let t0 = ContinuousClock.now
     static func at(_ seconds: Double) -> Instant { t0.advanced(by: .seconds(seconds)) }

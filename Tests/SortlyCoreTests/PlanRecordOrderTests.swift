@@ -5,9 +5,9 @@ import SortlyTestSupport
 
 /// Second review of the plan safety work (6b34b20): album records follow run order, and a
 /// folder alone carries out no suggestion.
-@Suite("Plan safety, second review")
-struct ReviewSafety2Tests {
-    let h = PluginReviewSafetyTests()
+@Suite("Plan safety: record order, a folder alone")
+struct PlanRecordOrderTests {
+    let h = InterruptedPlanUndoTests()
 
     /// P makes "Rom", R adds photos to it; with records stored in run order (the app stores
     /// waiting results before every run), undoing R and then P leaves no album behind.

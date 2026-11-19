@@ -11,8 +11,8 @@ import SortlyTestSupport
 /// order of "Rückgängig" on an interrupted plan and the second undo into an album that was
 /// there before; its store and album-check parts are `OpenPlansTests` and
 /// `ManagedAlbumCheckTests`.
-@Suite("Plugin review: interrupted plans, undo twice, albums missing for a while")
-struct PluginReviewSafetyTests {
+@Suite("Interrupted plans, undo twice, albums missing for a while")
+struct InterruptedPlanUndoTests {
     let planner = OrganizationPlanner(rootFolderTitle: "", chunkSize: 50)
     let allAssets: Set<AssetID> = ids("a", 0..<300)
     static let ownPhotos = ids("a", 250..<255)

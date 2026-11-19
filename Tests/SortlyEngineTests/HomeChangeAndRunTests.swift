@@ -7,8 +7,8 @@ import SortlyStore
 import SortlyTestSupport
 
 /// Second review of "Dein Zuhause" (16.11.): the scenarios of its findings, kept as tests.
-@Suite("Review: Dein Zuhause in the analysis")
-struct HomeReviewPipelineTests {
+@Suite("Dein Zuhause: a home change and the analysis")
+struct HomeChangeAndRunTests {
     let base = HomePipelineTests()
     let now = Fixture.date("2026-11-16")
 

@@ -3,10 +3,10 @@ import Testing
 @testable import SortlyStore
 import SortlyCore
 
-/// Third-pass review evidence (uncommitted): the identity stamp lives in `settings` under a
+/// The identity stamp and the safety backup (from the third review pass of the progress work): the identity stamp lives in `settings` under a
 /// key the safety backup keeps ("database.identity" is not "analysis.%" / "execution.%").
-@Suite("Review evidence 3: identity and the safety backup")
-struct ReviewIdentityEvidenceTests {
+@Suite("Identity stamp and the safety backup")
+struct IdentityStampBackupTests {
     /// AppModel.load asks for the identity BEFORE restoreFromBackupIfNeeded. On a new iPhone or
     /// after "Neu aufbauen" the fresh database then already "has safety data", so the user's
     /// decisions and settings are not restored.

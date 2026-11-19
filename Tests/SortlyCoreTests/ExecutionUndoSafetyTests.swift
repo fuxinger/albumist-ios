@@ -6,8 +6,8 @@ import SortlyTestSupport
 /// Regression tests for the independent audit of 14.11.2026 (docs/review/AUDIT_2026-11-14.md).
 /// Each test names the finding it covers. The first three came with the audit report; the
 /// first one was adapted (see 1.1 below), the other two are unchanged.
-@Suite("Audit 14.11.2026: execution and undo safety")
-struct AuditRegressionTests {
+@Suite("Execution and undo safety")
+struct ExecutionUndoSafetyTests {
     let planner = OrganizationPlanner(rootFolderTitle: "Albumist")
 
     func confirmed(_ plan: ChangePlan) -> ChangePlan {

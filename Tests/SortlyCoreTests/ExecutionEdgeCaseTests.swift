@@ -3,8 +3,8 @@ import Testing
 @testable import SortlyCore
 import SortlyTestSupport
 
-@Suite("Independent audit 2 – additional regression cases")
-struct Audit2RegressionTests {
+@Suite("Execution: edge cases")
+struct ExecutionEdgeCaseTests {
     private func confirmed(_ plan: ChangePlan) -> ChangePlan {
         var p = plan; p.confirmedAt = Date(); p.status = .confirmed; return p
     }

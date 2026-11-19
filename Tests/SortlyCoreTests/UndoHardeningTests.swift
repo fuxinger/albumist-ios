@@ -376,7 +376,7 @@ struct UndoHardeningTests {
         #expect(reasons == [blankReads == 1 ? StepState.deletionNotAppliedReason : "deletion could not be verified"])
         // Seen to be still there: nothing written down. Not verifiable either way: what the
         // album held stays written down (plugin review N6), and an undo brings it back only if
-        // Photos, asked for it on its own, says it is gone (PluginReviewLaunchTests).
+        // Photos, asked for it on its own, says it is gone (FreeAlbumUndoOrderTests).
         #expect(undone.record?.deletedAlbums.isEmpty == (blankReads == 1))
         #expect(PlanReceipt(plan: undone, inventory: try await library.currentInventory()).containersDeleted == 0)
     }

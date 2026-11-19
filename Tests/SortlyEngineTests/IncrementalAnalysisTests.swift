@@ -9,8 +9,8 @@ import SortlyTestSupport
 
 /// Regression tests for the analysis findings of the cross-review of 14.11.2026
 /// (docs/review/AUDIT_2026-11-14.md, group 2, 4.2, 5.1, 5.4, 5.6).
-@Suite("Audit 14.11.2026: analysis")
-struct AuditAnalysisTests {
+@Suite("Incremental analysis")
+struct IncrementalAnalysisTests {
     static let map: OfflineWorldMap = PipelineTests.map
 
     /// Analyzer whose answers the test changes between runs.

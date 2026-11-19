@@ -6,8 +6,8 @@ import SortlyStore
 import SortlyTestSupport
 
 /// Re-review of "Dein Zuhause" (16.11.): the scenarios of its findings, kept as tests.
-@Suite("Re-review: Dein Zuhause concurrency")
-struct ReReviewHomeTests {
+@Suite("Dein Zuhause: concurrency")
+struct HomeConcurrencyTests {
     let now = Fixture.date("2026-11-16")
 
     /// `rematch()` ("Passt nicht", after a plan) while "Analyse neu aufbauen" clears the store:

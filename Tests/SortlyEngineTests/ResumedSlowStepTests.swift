@@ -3,11 +3,11 @@ import Testing
 @testable import SortlyEngine
 @testable import SortlyCore
 
-/// Fourth-pass review evidence (uncommitted): leaving "catching up" early (a slow quick step,
+/// Resumed run, a slow step (from the fourth review pass of the progress work): leaving "catching up" early (a slow quick step,
 /// measured over 30 s) re-spreads from the floor at the CURRENT position, so the work that was
 /// already done before the stop is counted again as new progress.
-@Suite("Review evidence 4: back before the stopped step")
-struct ReviewFourthPassEvidenceTests {
+@Suite("Resumed run: back before the stopped step")
+struct ResumedSlowStepTests {
     /// Paused at 30,000 of 50,000 photos in the image step (stage 4). Nothing changed. On
     /// resume the places step's map pass over 50,000 photos takes about a minute, so after its
     /// first 30 s it is measured as slow: not catching up, `back` at the places step. Once the

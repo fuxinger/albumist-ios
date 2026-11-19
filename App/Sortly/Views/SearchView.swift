@@ -27,6 +27,9 @@ struct SearchView: View {
     /// The field is shown and focused when the tab opens; testers did not find a hidden one.
     @State private var searchActive = false
     @Namespace private var zoom
+    /// The column of a suggestion's symbol grows with the text size: a fixed 24 pt let the
+    /// symbol run over the word at the largest size (review P3-12 / G3-07).
+    @ScaledMetric(relativeTo: .body) private var symbolWidth: CGFloat = 24
 
     /// Shown only before the library is analysed (afterwards the library's own starting points).
     /// Translated (design review W6: English devices saw "Strand 2024"); the search understands
@@ -146,7 +149,7 @@ struct SearchView: View {
                     HStack(spacing: Theme.Spacing.s) {
                         Image(systemName: Self.symbol(suggestion.kind))
                             .foregroundStyle(.secondary)
-                            .frame(width: 24)
+                            .frame(width: symbolWidth)
                         Text(verbatim: suggestion.label)
                             .foregroundStyle(.primary)
                         Spacer()

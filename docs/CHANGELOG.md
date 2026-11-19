@@ -81,6 +81,20 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 19.11.: Featuring-Check nennt kein iPad mehr; die App gibt es nur fürs iPhone (G7-02).
+- 19.11.: Größte Schrift: Die Länderliste im Reise-Atlas wird nicht mehr zerhackt (P3-11).
+  Flagge und Pfeil stehen oben, der Name darunter in voller Breite, das Jahr in einer eigenen
+  Zeile und nie umbrochen, wie die Bereiche der Übersicht.
+- 19.11.: Einstellungen: „Ordner für neue Alben“ ist nicht mehr abgeschnitten (P3-17). Die
+  Beschriftung bekommt die Breite, die sie braucht, das Feld den Rest; bei den größten
+  Schriftgrößen steht das Feld unter der Beschriftung.
+- 19.11.: Größte Schrift: Das Symbol eines Suchvorschlags liegt nicht mehr über dem Wort
+  (P3-12); seine Spalte wächst mit der Schrift (`@ScaledMetric`), ebenso die Symbole in der
+  Reise-Werkstatt. `layout_rule.py` lehnt feste Symbol-Breiten ab.
+- 19.11.: Englisch (P3-10): „Sicher“ heißt „Certain“ statt „Safe“, überall „analyzing“ und
+  „test run“, „Alles zurücknehmen“ heißt „Undo Everything“, alle Knöpfe groß geschrieben
+  („Create Album“, „Not Now“, „Restore Purchase“ …). `check_strings.py` prüft das mit
+  `english_rule.py`.
 - 19.11.: Fotos mit einem Datum in der Zukunft bleiben nicht mehr für immer unsortiert (P1-03);
   ein als unlesbar aufgegebenes Foto wird eine Woche später noch einmal versucht (P1-08); Fotos,
   deren Land sich nicht finden lässt, gelten nicht mehr für immer als offen (P1-09); die

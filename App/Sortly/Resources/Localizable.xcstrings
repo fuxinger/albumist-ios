@@ -559,13 +559,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Add %lld photo"
+                  "value" : "Add %lld Photo"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Add %lld photos"
+                  "value" : "Add %lld Photos"
                 }
               }
             }
@@ -1009,13 +1009,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Review %lld suggestion"
+                  "value" : "Review %lld Suggestion"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Review %lld suggestions"
+                  "value" : "Review %lld Suggestions"
                 }
               }
             }
@@ -1206,7 +1206,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Create album"
+            "value" : "Create Album"
           }
         }
       }
@@ -1216,7 +1216,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add to album"
+            "value" : "Add to Album"
           }
         }
       }
@@ -1236,7 +1236,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Leave album as is"
+            "value" : "Leave Album as Is"
           }
         }
       }
@@ -1266,7 +1266,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist is analysing your photos. Possible again once it's done."
+            "value" : "Albumist is analyzing your photos. Possible again once it's done."
           }
         }
       }
@@ -1276,7 +1276,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist is analysing or changing your library right now. Try again in a moment."
+            "value" : "Albumist is analyzing or changing your library right now. Try again in a moment."
           }
         }
       }
@@ -1526,7 +1526,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Accept all safe ones"
+            "value" : "Accept All Certain Ones"
           }
         }
       }
@@ -1596,7 +1596,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rebuild analysis"
+            "value" : "Rebuild Analysis"
           }
         }
       }
@@ -1616,7 +1616,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Start analysis"
+            "value" : "Start Analysis"
           }
         }
       }
@@ -1726,7 +1726,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Detect automatically"
+            "value" : "Detect Automatically"
           }
         }
       }
@@ -1746,7 +1746,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Create example library"
+            "value" : "Create Example Library"
           }
         }
       }
@@ -1816,7 +1816,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Redeem code"
+            "value" : "Redeem Code"
           }
         }
       }
@@ -2796,7 +2796,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Restore purchase"
+            "value" : "Restore Purchase"
           }
         }
       }
@@ -2896,7 +2896,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Let’s go"
+            "value" : "Let’s Go"
           }
         }
       }
@@ -3066,7 +3066,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Enter a name"
+            "value" : "Enter a Name"
           }
         }
       }
@@ -3076,7 +3076,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Suggest names"
+            "value" : "Suggest Names"
           }
         }
       }
@@ -3116,7 +3116,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Check again"
+            "value" : "Check Again"
           }
         }
       }
@@ -3226,7 +3226,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not now"
+            "value" : "Not Now"
           }
         }
       }
@@ -3586,7 +3586,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Split trip"
+            "value" : "Split Trip"
           }
         }
       }
@@ -3596,7 +3596,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Split or merge trip"
+            "value" : "Split or Merge Trip"
           }
         }
       }
@@ -3646,7 +3646,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Detect trips automatically again"
+            "value" : "Detect Trips Automatically Again"
           }
         }
       }
@@ -3756,7 +3756,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Safe"
+            "value" : "Certain"
           }
         }
       }
@@ -4116,7 +4116,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Back to trips"
+            "value" : "Back to Trips"
           }
         }
       }
@@ -4396,7 +4396,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add to album"
+            "value" : "Add to Album"
           }
         }
       }
@@ -5669,13 +5669,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "You put %lld suggestion aside with “Not now”. It comes back after the next analysis."
+                  "value" : "You put %lld suggestion aside with “Not Now”. It comes back after the next analysis."
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "You put %lld suggestions aside with “Not now”. They come back after the next analysis."
+                  "value" : "You put %lld suggestions aside with “Not Now”. They come back after the next analysis."
                 }
               }
             }
@@ -6068,7 +6068,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The purchase could not be verified. Tap “Restore purchase” or try again later."
+            "value" : "The purchase could not be verified. Tap “Restore Purchase” or try again later."
           }
         }
       }
@@ -6538,7 +6538,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose album"
+            "value" : "Choose Album"
           }
         }
       }
@@ -6618,7 +6618,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Change selection"
+            "value" : "Change Selection"
           }
         }
       }
@@ -6628,7 +6628,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Allow all photos"
+            "value" : "Allow All Photos"
           }
         }
       }
@@ -6641,13 +6641,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Create %lld selected album"
+                  "value" : "Create %lld Selected Album"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "Create %lld selected albums"
+                  "value" : "Create %lld Selected Albums"
                 }
               }
             }
@@ -6908,7 +6908,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Show older"
+            "value" : "Show Older"
           }
         }
       }
@@ -7098,7 +7098,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Analysing new photos"
+            "value" : "Analyzing new photos"
           }
         }
       }
@@ -7108,7 +7108,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Analysing again after an update"
+            "value" : "Analyzing again after an update"
           }
         }
       }
@@ -7118,7 +7118,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Analysing more new photos"
+            "value" : "Analyzing more new photos"
           }
         }
       }
@@ -7528,7 +7528,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Trial run: only photos from %@"
+            "value" : "Test run: only photos from %@"
           }
         }
       }
@@ -7538,7 +7538,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add the whole library"
+            "value" : "Add the Whole Library"
           }
         }
       }
@@ -7558,7 +7558,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open the Photos app"
+            "value" : "Open the Photos App"
           }
         }
       }
@@ -7748,7 +7748,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not a trip, I'm here often"
+            "value" : "Not a Trip, I'm Here Often"
           }
         }
       }
@@ -7798,7 +7798,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Yes, I'm here often"
+            "value" : "Yes, I'm Here Often"
           }
         }
       }
@@ -7808,7 +7808,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No, these are trips"
+            "value" : "No, These Are Trips"
           }
         }
       }
@@ -7868,7 +7868,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Show as trips"
+            "value" : "Show as Trips"
           }
         }
       }
@@ -8518,7 +8518,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Take Everything Back?"
+            "value" : "Undo Everything?"
           }
         }
       }
@@ -8528,7 +8528,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Take Everything Back"
+            "value" : "Undo Everything"
           }
         }
       }
@@ -10628,7 +10628,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Review suggestions"
+            "value" : "Review Suggestions"
           }
         }
       }
@@ -11288,7 +11288,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "In the trial run Albumist only sees photos from %@. Add the whole library."
+            "value" : "In the test run Albumist only sees photos from %@. Add the whole library."
           }
         }
       }
@@ -11698,7 +11698,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "That's right"
+            "value" : "That's Right"
           }
         }
       }
@@ -12328,7 +12328,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“Not a trip” is available once the analysis has been rebuilt, because Albumist then plans your trips again."
+            "value" : "“Not a Trip” is available once the analysis has been rebuilt, because Albumist then plans your trips again."
           }
         }
       }
@@ -12338,7 +12338,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“Not a trip” is available once creating is finished, because Albumist then plans your trips again."
+            "value" : "“Not a Trip” is available once creating is finished, because Albumist then plans your trips again."
           }
         }
       }
@@ -12348,7 +12348,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "“Not a trip” is available once the analysis is finished, because Albumist then plans your trips again."
+            "value" : "“Not a Trip” is available once the analysis is finished, because Albumist then plans your trips again."
           }
         }
       }

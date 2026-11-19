@@ -8,7 +8,7 @@ gute Produktseite) und wie Albumist dasteht.
 
 | Bereich | Stand |
 |---|---|
-| iOS-27-Design | Systemleisten in Liquid Glass, Tab-Leiste schrumpft beim Scrollen, Suche als eigener Tab, Glasknöpfe (`glassProminent`/`glass`), iPad als Seitenleiste |
+| iOS-27-Design | Systemleisten in Liquid Glass, Tab-Leiste schrumpft beim Scrollen, Suche als eigener Tab, Glasknöpfe (`glassProminent`/`glass`) |
 | Apple-Technik | SwiftUI, Vision (neue Swift-API), Foundation Models auf dem Gerät (Foto-Geschichte, Namen, Suche in Sätzen), App Intents, Spotlight (`IndexedEntity`), BackgroundTasks mit Fortschritt auf dem Sperrbildschirm, StoreKit 2 |
 | Siri und Kurzbefehle | „Neue Fotos sortieren“, „Fotos aus Italien in Albumist“, „Offene Vorschläge“, Vorschlag öffnen |
 | Spotlight | Länder („Italien, 120 Fotos“) und offene Vorschläge, Antippen öffnet sie |
@@ -29,7 +29,7 @@ gute Produktseite) und wie Albumist dasteht.
 | Test auf echten iPhones (TestFlight) | Tempo und Wärme bei 50.000+ Fotos, iCloud-Mediatheken | Entwicklerkonto |
 | Nominierung in App Store Connect | 6 bis 12 Wochen vor dem Start (Text liegt in `FEATURING_NOMINATION.md`) | Entwicklerkonto |
 | Barrierefreiheits-Angaben („Accessibility Nutrition Labels“) | VoiceOver, Sprachsteuerung, größerer Text, Dunkelmodus, ausreichender Kontrast, Bewegung reduzieren: alles unterstützt, nur noch eintragen | App Store Connect |
-| Produktseite | Screenshots für 6,9″ und iPad 13″, kurzes Vorschauvideo, Werbetext | Vorlagen aus den UI-Screenshots |
+| Produktseite | Screenshots für 6,9″ (die App gibt es nur fürs iPhone), kurzes Vorschauvideo, Werbetext | Vorlagen aus den UI-Screenshots |
 
 ## Sinnvoll für ein Update (erhöht die Chancen weiter)
 

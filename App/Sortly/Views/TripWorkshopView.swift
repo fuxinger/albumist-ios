@@ -8,6 +8,8 @@ struct TripWorkshopView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Symbol columns grow with the text size, so a symbol never runs over its text (P3-12).
+    @ScaledMetric(relativeTo: .body) private var changeSymbolWidth: CGFloat = 28
     var proposal: AlbumProposal
     /// Called once a change is stored: the suggestion this sheet came from goes away with the
     /// run that applies it, however the sheet is closed then.
@@ -159,7 +161,7 @@ struct TripWorkshopView: View {
                     HStack(spacing: Theme.Spacing.s) {
                         Image(systemName: change.isSplit ? "scissors" : "arrow.triangle.merge")
                             .foregroundStyle(Theme.accent)
-                            .frame(width: 28)
+                            .frame(width: changeSymbolWidth)
                             .accessibilityHidden(true)
                         Text(describe(change))
                         Spacer(minLength: Theme.Spacing.s)
@@ -432,13 +434,14 @@ private struct MergeRowLabel: View {
     var title: LocalizedStringKey
     var detail: Text
     @Environment(\.isEnabled) private var isEnabled
+    @ScaledMetric(relativeTo: .title3) private var symbolWidth: CGFloat = 32
 
     var body: some View {
         HStack(spacing: Theme.Spacing.s) {
             Image(systemName: "arrow.triangle.merge")
                 .font(.title3)
                 .foregroundStyle(isEnabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
-                .frame(width: 32)
+                .frame(width: symbolWidth)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)

@@ -20,6 +20,9 @@ import UIKit
 /// - a visible format placeholder ("%lld", "%@") and, in the English run, German words
 ///   left in the interface (untranslated strings)
 /// - text that runs off the side of the screen
+/// - a country row of the atlas at the largest text size taller than its words need (a name
+///   or year broken mid-word, review P3-11, `checkAtlasRows`), and the folder label in the
+///   settings cut on one line at any size (P3-17, `checkFullyShown`)
 ///
 /// Also failing: an audit that does not complete in two attempts ("Audit failed to complete in
 /// time", each attempt printed as `A11Y_AUDIT_ERROR`): the screen would otherwise pass unchecked.
@@ -96,6 +99,8 @@ final class AccessibilityUITests: XCTestCase {
         /// Titles of screens the walk opens and goes back from: it waits for their bar.
         var receiptTitle: String
         var historyTitle: String
+        /// The label of the folder field in the settings (review P3-17: cut at the default size).
+        var folderLabel: String
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: ".*[0-9.]+ Vorschl(ag|äge) prüfen.*",
@@ -103,14 +108,16 @@ final class AccessibilityUITests: XCTestCase {
                                   starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
                                   applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
                                   shareAtlas: "Reise-Atlas teilen", sharePreview: "Vorschau des Teilen-Bilds", searchQuery: "Rom", country: "Italien",
-                                  receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig")
+                                  receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig",
+                                  folderLabel: "Ordner für neue Alben")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
-                                   settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ suggestions?.*",
+                                   settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ [Ss]uggestions?.*",
                                    suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
                                    starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
                                    applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
                                    shareAtlas: "Share Travel Atlas", sharePreview: "Preview of the share image", searchQuery: "Rome", country: "Italy",
-                                   receiptTitle: "Changes", historyTitle: "History and Undo")
+                                   receiptTitle: "Changes", historyTitle: "History and Undo",
+                                   folderLabel: "Folder for New Albums")
     }
 
     // MARK: Tests
@@ -334,6 +341,7 @@ final class AccessibilityUITests: XCTestCase {
             if !short {
                 app.swipeUp(); app.swipeUp(); sleep(1)
                 check("\(tag) atlas lower", english: english)
+                if accessibilitySize { checkAtlasRows(tag) }
                 // A country: its photo colours sit behind the title and caption.
                 let country = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", w.country)).firstMatch
                 // Its screen is called by the country's name.
@@ -399,6 +407,7 @@ final class AccessibilityUITests: XCTestCase {
                 let list = app.collectionViews.firstMatch
                 (list.exists ? list : app).swipeUp(); (list.exists ? list : app).swipeUp(); sleep(1)
                 check("\(tag) settings lower", english: english)
+                checkFullyShown(w.folderLabel, identifier: "settings.rootFolder.label", "\(tag) settings", in: list.exists ? list : app)
             }
             tap(button(w.done), "\(tag) close settings")
             sleep(1)
@@ -720,6 +729,80 @@ final class AccessibilityUITests: XCTestCase {
             }
         }
         print("A11Y_TREE \(screen) \(seen) elements, \(texts.count) texts")
+    }
+
+    // MARK: Layout checks the audit does not make
+
+    /// Largest text: a country row of the atlas holds its name in whole words and the year in
+    /// one line (review P3-11 / G3-01: "Ver-ei-nig-te Sta-a-ten" over six lines, the year as
+    /// "20" over "11", and the audit passed: wrapped text is not "clipped"). The row is one
+    /// VoiceOver element, so its height is measured: at most the line of flag and arrow, one
+    /// line per word of the name and one more (a single word wider than the screen of the
+    /// small iPhone may still break once), the year's line and the padding. A name broken into
+    /// syllables needs more lines than that: the six lines of "Vereinigte Staaten" are about
+    /// 400 pt on the small iPhone, two words are allowed about 355 pt.
+    private func checkAtlasRows(_ tag: String) {
+        let traits = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
+        let bodyLine = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits).lineHeight
+        let flagLine = UIFont.preferredFont(forTextStyle: .title2, compatibleWith: traits).lineHeight
+        let screen = app.frame
+        var measured = 0
+        for row in app.buttons.matching(identifier: "atlas.country").allElementsBoundByIndex where row.exists {
+            let frame = row.frame
+            // Only rows wholly on screen: a row cut by the edge has no meaningful height.
+            guard !frame.isEmpty, screen.contains(frame) else { continue }
+            measured += 1
+            // "Vereinigte Staaten, 2011": the name is the part before the year.
+            let name = row.label.components(separatedBy: ", ").first ?? row.label
+            let words = max(1, name.split(whereSeparator: { $0 == " " || $0 == "-" }).count)
+            let allowed = flagLine + CGFloat(words + 2) * bodyLine + 2 * 10 + 2 * 4 + 8
+            if frame.height > allowed {
+                print("A11Y_FAIL \(tag) atlas lower | country row broken mid-word | label '\(row.label)' | height \(Int(frame.height)) > \(Int(allowed)) for \(words) word(s)")
+                XCTFail("\(tag) atlas: the row '\(row.label)' is \(Int(frame.height)) pt tall, more than \(Int(allowed)) pt for \(words) word(s) and the year: the name or the year breaks mid-word")
+            }
+        }
+        if measured > 0 {
+            print("UI_STEP_OK \(tag) atlas rows measured \(measured)")
+        } else {
+            print("UI_STEP_MISSING \(tag) atlas rows measured (no country row wholly on screen)")
+            XCTFail("\(tag) atlas: no country row wholly on screen to measure")
+        }
+    }
+
+    /// A label shown in full, not ending in "…" (review P3-17 / G3-08: "Ordner für neue Al…"
+    /// in the settings at the default text size; the audit leaves clipped text at standard
+    /// sizes to the largest-size run, see `record`). On one line the label is as wide as the
+    /// text needs; wrapped, it is at least two lines tall. Scrolls the list until the label is
+    /// on screen.
+    private func checkFullyShown(_ text: String, identifier: String, _ screen: String, in list: XCUIElement) {
+        var element = app.staticTexts[text]
+        if !element.exists { element = app.staticTexts[identifier] }
+        func visible() -> Bool {
+            element.exists && !element.frame.isEmpty && app.frame.contains(element.frame)
+        }
+        // No fixed sleep after a swipe (SleepRuleTests): XCTest waits for the app to be idle,
+        // and only the width and height of the label are measured, not its position.
+        var swipes = 0
+        while !visible() && swipes < 4 { list.swipeDown(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
+        swipes = 0
+        while !visible() && swipes < 6 { list.swipeUp(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
+        guard visible() else {
+            print("UI_STEP_MISSING \(screen) label '\(text)' on screen")
+            XCTFail("\(screen): the label '\(text)' was not found on screen")
+            return
+        }
+        let category: UIContentSizeCategory = accessibilitySize ? .accessibilityExtraExtraExtraLarge : .large
+        let font = UIFont.preferredFont(forTextStyle: .body, compatibleWith: UITraitCollection(preferredContentSizeCategory: category))
+        let needed = (text as NSString).size(withAttributes: [.font: font]).width
+        let frame = element.frame
+        let oneLineInFull = frame.width + 2 >= needed
+        let wrapped = frame.height >= 1.8 * font.lineHeight
+        if oneLineInFull || wrapped {
+            print("UI_STEP_OK \(screen) label '\(text)' shown in full (\(Int(frame.width))x\(Int(frame.height)), needs \(Int(needed)) on one line)")
+        } else {
+            print("A11Y_FAIL \(screen) | label cut | label '\(text)' | \(Int(frame.width))x\(Int(frame.height)), needs \(Int(needed)) pt on one line")
+            XCTFail("\(screen): the label '\(text)' is cut: \(Int(frame.width)) pt wide on one line, it needs \(Int(needed)) pt")
+        }
     }
 
     /// "chevron.right", "square.and.arrow.up": a symbol name read out instead of a label.

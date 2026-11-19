@@ -176,8 +176,24 @@ public struct OfflineWorldMap: Sendable {
 
     // MARK: Lookup
 
+    /// The work of lookups, counted (review of bundle-i, 19.11.2026: the speed test measured
+    /// the clock and failed at 2.09 s under a loaded machine, 0.6 s alone). A slower lookup is
+    /// one that decodes more: more regions whose rings are read, more rings, more points.
+    struct LookupWork: Equatable, Sendable {
+        /// Regions whose bounding box (plus margin) holds the point; their rings are looked at.
+        var regions = 0
+        /// Rings whose box holds the point and that are decoded, and the points decoded.
+        var rings = 0
+        var points = 0
+    }
+
     public func lookup(_ coordinate: GeoCoordinate) -> Match {
-        let countries = evaluate(coordinate, among: regions.lazy.filter { $0.level == .country }.map(\.index))
+        var work = LookupWork()
+        return lookup(coordinate, work: &work)
+    }
+
+    func lookup(_ coordinate: GeoCoordinate, work: inout LookupWork) -> Match {
+        let countries = evaluate(coordinate, among: regions.lazy.filter { $0.level == .country }.map(\.index), work: &work)
         var match = Match(country: nil, region: nil, countryIsCertain: false, regionIsCertain: false, countryCandidates: countries.map { regions[$0.index] })
         guard let best = countries.first, best.inside || best.distance <= borderMarginMeters else {
             // At sea, or on an island the map does not draw, in a disputed area's waters.
@@ -187,7 +203,7 @@ public struct OfflineWorldMap: Sendable {
         match.country = regions[best.index]
         // Certain if no other country is inside or within the margin.
         match.countryIsCertain = countries.dropFirst().allSatisfy { !$0.inside && $0.distance > borderMarginMeters }
-        if let r = region(coordinate, inCountry: best.index) {
+        if let r = region(coordinate, inCountry: best.index, work: &work) {
             match.region = r.region
             match.regionIsCertain = r.isCertain
         }
@@ -202,7 +218,8 @@ public struct OfflineWorldMap: Sendable {
     /// country of a point at a border. Keeps region names identical across both sources.
     public func region(_ coordinate: GeoCoordinate, inCountryCode code: String) -> (region: Region, isCertain: Bool)? {
         guard let country = country(code: code) else { return nil }
-        return region(coordinate, inCountry: country.index)
+        var work = LookupWork()
+        return region(coordinate, inCountry: country.index, work: &work)
     }
 
     /// The map's country of a code. Where a disputed area shares the code (Northern Cyprus has
@@ -326,9 +343,9 @@ public struct OfflineWorldMap: Sendable {
         renamer(to: language).renamed(place)
     }
 
-    private func region(_ coordinate: GeoCoordinate, inCountry country: Int) -> (region: Region, isCertain: Bool)? {
+    private func region(_ coordinate: GeoCoordinate, inCountry country: Int, work: inout LookupWork) -> (region: Region, isCertain: Bool)? {
         guard let children = regionsByCountry[country] else { return nil }
-        let candidates = evaluate(coordinate, among: children)
+        let candidates = evaluate(coordinate, among: children, work: &work)
         guard let best = candidates.first, best.inside || best.distance <= borderMarginMeters else { return nil }
         let certain = candidates.dropFirst().allSatisfy { !$0.inside && $0.distance > borderMarginMeters }
         return (regions[best.index], certain)
@@ -338,7 +355,7 @@ public struct OfflineWorldMap: Sendable {
 
     /// Containment and boundary distance for every region whose bounding box (plus margin)
     /// contains the point. Sorted: containing regions first, then by distance.
-    private func evaluate<S: Sequence>(_ c: GeoCoordinate, among indices: S) -> [Candidate] where S.Element == Int {
+    private func evaluate<S: Sequence>(_ c: GeoCoordinate, among indices: S, work: inout LookupWork) -> [Candidate] where S.Element == Int {
         let marginLat = borderMarginMeters / GeoMath.metersPerDegreeLatitude
         let marginLon = marginLat / max(cos(c.latitude * .pi / 180), 0.01)
         let lat = c.latitude * scale, lon = c.longitude * scale
@@ -348,7 +365,8 @@ public struct OfflineWorldMap: Sendable {
             let r = regions[i]
             guard lat >= Double(r.minLat) - mLat, lat <= Double(r.maxLat) + mLat,
                   lon >= Double(r.minLon) - mLon, lon <= Double(r.maxLon) + mLon else { continue }
-            let (inside, distance) = containment(c, region: r, marginLat: mLat, marginLon: mLon)
+            work.regions += 1
+            let (inside, distance) = containment(c, region: r, marginLat: mLat, marginLon: mLon, work: &work)
             guard inside || distance.isFinite else { continue }
             result.append(Candidate(index: i, inside: inside, distance: distance))
         }
@@ -357,7 +375,7 @@ public struct OfflineWorldMap: Sendable {
 
     /// Even-odd containment plus the distance to the nearest boundary segment in metres
     /// (local equirectangular projection; exact enough for distances of a few kilometres).
-    private func containment(_ c: GeoCoordinate, region r: Region, marginLat: Double, marginLon: Double) -> (Bool, Double) {
+    private func containment(_ c: GeoCoordinate, region r: Region, marginLat: Double, marginLon: Double, work: inout LookupWork) -> (Bool, Double) {
         let metersPerLon = GeoMath.metersPerDegreeLatitude * cos(c.latitude * .pi / 180)
         let qLat = c.latitude * scale, qLon = c.longitude * scale
         var inside = false
@@ -368,6 +386,8 @@ public struct OfflineWorldMap: Sendable {
                   qLon >= Double(box.1) - marginLon, qLon <= Double(box.3) + marginLon else { continue }
             var offset = ringOffsets[ring]
             let count = ringCounts[ring]
+            work.rings += 1
+            work.points += count
             var lat: Int64 = 0, lon: Int64 = 0
             var firstX = 0.0, firstY = 0.0, prevX = 0.0, prevY = 0.0
             for p in 0..<count {

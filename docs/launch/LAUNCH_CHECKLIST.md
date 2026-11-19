@@ -11,7 +11,9 @@ Was vor dem Verkaufsstart erledigt sein muss. Wird bei jeder Entscheidung ergän
 - [ ] Zwei-Schritt-Anmeldung (2FA) für das GitHub-Konto.
 
 ## Qualität
-- [ ] Testplan (`docs/TEST_PLAN.md`) ohne offene Fälle.
+- [ ] Testplan (`docs/TEST_PLAN.md`, Abschnitt „Tore“) für den App Store erfüllt: kein Fall mit ⛔;
+      jeder Fall mit ⚪ und jede Lücke in den Tests (G5) behoben oder von Fuchs bewusst offen
+      gelassen, mit Grund im Testplan; alle Punkte unter „Am iPhone prüfen“ geprüft.
 - [ ] Letzte TestFlight-Version auf einem echten iPhone durchgespielt: Analyse, Wärme, Hintergrund,
       Rückgängig, Kauf, große Schrift, VoiceOver.
 - [ ] Voller Härtetest im Simulator auf genau dem Stand, der eingereicht wird (50.000 Fotos,

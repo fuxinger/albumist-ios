@@ -106,8 +106,7 @@ class RealCatalogTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        path = REPO / english_rule.CATALOG
-        cls.catalog = json.load(open(path, encoding="utf-8"))["strings"]
+        cls.catalog = english_rule.load_catalog(REPO)
 
     def english(self, key):
         return english_rule.english_values(self.catalog[key])

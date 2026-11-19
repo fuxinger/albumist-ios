@@ -51,6 +51,11 @@ def norm(key):
     return re.sub(r"%(\d\$)?(lld|ld|d|@|f|\.\d+f)", "#", key)
 
 
+def load_catalog(root):
+    with open(f"{root}/{CATALOG}", encoding="utf-8") as file:
+        return json.load(file)["strings"]
+
+
 def english_values(entry):
     """Every English text of a catalog entry: the plain one and each plural or device form."""
     out = []
@@ -146,13 +151,14 @@ def button_titles_in(src):
 
 def button_keys(root):
     """Catalog keys shown as button titles, each with the first place it is used."""
-    catalog = json.load(open(f"{root}/{CATALOG}", encoding="utf-8"))["strings"]
+    catalog = load_catalog(root)
     keys = {}
     for key in catalog:
         keys.setdefault(norm(key), key)
     used = {}
     for path in sorted(glob.glob(f"{root}/App/Sortly/**/*.swift", recursive=True)):
-        src = open(path, encoding="utf-8").read()
+        with open(path, encoding="utf-8") as file:
+            src = file.read()
         for line, literal in button_titles_in(src):
             key = keys.get(norm(literal))
             if key is not None:
@@ -182,7 +188,7 @@ def title_case_problem(text):
 
 def offenders(root):
     """(key, English text, problem) for every rule an English text breaks."""
-    catalog = json.load(open(f"{root}/{CATALOG}", encoding="utf-8"))["strings"]
+    catalog = load_catalog(root)
     found = []
     for key, entry in catalog.items():
         for value in english_values(entry):

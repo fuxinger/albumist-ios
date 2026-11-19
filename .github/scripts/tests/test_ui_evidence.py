@@ -454,6 +454,26 @@ class CommandTests(unittest.TestCase):
         self.assertIn("::error title=UI other::red for this app and this test code", log)
         self.assertIn("**Not green** (no upload, no release)", self.read(self.summary))
 
+    def test_a_skipped_or_missing_group_is_never_green(self):
+        # G5-08 (review of 18.11.2026): a group job that GitHub skipped, a job whose "Run UI tests"
+        # step was skipped, and a group without any job are never green: the gate blocks and the
+        # plan runs them. (A group whose tests all skipped themselves fails in ui_tests.py.)
+        here = [job(g, tests=TEST_ONLY_FPS[g], job_id=500 + i) for i, g in enumerate(["full", "other"])]
+        skipped = dict(job("small", tests=TEST_ONLY_FPS["small"], job_id=510), conclusion="skipped", steps=[])
+        step_skipped = job("device", tests=TEST_ONLY_FPS["device"], job_id=511)
+        step_skipped["steps"][2] = {"name": "Run UI tests", "conclusion": "skipped"}
+        runs = [run(9, "b" * 40, here + [skipped, step_skipped], workflow="testflight.yml")]
+        code, log = self.gate(runs)
+        self.assertEqual(code, 1)
+        for g in ("device", "small"):
+            self.assertIn(f"::error title=UI {g}::no green full result", log)
+        self.assertIn("device missing; full here; other here; small missing", self.outputs()["text"])
+        os.remove(self.output)
+        self.assertEqual(self.gate([run(9, "b" * 40, here, workflow="testflight.yml")])[0], 1)
+        os.remove(self.output)
+        self.plan("auto", runs)
+        self.assertEqual([e["group"] for e in json.loads(self.outputs()["matrix"])["include"]], ["device", "small"])
+
     def gate_only(self, runs, only):
         with contextlib.redirect_stdout(io.StringIO()) as log:
             code = ui_evidence.gate(9, call=fake_api(runs), verifier=VERIFIER, tree=TEST_ONLY, now=NOW, only=only)

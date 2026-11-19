@@ -16,12 +16,12 @@ final class SortlyFlowUITests: XCTestCase {
     // MARK: Helpers
 
     private func launch(_ extra: [String] = []) {
-        UITestAppEnd.end(app)
+        // UITestAppEnd.launch ends the app of the last launch first.
         app = XCUIApplication()
         // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"]
             + UITestStalls.arguments(besides: extra) + extra
-        app.launch()
+        UITestAppEnd.launch(app)
     }
 
     /// The first suggestion row of a list ("57 Fotos" is in every row, never in a button).
@@ -1116,8 +1116,11 @@ final class SortlyFlowUITests: XCTestCase {
     /// that each tap leads somewhere and back works: no dead rows, no crash, no lost screen.
     /// Returns how many taps led somewhere (this screen and the screens below it). Rows it
     /// leaves out are printed (UI_SWEEP_SKIP), so a sweep that taps nothing says why.
+    /// A row that does nothing fails the test in every list the sweep walks (G5-10 of the
+    /// review of 18.11.2026; before, only in "Vorschläge", elsewhere it was only a log line):
+    /// in 38 UI runs of 16.–19.11. no row on any of them did nothing.
     @discardableResult
-    private func sweep(_ screen: String, depth: Int, strict: Bool = false) -> Int {
+    private func sweep(_ screen: String, depth: Int) -> Int {
         var reached = 0
         let start = screenTitle
         let useCells = app.collectionViews.cells.count > 0
@@ -1167,7 +1170,7 @@ final class SortlyFlowUITests: XCTestCase {
                 reached += 1
             } else {
                 print("UI_SWEEP_NOOP \(screen) › \(label)")
-                if strict { XCTFail("Row '\(label)' on \(screen) did nothing") }
+                XCTFail("Row '\(label)' on \(screen) did nothing")
             }
         }
         return reached
@@ -1263,7 +1266,7 @@ final class SortlyFlowUITests: XCTestCase {
         let suggestions = reviewSuggestionsButton()
         if suggestions.waitForExistence(timeout: 5) {
             suggestions.tap(); sleep(2)
-            check("Vorschläge", sweep("Vorschläge", depth: 0, strict: true))
+            check("Vorschläge", sweep("Vorschläge", depth: 0))
             back()
         } else {
             print("UI_STEP_MISSING sweep suggestions")

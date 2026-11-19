@@ -8,6 +8,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -16,6 +17,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import ui_tests  # noqa: E402
+import ui_groups  # noqa: E402
 
 # Job 133263283907 (contrast pass): the runner never came up.
 AX_TIMEOUT = """\
@@ -112,6 +114,16 @@ TESTMANAGERD_BUNDLE = [
 ]
 PASSED_ONE = "Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' passed (9.0 seconds).\n"
 
+# Every selected test skipped itself (XCTSkip): xcodebuild succeeds without having tested anything.
+SKIPPED_ONLY = """\
+Test Case '-[SortlyUITests.DeviceConditionUITests test11_LargeLibrary]' started.
+Test Case '-[SortlyUITests.DeviceConditionUITests test11_LargeLibrary]' skipped (0.012 seconds).
+Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' started.
+Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' skipped (0.010 seconds).
+\t Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.022 (0.030) seconds
+** TEST SUCCEEDED **
+"""
+
 # Job 133113879733: a compile error (xcodebuild test builds first).
 COMPILE_ERROR = """\
 /Users/runner/work/sortly-ios/sortly-ios/App/Sortly/Platform/SamplePhotos.swift:162:66: error: cannot infer key path type from context; consider explicitly specifying a root type
@@ -180,6 +192,34 @@ class DecideTests(unittest.TestCase):
         verdict, reasons = ui_tests.decide(0, log)
         self.assertEqual(verdict, "fail")
         self.assertIn("no test ran", reasons[0])
+
+    def test_green_pass_where_every_test_skipped_itself_fails(self):
+        # G5-08 (review of 18.11.2026): a group whose every test skips itself (XCTSkip, e.g.
+        # DeviceConditionUITests test11 in a quick run and test12 outside the stress run) ran no
+        # test; it must never count as green.
+        verdict, reasons = ui_tests.decide(0, SKIPPED_ONLY)
+        self.assertEqual(verdict, "fail")
+        self.assertIn("no test passed", reasons[0])
+        self.assertIn("2 skipped", reasons[0])
+        # One passed test next to the skipped ones: green, as before.
+        self.assertEqual(ui_tests.decide(0, PASSED_ONE + SKIPPED_ONLY), ("pass", []))
+        # A repeat that ran only tests which skip themselves passes when the first pass of the
+        # same group passed a test (the repeat runs only what did not pass there).
+        self.assertEqual(ui_tests.decide(0, SKIPPED_ONLY, earlier=PASSED_ONE), ("pass", []))
+        self.assertEqual(ui_tests.decide(0, SKIPPED_ONLY, earlier=AX_TIMEOUT)[0], "fail")
+
+    def test_classify_takes_the_first_pass_of_a_repeat(self):
+        # The manual `classify` decides like `run`: a repeat is judged with its first pass.
+        with tempfile.TemporaryDirectory() as folder:
+            first, repeat = os.path.join(folder, "first.log"), os.path.join(folder, "retry.log")
+            for path, text in ((first, PASSED_ONE + SERVICE_INTERRUPTED), (repeat, SKIPPED_ONLY)):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+            for extra, verdict in (([], "fail"), (["--earlier", first], "pass")):
+                with self.subTest(extra=extra):
+                    with contextlib.redirect_stdout(io.StringIO()) as out:
+                        self.assertEqual(ui_tests.main(["classify", repeat, "--status", "0"] + extra), 0)
+                    self.assertTrue(out.getvalue().startswith(verdict + ":"), out.getvalue())
 
     def test_assertion_is_not_retried(self):
         self.assertEqual(ui_tests.decide(65, FLOW_ASSERTION)[0], "fail")
@@ -443,6 +483,20 @@ class SelectionTests(unittest.TestCase):
         self.assertIn("UI_RESULT device fail", log)
         self.assertIn("UI_RESULT device pass", self.run_with_passes(["** TEST SUCCEEDED **\n" + PASSED_ONE])[2])
 
+    def test_a_group_whose_every_test_skipped_itself_is_red(self):
+        # G5-08: never green, also not as "no result": the selection tested nothing.
+        code, marker, log = self.run_with_passes([SKIPPED_ONLY])
+        self.assertEqual((code, marker), (1, False))
+        self.assertIn("UI_VERDICT device first: fail (no test passed", log)
+        self.assertIn("UI_RESULT device fail", log)
+        # The first pass lost the simulator before any test, the repeat only skipped: red.
+        self.assertEqual(self.run_with_passes([AX_TIMEOUT, SKIPPED_ONLY])[:2], (1, False))
+        # The first pass passed a test and then lost the simulator; the repeat ran only the
+        # tests that skip themselves: the group passed a test, so green.
+        code, marker, log = self.run_with_passes([PASSED_ONE + SERVICE_INTERRUPTED, SKIPPED_ONLY])
+        self.assertEqual((code, marker), (0, False), log)
+        self.assertIn("UI_RESULT device pass", log)
+
     def test_a_testmanagerd_crash_is_repeated_and_no_red_on_its_own(self):
         verdict, reasons = ui_tests.decide(65, TESTMANAGERD_CRASH, bundle=TESTMANAGERD_BUNDLE)
         self.assertEqual((verdict, reasons[0]), ("retry", "XCTest daemon testmanagerd crashed"))
@@ -632,6 +686,40 @@ class FlakyTests(unittest.TestCase):
             with open(path, "w") as f:
                 json.dump(ui_tests.flaky_record("accessibility", RESTART, ["simulator not booted"], self.RETRY_LOG, "pass"), f)
             self.assertEqual(ui_tests.main(["flaky-summary", path, os.path.join(folder, "missing.json")]), 0)
+
+
+class SweepStrictTests(unittest.TestCase):
+    """G5-10 (review of 18.11.2026): the tap-through sweep (SortlyFlowUITests test3) checked rows
+    strictly only in "Vorschläge"; on "Übersicht", "Mediathek", "Alben" and every screen one level
+    down a row that did nothing was only a UI_SWEEP_NOOP line in the log. Every list it walks is
+    strict now: each NOOP line is followed by a failure, or by `return 0`, which check() fails."""
+
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+
+    def swift(self):
+        with open(os.path.join(self.ROOT, "App", "SortlyUITests", "SortlyFlowUITests.swift"), encoding="utf-8") as f:
+            return f.read()
+
+    @staticmethod
+    def lenient(source: str) -> list[int]:
+        """Lines whose code (comments and string literals left out) names a `strict` switch."""
+        code = ui_groups.strip_swift(source)
+        return [i + 1 for i, line in enumerate(code.splitlines()) if re.search(r"\bstrict\b", line)]
+
+    def test_no_list_is_walked_leniently(self):
+        self.assertEqual(self.lenient("// strict in every list\nlet s = \"strict\"\n"), [])
+        self.assertEqual(self.lenient("func sweep(depth: Int, strict: Bool = false) {}\n"), [1])
+        self.assertEqual(self.lenient(self.swift()), [])
+
+    def test_every_dead_row_fails_the_test(self):
+        lines = self.swift().splitlines()
+        noops = [i for i, line in enumerate(lines) if "UI_SWEEP_NOOP" in line and "print(" in line]
+        self.assertGreaterEqual(len(noops), 4)  # the sweep's rows, and the search's three
+        for i in noops:
+            with self.subTest(line=i + 1, text=lines[i].strip()[:80]):
+                self.assertRegex(lines[i + 1], r"^\s*(XCTFail\(|XCTAssert\w*\(|return 0\s*$)")
+        # A screen whose sweep reached nothing (the search's `return 0`) fails in check().
+        self.assertRegex(self.swift(), r"if reached == 0 \{ XCTFail\(")
 
 
 class SweepSkipTests(unittest.TestCase):
@@ -1130,7 +1218,61 @@ class HostTerminateTests(unittest.TestCase):
                 swift = open(os.path.join(folder, name), encoding="utf-8").read()
                 self.assertNotIn(".terminate()", swift)
                 if "app = XCUIApplication()" in swift:
-                    self.assertIn("UITestAppEnd.end(app", swift)
+                    # UITestAppEnd.launch ends the app first (since the first launch of a test
+                    # goes through it as well).
+                    self.assertRegex(swift, r"UITestAppEnd\.(end|launch)\(app")
+
+    @staticmethod
+    def launch_calls(source: str) -> list[int]:
+        """Line numbers of `.launch()` calls (any spacing) in Swift code, comments and string
+        literals left out."""
+        code = ui_groups.strip_swift(source)
+        return [code.count("\n", 0, m.start()) + 1 for m in re.finditer(r"\.\s*launch\s*\(\s*\)", code)]
+
+    def test_every_launch_goes_through_the_helper_that_records_the_process_id(self):
+        # The first launch of each test ended the app of the test before through a new
+        # XCUIApplication without launch arguments, so `UITestAppEnd.processID` found no watch
+        # file and the Mac fell back to `simctl terminate` by bundle id: the race of 945446e (a
+        # late end hits the NEW launch) and simctl's hangs (device test08 of job 135412549414:
+        # 114 s, "by XCTest after the Mac"). Every launch now goes through UITestAppEnd.launch,
+        # which ends the last launch's app, adds -SortlyUITestWatchMainLog when the arguments
+        # lack it and notes the launch (UITestLaunchRecord), so the next end knows the process
+        # from any XCUIApplication. No UI test file launches the app itself.
+        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        for sample, found in (("app.launch()", 1), ("app.launch( )", 1), ("app\n  .launch ()", 1),
+                              ("// app.launch()", 0), ('print("app.launch()")', 0), ("UITestAppEnd.launch(app)", 0)):
+            with self.subTest(sample=sample):
+                self.assertEqual(len(self.launch_calls(sample)), found)
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".swift") or name == "UITestAppEnd.swift":
+                continue
+            with self.subTest(name):
+                with open(os.path.join(folder, name), encoding="utf-8") as f:
+                    source = f.read()
+                self.assertEqual(self.launch_calls(source), [], "launch through UITestAppEnd.launch(app)")
+                # The helper ends the app before every launch; a plain end "before the next
+                # launch" in front of it would wait a second time for an app still running
+                # (60 s for the Mac, then XCTest). Ends with their own reason stay.
+                self.assertEqual(ui_groups.strip_swift(source).count("UITestAppEnd.end(app)"), 0)
+        with open(os.path.join(folder, "UITestAppEnd.swift"), encoding="utf-8") as f:
+            helper = f.read()
+        body = helper[helper.index("static func launch(_ app: XCUIApplication"):]
+        body = body[:body.index("\n    }\n")]
+        self.assertEqual(body.count("app.launch()"), 1)
+        order = [body.index(s) for s in ("end(app", "UITestStalls.arguments(besides: app.launchArguments)",
+                                         "UITestLaunchRecord.shared.launching(app.launchArguments)", "app.launch()")]
+        self.assertEqual(order, sorted(order), "end, watch file, record, then launch")
+        # The device tests' launch clock (compared with the app's process start by
+        # lost_app_at_launch) is taken after that end, right before the launch.
+        with open(os.path.join(folder, "DeviceConditionUITests.swift"), encoding="utf-8") as f:
+            self.assertIn('UITestAppEnd.launch(app, justBefore: { UITestOnboarding.clock("launch") })', f.read())
+        self.assertLess(body.index("justBefore()"), body.index("app.launch()"))
+        self.assertLess(body.index("end(app"), body.index("justBefore()"))
+        # The end reads the process of the last launch, and the stall report keeps it when it
+        # removes the file (DeviceConditionUITests and AccessibilityUITests report in teardown).
+        self.assertIn("UITestLaunchRecord.shared.processID(", helper)
+        with open(os.path.join(folder, "UITestStalls.swift"), encoding="utf-8") as f:
+            self.assertIn("UITestLaunchRecord.shared.read(", f.read())
 
     def test_the_test_lines_about_the_end_are_no_finding(self):
         log = ("UI_FACT clock 10:00:00.0 end the app before the next launch\nUI_HOST_TERMINATE_APP 1763500000\n"

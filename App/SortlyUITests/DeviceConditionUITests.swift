@@ -17,12 +17,13 @@ final class DeviceConditionUITests: XCTestCase {
     // MARK: Helpers (copied from SortlyFlowUITests, which stays as it is)
 
     private func launch(_ extra: [String] = []) {
+        // Ended first: the stall file holds the app's process id for the Mac (`UITestAppEnd`).
+        UITestAppEnd.end(app)
         UITestStalls.report()
         if !stallsReportedAtEnd {
             stallsReportedAtEnd = true
             addTeardownBlock { UITestStalls.report() }
         }
-        UITestAppEnd.end(app)
         app = XCUIApplication()
         let stalls = UITestStalls.arguments(besides: extra)
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra

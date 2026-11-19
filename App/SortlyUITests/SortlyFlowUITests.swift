@@ -18,7 +18,9 @@ final class SortlyFlowUITests: XCTestCase {
     private func launch(_ extra: [String] = []) {
         UITestAppEnd.end(app)
         app = XCUIApplication()
-        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + extra
+        // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
+        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"]
+            + UITestStalls.arguments(besides: extra) + extra
         app.launch()
     }
 

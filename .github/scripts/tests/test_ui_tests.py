@@ -925,7 +925,10 @@ class HostTerminateTests(unittest.TestCase):
     def test_requests_are_read_in_order_with_their_time(self):
         log = ("UI_HOST_TERMINATE_APP 1700000000\nUI_HOST_GRANT_PHOTOS\n"
                "UI_HOST app ended (1 s, attempt 1 of 2)\nUI_HOST_TERMINATE_APP_X 1\nUI_HOST_TERMINATE_APP\n")
-        self.assertEqual(ui_tests.host_requests(log), [("terminate", 1700000000.0), ("grant", None), ("terminate", None)])
+        self.assertEqual(ui_tests.host_requests(log), [("terminate", 1700000000.0, None), ("grant", None, None),
+                                                       ("terminate", None, None)])
+        self.assertEqual(ui_tests.host_requests("UI_HOST_TERMINATE_APP 1700000000 35745\n"),
+                         [("terminate", 1700000000.0, 35745)])
         self.assertEqual(ui_tests.host_grant_requests(log), 1)
 
     def test_the_watcher_ends_the_app_once_per_request_in_log_order(self):
@@ -935,13 +938,86 @@ class HostTerminateTests(unittest.TestCase):
             with open(path, "w") as log:
                 log.write("UI_HOST_TERMINATE_APP 1700000000\nUI_HOST_GRANT_PHOTOS\nUI_HOST_TERMINATE_APP 17000")
             watcher = ui_tests.HostGrants("U", path, interval=0.01, grant=lambda: done.append("grant"),
-                                          terminate=lambda asked: done.append(("terminate", asked)))
+                                          terminate=lambda asked, pid: done.append(("terminate", asked)))
             watcher.check()
             with open(path, "a") as log:
                 log.write("00009\n")
             watcher.check()
             watcher.check()
         self.assertEqual(done, [("terminate", 1700000000.0), "grant", ("terminate", 1700000009.0)])
+
+    # PR #9's UI run 44464687545 (device group): ending by bundle id ended test09's NEW launch
+    # (the app had ended by itself, the test launched it again, the Mac's late `simctl
+    # terminate` hit the new one), and `simctl terminate` hung 20 s in test06. With the app's
+    # process id the Mac ends exactly that process, SIGTERM then SIGKILL.
+    APP = "/Users/runner/Library/Developer/CoreSimulator/Devices/U/data/Containers/Bundle/Application/X/Sortly.app/Sortly"
+
+    def run_pid_end(self, alive_after, command=None):
+        """`alive_after`: how many `ps` calls still see the app after the first look."""
+        calls, looks = [], [0]
+
+        def fake(cmd, timeout, quiet):
+            calls.append(cmd)
+            if cmd[0] == "ps":
+                looks[0] += 1
+                if looks[0] == 1:
+                    return (0, (command or self.APP) + "\n") if command != "" else (1, "")
+                return (0, self.APP + "\n") if looks[0] - 1 <= alive_after else (1, "")
+            return 0, ""
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ended = ui_tests.end_app_process("U", 35745, run=fake, sleep=lambda s: None)
+        return ended, [c for c in calls if c[0] == "kill"], out.getvalue()
+
+    def test_a_named_process_is_ended_with_sigterm(self):
+        ended, kills, out = self.run_pid_end(alive_after=1)
+        self.assertTrue(ended)
+        self.assertEqual(kills, [["kill", "-TERM", "35745"]])
+        self.assertIn("ended by SIGTERM", out)
+
+    def test_the_app_is_known_with_its_launch_arguments(self):
+        ended, kills, _ = self.run_pid_end(alive_after=0, command=self.APP + " -AppleLanguages (de) -SortlyUITestUnlocked")
+        self.assertTrue(ended)
+        self.assertEqual(kills, [["kill", "-TERM", "35745"]])
+
+    def test_a_process_that_ignores_sigterm_gets_sigkill(self):
+        ended, kills, out = self.run_pid_end(alive_after=int(ui_tests.PID_TERM_WAIT * 2) + 1)
+        self.assertTrue(ended)
+        self.assertEqual(kills, [["kill", "-TERM", "35745"], ["kill", "-KILL", "35745"]])
+        self.assertIn("ended by SIGKILL", out)
+
+    def test_another_process_with_that_id_is_never_ended(self):
+        # The id names the app of the last launch only; a new launch has another id, and an id
+        # reused by anything else (or another simulator's app) is left alone.
+        for other in ("/usr/libexec/something", self.APP.replace("/Devices/U/", "/Devices/V/"),
+                      self.APP.replace("Sortly.app/Sortly", "SortlyUITests-Runner.app/SortlyUITests-Runner")):
+            with self.subTest(other):
+                ended, kills, out = self.run_pid_end(alive_after=0, command=other)
+                self.assertFalse(ended)
+                self.assertEqual(kills, [])
+                self.assertIn("not Albumist in this simulator", out)
+
+    def test_a_process_that_is_gone_already_is_not_signalled(self):
+        ended, kills, out = self.run_pid_end(alive_after=0, command="")
+        self.assertTrue(ended)
+        self.assertEqual(kills, [])
+
+    def test_the_watcher_ends_by_process_id_when_the_test_names_one(self):
+        ended = []
+        watcher = ui_tests.HostGrants("U", "/nonexistent", grant=lambda: None)
+        original_end, original_terminate = ui_tests.end_app_process, ui_tests.terminate_app
+        try:
+            ui_tests.end_app_process = lambda udid, pid: ended.append(("pid", pid))
+            ui_tests.terminate_app = lambda udid, asked: ended.append(("bundle", asked))
+            watcher.terminate_app(1700000000.0, 35745)
+            watcher.terminate_app(1700000000.0, None)
+        finally:
+            ui_tests.end_app_process, ui_tests.terminate_app = original_end, original_terminate
+        self.assertEqual(ended, [("pid", 35745), ("bundle", 1700000000.0)])
+
+    def test_the_whole_pid_end_fits_in_the_tests_wait(self):
+        self.assertLess(ui_tests.PID_TERM_WAIT + ui_tests.PID_KILL_WAIT + 10, ui_tests.TERMINATE_WAIT)
 
     def run_terminate(self, answers, asked=1000.0, clock=None):
         calls, now = [], [1000.0]

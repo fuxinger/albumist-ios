@@ -204,7 +204,9 @@ final class SortlyLockedUITests: XCTestCase {
     /// CI runs groups of UI tests on separate simulators: when this test runs without the flow
     /// before it, the demo library is created and analysed first (fast start, no onboarding).
     private func prepareLibrary() {
+        // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked", "-SortlyUITestFastStart"]
+            + UITestStalls.arguments(besides: [])
         app.launch()
         let deadline = Date().addingTimeInterval(900)
         var streak = 0
@@ -223,7 +225,7 @@ final class SortlyLockedUITests: XCTestCase {
         continueAfterFailure = true
         prepareLibrary()
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked",
-                               "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "1"]
+                               "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "1"] + UITestStalls.arguments(besides: [])
         app.launch()
         // A cut-off test 1 left the app at its welcome screen (run 43816787321).
         if !UITestOnboarding.fullFlowReachedItsEnd { UITestOnboarding.completeIfNeeded(app, in: "test7") }

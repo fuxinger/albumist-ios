@@ -140,11 +140,17 @@ struct SettingsView: View {
                     Button("Reisen wieder automatisch erkennen") { confirmTripReset = true }
                         // Grey while an analysis runs or albums are made; the footer says why.
                         .disabled(model.tripChangeWait != nil)
+                        .tripChangeWaitHint(model.tripChangeWait)
                         .accessibilityIdentifier("settings.resetTrips")
                         .confirmationDialog("Reisen wieder automatisch erkennen?", isPresented: $confirmTripReset, titleVisibility: .visible) {
                             Button("Automatisch erkennen") { Task { await model.resetTripCorrections() } }
                         } message: {
-                            Text("Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind.")
+                            // During a Pause the reset starts the analysis again (decision 18.11.2026).
+                            if model.analysis.isPausedByUser {
+                                Text("Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter.")
+                            } else {
+                                Text("Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind.")
+                            }
                         }
                 } header: {
                     Text("Reisen")

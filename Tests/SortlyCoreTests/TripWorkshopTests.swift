@@ -176,6 +176,42 @@ struct TripWorkshopTests {
         #expect(TripWorkshop.wait(creatingAlbums: true, analysing: true, check: true) == .creatingAlbums)
     }
 
+    /// "Gleich wieder möglich" only for a check that is soon done (review of b240899): not for a
+    /// check with work of its own (labels after "Themen" or "Dokumente", many new photos), and
+    /// not for the overnight refinement, which runs without a kind of its own and keeps the last
+    /// run's.
+    @Test func onlyAShortCheckSaysSoon() {
+        #expect(TripWorkshop.shortCheck(kind: true, newWork: false, refinement: false))
+        #expect(!TripWorkshop.shortCheck(kind: true, newWork: true, refinement: false), "a check with new work said gleich")
+        #expect(!TripWorkshop.shortCheck(kind: true, newWork: false, refinement: true), "the refinement said gleich")
+        #expect(!TripWorkshop.shortCheck(kind: false, newWork: false, refinement: false))
+        #expect(!TripWorkshop.shortCheck(kind: false, newWork: true, refinement: true))
+        let labels = TripWorkshop.shortCheck(kind: true, newWork: true, refinement: false)
+        #expect(TripWorkshop.wait(creatingAlbums: false, analysing: true, check: labels) == .analysis)
+        let refinement = TripWorkshop.shortCheck(kind: true, newWork: false, refinement: true)
+        #expect(TripWorkshop.wait(creatingAlbums: false, analysing: true, check: refinement) == .analysis)
+    }
+
+    /// A trip change during a Pause starts the run that goes on with the paused analysis
+    /// (decision 18.11.2026), which can take tens of minutes; the sheet waited for it with no
+    /// way to close (review of 163d656). It waits only for a short check, the run a change
+    /// starts after a complete analysis; otherwise the change is saved and the sheet says so
+    /// and can be closed. Also when no run started yet (one waits for a change in "Dein
+    /// Zuhause" or for "Analyse neu aufbauen"): there was no end to wait for.
+    @Test func aChangeWaitsInTheSheetOnlyForAShortCheck() {
+        #expect(TripWorkshop.afterChange(running: true, check: true) == .waitHere)
+        #expect(TripWorkshop.afterChange(running: true, check: false) == .savedForLater, "the sheet waited for a long run")
+        #expect(TripWorkshop.afterChange(running: false, check: true) == .savedForLater, "the sheet waited for a run that never started")
+        #expect(TripWorkshop.afterChange(running: false, check: false) == .savedForLater)
+        // The same notion of "soon" as the note under the controls.
+        for running in [false, true] {
+            for check in [false, true] {
+                let soon = TripWorkshop.wait(creatingAlbums: false, analysing: running, check: check) == .tripsAgain
+                #expect((TripWorkshop.afterChange(running: running, check: check) == .waitHere) == soon)
+            }
+        }
+    }
+
     /// Right after a split the merge row was off while the check ran, looked tappable and said
     /// nothing (the settings' "Reisen wieder automatisch erkennen" too). The model refuses a
     /// change exactly while `TripWorkshop.wait` gives a reason, both screens take their state
@@ -200,6 +236,23 @@ struct TripWorkshopTests {
             #expect(showsTheNote, "\(name): its trip controls wait without saying why")
             #expect(!waitsSilently, "\(name): waits for the analysis without saying why")
         }
+        // Each part the screens rely on, so taking one back goes red (review of b240899).
+        let tripChangeWait = try #require(AppSource.body(of: "var tripChangeWait:", in: model))
+        let waitsForAlbums = tripChangeWait.contains("creatingAlbums: execution.isRunning")
+        let waitsForTheRun = tripChangeWait.contains("analysing: analysis.isRunning")
+        #expect(waitsForAlbums, "tripChangeWait does not wait while albums are made")
+        #expect(waitsForTheRun, "tripChangeWait does not wait while an analysis runs")
+        let busyByTheModel = workshop.contains("busy: Bool { model.tripChangeWait != nil }")
+        #expect(busyByTheModel, "TripWorkshopView greys its controls for another reason than the model refuses")
+        let resetByTheModel = settings.contains(".disabled(model.tripChangeWait != nil)")
+        #expect(resetByTheModel, "SettingsView: the trip reset is not greyed while the model refuses")
+        let mergeLabel = try #require(AppSource.body(of: "struct MergeRowLabel", in: workshop))
+        let mergeLooksDisabled = mergeLabel.contains("@Environment(\\.isEnabled)") && mergeLabel.contains("isEnabled ?")
+        #expect(mergeLooksDisabled, "the merge rows keep their accent colour while disabled")
+        let mergeSection = try #require(AppSource.body(of: "func mergeSection(", in: workshop))
+        let mergeFooter = mergeSection.components(separatedBy: "footer:").dropFirst().joined()
+        let noteInTheMergeFooter = mergeFooter.contains("TripChangeWaitNote()")
+        #expect(noteInTheMergeFooter, "the merge rows wait without the note in their footer")
         let catalog = try StringCatalogTests.catalog()
         for reason in ["Albumist rechnet die Reisen gerade neu. Gleich wieder möglich.",
                        "Albumist analysiert gerade deine Fotos. Danach wieder möglich.",
@@ -209,6 +262,73 @@ struct TripWorkshopTests {
             let english = catalog[reason].flatMap { StringCatalogTests.localization($0, "en") }
                 .flatMap { $0["stringUnit"] as? [String: Any] }?["value"] as? String
             #expect(english?.isEmpty == false, "Not in the catalog with English: \(reason)")
+        }
+    }
+
+    /// A trip change during a Pause starts the run that goes on with the paused analysis
+    /// (decision 18.11.2026): the sheet waits only for a short check and otherwise says the
+    /// change is saved and can be closed; "gleich" only for a short check, the refinement too;
+    /// VoiceOver says on each greyed control why it waits; the confirmations say that the paused
+    /// analysis goes on (review of 163d656). The App does not build on Linux, so its sources are
+    /// read; each check goes red when its part is taken back.
+    @Test func aChangeDuringAPauseLeavesTheSheetFreeAndSaysSo() throws {
+        let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
+        let workshop = try AppSource.read("App/Sortly/Views/TripWorkshopView.swift")
+        let settings = try AppSource.read("App/Sortly/Views/SettingsView.swift")
+        func body(_ declaration: String, in source: String) throws -> String {
+            try #require(AppSource.body(of: declaration, in: source), "no \(declaration)")
+        }
+        // The model: what a short check is, for the note and for the sheet alike.
+        let shortCheck = try body("var runIsShortCheck:", in: model)
+        let checkByTheRule = shortCheck.contains(
+            "TripWorkshop.shortCheck(kind: analysis.kind == .check, newWork: analysis.newWork != nil, refinement: analysis.isRefinement)")
+        #expect(checkByTheRule, "runIsShortCheck does not take the kind, the new work and the refinement")
+        let waitUsesIt = try body("var tripChangeWait:", in: model).contains("check: runIsShortCheck")
+        #expect(waitUsesIt, "tripChangeWait says gleich for every check")
+        let afterChange = try body("var afterTripChange:", in: model)
+        let afterByTheRule = afterChange.contains("TripWorkshop.afterChange(running: analysis.isRunning, check: runIsShortCheck)")
+        #expect(afterByTheRule, "afterTripChange does not follow TripWorkshop.afterChange")
+        let refinement = try body("func refinePass(", in: model)
+        let refinementMarked = refinement.contains("analysis.isRefinement = true") && refinement.contains("analysis.isRefinement = false")
+        #expect(refinementMarked, "the refinement does not mark itself, and reads as a check")
+
+        // The sheet: waits only when the model says so, else saved and free to close.
+        let perform = try body("func perform(", in: workshop)
+        let sheetAsksTheModel = perform.contains("switch model.afterTripChange") && perform.contains("case .savedForLater")
+        #expect(sheetAsksTheModel, "the sheet waits for every run a change starts")
+        let saysSaved = workshop.contains("Text(\"Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist.\")")
+        #expect(saysSaved, "the sheet does not say the change is saved")
+        let closeWhenSaved = workshop.contains("if working == nil && (done == nil || saved)")
+        #expect(closeWhenSaved, "the sheet cannot be closed once the change is saved")
+
+        // VoiceOver: each greyed control says why it waits.
+        let hint = try body("func tripChangeWaitHint(", in: workshop)
+        let hintSaysWhy = hint.contains("accessibilityHint(") && hint.contains("TripChangeWaitNote.reason(")
+        #expect(hintSaysWhy, "the hint does not say the reason of the note")
+        let greyed = try Regex(#"\.disabled\(busy\)"#)
+        let greyedWithHint = try Regex(#"\.disabled\(busy\)\s*\.tripChangeWaitHint\(model\.tripChangeWait\)"#)
+        let workshopGreyed = workshop.matches(of: greyed).count
+        #expect(workshopGreyed == 3)
+        #expect(workshop.matches(of: greyedWithHint).count == workshopGreyed, "TripWorkshopView: a greyed control does not say why to VoiceOver")
+        let resetWithHint = try Regex(#"\.disabled\(model\.tripChangeWait != nil\)\s*\.tripChangeWaitHint\(model\.tripChangeWait\)"#)
+        #expect(settings.matches(of: resetWithHint).count == 1, "SettingsView: the greyed trip reset does not say why to VoiceOver")
+
+        // The confirmations say that the paused analysis goes on.
+        let merge = try body("func mergeButton(", in: workshop)
+        let mergeSaysIt = merge.contains("if model.analysis.isPausedByUser")
+            && merge.contains("Fotos. Die pausierte Analyse läuft dann weiter.\")")
+        #expect(mergeSaysIt, "the merge confirmation does not say that the paused analysis goes on")
+        let resetSaysIt = settings.contains("if model.analysis.isPausedByUser")
+            && settings.contains("Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter.\")")
+        #expect(resetSaysIt, "the trip reset confirmation does not say that the paused analysis goes on")
+
+        let catalog = try StringCatalogTests.catalog()
+        for key in ["Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist.",
+                    "„%@“ und „%@“ werden eine Reise mit %lld Fotos. Die pausierte Analyse läuft dann weiter.",
+                    "Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter."] {
+            let english = catalog[key].flatMap { StringCatalogTests.localization($0, "en") }
+                .flatMap { $0["stringUnit"] as? [String: Any] }?["value"] as? String
+            #expect(english?.isEmpty == false, "Not in the catalog with English: \(key)")
         }
     }
 }

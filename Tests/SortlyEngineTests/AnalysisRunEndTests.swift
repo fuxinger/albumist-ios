@@ -394,6 +394,60 @@ struct AnalysisStartCauseTests {
         }
     }
 
+    /// The App really decides by this rule (it does not build on Linux, so its code is read):
+    /// a trip change starts its run as the user's change, the start and the Pause follow the
+    /// cause, and no start that comes by itself passes a cause that would end a Pause. Each
+    /// check goes red when that part of the fix is taken back (review of 163d656).
+    @Test func theAppStartsByThisRule() throws {
+        let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
+        func body(_ declaration: String, in source: String, file: String = "AppModel.swift") throws -> String {
+            try #require(AppSource.body(of: declaration, in: source), "\(file): no \(declaration)")
+        }
+        // Booleans first: an expectation on `contains` would print the whole file.
+        let changeTrips = try body("func changeTrips(", in: model)
+        let tripChangeIsTheUsers = changeTrips.contains("startAnalysis(cause: .userChange)")
+        #expect(tripChangeIsTheUsers, "changeTrips does not start its run as the user's change")
+        let recurring = try body("func changeRecurringPlaces(", in: model)
+        let answerIsTheUsers = recurring.contains("startAnalysis(cause: .userChange)")
+        #expect(answerIsTheUsers, "changeRecurringPlaces(rerun: true) does not start its run as the user's change")
+
+        let start = try body("func startAnalysisNow(", in: model)
+        let gateByTheRule = start.contains("cause.startsRun(pausedByUser:")
+        let pauseByTheRule = start.contains("cause.pausedAfterStart(")
+        let ownGate = start.contains("cause == .") || start.contains("cause != .") || start.contains("pausedByUser && !")
+        #expect(gateByTheRule, "startAnalysisNow does not decide the start by AnalysisStartCause")
+        #expect(pauseByTheRule, "startAnalysisNow does not set the Pause by AnalysisStartCause")
+        #expect(!ownGate, "startAnalysisNow has a Pause rule of its own")
+
+        // Every start that comes by itself, found by its function (not its line): the start at
+        // launch, after a rebuild or with the access back, follow-ups, retries, the end of a plan,
+        // the app on screen again, changes in Photos, the Shortcut and "Neu prüfen" on the
+        // overview (only shown without a Pause).
+        let automatic: [(file: String, declarations: [String])] = [
+            ("App/Sortly/Model/AppModel.swift", ["func rebuildAfterFailure(", "func followAccess(", "func startAnalysisNow(",
+                                                 "func follow(_ next:", "func retryUnattendedRun(", "func sceneBecameActive(",
+                                                 "func releaseExecution(", "func run(_ plan:"]),
+            ("App/Sortly/App/Shortcuts.swift", ["struct SortNewPhotosIntent"]),
+            ("App/Sortly/App/SortlyApp.swift", ["var body: some Scene"]),
+            ("App/Sortly/Platform/LibraryChangeWatcher.swift", ["func scheduleCatchUpNow("]),
+            ("App/Sortly/Views/OverviewView.swift", ["var finishedAnalysis: some View"]),
+        ]
+        var sites = 0
+        for (path, declarations) in automatic {
+            let source = try AppSource.read(path)
+            for declaration in declarations {
+                let calls = AppSource.calls(of: "startAnalysis(", in: try body(declaration, in: source, file: path))
+                #expect(!calls.isEmpty, "\(path) \(declaration): no start found (moved?)")
+                for arguments in calls {
+                    sites += 1
+                    let endsAPause = arguments.contains(".tap") || arguments.contains(".userChange") || arguments.contains("cause:")
+                    #expect(!endsAPause, "\(path) \(declaration): an automatic start passes \"\(arguments)\"")
+                }
+            }
+        }
+        #expect(sites == 13)
+    }
+
     /// Several requests while a change in "Dein Zuhause" is applied become one run: the one the
     /// user asked for wins, so a queued trip change still ends the Pause.
     @Test func joinedRequestsKeepWhatTheUserAskedFor() {

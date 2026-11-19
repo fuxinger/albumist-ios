@@ -56,7 +56,13 @@
   wurde gespeichert, aber nicht angewendet: die Werkstatt drehte ohne Ende, die alten Reisen
   blieben, ohne Hinweis. Jetzt startet die Analyse, die die Änderung anwendet, sofort wie nach
   einem Tippen, und die Pause endet. Was von selbst startet (Start der App, Wiederholungen,
-  Änderungen in Fotos oder an Einstellungen), wartet weiter auf „Fortsetzen“.
+  Änderungen in Fotos oder an Einstellungen), wartet weiter auf „Fortsetzen“. Die Bestätigungen
+  sagen das vorher („Die pausierte Analyse läuft dann weiter.“). Setzt die Änderung eine lange
+  Analyse fort, wartet die Werkstatt nicht mehr darauf: „Gespeichert. Albumist wendet die Änderung
+  an, sobald die Analyse fertig ist.“, und das Blatt lässt sich schließen.
+- Reise-Werkstatt: „Gleich wieder möglich“ steht nur noch bei einer kurzen Prüfung, nicht bei einer
+  mit eigener Arbeit (Labels nach „Themen“, viele neue Fotos) oder der nächtlichen Verfeinerung.
+  VoiceOver sagt an jedem grauen Knopf, warum er wartet.
 - Reise-Werkstatt (UI-Lauf 44375768011): Direkt nach dem Teilen war „Mit der Reise danach
   zusammenlegen“ gesperrt, solange Albumist die Reisen neu rechnete, sah aber tippbar aus und sagte
   nichts. Jetzt sind „Zusammenlegen“, „Aufheben“, „Reise teilen“ und in den Einstellungen „Reisen

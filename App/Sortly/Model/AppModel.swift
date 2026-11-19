@@ -42,6 +42,9 @@ final class AppModel {
         var waiting: PauseReason?
         /// Pause was tapped and the run is finishing the photos in work.
         var pausing = false
+        /// The run in progress is the overnight refinement: it has no `kind` of its own and keeps
+        /// the last run's (`TripWorkshop.shortCheck`).
+        var isRefinement = false
         /// Where an unfinished earlier run got to. A run that goes on shows this instead of
         /// "Schritt 1" again until it is back there (first device test 15.11.).
         var resumeFrom: AnalysisMarker.Point?
@@ -1624,6 +1627,7 @@ final class AppModel {
         guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !refinementHeldByPause,
               !Task.isCancelled else { return nil }
         analysis.isRunning = true
+        analysis.isRefinement = true
         updateCard()
         // Late progress of the run before must not show up during this one.
         analysisGeneration += 1
@@ -1660,6 +1664,7 @@ final class AppModel {
         // stopped by the device: as it was.
         analysis.needsResume = end.needsResume(afterRefinement: analysis.needsResume)
         analysis.isRunning = false
+        analysis.isRefinement = false
         analysis.pausing = false
         updateCard()
         guard let ran = report else { return (false, end.next, generation) }
@@ -2015,7 +2020,22 @@ final class AppModel {
     /// be made. `changeTrips` refuses exactly then; the workshop and the settings grey these
     /// controls and say why next to them (`TripChangeWaitNote`).
     var tripChangeWait: TripWorkshop.Wait? {
-        TripWorkshop.wait(creatingAlbums: execution.isRunning, analysing: analysis.isRunning, check: analysis.kind == .check)
+        TripWorkshop.wait(creatingAlbums: execution.isRunning, analysing: analysis.isRunning, check: runIsShortCheck)
+    }
+
+    /// What the workshop does once `changeTrips` stored a change and asked for its run: wait for
+    /// a short check, or say the change is saved and stay free to close. A change during a Pause
+    /// starts the run that goes on with the paused analysis, which can take tens of minutes
+    /// (review of 163d656: the sheet waited for it with no way to close).
+    var afterTripChange: TripWorkshop.AfterChange {
+        TripWorkshop.afterChange(running: analysis.isRunning, check: runIsShortCheck)
+    }
+
+    /// The run in progress is a short check: not one with work of its own (labels after "Themen"
+    /// or "Dokumente", many new photos), not the refinement (review of b240899: each said
+    /// "Gleich wieder möglich").
+    private var runIsShortCheck: Bool {
+        TripWorkshop.shortCheck(kind: analysis.kind == .check, newWork: analysis.newWork != nil, refinement: analysis.isRefinement)
     }
 
     /// Stores the change (it is part of the decisions copy in the backup) and starts the

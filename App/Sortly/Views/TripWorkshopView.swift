@@ -18,6 +18,8 @@ struct TripWorkshopView: View {
     @State private var splitIndex: Int?
     @State private var working: Outcome?
     @State private var done: Outcome?
+    /// The change is saved and a longer run applies it (`TripWorkshop.AfterChange.savedForLater`).
+    @State private var saved = false
     @State private var merging: Side?
     @State private var failed = false
 
@@ -55,8 +57,9 @@ struct TripWorkshopView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // A round close button: the wider "Abbrechen" pushed the title off centre.
+            // Also once a change is saved for a longer run: nothing to wait for here.
             ToolbarItem(placement: .cancellationAction) {
-                if done == nil && working == nil {
+                if working == nil && (done == nil || saved) {
                     Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
                 }
             }
@@ -92,10 +95,22 @@ struct TripWorkshopView: View {
     /// `TripChangeWaitNote` says so next to them.
     private var busy: Bool { model.tripChangeWait != nil }
 
+    /// The sheet waits only for a short check, the run a change starts after a complete
+    /// analysis. A change during a Pause starts the run that goes on with the paused analysis
+    /// (decision 18.11.2026), which can take tens of minutes: the change is saved, the sheet says
+    /// so and can be closed (review of 163d656: it waited with no way to close).
     private func perform(_ outcome: Outcome, _ change: @escaping @MainActor () async -> Bool) {
         Task {
             if await change() {
-                withAnimation(.smooth) { working = outcome }
+                switch model.afterTripChange {
+                case .waitHere:
+                    withAnimation(.smooth) { working = outcome }
+                case .savedForLater:
+                    withAnimation(.smooth) {
+                        saved = true
+                        done = outcome
+                    }
+                }
             } else {
                 failed = true
             }
@@ -145,6 +160,7 @@ struct TripWorkshopView: View {
                         }
                         .buttonStyle(.borderless)
                         .disabled(busy)
+                        .tripChangeWaitHint(model.tripChangeWait)
                         .accessibilityIdentifier("workshop.undoChange")
                     }
                 }
@@ -208,6 +224,7 @@ struct TripWorkshopView: View {
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(busy)
+            .tripChangeWaitHint(model.tripChangeWait)
             .accessibilityIdentifier("workshop.split")
             // The bar covers the end of the list, so it says itself why the button waits.
             TripChangeWaitNote(identifier: "workshop.split.busyNote")
@@ -246,6 +263,7 @@ struct TripWorkshopView: View {
         }
         .buttonStyle(.plain)
         .disabled(busy)
+        .tripChangeWaitHint(model.tripChangeWait)
         .accessibilityIdentifier(side == .before ? "workshop.merge.before" : "workshop.merge.after")
         .confirmationDialog("Zu einer Reise zusammenlegen?", isPresented: Binding(get: { merging == side }, set: { if !$0 { merging = nil } }),
                             titleVisibility: .visible) {
@@ -254,9 +272,15 @@ struct TripWorkshopView: View {
                 perform(.merged) { await model.mergeTrips(first, second) }
             }
         } message: {
-            // The earlier trip first, as in the trip list read from the past.
+            // The earlier trip first, as in the trip list read from the past. During a Pause the
+            // merge starts the analysis again (decision 18.11.2026): said before the tap.
             let (first, second) = side == .before ? (other, proposal) : (proposal, other)
-            Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(other.assetIDs.count + proposal.assetIDs.count) Fotos.")
+            let total = other.assetIDs.count + proposal.assetIDs.count
+            if model.analysis.isPausedByUser {
+                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) Fotos. Die pausierte Analyse läuft dann weiter.")
+            } else {
+                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) Fotos.")
+            }
         }
     }
 
@@ -269,25 +293,33 @@ struct TripWorkshopView: View {
                     .foregroundStyle(Theme.accent)
                     .symbolEffect(.bounce, value: done != nil)
                     .accessibilityHidden(true)
-                Group {
-                    switch outcome {
-                    case .split: Text("Aus einer Reise sind zwei geworden.")
-                    case .merged: Text("Die zwei Reisen sind jetzt eine.")
-                    case .undone: Text("Deine Änderung ist aufgehoben.")
+                if saved {
+                    // Not applied yet: the run that goes on with the analysis does it.
+                    Text("Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist.")
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Group {
+                        switch outcome {
+                        case .split: Text("Aus einer Reise sind zwei geworden.")
+                        case .merged: Text("Die zwei Reisen sind jetzt eine.")
+                        case .undone: Text("Deine Änderung ist aufgehoben.")
+                        }
                     }
-                }
-                .font(.headline)
-                .multilineTextAlignment(.center)
-                Group {
-                    if outcome == .undone {
-                        Text("Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst.")
-                    } else {
-                        Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen.")
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    Group {
+                        if outcome == .undone {
+                            Text("Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst.")
+                        } else {
+                            Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen.")
+                        }
                     }
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.subheadline).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.s)
@@ -353,6 +385,14 @@ struct TripChangeWaitNote: View {
         case .analysis: LocalizedStringKey("Albumist analysiert gerade deine Fotos. Danach wieder möglich.")
         case .creatingAlbums: LocalizedStringKey("Albumist legt gerade Alben an. Danach wieder möglich.")
         }
+    }
+}
+
+extension View {
+    /// While trip changes wait, VoiceOver says why on the greyed control itself, not only in the
+    /// note under it (the reason of `TripChangeWaitNote`); no hint otherwise.
+    func tripChangeWaitHint(_ wait: TripWorkshop.Wait?) -> some View {
+        accessibilityHint(wait.map { Text(TripChangeWaitNote.reason($0)) } ?? Text(verbatim: ""))
     }
 }
 

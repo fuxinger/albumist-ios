@@ -21,10 +21,17 @@
 - Umstrittene Gebiete (Entscheidung Fuchs 18.11., `DisputedAreas`): Krim, Westsahara, Kaschmir,
   Nordzypern, Kosovo, Taiwan, Golanhöhen und Abchasien heißen mit ihrem eigenen Namen statt eines
   Landes, ihr Vorschlag ist „Unsicher“. Die Umrisse von Westsahara, Golanhöhen und Aksai Chin
-  sind grob (einige Kilometer). Orte, die vor dem Update bestimmt wurden, behalten ihr altes Land,
-  bis „Analyse neu aufbauen“ sie neu bestimmt. Im Reise-Atlas zählen diese Gebiete nicht als
-  Land, und die Suche nach „Taiwan“ oder „Kosovo“ als Land findet sie nicht (wohl aber nach dem
-  Gebiets- oder Ortsnamen). Nicht in der Liste: Südossetien, Transnistrien, Somaliland,
+  und die Umrisse auf dem Wasser (um die Krim mit der Straße von Kertsch, um Taiwan, Penghu und
+  die kleinen Inseln, Kästen um Matsu und Pratas) sind grob (einige Kilometer). An der Grenze
+  (bis etwa 1,5 km), wo die Karte nicht sicher ist und Apple das Nachbarland nennt (etwa
+  Serbien am Kosovo, Republik Zypern an der Pufferzone), gilt das Nachbarland. Orte, die vor dem Update bestimmt wurden, behalten ihr altes Land, bis „Analyse
+  neu aufbauen“ sie neu bestimmt. Eine automatische Nachprüfung gibt es bewusst nicht: Die
+  Entscheidungen, Titel und Alben eines Ortsvorschlags hängen an seinem Schlüssel, und für Krim,
+  Nordzypern, Westsahara und Kaschmir bleibt der alte Länderschlüssel („Russland“) für den Rest
+  des Landes bestehen; eine Entscheidung zu „Russland“ ließe sich nicht sauber auf „Krim“
+  übertragen. Im Reise-Atlas zählen diese Gebiete nicht als Land (ihre Reisen und Orte zählen
+  mit dem Gebietsnamen); die Suche findet sie über den Gebiets- oder Ortsnamen, nicht als
+  Land. Nicht in der Liste: Südossetien, Transnistrien, Somaliland,
   Westjordanland und Ost-Jerusalem (dort gilt die Karte wie bisher).
 - Sprache der Albumnamen gewechselt (Prüfbefund P1-12): Länder und Regionen aller
   gespeicherten Orte werden beim nächsten Lauf aus der Offline-Karte neu benannt (der Wechsel

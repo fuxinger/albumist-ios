@@ -1126,7 +1126,10 @@ public struct FinishMoment: Sendable, Equatable {
     public mutating func afterWait(settled: Bool, appActive: Bool) -> Shown {
         guard owed && settled else { return .nothing }
         let notify = !appActive && !notified
-        if notify { notified = true }
+        // Shown in the app (even if not looked at yet, another tab): no notification for it
+        // later (second review of 4e26e08, S1: a check ending in the background hours later
+        // notified a finish that had been on screen).
+        notified = true
         return Shown(card: true, notification: notify)
     }
 

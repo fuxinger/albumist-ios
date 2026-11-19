@@ -109,6 +109,21 @@ struct FinishMomentTests {
         #expect(!again2)
     }
 
+    /// The finish card came while the app was open but was not looked at (another tab): the
+    /// moment stays owed, and a check that ends later in the background shows the card again but
+    /// sends no notification for a finish that was already on screen in the app (second review
+    /// of 4e26e08, S1).
+    @Test func aFinishShownInTheAppIsNotNotifiedLater() {
+        var moment = FinishMoment()
+        moment.runStarted()
+        let inApp = Self.end(.longFinished, in: &moment, isNewest: true, appActive: true)
+        #expect(inApp == .init(card: true, notification: false))
+        moment.runStarted()
+        let later = Self.end(.quickCheckFinished, in: &moment, isNewest: true, appActive: false)
+        #expect(later.card)
+        #expect(!later.notification, "Analyse fertig was notified hours after it was shown in the app")
+    }
+
     /// Never "fertig" while work is left: the run that slipped in ends with a change left or
     /// paused, and the moment waits for the run that really finishes the analysis.
     @Test func neverFertigWhileWorkIsLeft() {

@@ -50,7 +50,8 @@ public enum HomeCandidates {
             var group = groups[key] ?? Group(components: PlaceComponents(
                 isoCountryCode: place.isoCountryCode, country: place.country, administrativeArea: place.administrativeArea,
                 subAdministrativeArea: key.level == .locality ? place.subAdministrativeArea : nil,
-                locality: key.level == .locality ? place.locality : nil, administrativeAreaKey: place.administrativeAreaKey))
+                locality: key.level == .locality ? place.locality : nil, administrativeAreaKey: place.administrativeAreaKey,
+                disputedArea: place.disputedArea))
             group.coordinates.append(c)
             if let date = f.asset.creationDate {
                 group.days.insert(calendar.startOfDay(for: date))

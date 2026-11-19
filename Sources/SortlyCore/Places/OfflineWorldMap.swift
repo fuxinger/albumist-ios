@@ -180,8 +180,8 @@ public struct OfflineWorldMap: Sendable {
         let countries = evaluate(coordinate, among: regions.lazy.filter { $0.level == .country }.map(\.index))
         var match = Match(country: nil, region: nil, countryIsCertain: false, regionIsCertain: false, countryCandidates: countries.map { regions[$0.index] })
         guard let best = countries.first, best.inside || best.distance <= borderMarginMeters else {
-            // At sea, near a disputed coast the map does not draw (Western Sahara).
-            if let area = DisputedAreas.area(outlineContaining: coordinate) { match.markDisputed(area) }
+            // At sea, or on an island the map does not draw, in a disputed area's waters.
+            if let area = DisputedAreas.area(outlineContaining: coordinate, mapCountry: nil) { match.markDisputed(area) }
             return match
         }
         match.country = regions[best.index]
@@ -192,7 +192,7 @@ public struct OfflineWorldMap: Sendable {
             match.regionIsCertain = r.isCertain
         }
         if let area = DisputedAreas.area(mapCountry: match.country?.nameEN, mapRegion: match.region?.isoCode)
-            ?? DisputedAreas.area(outlineContaining: coordinate) {
+            ?? DisputedAreas.area(outlineContaining: coordinate, mapCountry: match.country?.nameEN) {
             match.markDisputed(area)
         }
         return match

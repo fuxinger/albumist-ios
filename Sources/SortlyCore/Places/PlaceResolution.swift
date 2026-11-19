@@ -1,6 +1,6 @@
 import Foundation
 
-/// Online reverse geocoding (MapKit on iOS). Implementations throw `GeocodingError`.
+/// Online reverse geocoding (Apple's geocoder, `CLGeocoder`, on iOS). Implementations throw `GeocodingError`.
 public protocol ReverseGeocoding: Sendable {
     func reverseGeocode(_ coordinate: GeoCoordinate) async throws -> PlaceComponents?
 }
@@ -265,11 +265,13 @@ public actor PlaceResolutionService {
             // The user's consent is read again before every online lookup: switching it off in
             // the settings stops the next request, not only the next run (audit 2, 5.2).
             if !onlineDisabled, let onlineAllowed, !(await onlineAllowed()) { onlineDisabled = true }
+            // The cell's answer is for this photo of it (also when it comes from the cache: the
+            // members of a cell hardly move): a town from across a disputed line is not taken.
+            let representative = Self.representative(of: members.map(\.coordinate))
             var online = try await cache.cachedPlace(cell: cell)
             if online != nil {
                 outcome.cacheHits += 1
             } else if !onlineDisabled, maxOnlineRequests.map({ outcome.onlineRequests < $0 }) ?? true, let geocoder {
-                let representative = Self.representative(of: members.map(\.coordinate))
                 switch await request(geocoder, representative, patience: maxRateLimitWait, shouldStop: shouldStop) {
                 case .found(let components):
                     outcome.onlineRequests += 1
@@ -302,9 +304,10 @@ public actor PlaceResolutionService {
                 continue
             }
             var batch: [AssetID: ResolvedPlace] = [:]
+            let sample = offlineMatch(representative, memo: &offlineCache)
             for member in members {
                 let match = offlineMatch(member.coordinate, memo: &offlineCache)
-                guard let merged = merge(online: online, offline: match, at: member.coordinate) else {
+                guard let merged = merge(online: online, offline: match, at: member.coordinate, sample: sample) else {
                     // An empty answer will not get better by asking again.
                     if online != PlaceComponents() { outcome.pendingOnline.insert(member.assetID) }
                     continue
@@ -351,18 +354,27 @@ public actor PlaceResolutionService {
 
     /// Country and region always come from the offline map when it is certain, so names
     /// stay identical across sources and languages; the town comes from the online cell.
-    func merge(online: PlaceComponents, offline: OfflineWorldMap.Match?, at coordinate: GeoCoordinate) -> (components: PlaceComponents, townIsValid: Bool)? {
+    ///
+    /// `sample`: the map's answer for the point the online answer was asked for (the cell's
+    /// representative). Where it lies on the other side of a disputed line than `coordinate`,
+    /// the online town is not this photo's (second review of 752ba07).
+    func merge(online: PlaceComponents, offline: OfflineWorldMap.Match?, at coordinate: GeoCoordinate,
+               sample: OfflineWorldMap.Match? = nil) -> (components: PlaceComponents, townIsValid: Bool)? {
         var result = online
         var townIsValid = true
         if let area = offline?.disputedArea {
             // A disputed area: Apple names the country by the country of the device, Albumist
-            // takes no side (decision Fuchs 18.11.2026). The town stays.
+            // takes no side (decision Fuchs 18.11.2026). The town stays, if it is from the area.
+            if let sample, sample.disputedArea != area {
+                return (PlaceComponents(timeZoneIdentifier: online.timeZoneIdentifier).inDisputedArea(area, language: policy.language), false)
+            }
             return (online.inDisputedArea(area, language: policy.language), true)
         }
         if let offline, offline.countryIsCertain, let country = offline.country {
-            if let code = online.isoCountryCode, code.uppercased() != country.isoCode.uppercased() {
-                // The coarse cell's representative lies in another country: keep this photo's
-                // own country, drop the borrowed town and refine later.
+            let borrowed = online.isoCountryCode.map { $0.uppercased() != country.isoCode.uppercased() } ?? false
+            if borrowed || sample?.disputedArea != nil {
+                // The coarse cell's representative lies in another country or in a disputed
+                // area: keep this photo's own country, drop the borrowed town and refine later.
                 result = PlaceComponents(isoCountryCode: country.isoCode, timeZoneIdentifier: online.timeZoneIdentifier)
                 townIsValid = false
             }
@@ -372,8 +384,17 @@ public actor PlaceResolutionService {
                 result.administrativeArea = region.name(policy.language)
             }
         } else if let map, let code = online.isoCountryCode {
-            if let country = map.country(code: code) { result.country = country.name(policy.language) }
-            if let region = map.region(coordinate, inCountryCode: code), region.isCertain {
+            // The map is not sure (a border, the sea): Apple's answer decides the side, but an
+            // answer in a disputed area is still "nicht sicher" (second review of 752ba07: a
+            // Kherson photo near Crimea became "Russland", a Serbian one "Kosovo").
+            let country = map.country(code: code)
+            let region = map.region(coordinate, inCountryCode: code)
+            if let area = DisputedAreas.area(mapCountry: country?.nameEN, mapRegion: region?.region.isoCode)
+                ?? DisputedAreas.area(outlineContaining: coordinate, mapCountry: country?.nameEN) {
+                return (online.inDisputedArea(area, language: policy.language), true)
+            }
+            if let country { result.country = country.name(policy.language) }
+            if let region, region.isCertain {
                 result.administrativeArea = region.region.name(policy.language)
             }
         }

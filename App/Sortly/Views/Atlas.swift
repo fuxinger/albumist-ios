@@ -40,6 +40,12 @@ enum AtlasStyle {
     static func countryName(_ code: String) -> String {
         Locale.current.localizedString(forRegionCode: code) ?? code
     }
+
+    /// Where a trip went: flag and country, or a disputed area's own name without a flag
+    /// (decision Fuchs 18.11.2026).
+    static func tripCountry(_ trip: TravelAtlas.TripSummary) -> String {
+        trip.areaName ?? "\(TravelAtlas.flag(trip.countryCode)) \(countryName(trip.countryCode))"
+    }
 }
 
 // MARK: - Map
@@ -361,7 +367,7 @@ struct AtlasContent: View {
                 if atlas.year == nil, let year = atlas.sinceYear { tile("calendar", String(year), "unterwegs seit") }
                 if let days = atlas.longestTripDays {
                     tile("clock.fill", "\(days)", days == 1 ? "Tag längste Reise" : "Tage längste Reise",
-                         detail: atlas.longestTrip.flatMap { $0.days == days ? "\(TravelAtlas.flag($0.countryCode)) \(AtlasStyle.countryName($0.countryCode))" : nil })
+                         detail: atlas.longestTrip.flatMap { $0.days == days ? AtlasStyle.tripCountry($0) : nil })
                 }
             }
 
@@ -526,7 +532,7 @@ struct ShareCard: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 stat(days, "Tage am Stück")
                                 if let trip = atlas.longestTrip, trip.days == days {
-                                    Text(verbatim: "\(TravelAtlas.flag(trip.countryCode)) \(AtlasStyle.countryName(trip.countryCode))")
+                                    Text(verbatim: AtlasStyle.tripCountry(trip))
                                         .font(.system(size: 22, weight: .semibold))
                                 }
                             }

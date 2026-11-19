@@ -18,18 +18,38 @@ public struct DisputedArea: Sendable, Hashable, Identifiable {
     let mapCountries: Set<String>
     /// First-level regions of the offline map (by code) that lie wholly in the area.
     let mapRegions: Set<String>
-    /// Outlines (latitude, longitude) for the parts the map does not draw on their own. Coarse,
-    /// a few kilometres: they follow the lines of control, not the coast.
+    /// Outlines (latitude, longitude) for the parts the map does not draw on their own, and the
+    /// area's waters. Coarse, a few kilometres: they follow the lines of control, not the coast.
     let outlines: [[(Double, Double)]]
+    /// The map countries (by English name) an outline may override: a point in the outline
+    /// belongs to the area only where the map says one of these, or no country at all (the
+    /// sea). Everywhere else the map's country stands, so a coarse outline never reaches into
+    /// a neighbour (second review of 752ba07: the Golan outline took in Israeli kibbutzim of
+    /// the Hula valley, Syrian-held villages east of the 1974 line and a strip of Jordan).
+    let outlineCountries: Set<String>
 
     public func name(_ language: TitleLanguage) -> String { language == .german ? nameDE : nameEN }
 
     public static func == (lhs: DisputedArea, rhs: DisputedArea) -> Bool { lhs.id == rhs.id }
     public func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
-    /// Whether `coordinate` lies inside one of the area's own outlines.
-    func outlineContains(_ coordinate: GeoCoordinate) -> Bool {
-        outlines.contains { Self.contains($0, coordinate.latitude, coordinate.longitude) }
+    init(id: String, nameDE: String, nameEN: String, continent: Continent, mapCountries: Set<String>, mapRegions: Set<String>,
+         outlines: [[(Double, Double)]] = [], outlineCountries: Set<String> = []) {
+        self.id = id
+        self.nameDE = nameDE
+        self.nameEN = nameEN
+        self.continent = continent
+        self.mapCountries = mapCountries
+        self.mapRegions = mapRegions
+        self.outlines = outlines
+        self.outlineCountries = outlineCountries
+    }
+
+    /// Whether `coordinate`, which the map gives to `mapCountry` (nil: no country, the sea),
+    /// lies inside one of the area's own outlines where they count (`outlineCountries`).
+    func outlineContains(_ coordinate: GeoCoordinate, mapCountry: String?) -> Bool {
+        guard mapCountry.map(outlineCountries.contains) ?? true else { return false }
+        return outlines.contains { Self.contains($0, coordinate.latitude, coordinate.longitude) }
     }
 
     /// Even-odd ray casting in plain degrees (the outlines are small and far from the date line).
@@ -50,31 +70,54 @@ public struct DisputedArea: Sendable, Hashable, Identifiable {
 public enum DisputedAreas {
     public static let all: [DisputedArea] = [
         DisputedArea(id: "crimea", nameDE: "Krim", nameEN: "Crimea", continent: .europe,
-                     mapCountries: [], mapRegions: ["UA-43", "UA-40"], outlines: []),
+                     mapCountries: [], mapRegions: ["UA-43", "UA-40"],
+                     // The waters around the peninsula, about 25 km out, and the Kerch Strait with
+                     // the bridge (the map's regions end 1.5 km off the coast). Only the sea: on
+                     // land the map's regions decide.
+                     outlines: [[(45.95, 32.40), (45.95, 34.60), (45.55, 35.30), (45.62, 36.00), (45.50, 36.58), (45.20, 36.62),
+                                 (45.00, 36.55), (44.85, 36.25), (44.80, 35.70), (44.60, 35.20), (44.20, 34.30), (44.25, 33.50),
+                                 (44.60, 33.20), (45.30, 32.25)]],
+                     outlineCountries: []),
         DisputedArea(id: "western-sahara", nameDE: "Westsahara", nameEN: "Western Sahara", continent: .africa,
                      mapCountries: ["Western Sahara"], mapRegions: [],
                      // 27°40' N with Morocco, 8°40' W, 26° N, 12° W, 23°27' N, 13° W and 21°20' N with
                      // Mauritania; to the west over the sea, short of the Canary Islands.
                      outlines: [[(27.667, -13.60), (27.667, -8.667), (26.0, -8.667), (26.0, -12.0), (23.45, -12.0),
                                  (23.45, -13.0), (21.333, -15.0), (21.333, -17.06), (21.333, -17.4), (23.5, -16.6),
-                                 (26.0, -15.0), (27.3, -13.85)]]),
+                                 (26.0, -15.0), (27.3, -13.85)]],
+                     outlineCountries: ["Morocco", "Western Sahara"]),
         DisputedArea(id: "kashmir", nameDE: "Kaschmir", nameEN: "Kashmir", continent: .asia,
                      mapCountries: ["Siachen Glacier"], mapRegions: ["IN-JK", "IN-LA", "PK-JK", "PK-GB"],
                      // Aksai Chin, which the map counts to Xinjiang.
                      outlines: [[(35.65, 77.80), (35.95, 78.40), (35.60, 79.20), (35.30, 80.10), (34.75, 80.25),
-                                 (34.30, 79.50), (34.40, 78.80), (34.95, 78.30), (35.40, 77.95)]]),
+                                 (34.30, 79.50), (34.40, 78.80), (34.95, 78.30), (35.40, 77.95)]],
+                     outlineCountries: ["People's Republic of China", "India"]),
         DisputedArea(id: "northern-cyprus", nameDE: "Nordzypern", nameEN: "Northern Cyprus", continent: .europe,
                      mapCountries: ["Turkish Republic of Northern Cyprus"], mapRegions: [], outlines: []),
         DisputedArea(id: "kosovo", nameDE: "Kosovo", nameEN: "Kosovo", continent: .europe,
                      mapCountries: ["Kosovo"], mapRegions: [], outlines: []),
         DisputedArea(id: "taiwan", nameDE: "Taiwan", nameEN: "Taiwan", continent: .asia,
-                     mapCountries: ["Taiwan"], mapRegions: [], outlines: []),
+                     mapCountries: ["Taiwan"], mapRegions: [],
+                     // The waters of Taiwan with Penghu, Liuqiu, Green Island and Orchid Island;
+                     // the Matsu Islands; Pratas. The map draws some of these islands not at
+                     // all. Only the sea and the map's Taiwan: the coast of Fujian keeps its country.
+                     outlines: [
+                         [(25.50, 121.40), (25.40, 122.15), (24.00, 122.00), (22.60, 121.75), (21.80, 121.70), (21.80, 120.70),
+                          (22.25, 120.15), (23.00, 119.25), (23.90, 119.25), (24.60, 120.40), (25.20, 120.95)],
+                         [(26.45, 119.89), (26.45, 120.55), (25.92, 120.55), (25.92, 119.89)],
+                         [(20.85, 116.65), (20.85, 116.95), (20.55, 116.95), (20.55, 116.65)],
+                     ],
+                     outlineCountries: ["Taiwan"]),
         DisputedArea(id: "golan", nameDE: "Golanhöhen", nameEN: "Golan Heights", continent: .asia,
                      mapCountries: [], mapRegions: [],
                      // The part west of the 1974 line of separation; the map counts it to Israel.
+                     // To the west the 1949 line: the Jordan from the Sea of Galilee to the Bnot
+                     // Ya'akov bridge, then the foot of the heights east of the Hula valley
+                     // (Gonen, Kfar Szold, Dan and Tel Dan stay in Israel, Banias is in the area).
                      outlines: [[(33.31, 35.70), (33.33, 35.78), (33.29, 35.85), (33.10, 35.81), (32.95, 35.86),
                                  (32.80, 35.84), (32.70, 35.78), (32.68, 35.65), (32.83, 35.645), (32.90, 35.63),
-                                 (33.05, 35.62), (33.20, 35.63), (33.25, 35.65)]]),
+                                 (33.00, 35.628), (33.05, 35.64), (33.12, 35.66), (33.20, 35.67), (33.245, 35.675)]],
+                     outlineCountries: ["Israel"]),
         DisputedArea(id: "abkhazia", nameDE: "Abchasien", nameEN: "Abkhazia", continent: .asia,
                      mapCountries: [], mapRegions: ["GE-AB"], outlines: []),
     ]
@@ -90,9 +133,10 @@ public enum DisputedAreas {
         }
     }
 
-    /// The area whose own outline holds `coordinate`.
-    static func area(outlineContaining coordinate: GeoCoordinate) -> DisputedArea? {
-        all.first { $0.outlineContains(coordinate) }
+    /// The area whose own outline holds `coordinate`, which the map gives to `mapCountry`
+    /// (nil: no country, the sea); see `DisputedArea.outlineCountries`.
+    static func area(outlineContaining coordinate: GeoCoordinate, mapCountry: String?) -> DisputedArea? {
+        all.first { $0.outlineContains(coordinate, mapCountry: mapCountry) }
     }
 }
 

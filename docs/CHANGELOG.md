@@ -60,6 +60,10 @@
   sagen das vorher („Die pausierte Analyse läuft dann weiter.“). Setzt die Änderung eine lange
   Analyse fort, wartet die Werkstatt nicht mehr darauf: „Gespeichert. Albumist wendet die Änderung
   an, sobald die Analyse fertig ist.“, und das Blatt lässt sich schließen.
+- Reise-Werkstatt: Das Blatt lässt sich auch schließen, während es auf den Lauf einer Änderung
+  wartet; die Änderung ist dann schon gespeichert. Begann zwischen dem Speichern und dem Start ein
+  anderer Lauf, folgt ihm ein weiterer, der die Änderung sicher anwendet. Während einer Pause sagen
+  auch „Reise teilen“ und „Deine Änderungen“, dass die pausierte Analyse dann weiterläuft.
 - Reise-Werkstatt: „Gleich wieder möglich“ steht nur noch bei einer kurzen Prüfung, nicht bei einer
   mit eigener Arbeit (Labels nach „Themen“, viele neue Fotos) oder der nächtlichen Verfeinerung.
   VoiceOver sagt an jedem grauen Knopf, warum er wartet.

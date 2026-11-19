@@ -437,6 +437,10 @@ final class AppModel {
     /// overnight refinement (`AnalysisRunEnd`). A change of the settings needs no request: the
     /// end of the run compares what the run read with the settings then.
     @ObservationIgnored var catchUpAfterRun = false
+    /// A change of the user's (a trip change) asked for its run while another run was going: that
+    /// run may have read the old state, so its end starts one more (`AnalysisStartCause
+    /// .asksForARunAfter`, `AnalysisRunEnd` `changeRequested`; re-review of 7e8aba3).
+    @ObservationIgnored private var changeAfterRun = false
     /// The user's own trip splits and merges (I07), for the settings.
     private(set) var tripCorrections = TripCorrections()
     /// The user's answers to "Bist du hier öfter?", for the settings.
@@ -963,6 +967,9 @@ final class AppModel {
     }
 
     private func startAnalysisNow(scope: OrganizationScope?, mode: AnalysisPipeline.Mode, cause: AnalysisStartCause) {
+        // A run slipped in between storing the user's change and this start (a change in Photos,
+        // a retry): one more run follows it, so the change is always applied.
+        if cause.asksForARunAfter(running: analysis.isRunning) { changeAfterRun = true }
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
         // Paused by the user (`AnalysisStartCause`): a tap goes on ("Fortsetzen", "Analyse neu
         // aufbauen", another part of the library), and so does a change of the user's that needs
@@ -1071,8 +1078,10 @@ final class AppModel {
             // keeps that work for "Fortsetzen"; changes in Photos meanwhile get their pass. The
             // request for that pass is taken here, whatever follows.
             let end = AnalysisRunEnd(report: finished, settings: settings, pauseTapped: control.isPaused,
-                                     catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow)
+                                     catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow,
+                                     changeRequested: changeAfterRun)
             catchUpAfterRun = false
+            changeAfterRun = false
             // Also a Pause tapped before the run ended unfinished for another reason (an error,
             // the heat, Photos) stays (`AnalysisRunEnd.pauseHeld`).
             setPausedByUser(end.keepsPause)
@@ -1646,8 +1655,10 @@ final class AppModel {
         // the overview was refreshed, the Pause was lost and one more run started).
         if analysisControl === control { analysisControl = nil }
         let end = AnalysisRunEnd(report: report, settings: settings, pauseTapped: control.isPaused,
-                                 catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow, background: true)
+                                 catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow, background: true,
+                                 changeRequested: changeAfterRun)
         catchUpAfterRun = false
+        changeAfterRun = false
         setPausedByUser(end.keepsPause)
         if let ended = end.report {
             analysis.lastReport = ended

@@ -9,7 +9,8 @@ struct TripWorkshopView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var proposal: AlbumProposal
-    /// Called after a change: the suggestion this sheet came from no longer exists.
+    /// Called once a change is stored: the suggestion this sheet came from goes away with the
+    /// run that applies it, however the sheet is closed then.
     var onChanged: () -> Void
 
     private enum Outcome { case split, merged, undone }
@@ -56,10 +57,13 @@ struct TripWorkshopView: View {
         .navigationTitle("Reise anpassen")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // A round close button: the wider "Abbrechen" pushed the title off centre.
-            // Also once a change is saved for a longer run: nothing to wait for here.
+            // A round close button: the wider "Abbrechen" pushed the title off centre. Also while
+            // the sheet waits for the run and once a change is saved: the change is stored, so
+            // closing loses nothing (re-review of 7e8aba3: a long check that started fresh read as
+            // short and held the sheet). Only the applied change's result leads on with
+            // "Zu den Reisen".
             ToolbarItem(placement: .cancellationAction) {
-                if working == nil && (done == nil || saved) {
+                if done == nil || saved {
                     Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
                 }
             }
@@ -75,7 +79,6 @@ struct TripWorkshopView: View {
         // The controls grey and the note comes while the changes wait, and both go back by
         // themselves when the run ends (they follow the model).
         .animation(reduceMotion ? nil : .smooth, value: model.tripChangeWait)
-        .interactiveDismissDisabled(working != nil)
         // The change shows once the analysis that applies it has finished.
         .onChange(of: model.analysis.isRunning) { _, running in
             guard !running, let finished = working else { return }
@@ -102,6 +105,7 @@ struct TripWorkshopView: View {
     private func perform(_ outcome: Outcome, _ change: @escaping @MainActor () async -> Bool) {
         Task {
             if await change() {
+                onChanged()
                 switch model.afterTripChange {
                 case .waitHere:
                     withAnimation(.smooth) { working = outcome }
@@ -170,6 +174,10 @@ struct TripWorkshopView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     if saysWhy { TripChangeWaitNote() }
                     Text("Aufheben lässt Albumist diese Reisen wieder selbst erkennen.")
+                    // During a Pause "Aufheben" starts the analysis again (decision 18.11.2026).
+                    if model.analysis.isPausedByUser {
+                        Text("Die pausierte Analyse läuft dann weiter.")
+                    }
                 }
             }
         }
@@ -228,6 +236,12 @@ struct TripWorkshopView: View {
             .accessibilityIdentifier("workshop.split")
             // The bar covers the end of the list, so it says itself why the button waits.
             TripChangeWaitNote(identifier: "workshop.split.busyNote")
+            // During a Pause the split starts the analysis again (decision 18.11.2026).
+            if model.analysis.isPausedByUser {
+                Text("Die pausierte Analyse läuft dann weiter.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(Theme.Spacing.m)
         .floatingPanel()

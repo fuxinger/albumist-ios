@@ -394,58 +394,120 @@ struct AnalysisStartCauseTests {
         }
     }
 
-    /// The App really decides by this rule (it does not build on Linux, so its code is read):
-    /// a trip change starts its run as the user's change, the start and the Pause follow the
-    /// cause, and no start that comes by itself passes a cause that would end a Pause. Each
-    /// check goes red when that part of the fix is taken back (review of 163d656).
+    /// The App really decides by this rule (it does not build on Linux, so its code is read,
+    /// without comments and strings: `AppSource.code`): a trip change starts its run as the
+    /// user's change, the start and the Pause follow the cause, and no start outside the places
+    /// the user asks for passes a cause that would end a Pause. Each check goes red when that
+    /// part of the fix is taken back (reviews of 163d656 and 7e8aba3).
     @Test func theAppStartsByThisRule() throws {
         let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
-        func body(_ declaration: String, in source: String, file: String = "AppModel.swift") throws -> String {
-            try #require(AppSource.body(of: declaration, in: source), "\(file): no \(declaration)")
+        func code(_ declaration: String) throws -> String {
+            AppSource.code(try #require(AppSource.body(of: declaration, in: model), "AppModel.swift: no \(declaration)"))
         }
         // Booleans first: an expectation on `contains` would print the whole file.
-        let changeTrips = try body("func changeTrips(", in: model)
-        let tripChangeIsTheUsers = changeTrips.contains("startAnalysis(cause: .userChange)")
+        let tripChangeIsTheUsers = try code("func changeTrips(").contains("startAnalysis(cause: .userChange)")
         #expect(tripChangeIsTheUsers, "changeTrips does not start its run as the user's change")
-        let recurring = try body("func changeRecurringPlaces(", in: model)
-        let answerIsTheUsers = recurring.contains("startAnalysis(cause: .userChange)")
+        let answerIsTheUsers = try code("func changeRecurringPlaces(").contains("startAnalysis(cause: .userChange)")
         #expect(answerIsTheUsers, "changeRecurringPlaces(rerun: true) does not start its run as the user's change")
 
-        let start = try body("func startAnalysisNow(", in: model)
-        let gateByTheRule = start.contains("cause.startsRun(pausedByUser:")
-        let pauseByTheRule = start.contains("cause.pausedAfterStart(")
+        // The start and the Pause, line by line as the rule says them.
+        let start = try code("func startAnalysisNow(")
+        let lines = Set(start.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) })
+        for line in ["let pausedBefore = analysis.pausedByUser",
+                     "guard cause.startsRun(pausedByUser: pausedBefore) else { return }",
+                     "setPausedByUser(cause.pausedAfterStart(pausedByUser: pausedBefore))",
+                     "if cause.asksForARunAfter(running: analysis.isRunning) { changeAfterRun = true }"] {
+            #expect(lines.contains(line), "startAnalysisNow lacks: \(line)")
+        }
         let ownGate = start.contains("cause == .") || start.contains("cause != .") || start.contains("pausedByUser && !")
-        #expect(gateByTheRule, "startAnalysisNow does not decide the start by AnalysisStartCause")
-        #expect(pauseByTheRule, "startAnalysisNow does not set the Pause by AnalysisStartCause")
         #expect(!ownGate, "startAnalysisNow has a Pause rule of its own")
+        // The run's end and the refinement's take the request for one more run.
+        for declaration in ["func startAnalysisNow(", "func refinePass("] {
+            let takesIt = try code(declaration).contains("changeRequested: changeAfterRun")
+            #expect(takesIt, "\(declaration): the end of the run does not take a trip change that came during it")
+        }
 
-        // Every start that comes by itself, found by its function (not its line): the start at
-        // launch, after a rebuild or with the access back, follow-ups, retries, the end of a plan,
-        // the app on screen again, changes in Photos, the Shortcut and "Neu prüfen" on the
-        // overview (only shown without a Pause).
-        let automatic: [(file: String, declarations: [String])] = [
-            ("App/Sortly/Model/AppModel.swift", ["func rebuildAfterFailure(", "func followAccess(", "func startAnalysisNow(",
-                                                 "func follow(_ next:", "func retryUnattendedRun(", "func sceneBecameActive(",
-                                                 "func releaseExecution(", "func run(_ plan:"]),
-            ("App/Sortly/App/Shortcuts.swift", ["struct SortNewPhotosIntent"]),
-            ("App/Sortly/App/SortlyApp.swift", ["var body: some Scene"]),
-            ("App/Sortly/Platform/LibraryChangeWatcher.swift", ["func scheduleCatchUpNow("]),
-            ("App/Sortly/Views/OverviewView.swift", ["var finishedAnalysis: some View"]),
+        // Every start in the App: only where the user asks for the analysis (a tap, the user's
+        // own change, the queued start after a change in "Dein Zuhause") may a cause other than
+        // `.automatic` be passed. Found by declaration, not by line.
+        let allowed: [String: [[String]]] = [
+            "App/Sortly/Model/AppModel.swift": [["func finishOnboarding("], ["func changeScope("], ["func runAfterSettingsChange("],
+                                                ["func restoreRejectedProposals("], ["func changeTrips("], ["func changeRecurringPlaces("],
+                                                ["func startAnalysis("], ["func changeHome("]],
+            "App/Sortly/Views/EmptyLibraryCard.swift": [["struct EmptyLibraryCard", "var body: some View"]],
+            "App/Sortly/Views/SettingsView.swift": [["struct SettingsView", "var body: some View"]],
+            "App/Sortly/Views/OverviewView.swift": [["var analysisCard: some View"], ["struct LimitedAccessCard", "var body: some View"],
+                                                    ["func presentPicker("]],
+            "App/Sortly/Views/AnalysisProgressCard.swift": [["struct AnalysisProgressCard", "var control: some View"]],
+            "App/Sortly/Platform/UITestSwitches.swift": [["static func didLaunch("]],
+            "App/Sortly/Platform/DemoLibrary.swift": [["func seed(then model:"]],
+            "App/Sortly/Platform/SamplePhotos.swift": [["func add(model:"], ["func remove(model:"]],
         ]
-        var sites = 0
-        for (path, declarations) in automatic {
+        let files = AppSource.swiftFiles(under: "App")
+        #expect(files.count > 50)
+        var automatic = 0, asked = 0
+        for path in files {
             let source = try AppSource.read(path)
-            for declaration in declarations {
-                let calls = AppSource.calls(of: "startAnalysis(", in: try body(declaration, in: source, file: path))
-                #expect(!calls.isEmpty, "\(path) \(declaration): no start found (moved?)")
-                for arguments in calls {
-                    sites += 1
-                    let endsAPause = arguments.contains(".tap") || arguments.contains(".userChange") || arguments.contains("cause:")
-                    #expect(!endsAPause, "\(path) \(declaration): an automatic start passes \"\(arguments)\"")
+            var ranges: [Range<Int>] = []
+            for declaration in allowed[path] ?? [] {
+                let range = AppSource.bodyRange(of: declaration, in: source)
+                #expect(range != nil, "\(path): no \(declaration.joined(separator: " › ")) (moved?)")
+                if let range { ranges.append(range) }
+            }
+            for call in AppSource.callSites(of: "startAnalysis(", in: source) {
+                let cause = call.arguments.components(separatedBy: "cause:").dropFirst().first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if cause == nil || cause == ".automatic" {
+                    automatic += 1
+                    continue
                 }
+                asked += 1
+                let allowedHere = ranges.contains { $0.contains(call.offset) }
+                let line = source.unicodeScalars.prefix(call.offset).filter { $0 == "\n" }.count + 1
+                #expect(allowedHere, "\(path):\(line): a start the user did not ask for passes \"\(call.arguments)\"")
             }
         }
-        #expect(sites == 13)
+        // Today: 13 automatic starts and 18 the user asks for.
+        #expect(automatic == 13)
+        #expect(asked == 18)
+    }
+
+    /// A run slipped in between storing the user's change and its start (a change in Photos, a
+    /// retry): that run may have read the old change, so one more run follows it, as after a
+    /// change in the settings it missed (re-review of 7e8aba3). "Gespeichert … sobald die
+    /// Analyse fertig ist" holds in every path.
+    @Test func aChangeRefusedByARunningRunAsksForOneMore() {
+        #expect(AnalysisStartCause.userChange.asksForARunAfter(running: true), "the trip change was lost behind a running run")
+        #expect(!AnalysisStartCause.userChange.asksForARunAfter(running: false))
+        // Taps and starts by themselves read everything anew in their own run; nothing is left.
+        for cause in [AnalysisStartCause.automatic, .tap] {
+            #expect(!cause.asksForARunAfter(running: true), "\(cause)")
+            #expect(!cause.asksForARunAfter(running: false), "\(cause)")
+        }
+    }
+
+    @Test func theEndOfThatRunStartsOneMore() {
+        typealias T = AnalysisRunEndTests
+        func end(_ report: AnalysisPipeline.Report?, pauseTapped: Bool = false, mayStart: Bool = true, background: Bool = false) -> AnalysisRunEnd {
+            AnalysisRunEnd(report: report, settings: T.on, pauseTapped: pauseTapped, catchUpRequested: false,
+                           mayStart: mayStart, background: background, changeRequested: true)
+        }
+        // A complete run: not the end of the analysis, one more right away.
+        let done = end(T.complete(T.on))
+        #expect(done.next == .followUp, "no run applied the trip change")
+        #expect(!done.isFinished && done.needsResume)
+        // A plan holds the start: the run goes on when it may (needsResume).
+        let held = end(T.complete(T.on), mayStart: false)
+        #expect(held.next == .nothing && !held.isFinished && held.needsResume)
+        // Pause tapped on that run: the Pause stays, "Fortsetzen" applies the change.
+        let paused = end(T.complete(T.on), pauseTapped: true)
+        #expect(paused.next == .nothing && paused.keepsPause && !paused.isFinished)
+        // The overnight refinement takes it in one more pass (`AppModel.refine`).
+        #expect(end(T.complete(T.on), background: true).next == .followUp)
+        // Ended early: as before (a retry, or the Pause), never finished.
+        #expect(end(nil).next == .retry && !end(nil).isFinished)
+        // Without the request nothing changes.
+        #expect(T.end(T.complete(T.on)).isFinished)
     }
 
     /// Several requests while a change in "Dein Zuhause" is applied become one run: the one the

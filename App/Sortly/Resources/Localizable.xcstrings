@@ -1961,6 +1961,16 @@
         }
       }
     },
+    "Die pausierte Analyse läuft dann weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The paused analysis then continues."
+          }
+        }
+      }
+    },
     "Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen." : {
       "localizations" : {
         "en" : {

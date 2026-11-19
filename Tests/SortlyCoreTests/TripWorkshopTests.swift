@@ -216,40 +216,39 @@ struct TripWorkshopTests {
     /// nothing (the settings' "Reisen wieder automatisch erkennen" too). The model refuses a
     /// change exactly while `TripWorkshop.wait` gives a reason, both screens take their state
     /// from it and show the note next to the controls, and every reason is in the catalog with
-    /// English. The App does not build on Linux, so its sources are read.
+    /// English. The App does not build on Linux, so its sources are read: without comments
+    /// (`AppSource.code`), and code checks without strings too.
     @Test func waitingTripControlsSayWhyOnTheirScreen() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        func source(_ path: String) throws -> String {
-            try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
-        }
-        let model = try source("App/Sortly/Model/AppModel.swift")
-        let workshop = try source("App/Sortly/Views/TripWorkshopView.swift")
-        let settings = try source("App/Sortly/Views/SettingsView.swift")
+        // Comments blanked, strings kept: a line left in a comment never passes.
+        let model = AppSource.code(try AppSource.read("App/Sortly/Model/AppModel.swift"), keepStrings: true)
+        let workshop = AppSource.code(try AppSource.read("App/Sortly/Views/TripWorkshopView.swift"), keepStrings: true)
+        let settings = AppSource.code(try AppSource.read("App/Sortly/Views/SettingsView.swift"), keepStrings: true)
+        func code(_ text: String) -> String { AppSource.code(text) }
         // Booleans first: an expectation on `contains` would print the whole file.
-        let modelUsesTheRule = model.contains("TripWorkshop.wait(")
-        let refusesByTheRule = model.contains("tripChangeWait == nil else { return false }")
+        let modelUsesTheRule = code(model).contains("TripWorkshop.wait(")
+        let refusesByTheRule = code(model).contains("tripChangeWait == nil else { return false }")
         #expect(modelUsesTheRule, "AppModel does not take the waiting from TripWorkshop.wait")
         #expect(refusesByTheRule, "changeTrips refuses for another reason than the screens say")
         for (name, view) in [("TripWorkshopView", workshop), ("SettingsView", settings)] {
-            let showsTheNote = view.contains("TripChangeWaitNote(")
-            let waitsSilently = view.contains(".disabled(model.analysis.isRunning")
+            let showsTheNote = code(view).contains("TripChangeWaitNote(")
+            let waitsSilently = code(view).contains(".disabled(model.analysis.isRunning")
             #expect(showsTheNote, "\(name): its trip controls wait without saying why")
             #expect(!waitsSilently, "\(name): waits for the analysis without saying why")
         }
         // Each part the screens rely on, so taking one back goes red (review of b240899).
-        let tripChangeWait = try #require(AppSource.body(of: "var tripChangeWait:", in: model))
+        let tripChangeWait = code(try #require(AppSource.body(of: "var tripChangeWait:", in: model)))
         let waitsForAlbums = tripChangeWait.contains("creatingAlbums: execution.isRunning")
         let waitsForTheRun = tripChangeWait.contains("analysing: analysis.isRunning")
         #expect(waitsForAlbums, "tripChangeWait does not wait while albums are made")
         #expect(waitsForTheRun, "tripChangeWait does not wait while an analysis runs")
-        let busyByTheModel = workshop.contains("busy: Bool { model.tripChangeWait != nil }")
+        let busyByTheModel = code(workshop).contains("busy: Bool { model.tripChangeWait != nil }")
         #expect(busyByTheModel, "TripWorkshopView greys its controls for another reason than the model refuses")
-        let resetByTheModel = settings.contains(".disabled(model.tripChangeWait != nil)")
+        let resetByTheModel = code(settings).contains(".disabled(model.tripChangeWait != nil)")
         #expect(resetByTheModel, "SettingsView: the trip reset is not greyed while the model refuses")
-        let mergeLabel = try #require(AppSource.body(of: "struct MergeRowLabel", in: workshop))
+        let mergeLabel = code(try #require(AppSource.body(of: "struct MergeRowLabel", in: workshop)))
         let mergeLooksDisabled = mergeLabel.contains("@Environment(\\.isEnabled)") && mergeLabel.contains("isEnabled ?")
         #expect(mergeLooksDisabled, "the merge rows keep their accent colour while disabled")
-        let mergeSection = try #require(AppSource.body(of: "func mergeSection(", in: workshop))
+        let mergeSection = code(try #require(AppSource.body(of: "func mergeSection(", in: workshop)))
         let mergeFooter = mergeSection.components(separatedBy: "footer:").dropFirst().joined()
         let noteInTheMergeFooter = mergeFooter.contains("TripChangeWaitNote()")
         #expect(noteInTheMergeFooter, "the merge rows wait without the note in their footer")
@@ -259,76 +258,106 @@ struct TripWorkshopTests {
                        "Albumist legt gerade Alben an. Danach wieder möglich."] {
             let shown = workshop.contains("\"\(reason)\"")
             #expect(shown, "Not shown: \(reason)")
-            let english = catalog[reason].flatMap { StringCatalogTests.localization($0, "en") }
-                .flatMap { $0["stringUnit"] as? [String: Any] }?["value"] as? String
-            #expect(english?.isEmpty == false, "Not in the catalog with English: \(reason)")
+            #expect(Self.english(reason, in: catalog) != nil, "Not in the catalog with English: \(reason)")
         }
+    }
+
+    static func english(_ key: String, in catalog: [String: [String: Any]]) -> String? {
+        let english = catalog[key].flatMap { StringCatalogTests.localization($0, "en") }
+            .flatMap { $0["stringUnit"] as? [String: Any] }?["value"] as? String
+        return english?.isEmpty == false ? english : nil
     }
 
     /// A trip change during a Pause starts the run that goes on with the paused analysis
     /// (decision 18.11.2026): the sheet waits only for a short check and otherwise says the
-    /// change is saved and can be closed; "gleich" only for a short check, the refinement too;
-    /// VoiceOver says on each greyed control why it waits; the confirmations say that the paused
-    /// analysis goes on (review of 163d656). The App does not build on Linux, so its sources are
-    /// read; each check goes red when its part is taken back.
+    /// change is saved; it can always be closed, also while it waits (the change is stored
+    /// already); "gleich" only for a short check, the refinement too; VoiceOver says on each
+    /// greyed control why it waits; the confirmations and the split and "Aufheben" say that the
+    /// paused analysis goes on (reviews of 163d656 and 7e8aba3). The App does not build on
+    /// Linux, so its sources are read; each check goes red when its part is taken back.
     @Test func aChangeDuringAPauseLeavesTheSheetFreeAndSaysSo() throws {
-        let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
-        let workshop = try AppSource.read("App/Sortly/Views/TripWorkshopView.swift")
-        let settings = try AppSource.read("App/Sortly/Views/SettingsView.swift")
+        let model = AppSource.code(try AppSource.read("App/Sortly/Model/AppModel.swift"), keepStrings: true)
+        let workshop = AppSource.code(try AppSource.read("App/Sortly/Views/TripWorkshopView.swift"), keepStrings: true)
+        let settings = AppSource.code(try AppSource.read("App/Sortly/Views/SettingsView.swift"), keepStrings: true)
         func body(_ declaration: String, in source: String) throws -> String {
             try #require(AppSource.body(of: declaration, in: source), "no \(declaration)")
         }
+        func code(_ text: String) -> String { AppSource.code(text) }
+        /// What follows `marker` in `text`, from the next non-blank character on.
+        func after(_ marker: String, in text: String) -> Substring? {
+            guard let range = text.range(of: marker) else { return nil }
+            return text[range.upperBound...].drop { $0.isWhitespace }
+        }
+        let saved = "Text(\"Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist.\")"
+        let paused = "Text(\"Die pausierte Analyse läuft dann weiter.\")"
+
         // The model: what a short check is, for the note and for the sheet alike.
-        let shortCheck = try body("var runIsShortCheck:", in: model)
+        let shortCheck = code(try body("var runIsShortCheck:", in: model))
         let checkByTheRule = shortCheck.contains(
             "TripWorkshop.shortCheck(kind: analysis.kind == .check, newWork: analysis.newWork != nil, refinement: analysis.isRefinement)")
         #expect(checkByTheRule, "runIsShortCheck does not take the kind, the new work and the refinement")
-        let waitUsesIt = try body("var tripChangeWait:", in: model).contains("check: runIsShortCheck")
+        let waitUsesIt = code(try body("var tripChangeWait:", in: model)).contains("check: runIsShortCheck")
         #expect(waitUsesIt, "tripChangeWait says gleich for every check")
-        let afterChange = try body("var afterTripChange:", in: model)
+        let afterChange = code(try body("var afterTripChange:", in: model))
         let afterByTheRule = afterChange.contains("TripWorkshop.afterChange(running: analysis.isRunning, check: runIsShortCheck)")
         #expect(afterByTheRule, "afterTripChange does not follow TripWorkshop.afterChange")
-        let refinement = try body("func refinePass(", in: model)
+        let refinement = code(try body("func refinePass(", in: model))
         let refinementMarked = refinement.contains("analysis.isRefinement = true") && refinement.contains("analysis.isRefinement = false")
         #expect(refinementMarked, "the refinement does not mark itself, and reads as a check")
 
-        // The sheet: waits only when the model says so, else saved and free to close.
-        let perform = try body("func perform(", in: workshop)
-        let sheetAsksTheModel = perform.contains("switch model.afterTripChange") && perform.contains("case .savedForLater")
+        // The sheet: waits only when the model says so, else saved.
+        let perform = code(try body("func perform(", in: workshop))
+        let sheetAsksTheModel = perform.contains("switch model.afterTripChange")
         #expect(sheetAsksTheModel, "the sheet waits for every run a change starts")
-        let saysSaved = workshop.contains("Text(\"Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist.\")")
-        #expect(saysSaved, "the sheet does not say the change is saved")
-        let closeWhenSaved = workshop.contains("if working == nil && (done == nil || saved)")
-        #expect(closeWhenSaved, "the sheet cannot be closed once the change is saved")
+        let savedCase = perform.components(separatedBy: "case .savedForLater:").dropFirst().first?
+            .components(separatedBy: "case ").first ?? ""
+        let savedPath = savedCase.contains("saved = true") && savedCase.contains("done = outcome") && !savedCase.contains("working =")
+        #expect(savedPath, "the saved path waits in the sheet or does not say saved")
+        let finished = try body("func finished(", in: workshop)
+        let savedText = after("if saved {", in: finished)?.hasPrefix(saved) == true
+        #expect(savedText, "the finished sheet does not say Gespeichert for a saved change")
+        // Always free to close: the change is stored once `change()` returned true, so closing
+        // loses nothing; the trip's suggestion goes away with it (re-review of 7e8aba3: a long
+        // check that started fresh read as short and held the sheet).
+        let toldAtOnce = perform.contains("if await change() {\n") && after("if await change() {", in: perform)?.hasPrefix("onChanged()") == true
+        #expect(toldAtOnce, "the trip view is told of the change only on Zu den Reisen")
+        let closeShown = code(workshop).contains("if done == nil || saved {")
+        #expect(closeShown, "the sheet hides its close button while it waits or once saved")
+        let dismissHeld = code(workshop).contains("interactiveDismissDisabled(")
+        #expect(!dismissHeld, "the sheet cannot be swiped away while it waits")
 
         // VoiceOver: each greyed control says why it waits.
-        let hint = try body("func tripChangeWaitHint(", in: workshop)
+        let hint = code(try body("func tripChangeWaitHint(", in: workshop))
         let hintSaysWhy = hint.contains("accessibilityHint(") && hint.contains("TripChangeWaitNote.reason(")
         #expect(hintSaysWhy, "the hint does not say the reason of the note")
         let greyed = try Regex(#"\.disabled\(busy\)"#)
         let greyedWithHint = try Regex(#"\.disabled\(busy\)\s*\.tripChangeWaitHint\(model\.tripChangeWait\)"#)
-        let workshopGreyed = workshop.matches(of: greyed).count
+        let workshopCode = code(workshop)
+        let workshopGreyed = workshopCode.matches(of: greyed).count
         #expect(workshopGreyed == 3)
-        #expect(workshop.matches(of: greyedWithHint).count == workshopGreyed, "TripWorkshopView: a greyed control does not say why to VoiceOver")
+        #expect(workshopCode.matches(of: greyedWithHint).count == workshopGreyed, "TripWorkshopView: a greyed control does not say why to VoiceOver")
         let resetWithHint = try Regex(#"\.disabled\(model\.tripChangeWait != nil\)\s*\.tripChangeWaitHint\(model\.tripChangeWait\)"#)
-        #expect(settings.matches(of: resetWithHint).count == 1, "SettingsView: the greyed trip reset does not say why to VoiceOver")
+        #expect(code(settings).matches(of: resetWithHint).count == 1, "SettingsView: the greyed trip reset does not say why to VoiceOver")
 
-        // The confirmations say that the paused analysis goes on.
+        // The confirmations, the split and "Aufheben" say that the paused analysis goes on.
         let merge = try body("func mergeButton(", in: workshop)
-        let mergeSaysIt = merge.contains("if model.analysis.isPausedByUser")
-            && merge.contains("Fotos. Die pausierte Analyse läuft dann weiter.\")")
+        let mergeSaysIt = after("if model.analysis.isPausedByUser {", in: merge)?
+            .hasPrefix("Text(\"„\\(title(first))“ und „\\(title(second))“ werden eine Reise mit \\(total) Fotos. Die pausierte Analyse läuft dann weiter.\")") == true
         #expect(mergeSaysIt, "the merge confirmation does not say that the paused analysis goes on")
-        let resetSaysIt = settings.contains("if model.analysis.isPausedByUser")
-            && settings.contains("Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter.\")")
+        let resetSaysIt = after("if model.analysis.isPausedByUser {", in: settings)?
+            .hasPrefix("Text(\"Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter.\")") == true
         #expect(resetSaysIt, "the trip reset confirmation does not say that the paused analysis goes on")
+        for declaration in ["func splitBar(", "func changesSection("] {
+            let says = after("if model.analysis.isPausedByUser {", in: try body(declaration, in: workshop))?.hasPrefix(paused) == true
+            #expect(says, "\(declaration): does not say that the paused analysis goes on")
+        }
 
         let catalog = try StringCatalogTests.catalog()
         for key in ["Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist.",
+                    "Die pausierte Analyse läuft dann weiter.",
                     "„%@“ und „%@“ werden eine Reise mit %lld Fotos. Die pausierte Analyse läuft dann weiter.",
                     "Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter."] {
-            let english = catalog[key].flatMap { StringCatalogTests.localization($0, "en") }
-                .flatMap { $0["stringUnit"] as? [String: Any] }?["value"] as? String
-            #expect(english?.isEmpty == false, "Not in the catalog with English: \(key)")
+            #expect(Self.english(key, in: catalog) != nil, "Not in the catalog with English: \(key)")
         }
     }
 }

@@ -69,7 +69,27 @@
   jedem Upload läuft; rund 70 Minuten, nur an Tagen mit geänderter App); das große Tor mit allen
   UI-Gruppen und Härtetest bleibt für Tester und App Store. „Was testen“ nennt das kleine Tor; der
   Feedback-Abruf hat einen eigenen Schlüssel.
+- 19.11. (Entscheidung Fuchs per Karte): TestFlight lädt ohne Klick hoch, nur von `main` und nur
+  mit allen Toren grün; der erste Job „Upload setup“ prüft die Umgebung `testflight-upload`
+  (nur Zweig `main`), ein privates Repository nur mit der Planvariable, ein Re-Run nach einem
+  Upload lädt nie ein zweites Mal hoch. Vor dem Upload wird der Release-Build selbst kurz
+  UI-getestet (Rauchtest), höchstens fünf Macs je Lauf.
+- „Gleicher Name gewinnt“ (Fable P1-02): Gibt es genau ein bearbeitbares Album mit dem Namen eines
+  Vorschlags, ergänzt Albumist dieses Album, auch unter den Inhaltsschwellen. Ein Album, das den
+  ganzen Vorschlag schon enthält, gewinnt vor dem Namen; Fotos ohne Ort zählen für jedes andere
+  Album weiter, der Ring sinkt dadurch nie (Abgleich Version 6).
+- Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
+  MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 19.11.: Fotos mit einem Datum in der Zukunft bleiben nicht mehr für immer unsortiert (P1-03);
+  ein als unlesbar aufgegebenes Foto wird eine Woche später noch einmal versucht (P1-08); Fotos,
+  deren Land sich nicht finden lässt, gelten nicht mehr für immer als offen (P1-09); die
+  Umkreis-Suche findet jedes Foto im Kreis (G1-01); eine Reise über die Datumsgrenze bleibt ein
+  Halt. Reisen bearbeiten: kann das Neuberechnen nicht starten, werden die Knöpfe wieder frei;
+  nach einem Fehler folgt genau ein weiterer Versuch.
+- CI 19.11.: Die Ubuntu-Paketquelle war eine Viertelstunde nicht erreichbar, die Linux-Kerntests
+  auf `main` liefen nie. Pakete kommen jetzt über `apt_install.sh` (20 s Grenze, Wiederholung,
+  zweite Paketquelle, jede Wiederholung gezählt).
 - UI-Tests: jede Gruppe wartet vor ihrem ersten Test (und vor einer Wiederholung) bis zu 5 Min.,
   bis der Simulator nach seinem Start wieder schnell antwortet (`SIM_SETTLE`);
   vorher verlor XCTest dabei die App beim ersten Start (UI-Lauf 44437759848, test05).

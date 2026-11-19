@@ -9,8 +9,10 @@ Buildnummer und der Commit werden automatisch angehängt.
 - Markdown wird zu einfachem Text: Überschriften werden zu Zeilen, `-` zu `•`.
 - Text vor dem nächsten Build anpassen, der etwas Neues zum Testen hat. Der alte Text wandert
   darunter nach „Frühere Builds“.
-- Ein Push startet keinen Build; TestFlight-Läufe startet man von Hand auf `main`
-  (`docs/TESTFLIGHT.md`). Der alte Zweig `claude/sortly-app` lädt seit 18.11. nichts mehr hoch.
+- Ein Push startet keinen Build. TestFlight-Läufe startet man von Hand auf `main`, dazu kommt
+  morgens der tägliche Build mit kleinem Tor (`docs/TESTFLIGHT.md`). Hochgeladen wird seit
+  19.11. ohne Klick, nur von `main` und nur mit allen Toren grün. Der alte Zweig
+  `claude/sortly-app` lädt seit 18.11. nichts mehr hoch.
 - Jeder Build hat seine Tests bestanden; einen Notfall-Build ohne Tests gibt es nicht mehr
   (Beschluss 17.11.).
 
@@ -25,6 +27,11 @@ Danke fürs Testen! Dieser Build bringt viele Korrekturen aus deinen Tests. Bitt
 - Pause: Änderst du während einer Pause eine Reise (teilen, zusammenlegen, „Aufheben“), läuft die Analyse weiter und wendet die Änderung an.
 - Suche: Orte, die du selbst benannt hast, findest du über ihren Namen, auch bevor es ihr Album gibt.
 - Umstrittene Gebiete (etwa Krim, Taiwan, Kosovo): Albumist ordnet sie keinem Land zu und sagt „nicht sicher“.
+- Gleicher Name: Hast du schon ein Album mit genau dem Namen eines Vorschlags, ergänzt Albumist dieses Album, statt ein zweites anzulegen.
+- Fotos mit falschem Datum in der Zukunft und Fotos, die einmal nicht lesbar waren, bleiben nicht mehr für immer unsortiert; Albumist versucht sie später noch einmal.
+- Umkreis-Suche: Findet jetzt jedes Foto im Kreis.
+- Reisen bearbeiten: Nach einem Fehler beim Neuberechnen werden die Knöpfe wieder frei.
+- Diagnosebericht: zeigt jetzt, wie viel Akku die Analyse ungefähr pro 1.000 Fotos braucht.
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
 <!-- testflight:end -->

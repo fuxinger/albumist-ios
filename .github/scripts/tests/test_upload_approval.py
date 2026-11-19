@@ -106,8 +106,8 @@ def run(number, sha, status="completed", conclusion="success"):
 
 
 class DailyBuildTests(unittest.TestCase):
-    def decide(self, runs=(), tags=None, approval=APPROVED, passed=lambda r: True):
-        return daily_build.decide(HEAD, APPS[HEAD], list(runs), tags or {}, approval, APPS.get, passed)
+    def decide(self, runs=(), tags=None, approval=APPROVED, passed=lambda r: True, docs_only=lambda sha: False):
+        return daily_build.decide(HEAD, APPS[HEAD], list(runs), tags or {}, approval, APPS.get, passed, docs_only)
 
     def test_a_new_app_starts_the_small_gate(self):
         start, why = self.decide([run(40, OLD)], {"build-40": OLD})
@@ -141,6 +141,48 @@ class DailyBuildTests(unittest.TestCase):
         # A run that stopped in its first job (approval not set up then) tested nothing.
         start, why = self.decide([run(42, HEAD, conclusion="failure")], passed=lambda r: False)
         self.assertTrue(start, why)
+
+    def test_the_same_app_is_not_tried_again_after_a_docs_only_commit(self):
+        # Run 42 on commit c (same app as HEAD) was red or rejected; since then only docs changed.
+        # The next morning must not run the unchanged app and tests again until one goes green.
+        same_app = "c" * 40
+        for conclusion in ("failure", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                start, why = self.decide([run(42, same_app, conclusion=conclusion)], docs_only=lambda sha: True)
+                self.assertFalse(start)
+                self.assertIn("only documentation changed since", why)
+        # Tests or the pipeline changed since (a fix of a flaky test): a new run is right.
+        start, why = self.decide([run(42, same_app, conclusion="failure")], docs_only=lambda sha: False)
+        self.assertTrue(start, why)
+        # Another app on that commit: only docs between them cannot be, but the app decides.
+        start, why = self.decide([run(42, OLD, conclusion="failure")], docs_only=lambda sha: True)
+        self.assertTrue(start, why)
+
+    def test_docs_only_since_reads_the_diff(self):
+        import subprocess
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        git = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=folder.name,
+                                        check=True, capture_output=True, text=True).stdout.strip()
+        git("init", "-q")
+        os.makedirs(os.path.join(folder.name, "docs"))
+        for name in ("docs/a.md", "README.md", "app.swift"):
+            with open(os.path.join(folder.name, name), "w") as f:
+                f.write("1")
+        git("add", "-A"); git("commit", "-qm", "1")
+        first = git("rev-parse", "HEAD")
+        for name in ("docs/a.md", "README.md"):
+            with open(os.path.join(folder.name, name), "w") as f:
+                f.write("2")
+        git("commit", "-qam", "2")
+        docs = git("rev-parse", "HEAD")
+        with open(os.path.join(folder.name, "app.swift"), "w") as f:
+            f.write("2")
+        git("commit", "-qam", "3")
+        code = git("rev-parse", "HEAD")
+        self.assertTrue(daily_build.docs_only_since(first, docs, folder.name))
+        self.assertFalse(daily_build.docs_only_since(first, code, folder.name))
+        self.assertFalse(daily_build.docs_only_since("f" * 40, docs, folder.name))  # not in the checkout
 
     def test_build_tags_point_at_their_commits(self):
         import subprocess

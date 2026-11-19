@@ -9,7 +9,8 @@ name: Daily build
 #   - no TestFlight run runs or waits for the owner's approval (a new run would only wait behind
 #     it and replace one that waits there);
 #   - the app changed since the last uploaded build (app fingerprint, ui_groups.py; docs, tests
-#     and the pipeline do not count), and no TestFlight run tested exactly this commit yet.
+#     and the pipeline do not count), and no TestFlight run tested this commit yet, nor an
+#     earlier commit with the same app from which only docs changed (no re-run until green).
 # The TestFlight run then tests main with the small gate (CI, the UI groups flow-full and
 # contrast and the small stress pass, about 70 min; the stress pass runs before every upload,
 # the owner's rule 17.11. and decision 4) and its upload job waits for the owner's click like

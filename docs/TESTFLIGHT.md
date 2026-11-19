@@ -469,11 +469,11 @@ brauchen sie nicht.
   warum), wenn: die Freigabe noch nicht eingerichtet ist; ein TestFlight-Lauf läuft oder auf
   deine Freigabe wartet; die App seit dem letzten hochgeladenen Build gleich ist (nur Doku, Tests
   oder Bau-Strecke geändert; derselbe Fingerabdruck der App wie bei den UI-Tests, verglichen mit
-  den Tags `build-<Nummer>`); oder genau dieser Commit schon einmal in einem TestFlight-Lauf war
-  (rot, abgelehnt oder abgebrochen): ein roter Test wird in einem neuen Commit behoben, nie durch
-  Wiederholen grün, und einen abgelehnten Build bietet er nicht jeden Tag neu an. Von Hand geht es
-  trotzdem. **Grenze:** hast du einen Build abgelehnt und kommt danach nur Doku dazu, bietet der
-  nächste Morgen dieselbe App noch einmal an (einmal ablehnen genügt).
+  den Tags `build-<Nummer>`); oder genau dieser Commit, oder ein früherer mit derselben App, nach
+  dem nur Doku (`*.md`, `docs/`) dazukam, schon einmal in einem TestFlight-Lauf war (rot, abgelehnt
+  oder abgebrochen): ein roter Test wird in einem neuen Commit behoben, der Code, Tests oder die
+  Bau-Strecke ändert, nie durch Wiederholen grün, und einen abgelehnten Build bietet er nicht jeden
+  Tag neu an, auch nicht, wenn danach nur Doku dazukommt. Von Hand geht es trotzdem.
 - Der tägliche Build achtet nicht auf die Mac-Warteschlange (eigene Gruppen wie jeder
   TestFlight-Lauf); er braucht höchstens drei Macs zugleich (zwei UI-Gruppen und den Härtetest), um
   03:30 UTC sind die nächtlichen Läufe meist fertig.

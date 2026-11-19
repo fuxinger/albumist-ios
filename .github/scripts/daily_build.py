@@ -15,10 +15,13 @@ testers and the App Store). For daily-build.yml: Linux, no secret.
            uploaded build, and only those) is on a commit with this commit's app fingerprint
            (ui_groups.py: what goes into the app; docs, tests and the pipeline do not count). No
            new build, and no new question to the owner, while the app is unchanged.
-        4. No TestFlight run of exactly this commit got past its first job ("Upload approval"),
-           whatever its result: a red test is fixed in a new commit, never re-run to green, and a
-           build the owner rejected is not offered again the next day. A run that stopped in its
-           first job (approval not set up yet, API down) tested nothing and does not count.
+        4. No TestFlight run of exactly this commit, or of an earlier commit with the same app
+           from which only documentation changed (*.md, docs/; as changes.py), got past its
+           first job ("Upload approval"), whatever its result: a red test is fixed in a new
+           commit that changes code, tests or the pipeline, never re-run to green because a doc
+           changed, and a build the owner rejected is not offered again the next day. A run that
+           stopped in its first job (approval not set up yet, API down) tested nothing and does
+           not count.
       Started by hand, testflight.yml can still build any commit with either gate.
 
 The workflow then starts testflight.yml on main with the input gate=small (gh workflow run, the
@@ -57,6 +60,19 @@ def build_tags(cwd: str = ui_groups.ROOT) -> dict[str, str]:
     return tags
 
 
+def is_docs(path: str) -> bool:
+    """Documentation only, as changes.py counts it (that module needs the Actions environment)."""
+    return path.endswith(".md") or path.startswith("docs/")
+
+
+def docs_only_since(sha: str, head: str, cwd: str = ui_groups.ROOT) -> bool:
+    """Whether every file that differs between sha and head is documentation; False when git
+    cannot tell (a commit that is not in the checkout)."""
+    out = subprocess.run(["git", "diff", "--name-only", "--no-renames", sha, head], cwd=cwd,
+                         capture_output=True, text=True)
+    return out.returncode == 0 and all(is_docs(p) for p in out.stdout.splitlines() if p)
+
+
 def runs_of(call) -> list[dict]:
     """The newest 100 runs of testflight.yml (newest first); a TestFlight run takes hours, so they
     reach back weeks."""
@@ -70,8 +86,9 @@ def got_past_the_check(call, run: dict) -> bool:
 
 
 def decide(head: str, app: str, runs: list[dict], tags: dict[str, str], approval: tuple[list, list, list],
-           app_of, passed_check) -> tuple[bool, str]:
-    """(start, why). app_of(sha) -> app fingerprint or None; passed_check(run) -> bool."""
+           app_of, passed_check, docs_only=lambda sha: False) -> tuple[bool, str]:
+    """(start, why). app_of(sha) -> app fingerprint or None; passed_check(run) -> bool;
+    docs_only(sha) -> whether only documentation changed from sha to head."""
     problems = approval[0]
     if problems:
         return False, (f"{'; '.join(problems)}: the daily build starts once the upload asks the owner first "
@@ -86,11 +103,16 @@ def decide(head: str, app: str, runs: list[dict], tags: dict[str, str], approval
         if app_of(sha) == app:
             return False, f"this app is in TestFlight already: {tag} ({sha[:7]}) has the same app fingerprint"
     for r in runs:
-        if r.get("head_sha") == head and passed_check(r):
-            return False, (f"TestFlight run {r.get('run_number')} tested exactly this commit already "
-                           f"({r.get('conclusion')}): a red test is fixed in a new commit, and a build the owner "
-                           f"rejected is not offered again; start TestFlight by hand to build it anyway "
-                           f"({r.get('html_url', '')})")
+        sha = r.get("head_sha") or ""
+        same = sha == head
+        # The cheap local checks first; passed_check asks the API.
+        if not (same or (app_of(sha) == app and docs_only(sha))) or not passed_check(r):
+            continue
+        what = "exactly this commit" if same else f"this app on {sha[:7]} (only documentation changed since)"
+        return False, (f"TestFlight run {r.get('run_number')} tested {what} already "
+                       f"({r.get('conclusion')}): a red test is fixed in a new commit that changes code, tests or "
+                       f"the pipeline, never re-run to green, and a build the owner rejected is not offered again; "
+                       f"start TestFlight by hand to build it anyway ({r.get('html_url', '')})")
     return True, f"new app {app[:ui_groups.SHORT]} on {head[:7]}: starting TestFlight with the small gate"
 
 
@@ -111,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         verifier = ui_evidence.Verifier()
         try:
             start, why = decide(head, app, runs, build_tags(), upload_approval.review(environment), verifier.app,
-                                lambda run: got_past_the_check(call, run))
+                                lambda run: got_past_the_check(call, run), lambda sha: docs_only_since(sha, head))
         except ui_evidence.ApiError as error:
             start, why = False, f"GitHub API did not answer ({error}); no daily build today, or start it by hand"
     print(f"DAILY_BUILD {'start' if start else 'no build'}: {why}")

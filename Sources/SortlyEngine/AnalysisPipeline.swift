@@ -1702,10 +1702,12 @@ public actor AnalysisPipeline {
             }
         }
         let tripSets = trips.map { Set($0.allAssetIDs) }
+        let unlocated = Set(all.filter { $0.usableLocation == nil }.map(\.id))
         let found = suggestions, albums = inventory
         let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albums)
         var matches = await offActor {
-            Self.match(found.open, dismissed: found.dismissed, against: albums, overrides: overrides, assignments: assignments, trips: tripSets)
+            Self.match(found.open, dismissed: found.dismissed, against: albums, overrides: overrides, assignments: assignments, trips: tripSets,
+                       unlocated: unlocated)
         }
         if generation != albumGeneration {
             // A plan was applied while this ran: match against the albums as they are now, or
@@ -1714,7 +1716,7 @@ public actor AnalysisPipeline {
             let assignmentsNow = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albumsNow)
             matches = await offActor {
                 Self.match(found.open, dismissed: found.dismissed, against: albumsNow, overrides: overridesNow, assignments: assignmentsNow,
-                           trips: tripSets)
+                           trips: tripSets, unlocated: unlocated)
             }
         }
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
@@ -1757,16 +1759,18 @@ public actor AnalysisPipeline {
     /// no shown suggestion extends it (review 16.11., A10).
     static func match(_ open: [AlbumProposal], dismissed: [AlbumProposal], against inventory: CollectionInventory,
                       overrides: OverrideSet, assignments: [SortlyID: CollectionID],
-                      trips: [Set<AssetID>] = []) -> [SortlyID: MatchResult] {
+                      trips: [Set<AssetID>] = [], unlocated: Set<AssetID> = []) -> [SortlyID: MatchResult] {
         guard !dismissed.isEmpty else {
-            return AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
+            return AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments, trips: trips,
+                                        unlocated: unlocated)
         }
-        let all = AlbumMatcher().match(open + dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
+        let all = AlbumMatcher().match(open + dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips,
+                                       unlocated: unlocated)
         let reserved = Set(dismissed.compactMap { p in
             all[p.id].flatMap { $0.status == .alreadyComplete && $0.best?.isEditable == true ? $0.best?.albumID : nil }
         })
         var matches = AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments,
-                                           reserved: reserved, trips: trips)
+                                           reserved: reserved, trips: trips, unlocated: unlocated)
         for p in dismissed { matches[p.id] = all[p.id] }
         return matches
     }
@@ -2012,10 +2016,12 @@ public actor AnalysisPipeline {
         let inventory = try await store.loadInventory()
         let overrides = OverrideSet(try await store.overrides())
         let trips = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map { Set($0.allAssetIDs) }
+        let unlocated = Set(try await store.allAssets().filter { $0.usableLocation == nil }.map(\.id))
         let found = snapshot
         let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.proposals + found.dismissed, inventory: inventory)
         snapshot.matches = await offActor {
-            Self.match(found.proposals, dismissed: found.dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
+            Self.match(found.proposals, dismissed: found.dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips,
+                       unlocated: unlocated)
         }
         snapshot.matcherVersion = AlbumMatcher.version
         return snapshot

@@ -125,13 +125,20 @@ In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen V
   es ergänzen will oder schon ganz darin steckt, und auch gegenüber zurückgestellten
   Vorschlägen. Das Land ergänzt dann „Italien“ (in der Vorschau unter „Ergänzt“, rückgängig
   zu machen); die Reise „Italien · Mai 2019“ bekommt ein eigenes Album und sieht „Italien“
-  nur unter „Anpassen“. Ergänzen will der Vorschlag das einzige bearbeitbare Album dieses
-  Namens schon, wenn es überwiegend (≥ 50 %) seine Fotos enthält, auch mit wenig davon
-  (17 % des Landes nach fünf Reisen) oder mit anderen Fotos dazu (Prüfung 18.11.2026, P1-02;
-  vorher erst ab 25 % des Vorschlags und 80 % des Albums, sonst kam ein zweites „Italien“).
-  Enthält es auch andere Fotos, wählt „Empfohlene auswählen“ es nicht von selbst aus. Bei
-  zwei Alben dieses Namens oder einem Album mit überwiegend anderen Fotos entscheidet der
-  Inhalt wie sonst. Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
+  nur unter „Anpassen“. Das gilt unabhängig vom Inhalt (Prüfungen 18. und 19.11.2026,
+  P1-02; vorher erst ab 25 % des Vorschlags und 80 % des Albums, sonst kam ein zweites
+  „Italien“): Gibt es genau ein bearbeitbares Album mit genau dem Namen des Vorschlags,
+  empfiehlt Albumist, es zu ergänzen, auch wenn es wenig davon (17 % des Landes nach fünf
+  Reisen), andere Fotos dazu oder noch gar keins davon enthält; nie ein zweites Album
+  gleichen Namens. Enthält es schon alles, heißt es „Album so lassen“. Fotos ohne Ort zählen
+  bei Ländern, Orten und Reisezielen nicht gegen die Reinheit des Albums (150 Fotos aus
+  Italien und 160 ohne Ort sind ein reines Italien-Album). Enthält das Album auch andere
+  Fotos mit Ort, oder fehlen ihm Fotos des Vorschlags ganz, wählt „Empfohlene auswählen“ es
+  nicht von selbst aus; die Empfehlung bleibt „ergänzen“. Bei zwei bearbeitbaren Alben
+  dieses Namens wählt der Inhalt eines davon (das mit mehr Fotos des Vorschlags), nie ein
+  drittes; enthalten beide gleich viel, wählt der Nutzer unter „Anpassen“. Hat der Nutzer
+  die Zuordnung unter „Anpassen“ abgelehnt, gilt die Regel für dieses Album nicht mehr.
+  Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
   die Reise. Ausnahmen: Albumist hat das Album schon für einen anderen Vorschlag angelegt
   oder ergänzt („Alben anderer Vorschläge“), oder ein Vorschlag mit genau diesem Namen ist
   schon vollständig darin.

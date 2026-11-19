@@ -334,7 +334,8 @@ extension ProposalDecision {
     /// ("Gleicher Name gewinnt", review P1-02).
     public static func isSafeToAcceptUnseen(_ proposal: AlbumProposal, match: MatchResult?) -> Bool {
         let recommended = recommended(for: proposal, match: match)
-        let extendsMixedAlbum = recommended.extendedAlbum != nil && match?.best?.relation == .partialOverlap
+        let extendsMixedAlbum = recommended.extendedAlbum != nil
+            && (match?.best?.relation == .partialOverlap || match?.best?.relation == .broaderCollection)
         return proposal.reliability >= .likely && !proposal.isSensitive && !proposal.requiresUserName
             && match?.status != .possibleMatch && recommended.isAccepted && !recommended.isKeepExisting
             && !extendsMixedAlbum

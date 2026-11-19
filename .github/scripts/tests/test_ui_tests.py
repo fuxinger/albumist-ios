@@ -996,3 +996,44 @@ class GrantPhotosTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SettleTests(unittest.TestCase):
+    """The wait for the Mac's load before a pass (ui_tests.settle; UI runs 44397301774, 44437759848)."""
+
+    def run_settle(self, loads, limit=300):
+        values, slept, tops = list(loads), [], []
+
+        def top():
+            tops.append(len(slept))
+            return ["99.0 R Simulator"]
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            settled = ui_tests.settle(load=lambda: values.pop(0) if len(values) > 1 else values[0],
+                                      sleep=slept.append, top=top, limit=limit, step=10)
+        return settled, slept, tops, log.getvalue()
+
+    def test_a_quiet_mac_starts_at_once(self):
+        settled, slept, tops, log = self.run_settle([1.2])
+        self.assertTrue(settled)
+        self.assertEqual((slept, tops), ([], []))
+        self.assertIn("SIM_SETTLE load(1m)=1.20 after 0 s", log)
+
+    def test_a_busy_mac_waits_until_the_load_is_down_and_logs_what_is_busy(self):
+        settled, slept, tops, log = self.run_settle([40.0, 22.0, 9.0, 3.4])
+        self.assertTrue(settled)
+        self.assertEqual(slept, [10, 10, 10])
+        self.assertEqual(tops, [0])  # once a minute, from the first value
+        self.assertIn("SIM_TOP 99.0 R Simulator", log)
+        self.assertIn("SIM_SETTLE load(1m)=3.40 after 30 s", log)
+
+    def test_the_wait_has_a_limit_and_the_pass_then_starts_anyway(self):
+        settled, slept, tops, log = self.run_settle([50.0], limit=120)
+        self.assertFalse(settled)
+        self.assertEqual(sum(slept), 120)
+        self.assertEqual(tops, [0, 6, 12])
+        self.assertIn("the pass starts anyway", log)
+
+    def test_every_pass_waits_before_xcodebuild(self):
+        source = open(ui_tests.__file__, encoding="utf-8").read()
+        body = source.split("def run_pass(", 1)[1].split("\ndef ", 1)[0]
+        self.assertLess(body.index("settle()"), body.index("subprocess.Popen"))

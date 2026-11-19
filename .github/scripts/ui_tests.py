@@ -579,6 +579,45 @@ def timing(what: str, started: float) -> None:
     print(f"UI_BOOT_TIMING {what} {time.monotonic() - started:.1f} s", flush=True)
 
 
+SETTLE_LOAD = 3.5
+SETTLE_LIMIT = 300
+SETTLE_STEP = 10
+
+
+def settle(load=lambda: os.getloadavg()[0], sleep=time.sleep, top=None,
+           limit: float = SETTLE_LIMIT, step: float = SETTLE_STEP) -> bool:
+    """Waits until the Mac's 1-minute load is below SETTLE_LOAD (at most `limit` s), before a
+    pass starts its first test. Every value is a SIM_SETTLE line, what keeps the Mac busy a
+    SIM_TOP line once a minute. True when it settled.
+
+    Why: right after the simulator's boot the hosted Mac (3 cores) is starved for minutes
+    (ci.yml has the same wait since CI 44376522818). The first launch of a UI group then took
+    30 s (device test06, UI run 44397301774) or XCTest lost the app although it had started
+    and drawn its first screen (flow-other test05, UI run 44437759848: process after 4 s, its
+    code after 9 s, a 2.3 s stall in dyld/os_log, "does not have a process ID" after 150 s).
+    The pass still runs when the load stays high: the wait only gives the Mac its time."""
+    waited = 0.0
+    while True:
+        value = load()
+        print(f"SIM_SETTLE load(1m)={value:.2f} after {waited:.0f} s", flush=True)
+        if value < SETTLE_LOAD:
+            return True
+        if waited % 60 == 0:
+            for line in (top or busiest)():
+                print(f"SIM_TOP {line}", flush=True)
+        if waited >= limit:
+            print(f"SIM_SETTLE still {value:.2f} after {waited:.0f} s; the pass starts anyway", flush=True)
+            return False
+        sleep(step)
+        waited += step
+
+
+def busiest() -> list[str]:
+    """The busiest processes on the Mac (for SIM_TOP)."""
+    code, out = sh(["ps", "-Ao", "pcpu=,state=,comm=", "-r"], timeout=30, quiet=True)
+    return [line[:160] for line in out.splitlines()[:8]] if code == 0 else []
+
+
 def boot(udid: str) -> bool:
     for attempt in (1, 2, 3):
         started = time.monotonic()
@@ -886,6 +925,9 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         command = ["xcodebuild", "test" if build else "test-without-building", "-project", args.project,
                    "-scheme", args.scheme, "CODE_SIGNING_ALLOWED=NO"]
     command += ["-destination", f"id={args.udid}", "-resultBundlePath", result] + chosen
+    settled = time.monotonic()
+    settle()
+    timing(f"load settled before the {label} pass", settled)
     print(f"UI_PASS {args.name} {label}: {' '.join(chosen) or 'all tests'}", flush=True)
     # SwiftUI reports broken navigation (link without destination) and similar runtime problems
     # only in the system log, so it is recorded during the whole pass.

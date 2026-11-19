@@ -474,11 +474,12 @@ Jobs davor brauchen sie nicht.
   (Abschnitt „Abstürze und Feedback abholen“).
 - **Privates Repository** (GitHub-Hilfe „Managing environments for deployment“, gelesen am
   19.11.2026): mit GitHub Free gibt es Umgebungen, ihre Secrets und ihre Zweig-Regeln nur in
-  öffentlichen Repositorys; GitHub Pro, Team und Enterprise haben sie auch in privaten. Zeigt die
-  API in einem privaten Repository keine Regel `main`, hält der erste Job mit einem Hinweis auf
-  GitHub Free an; zeigt sie eine, steht eine Warnung im Lauf, dass sie nur mit Pro, Team oder
-  Enterprise gilt. Mit Free gibt GitHub die Secrets der Umgebung dann auch nicht heraus, und der
-  Upload-Job hält bei „App Store Connect secrets present“ an.
+  öffentlichen Repositorys; GitHub Pro, Team und Enterprise haben sie auch in privaten. Eine
+  Regel, die die API in einem privaten Repository mit Free noch zeigt, setzt GitHub nicht durch,
+  und der Lauf kann den Tarif nicht lesen. Darum hält der erste Job in einem privaten Repository
+  immer an (mit Hinweis auf GitHub Free), außer die Repository-Variable `UPLOAD_PRIVATE_PLAN_OK`
+  steht auf `true`; die setzt der Eigentümer erst, wenn sein Tarif Umgebungen in privaten
+  Repositorys hat. Dann gelten dieselben Prüfungen wie im öffentlichen Repository.
 
 ## Zwei Tore: täglicher Build und Build für Tester (Entscheidung Fuchs 18.11.2026, Nr. 10)
 

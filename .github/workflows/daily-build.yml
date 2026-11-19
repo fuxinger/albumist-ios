@@ -63,6 +63,8 @@ jobs:
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
+          # As in testflight.yml's "Upload setup checked" (upload_approval.py PLAN_VARIABLE).
+          UPLOAD_PRIVATE_PLAN_OK: ${{ vars.UPLOAD_PRIVATE_PLAN_OK }}
         run: python3 .github/scripts/daily_build.py decide
       - name: Start TestFlight with the small gate
         if: steps.decide.outputs.start == 'true'

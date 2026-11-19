@@ -46,19 +46,38 @@ class ReviewTests(unittest.TestCase):
                 self.assertEqual(len(problems), 1)
                 self.assertIn(why, problems[0])
 
-    def test_a_private_repository_needs_a_working_branch_rule(self):
+    def test_a_private_repository_is_refused_unless_the_owner_says_his_plan_has_environments(self):
         # GitHub Free has no environments, environment secrets or branch rules in a private
-        # repository (GitHub Pro, Team or Enterprise has). Without a rule the API shows, refused,
-        # and the message says why; with one, a warning names the plan it needs.
-        for environment, branches in ((None, None), (CREATED_BY_A_JOB, None), (dict(SET_UP, deployment_branch_policy=None), MAIN)):
+        # repository (GitHub Pro, Team or Enterprise has). The API may still list a rule there
+        # that GitHub does not enforce, and the token cannot read the plan: so a private
+        # repository is refused, even with the rule main, until the owner sets the repository
+        # variable UPLOAD_PRIVATE_PLAN_OK to "true" (third review of fix/pipeline).
+        for environment, branches in ((None, None), (CREATED_BY_A_JOB, None), (SET_UP, MAIN), (WITH_REVIEWER, MAIN)):
             with self.subTest(environment=environment):
                 problems, _, _ = upload_approval.review(environment, public=False, branches=branches)
                 self.assertEqual(len(problems), 1)
-                self.assertIn("private", problems[0])
-                self.assertIn("GitHub Free", problems[0])
-        problems, warnings, _ = upload_approval.review(SET_UP, public=False, branches=MAIN)
-        self.assertEqual(problems, [])
-        self.assertTrue(any("GitHub Pro, Team or Enterprise" in w for w in warnings), warnings)
+                for words in ("private", "GitHub Free", "UPLOAD_PRIVATE_PLAN_OK"):
+                    self.assertIn(words, problems[0])
+        # With the variable, the same checks as in a public repository, and a note says why.
+        problems, warnings, notes = upload_approval.review(SET_UP, public=False, branches=MAIN, plan_ok=True)
+        self.assertEqual((problems, warnings), ([], []))
+        self.assertTrue(any("UPLOAD_PRIVATE_PLAN_OK" in n for n in notes), notes)
+        for environment, branches, why in ((None, None, "does not exist"), (CREATED_BY_A_JOB, None, "other branches"),
+                                           (SET_UP, MAIN + [{"name": "dev"}], "other branches")):
+            with self.subTest(why=why, plan_ok=True):
+                problems, _, _ = upload_approval.review(environment, public=False, branches=branches, plan_ok=True)
+                self.assertEqual(len(problems), 1)
+                self.assertIn(why, problems[0])
+        # A public repository needs no variable.
+        self.assertEqual(upload_approval.review(SET_UP, branches=MAIN, plan_ok=False)[0], [])
+
+    def test_only_the_word_true_says_the_plan_has_environments(self):
+        for value, ok in (("true", True), ("TRUE", True), (" true\n", True), ("", False), ("false", False),
+                          ("1", False), ("yes", False)):
+            with self.subTest(value=value):
+                self.assertEqual(upload_approval.private_plan_ok({upload_approval.PLAN_VARIABLE: value}), ok)
+        self.assertFalse(upload_approval.private_plan_ok({}))
+        self.assertEqual(upload_approval.PLAN_VARIABLE, "UPLOAD_PRIVATE_PLAN_OK")
 
     def test_a_reviewer_left_in_place_is_a_warning(self):
         problems, warnings, _ = upload_approval.review(WITH_REVIEWER, branches=MAIN)
@@ -116,7 +135,7 @@ class CheckTests(unittest.TestCase):
         with open(path, encoding="utf-8") as f:
             return f.read()
 
-    def check(self, answer, public=True, branches=MAIN):
+    def check(self, answer, public=True, branches=MAIN, plan_ok=False):
         def fetcher():
             if isinstance(answer, Exception):
                 raise answer
@@ -127,7 +146,7 @@ class CheckTests(unittest.TestCase):
                 raise public
             return public
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            code = upload_approval.check(fetcher, visibility, lambda: branches)
+            code = upload_approval.check(fetcher, visibility, lambda: branches, lambda: plan_ok)
         return code, log.getvalue()
 
     def test_set_up(self):
@@ -155,14 +174,16 @@ class CheckTests(unittest.TestCase):
                 self.assertIn("re-run this job", log)
                 self.assertEqual(self.read(self.output), "")
 
-    def test_a_private_repository_goes_on_only_with_the_branch_rule(self):
+    def test_a_private_repository_goes_on_only_with_the_owners_variable(self):
         code, log = self.check(SET_UP, public=False)
-        self.assertEqual(code, 0, log)
-        self.assertIn("GitHub Pro, Team or Enterprise", log)
-        code, log = self.check(dict(SET_UP, deployment_branch_policy=None), public=False, branches=None)
         self.assertEqual(code, 1)
         self.assertIn("GitHub Free", log)
-        self.assertEqual(self.read(self.output), "ready=true\n")  # from the first check only
+        self.assertIn("UPLOAD_PRIVATE_PLAN_OK", log)
+        self.assertEqual(self.read(self.output), "")
+        code, log = self.check(SET_UP, public=False, plan_ok=True)
+        self.assertEqual(code, 0, log)
+        self.assertEqual(self.read(self.output), "ready=true\n")
+        self.assertIn("UPLOAD_PRIVATE_PLAN_OK", self.read(self.summary))
 
     def test_visibility_is_read_from_the_repository(self):
         originals = upload_approval._get
@@ -200,7 +221,8 @@ class DailyBuildTests(unittest.TestCase):
 
     def test_never_before_the_approval_is_set_up(self):
         for approval in (upload_approval.review(None), upload_approval.review(CREATED_BY_A_JOB),
-                         upload_approval.review(dict(SET_UP, deployment_branch_policy=None), public=False)):
+                         upload_approval.review(dict(SET_UP, deployment_branch_policy=None), public=False),
+                         upload_approval.review(SET_UP, public=False, branches=MAIN)):
             with self.subTest(approval=approval):
                 start, why = self.decide(approval=approval)
                 self.assertFalse(start)

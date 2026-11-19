@@ -10,10 +10,9 @@ Diese Regel ist jetzt der einzige Zaun; darum prüft der erste Job jedes Laufs s
 **Bis das eingerichtet ist, lädt TestFlight nichts hoch.** Ein Lauf hält dann gleich im ersten
 Job („Upload setup“) an und verweist auf diese Seite. Auch der tägliche Build startet erst danach.
 
-**Privates Repository:** Mit dem kostenlosen GitHub-Abo (GitHub Free) gibt es Umgebungen, ihre
-Secrets und ihre Zweig-Regel nur in öffentlichen Repositorys. Privat geht es nur mit GitHub Pro,
-Team oder Enterprise. Mit GitHub Free und privatem Repository hält der erste Job an (oder der
-Upload findet die Secrets nicht); hochgeladen wird dann nichts.
+**Privates Repository:** Das Repository ist öffentlich; würde es privat, hält jeder Lauf im ersten
+Job an, bis du (erst mit GitHub Pro, Team oder Enterprise) die Repository-Variable
+`UPLOAD_PRIVATE_PLAN_OK` auf `true` setzt.
 
 Die Knöpfe bei GitHub sind englisch; sie stehen unten **fett**.
 
@@ -51,8 +50,8 @@ wieder an.
 ## Wenn etwas nicht klappt
 
 - „No upload: the upload environment is not set up“ im ersten Job: Schritt 1 oder 3 fehlt, oder
-  die Zweig-Regel ist nicht genau `main`. Mit privatem Repository nennt die Meldung GitHub Free:
-  siehe oben.
+  die Zweig-Regel ist nicht genau `main`. Nennt die Meldung GitHub Free, ist das Repository
+  privat: siehe oben.
 - Der Upload bricht gleich mit „App Store Connect secrets“ ab: in Schritt 4 fehlt ein Name oder
   er ist anders geschrieben. Ergänzen, dann im Lauf **Re-run failed jobs**.
 - Der Upload wartet auf einen Klick („Review deployments“): Schritt 2 fehlt.

@@ -8,8 +8,8 @@ reaches TestFlight without a click. For daily-build.yml: Linux, no secret.
       Writes start=true|false to $GITHUB_OUTPUT and why to the log and the job summary. true only
       when all of these hold:
         1. The upload is fenced in (upload_approval.py: the environment testflight-upload exists
-           and only the branch main may use it; in a private repository that needs GitHub Pro,
-           Team or Enterprise).
+           and only the branch main may use it; a private repository only when the owner set the
+           repository variable UPLOAD_PRIVATE_PLAN_OK to true, see there).
         2. No TestFlight run is running or waiting (queued, waiting for a runner, in progress):
            a run holds the group "testflight" (testflight.yml) until its last job ends; a run
            started now would wait behind it and would replace a run that already waits there
@@ -139,7 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         verifier = ui_evidence.Verifier()
         try:
-            start, why = decide(head, app, runs, build_tags(), upload_approval.review(environment, public, branches),
+            start, why = decide(head, app, runs, build_tags(), upload_approval.review(environment, public, branches,
+                                                                             upload_approval.private_plan_ok()),
                                 verifier.app,
                                 lambda run: got_past_the_check(call, run), lambda sha: docs_only_since(sha, head))
         except ui_evidence.ApiError as error:

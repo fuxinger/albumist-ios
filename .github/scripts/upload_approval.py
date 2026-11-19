@@ -22,12 +22,13 @@ from another branch must not reach the secrets).
 
 A private repository (GitHub's docs, "Managing environments for deployment", 19.11.2026): on GitHub
 Free, environments, environment secrets and deployment branch rules exist for public
-repositories only; GitHub Pro, Team and Enterprise have them in private ones too. Required
-reviewers in private repositories need Enterprise, but no reviewer is needed any more. So in a
-private repository a missing branch rule is refused with a message that names GitHub Free, and
-a rule the API lists gives a warning that it holds only on GitHub Pro, Team or Enterprise. On
-GitHub Free the environment's secrets are not given to the job either, so the upload job stops at
-"App Store Connect secrets present" (fails closed).
+repositories only; GitHub Pro, Team and Enterprise have them in private ones too. The API may
+still list a branch rule in a private repository on Free, which GitHub then does not enforce, and
+the run's token cannot read the plan. So a private repository is refused, with a message that
+names GitHub Free, unless the owner has set the repository variable UPLOAD_PRIVATE_PLAN_OK to
+"true" (PLAN_VARIABLE; testflight.yml and daily-build.yml pass it in) once his plan has
+environments in private repositories; then the same checks as in a public one apply (third
+review of fix/pipeline, 19.11.).
 
 Warning, no block: a required reviewer is still set (the upload then waits for a click, as before
 19.11.).
@@ -37,7 +38,8 @@ When the API does not answer, check fails (no upload without knowing): re-run th
 The file keeps its name (daily_build.py and the tests import it); the job and its texts say
 "setup" since 19.11.
 
-Environment: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_API_URL, GITHUB_OUTPUT, GITHUB_STEP_SUMMARY.
+Environment: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_API_URL, GITHUB_OUTPUT, GITHUB_STEP_SUMMARY,
+UPLOAD_PRIVATE_PLAN_OK (the repository variable).
 """
 from __future__ import annotations
 
@@ -113,13 +115,18 @@ def _get(path: str) -> dict | None:
     raise ApiError(f"GitHub API: {name}: {last}")
 
 
-PRIVATE_WITHOUT_RULE = ("the repository is private and the environment {name} shows no branch rule: on GitHub Free, "
-                        "environments, their secrets and their branch rules exist only in public repositories (GitHub "
-                        "Pro, Team or Enterprise has them in private ones); make the repository public, or use one of "
-                        "those plans and set the rule main, as in {setup}")
-PRIVATE_NEEDS_PLAN = ("the repository is private: the environment's branch rule (and its secrets) hold only on GitHub "
-                      "Pro, Team or Enterprise; on GitHub Free they are ignored and the upload job stops at "
-                      "'App Store Connect secrets present'")
+# The repository variable by which the owner says that his plan has environments in private
+# repositories (GitHub Pro, Team or Enterprise); only "true" counts.
+PLAN_VARIABLE = "UPLOAD_PRIVATE_PLAN_OK"
+PRIVATE_ON_FREE = ("the repository is private: on GitHub Free, environments, their secrets and their branch rules "
+                   "exist only in public repositories, and a rule the API still lists is not enforced; make the "
+                   "repository public, or, once the plan is GitHub Pro, Team or Enterprise, set the repository variable "
+                   f"{PLAN_VARIABLE} to true (Settings > Secrets and variables > Actions > Variables), as in {{setup}}")
+
+
+def private_plan_ok(environ=None) -> bool:
+    """Whether the owner set PLAN_VARIABLE to "true" (any case, spaces around it ignored)."""
+    return str((os.environ if environ is None else environ).get(PLAN_VARIABLE, "")).strip().lower() == "true"
 
 
 def main_only(environment: dict | None, branches: list[dict] | None) -> bool:
@@ -129,28 +136,31 @@ def main_only(environment: dict | None, branches: list[dict] | None) -> bool:
     return bool(policy.get("custom_branch_policies")) and not policy.get("protected_branches") and named == MAIN_ONLY
 
 
-def review(environment: dict | None, public: bool = True,
-           branches: list[dict] | None = None) -> tuple[list[str], list[str], list[str]]:
+def review(environment: dict | None, public: bool = True, branches: list[dict] | None = None,
+           plan_ok: bool = False) -> tuple[list[str], list[str], list[str]]:
     """(problems that block the upload, warnings, notes) of an environment; None: it does not exist.
     public: whether the repository is public (fetch_public). branches: its custom branch rules
-    (fetch_branches)."""
-    fenced = environment is not None and main_only(environment, branches)
-    if not public and not fenced:
-        return [PRIVATE_WITHOUT_RULE.format(name=ENVIRONMENT, setup=SETUP)], [], []
+    (fetch_branches). plan_ok: the owner's PLAN_VARIABLE (private_plan_ok), needed when private."""
+    if not public and not plan_ok:
+        return [PRIVATE_ON_FREE.format(setup=SETUP)], [], []
     if environment is None:
         return [f"the environment {ENVIRONMENT} does not exist"], [], []
-    if not fenced:
+    if not main_only(environment, branches):
         return [f"the environment {ENVIRONMENT} may be used from other branches than main: set 'Deployment "
                 "branches and tags' to 'Selected branches and tags' with the one rule main"], [], []
-    warnings = [] if public else [PRIVATE_NEEDS_PLAN]
+    warnings = []
     rules = environment.get("protection_rules") or []
     if any(isinstance(r, dict) and r.get("type") == "required_reviewers" for r in rules):
         warnings.append(f"the environment {ENVIRONMENT} still has a required reviewer: the upload waits for a click "
                         f"(since 19.11.2026 it should run by itself; remove the reviewer as in {SETUP})")
-    return [], warnings, [f"only the branch main may use the environment {ENVIRONMENT}"]
+    notes = [f"only the branch main may use the environment {ENVIRONMENT}"]
+    if not public:
+        notes.append(f"the repository is private and {PLAN_VARIABLE} is true: the owner's plan has environments "
+                     "in private repositories")
+    return [], warnings, notes
 
 
-def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches) -> int:
+def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches, plan_ok=private_plan_ok) -> int:
     try:
         environment = fetcher()
         is_public = public()
@@ -159,7 +169,7 @@ def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches) -> 
         print(command("error", "Upload setup", f"the environment {ENVIRONMENT} could not be read ({error}); "
                       "re-run this job when the API answers"))
         return 1
-    problems, warnings, notes = review(environment, is_public, branches)
+    problems, warnings, notes = review(environment, is_public, branches, plan_ok())
     for text in warnings:
         print(command("warning", "Upload setup", text))
     with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:

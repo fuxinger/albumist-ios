@@ -190,6 +190,12 @@ class UploadApprovalTests(unittest.TestCase):
         self.assertIn("\n    if: github.ref == 'refs/heads/main'\n", "\n" + check + "\n")
         self.assertIn("ready: ${{ steps.setup.outputs.ready }}", check)
         self.assertIn("\n      - name: Upload setup checked\n        id: setup\n", "\n" + check)
+        # A private repository needs the owner's word that his plan has environments there
+        # (upload_approval.PLAN_VARIABLE); the daily build reads the same variable.
+        variable = "UPLOAD_PRIVATE_PLAN_OK: ${{ vars.UPLOAD_PRIVATE_PLAN_OK }}"
+        self.assertIn(variable, check.split("- name: Upload setup checked", 1)[1].split("\n      - ", 1)[0])
+        daily = read(os.path.join(ROOT, ".github", "workflows", "daily-build.yml"))
+        self.assertIn(variable, daily.split("run: python3 .github/scripts/daily_build.py decide", 1)[0].rsplit("\n      - ", 1)[1])
         # Runs of before 19.11. named the job "Upload approval"; the daily build reads both.
         self.assertEqual(daily_build.CHECK_JOBS, (daily_build.CHECK_JOB, "Upload approval"))
         # The secrets' presence is checked first in the upload job, without their values in a step.

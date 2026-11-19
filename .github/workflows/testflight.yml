@@ -29,10 +29,10 @@ run-name: >-
 #
 #   1. Upload setup (Linux, a minute): only on main, and only when the environment
 #      testflight-upload exists and may be used from the branch main only (a custom rule for
-#      exactly main; .github/scripts/upload_approval.py). In a private repository that needs
-#      GitHub Pro, Team or Enterprise (on GitHub Free there are no environments in private
-#      repositories): without a branch rule the API shows, the run stops; on Free the secrets
-#      would not reach the job either. Otherwise the run stops here, before any macOS minute, and
+#      exactly main; .github/scripts/upload_approval.py). A private repository stops here unless
+#      the owner set the repository variable UPLOAD_PRIVATE_PLAN_OK to true: on GitHub Free
+#      there are no environments in private repositories, a rule the API lists is not enforced,
+#      and the token cannot read the plan. Otherwise the run stops here, before any macOS minute, and
 #      names the setup steps. GitHub would create a missing environment without any rule as
 #      soon as the upload job names it, so this check is what keeps the upload job from ever
 #      starting without the fence. It reads no secret.
@@ -169,6 +169,9 @@ jobs:
         id: setup
         env:
           GH_TOKEN: ${{ github.token }}
+          # "true" only once the owner's plan has environments in private repositories (GitHub
+          # Pro, Team or Enterprise); a private repository is refused without it.
+          UPLOAD_PRIVATE_PLAN_OK: ${{ vars.UPLOAD_PRIVATE_PLAN_OK }}
         run: python3 .github/scripts/upload_approval.py check
       - name: Choose the gate
         id: gate

@@ -889,7 +889,7 @@ final class DeviceConditionUITests: XCTestCase {
         guard rebuildAnalysis(), waitForImageStep("image step before leaving") else { return }
         record("before leaving")
         sendToBackground("for the background time to run out", atLeast: 6) // the run ends there: iOS took the time away
-        app.activate()
+        UITestWait.toForeground(app, "after the background time ran out", in: self)
         var caughtUp = false
         let goesOn = waitStable("analysis goes on after the background time ran out", timeout: 40, stableChecks: 2) {
             if anything("Gleich wieder bei Schritt").exists || anything("Macht da weiter").exists { caughtUp = true }
@@ -1077,7 +1077,7 @@ final class DeviceConditionUITests: XCTestCase {
         // (its count moves). That it then ends with every photo is
         // DeviceConditionRunTests.fullDiskDuringTheAnalysisThenSpaceAgainEndsWithEveryPhoto.
         sendToBackground("to free space", atLeast: 4)
-        app.activate()
+        UITestWait.toForeground(app, "after freeing space", in: self)
         expectAnalysisGoesOn("after the disk had space again", dismissing: true)
         shot("11-after-disk-full-analysis")
         // Before the plan part, which ends the app (a UI run does not resume at launch).

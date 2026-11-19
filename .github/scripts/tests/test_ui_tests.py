@@ -1223,6 +1223,31 @@ class HostTerminateTests(unittest.TestCase):
                     # goes through it as well).
                     self.assertRegex(swift, r"UITestAppEnd\.(end|launch)\(app")
 
+    def test_every_return_to_the_app_goes_through_the_wait_that_tries_again(self):
+        # Device test03 in UI run 44582675590 (load 674 on the Mac): `app.activate()` after the
+        # background time failed with "Failed to activate application ... (current state:
+        # Running Background)", and the test was red with nothing wrong in the app.
+        # UITestWait.toForeground takes such a failed activation as expected (non-strict, only
+        # that message), tries again, says each extra try in a counted UI_FLAKY_RETRY line that
+        # names the test, and fails the test only when the app never came to the front.
+        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".swift") or name == "UITestWait.swift":
+                continue
+            with self.subTest(name):
+                with open(os.path.join(folder, name), encoding="utf-8") as source:
+                    code = ui_groups.strip_swift(source.read())
+                self.assertNotRegex(code, r"\bapp\.activate\(\)")
+                for call in re.finditer(r"UITestWait\.toForeground\(", code):
+                    self.assertRegex(code[call.end():call.end() + 200], r"^[^()]*\bin: self\b")
+        with open(os.path.join(folder, "UITestWait.swift"), encoding="utf-8") as source:
+            wait = source.read()
+        body = wait[wait.index("static func toForeground("):wait.index("static func testID(")]
+        self.assertIn('"Failed to activate application"', body)
+        self.assertIn("isStrict = false", body)
+        self.assertRegex(body, r'print\("UI_FLAKY_RETRY \\\(testID\(test\)\) ')
+        self.assertIn("XCTFail(", body)
+
     def test_every_home_press_goes_through_the_wait_that_tries_again(self):
         # UI run 44497741096 (19.11.): after the Home press the app stayed in the foreground
         # for 30 s in device test03 and test06; the press was lost on the CI simulator.

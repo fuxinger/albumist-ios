@@ -49,15 +49,24 @@ public struct ProposalEngine: Sendable {
 
     /// The suggestions to show, the ones the user dismissed, and which album stands for the
     /// photos that get no album of their own (`Suggestions`).
-    public func suggestions(for analysis: AnalysisSnapshot, overrides: OverrideSet = OverrideSet()) -> Suggestions {
+    /// `stop`: asked between the parts of the work; when it says so, the suggestions are given
+    /// up and none are returned. Only for work whose result is dropped then (an analysis run
+    /// paused meanwhile, review P4-07); never stopped, the result is the same.
+    public func suggestions(for analysis: AnalysisSnapshot, overrides: OverrideSet = OverrideSet(),
+                            stoppingWhen stop: () -> Bool = { false }) -> Suggestions {
+        let none = Suggestions(open: [])
         let usable = analysis.facts.filter { !overrides.isExcluded($0.id) && !overrides.isIgnored($0.id) }
         let profile = LibraryProfile(facts: usable, trips: analysis.trips)
+        if stop() { return none }
         let home = HomeContext(settings: analysis.home, profile: profile, facts: usable, radius: settings.trips.advanced.homeRadiusMeters)
         var result: [AlbumProposal] = []
         var standIns: [StandIn] = []
         let areas = settings.enabledAreas
+        if stop() { return none }
         if areas.contains(.places) { result += placeProposals(usable, profile: profile) }
+        if stop() { return none }
         if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile, home: home, routineVisits: &standIns) }
+        if stop() { return none }
         let frequentPlaces = areas.contains(.frequentPlaces) ? analysis.frequentPlaces : []
         // A place the user is often at gets one album instead of its trips, so it comes with
         // either area (Trips/RecurringPlaces.swift).
@@ -69,16 +78,21 @@ public struct ProposalEngine: Sendable {
         standIns += once.standIns
         // The cap on unnamed places counts the places that are shown, after the ones that went.
         result += frequentPlaceProposals(once.frequent, facts: analysis.facts, chosen: analysis.chosen) + once.recurring
+        if stop() { return none }
         if areas.contains(.chronology) { result += chronologyProposals(usable) }
         if areas.contains(.mediaTypes) { result += mediaTypeProposals(usable) }
+        if stop() { return none }
         if areas.contains(.screenshots) { result += screenshotProposals(usable, profile: profile) }
         if areas.contains(.imageCategories) { result += imageCategoryProposals(usable, profile: profile) }
+        if stop() { return none }
         if areas.contains(.documents) { result += documentProposals(usable, profile: profile) }
         if areas.contains(.messenger) { result += messengerProposals(usable) }
         if areas.contains(.peopleAndPets) { result += groupProposals(analysis.groups) }
+        if stop() { return none }
         // Curated before rejections are taken out: a trip the user said no to still stands for
         // its country, which would otherwise come back as the same photos under another name.
         let kept = curated(result, home: home, standIns: &standIns, users: users.union(named))
+        if stop() { return none }
         if areas.contains(.places) { standIns += placesOfTrips(kept, standIns: standIns) }
         let dismissed = { (p: AlbumProposal) in overrides.isRejected(p.id) || overrides.mustNotRecreate(p.id) }
         return Suggestions(open: kept.filter { !dismissed($0) }, dismissed: kept.filter(dismissed),

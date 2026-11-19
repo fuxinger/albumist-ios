@@ -64,6 +64,7 @@ public enum OrganizationScope: Hashable, Sendable, Codable {
 /// (`AssetFacts.timeZone`, `PhotoClocks`, review P1-15): its place's, else its country's there,
 /// else, on a trip, the trip's; else that one.
 /// `placeZones`: the zones of the places (`LocalTime.placeZones`) where the caller has them.
+/// `stop`: asked every 1,000 photos (see the loop).
 public enum FactsAssembler {
     public static func assemble(
         assets: [AssetSnapshot],
@@ -77,7 +78,8 @@ public enum FactsAssembler {
         home: Set<AssetID> = [],
         withoutCountry: Set<AssetID> = [],
         homeTimeZone: TimeZone? = nil,
-        placeZones: [AssetID: TimeZone]? = nil
+        placeZones: [AssetID: TimeZone]? = nil,
+        stoppingWhen stop: () -> Bool = { false }
     ) -> [AssetFacts] {
         var tripOf: [AssetID: SortlyID] = [:]
         for trip in trips { for id in trip.geotaggedAssetIDs { tripOf[id] = trip.id } }
@@ -90,7 +92,7 @@ public enum FactsAssembler {
         let messenger = MessengerClassifier()
         let clocks = homeTimeZone.map { PhotoClocks(places: placeZones ?? LocalTime.placeZones(of: assets, places: places), trips: trips, home: $0) }
 
-        return assets.map { asset in
+        func facts(of asset: AssetSnapshot) -> AssetFacts {
             let place = places[asset.id]
             let content = contents[asset.id]
             let text = texts[asset.id]
@@ -122,5 +124,15 @@ public enum FactsAssembler {
             facts.timeZone = clocks?.zone(of: asset.id)
             return facts
         }
+
+        var all: [AssetFacts] = []
+        all.reserveCapacity(assets.count)
+        for (index, asset) in assets.enumerated() {
+            // Given up, the facts so far are returned: only for work whose result is dropped
+            // then (an analysis run paused meanwhile, review P4-07).
+            if index % 1_000 == 0, stop() { return all }
+            all.append(facts(of: asset))
+        }
+        return all
     }
 }

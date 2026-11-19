@@ -91,8 +91,9 @@ struct PlanReviewView: View {
             }
         }
         .background(Theme.background)
-        // One name for one step (design review W2): it is the preview of what changes.
-        .navigationTitle("Vorschau")
+        // One name for one step (design review W2), and it follows the step: the preview, the
+        // run with its sorting show, the result (review P3-15, `PlanReviewPhase`).
+        .navigationTitle(phase.title)
         // Leaving mid-way would look like cancelling; the work goes on either way.
         .navigationBarBackButtonHidden(model.execution.isRunning)
         .navigationBarTitleDisplayMode(.inline)
@@ -116,6 +117,13 @@ struct PlanReviewView: View {
             // Back from the Settings app: the full-access card disappears by itself.
             if phase == .active { Task { await model.refreshAccess() } }
         }
+    }
+
+    /// What the screen shows, in the order of the body: a run (the sorting show or the
+    /// progress card), its result, the preview.
+    private var phase: PlanReviewPhase {
+        PlanReviewPhase(running: model.execution.isRunning, runningPlan: model.execution.planID,
+                        previewedPlan: model.plan?.id, hasResult: model.execution.finished != nil)
     }
 
     private var factsKey: FactsKey {
@@ -296,7 +304,8 @@ struct PlanReviewView: View {
 
     private var runningCard: some View {
         Card {
-            Text("Alben werden angelegt").font(.headline)
+            // An undo of the result runs here too: it says what really happens.
+            Text(phase.title).font(.headline)
             ExecutionProgressBar(showsCount: true)
             Text("Du kannst die App dabei offen lassen. Bricht etwas ab, setzt Albumist beim nächsten Start sicher fort.")
                 .font(.footnote).foregroundStyle(.secondary)
@@ -475,6 +484,18 @@ struct ResultCard: View {
     }
 }
 
+extension PlanReviewPhase {
+    /// The screen's title, and the heading of the card while a plan runs.
+    var title: LocalizedStringKey {
+        switch self {
+        case .preview: LocalizedStringKey("Vorschau")
+        case .creating: LocalizedStringKey("Alben werden angelegt")
+        case .changing: LocalizedStringKey("Alben werden geändert")
+        case .result: LocalizedStringKey("Ergebnis")
+        }
+    }
+}
+
 enum ConflictText {
     static func text(_ conflict: PlanConflict, inventory: CollectionInventory) -> String {
         text(ResolvedConflict(conflict, inventory: inventory))
@@ -487,7 +508,8 @@ enum ConflictText {
         case .duplicatePlannedTitle(let title, _, _):
             return String(localized: "Zwei neue Alben heißen „\(title)“. Bitte benenne eines um.")
         case .titleExistsInFolder(let title, _):
-            return String(localized: "Es gibt schon ein anderes Album „\(title)“. Das neue bekommt einen Zusatz.")
+            // Albumist makes it under the same name, next to the other one (review P2-02).
+            return String(localized: "Es gibt schon ein anderes Album „\(title)“. Danach hast du zwei Alben mit diesem Namen.")
         case .albumMissing(let id):
             return String(localized: "Das Album „\(title(id))“ gibt es nicht mehr.")
         case .albumNotEditable(let id):

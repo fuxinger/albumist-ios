@@ -341,9 +341,7 @@ final class AppModel {
     var creationDates: [AssetID: Date] {
         access(keyPath: \.facts)
         if let datesCache { return datesCache }
-        let dates = MainThreadWatch.shared.section("creation dates") {
-            Dictionary(facts.compactMap { f in f.asset.creationDate.map { (f.id, $0) } }, uniquingKeysWith: { first, _ in first })
-        }
+        let dates = MainThreadWatch.shared.section("creation dates") { DerivedLibrary.creationDates(of: facts) }
         datesCache = dates
         return dates
     }
@@ -1933,41 +1931,21 @@ final class AppModel {
             let recurringReport = try await pipeline.recurringPlaceReport()
             let home = try await pipeline.detectedHome()
             let homeNotice = try await pipeline.homeChangeNotice()
-            let newFacts = try await pipeline.currentFacts()
-            // The preview ranks of the whole library, worked out off the main thread with the
-            // facts (second review of the build 36 fix; `previewRanks` only falls back to it).
-            let newRanks = await Task.detached(priority: .userInitiated) { PreviewRank.ranks(of: newFacts) }.value
-            let inventory = try await store.loadInventory()
+            // Everything that grows with the library is read once and worked out off the main
+            // actor, its passes side by side (`AnalysisPipeline.derivedLibrary`); here it is only
+            // assigned. Review P4-02: the image results and the album list were read twice, and
+            // the start waited for each pass after the other; review of d612bc0: with 50,000
+            // photos this was seconds of main-thread work at every call. The analysed photos
+            // still without their image labels are read there too, so the sets never pass
+            // through the main actor.
+            let settings = settings
+            let managed = managedAlbums, scope = analysisScope
             // Albumist's own albums overlap on purpose (a country holds its trips).
-            let own = Set(managedAlbums.map(\.albumID))
-            let merges = await Task.detached(priority: .utility) { AlbumOverlapAnalyzer().suggestions(in: inventory, excluding: own) }.value
+            let derived = try await pipeline.derivedLibrary(snapshot: snapshot, settings: settings, managed: managed, scope: scope,
+                                                            ownAlbums: Set(managed.map(\.albumID)))
             let plans = try await store.planHistory(limit: historyLimit + 1)
             let undone = try await store.undoneTargets()
             Purchases.shared.settleUndone(undone)
-            let contents = try await store.results(ContentAnalysis.self, kind: "content")
-            let stored = try await store.overrides()
-            let overrides = OverrideSet(stored)
-            var removed: [SortlyID: Set<AssetID>] = [:]
-            for o in stored where o.decision == .neverAdd {
-                if case .assetInSource(let asset, let source) = o.scope { removed[source, default: []].insert(asset) }
-            }
-            // Everything that grows with the library is worked out off the main actor; here
-            // it is only assigned (review of d612bc0: with 50,000 photos this was seconds of
-            // main-thread work at every call, a lead for the 7 s Pause tap of the stress run).
-            let settings = settings
-            let managed = managedAlbums, scope = analysisScope
-            let derived = try await Task.detached(priority: .userInitiated) {
-                // The analysed photos still without their image labels ("Themen" or "Dokumente"
-                // turned on since): counted apart on the overview, and the ring holds its count
-                // until each was looked at once (`RecountState`). Read here, so the sets never
-                // pass through the main actor; only while one of the two is on, and only those
-                // photos, none once they are caught up (second review of the labels fix, 11).
-                let labels = try await AnalysisPipeline.photosWaitingForLabels(in: store, settings: settings)
-                return DerivedLibraryStatus.derive(facts: newFacts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                                   contents: contents, labelsMissing: labels.missing,
-                                                   labelsRetrying: labels.retrying, managed: managed,
-                                                   inventory: inventory, scope: scope)
-            }.value
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
             guard derivedCalls.isNewest(call), scope == analysisScope else { return }
@@ -1977,16 +1955,23 @@ final class AppModel {
             detectedHome = home
             homeChangeNotice = homeNotice
             MainThreadWatch.shared.section("refresh: facts") {
-                facts = newFacts
-                previewRanksCache = newRanks
+                facts = derived.facts
+                // Made with the facts off the main thread (a new value of the facts empties
+                // them): the first draw of the overview, the atlas and "Dein Zuhause" does not
+                // go over all photos on the main thread (review P4-09).
+                previewRanksCache = derived.previewRanks
+                datesCache = derived.creationDates
+                atlasCache[0] = derived.atlas
+                atlasYearsCache = derived.atlasYears
+                homeCandidatesCache = derived.homeCandidates
             }
-            self.inventory = inventory
-            mergeSuggestions = merges
+            self.inventory = derived.inventory
+            mergeSuggestions = derived.merges
             historyHasMore = plans.count > historyLimit
             history = plans.prefix(historyLimit).filter { $0.reverts == nil }
             undonePlans = undone
-            removedFromProposals = removed
-            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot, call: call) }
+            removedFromProposals = derived.removed
+            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived.status, snapshot: snapshot, call: call) }
             tripChangeLedger.refreshShown(call)
         } catch {
             message = .failure(error.localizedDescription)

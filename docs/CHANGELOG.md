@@ -73,7 +73,7 @@
   Kaschmir nicht mit Indien oder Pakistan); es bleibt Landfarbe, ausgeschnitten statt übermalt
   (kein Rand in der Farbe des Landes), und ein Tippen darauf öffnet kein Land mehr (vorher
   öffnete die Krim „Russland“). Ein Tippen neben ein kleines besuchtes Land misst jetzt bis
-  zu seiner Küste oder Grenze (vorher öffnete etwa ein Tippen auf Paris „Russland“, wenn nur
+  zu seiner Küste oder Grenze, nicht bis zu der eines umstrittenen Gebiets darin (vorher öffnete etwa ein Tippen auf Paris „Russland“, wenn nur
   Russland besucht war). Der Text der Fotozugriffs-Frage
   sagt „Kein Foto wird hochgeladen“ wie alle anderen Texte. Eine Stadt aus Apples Antwort gilt nur, wenn das
   gefragte Foto auf derselben Seite der Linie liegt wie das Foto, um das es geht. Im Reise-Atlas

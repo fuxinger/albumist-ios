@@ -202,13 +202,25 @@ struct DisputedAreaTests {
     /// borders: a tap in Paris with only Russia visited opened Russia before, whose box spans
     /// the whole map from 41° N up.
     @Test func atlasTapSlackFindsTheNearCountryOnly() {
+        // The detailed shapes and the app's (0.3° steps) give the same answer.
+        let app = AtlasShapes.make(from: Self.map, minimumStepDegrees: 0.3)
         func tap(_ lat: Double, _ lon: Double, _ visited: Set<String>, _ slack: Double) -> String? {
-            AtlasShapes.tappedCode(at: GeoCoordinate(latitude: lat, longitude: lon), in: Self.shapes, visited: visited, slackDegrees: slack)
+            let point = GeoCoordinate(latitude: lat, longitude: lon)
+            let code = AtlasShapes.tappedCode(at: point, in: Self.shapes, visited: visited, slackDegrees: slack)
+            #expect(AtlasShapes.tappedCode(at: point, in: app, visited: visited, slackDegrees: slack) == code, "\(lat), \(lon) in the app's shapes")
+            return code
         }
         #expect(tap(50.85, 4.35, ["LU"], 2) == "LU") // Brussels, Luxembourg 1.5° away
         #expect(tap(48.8566, 2.3522, ["RU"], 2) == nil) // Paris
         #expect(tap(48.8566, 2.3522, ["RU", "LU"], 6) == "LU")
         #expect(tap(20, -40, ["BR"], 2) == nil) // the Atlantic
+        // The coast and borders of a disputed area are not the country's: the slack measures to
+        // what the map fills (review of b376999: a tap on the sea off the grey Crimea opened
+        // Russia, one in Mauritania beside the grey Western Sahara Morocco).
+        #expect(tap(44.35, 33.8, ["RU"], 1) == nil) // the sea off Yalta
+        #expect(tap(21.0, -15.0, ["MA"], 2) == nil) // Mauritania, 0.3° off Western Sahara
+        #expect(tap(44.5, 37.7, ["RU"], 1) == "RU") // the sea off Novorossiysk
+        #expect(tap(30.4, -10.5, ["MA"], 1) == "MA") // the Atlantic off Agadir
     }
 
     @Test func atlasShapesForTheApp() {

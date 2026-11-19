@@ -48,8 +48,9 @@ public struct AtlasShape: Sendable, Hashable {
     }
 
     /// Distance in degrees (as the flat map draws them) to the nearest coast or border of the
-    /// shape, looking only at rings within `limit`; nil beyond it.
-    func edgeDistance(to c: GeoCoordinate, within limit: Double) -> Double? {
+    /// shape, looking only at rings within `limit`; nil beyond it. A nearest point for which
+    /// `skipping` is true does not count.
+    func edgeDistance(to c: GeoCoordinate, within limit: Double, skipping: (GeoCoordinate) -> Bool = { _ in false }) -> Double? {
         var best: Double?
         for (ring, box) in zip(rings, boxes) where box.distance(to: c) <= limit {
             guard var a = ring.last else { continue }
@@ -57,11 +58,17 @@ public struct AtlasShape: Sendable, Hashable {
                 let dx = b.longitude - a.longitude, dy = b.latitude - a.latitude, length = dx * dx + dy * dy
                 let t = length == 0 ? 0 : max(0, min(1, ((c.longitude - a.longitude) * dx + (c.latitude - a.latitude) * dy) / length))
                 let d = hypot(c.longitude - a.longitude - t * dx, c.latitude - a.latitude - t * dy)
-                if d <= limit, d < (best ?? .infinity) { best = d }
+                if d <= limit, d < (best ?? .infinity),
+                   !skipping(GeoCoordinate(latitude: a.latitude + t * dy, longitude: a.longitude + t * dx)) { best = d }
                 a = b
             }
         }
         return best
+    }
+
+    /// Whether `c` lies in the shape or within `margin` degrees of its edge.
+    func covers(_ c: GeoCoordinate, margin: Double) -> Bool {
+        boxes.contains { $0.distance(to: c) <= margin } && (contains(c) || edgeDistance(to: c, within: margin) != nil)
     }
 }
 
@@ -120,7 +127,16 @@ public enum AtlasShapes {
         if disputedArea(at: point, in: shapes) != nil { return nil }
         let candidates = shapes.filter { !$0.isNeutral && !$0.code.isEmpty && visited.contains($0.code) }
         if let hit = candidates.first(where: { $0.contains(point) }) { return hit.code }
-        return candidates.compactMap { shape in shape.edgeDistance(to: point, within: slackDegrees).map { (shape.code, $0) } }
-            .min { $0.1 < $1.1 }?.0
+        // Measured to what the map fills: a coast or border along a disputed area in the
+        // country is the area's (review of b376999: a tap on the sea off the grey Crimea opened
+        // Russia). The margin covers the coarse outlines of the areas and the map's 0.3° steps,
+        // so the country's own coast a few kilometres across a strait may not count either.
+        let areas = shapes.filter(\.isNeutral)
+        return candidates.compactMap { shape in
+            let own = areas.filter { $0.neutralOver.contains(shape.code) }
+            return shape.edgeDistance(to: point, within: slackDegrees, skipping: { q in own.contains { $0.covers(q, margin: 0.35) } })
+                .map { (shape.code, $0) }
+        }
+        .min { $0.1 < $1.1 }?.0
     }
 }

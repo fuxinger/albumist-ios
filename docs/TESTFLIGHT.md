@@ -223,11 +223,13 @@ Testcode gibt.
   das jede Gruppe läuft: die beiden UI-Workflows (`ui.yml`, `ui-stress.yml`) und jede Datei
   unter `.github/`, die sie nennen, und jedes Skript, das ein solches Skript nennt oder
   importiert (`ui_tests.py`, `pick_simulator.py`, `toolchain.py`, `ui_evidence.py`, ...; ohne
-  die Unit-Tests in `tests/`). Eine Änderung daran lässt alle Gruppen laufen; eine Änderung an
-  einem Workflow oder Skript, das kein UI-Job ausführt (`testflight.yml`, `ci.yml`,
-  `ci_gate.py`, ...), lässt jedes grüne Ergebnis stehen (Prüfer 5, P5-08 c). Im Zweifel (ein
-  UI-Workflow fehlt oder erreicht `ui_tests.py` nicht) zählt wie früher jedes Skript und jeder
-  Workflow.
+  die Unit-Tests in `tests/` und ohne `ui-groups.json`, dort zählt nur die Zeile der Gruppe).
+  Eine Änderung daran lässt alle Gruppen laufen; eine Änderung an einem Workflow oder Skript,
+  das kein UI-Job ausführt (`testflight.yml`, `ci.yml`, `ci_gate.py`, ...), lässt jedes grüne
+  Ergebnis stehen (Prüfer 5, P5-08 c). Im Zweifel zählt jede Datei unter `.github/`: wenn ein
+  UI-Workflow fehlt oder `ui_tests.py` nicht erreicht, ein Skript nicht lesbar ist oder ein
+  Name sich nicht auflösen lässt (ein Skript- oder Pfadname aus einer Variablen, ein Pfad, den
+  es nicht gibt).
   Swift-Dateien der UI-Tests zählen mit ihrem Code, nicht Byte für Byte: Kommentare,
   Einrückung und Leerzeilen zählen nicht, Zeichenketten und Regex-Literale schon (Zeichen für
   Zeichen). Ein geänderter Kommentar ist also keine Änderung des Tests: ein rotes Ergebnis

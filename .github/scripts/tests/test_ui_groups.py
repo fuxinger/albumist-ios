@@ -2,6 +2,7 @@
 
 Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
+import io
 import json
 import os
 import re
@@ -414,11 +415,83 @@ class FingerprintTests(unittest.TestCase):
     def test_names_in_comments_and_docstrings_are_no_use(self):
         names = ui_groups.script_names('"""Uses x_doc.py."""\nimport a_mod\nfrom b_mod import c\n# d_comment.py\n'
                                        'def f():\n    """e_doc.py"""\n    return os.path.join(HERE, "f_run.py"), ".github/g.json"\n')
-        self.assertEqual(names, {".github/scripts/a_mod.py", ".github/scripts/b_mod.py", ".github/scripts/f_run.py",
-                                 ".github/g.json"})
+        self.assertEqual((names.modules, names.files, names.paths, names.unresolved),
+                         ({"a_mod", "b_mod"}, {"f_run.py", "g.json"}, {".github/g.json"}, ""))
         self.assertIsNone(ui_groups.script_names("def broken(:\n"))
-        self.assertEqual(ui_groups.workflow_names("# .github/scripts/ci_gate.py\n  run: python3 .github/scripts/x.py # y\n"),
-                         {".github/scripts/x.py"})
+        names = ui_groups.workflow_names("# .github/scripts/ci_gate.py\n  run: python3 .github/scripts/x.py # y\n"
+                                         "  with:\n    sparse-checkout: .github\n")
+        self.assertEqual((names.paths, names.files), ({".github/scripts/x.py"}, {"x.py"}))
+        # The runner starts a script it named in a variable: resolved; one from an unknown name: not.
+        self.assertEqual(ui_groups.script_names('s = os.path.join(HERE, "pick.py")\nsubprocess.run([sys.executable, s])\n')
+                         .unresolved, "")
+        self.assertNotEqual(ui_groups.script_names("subprocess.run([sys.executable, NAME, '--x'])\n").unresolved, "")
+
+    def test_every_way_of_naming_a_helper_counts_it_or_everything(self):
+        # Second review of C6: a helper named in a way the reader did not know was left out of
+        # every fingerprint. Each way below either counts the helper or, when the name cannot be
+        # resolved, counts everything (fails safe).
+        everyone = ["device", "full", "other", "small"]
+        runner = "  run: python3 .github/scripts/ui_tests.py run\n"
+
+        def changed_groups(changes, edit):
+            base = repo(**changes)
+            after = repo(**dict(changes, **edit))
+            before_fp, after_fp = ui_groups.fingerprints(base)["groups"], ui_groups.fingerprints(after)["groups"]
+            return sorted(g for g in before_fp if before_fp[g] != after_fp[g])
+
+        other = {".github__scripts__other.py": "# changed"}
+        cases = {
+            "workspace variable": {".github__workflows__ui.yml": "name: UI\n" + runner
+                                   + '  run: python3 "$GITHUB_WORKSPACE/.github/scripts/other.py"\n'},
+            "workspace expression": {".github__workflows__ui.yml": "name: UI\n" + runner
+                                     + "  run: python3 ${{ github.workspace }}/.github/scripts/other.py\n"},
+            "working directory": {".github__workflows__ui.yml": "name: UI\n" + runner
+                                  + "  working-directory: .github/scripts\n  run: python3 other.py\n"},
+            "python -m": {".github__workflows__ui.yml": "name: UI\n" + runner
+                          + "  run: cd .github/scripts && python3 -m other\n"},
+            "import_module": {".github__scripts__ui_tests.py": "import importlib\nimportlib.import_module('other')\n"},
+        }
+        for name, changes in cases.items():
+            with self.subTest(name):
+                self.assertEqual(changed_groups(changes, other), everyone)
+        # A local action: its action.yml and what it runs.
+        action = {".github__workflows__ui.yml": "name: UI\n" + runner + "  - uses: ./.github/actions/sim\n",
+                  ".github__actions__sim__action.yml": "runs:\n  steps:\n    - run: python3 .github/scripts/other.py\n"}
+        self.assertEqual(changed_groups(action, other), everyone)
+        self.assertEqual(changed_groups(action, {".github__actions__sim__action.yml": "runs: {}\n"}), everyone)
+        # A data file named through os.path.join parts.
+        data = {".github__scripts__ui_tests.py": "import os\nPINS = os.path.join(HERE, '..', 'data', 'pins.json')\n",
+                ".github__data__pins.json": "{}"}
+        self.assertEqual(changed_groups(data, {".github__data__pins.json": '{"x": 1}'}), everyone)
+        # Names it cannot resolve: everything counts, here the release gate no UI job runs.
+        gate = {".github__scripts__ci_gate.py": "# changed"}
+        for name, changes in {
+            "variable script": {".github__workflows__ui.yml": "name: UI\n" + runner
+                                + "  run: python3 .github/scripts/${TOOL}.py\n"},
+            "variable module": {".github__scripts__ui_tests.py": "import importlib\nimportlib.import_module(NAME)\n"},
+            "variable -m": {".github__scripts__ui_tests.py": "import subprocess\nsubprocess.run(['python3', '-m', NAME])\n"},
+            "missing path": {".github__workflows__ui.yml": "name: UI\n" + runner
+                             + "  run: python3 .github/scripts/not_there.py\n"},
+        }.items():
+            with self.subTest(name):
+                self.assertEqual(changed_groups(changes, gate), everyone)
+
+    def test_the_group_file_is_no_harness(self):
+        # Second review of C6: ui-groups.json was harness (the real ui_groups.py names it), so a
+        # budget_min or _comment edit ran all groups again. Each group's own definition counts.
+        with open(os.path.join(ui_groups.ROOT, ".github", "scripts", "ui_groups.py"), encoding="utf-8") as f:
+            real = f.read()
+        changes = {".github__workflows__ui.yml": "name: UI\n  run: python3 .github/scripts/ui_groups.py plan\n"
+                                                 "  run: python3 .github/scripts/ui_tests.py run\n",
+                   ".github__scripts__ui_groups.py": real}
+        base = repo(**changes)
+        self.assertNotIn(".github/ui-groups.json", ui_groups.harness_files(base))
+        groups = json.loads(json.dumps(GROUPS))
+        groups["_comment"] = ["a new comment"]
+        groups["groups"][0]["budget_min"] = 99
+        after = repo(**dict(changes, **{".github__ui-groups.json": json.dumps(groups)}))
+        self.assertEqual(ui_groups.fingerprints(base)["groups"], ui_groups.fingerprints(after)["groups"])
+        self.assertNotIn(".github/ui-groups.json", ui_groups.harness_files(ui_groups.GitTree("HEAD")))
 
     def test_unsure_counts_every_script_and_workflow(self):
         # Fails toward "harness changed": without a UI workflow, or one that reaches no runner,
@@ -433,6 +506,24 @@ class FingerprintTests(unittest.TestCase):
                 after = repo(**dict(changes, **{".github__scripts__ci_gate.py": "# changed"}))
                 before_fp, after_fp = ui_groups.fingerprints(base)["groups"], ui_groups.fingerprints(after)["groups"]
                 self.assertEqual(sorted(g for g in before_fp if before_fp[g] != after_fp[g]), everyone[1])
+
+    @staticmethod
+    def code_of(path, text):
+        """The text without comments, and for a script without its docstrings (they name other
+        scripts for the reader only)."""
+        if not path.endswith(".py"):
+            return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        import ast
+        import tokenize
+        docs = set()
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+                first = node.body[0]
+                if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                    docs.add(first.lineno)
+        kept = [tok.string for tok in tokenize.generate_tokens(io.StringIO(text).readline)
+                if tok.type != tokenize.COMMENT and not (tok.type == tokenize.STRING and tok.start[0] in docs)]
+        return " ".join(kept)
 
     def test_the_real_harness_is_what_the_ui_workflows_and_runner_name(self):
         # Read from the files themselves, no list kept by hand: every script ui.yml, ui-stress.yml
@@ -450,6 +541,18 @@ class FingerprintTests(unittest.TestCase):
         self.assertIn(".github/scripts/ui_tests.py", named)
         self.assertIn(".github/scripts/pick_simulator.py", named)  # imported by ui_tests.py
         self.assertEqual(sorted(named - harness), [])
+        # Every .github/scripts name, path or -m module in the code (comments left out) of the
+        # roots and of every harness script resolves to a file in the set.
+        scripts = {p for p in tree.files() if p.startswith(".github/scripts/") and p.endswith(".py")
+                   and not p.startswith(".github/scripts/tests/")}
+        for path in sorted(p for p in harness if p.endswith((".yml", ".py"))):
+            code = self.code_of(path, tree.read(path))
+            names = set(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\.py\b", code)) | set(re.findall(r"-m\s+([A-Za-z_]\w*)", code))
+            for name in names:
+                script = f".github/scripts/{name}.py"
+                if script in scripts:
+                    with self.subTest(file=path, name=name):
+                        self.assertIn(script, harness)
         for path in (".github/workflows/testflight.yml", ".github/workflows/ci.yml", ".github/scripts/ci_gate.py",
                      ".github/scripts/archive_check.py"):
             self.assertNotIn(path, harness)

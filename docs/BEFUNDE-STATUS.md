@@ -30,6 +30,11 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 - **Abhaken, sobald erledigt:** Status auf ✅ setzen und in „Beleg“ den Commit oder Test eintragen.
 - ✅ steht nur da, wo ein Commit oder Test auf `integ/next` oder `main` liegt. Ein Fix, der nur auf
   einem lokalen Zweig liegt, ist 🔧 (der Zweig steht dabei). Unklar heißt: nicht erledigt.
+- **Erst nachstellen, dann ändern (Fuchs, 19.11.):** Nicht jeder Befund der großen Analyse wurde
+  doppelt geprüft. Der Leiter hat rund 30 selbst am Code nachgesehen, 19 sind durch einen roten Test
+  belegt. Die 39 der Prüfung von außen wurden alle am Code geprüft (0 falsch). Deshalb wird jeder
+  offene Befund vor der Korrektur mit einem Test nachgestellt, der rot ist. Lässt er sich nicht
+  nachstellen, wird nichts geändert, und hier steht „❔ nicht nachstellbar“ mit dem Grund.
 - 👤 heißt: Ohne dich geht es nicht weiter (eine Entscheidung, ein Klick bei GitHub oder ein Test
   am iPhone). Alle 👤-Punkte stehen unten noch einmal gesammelt.
 - Die Nummern führen zum Befund: P… in `sortly-review/fable-analyse-2026-11-18/PRUEFER-*.md`,

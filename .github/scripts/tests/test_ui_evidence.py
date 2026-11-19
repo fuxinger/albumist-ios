@@ -454,6 +454,33 @@ class CommandTests(unittest.TestCase):
         self.assertIn("::error title=UI other::red for this app and this test code", log)
         self.assertIn("**Not green** (no upload, no release)", self.read(self.summary))
 
+    def gate_only(self, runs, only):
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = ui_evidence.gate(9, call=fake_api(runs), verifier=VERIFIER, tree=TEST_ONLY, now=NOW, only=only)
+        return code, log.getvalue()
+
+    def test_the_small_gate_checks_its_groups_by_the_same_rules_and_names_the_others(self):
+        # The daily build (testflight.yml, gate small; decision 10 of 18.11.2026): only the named
+        # groups must be green for this app and their test code, and a red of theirs still blocks.
+        here = [job("full", tests=TEST_ONLY_FPS["full"], job_id=400)]
+        code, log = self.gate_only([run(9, "b" * 40, here, workflow="testflight.yml")], "full")
+        self.assertEqual(code, 0, log)
+        self.assertEqual(self.outputs()["text"], "UI groups (full, only full): full here; not checked: device other small")
+        self.assertIn("(full, only full): green", self.read(self.summary))
+        self.assertIn("Not checked by this gate: device, other, small.", self.read(self.summary))
+        os.remove(self.output)
+        red_other = [run(8, "b" * 40, [job("other", "failure", "failure", tests=TEST_ONLY_FPS["other"], job_id=401)]),
+                     run(9, "b" * 40, here, workflow="testflight.yml")]
+        self.assertEqual(self.gate_only(red_other, "full")[0], 0)
+        code, log = self.gate_only(red_other, "full other")
+        self.assertEqual(code, 1)
+        self.assertIn("::error title=UI other::red for this app and this test code", log)
+        code, log = self.gate_only(red_other, "full flow")
+        self.assertEqual(code, 1)
+        self.assertIn("unknown group(s) flow", log)
+        # Without --groups every group counts, as before.
+        self.assertEqual(self.gate([run(9, "b" * 40, here, workflow="testflight.yml")])[0], 1)
+
     def test_history_that_cannot_be_read_runs_everything_and_fails_the_gate(self):
         saved = ui_evidence.MAX_CALLS
         ui_evidence.MAX_CALLS = 1

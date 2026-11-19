@@ -33,6 +33,20 @@ class RenderTests(unittest.TestCase):
         self.assertTrue(text.endswith("…\n\nBuild 42 · 902f101"))
         self.assertLessEqual(len(text), testflight_notes.LIMIT)
 
+    def test_a_small_gate_build_says_it_is_only_for_the_owner(self):
+        # The daily build (testflight.yml, gate small; decision 10 of 18.11.2026) is for the
+        # owner's own iPhone; testers get builds of the big gate, whose text has no such line.
+        text = testflight_notes.render(self.notes("Hallo"), 43, SHA, "small")
+        self.assertEqual(text, "Hallo\n\nBuild 43 · 902f101\n" + testflight_notes.SMALL_GATE)
+        self.assertNotIn("Tor", testflight_notes.render(self.notes("Hallo"), 43, SHA, "big"))
+        long = testflight_notes.render(self.notes("- Punkt\n" * 900), 44, SHA, "small")
+        self.assertTrue(long.endswith("…\n\nBuild 44 · 902f101\n" + testflight_notes.SMALL_GATE))
+        self.assertLessEqual(len(long), testflight_notes.LIMIT)
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "testflight_notes.py")
+        run = subprocess.run([sys.executable, script, "text", "--notes", self.notes("Hallo"), "--build", "43",
+                              "--sha", SHA, "--gate", "small"], capture_output=True, text=True)
+        self.assertEqual(run.stdout.strip().splitlines()[-1], testflight_notes.SMALL_GATE)
+
     def test_there_is_no_forced_mode(self):
         # The emergency "force" (upload without tests) was removed (the owner's decision 17.11.,
         # G5-02/G6-02); so was the warning text for such a build.

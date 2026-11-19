@@ -14,9 +14,11 @@
 - **Härtetest im Simulator** (`.github/workflows/ui-stress.yml`, UI-Test
   `DeviceConditionUITests/test12`): legt viele Fotos an (nur in iCloud, offline) und misst die
   Analyse: Tempo je Schritt, Pause, längster Stillstand der Anzeige, langsamste Antwort, Speicher.
-  Regel (Fuchs, 17.11.2026): **vor jedem TestFlight-Build** der kleine Durchgang mit 10.000 Fotos
-  und 15 Minuten Messung (rund 45 Minuten, die Vorgaben des Workflows; der TestFlight-Lauf
-  startet ihn selbst und lädt nur hoch, wenn er grün ist); der **volle Durchgang**
+  Regel (Fuchs, 17.11.2026, und Entscheidung 4): **vor jedem TestFlight-Build**, mit beiden Toren
+  (auch vor dem täglichen Build mit kleinem Tor, `docs/TESTFLIGHT.md` „Zwei Tore“), der kleine
+  Durchgang mit 10.000 Fotos und 15 Minuten Messung (rund 45 Minuten, die Vorgaben des
+  Workflows; der TestFlight-Lauf startet ihn selbst und lädt nur hoch, wenn er grün ist); der
+  **volle Durchgang**
   mit 50.000 Fotos und 45 Minuten Messung nur **wöchentlich nachts** (Zeitplan Sonntag 00:40 UTC;
   läuft erst, wenn der Workflow in `main` ist) und **vor dem Start im App Store**. Pause und
   Fortsetzen prüft der Test nach 200 Fotos oder 2 Minuten der Bildinhalte (seit 9ff0dfc; vorher

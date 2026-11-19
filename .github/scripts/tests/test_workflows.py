@@ -79,6 +79,22 @@ def workflow_inputs(text, plain=False):
     return names
 
 
+def job_blocks(text):
+    """{job id: its lines without comments}, read by indentation from the top-level "jobs:"."""
+    blocks, current = {}, None
+    for raw in text.split("\njobs:\n", 1)[1].splitlines():
+        line = strip_comment(raw).rstrip()
+        found = re.match(r"^  ([A-Za-z0-9_-]+):$", line)
+        if found:
+            current = found.group(1)
+            blocks[current] = []
+        elif re.match(r"^\S", line):
+            current = None  # another top-level key after the jobs
+        elif current is not None:
+            blocks[current].append(line)
+    return {job: "\n".join(lines) for job, lines in blocks.items()}
+
+
 def job_field(text, job, field):
     """A job's "if:" or "needs:" as one line (a list joined by ", ")."""
     if yaml is not None:
@@ -115,15 +131,98 @@ class CacheTests(unittest.TestCase):
                         self.assertNotRegex(step, r"\n\s+ref:")
 
 
+APPLE_SECRETS = ("ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_P8", "APPLE_TEAM_ID")
+APPLE_SECRET = re.compile(r"secrets\.(%s)\b" % "|".join(APPLE_SECRETS))
+
+
+class UploadApprovalTests(unittest.TestCase):
+    """The owner's decision 5 of 18.11.2026: an upload only with his approval. The upload job runs in
+    the environment testflight-upload, whose required reviewer is the owner; the four App Store
+    Connect secrets are environment secrets there; nothing else can read them."""
+
+    def test_the_upload_job_runs_in_the_protected_environment(self):
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
+        import upload_approval
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        release = job_blocks(text)["release"]
+        self.assertEqual(upload_approval.ENVIRONMENT, "testflight-upload")
+        self.assertIn(f"\n    environment: {upload_approval.ENVIRONMENT}\n", release + "\n")
+        if yaml is not None:
+            self.assertEqual(yaml.safe_load(text)["jobs"]["release"]["environment"], upload_approval.ENVIRONMENT)
+        # No other job of any workflow names this environment: no second door to its secrets,
+        # and one approval per upload (pages.yml has its own, github-pages).
+        for path in WORKFLOWS:
+            for job, block in job_blocks(read(path)).items():
+                if (os.path.basename(path), job) != ("testflight.yml", "release"):
+                    with self.subTest(workflow=os.path.basename(path), job=job):
+                        self.assertNotIn(upload_approval.ENVIRONMENT, block)
+
+    def test_the_apple_secrets_are_named_only_in_the_upload_job(self):
+        users = []
+        for path in WORKFLOWS:
+            text = read(path)
+            name = os.path.basename(path)
+            code = "\n".join(strip_comment(line) for line in text.splitlines())
+            with self.subTest(workflow=name):
+                # Not around the jobs (a workflow-level env reaches every job), never all secrets
+                # at once (passed on to a called workflow, or as JSON), never by a computed name.
+                self.assertNotRegex(code.split("\njobs:\n", 1)[0], APPLE_SECRET)
+                self.assertNotRegex(code, r"secrets:\s*inherit|toJSON\(\s*secrets\s*\)|secrets\[")
+            blocks = job_blocks(text)
+            if yaml is not None:
+                self.assertEqual(sorted(blocks), sorted(yaml.safe_load(text)["jobs"]), name)
+            users += [(name, job, sorted(set(APPLE_SECRET.findall(block)))) for job, block in blocks.items()
+                      if APPLE_SECRET.search(block)]
+        self.assertEqual(users, [("testflight.yml", "release", sorted(APPLE_SECRETS))])
+        # The jobs before the upload need none: the first one checks the environment instead.
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        self.assertIn("run: python3 .github/scripts/upload_approval.py check", job_blocks(text)["check"])
+
+    def test_the_first_job_is_the_approval_check_the_daily_build_reads(self):
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
+        import daily_build
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        check = job_blocks(text)["check"]
+        self.assertIn(f"\n    name: {daily_build.CHECK_JOB}\n", "\n" + check + "\n")
+        self.assertIn("\n    if: github.ref == 'refs/heads/main'\n", "\n" + check + "\n")
+        self.assertIn("ready: ${{ steps.approval.outputs.ready }}", check)
+        # The secrets' presence is checked after the approval without their values in a step.
+        release = job_blocks(text)["release"]
+        first = release.split("\n      - ", 2)[1]
+        self.assertTrue(first.startswith("name: App Store Connect secrets present"), first[:60])
+        self.assertNotRegex(first, r"\$\{\{\s*secrets\.\w+\s*\}\}")
+        # "Was testen" is set in the upload job now: no other job sets it with the key.
+        self.assertEqual([job for job, block in job_blocks(text).items() if "testflight_notes.py upload" in block],
+                         ["release"])
+
+
 class TestFlightWiringTests(unittest.TestCase):
     """The upload waits for the UI gate (ui_evidence.py), which reads the group jobs' names."""
 
     def test_no_upload_starts_by_itself(self):
         # Fable P5-15: the old testflight.yml on main uploaded the old app state, untested, on
-        # every push to main (16.11.: the website merge started one). Uploads start by hand only,
-        # and no workflow that can read the App Store Connect key (named, or all secrets passed on
-        # with "secrets: inherit") starts on a push or a pull request. A schedule may read it
-        # (asc-feedback.yml fetches feedback and crash logs; it uploads nothing).
+        # every push to main (16.11.: the website merge started one). TestFlight starts by
+        # workflow_dispatch only, and no workflow that can read an App Store Connect key (named,
+        # or all secrets passed on with "secrets: inherit") starts on a push or a pull request. A
+        # schedule may read one (asc-feedback.yml fetches feedback with its own key; it uploads
+        # nothing). The one workflow that starts TestFlight by itself is the daily build
+        # (decision 10 of 18.11.2026): with the small gate, on main, and its upload still waits
+        # for the owner's approval (UploadApprovalTests).
+        starters = {}
+        for path in WORKFLOWS:
+            code = "\n".join(strip_comment(line) for line in read(path).splitlines())
+            if re.search(r"testflight\.yml(?:/dispatches)?\b", code) and re.search(r"workflow run|/dispatches", code):
+                starters[os.path.basename(path)] = code
+        self.assertEqual(sorted(starters), ["daily-build.yml"])
+        daily = starters["daily-build.yml"]
+        self.assertIn("gh workflow run testflight.yml --repo \"$GITHUB_REPOSITORY\" --ref main -f gate=small\n", daily)
+        self.assertEqual(len(re.findall(r"workflow run", daily)), 1)
+        self.assertIn("if: github.ref == 'refs/heads/main'", daily)
+        self.assertNotRegex(daily, r"secrets[.\[]|secrets:\s*inherit")
+        trigger = read(os.path.join(ROOT, ".github", "workflows", "daily-build.yml")).split("\non:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(re.findall(r"^  ([a-z_]+):", trigger, re.M), ["schedule", "workflow_dispatch"])
         for path in WORKFLOWS:
             text = read(path)
             if "secrets.ASC_" not in text and not re.search(r"secrets:\s*inherit", text):
@@ -158,7 +257,8 @@ class TestFlightWiringTests(unittest.TestCase):
                 self.assertEqual([line.strip() for line in code.splitlines() if SKIP_MARK.search(line)], [])
         # Scripts: no flag that lets a run through without tests ("--forced" in earlier_attempts.py
         # and testflight_notes.py). ui_tests.py --skip names single tests that another group runs
-        # (ui-groups.json); the UI gate needs every group green.
+        # (ui-groups.json); the UI gate needs every group green, or with --groups the groups of the
+        # small gate (the daily build, decision 10 of 18.11.2026; checked below).
         for path in glob.glob(os.path.join(ROOT, ".github", "scripts", "*.py")):
             with self.subTest(script=os.path.basename(path)):
                 flags = re.findall(r"add_argument\(\s*[\"']--([\w-]+)[\"']", read(path))
@@ -167,14 +267,45 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertEqual(job_field(text, "tests", "if"), "needs.check.outputs.ready == 'true'")
         for job in ("ui", "stress"):
             self.assertIn("tests", [need.strip() for need in job_field(text, job, "needs").split(",")])
+        # The two gates (the owner's decision 10 of 18.11.2026) differ only in the UI groups: the
+        # stress pass runs before every upload, also before the daily build with the small gate
+        # (the owner's rule of 17.11. and decision 4), so it has no condition of its own and the
+        # UI gate and the upload need it green with either gate. The check job turns the input
+        # into big or small and stops on anything else.
+        self.assertEqual(job_field(text, "stress", "if"), "")
+        stress = job_blocks(text)["stress"]
+        self.assertNotIn("gate", stress)  # the same small pass with either gate
+        self.assertIn("photos: '10000'", stress)
+        self.assertIn("minutes: '15'", stress)
         for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "ui-gate"))):
             with self.subTest(job=job):
                 rule = job_field(text, job, "if")
                 self.assertNotIn("||", rule)
                 self.assertNotIn("inputs.", rule)
+                self.assertNotIn("gate", rule.replace("needs.ui-gate.result", ""))
                 self.assertIn("needs.check.outputs.ready == 'true'", rule)
                 for need in needed:
                     self.assertIn(f"needs.{need}.result == 'success'", rule)
+        check = job_blocks(text)["check"]
+        self.assertIn("GATE: ${{ inputs.gate || 'big' }}", check)
+        self.assertIn("big) groups=\"$UI_GROUPS\"; checked=\"\" ;;", check)
+        self.assertIn("small) groups=\"$SMALL_GATE_GROUPS\"; checked=\"$SMALL_GATE_GROUPS\" ;;", check)
+        self.assertIn("*) echo \"::error title=Gate::unknown gate $GATE (big or small)\"; exit 1 ;;", check)
+
+    def test_the_small_gate_is_the_two_short_ui_groups(self):
+        # docs/TESTFLIGHT.md ("Messung", "Zwei Tore"): flow-full and contrast, about 18 min each.
+        # The gate checks exactly the groups the UI flow ran.
+        import json
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        small = re.search(r"\n          SMALL_GATE_GROUPS: (.+)\n", text).group(1).split()
+        self.assertEqual(small, ["flow-full", "contrast"])
+        with open(os.path.join(ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:
+            names = [g["group"] for g in json.load(f)["groups"]]
+        self.assertLess(set(small), set(names))
+        jobs = job_blocks(text)
+        self.assertIn("groups: ${{ needs.check.outputs.ui_groups }}", jobs["ui"])
+        self.assertIn("GATE_GROUPS: ${{ needs.check.outputs.gate_groups }}", jobs["ui-gate"])
+        self.assertIn('python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS"', jobs["ui-gate"])
 
     def test_the_skip_check_finds_force_and_nothing_else(self):
         # Second review of 51e72f3: harmless "--force" flags of other tools are no skip, a

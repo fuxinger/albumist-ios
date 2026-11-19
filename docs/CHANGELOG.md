@@ -61,6 +61,14 @@
   anderen Jahr mit dem Grund „Albumist zählt gerade nur Fotos aus 2026.“). Der Ring zeigt „100 %“
   erst, wenn alles sortiert ist (vorher rundete 199 von 200 auf 100 %); nach dem Wechsel des
   Jahres zählt er sofort neu; die Suche „nicht sortiert“ findet genau die Liste „Nicht sortiert“.
+- Bau-Strecke (Entscheidungen 5 und 10 vom 18.11.): TestFlight lädt nur noch nach der Freigabe von
+  Fuchs hoch. Der Upload-Job läuft in der GitHub-Umgebung `testflight-upload`, nur dort liegen die
+  Apple-Schlüssel; der erste Job hält den Lauf an, solange die Umgebung keinen Prüfer verlangt
+  oder nicht nur der Zweig `main` sie nutzen darf (Anleitung `docs/launch/FREIGABE_EINRICHTEN.md`). Neu: ein täglicher Build mit kleinem Tor
+  (`daily-build.yml`: CI, die UI-Gruppen „ganzer Ablauf“ und „Kontrast“ und der Härtetest, der vor
+  jedem Upload läuft; rund 70 Minuten, nur an Tagen mit geänderter App); das große Tor mit allen
+  UI-Gruppen und Härtetest bleibt für Tester und App Store. „Was testen“ nennt das kleine Tor; der
+  Feedback-Abruf hat einen eigenen Schlüssel.
 ### Korrigiert
 - UI-Tests: jede Gruppe wartet vor ihrem ersten Test (und vor einer Wiederholung) bis zu 5 Min.,
   bis der Simulator nach seinem Start wieder schnell antwortet (`SIM_SETTLE`);

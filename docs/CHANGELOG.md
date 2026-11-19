@@ -89,6 +89,9 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 19.11.: Vorschau vor dem Anlegen: Der Hinweis bei einem schon vorhandenen Albumnamen sagt jetzt, dass danach zwei
+  Alben mit diesem Namen da sind (Albumist hängt keinen Zusatz an, P2-02). Der Titel folgt dem Schritt: „Vorschau“,
+  „Alben werden angelegt“, „Alben werden geändert“ (Rückgängig), „Ergebnis“ (P3-15, `PlanReviewPhase`).
 - 19.11.: Suche: Neben einem Vorschlag („Ital“ → Italien) steht nicht mehr „nicht erkannt“ (P3-13 = G3-06).
 - 19.11.: Speicherwarnung von iOS: Albumist leert Suchindex, Vorschaubilder, die für die Analyse vorgeladenen Bilder und die aus den Fotodaten gebauten Zwischenspeicher (abseits des Hauptthreads) und baut sie bei Bedarf neu; Fotodaten, Vorschläge, Entscheidungen, Mediathek-Raster und Atlas bleiben, der Diagnosebericht nennt die Warnungen dieses Starts und die letzte (P4-06).
 - 19.11.: Featuring-Check nennt kein iPad mehr; die App gibt es nur fürs iPhone (G7-02).

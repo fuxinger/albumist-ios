@@ -188,7 +188,11 @@ struct PreviewSensitiveDocumentTests {
         // Exactly what the photos alone gave before ranks existed, whatever order the ids come in.
         #expect(picked == PreviewPicker.pick(photos, dates: d, cover: "q17", count: 8))
         #expect(picked == PreviewPicker.pick(all.reversed(), dates: d, cover: "q17", count: 8, ranks: ranks))
-        #expect(picked == PreviewPicker.pick(all.shuffled(), dates: d, cover: "q17", count: 8, ranks: ranks))
+        // A fixed seed, so a red run can be repeated (review P5-14 c).
+        for seed in UInt64(1)...5 {
+            var rng = SeededRandom(seed: seed)
+            #expect(picked == PreviewPicker.pick(all.shuffled(using: &rng), dates: d, cover: "q17", count: 8, ranks: ranks), "seed \(seed)")
+        }
         // Ranks of other photos change nothing.
         #expect(PreviewPicker.pick(photos, dates: d, cover: nil, count: 8, ranks: ["elsewhere": .sensitive])
                 == PreviewPicker.pick(photos, dates: d, cover: nil, count: 8))
@@ -311,13 +315,15 @@ struct PreviewSecondReviewTests {
         let ids = Array(dates.keys)
         let first = PreviewPicker.pick(ids.sorted(), dates: dates, cover: nil, count: 8, ranks: ranks)
         #expect(first.count == 8 && !first.contains("card") && !first.contains("doc"))
-        for _ in 0..<20 {
-            #expect(PreviewPicker.pick(ids.shuffled(), dates: dates, cover: nil, count: 8, ranks: ranks) == first)
-            #expect(PreviewPicker.pick(Set(ids.shuffled()), dates: dates, cover: nil, count: 3, ranks: ranks)
-                    == PreviewPicker.pick(ids.sorted(), dates: dates, cover: nil, count: 3, ranks: ranks))
-            #expect(PreviewPicker.firstSuited(PreviewPicker.chronological(ids.shuffled(), dates: dates), count: 2, ranks: ranks)
-                    == ["b00", "b01"])
-            #expect(PreviewPicker.newest(ids.shuffled(), dates: dates, ranks: ranks) == "b16")   // equal dates: the smallest id, as `newest` says
+        // Twenty orders from fixed seeds, so a red run can be repeated (review P5-14 c).
+        for seed in UInt64(1)...20 {
+            var rng = SeededRandom(seed: seed)
+            #expect(PreviewPicker.pick(ids.shuffled(using: &rng), dates: dates, cover: nil, count: 8, ranks: ranks) == first, "seed \(seed)")
+            #expect(PreviewPicker.pick(Set(ids.shuffled(using: &rng)), dates: dates, cover: nil, count: 3, ranks: ranks)
+                    == PreviewPicker.pick(ids.sorted(), dates: dates, cover: nil, count: 3, ranks: ranks), "seed \(seed)")
+            #expect(PreviewPicker.firstSuited(PreviewPicker.chronological(ids.shuffled(using: &rng), dates: dates), count: 2, ranks: ranks)
+                    == ["b00", "b01"], "seed \(seed)")
+            #expect(PreviewPicker.newest(ids.shuffled(using: &rng), dates: dates, ranks: ranks) == "b16", "seed \(seed)")   // equal dates: the smallest id, as `newest` says
         }
     }
 

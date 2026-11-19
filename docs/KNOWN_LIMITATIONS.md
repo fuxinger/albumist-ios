@@ -70,6 +70,33 @@
   Schlüssel; bei ihr und bei Städten, die Apple nach einem Neustart in der anderen Sprache
   nennt („Rom“/„Rome“), entsteht nach einem Sprachwechsel eine neue Kennung.
 
+## Ortszeit (Tage, Monate, Jahre)
+
+- Tage, Monate und Jahre eines Fotos sind die der Uhr am Aufnahmeort (Prüfbefund P1-15,
+  Entscheidung 19.11.2026). Die Zeitzone nennt online der Ort selbst; offline kommt sie aus dem
+  Land, in einem Land mit mehreren Zonen aus dem nächsten Bezugsort (IANA `zone.tab` und die Orte
+  in `tools/country_time_zones_extra.txt`). Bis etwa 50 km an einer Zonengrenze kann das offline
+  die Nachbarzone sein (Bullhead City in Arizona bekommt die Zeit von Laughlin am anderen Ufer).
+  Wo die Uhren früher anders gingen (Indiana bis 2007, North Dakota bis 2010, Teile Russlands),
+  kann ein älteres Foto nahe einer solchen Grenze offline eine Stunde daneben liegen. Kaschmir,
+  die Golanhöhen und Abchasien haben offline keine Zone (dort gilt die Heimatzone).
+- Fotos ohne Ort (auch mit einem Ort nur aus dem Bildinhalt) zählen in der Heimatzone: der
+  Zeitzone des iPhones bei der ersten Analyse (bei einer Datenbank von vorher: bei der ersten
+  Analyse nach dem Update). Sie bleibt auf Reisen und nach „Analyse neu aufbauen“, die Sicherung
+  nimmt sie mit. Wer bei dieser ersten Analyse verreist ist, bekommt die Zone der Reise; wer in
+  ein Land mit anderer Zeit umzieht, behält die alte. Ändern lässt sie sich noch nicht.
+- Weiter in der Zeitzone des iPhones: Reise-Atlas, Länderseiten und Foto-Geschichte (ihre Jahre
+  und Tage), der Vorschlag für „Seit wann wohnst du dort?“ und die Tage in der Reise-Werkstatt.
+  Ein Foto der Silvesternacht in New York steht also im Album „Dezember 2026“, im Reise-Atlas
+  eines iPhones mit deutscher Zeit aber unter 2027. Eigene Zeiträume und Regeln „von–bis“ sind
+  feste Zeitpunkte und bleiben es.
+- In der Heimatzone, nicht in der Zeit jedes Fotos: die Erkennung von Reisen und Zuhause (welche
+  Tage zu Hause waren). Eine Reise ins Ausland wird danach in der Zeit ihres Ziels eingeordnet
+  (Tagesausflug, Wochenende, Halte), wie bisher.
+- Ein Foto, das durch die Ortszeit in einen anderen Monat rückt (am Monatsende im Ausland), wird
+  dem Album seines neuen Monats zum Ergänzen angeboten; aus dem schon angelegten Album des alten
+  Monats nimmt Albumist es nicht heraus.
+
 ## Reisen
 
 - Fotos mit dem Ort des Zuhauses mitten in einer Reise (Prüfbefund P1-14, zweite Prüfung):

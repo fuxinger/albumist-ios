@@ -81,6 +81,10 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 19.11.: Tage, Monate und Jahre folgen der Ortszeit des Fotos wie in Apple Fotos (P1-15): ein Foto
+  von 23 Uhr in New York am 31. Januar bleibt im Januar, auch auf einem iPhone mit deutscher Zeit.
+  Die Zeitzone des iPhones während der Analyse ändert kein Album mehr; Fotos ohne Ort zählen in
+  der Zeitzone der ersten Analyse. Offline kommt die Zeitzone aus dem Land (IANA-Liste).
 - 19.11.: Fotos mit einem Datum in der Zukunft bleiben nicht mehr für immer unsortiert (P1-03);
   ein als unlesbar aufgegebenes Foto wird eine Woche später noch einmal versucht (P1-08); Fotos,
   deren Land sich nicht finden lässt, gelten nicht mehr für immer als offen (P1-09); die

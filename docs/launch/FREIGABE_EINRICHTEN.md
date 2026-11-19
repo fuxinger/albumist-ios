@@ -47,6 +47,8 @@ laden und den alten Schlüssel widerrufen.
 
 ## Schritt 3: Nur der Zweig `main`
 
+Pflicht: ohne genau diese eine Regel hält jeder TestFlight-Lauf im ersten Job an.
+
 1. Unter „Deployment branches and tags“ statt „No restriction“ **Selected branches and tags**
    wählen.
 2. **Add deployment branch or tag rule**, Name `main`, **Add rule**.

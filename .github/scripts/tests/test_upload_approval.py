@@ -23,12 +23,14 @@ SET_UP = {"name": "testflight-upload",
                                {"id": 2, "type": "branch_policy"}],
           "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
 # What GitHub creates when a job names an environment that does not exist: no rule at all.
+# GET .../environments/testflight-upload/deployment-branch-policies as set up there (step 3).
+MAIN = [{"id": 3, "name": "main", "type": "branch"}]
 CREATED_BY_A_JOB = {"name": "testflight-upload", "protection_rules": [], "deployment_branch_policy": None}
 
 
 class ReviewTests(unittest.TestCase):
     def test_only_a_required_reviewer_lets_the_upload_through(self):
-        self.assertEqual(upload_approval.review(SET_UP), ([], [], ["owner"]))
+        self.assertEqual(upload_approval.review(SET_UP, branches=MAIN), ([], [], ["owner"]))
         for environment, why in ((None, "does not exist"), (CREATED_BY_A_JOB, "no required reviewer"),
                                  ({"protection_rules": [{"type": "wait_timer", "wait_timer": 5}]}, "no required reviewer"),
                                  ({"protection_rules": [{"type": "required_reviewers", "reviewers": []}]},
@@ -45,13 +47,27 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(problems, [upload_approval.NOT_PUBLIC])
         self.assertEqual((warnings, reviewers), ([], []))
 
-    def test_a_missing_branch_rule_and_self_review_are_warnings(self):
-        open_to_all = dict(SET_UP, deployment_branch_policy=None)
-        problems, warnings, _ = upload_approval.review(open_to_all)
-        self.assertEqual(problems, [])
-        self.assertIn("every branch may use the environment", warnings[0])
+    def test_only_the_branch_main_may_use_the_environment(self):
+        # Second review of bundle-p: a changed testflight.yml from another branch must not reach
+        # the owner's approval under a misleading name, so anything but "main only" stops the run.
+        protected = {"protected_branches": True, "custom_branch_policies": False}
+        for environment, branches, why in (
+                (dict(SET_UP, deployment_branch_policy=None), None, "no rule"),
+                (dict(SET_UP, deployment_branch_policy=protected), None, "protected branches"),
+                (SET_UP, [], "custom without a rule"),
+                (SET_UP, [{"name": "*", "type": "branch"}], "every branch by pattern"),
+                (SET_UP, MAIN + [{"name": "dev", "type": "branch"}], "main and another"),
+                (SET_UP, [{"name": "main", "type": "tag"}], "a tag named main")):
+            with self.subTest(why=why):
+                problems, _, _ = upload_approval.review(environment, branches=branches)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("other branches than main", problems[0])
+
+    def test_self_review_is_a_warning(self):
         strict = dict(SET_UP, protection_rules=[dict(SET_UP["protection_rules"][0], prevent_self_review=True)])
-        self.assertIn("Prevent self-review", upload_approval.review(strict)[1][0])
+        problems, warnings, _ = upload_approval.review(strict, branches=MAIN)
+        self.assertEqual(problems, [])
+        self.assertIn("Prevent self-review", warnings[0])
 
 
 class CheckTests(unittest.TestCase):
@@ -70,7 +86,7 @@ class CheckTests(unittest.TestCase):
         with open(path, encoding="utf-8") as f:
             return f.read()
 
-    def check(self, answer, public=True):
+    def check(self, answer, public=True, branches=MAIN):
         def fetcher():
             if isinstance(answer, Exception):
                 raise answer
@@ -81,7 +97,7 @@ class CheckTests(unittest.TestCase):
                 raise public
             return public
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            code = upload_approval.check(fetcher, visibility)
+            code = upload_approval.check(fetcher, visibility, lambda: branches)
         return code, log.getvalue()
 
     def test_set_up(self):
@@ -129,7 +145,7 @@ class CheckTests(unittest.TestCase):
             upload_approval.fetch_public()
 
 
-APPROVED = upload_approval.review(SET_UP)
+APPROVED = upload_approval.review(SET_UP, branches=MAIN)
 HEAD, OLD = "a" * 40, "b" * 40
 APPS = {HEAD: "1" * 64, OLD: "2" * 64, "c" * 40: "1" * 64}
 
@@ -246,10 +262,12 @@ class DailyBuildTests(unittest.TestCase):
         os.environ.update(GITHUB_OUTPUT=output, GITHUB_STEP_SUMMARY=summary)
         self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
                                  for k, v in saved.items()])
-        originals = (upload_approval.fetch, ui_evidence.api, upload_approval.fetch_public)
+        originals = (upload_approval.fetch, ui_evidence.api, upload_approval.fetch_public, upload_approval.fetch_branches)
         self.addCleanup(lambda: (setattr(upload_approval, "fetch", originals[0]), setattr(ui_evidence, "api", originals[1]),
-                                 setattr(upload_approval, "fetch_public", originals[2])))
+                                 setattr(upload_approval, "fetch_public", originals[2]),
+                                 setattr(upload_approval, "fetch_branches", originals[3])))
         upload_approval.fetch_public = lambda: True
+        upload_approval.fetch_branches = lambda: MAIN
 
         def runs(path, **params):
             if path.endswith("/runs"):

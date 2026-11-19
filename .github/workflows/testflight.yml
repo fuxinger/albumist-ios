@@ -456,7 +456,7 @@ jobs:
             --wait-minutes 20 --gate "$GATE"
       - name: Remove key
         if: always()
-        run: rm -rf "$(dirname "$KEY_PATH")"
+        run: if [ -n "${KEY_PATH:-}" ]; then rm -rf "$(dirname "$KEY_PATH")"; fi
 
   tag:
     # Every uploaded build has an annotated git tag build-<number> on exactly the commit it was

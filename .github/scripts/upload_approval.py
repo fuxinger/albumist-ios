@@ -19,8 +19,12 @@ reviewer of an environment is enforced in public repositories only, and whether 
 lists such a rule after a switch to private is not known. Going private needs another approval
 path first (docs/launch/FREIGABE_EINRICHTEN.md); until then nothing is uploaded.
 
-Warnings, no block: a branch rule is missing (every branch may use the environment; it should be
-main only), or "Prevent self-review" is on (the owner could not approve a run he started himself;
+It also stops unless the environment may be used from the branch main only (a custom rule for
+exactly the branch main, GET .../deployment-branch-policies): with no rule, or "protected
+branches", or another pattern, a changed testflight.yml started from another branch could ask
+for the owner's approval under a misleading name (second review of bundle-p).
+
+Warning, no block: "Prevent self-review" is on (the owner could not approve a run he started himself;
 the daily build is started by GitHub Actions, so it does not matter there).
 
 When the API does not answer, check fails (no upload without knowing): re-run the job.
@@ -54,6 +58,21 @@ class ApiError(Exception):
 def fetch(name: str = ENVIRONMENT) -> dict | None:
     """The environment as the REST API describes it, None when it does not exist (HTTP 404)."""
     return _get(f"environments/{urllib.parse.quote(name, safe='')}")
+
+
+def fetch_branches(name: str = ENVIRONMENT) -> list[dict] | None:
+    """The environment's custom branch rules, None when there are none (HTTP 404)."""
+    answer = _get(f"environments/{urllib.parse.quote(name, safe='')}/deployment-branch-policies")
+    return None if answer is None else list(answer.get("branch_policies") or [])
+
+
+MAIN_ONLY = [("main", "branch")]
+
+
+def branches_of(environment: dict | None, fetcher=None) -> list[dict] | None:
+    """The custom branch rules of an environment that has them (fetch_branches), else None."""
+    custom = bool(((environment or {}).get("deployment_branch_policy") or {}).get("custom_branch_policies"))
+    return (fetcher or fetch_branches)() if custom else None
 
 
 def fetch_public() -> bool:
@@ -90,9 +109,11 @@ NOT_PUBLIC = ("the repository is not public, and GitHub enforces a required revi
               "private repository only with GitHub Enterprise")
 
 
-def review(environment: dict | None, public: bool = True) -> tuple[list[str], list[str], list[str]]:
+def review(environment: dict | None, public: bool = True,
+           branches: list[dict] | None = None) -> tuple[list[str], list[str], list[str]]:
     """(problems that block the upload, warnings, reviewers) of an environment; None: it does not exist.
-    public: whether the repository is public (fetch_public)."""
+    public: whether the repository is public (fetch_public). branches: its custom branch rules
+    (fetch_branches)."""
     if not public:
         return [NOT_PUBLIC], [], []
     if environment is None:
@@ -107,24 +128,27 @@ def review(environment: dict | None, public: bool = True) -> tuple[list[str], li
     # A rule always has a reviewer in GitHub's settings; an answer that lists none counts as none.
     if not reviewing or all(isinstance(r.get("reviewers"), list) and not r["reviewers"] for r in reviewing):
         return [f"the environment {ENVIRONMENT} has no required reviewer"], [], []
+    policy = environment.get("deployment_branch_policy") or {}
+    rules_named = sorted(((b or {}).get("name"), (b or {}).get("type", "branch")) for b in branches or [])
+    if policy.get("protected_branches") or not policy.get("custom_branch_policies") or rules_named != MAIN_ONLY:
+        return [f"the environment {ENVIRONMENT} may be used from other branches than main: set 'Deployment "
+                "branches and tags' to 'Selected branches and tags' with the one rule main"], [], []
     warnings = []
-    if not environment.get("deployment_branch_policy"):
-        warnings.append(f"every branch may use the environment {ENVIRONMENT}: set 'Deployment branches and tags' "
-                        "to the branch main")
     if any(r.get("prevent_self_review") for r in reviewing):
         warnings.append("'Prevent self-review' is on: a reviewer cannot approve a run he started himself")
     return [], warnings, reviewers
 
 
-def check(fetcher=fetch, public=fetch_public) -> int:
+def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches) -> int:
     try:
         environment = fetcher()
         is_public = public()
+        branches = branches_of(environment, branch_fetcher)
     except ApiError as error:
         print(command("error", "Upload approval", f"the environment {ENVIRONMENT} could not be read ({error}); "
                       "re-run this job when the API answers"))
         return 1
-    problems, warnings, reviewers = review(environment, is_public)
+    problems, warnings, reviewers = review(environment, is_public, branches)
     for text in warnings:
         print(command("warning", "Upload approval", text))
     with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:

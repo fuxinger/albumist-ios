@@ -126,6 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         environment = upload_approval.fetch()
         public = upload_approval.fetch_public()
+        branches = upload_approval.branches_of(environment)
         call = ui_evidence.api
         runs = runs_of(call)
     except (upload_approval.ApiError, ui_evidence.ApiError) as error:
@@ -133,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         verifier = ui_evidence.Verifier()
         try:
-            start, why = decide(head, app, runs, build_tags(), upload_approval.review(environment, public), verifier.app,
+            start, why = decide(head, app, runs, build_tags(), upload_approval.review(environment, public, branches),
+                                verifier.app,
                                 lambda run: got_past_the_check(call, run), lambda sha: docs_only_since(sha, head))
         except ui_evidence.ApiError as error:
             start, why = False, f"GitHub API did not answer ({error}); no daily build today, or start it by hand"

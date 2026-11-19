@@ -427,8 +427,10 @@ brauchen sie nicht.
 - **Warum der erste Job das prüft** (`.github/scripts/upload_approval.py`): nennt ein Job eine
   Umgebung, die es noch nicht gibt, legt GitHub sie ohne jede Regel an, und der Job liefe ohne
   Frage los. Der erste Job liest darum die Einstellungen der Umgebung und lässt den Lauf nur
-  weiter, wenn sie einen Prüfer verlangt. Fehlt die Regel „nur `main`“ oder ist „Prevent
-  self-review“ an, steht eine Warnung im Lauf. Ob die alten Repository-Secrets gelöscht sind,
+  weiter, wenn sie einen Prüfer verlangt und nur der Zweig `main` sie nutzen darf (genau eine
+  Regel `main`; fehlt sie, oder steht dort „Protected branches“ oder ein anderes Muster, hält der
+  Lauf an: sonst könnte ein geänderter Ablauf von einem anderen Zweig unter irreführendem Namen um
+  deine Freigabe bitten). Ist „Prevent self-review“ an, steht eine Warnung im Lauf. Ob die alten Repository-Secrets gelöscht sind,
   kann kein Job prüfen, ohne sie zu lesen: das ist Schritt 5 der Anleitung.
 - **Freigeben**: im wartenden Lauf **Review deployments** > `testflight-upload` > **Approve and
   deploy** (oder **Reject**). Danach prüft der Job zuerst, dass alle vier Secrets da sind (nur ob,

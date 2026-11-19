@@ -356,15 +356,18 @@ struct SortedCountTests {
                                         dismissed: dismissed, standIns: standIns)
         var settings = OrganizationSettings()
         settings.primaryAreas = [.places, .trips]
-        let clock = ContinuousClock()
-        let start = clock.now
-        let computed = LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, contentAnalyzed: [])
-        let elapsed = clock.now - start
+        var suggestionReads = 0
+        let computed = LibraryStatus.computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, contentAnalyzed: [],
+                                                        suggestionReads: &suggestionReads)
         let p = OrganizationStatusResolver(primaryAreas: settings.primaryAreas).progress(computed.states.values)
         #expect(p.total == 30_000 && p.outsideMainAreas == 70_000)
         #expect(p.fully == 15_000) // every second trip has its own album
         #expect(computed.reasons.home == 70_000)
-        #expect(elapsed < .seconds(20), "\(elapsed)")
+        // Counted, not timed (review P5-14 b: the old limit of 20 s wall clock failed at 40 and
+        // 51 s on a machine running three times as many threads as it has cores, 19.11.). Each
+        // suggestion's photos are gone through once: 600 reads for 100,000 photos. Asking the
+        // suggestions for each photo instead reads them tens of millions of times.
+        #expect(suggestionReads <= proposals.count + dismissed.count + standIns.count, "\(suggestionReads) suggestion reads")
     }
 
     /// A snapshot stored before dismissed suggestions and stand-ins were kept still loads.

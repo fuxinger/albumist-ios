@@ -25,20 +25,13 @@ struct AlbumsView: View {
         let request: PlanRequest
     }
 
-    private var topLevel: [CollectionSnapshot] {
-        model.inventory.collections.values
-            .filter { $0.parentID == nil && $0.kind != .smartAlbum }
-            .sorted(by: Self.order)
-    }
-
     private var suggestions: [AlbumOverlapAnalyzer.MergeSuggestion] { model.mergeSuggestions }
 
-    static func order(_ a: CollectionSnapshot, _ b: CollectionSnapshot) -> Bool {
-        if (a.kind == .folder) != (b.kind == .folder) { return a.kind == .folder }
-        return a.title.localizedStandardCompare(b.title) == .orderedAscending
-    }
+    static func order(_ a: CollectionSnapshot, _ b: CollectionSnapshot) -> Bool { AlbumTabSections.order(a, b) }
 
     var body: some View {
+        // Each album once: "Deine Alben" leaves out Albumist's albums listed above (review P3-16).
+        let sections = AlbumTabSections(inventory: model.inventory, managed: model.managedAlbums)
         List {
             if !suggestions.isEmpty {
                 Section {
@@ -72,10 +65,9 @@ struct AlbumsView: View {
                 }
             }
 
-            let fromSortly = model.managedAlbums.compactMap { model.inventory[$0.albumID] }
-            if !fromSortly.isEmpty {
+            if !sections.fromAlbumist.isEmpty {
                 Section {
-                    ForEach(fromSortly.sorted(by: Self.order)) { collection in
+                    ForEach(sections.fromAlbumist) { collection in
                         CollectionRow(collection: collection)
                             .disabled(preparing != nil)
                             .accessibilityHint(waitHint)
@@ -92,26 +84,30 @@ struct AlbumsView: View {
                 }
             }
 
-            Section("Deine Alben") {
-                if model.access == .limited {
-                    // iOS shows an app no albums at all while only some photos are shared.
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Deine Alben sind nicht sichtbar, solange du Albumist nur ausgewählte Fotos freigibst. So regelt iOS das.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            Button("Alle Fotos erlauben") { openURL(url) }
-                                .font(.subheadline.weight(.semibold))
+            // Left out while every album is Albumist's: "Noch keine Alben" under the list above
+            // read as wrong (UI run 44570945716). With limited access it always explains why.
+            if sections.showsYourAlbums || model.access == .limited {
+                Section("Deine Alben") {
+                    if model.access == .limited {
+                        // iOS shows an app no albums at all while only some photos are shared.
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            Text("Deine Alben sind nicht sichtbar, solange du Albumist nur ausgewählte Fotos freigibst. So regelt iOS das.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                Button("Alle Fotos erlauben") { openURL(url) }
+                                    .font(.subheadline.weight(.semibold))
+                            }
                         }
+                        .padding(.vertical, 4)
+                    } else if sections.saysNoAlbums {
+                        Text("Noch keine Alben").foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 4)
-                } else if topLevel.isEmpty {
-                    Text("Noch keine Alben").foregroundStyle(.secondary)
-                }
-                ForEach(topLevel) { collection in
-                    CollectionRow(collection: collection)
-                        .disabled(preparing != nil)
-                        .accessibilityHint(waitHint)
+                    ForEach(sections.yours) { collection in
+                        CollectionRow(collection: collection)
+                            .disabled(preparing != nil)
+                            .accessibilityHint(waitHint)
+                    }
                 }
             }
         }

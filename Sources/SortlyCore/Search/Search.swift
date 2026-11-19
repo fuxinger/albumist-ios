@@ -123,6 +123,9 @@ public struct SearchResult: Hashable, Sendable {
     public var tokens: [SearchToken] = []
     /// Terms left out because no photo matched all terms together.
     public var dropped: [SearchToken] = []
+    /// Words still being typed that a completion beside the result continues ("Ital" →
+    /// Italien): not in `tokens`, never reported as not recognised (`beside(_:for:)`).
+    public var typing: [String] = []
 
     public var isRelaxed: Bool { !dropped.isEmpty }
     public init() {}
@@ -136,6 +139,52 @@ public struct SearchSuggestion: Hashable, Sendable, Identifiable {
     public var kind: SearchToken.Kind
     public var count: Int
     public var id: String { completion }
+}
+
+/// What the search page says when a search finds no photos (`SearchResult.emptyState`).
+public enum SearchEmptyState: Hashable, Sendable {
+    /// No word of the query was understood: "Suchbegriff nicht erkannt".
+    case notRecognized
+    /// A term without a single photo in the library: "Keine Fotos", with its name.
+    case noPhotos(SearchToken)
+    /// Every term finds photos, only not together.
+    case noMatch
+}
+
+extension SearchResult {
+    /// The result as the page shows it beside the completions for the same text
+    /// (`SearchIndex.suggestions(for:)`). The words a completion would replace are still being
+    /// typed: "Ital" is on its way to Italien, which the completion above already shows with its
+    /// photos. Such a word is neither a chip "nicht erkannt" nor a reason for "Suchbegriff nicht
+    /// erkannt": one answer for one word (review P3-13 / G3-06). A word nothing continues, or
+    /// one typed to its end (a space closes the completions), is reported as before.
+    public func beside(_ completions: [SearchSuggestion], for text: String) -> SearchResult {
+        var shown = self
+        for completion in completions {
+            // A completion is the text before the words it replaces, then its label.
+            let kept = completion.completion.dropLast(completion.label.count)
+            guard text.hasPrefix(kept) else { continue }
+            for word in QueryParser.tokenize(String(text.dropFirst(kept.count))) where !shown.typing.contains(word.typed) {
+                shown.typing.append(word.typed)
+                // The words being typed end the query, so the last such chip is theirs.
+                if let chip = shown.tokens.lastIndex(where: { $0.kind == .ignored && $0.label == word.typed }) {
+                    shown.tokens.remove(at: chip)
+                }
+            }
+        }
+        return shown
+    }
+
+    /// What the page says when the search found nothing; nil when it found photos, and while
+    /// the only words not understood are still being typed: the completions above them are the
+    /// answer then (`beside(_:for:)`).
+    public var emptyState: SearchEmptyState? {
+        guard ids.isEmpty else { return nil }
+        let understood = tokens.filter { $0.kind != .ignored }
+        if understood.isEmpty { return tokens.isEmpty && !typing.isEmpty ? nil : .notRecognized }
+        if let missing = understood.first(where: { $0.count == 0 }) { return .noPhotos(missing) }
+        return .noMatch
+    }
 }
 
 /// Evaluates parsed queries against a `SearchIndex`.

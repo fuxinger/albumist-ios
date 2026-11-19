@@ -795,6 +795,19 @@ final class DeviceConditionUITests: XCTestCase {
         return Int(count.replacingOccurrences(of: ".", with: ""))
     }
 
+    /// How many rows of the albums tab show the album ("Testalbum Vollendet, 2 Fotos"; a merge
+    /// suggestion naming it reads differently).
+    private func albumRowCount(_ title: String) -> Int {
+        guard tap(tabButton("Alben"), "albums tab for the rows of \(title)") else { return 0 }
+        let pattern = "(.*, )?" + NSRegularExpression.escapedPattern(for: title) + ", [0-9][0-9.]* Fotos?"
+        let rows = app.buttons.matching(NSPredicate(format: "label MATCHES %@", pattern))
+        _ = rows.firstMatch.waitForExistence(timeout: 10)
+        let count = rows.count
+        print("UI_FACT album rows \(title): \(count)")
+        tap(tabButton("Übersicht"), "overview after albums")
+        return count
+    }
+
     // MARK: 1–2 Heat, battery, Low Power Mode
 
     /// A warm iPhone only slows the analysis down, a hot one makes it wait and say so; it is
@@ -876,7 +889,7 @@ final class DeviceConditionUITests: XCTestCase {
         guard rebuildAnalysis(), waitForImageStep("image step before leaving") else { return }
         record("before leaving")
         sendToBackground("for the background time to run out", atLeast: 6) // the run ends there: iOS took the time away
-        app.activate()
+        UITestWait.toForeground(app, "after the background time ran out", in: self)
         var caughtUp = false
         let goesOn = waitStable("analysis goes on after the background time ran out", timeout: 40, stableChecks: 2) {
             if anything("Gleich wieder bei Schritt").exists || anything("Macht da weiter").exists { caughtUp = true }
@@ -1064,7 +1077,7 @@ final class DeviceConditionUITests: XCTestCase {
         // (its count moves). That it then ends with every photo is
         // DeviceConditionRunTests.fullDiskDuringTheAnalysisThenSpaceAgainEndsWithEveryPhoto.
         sendToBackground("to free space", atLeast: 4)
-        app.activate()
+        UITestWait.toForeground(app, "after freeing space", in: self)
         expectAnalysisGoesOn("after the disk had space again", dismissing: true)
         shot("11-after-disk-full-analysis")
         // Before the plan part, which ends the app (a UI run does not resume at launch).
@@ -1123,6 +1136,9 @@ final class DeviceConditionUITests: XCTestCase {
             let photos = albumPhotoCount(continued)
             XCTAssertNotNil(photos, "After \"Rest anlegen\" the album is missing")
             XCTAssertEqual(photos, 2, "After \"Rest anlegen\" the album does not hold the two photos of the plan")
+            // Review P3-16: no folder for new albums, so the album lies at the top level; it
+            // stood under "Von Albumist angelegt oder ergänzt" and again under "Deine Alben".
+            XCTAssertEqual(albumRowCount(continued), 1, "The album stands more than once in the albums tab")
         }
         if let undone = interruptManualPlan("Testalbum Zurueck"), tap(app.buttons["Alles zurücknehmen"].firstMatch, "undo interrupted plan") {
             confirm("Alles zurücknehmen", "confirm undo of interrupted plan")

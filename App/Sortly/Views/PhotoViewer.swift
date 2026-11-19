@@ -21,24 +21,37 @@ struct PhotoViewer: View {
     var ids: [AssetID]
     @State var current: AssetID
     /// Shows the "i" button with the photo's details, album and ignore actions.
-    var showsInfo = false
+    var showsInfo: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
     @State private var info: AssetFacts?
     @State private var addingToAlbum: [AssetID]?
     /// How far the photo was pulled down to close.
     @State private var pull: CGFloat = 0
+    /// The pages built: a window around the photo shown, moved on while swiping (review
+    /// P4-11: the library hands over 3,000 photos and more, and every one was a page).
+    @State private var window: PageWindow
+
+    init(ids: [AssetID], current: AssetID, showsInfo: Bool = false) {
+        self.ids = ids
+        _current = State(initialValue: current)
+        self.showsInfo = showsInfo
+        _window = State(initialValue: PageWindow(around: ids.firstIndex(of: current) ?? 0, count: ids.count))
+    }
 
     var body: some View {
         let index = ids.firstIndex(of: current) ?? 0
         NavigationRoot {
             TabView(selection: $current) {
-                ForEach(ids, id: \.self) { id in
+                ForEach(ids[window.range.clamped(to: ids.indices)], id: \.self) { id in
                     ZoomablePhoto(id: id, label: label(for: id), pull: $pull) { dismiss() }
                         .tag(id)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .onChange(of: current) {
+                window = window.following(ids.firstIndex(of: current) ?? 0, count: ids.count)
+            }
             .background(Color.black.opacity(1 - min(pull / 500, 0.7)).ignoresSafeArea())
             .ignoresSafeArea(edges: .bottom)
             .navigationTitle(Text("\(index + 1) von \(ids.count)"))

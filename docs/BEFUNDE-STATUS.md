@@ -1,7 +1,7 @@
 # Befunde: Stand der Arbeit
 
-Stand: **19.11.2026**, geprüft am Zweig `integ/next` (Commit `8a6cc6f`: PR #9 mit den Paketen c–r,
-dazu `fix/ui-supersede` und `fix/test-gaps`). `main` hat seit 19.11. den Stand von PR #7 (`da79816`).
+Stand: **19.11.2026, 17:00 Uhr**, `main` 5f9ad8a = Build 38 in TestFlight (PR #10: Pakete c–r aus PR #9, dazu „Gleicher Name
+gewinnt“, die nie-fertig-Fälle, Akku-Zahlen, Upload ohne Klick und die Bau-Strecke P5).
 
 Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergessen wird:
 
@@ -13,11 +13,11 @@ Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergesse
 
 | Status | Große Analyse | Prüfung von außen | Zusammen |
 |---|---:|---:|---:|
-| ✅ erledigt | 22 | 22 | 44 |
-| 🔧 in Arbeit | 3 | 1 | 4 |
-| 📋 geplant (offen, noch nicht begonnen) | 39 | 12 | 51 |
+| ✅ erledigt | 31 | 24 | 55 |
+| 🔧 in Arbeit | 3 | 0 | 3 |
+| 📋 geplant (offen, noch nicht begonnen) | 32 | 11 | 43 |
 | ⏸ bewusst verschoben | 0 | 2 | 2 |
-| 👤 braucht Fuchs | 15 | 1 | 16 |
+| 👤 braucht Fuchs | 13 | 1 | 14 |
 | 📱 nur am iPhone prüfbar | 2 | 1 | 3 |
 | **Summe** | **81** | **39** | **120** |
 
@@ -48,20 +48,20 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | Nr. | Worum es geht | Status | Beleg |
 |---|---|---|---|
 | P1-01 | Häufiger Ort bekommt neue Kennung, Name und „Nicht jetzt“ gehen verloren (= G1-04) | ✅ | 868bc65, ba3da72; `FrequentPlaceIDTests`; DECISIONS „Kennung häufiger Orte“ |
-| P1-02 | „Gleicher Name gewinnt“ nicht in allen Wegen: zweites Album „Italien“ wird angeboten | 📋 | kein Fix nach Build 36 gefunden |
-| P1-03 | Fotos mit Datum in der Zukunft bleiben für immer „unsortiert“ | 📋 | kein Fix gefunden |
+| P1-02 | „Gleicher Name gewinnt“ nicht in allen Wegen: zweites Album „Italien“ wird angeboten | ✅ | `main` 5f9ad8a (PR #10): 7bda4b1, d224d4d, 2d02cca, 1423db5, 0e7a428; Tests `AlbumInterplayReviewTests` (theOnlyAlbumOfTheNameIsExtendedWhateverItHolds u. a.), zwei Zweitprüfungen |
+| P1-03 | Fotos mit Datum in der Zukunft bleiben für immer „unsortiert“ | ✅ | `main` 5f9ad8a: 3785439; Test `NeverDoneTests.photosDatedInTheFutureCountLikeTheOthers` |
 | P1-04 | Jahreszeiten auf der Südhalbkugel | ✅ | f44c59c; `NamingTests`; DECISIONS „Jahreszeiten mit Halbkugel“ |
 | P1-05 | „Ignorieren“ macht den Ring schlechter, 100 % nie erreichbar | ✅ | 0a9f2d1, a3ba7ea; `RingDefinitionTests`; Entscheidung 1 |
 | P1-06 | Liste „Sortiert“ zeigt andere Zahl als der Ring | ✅ | 0a9f2d1, a3ba7ea; `RingAndListTests`; Entscheidung 2 |
 | P1-07 | Wechsel auf „Ausgewählte Fotos“ und zurück wirft die ganze Analyse weg | 📋 | e2af540 beschreibt nur den Weg (KNOWN_LIMITATIONS: Migration und App-Teil nötig) |
-| P1-08 | Dreimal unlesbares Foto wird nie wieder versucht, Text verspricht „später noch einmal“ | 📋 | Text steht noch in `OverviewView.swift:309` |
-| P1-09 | Fotos auf See oder an der Grenze ohne Online-Ortssuche bleiben für immer „offen“ | 📋 | kein Fix gefunden |
+| P1-08 | Dreimal unlesbares Foto wird nie wieder versucht, Text verspricht „später noch einmal“ | ✅ | `main` 5f9ad8a: 6ed182e, e5c8635, afee52b (nach einer Woche neu versucht, der Text stimmt jetzt); Tests `NeverDoneTests.aPhotoGivenUpAsUnreadableIsTriedAgainAWeekLater` u. a. Wortlaut „N nicht lesbar“ kommt als Entwurf |
+| P1-09 | Fotos auf See oder an der Grenze ohne Online-Ortssuche bleiben für immer „offen“ | ✅ | `main` 5f9ad8a: 8f8a5f4, d62de37; Tests `NeverDoneTests.photosThatCannotGetACountryAreNotCountedAsWaiting` u. a. |
 | P1-10 | Das eigene Zuhause wird als „Häufiger Ort in München“ vorgeschlagen | 👤 | Entscheidung 7 (Album fürs Zuhause?) offen; Zuhause-Erkennung ist repariert (G1-02) |
 | P1-11 | Krim, Westsahara usw. bekommen ein Land und gelten als „sicher“ | ✅ | d52cb53, a905af6, b376999, e627d49; `DisputedAreaTests`; Entscheidung 8 |
 | P1-12 | Nach Sprachwechsel bleiben Ländernamen in der alten Sprache (⊂ G1-03) | ✅ | 6933ba5, 638ff85, daff055; `AlbumNameLanguageTests`. Rest Städte: G1-03 |
 | P1-13 | Suche liest „seit/vor/nach 2024“ als genau 2024 (⊂ G1-06) | ✅ | e17d5e3, 60c8974, fcccf28; `SearchDateRangeTests`. Rest „Winter 2024“: G1-06 |
 | P1-14 | Drei Fotos von zu Hause teilen eine Reise in zwei Alben | ✅ | 8118fcb, f103cf5, 71332f6; `TripHomeInterludeTests` |
-| P1-15 | Tage und Monate hängen an der Zeitzone, auf die das Gerät gerade gestellt ist | 📋 | kein Fix gefunden (niedrig) |
+| P1-15 | Tage und Monate hängen an der Zeitzone, auf die das Gerät gerade gestellt ist | 🔧 | entschieden 19.11. (Karte „Ortszeit wie in Apple Fotos“); Zweig `fix/ortszeit`, erst roter Test, dann Umbau und Zweitprüfung |
 
 ### Prüfer 2: Schutz der Fotos
 
@@ -108,12 +108,12 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P4-02 | `refreshDerived` liest alles neu, einen Teil doppelt, der Start wartet darauf | 📋 | IMPROVEMENTS „Nach Analyse und Start nichts doppelt lesen“ (💡) |
 | P4-03 | Jeder Analyse-Lauf liest die ganze Mediathek neu, auch ohne Änderung | 📋 | IMPROVEMENTS „Nur geänderte Fotos neu einlesen“ (💡) |
 | P4-04 | Mediathek-Tab filtert und sortiert alle Fotos auf dem Haupt-Strang (= G4-01) | ✅ | 2960726, d71fcea (PR #7) |
-| P4-05 | Am echten iPhone wird nichts gemessen, Diagnosebericht ohne Zeiten und Hänger | 🔧 | Zweig `feat/battery` (MetricKit, Akku je 1.000 Fotos, eece6f0, 7457d27) |
+| P4-05 | Am echten iPhone wird nichts gemessen, Diagnosebericht ohne Zeiten und Hänger | ✅ | `main` 5f9ad8a: Akku je 1.000 Fotos und MetricKit im Diagnosebericht (a4fc303, 68aec4c, ed66efd, 9e06bef); erste echte Zahlen mit dem nächsten Build (P4-08) |
 | P4-06 | Speicher: mehrere volle Kopien, keine Reaktion auf Speicherwarnungen | 📋 | kein `didReceiveMemoryWarning` im Code |
 | P4-07 | „Pause in unter 1 Sekunde“ gilt nur für die Anzeige, nicht für die Arbeit | 📋 | offen |
 | P4-08 | Erstes Lesen und Bilderkennung nur im Simulator gemessen (7,3 h für 50.000) | 📱 | braucht Messung am iPhone (kommt mit P4-05) |
 | P4-09 | Weitere Rechnungen über alle Fotos auf dem Haupt-Strang | 📋 | offen (niedrig) |
-| P4-10 | Schutz gegen veraltete Ergebnisse deckt nur die letzte Zuweisung (= G4-03) | 🔧 | Zweig `fix/celebration`, c7a21f9 |
+| P4-10 | Schutz gegen veraltete Ergebnisse deckt nur die letzte Zuweisung (= G4-03) | ✅ | `main` 5f9ad8a: c7a21f9 und Folge-Commits (f4ce44e, 00c33c5); Tests `TripChangeLedgerTests` |
 | P4-11 | Foto-Ansicht blättert über bis zu 3.000 Seiten | 📋 | `PhotoViewer.swift:41` unverändert |
 | P4-12 | Dauer-Animationen: Kosten für Akku und Wärme unbekannt | 📱 | erst am iPhone messen; Akku-Zahl kommt mit `feat/battery` |
 | P4-13 | Im Hintergrund werden Screenshots viel langsamer gelesen | 👤 | deine 5-Minuten-Messung, danach Entscheidung 6 (Grafikeinheit) |
@@ -123,16 +123,16 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | Nr. | Worum es geht | Status | Beleg |
 |---|---|---|---|
 | P5-01 | Build 36 erst im dritten Versuch grün, das Tor merkt Wiederholungen nicht | ✅ | d94be53, 96fe370; `test_ci_gate.py`, `test_earlier_attempts.py` |
-| P5-02 | Schalter „force“ lädt ohne Test hoch, Apple-Schlüssel ungeschützt (⊂ G5-02) | 👤 | „force“ weg (51e72f3). Freigabe-Umgebung gebaut (751bbc0, 0fbdb80), du musst sie einrichten: `docs/launch/FREIGABE_EINRICHTEN.md` (10 Min.) |
-| P5-03 | Getestet wird nur die Debug-Fassung, die ausgelieferte Release-Fassung nie | 📋 | `ci.yml` baut Release nur, kein Test startet sie |
-| P5-04 | Kein Zeitplan läuft (Nachtlauf, Härtetest, Abholen der Abstürze) | 📋 | Abläufe seit 19.11. auf `main` (da79816); bis 19.11. vormittags noch kein Zeitplan-Lauf zu sehen, nur noch prüfen |
+| P5-02 | Schalter „force“ lädt ohne Test hoch, Apple-Schlüssel ungeschützt (⊂ G5-02) | ✅ | „force“ weg (51e72f3), Umgebung `testflight-upload` von dir eingerichtet (19.11.), Upload ohne Klick nur von `main`; Beleg: TestFlight-Lauf 44541589587, Build 38 (Tag `build-38`), alle Tore grün beim ersten Versuch |
+| P5-03 | Getestet wird nur die Debug-Fassung, die ausgelieferte Release-Fassung nie | ✅ | Rauchtest des Release-Builds vor dem Upload auf `main` (8304617, d159140); Beleg: TestFlight-Lauf 44541589587, Job „Release build smoke test (UI)“ grün vor dem Upload von Build 38 |
+| P5-04 | Kein Zeitplan läuft (Nachtlauf, Härtetest, Abholen der Abstürze) | 📋 | Abläufe seit 19.11. auf `main` (da79816); erster Zeitplan-Lauf grün: „TestFlight feedback“ 19.11. 16:31 Uhr (Lauf 44555688794); Nachtlauf und Härtetest am 20.11. früh prüfen |
 | P5-05 | Bedienungs-Durchgang wartet vor allem, Demo-Mediathek wird in jeder Gruppe neu analysiert | 📋 | Stufe 1 und 2 aus dem Plan von Prüfer 5 noch offen |
-| P5-06 | 8 von 15 roten Durchgängen waren kein App-Fehler | 🔧 | Zweig `fix/pipeline` (UI-Test-Wackler); dazu 945446e, d8f863f auf `integ/next`, Beleg durch grünen Lauf steht aus |
+| P5-06 | 8 von 15 roten Durchgängen waren kein App-Fehler | ✅ | `main` 5f9ad8a: bedingte Wartezeiten (90c79c1), Home-Druck mit drei Wegen, jede Wiederholung gezählt; UI-Lauf 44529147724 auf PR #10 im ersten Versuch grün |
 | P5-07 | Geplanter Umbau bringt nur 60 statt 84 Min. und macht die Bau-Strecke größer | 📋 | Stufe 4 (Tor vereinfachen, rund 1.400 Zeilen weg) offen |
 | P5-08 | Das neue Tor hat eigene Lücken (a bis f) | 📋 | (a) „force“ weg, (b) = G5-04 erledigt; (c), (d), (f) offen, (e) = P5-02 |
 | P5-09 | Tests laufen fast nie von selbst, Hauptzweig nicht geschützt (≈ G6-05) | 👤 | GitHub meldet am 19.11. „Branch not protected“: Schutz für `main` einschalten |
 | P5-10 | Läufe für Build 36 prüften einen zusammengeführten Stand, nicht den ausgelieferten | ✅ | 3bad601 (TestFlight-Lauf testet seinen eigenen Commit), `archive_check.py` |
-| P5-11 | 3 von 11 eingebauten Fehlern blieben in den schnellen Tests unentdeckt | 📋 | die drei vorgeschlagenen Tests fehlen noch |
+| P5-11 | 3 von 11 eingebauten Fehlern blieben in den schnellen Tests unentdeckt | 🔧 | Stichprobe 19.11.: 2 Fehler weiter unentdeckt (Schwelle 0,8; unklarer Ausgang beim Abgleich vor dem Rückgängig), der dritte von 18 Prüfungen gefunden. 5 neue Tests (7f1df09, kommt mit dem nächsten PR) |
 | P5-12 | Schlüssel und fremde Pull Requests: drei offene Punkte | 👤 | CodeQL läuft wieder grün; offen: Dependabot (jetzt PR #8) und Freigabe für fremde Mitwirkende in den Einstellungen |
 | P5-13 | Regel „nie still wiederholen“ gebrochen, Test vor dem Build gelockert | 📋 | Regel „Zeitgrenze nur mit Eintrag lockern“ fehlt noch |
 | P5-14 | Kleinere Punkte in den schnellen Tests (Dateinamen, Zeitmessungen, Zufall) | 📋 | teilweise: Zeitmessungen zählen jetzt Arbeit (9e60f7a, d96e95f); Rest offen |
@@ -143,7 +143,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | Nr. | Worum es geht | Status | Beleg |
 |---|---|---|---|
 | P6-01 | Warnung „nichts auf main zusammenführen“ verschwunden (= P5-15) | ✅ | wie P5-15 |
-| P6-02 | 53 Stunden kein Build: großes Tor vor jedem Build | 👤 | täglicher Build gebaut (751bbc0, 65b62ac, Entscheidung 10), läuft erst nach Merge von PR #9 und deiner Freigabe-Einrichtung |
+| P6-02 | 53 Stunden kein Build: großes Tor vor jedem Build | 🔧 | täglicher Build auf `main` seit PR #10, Umgebung eingerichtet; erster Lauf 20.11. 04:30 Uhr |
 | P6-03 | „Jedes Limit-Fenster voll nutzen“ und „Vollgas“ erzeugen Baustellen | 👤 | Entscheidung 11 (Vorgaben ändern nur du) |
 | P6-04 | Zweitprüfung ohne Stopp-Regel (28 Prüfdurchgänge) | 👤 | Regeltext für die Vorgaben (Vorschlag von Prüfer 6) |
 | P6-05 | Ziel und Ist stehen in den Vorgaben ununterscheidbar nebeneinander | 👤 | Regeltext; `main` ist seit PR #7 wieder aktuell |
@@ -158,7 +158,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 
 | Nr. | Worum es geht | Status | Beleg |
 |---|---|---|---|
-| G1-01 | Ganz weit im Norden kann ein Foto im Album „regelmäßiges Reiseziel“ fehlen | 📋 | offen (niedrig, in bewohnten Gegenden praktisch nie) |
+| G1-01 | Ganz weit im Norden kann ein Foto im Album „regelmäßiges Reiseziel“ fehlen | ✅ | `main` 5f9ad8a: 78daf4c; Test `GeoTests.spatialIndexFindsEveryNeighbourAtAnyLatitude` |
 | G1-02 | Zuhause falsch erkannt (nur die ersten 15 Fotos je Tag) | ✅ | 243f6d2, 8b620eb; `HomeDayPointTests`; DECISIONS |
 | G1-03 | Nach Sprachwechsel bleiben Städtenamen in der alten Sprache (⊂ P1-12) | ⏸ | bekannte Grenze, KNOWN_LIMITATIONS: braucht neue Ortsabfragen (Netz, Drosselung) |
 | G1-04 | Zwei nahe Lieblingsorte bekommen dieselbe Kennung (= P1-01) | ✅ | 868bc65, ba3da72; `FrequentPlaceIDTests` |
@@ -179,7 +179,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | G3-10 | Englisch „SAFE“ missverständlich (= P3-10) | 📋 | offen |
 | G4-01 | Mediathek sortiert auf der Oberfläche (= P4-04) | ✅ | 2960726, d71fcea |
 | G4-02 | „Rückgängig“ nach Ignorieren kommt spät (= P4-01) | ✅ | f42c48f, d71fcea |
-| G4-03 | Kurze Zwischenstände bei gleichzeitigen Neuberechnungen (= P4-10) | 🔧 | Zweig `fix/celebration`, c7a21f9 |
+| G4-03 | Kurze Zwischenstände bei gleichzeitigen Neuberechnungen (= P4-10) | ✅ | = P4-10, `main` 5f9ad8a |
 | G4-04 | Schneller Wechsel „dieses Jahr“/„alle“ speichert vielleicht den alten Umfang | 📱 | im Code kein Weg gefunden, nur am iPhone klärbar (TEST_PLAN F4) |
 | G4-05 | Suche während eines Index-Neubaus nutzt einmal den alten Stand | 📋 | offen (niedrig); `fix/celebration` lässt ihn bewusst stehen |
 | G5-01 = G6-01 | Alter Upload-Weg auf dem Hauptzweig (= P5-15) | ✅ | 8b5afbd (PR #5) |
@@ -208,7 +208,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 
 ## Was braucht Fuchs (alle 👤 auf einen Blick)
 
-1. **Freigabe vor dem Hochladen einrichten** (10 Min., `docs/launch/FREIGABE_EINRICHTEN.md`): P5-02, P6-02. Bis dahin lädt TestFlight nichts hoch.
+1. ~~**Freigabe vor dem Hochladen einrichten**~~: erledigt (19.11., Umgebung `testflight-upload`). Build 38 ging am 19.11. um 16:40 Uhr ohne Klick zu TestFlight (P5-02 ✅; P6-02 wartet auf den ersten Tages-Build am 20.11.).
 2. **Hauptzweig `main` schützen** (Klick bei GitHub): P5-09, G6-05.
 3. **Einstellungen bei GitHub:** Freigabe für Läufe aus fremden Kopien; Dependabot-PR #8 annehmen oder schließen: P5-12.
 4. **Entscheidungen, die im Repo noch nicht festgehalten sind:** 6 Grafikeinheit (nach Messung, P4-13), 7 Album fürs Zuhause (P1-10), 9 „Merken“ oder „Auswählen“ (Paket 4A), 11 „Vollgas“/Limit (P6-03), 13 Technik beim Koordinator (P6-08), dazu P2-09 (zwei Pläne, ein Album).

@@ -281,7 +281,8 @@ Testcode gibt.
   Läufen in 90 Tagen, deren Commit diese App und den jetzigen Testcode einer Gruppe hat (oder
   die Git nicht kennt), zusätzlich zur Laufliste (100 Läufe je Anfrage). Dann sperrt das Gate
   jeden Upload dieses Stands, bis sich die App ändert oder `MAX_CALLS` in
-  `ui_evidence.py` erhöht wird. Ein Zwischenspeicher der ausgewerteten Läufe (als Artefakt)
+  `ui_evidence.py` erhöht wird, und sagt das so (dass eine Wiederholung gleich endet), statt wie
+  vorher „re-run this job when the API answers“. Ein Zwischenspeicher der ausgewerteten Läufe (als Artefakt)
   würde das aufheben; er ist noch nicht gebaut. Ein dauerhaftes Verzeichnis der roten Ergebnisse außerhalb
   von GitHubs Laufliste gibt es nicht (es bräuchte ein Schreib-Token in den Testläufen;
   Artefakte laufen ab wie die Läufe).
@@ -304,9 +305,12 @@ Testcode gibt.
   mindestens 30 Minuten bis zu dieser Frist bleiben (und nach dem Zurücksetzen noch 10);
   sonst hat die Gruppe kein Ergebnis. Gescheiterte Testfälle und `: error: -[`-Zeilen
   erscheinen schon während des Durchgangs im Log (`UI_LIVE`), sodass auch ein Abbruch danach
-  rot bleibt. Ein Job, der nach seinem vollen Zeitlimit nicht grün endete, ist ebenfalls rot. Ein Log, das sich nicht lesen lässt, zählt
-  als Rot; GitHub löscht Logs spätestens mit dem Lauf (Antwort 410), und ein solches Rot
-  bleibt dann bestehen, bis sich App oder Test ändern. Ein
+  rot bleibt. Ein Job, der nach seinem vollen Zeitlimit nicht grün endete, ist ebenfalls rot. Ein Log, das GitHub nicht mehr hat
+  (Antwort 404 oder 410; GitHub löscht Logs spätestens mit dem Lauf), zählt als Rot, und ein
+  solches Rot bleibt bestehen, bis sich App oder Test ändern; Gate und Tabelle sagen dann „log
+  gone“. Antwortet die API auf ein Log nur nicht (dreimal), gibt es kein Urteil wie bei einer
+  nicht lesbaren Laufliste: der Plan lässt alle Gruppen laufen, das Gate ist rot und sagt „re-run
+  this job“ (Prüfer 5, P5-08 d; vorher wurde daraus ein Rot ohne gescheiterten Test). Ein
   wackelnder Test wird so gezählt und behoben, nie durch Wiederholen versteckt. Die Gruppe darf
   zur Beobachtung noch einmal laufen; ihr Grün steht dann als „red before for this key“ in der
   Tabelle und zählt für TestFlight nicht. Ein Test, der einen Schritt in sich selbst noch
@@ -338,6 +342,17 @@ Testcode gibt.
   `timeout` oder eine Wartezeit verlängert, nennt im Commit die Messung (Lauf und gemessene
   Sekunden), so wie 4bb7fdd („say how long it took“). Eine reine Verlängerung ohne Messung ist
   keine Korrektur.
+- **Eine Zeitgrenze wird nur mit Eintrag gelockert** (Regel 19.11., Prüfer 5, P5-13: Build 36
+  kam aus 4bb7fdd, das nur eine Wartezeit von 5 auf 20 s verlängerte; die langsame App war damit
+  leiser): wer in einem Test (`App/SortlyUITests`, `App/SortlyTests`, `Tests`) ein `timeout:`,
+  ein `limit:` von `timed(...)`, eine Obergrenze `< .seconds(…)` oder ein `.timeLimit` erhöht,
+  oder in einem Workflow ein `timeout-minutes`, legt im selben Pull Request oder Push eine Zeile
+  in `docs/IMPROVEMENTS.md` an, die „Zeitgrenze gelockert“ sagt und die Datei nennt: warum, die
+  Messung (Lauf, Sekunden), der alte Wert und was die Grenze wieder enger macht. Sie steht als
+  offener Punkt (🔜), bis die Ursache behoben ist. CI prüft das im Job „App rules and strings“
+  (`.github/scripts/time_limit_rule.py`, Schritt „Time limits only loosened with an entry“) und
+  zählt die Einträge (`TIME_LIMIT_ENTRIES`, davon offen). Eine neue oder kürzere Grenze braucht
+  nichts. Nicht gesehen werden eine ganz gelöschte Grenze und eine aus Variablen berechnete.
 - **TestFlight**: der Lauf ruft die UI-Tests mit „auto“ auf (kleines Tor: nur `flow-full` und
   `contrast`, Abschnitt „Zwei Tore“). Vor dem Hochladen prüft der Job
   **UI gate** auf Linux, dass jede Gruppe des Tors für genau diese App und ihren Testcode grün

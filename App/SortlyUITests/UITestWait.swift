@@ -111,6 +111,50 @@ enum UITestWait {
         return reached
     }
 
+    /// Brings `app` back to the front and waits until iOS has it there. On a starved CI Mac
+    /// XCTest's `activate()` can fail on its own: device test03 in UI run 44582675590 (load 674)
+    /// stopped with "Failed to activate application ... (current state: Running Background)"
+    /// with nothing wrong in the app. Such a failed activation is taken as expected (non-strict,
+    /// only that message) and tried again, at most three times; every extra try is a counted
+    /// flaky retry (`UI_FLAKY_RETRY <Class.test>`), never silent. The test fails only when the
+    /// app never came to the front. Every return of the UI tests to the app goes through here
+    /// (rule `test_every_return_to_the_app_goes_through_the_wait_that_tries_again`).
+    @discardableResult
+    static func toForeground(_ app: XCUIApplication, _ why: String, in test: XCTestCase,
+                             file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        final class Seen: @unchecked Sendable { var failedActivation = false }
+        let start = Date()
+        for attempt in 1...3 {
+            let seen = Seen()
+            let options = XCTExpectedFailure.Options()
+            options.isStrict = false
+            options.issueMatcher = { issue in
+                let match = issue.compactDescription.contains("Failed to activate application")
+                if match { seen.failedActivation = true }
+                return match
+            }
+            XCTExpectFailure("XCTest could not activate the app on a busy simulator", options: options) {
+                app.activate()
+            }
+            let front = app.wait(for: .runningForeground, timeout: 15)
+            if front {
+                if attempt > 1 || seen.failedActivation {
+                    print("UI_TIMING wait app in the foreground \(why) \(Int(Date().timeIntervalSince(start) * 1000)) ms, attempt \(attempt)")
+                }
+                if seen.failedActivation {
+                    print("UI_FLAKY_RETRY \(testID(test)) XCTest could not activate the app \(why) (attempt \(attempt)), it came to the front")
+                }
+                return true
+            }
+            if attempt < 3 {
+                print("UI_FLAKY_RETRY \(testID(test)) app not in the foreground \(why) (state \(app.state.rawValue), attempt \(attempt)\(seen.failedActivation ? ", activation failed" : "")), tried again")
+            }
+        }
+        print("UI_STEP_MISSING app in the foreground \(why) (3 activations, \(Int(Date().timeIntervalSince(start))) s)")
+        XCTFail("The app did not come to the front \(why) (3 activations, state \(app.state.rawValue))", file: file, line: line)
+        return false
+    }
+
     /// "DeviceConditionUITests.test03_…" for UI_FLAKY_RETRY (XCTest's name is "-[Module.Class test]").
     static func testID(_ test: XCTestCase) -> String {
         let parts = test.name.trimmingCharacters(in: CharacterSet(charactersIn: "-[]")).split(separator: " ")

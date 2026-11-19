@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(Purchases.self) private var purchases
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var confirmReset = false
     @State private var redeeming = false
     @State private var rejectedCount = 0
@@ -84,10 +85,14 @@ struct SettingsView: View {
                     Text("Englisch").tag(TitleLanguage.english)
                 }
                 .adaptivePickerStyle()
-                LabeledContent("Ordner für neue Alben") {
+                LabeledContent {
                     TextField("Kein Ordner", text: $model.settings.rootFolderTitle)
-                        .multilineTextAlignment(.trailing)
+                        .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
+                } label: {
+                    Text("Ordner für neue Alben")
+                        .accessibilityIdentifier("settings.rootFolder.label")
                 }
+                .labeledContentStyle(FieldRowStyle())
                 if model.settings.enabledAreas.contains(.places) {
                     // Off by default: a trip would otherwise bring a country, two cities and
                     // itself as four albums (usability test 14.11.2026).
@@ -258,6 +263,37 @@ struct SettingsView: View {
                 if keyPath == \OrganizationSettings.enabledAreas && !on { model.settings.primaryAreas.remove(area) }
             }
         )
+    }
+}
+
+/// A label with a text field after it whose label is never cut: the label takes the width it
+/// needs, the field the rest. With the system style the two shared the row half and half and
+/// the label ended in "…" already at the default text size ("Ordner für neue Al…", review
+/// P3-17 / G3-08). At the accessibility text sizes the field goes under the label, where both
+/// have the whole width.
+private struct FieldRowStyle: LabeledContentStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        FieldRow(label: configuration.label, field: configuration.content)
+    }
+
+    private struct FieldRow<RowLabel: View, Field: View>: View {
+        var label: RowLabel
+        var field: Field
+        @Environment(\.dynamicTypeSize) private var typeSize
+
+        var body: some View {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    label
+                    field
+                }
+            } else {
+                HStack {
+                    label.layoutPriority(1)
+                    field
+                }
+            }
+        }
     }
 }
 

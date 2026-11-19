@@ -74,6 +74,14 @@
   (nur Zweig `main`), ein privates Repository nur mit der Planvariable, ein Re-Run nach einem
   Upload lädt nie ein zweites Mal hoch. Vor dem Upload wird der Release-Build selbst kurz
   UI-getestet (Rauchtest), höchstens fünf Macs je Lauf.
+- CI 19.11. (Prüfer 5, P5-13): Wer in einem Test oder Workflow eine Zeitgrenze erhöht (`timeout:`,
+  `timeout-minutes` und ähnliche), braucht im selben Pull Request oder Push eine Zeile „Zeitgrenze
+  gelockert“ mit dem Dateinamen in `docs/IMPROVEMENTS.md`; sonst ist der CI-Job „App rules and
+  strings“ rot.
+- UI-Gate 19.11. (Prüfer 5, P5-08 d): Ein Log, auf das die API nur nicht antwortet, macht eine
+  Gruppe nicht mehr rot, sondern das Gate sagt „re-run this job“; ein von GitHub gelöschtes Log
+  zählt weiter als Rot und heißt im Gate „log gone“. Reicht das Abfrage-Budget nicht, sagt das
+  Gate, dass eine Wiederholung nicht hilft.
 - „Gleicher Name gewinnt“ (Fable P1-02): Gibt es genau ein bearbeitbares Album mit dem Namen eines
   Vorschlags, ergänzt Albumist dieses Album, auch unter den Inhaltsschwellen. Ein Album, das den
   ganzen Vorschlag schon enthält, gewinnt vor dem Namen; Fotos ohne Ort zählen für jedes andere
@@ -81,6 +89,25 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 19.11.: Suche: Neben einem Vorschlag („Ital“ → Italien) steht nicht mehr „nicht erkannt“ (P3-13 = G3-06).
+- 19.11.: Featuring-Check nennt kein iPad mehr; die App gibt es nur fürs iPhone (G7-02).
+- 19.11.: Größte Schrift: Die Länderliste im Reise-Atlas wird nicht mehr zerhackt (P3-11).
+  Flagge und Pfeil stehen oben, der Name darunter in voller Breite, das Jahr in einer eigenen
+  Zeile und nie umbrochen, wie die Bereiche der Übersicht.
+- 19.11.: Einstellungen: „Ordner für neue Alben“ ist nicht mehr abgeschnitten (P3-17). Die
+  Beschriftung bekommt die Breite, die sie braucht, das Feld den Rest; bei den größten
+  Schriftgrößen steht das Feld unter der Beschriftung.
+- 19.11.: Größte Schrift: Das Symbol eines Suchvorschlags liegt nicht mehr über dem Wort
+  (P3-12); seine Spalte wächst mit der Schrift (`@ScaledMetric`), ebenso die Symbole in der
+  Reise-Werkstatt. `layout_rule.py` lehnt feste Symbol-Breiten ab.
+- 19.11.: Englisch (P3-10): „Sicher“ heißt „Certain“ statt „Safe“, überall „analyzing“ und
+  „test run“, „Alles zurücknehmen“ heißt „Undo Everything“, alle Knöpfe groß geschrieben
+  („Create Album“, „Not Now“, „Restore Purchase“ …). `check_strings.py` prüft das mit
+  `english_rule.py`.
+- 19.11.: Im Tab „Alben“ steht jedes Album nur noch einmal: „Deine Alben“ lässt die Alben weg,
+  die schon unter „Von Albumist angelegt oder ergänzt“ stehen (P3-16 = G3-02).
+- 19.11.: Die Foto-Großansicht baut nur noch die Seiten um das gezeigte Foto (50 davor und
+  danach) statt aller geladenen Fotos und schiebt sie beim Blättern nach (P4-11).
 - 19.11.: Fotos mit einem Datum in der Zukunft bleiben nicht mehr für immer unsortiert (P1-03);
   ein als unlesbar aufgegebenes Foto wird eine Woche später noch einmal versucht (P1-08); Fotos,
   deren Land sich nicht finden lässt, gelten nicht mehr für immer als offen (P1-09); die
@@ -90,6 +117,7 @@
 - CI 19.11.: Die Ubuntu-Paketquelle war eine Viertelstunde nicht erreichbar, die Linux-Kerntests
   auf `main` liefen nie. Pakete kommen jetzt über `apt_install.sh` (20 s Grenze, Wiederholung,
   zweite Paketquelle, jede Wiederholung gezählt).
+- Tests 19.11. (P5-14 b): Mediathek-Bereiche und Sortiert-Zählung zählen ihre Arbeit statt der Zeit; ein voller Rechner macht sie nicht mehr rot.
 - UI-Tests: jede Gruppe wartet vor ihrem ersten Test (und vor einer Wiederholung) bis zu 5 Min.,
   bis der Simulator nach seinem Start wieder schnell antwortet (`SIM_SETTLE`);
   vorher verlor XCTest dabei die App beim ersten Start (UI-Lauf 44437759848, test05).

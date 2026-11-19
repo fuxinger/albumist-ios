@@ -27,6 +27,9 @@ struct SearchView: View {
     /// The field is shown and focused when the tab opens; testers did not find a hidden one.
     @State private var searchActive = false
     @Namespace private var zoom
+    /// The column of a suggestion's symbol grows with the text size: a fixed 24 pt let the
+    /// symbol run over the word at the largest size (review P3-12 / G3-07).
+    @ScaledMetric(relativeTo: .body) private var symbolWidth: CGFloat = 24
 
     /// Shown only before the library is analysed (afterwards the library's own starting points).
     /// Translated (design review W6: English devices saw "Strand 2024"); the search understands
@@ -94,12 +97,14 @@ struct SearchView: View {
             }
             searching = true
             // Completions right away; the search itself waits until typing pauses.
-            suggestions = await model.searchSuggestions(for: text)
+            let completions = await model.searchSuggestions(for: text)
+            suggestions = completions
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             let found = await model.search(text)
             guard !Task.isCancelled else { return }
-            result = found
+            // A word the completions continue is still being typed, never "nicht erkannt" (P3-13).
+            result = found.beside(completions, for: text)
             resultQuery = text
             shown = Self.page
             searching = false
@@ -146,7 +151,7 @@ struct SearchView: View {
                     HStack(spacing: Theme.Spacing.s) {
                         Image(systemName: Self.symbol(suggestion.kind))
                             .foregroundStyle(.secondary)
-                            .frame(width: 24)
+                            .frame(width: symbolWidth)
                         Text(verbatim: suggestion.label)
                             .foregroundStyle(.primary)
                         Spacer()
@@ -180,19 +185,22 @@ struct SearchView: View {
     }
 
     /// Never an unexplained empty page: says whether nothing was understood or which term
-    /// has no photos at all.
+    /// has no photos at all. Nothing while the completions above stand for the word being
+    /// typed (`SearchResult.emptyState`, review P3-13).
     private var emptyState: some View {
-        let understood = result.tokens.filter { $0.kind != .ignored }
-        return Group {
-            if understood.isEmpty {
+        Group {
+            switch result.emptyState {
+            case .notRecognized:
                 // Says what to try instead (design review N14).
                 ContentUnavailableView("Suchbegriff nicht erkannt", systemImage: "questionmark.circle",
                                        description: Text("Versuch es mit einem Ort, einem Jahr, einem Thema oder Text auf einem Screenshot."))
-            } else if let missing = understood.first(where: { $0.count == 0 }) {
+            case .noPhotos(let missing):
                 ContentUnavailableView("Keine Fotos", systemImage: "magnifyingglass",
                                        description: Text("Zu „\(missing.label)“ gibt es keine Fotos in deiner Mediathek."))
-            } else {
+            case .noMatch:
                 ContentUnavailableView.search(text: resultQuery)
+            case nil:
+                EmptyView()
             }
         }
         .accessibilityElement(children: .contain)

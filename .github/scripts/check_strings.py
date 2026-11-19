@@ -1,6 +1,9 @@
-"""Fails when a UI string in the app is missing from Localizable.xcstrings or has no
-English translation. Usage: python3 check_strings.py <repo root>"""
-import json, re, sys, glob
+"""Fails when a UI string in the app is missing from Localizable.xcstrings, has no
+English translation, or breaks an English wording rule (english_rule.py: "Certain", not "Safe";
+American spelling; buttons in title case). Usage: python3 check_strings.py <repo root>"""
+import json, os, re, sys, glob
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import english_rule
 root = sys.argv[1]
 cat = json.load(open(f'{root}/App/Sortly/Resources/Localizable.xcstrings'))
 def norm(k):
@@ -25,5 +28,8 @@ untranslated = [k for k, v in cat['strings'].items()
                 if v.get('shouldTranslate', True) and 'en' not in v.get('localizations', {})]
 for k in untranslated:
     print(f'NO_ENGLISH | {k}')
-print(f'STRINGS_CHECKED {len(cat["strings"])} catalog entries, {len(missing)} missing, {len(untranslated)} without English')
-sys.exit(1 if missing or untranslated else 0)
+style = english_rule.offenders(root)
+for k, v, problem in style:
+    print(f'ENGLISH_STYLE | {k} | {v} | {problem}')
+print(f'STRINGS_CHECKED {len(cat["strings"])} catalog entries, {len(missing)} missing, {len(untranslated)} without English, {len(style)} English style problems')
+sys.exit(1 if missing or untranslated or style else 0)

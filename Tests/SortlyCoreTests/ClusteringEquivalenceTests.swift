@@ -72,12 +72,15 @@ struct ClusteringEquivalenceTests {
     @Test func denseHomeClusterIsFast() {
         var rng = LCG(state: 42)
         let points = Self.scatter(Fixture.Places.munichHome, count: 20_000, meters: 60, rng: &rng)
-        let clock = ContinuousClock()
-        var result: (clusters: [GeoClusterer.Cluster], noise: [Int]) = ([], [])
-        let elapsed = clock.measure { result = GeoClusterer(epsilonMeters: 120, minPoints: 4).cluster(points) }
+        var distances = 0
+        let result = GeoClusterer(epsilonMeters: 120, minPoints: 4).cluster(points, distances: &distances)
         #expect(result.clusters.count == 1)
         #expect(result.clusters.first?.memberIndices.count == 20_000)
-        #expect(elapsed < .seconds(3))
+        // Counted, not timed (review P5-14 b: the old limit of 3 s wall clock failed at 3.2 and
+        // 4.5 s on a machine running three times as many threads as it has cores, 19.11.). A full
+        // cube is core without a distance and cubes connect with one pair: 21 distances for
+        // 20,000 points (19.11.). Checking every point against its cube costs millions.
+        #expect(distances < points.count / 10, "\(distances) distances")
     }
 
     static func offset(_ c: GeoCoordinate, north: Double, east: Double) -> GeoCoordinate {
@@ -118,11 +121,12 @@ struct ClusteringEquivalenceTests {
         // An L-shape next to them: its box reaches within ε of the second group, its points do not.
         points += Self.scatter(Self.offset(base, north: 150, east: 1.04 * eps + 150), count: 3_000, meters: 3, rng: &rng)
         points += Self.scatter(Self.offset(base, north: 150 + 1.05 * eps, east: 1.04 * eps), count: 3_000, meters: 3, rng: &rng)
-        let clock = ContinuousClock()
-        var result: (clusters: [GeoClusterer.Cluster], noise: [Int]) = ([], [])
-        let elapsed = clock.measure { result = GeoClusterer(epsilonMeters: eps, minPoints: 5).cluster(points) }
+        var distances = 0
+        let result = GeoClusterer(epsilonMeters: eps, minPoints: 5).cluster(points, distances: &distances)
         #expect(result.clusters.count >= 3)
         #expect(result.clusters.map(\.memberIndices.count).reduce(0, +) == points.count)
-        #expect(elapsed < .seconds(3)) // before: 5.3 s on the same machine, 1.1 s now (debug build)
+        // Counted, not timed (review P5-14 b, as denseHomeClusterIsFast): 1 distance for 18,000
+        // points (19.11.); comparing every pair of the two groups was 36 million.
+        #expect(distances < points.count / 10, "\(distances) distances")
     }
 }

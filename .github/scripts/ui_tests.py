@@ -63,7 +63,7 @@ tests, before the first) a deadline line that counts as infrastructure (UI_DEADL
 is not started with less than 30 min left (10 min after the erase): then no result. While a pass runs, failed test cases and ": error: -["
 lines are echoed into the job log at once (UI_LIVE), so a cancel after a failure stays red.
 Before every pass (first and repeat) `settle` waits up to 5 min until the simulator answers a
-trivial process twice in a row in under 2 s (the Mac is starved after the boot; SIM_SETTLE with
+trivial process (launchctl) twice in a row in under 2 s (the Mac is starved after the boot; SIM_SETTLE with
 the load, SIM_TOP), never into the 10 min a repeat keeps; then the pass starts anyway. No test
 is repeated for it.
 A watchdog (class Watchdog) stops a pass early when the simulator leaves "Booted" before
@@ -599,11 +599,16 @@ def settle_limit(deadline: float, now: float) -> float:
 
 
 def simulator_probe(udid: str) -> float | None:
-    """Seconds the simulator takes to start and end a trivial process (`simctl spawn U
-    /usr/bin/true`); None when it failed."""
+    """Seconds the simulator takes to start and end a trivial process (`simctl spawn U launchctl
+    getenv HOME`: launchctl is part of every simulator runtime and `run` already asks it after a
+    failed pass; it also asks the simulator's launchd); None when it failed, with why as a
+    SIM_SETTLE line, so a probe that can never succeed does not pass for a slow simulator."""
     started = time.monotonic()
-    code, _ = sh(["xcrun", "simctl", "spawn", udid, "/usr/bin/true"], timeout=30, quiet=True)
-    return time.monotonic() - started if code == 0 else None
+    code, out = sh(["xcrun", "simctl", "spawn", udid, "launchctl", "getenv", "HOME"], timeout=30, quiet=True)
+    if code != 0:
+        print(f"SIM_SETTLE probe failed (exit {code}): {' '.join(out.split())[:160]}", flush=True)
+        return None
+    return time.monotonic() - started
 
 
 def settle(probe, load=lambda: os.getloadavg()[0], sleep=time.sleep, top=None,

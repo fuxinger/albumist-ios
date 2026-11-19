@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import ui_tests  # noqa: E402
@@ -1040,6 +1041,18 @@ class SettleTests(unittest.TestCase):
         body = source.split("def run_pass(", 1)[1].split("\ndef ", 1)[0]
         self.assertLess(body.index("settle(lambda: simulator_probe(args.udid), limit=settle_limit("),
                         body.index("subprocess.Popen"))
+
+    def test_the_probe_asks_launchctl_and_says_why_it_failed(self):
+        calls = []
+
+        def fake_sh(command, timeout=300, quiet=False):
+            calls.append(command)
+            return (0, "/Users/x\n") if len(calls) == 1 else (148, "An error was encountered\nNo such process")
+        with mock.patch.object(ui_tests, "sh", fake_sh), contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertIsNotNone(ui_tests.simulator_probe("U"))
+            self.assertIsNone(ui_tests.simulator_probe("U"))
+        self.assertEqual(calls[0], ["xcrun", "simctl", "spawn", "U", "launchctl", "getenv", "HOME"])
+        self.assertIn("SIM_SETTLE probe failed (exit 148): An error was encountered No such process", log.getvalue())
 
     def test_the_wait_never_eats_the_time_a_retry_was_promised(self):
         self.assertEqual(ui_tests.settle_limit(0, 5000.0), ui_tests.SETTLE_LIMIT)

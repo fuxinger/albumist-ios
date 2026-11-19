@@ -15,6 +15,32 @@ struct PromiseWordingTests {
         try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
     }
 
+    /// Swift source without its comments (string literals kept), so a sentence in a comment
+    /// cannot stand in for the one on screen (review of bundle-i, 19.11.).
+    static func withoutComments(_ source: String) -> String {
+        var out = "", chars = Array(source), i = 0, inString = false
+        while i < chars.count {
+            let c = chars[i], next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
+            if inString {
+                out.append(c)
+                if c == "\\", let next { out.append(next); i += 2; continue }
+                if c == "\"" { inString = false }
+                i += 1
+            } else if c == "\"" {
+                inString = true; out.append(c); i += 1
+            } else if c == "/", next == "/" {
+                while i < chars.count, chars[i] != "\n" { i += 1 }
+            } else if c == "/", next == "*" {
+                i += 2
+                while i + 1 < chars.count, !(chars[i] == "*" && chars[i + 1] == "/") { i += 1 }
+                i += 2
+            } else {
+                out.append(c); i += 1
+            }
+        }
+        return out
+    }
+
     /// What goes to Apple: the photo locations and the language the names should come in
     /// (`SystemGeocoder` passes `preferredLocale`), nothing else from Albumist (second review
     /// of 752ba07: "nur Koordinaten" left out the language).
@@ -23,7 +49,19 @@ struct PromiseWordingTests {
 
     /// Whitespace folded, so a sentence wrapped across lines in Markdown is still found.
     static func flat(_ path: String) throws -> String {
-        try text(path).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let raw = try text(path)
+        return (path.hasSuffix(".swift") ? withoutComments(raw) : raw).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    @Test func aCommentDoesNotCountAsTheSentence() {
+        let source = """
+        // Kein Foto wird hochgeladen.
+        /* Kein Foto wird hochgeladen. */
+        Text("Deine Fotos // bleiben")
+        """
+        let code = Self.withoutComments(source)
+        #expect(!code.contains("Kein Foto"))
+        #expect(code.contains("Text(\"Deine Fotos // bleiben\")"))
     }
 
     /// The files that make promises to the user: the app's strings, the store, the website.
@@ -32,19 +70,21 @@ struct PromiseWordingTests {
         "docs/launch/APP_STORE_DE.md", "docs/launch/APP_STORE_EN.md", "docs/PRIVACY.md",
         "website/pages/de/index.html", "website/pages/en/index.html", "website/pages/de/support.html",
         "website/pages/en/support.html", "website/pages/de/datenschutz.html", "website/pages/en/privacy.html",
+        "App/project.yml", "App/Sortly/Resources/InfoPlist.xcstrings",
     ]
 
     @Test func noPromiseThatNothingIsUploaded() throws {
         for path in Self.promises {
             let text = try Self.text(path)
-            for wrong in ["Nichts wird hochgeladen", "Nothing is uploaded", "Keine Fotos werden hochgeladen", "Alles bleibt auf deinem"] {
+            for wrong in ["Nichts wird hochgeladen", "Nothing is uploaded", "Keine Fotos werden hochgeladen", "Alles bleibt auf deinem",
+                          "Es werden keine Fotos hochgeladen", "No photos are uploaded"] {
                 #expect(!text.contains(wrong), "\(path): \(wrong)")
             }
         }
     }
 
     @Test func onboardingSaysWhatLeavesTheDevice() throws {
-        let onboarding = try Self.text("App/Sortly/Views/OnboardingView.swift")
+        let onboarding = Self.withoutComments(try Self.text("App/Sortly/Views/OnboardingView.swift"))
         #expect(onboarding.contains("Kein Foto wird hochgeladen."))
         #expect(onboarding.contains(Self.placeNamesDE))
         #expect(onboarding.contains("in den Einstellungen ausschalten"))
@@ -78,6 +118,9 @@ struct PromiseWordingTests {
         ("website/pages/en/support.html", ["No, no photo is ever uploaded.", "Only f\(placeNamesEN.dropFirst()); you can turn this off in the app under"]),
         ("docs/launch/APP_STORE_DE.md", ["Kein Foto wird hochgeladen", "\(placeNamesDE) – das kannst du in den Einstellungen ausschalten"]),
         ("docs/launch/APP_STORE_EN.md", ["No photo is ever uploaded", "\(placeNamesEN); you can turn this off in Settings."]),
+        // The system's question for photo access (review of bundle-i, 19.11.).
+        ("App/project.yml", ["Kein Foto wird hochgeladen, Originale werden nie verändert."]),
+        ("App/Sortly/Resources/InfoPlist.xcstrings", ["No photo is ever uploaded, and originals are never changed."]),
     ]
 
     @Test(arguments: sentences)

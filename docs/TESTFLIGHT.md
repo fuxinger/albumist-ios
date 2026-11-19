@@ -155,26 +155,11 @@ Actions > **TestFlight feedback** > Run workflow.
   17.11.2026 gestrichen; er ist seit 18.11. auch aus `testflight.yml` und den Skripten entfernt
   (Prüfbefund G5-02/G6-02). Auch ein eiliger Build wartet auf CI, UI-Tests, Härtetest und das
   UI-Tor. Ein Test in `.github/scripts/tests/test_workflows.py` schlägt fehl, sobald ein
-  Workflow wieder eine Eingabe oder ein Skript einen Schalter zum Überspringen bekommt.
-- Notfall: **force** lädt ohne Tests hoch. So ein Build ist überall als „FORCED – untested“
-  markiert: in der Zusammenfassung des Upload-Jobs, in der Nachricht des Tags `build-<Nummer>`
-  und als erste Zeile von „Was testen“. Er geht nie an Tester. Fuchs hat am 17.11. entschieden,
-  „force“ zu entfernen; umgesetzt ist das noch nicht.
+  Workflow wieder eine Eingabe oder ein Skript einen Schalter zum Überspringen bekommt. Die
+  einzige Wahl ist das Tor (groß oder klein, beide von Fuchs beschlossen, Abschnitt „Zwei Tore“).
 - Welcher Build an Tester gehen darf (Entscheidungen 10 und 12, 18.11.2026): `docs/TEST_PLAN.md`,
   Abschnitt „Tore“. Dieser Lauf setzt die Tests des großen Tors durch; Fälle mit ⛔ im Testplan
   prüft vor jeder Freigabe an Tester der Koordinator. Offene Fälle ohne ⛔ halten keinen Build auf.
-- Härtetest (Regel Fuchs, 17.11.2026): vor jedem TestFlight-Build der kleine Durchgang mit
-  10.000 Fotos und 15 Minuten Messung (rund 45 Minuten). Er läuft im TestFlight-Lauf neben den
-  UI-Tests und muss grün sein, sonst wird nicht hochgeladen; grün heißt, test12 ist
-  durchgelaufen (ein übersprungener test12 zählt als Fehler). Von Hand: Actions > **UI stress** >
-  Run workflow, Vorgaben unverändert lassen (oder `gh workflow run ui-stress.yml --ref <Zweig>`).
-  Der volle Durchgang mit 50.000 Fotos läuft nur wöchentlich nachts (Sonntag 00:40 UTC, erst wenn
-  der Workflow in `main` ist; in einer eigenen Gruppe, die Mac-Warteschlange ersetzt ihn nie) und
-  vor dem Start im App Store. Der letzte volle Durchgang, Lauf 44116350940 (17.11.), ist
-  **fehlgeschlagen**: zu Beginn von Schritt 4 stand die Fortschrittszeile 13,7 s still (Grenze
-  10 s). Die Korrektur (9ff0dfc) ist in diesem Stand; ein neuer voller Durchgang damit steht aus.
-  Workflow wieder eine Eingabe oder ein Skript einen Schalter zum Überspringen bekommt. Die
-  einzige Wahl ist das Tor (groß oder klein, beide von Fuchs beschlossen, Abschnitt „Zwei Tore“).
 - Härtetest (Regel Fuchs, 17.11.2026, und Entscheidung 4): vor jedem TestFlight-Build, mit beiden
   Toren, der kleine Durchgang mit 10.000 Fotos und 15 Minuten Messung (rund 45 Minuten); auch vor
   dem täglichen Build mit kleinem Tor, denn er lädt nach deiner Freigabe hoch. Er
@@ -185,8 +170,8 @@ Actions > **TestFlight feedback** > Run workflow.
   (Sonntag 00:40 UTC, erst wenn der Workflow in `main` ist; in einer eigenen Gruppe, die
   Mac-Warteschlange ersetzt ihn nie) und vor dem Start im App Store. Der letzte volle Durchgang,
   Lauf 44116350940 (17.11.), ist **fehlgeschlagen**: zu Beginn von Schritt 4 stand die
-  Fortschrittszeile 13,7 s still (Grenze 10 s). Die Korrektur liegt auf `claude/ui-fix` (9ff0dfc);
-  ein neuer voller Durchgang damit steht aus.
+  Fortschrittszeile 13,7 s still (Grenze 10 s). Die Korrektur (9ff0dfc) ist in diesem Stand; ein
+  neuer voller Durchgang damit steht aus.
 - Mac-Warteschlange (Profi-Analyse, 17.11.2026): UI-Läufe und Härtetests aller Zweige laufen
   nacheinander, nie zwei zugleich. Es wartet höchstens einer; startet ein weiterer, ersetzt er den
   wartenden, der dann als „abgebrochen“ erscheint und später neu gestartet werden muss. Ein

@@ -267,6 +267,11 @@ final class SortlySearchUITests: XCTestCase {
         let suggestion = search("search.suggestion", containing: "Italien")
         if suggestion.waitForExistence(timeout: 10) {
             print("UI_STEP_OK search suggestion Italien")
+            // One answer for the word (P3-13): once the search for "Ital" ran (after a pause of
+            // 250 ms), nothing beside the completion says "nicht erkannt".
+            let notice = search("search.empty").waitForExistence(timeout: 3) || search("search.ignored", containing: "Ital").exists
+            print(notice ? "UI_STEP_MISSING search no notice beside the suggestion" : "UI_STEP_OK search no notice beside the suggestion")
+            XCTAssertFalse(notice, "\"Ital\" is reported as not recognised beside the completion Italien")
             shot("s5-suggestion")
             suggestion.tap()
             let chip = search("search.token", containing: "Italien").waitForExistence(timeout: 10)

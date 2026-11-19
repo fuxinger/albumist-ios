@@ -42,13 +42,19 @@ struct AuditAnalysisCoreTests {
             proposals.append(AlbumProposal(id: SortlyID("trip-\(t)"), kind: .trip, title: "Reise \(t)", assetIDs: ids))
         }
         let inventory = CollectionInventory([CollectionSnapshot(id: "reisen", title: "Reisen", assetIDs: all)])
-        let clock = ContinuousClock()
-        var results: [SortlyID: MatchResult] = [:]
-        let elapsed = clock.measure { results = AlbumMatcher().match(proposals, against: inventory) }
+        var stats = AlbumMatcher.Stats()
+        let results = AlbumMatcher().match(proposals, against: inventory, overrides: OverrideSet(), assignments: [:],
+                                           reserved: [], trips: [], stats: &stats)
         #expect(results.count == 400)
         // The big album spans all trips: a broader collection, never a trip's album.
         #expect(results.values.allSatisfy { $0.best?.albumID != "reisen" })
-        #expect(elapsed < .seconds(3)) // before: every trip read all 40,000 photos again
+        // Counted, not timed (review P5-14 b: the old limit of 3 s wall clock failed at 6.1 and
+        // 7.2 s on a machine running three times as many threads as it has cores, 19.11.). What
+        // was slow before: every trip read all 40,000 photos of the album again (400 x 40,000).
+        // Now the album is read once for the family, and each trip reads its own memberships.
+        #expect(stats.albumPhotoReads <= all.count, "\(stats)")
+        #expect(stats.membershipReads <= 2 * all.count, "\(stats)")
+        #expect(stats.proposalRuns <= 2 * proposals.count, "\(stats)")
     }
 
     // MARK: 2.6 uncertainty counted once

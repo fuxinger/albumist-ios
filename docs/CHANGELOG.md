@@ -74,6 +74,14 @@
   (nur Zweig `main`), ein privates Repository nur mit der Planvariable, ein Re-Run nach einem
   Upload lädt nie ein zweites Mal hoch. Vor dem Upload wird der Release-Build selbst kurz
   UI-getestet (Rauchtest), höchstens fünf Macs je Lauf.
+- CI 19.11. (Prüfer 5, P5-13): Wer in einem Test oder Workflow eine Zeitgrenze erhöht (`timeout:`,
+  `timeout-minutes` und ähnliche), braucht im selben Pull Request oder Push eine Zeile „Zeitgrenze
+  gelockert“ mit dem Dateinamen in `docs/IMPROVEMENTS.md`; sonst ist der CI-Job „App rules and
+  strings“ rot.
+- UI-Gate 19.11. (Prüfer 5, P5-08 d): Ein Log, auf das die API nur nicht antwortet, macht eine
+  Gruppe nicht mehr rot, sondern das Gate sagt „re-run this job“; ein von GitHub gelöschtes Log
+  zählt weiter als Rot und heißt im Gate „log gone“. Reicht das Abfrage-Budget nicht, sagt das
+  Gate, dass eine Wiederholung nicht hilft.
 - „Gleicher Name gewinnt“ (Fable P1-02): Gibt es genau ein bearbeitbares Album mit dem Namen eines
   Vorschlags, ergänzt Albumist dieses Album, auch unter den Inhaltsschwellen. Ein Album, das den
   ganzen Vorschlag schon enthält, gewinnt vor dem Namen; Fotos ohne Ort zählen für jedes andere

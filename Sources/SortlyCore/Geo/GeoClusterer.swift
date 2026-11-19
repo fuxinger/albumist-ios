@@ -102,6 +102,16 @@ public struct GeoClusterer: Sendable {
 
     /// Returns clusters (sorted by size, descending) and indices of noise points.
     public func cluster(_ coordinates: [GeoCoordinate]) -> (clusters: [Cluster], noise: [Int]) {
+        var distances = 0
+        return cluster(coordinates, distances: &distances)
+    }
+
+    /// `cluster(_:)`, adding to `distances` the surface distances it computed between two points:
+    /// the work that grows with the square of a group's size if a shortcut is lost (tests count
+    /// it instead of timing it; review P5-14 b).
+    func cluster(_ coordinates: [GeoCoordinate], distances: inout Int) -> (clusters: [Cluster], noise: [Int]) {
+        var computed = 0
+        defer { distances += computed }
         let n = coordinates.count
         guard n > 0 else { return ([], []) }
         let eps = epsilonMeters
@@ -150,7 +160,10 @@ public struct GeoClusterer: Sendable {
                 }
             }
         }
-        func near(_ i: Int, _ j: Int) -> Bool { GeoMath.distance(coordinates[i], coordinates[j]) <= eps }
+        func near(_ i: Int, _ j: Int) -> Bool {
+            computed += 1
+            return GeoMath.distance(coordinates[i], coordinates[j]) <= eps
+        }
         // Bounding box of each cube's points: a neighbour cube whose box is further than ε
         // from a point (or another box) cannot hold a point within ε of it.
         let boxes = members.map { Box(position, $0) }

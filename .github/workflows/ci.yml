@@ -67,6 +67,12 @@ jobs:
         # The retry rule of the UI jobs (ui_tests.py) and the test gate (ci_gate.py), with log
         # snippets of real runs: a simulator failure is repeated, a real finding never.
         run: python3 -m unittest discover -s .github/scripts/tests -v
+      - name: Time limits only loosened with an entry
+        # Review P5-13: Build 36 came from a commit that only let a test wait 20 s instead of 5 s.
+        # A longer timeout in a test or a timeout-minutes in a workflow needs a row in
+        # docs/IMPROVEMENTS.md with "Zeitgrenze gelockert" and the file's name in the same pull
+        # request or push (docs/TESTFLIGHT.md). Fetches the commit it compares with.
+        run: python3 .github/scripts/time_limit_rule.py --base auto
       - name: Test-plan map names real tests
         # Warnings only: a stale name in docs/TEST_COVERAGE_MAP.txt makes a case look untested
         # in the job summary, it does not make the app worse.

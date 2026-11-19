@@ -71,14 +71,10 @@ struct LoadTests {
         let assets = lib.assets
         #expect(assets.count == target)
 
-        // Existing albums with random members.
-        var rng = SystemRandomNumberGenerator()
-        var albums: [CollectionSnapshot] = []
-        for i in 0..<albumCount {
-            let start = Int.random(in: 0..<(assets.count - 400), using: &rng)
-            let members = Set(assets[start..<(start + Int.random(in: 20...400, using: &rng))].map(\.id))
-            albums.append(CollectionSnapshot(id: CollectionID("album-\(i)"), title: "Album \(i)", assetIDs: members))
-        }
+        // Existing albums with random members, the same in every run unless SORTLY_LOAD_SEED says
+        // otherwise; the seed is in the log, so a red run can be repeated (review P5-14 c).
+        print("LOAD_SEED \(Self.seed) (SORTLY_LOAD_SEED=\(Self.seed) repeats this library)")
+        let albums = Self.albums(albumCount, of: assets, seed: Self.seed)
         // Originals only in iCloud: text from them waits for the network.
         let cloudOnly = Set(assets.enumerated().compactMap { index, asset in
             Double(index % 100) < cloudShare * 100 ? asset.id : nil
@@ -171,6 +167,21 @@ struct LoadTests {
         #expect(full < limits.first)
         #expect(again < limits.second) // 20,000 photos: was 44 s before the grid DBSCAN
         if let limit = limits.peakMB, let peak { #expect(peak < limit) }
+    }
+
+    /// The seed of the random albums: SORTLY_LOAD_SEED, else a fixed one.
+    static let seed = ProcessInfo.processInfo.environment["SORTLY_LOAD_SEED"].flatMap(UInt64.init) ?? 20_261_118
+
+    /// `count` existing albums, each a random run of 20 to 400 of `assets`, the same for the same seed.
+    static func albums(_ count: Int, of assets: [AssetSnapshot], seed: UInt64) -> [CollectionSnapshot] {
+        var rng = RandomLibraryTests.Seeded(state: seed &* 0x2545F4914F6CDD1D)
+        var albums: [CollectionSnapshot] = []
+        for i in 0..<count {
+            let start = Int.random(in: 0..<(assets.count - 400), using: &rng)
+            let members = Set(assets[start..<(start + Int.random(in: 20...400, using: &rng))].map(\.id))
+            albums.append(CollectionSnapshot(id: CollectionID("album-\(i)"), title: "Album \(i)", assetIDs: members))
+        }
+        return albums
     }
 
     // MARK: The image step's first count (stress run 44116350940)
@@ -307,5 +318,23 @@ struct LoadTests {
         #expect(took < .seconds(1), "Pause took \(took)")
         await pipeline.waitForEarlyLeftBehind()
         if !report.earlyProposals { #expect(try await pipeline.latestProposals() == nil) }
+    }
+}
+
+/// Review P5-14 (c): the load test's library is the same in every run, so a red run can be
+/// repeated with the same albums. Not gated by SORTLY_LOAD_TEST: it builds no store and takes
+/// milliseconds.
+@Suite("Load test library")
+struct LoadTestLibraryTests {
+    @Test func theAlbumsAreTheSameInEveryRun() {
+        let assets = LoadTests.stressLibrary(2_000)
+        // An album is a run of photos: its first photo and its size say which.
+        func runs(_ albums: [CollectionSnapshot]) -> [String] {
+            albums.map { "\($0.assetIDs.map(\.rawValue).min() ?? "-") +\($0.assetIDs.count)" }
+        }
+        let first = runs(LoadTests.albums(30, of: assets, seed: LoadTests.seed))
+        #expect(first == runs(LoadTests.albums(30, of: assets, seed: LoadTests.seed)))
+        // Another seed, other albums: the seed decides.
+        #expect(first != runs(LoadTests.albums(30, of: assets, seed: LoadTests.seed + 1)))
     }
 }

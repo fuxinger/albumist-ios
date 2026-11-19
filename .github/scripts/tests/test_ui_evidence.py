@@ -335,8 +335,49 @@ class RedFromTheLogTests(unittest.TestCase):
         # failed test case but is no result.
         self.assertEqual(self.entries({11: FAILED_LOG + "UI_RESULT device infra\n"}), "none")
         self.assertEqual(self.entries({11: "UI_RESULT device fail\n"}), "red")
-        # A log that cannot be read: red.
-        self.assertEqual(self.entries({11: ui_evidence.ApiError("gone")}), "red")
+        # A log GitHub no longer has (HTTP 404 or 410): red, as its result cannot be checked.
+        self.assertEqual(self.entries({11: ui_evidence.LogGone("HTTP Error 410: Gone")}), "red")
+
+    def test_a_log_the_api_did_not_answer_for_is_no_verdict(self):
+        # Review P5-08 (d): a log read that failed three times (HTTP 502, a timeout) made a job
+        # that was cancelled with nothing failed red, and the gate said "red for this app and this
+        # test code ... fix it" though no test had failed and the next call would have read it.
+        with self.assertRaises(ui_evidence.ApiError):
+            self.entries({11: ui_evidence.ApiError("GitHub API: actions/jobs/11/logs: HTTP Error 502: Bad Gateway")})
+        # The same for a job that failed in "Run UI tests": its log tells a test result from a
+        # runner that crashed before the tests.
+        runs = [run(1, "a" * 40, [job("device", "failure", "failure", job_id=11)])]
+        call = fake_api(runs, logs={11: ui_evidence.ApiError("HTTP Error 502: Bad Gateway")})
+        with self.assertRaises(ui_evidence.ApiError):
+            ui_evidence.results(runs, logs=ui_evidence.log_reader(call))
+
+    def test_the_api_tells_a_gone_log_from_no_answer(self):
+        import urllib.error
+        from unittest import mock
+
+        def answer(code):
+            def urlopen(request, timeout):
+                raise urllib.error.HTTPError(request.full_url, code, "x", {}, None)
+            return urlopen
+        with mock.patch.object(ui_evidence.urllib.request, "urlopen", answer(410)), \
+                mock.patch.object(ui_evidence.time, "sleep", lambda s: None):
+            with self.assertRaises(ui_evidence.LogGone):
+                ui_evidence.api("actions/jobs/11/logs")
+            # Not a log: gone, but no LogGone.
+            with self.assertRaises(ui_evidence.ApiError) as raised:
+                ui_evidence.api("actions/runs/11")
+            self.assertNotIsInstance(raised.exception, ui_evidence.LogGone)
+        with mock.patch.object(ui_evidence.urllib.request, "urlopen", answer(502)), \
+                mock.patch.object(ui_evidence.time, "sleep", lambda s: None):
+            with self.assertRaises(ui_evidence.ApiError) as raised:
+                ui_evidence.api("actions/jobs/11/logs")
+            self.assertNotIsInstance(raised.exception, ui_evidence.LogGone)
+
+    def test_a_red_from_a_gone_log_says_so(self):
+        runs = [run(1, "a" * 40, [dict(job("device", "cancelled", "cancelled", job_id=11))])]
+        entry = ui_evidence.results(runs, logs=ui_evidence.log_reader(fake_api(runs, logs={11: ui_evidence.LogGone("410")})))[0]
+        self.assertEqual((entry["result"], entry["log"]), ("red", "gone"))
+        self.assertIn("log gone", ui_evidence.where(entry))
 
 
 class QuickTests(unittest.TestCase):
@@ -535,6 +576,40 @@ class CommandTests(unittest.TestCase):
         own = FakeVerifier(VERIFIER.commits, changed={"a" * 40: ["App/SortlyUITests/DeviceUITests.swift"]})
         self.assertNotIn("red cleared", self.gate(red + [run(9, "b" * 40, here, workflow="testflight.yml")],
                                                    verifier=own)[1])
+
+    def test_the_gate_names_why_a_red_has_no_log(self):
+        # Review P5-08 (d): a red from a log GitHub deleted stays until the app or the test
+        # changes; the gate says that this is the reason, not a failed test it could show.
+        cancelled = [run(1, "b" * 40, [job("device", "cancelled", "cancelled", tests=TEST_ONLY_FPS["device"], job_id=77)])]
+        here = [job(g, tests=TEST_ONLY_FPS[g], job_id=100 + i) for i, g in enumerate(NAMES)]
+        runs = cancelled + [run(9, "b" * 40, here, workflow="testflight.yml")]
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = ui_evidence.gate(9, call=fake_api(runs, logs={77: ui_evidence.LogGone("HTTP Error 410: Gone")}),
+                                    verifier=VERIFIER, tree=TEST_ONLY, now=NOW)
+        self.assertEqual(code, 1)
+        self.assertIn("::error title=UI device::red for this app and this test code", log.getvalue())
+        self.assertIn("its log is gone", log.getvalue())
+        self.assertIn("log gone", self.read(self.summary))
+        # The API did not answer for the log: no verdict, and the gate says to run it again.
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = ui_evidence.gate(9, call=fake_api(runs, logs={77: ui_evidence.ApiError("HTTP Error 502")}),
+                                    verifier=VERIFIER, tree=TEST_ONLY, now=NOW)
+        self.assertEqual(code, 1)
+        self.assertNotIn("::error title=UI device::red", log.getvalue())
+        self.assertIn("re-run this job when the API answers", log.getvalue())
+
+    def test_the_call_budget_is_named_as_the_reason(self):
+        # Review P5-08 (d): beyond MAX_CALLS the gate has no verdict, and "re-run this job when
+        # the API answers" sent the reader to a re-run that ends the same way.
+        saved = ui_evidence.MAX_CALLS
+        ui_evidence.MAX_CALLS = 1
+        self.addCleanup(setattr, ui_evidence, "MAX_CALLS", saved)
+        here = [job(g, tests=TEST_ONLY_FPS[g], job_id=100 + i) for i, g in enumerate(NAMES)]
+        code, log = self.gate([run(9, "b" * 40, here, workflow="testflight.yml")])
+        self.assertEqual(code, 1)
+        self.assertNotIn("re-run this job when the API answers", log)
+        self.assertIn("MAX_CALLS", log)
+        self.assertIn("a re-run ends the same way", log)
 
     def test_gate_fails_closed_without_the_api(self):
         with contextlib.redirect_stdout(io.StringIO()) as log:

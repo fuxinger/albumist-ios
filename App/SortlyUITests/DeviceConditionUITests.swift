@@ -22,12 +22,27 @@ final class DeviceConditionUITests: XCTestCase {
             stallsReportedAtEnd = true
             addTeardownBlock { UITestStalls.report() }
         }
+        endRunningApp()
         app = XCUIApplication()
         let stalls = UITestStalls.arguments(besides: extra)
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
         launchExtra = extra
         UITestOnboarding.clock("launch")
         app.launch()
+    }
+
+    /// Ends the app of the last launch before the next one, and waits until it is gone. Left to
+    /// `launch()`, XCTest ends it with a short wait of its own: on a busy CI Mac that failed with
+    /// "Failed to terminate app.albumist.ios:20655" although the app stood idle on the overview
+    /// (test07, UI run 44446270757, 6 s after the last tap). The time it takes is logged, so a
+    /// slow end shows up before it fails.
+    private func endRunningApp() {
+        guard app.state != .notRunning else { return }
+        let asked = Date()
+        UITestOnboarding.clock("end the app before the next launch")
+        app.terminate()
+        let gone = app.wait(for: .notRunning, timeout: 60)
+        print("UI_TIMING app ended before the next launch \(Int(Date().timeIntervalSince(asked))) s (\(gone ? "ended" : "still running"))")
     }
 
     /// The test's own arguments of the last launch: the onboarding helpers open the app again

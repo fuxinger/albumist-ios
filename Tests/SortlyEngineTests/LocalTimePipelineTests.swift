@@ -519,6 +519,43 @@ struct LocalTimePipelineTests {
         #expect(keptShape == ["zone": "Europe/Berlin", "since": "2026-01-01"])
     }
 
+    /// Second review: the zones of the photos' places are worked out once for each state of the
+    /// places, not again in every step of a run and for every read of the facts (over 100,000
+    /// photos in as many places that took about three seconds each time).
+    @Test func theZonesOfThePlacesAreWorkedOutOncePerStateOfThePlaces() async throws {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2026-01-01", to: "2026-03-31", at: Fixture.Places.munichHome, perDay: 1)
+        for day in ["2026-02-10", "2026-02-11", "2026-02-12"] {
+            for time in ["10:00", "15:00", "20:00"] { _ = lib.photo(at: Self.local("\(day) \(time)", "America/New_York"), Self.newYork, jitterMeters: 30) }
+        }
+        let geocoder = FakeGeocoder(answers: [
+            (Fixture.Places.munichHome, .init(isoCountryCode: "DE", country: "Deutschland", locality: "München", timeZoneIdentifier: "Europe/Berlin")),
+            (Self.newYork, .init(isoCountryCode: "US", country: "Vereinigte Staaten", locality: "New York", timeZoneIdentifier: "America/New_York")),
+        ])
+        let store = try SortlyStore(url: nil)
+        let reader = InMemoryLibraryReader(assets: lib.assets)
+        let pipeline = Self.pipeline(store: store, reader: reader, geocoder: geocoder, deviceZone: "Europe/Berlin")
+        let work = ZoneWork()
+        await pipeline.setZoneProbe { work.add() }
+        #expect(try await pipeline.run().isComplete)
+        let firstRun = work.count
+        for _ in 0..<3 { _ = try await pipeline.currentFacts() }
+        let reads = work.count - firstRun
+        #expect(try await pipeline.run().isComplete)
+        let secondRun = work.count - firstRun - reads
+        // A new photo with its place: the places change once more.
+        _ = lib.photo(at: Self.local("2026-04-01 12:00", "Europe/Berlin"), Fixture.Places.munichHome)
+        await reader.set(assets: lib.assets)
+        #expect(try await pipeline.run().isComplete)
+        let thirdRun = work.count - firstRun - reads - secondRun
+        print("P1-15-ZONES worked out: first run \(firstRun), three reads of the facts \(reads), "
+              + "a second run \(secondRun), a run with a new photo \(thirdRun)")
+        #expect(firstRun <= 2)
+        #expect(reads == 0)
+        #expect(secondRun == 0)
+        #expect(thirdRun <= 2)
+    }
+
     /// The assembler gives each photo the clock of its place: the zone the online lookup named
     /// (it wins over the country's), else the zone of its country there (Denver, Perth offline),
     /// else the home time zone (no location, a place guessed from the content). Without a home
@@ -548,4 +585,12 @@ struct LocalTimePipelineTests {
         ])
         #expect(Set(zones(nil).values) == ["none"])
     }
+}
+
+/// How often a pipeline worked out the zones of the photos' places (`setZoneProbe`).
+final class ZoneWork: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+    func add() { lock.lock(); calls += 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return calls }
 }

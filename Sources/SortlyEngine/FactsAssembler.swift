@@ -62,6 +62,7 @@ public enum OrganizationScope: Hashable, Sendable, Codable {
 /// Joins stored analysis results into the per-asset facts the proposal engine, status
 /// resolver and search work on. With `homeTimeZone` each photo gets the time zone of its clock
 /// (`AssetFacts.timeZone`, review P1-15): its place's, else its country's there, else that one.
+/// `placeZones`: the zones of the places (`LocalTime.placeZones`) where the caller has them.
 public enum FactsAssembler {
     public static func assemble(
         assets: [AssetSnapshot],
@@ -74,7 +75,8 @@ public enum FactsAssembler {
         inventory: CollectionInventory,
         home: Set<AssetID> = [],
         withoutCountry: Set<AssetID> = [],
-        homeTimeZone: TimeZone? = nil
+        homeTimeZone: TimeZone? = nil,
+        placeZones: [AssetID: TimeZone]? = nil
     ) -> [AssetFacts] {
         var tripOf: [AssetID: SortlyID] = [:]
         for trip in trips { for id in trip.geotaggedAssetIDs { tripOf[id] = trip.id } }
@@ -85,7 +87,7 @@ public enum FactsAssembler {
         let membership = inventory.albumMembershipIndex()
         let titles = inventory.collections.mapValues(\.title)
         let messenger = MessengerClassifier()
-        var zones = TimeZoneFinder()
+        let zones = homeTimeZone == nil ? [:] : placeZones ?? LocalTime.placeZones(of: assets, places: places)
 
         return assets.map { asset in
             let place = places[asset.id]
@@ -116,9 +118,7 @@ public enum FactsAssembler {
                 // Only while it has no place: one found since wins.
                 countryOutOfReach: place == nil && withoutCountry.contains(asset.id)
             )
-            if let homeTimeZone {
-                facts.timeZone = zones.zone(of: facts.gpsPlace, at: asset.usableLocation) ?? homeTimeZone
-            }
+            if let homeTimeZone { facts.timeZone = zones[asset.id] ?? homeTimeZone }
             return facts
         }
     }

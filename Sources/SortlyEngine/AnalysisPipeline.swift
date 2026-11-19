@@ -590,8 +590,9 @@ public actor AnalysisPipeline {
         var library = all
         if library == nil { library = try await store.allAssets() }
         let near = (library ?? []).filter { $0.usableLocation.map { GeoMath.distance($0, center) <= radius } ?? false }
+        let zones = try await placeTimeZones()
         var counts: [String: Int] = [:]
-        for zone in try await placeTimeZones(all: near).values { counts[zone.identifier, default: 0] += 1 }
+        for asset in near { if let zone = zones[asset.id] { counts[zone.identifier, default: 0] += 1 } }
         return counts.max(by: { ($0.value, $1.key) < ($1.value, $0.key) }).flatMap { TimeZone(identifier: $0.key) }
     }
 
@@ -635,23 +636,29 @@ public actor AnalysisPipeline {
     }
 
     /// The zone each photo's place tells (online its own, offline its country's there), for the
-    /// photos that have one (review P1-15).
-    private func placeTimeZones(all: [AssetSnapshot]) async throws -> [AssetID: TimeZone] {
+    /// photos that have one (review P1-15). Worked out once for each state of the places and the
+    /// photos' locations (`SortlyStore.placesRevision`): a run asked for them up to four times
+    /// and every read of the facts once more, about three seconds each over 100,000 photos in as
+    /// many places (second review). Off the actor, like the facts (`offActor`).
+    private func placeTimeZones() async throws -> [AssetID: TimeZone] {
+        let revision = await store.placesRevision
+        if let cached = placeZones, cached.revision == revision { return cached.zones }
+        zoneProbe?()
         let places = try await store.places()
-        var finder = TimeZoneFinder()
-        var zones: [AssetID: TimeZone] = [:]
-        for asset in all {
-            guard let place = places[asset.id], place.source == .gpsReverseGeocoded || place.source == .userAssigned,
-                  let zone = finder.zone(of: place.components, at: asset.usableLocation) else { continue }
-            zones[asset.id] = zone
-        }
+        let assets = try await store.allAssets()
+        let zones = await Task.detached(priority: Task.currentPriority) { LocalTime.placeZones(of: assets, places: places) }.value
+        // A write meanwhile made them older than the store: they serve this caller only.
+        if await store.placesRevision == revision { placeZones = (revision, zones) }
         return zones
     }
+
+    /// `placeTimeZones()` and the state of the places they were worked out for.
+    private var placeZones: (revision: Int, zones: [AssetID: TimeZone])?
 
     /// `dateRange` of a run: over the zones of the places known so far.
     private func dateRange(of scope: OrganizationScope, all: [AssetSnapshot]) async throws -> Range<Date>? {
         guard case .year = scope else { return nil }
-        return Self.dateRange(of: scope, calendar: try await homeCalendar(), zones: Set(try await placeTimeZones(all: all).values))
+        return Self.dateRange(of: scope, calendar: try await homeCalendar(), zones: Set(try await placeTimeZones().values))
     }
 
     /// Pauses the run in progress at its next check; `run` then returns with `.userPaused`.
@@ -1227,7 +1234,7 @@ public actor AnalysisPipeline {
         // A place's days: those of the clocks its photos were taken on, where their places are
         // known so far (review P1-15).
         var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: home)
-            .detect(in: all, previous: previousPlaces ?? [], zones: try await placeTimeZones(all: all))
+            .detect(in: all, previous: previousPlaces ?? [], zones: try await placeTimeZones())
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
@@ -1248,7 +1255,9 @@ public actor AnalysisPipeline {
         // photo with a location has one.
         let members = Set(trips.lazy.flatMap(\.geotaggedAssetIDs))
         let travelled = all.filter { members.contains($0.id) }
-        let zones = try await placeTimeZones(all: travelled).mapValues(\.identifier)
+        let placeZones = try await placeTimeZones()
+        var zones: [AssetID: String] = [:]
+        for id in members { if let zone = placeZones[id] { zones[id] = zone.identifier } }
         guard !zones.isEmpty else { return trips }
         let localTrips = TripDetector.inDestinationTime(trips, assets: Dictionary(uniqueKeysWithValues: travelled.map { ($0.id, $0) }),
                                                         timeZones: zones, calendar: try await homeCalendar())
@@ -1823,6 +1832,10 @@ public actor AnalysisPipeline {
     private var offActorProbe: (@Sendable () async -> Void)?
     func setOffActorProbe(_ probe: (@Sendable () async -> Void)?) { offActorProbe = probe }
 
+    /// Tests only: called whenever the zones of the photos' places are worked out.
+    private var zoneProbe: (@Sendable () -> Void)?
+    func setZoneProbe(_ probe: (@Sendable () -> Void)?) { zoneProbe = probe }
+
     /// After a change in "Dein Zuhause" that no suggestions were made for yet
     /// (`PendingHomeChange`), whichever step makes them (`resuggest()`, a run, the early set):
     /// the suggestions the user chose before the change keep their content (`HeldSuggestions`),
@@ -2132,10 +2145,11 @@ public actor AnalysisPipeline {
         let home = try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
         let withoutCountry = try await store.value(Set<AssetID>.self, forKey: Key.placesWithoutCountry) ?? []
         let homeZone = try await homeTimeZone()
+        let placeZones = try await placeTimeZones()
         return await offActor {
             FactsAssembler.assemble(assets: all, places: places, contents: contents, texts: texts, trips: trips,
                                     frequentPlaces: frequent, groups: groups, inventory: inventory, home: home,
-                                    withoutCountry: withoutCountry, homeTimeZone: homeZone)
+                                    withoutCountry: withoutCountry, homeTimeZone: homeZone, placeZones: placeZones)
         }
     }
 

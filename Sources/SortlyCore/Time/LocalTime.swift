@@ -92,6 +92,22 @@ public struct TimeZoneFinder: Sendable {
     }
 }
 
+extension LocalTime {
+    /// The zone each photo's place tells (`zone(of:at:)`), for the photos whose place tells one.
+    /// Only a place from the photo's location or chosen by the user (`AssetFacts.gpsPlace`): one
+    /// guessed from the picture says nothing about where it was taken.
+    public static func placeZones(of assets: [AssetSnapshot], places: [AssetID: ResolvedPlace]) -> [AssetID: TimeZone] {
+        var finder = TimeZoneFinder()
+        var zones: [AssetID: TimeZone] = [:]
+        for asset in assets {
+            guard let place = places[asset.id], place.source == .gpsReverseGeocoded || place.source == .userAssigned,
+                  let zone = finder.zone(of: place.components, at: asset.usableLocation) else { continue }
+            zones[asset.id] = zone
+        }
+        return zones
+    }
+}
+
 extension AssetFacts {
     /// The capture date on the photo's own clock (`LocalTime.wallClock`): in its time zone, or in
     /// `fallback` (the calendar's zone) for facts made without zones.

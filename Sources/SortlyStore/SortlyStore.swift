@@ -8,6 +8,10 @@ public actor SortlyStore: PlanJournal {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     public private(set) var hasFullTextSearch = false
+    /// Counts the writes that can change a photo's place or its location (`setPlace`,
+    /// `upsertAssets`, `removeAssets`, `resetAnalysis`): what is worked out from the places of
+    /// all photos holds as long as it stays the same (their time zones, second review of P1-15).
+    public private(set) var placesRevision = 0
 
     /// - Parameter url: database file; `nil` creates an in-memory store (tests, previews).
     public init(url: URL?) throws {
@@ -114,6 +118,7 @@ public actor SortlyStore: PlanJournal {
                     ])
             }
         }
+        if !changed.isEmpty { placesRevision += 1 }
         return changed
     }
 
@@ -132,6 +137,7 @@ public actor SortlyStore: PlanJournal {
         try db.transaction {
             for id in stale { try db.execute("DELETE FROM assets WHERE id = ?", [.text(id)]) }
         }
+        if !stale.isEmpty { placesRevision += 1 }
         return stale.count
     }
 
@@ -387,6 +393,7 @@ public actor SortlyStore: PlanJournal {
     }
 
     public func setPlace(_ place: ResolvedPlace?, for asset: AssetID) throws {
+        placesRevision += 1
         if let place {
             try db.execute("INSERT OR REPLACE INTO asset_places (asset_id, components, source, resolved_at, precision_m) VALUES (?, ?, ?, ?, ?)", [
                 .text(asset.rawValue), try json(place.components), .text(place.source.rawValue), Self.date(place.resolvedAt),
@@ -982,6 +989,7 @@ public actor SortlyStore: PlanJournal {
     /// User decisions (overrides, rules, managed albums, plan history) are kept unless
     /// `includingDecisions` is true.
     public func resetAnalysis(includingDecisions: Bool = false) throws {
+        placesRevision += 1
         try db.transaction {
             for table in ["analysis_results", "asset_places", "place_cache", "analysis_progress", "text_plain"] {
                 try db.execute("DELETE FROM \(table)")

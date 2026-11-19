@@ -40,6 +40,38 @@ struct StoreTests {
         #expect(try await s.asset("b")?.creationDate == nil) // unknown dates stay unknown
     }
 
+    /// Second review of P1-15: the time zones worked out from the places of all photos are kept
+    /// while `placesRevision` stays the same. Every write that can change a photo's place or its
+    /// location moves it on; reading, or storing photos unchanged, does not.
+    @Test func everyWriteThatCanChangeAPlaceMovesThePlacesRevisionOn() async throws {
+        let s = try store()
+        let a = AssetSnapshot(id: "a", creationDate: Fixture.date("2026-01-01"), location: GeoCoordinate(latitude: 48.1, longitude: 11.5))
+        let b = AssetSnapshot(id: "b", creationDate: Fixture.date("2026-01-02"))
+        let place = ResolvedPlace(components: PlaceComponents(isoCountryCode: "DE"), source: .gpsReverseGeocoded)
+        var seen = [await s.placesRevision]
+        try await s.upsertAssets([a, b])
+        seen.append(await s.placesRevision)
+        try await s.setPlaces(["a": place])
+        seen.append(await s.placesRevision)
+        var moved = a
+        moved.location = GeoCoordinate(latitude: 40.7, longitude: -74.0)
+        try await s.upsertAssets([moved, b])
+        seen.append(await s.placesRevision)
+        _ = try await s.removeAssets(notIn: ["a"])
+        seen.append(await s.placesRevision)
+        try await s.setPlace(nil, for: "a")
+        seen.append(await s.placesRevision)
+        try await s.resetAnalysis()
+        seen.append(await s.placesRevision)
+        #expect(zip(seen, seen.dropFirst()).allSatisfy { $0 < $1 }, "\(seen)")
+        let last = await s.placesRevision
+        _ = try await s.places()
+        _ = try await s.allAssets()
+        try await s.upsertAssets([moved])
+        _ = try await s.removeAssets(notIn: ["a"])
+        #expect(await s.placesRevision == last)
+    }
+
     @Test func incrementalAnalysisTracking() async throws {
         let s = try store()
         try await s.upsertAssets((0..<10).map { AssetSnapshot(id: AssetID("a\($0)"), creationDate: Fixture.date("2026-01-01")) })

@@ -481,6 +481,19 @@ struct DecisionLifecycleTests {
         #expect(try await pipeline.refreshMatchesIfOutdated().reopened == [trip19.id])
         #expect((try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0) == 0)
 
+        // A choice made under these rules (stored version 5 or later) is the user's own: "new
+        // album" for the country and "so lassen" for the trip stay at every later re-match
+        // (third review 19.11., S5).
+        if AlbumMatcher.version > AlbumMatcher.sameNameWhateverItHoldsVersion {
+            try await store.setValue(old, forKey: AnalysisPipeline.Key.decisions)
+            var chosen = stored
+            chosen.matcherVersion = AlbumMatcher.sameNameWhateverItHoldsVersion
+            try await store.setValue(chosen, forKey: AnalysisPipeline.Key.proposals)
+            #expect(try await pipeline.refreshMatchesIfOutdated().reopened.isEmpty)
+            #expect(try await store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions) == old)
+            #expect(try await pipeline.latestProposals()?.matcherVersion == AlbumMatcher.version)
+        }
+
         // A new album the user named differently is no second "Italien": it stays.
         let named: [SortlyID: ProposalDecision] = [country.id: .createNew(title: "Italienreisen", folderPath: nil)]
         try await store.setValue(named, forKey: AnalysisPipeline.Key.decisions)

@@ -2087,6 +2087,9 @@ public actor AnalysisPipeline {
     func refreshMatchesIfOutdated(afterEachWrite: (@Sendable (String) throws -> Void)?) async throws -> MatchRefresh {
         guard var snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
         let outdated = snapshot.matcherVersion < AlbumMatcher.version
+        // Decisions made before "Gleicher Name gewinnt" held whatever the album holds; a choice
+        // made under that rule is the user's and stays at every later re-match (S5, 19.11.).
+        let beforeSameNameRule = snapshot.matcherVersion < AlbumMatcher.sameNameWhateverItHoldsVersion
         if outdated {
             guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
             snapshot = rematched
@@ -2114,8 +2117,9 @@ public actor AnalysisPipeline {
         // Against "Gleicher Name gewinnt" (second review 19.11.): open again too, but not for
         // the reason the overview's notice gives ("nur noch, wenn sie sicher passen"), so they
         // are not counted for it.
-        let sameName = outdated ? ProposalDecision.sameNameConflicts(decisions, proposals: suggested, matches: snapshot.matches,
-                                                                     protected: started) : []
+        let sameName = outdated && beforeSameNameRule
+            ? ProposalDecision.sameNameConflicts(decisions, proposals: suggested, matches: snapshot.matches, protected: started)
+            : []
         if ownAlbum {
             // Once per suggestion and album: an album the user picks again for it ("Anderes
             // Album wählen") is their choice and stays (re-review 18.11.). Which way a decision

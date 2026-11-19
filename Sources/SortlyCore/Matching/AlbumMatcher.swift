@@ -147,6 +147,11 @@ public struct AlbumMatcher: Sendable {
     ///    (third review 19.11., M3 and S6): saved matches of version 5 are matched again.
     public static let version = 6
 
+    /// The version since which the album named exactly like a suggestion is its album whatever it
+    /// holds (P1-02). Decisions accepted under older rules that go against it are reopened once
+    /// (`ProposalDecision.sameNameConflicts`); never a choice the user made under these rules.
+    public static let sameNameWhateverItHoldsVersion = 5
+
     /// Matches all proposals in one pass using an inverted membership index.
     /// - Parameters:
     ///   - overrides: albums the user marked as "passt nicht" for a suggestion are never offered

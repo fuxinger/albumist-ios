@@ -49,8 +49,9 @@ GitHub's run list would need a token that can write from the test runs; not done
     earlier, and such a red then stays until the app or the test changes.
   - no result: the step never started (a simulator that did not boot, a download, the
     toolchain, a run cancelled before it); a job still running; a cancel or a lost runner while
-    the tests ran with nothing failed in the log (the owner's rule: never cancel a running test
-    run); every pass failed on the simulator or XCTest alone (ui_tests.py exits 75, "UI_RESULT
+    the tests ran with nothing failed in the log (ui-supersede.yml cancels the waiting or
+    running UI runs of a pull request's older commits when a newer push comes; such a run leaves
+    no evidence, and a test that had already failed in it stays red); every pass failed on the simulator or XCTest alone (ui_tests.py exits 75, "UI_RESULT
     <group> infra", and the job fails in "No test result (...)" instead). Listed, never counted.
 A group is green for this app when its newest result for (app fingerprint, group, test
 fingerprint) is green AND there is no red result for that key at all. Both rules together:
@@ -112,9 +113,10 @@ RESERVED_CALLS = 60
 # timestamp), or without such a line a failed test case or an error line (also echoed live,
 # UI_LIVE, before a cancel: a test with continueAfterFailure that had not ended yet), a failing
 # verdict of older logs, or the job's time limit (also ran_out_of_time). A
-# cancel or a lost runner in the middle of the tests with nothing failed yet: no result (the
-# owner's rule is anyway never to cancel a running test run). An unreadable log (also an
-# expired one, HTTP 410) counts as red, so such a red stays for good.
+# cancel or a lost runner in the middle of the tests with nothing failed yet: no result (since
+# ui-supersede.yml a newer push to a pull request cancels the UI runs of its older commits, also
+# running ones; the result of an outdated commit is then simply missing). An unreadable log (also
+# an expired one, HTTP 410) counts as red, so such a red stays for good.
 RESULT_LINE = re.compile(r"^(?:\ufeff)?(?:\d{4}-\d\d-\d\dT[\d:.]+Z )?UI_RESULT (\S+) (pass|fail|infra)\s*$", re.M)
 RED_IN_LOG = re.compile(r"Test Case '-\[[^\]]+\]' failed|UI_LIVE .*: error: -\[|UI_VERDICT \S+ (?:first|retry): fail|the failed pass stays red"
                         r"|has exceeded the maximum execution time")

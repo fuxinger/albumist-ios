@@ -233,10 +233,14 @@ public struct TripDetector: Sendable {
     /// with photos alone, a small part of the work. Days count on `calendar`'s clock, so the
     /// home found can differ from clock to clock; the analysis asks this to choose the clock it
     /// detects the trips on (second review of P1-15).
+    /// `progress(grouped, of)`: said once, before the work, with `analyse`'s count at 0 (the
+    /// trips step names its count while it chooses the clock).
     public func detectedHome(in assets: [AssetSnapshot], corrections: TripCorrections = .init(),
-                             places: RecurringPlaceAnswers = .init()) -> DetectedHome? {
+                             places: RecurringPlaceAnswers = .init(),
+                             progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) -> DetectedHome? {
         let geotagged = Self.located(assets, corrections: corrections)
         guard let last = geotagged.last?.creationDate else { return nil }
+        progress(0, geotagged.count)
         return habitualArea(of: geotagged, places: places).mainHome(at: last)
     }
 

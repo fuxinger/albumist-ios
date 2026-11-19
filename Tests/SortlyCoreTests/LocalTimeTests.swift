@@ -319,6 +319,13 @@ struct LocalTimeTests {
         }
         #expect(found == ["Europe/Berlin": "Auckland", "Pacific/Auckland": "Munich"])
         #expect(TripDetector(calendar: Self.calendar("Europe/Berlin")).detectedHome(in: []) == nil)
+        // It names the trips step's count first, at 0, as the analysis does.
+        let detector = TripDetector(calendar: Self.calendar("Europe/Berlin"))
+        var said: [[Int]] = []
+        _ = detector.detectedHome(in: lib.assets, progress: { said.append([$0, $1]) })
+        var first: [Int]?
+        _ = detector.analyse(in: lib.assets, progress: { if first == nil { first = [$0, $1] } })
+        #expect(said == [first ?? []] && said == [[0, lib.assets.count]])
     }
 
     /// The search finds a photo by the day and month of its clock, on an iPhone in Auckland:

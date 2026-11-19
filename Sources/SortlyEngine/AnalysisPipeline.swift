@@ -1233,7 +1233,7 @@ public actor AnalysisPipeline {
         let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
         let answers = try await recurringPlaceAnswers()
         var home = calendar
-        home.timeZone = try await patternsClock(all: all, corrections: corrections, answers: answers)
+        home.timeZone = try await patternsClock(all: all, corrections: corrections, answers: answers, progress: progress)
         let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: home)
             .analyse(in: all, corrections: corrections, places: answers, home: try await homeSettings(), progress: progress)
         let detected = tripAnalysis.trips
@@ -1275,16 +1275,18 @@ public actor AnalysisPipeline {
     /// with every run, so it stays as it was. Only the home is detected for this
     /// (`TripDetector.detectedHome`, a small part of the work), so the trips are detected once,
     /// with their count going on: a second detection on another clock stood silent for longer
-    /// than the step may.
-    private func patternsClock(all: [AssetSnapshot], corrections: TripCorrections, answers: RecurringPlaceAnswers) async throws -> TimeZone {
+    /// than the step may. The count is named first (`progress`, at 0).
+    private func patternsClock(all: [AssetSnapshot], corrections: TripCorrections, answers: RecurringPlaceAnswers,
+                               progress: (_ grouped: Int, _ of: Int) -> Void) async throws -> TimeZone {
         let zone = try await settleHomeTimeZone(all: all)
         guard try await homeSettings().currentMode == .automatic else { return zone }
-        func homeFound(on zone: TimeZone) -> DetectedHome? {
+        func homeFound(on zone: TimeZone, progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) -> DetectedHome? {
             var clock = calendar
             clock.timeZone = zone
-            return TripDetector(configuration: settings.trips.advanced, calendar: clock).detectedHome(in: all, corrections: corrections, places: answers)
+            return TripDetector(configuration: settings.trips.advanced, calendar: clock)
+                .detectedHome(in: all, corrections: corrections, places: answers, progress: progress)
         }
-        guard let found = homeFound(on: zone),
+        guard let found = homeFound(on: zone, progress: progress),
               let other = try await self.zone(ofHomeAt: found.center, components: nil, all: all),
               other.identifier != zone.identifier,
               let again = homeFound(on: other),

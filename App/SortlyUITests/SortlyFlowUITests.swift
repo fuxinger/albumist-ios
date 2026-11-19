@@ -16,12 +16,12 @@ final class SortlyFlowUITests: XCTestCase {
     // MARK: Helpers
 
     private func launch(_ extra: [String] = []) {
-        UITestAppEnd.end(app)
+        // UITestAppEnd.launch ends the app of the last launch first.
         app = XCUIApplication()
         // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"]
             + UITestStalls.arguments(besides: extra) + extra
-        app.launch()
+        UITestAppEnd.launch(app)
     }
 
     /// The first suggestion row of a list ("57 Fotos" is in every row, never in a button).
@@ -303,8 +303,8 @@ final class SortlyFlowUITests: XCTestCase {
         }
         if apply.waitForExistence(timeout: 5) {
             guard tap(apply, "open plan for \(what)", timeout: 20) else { return false }
-            sleep(3)
-            return true
+            // The plan's screen, not a fixed 3 s (the callers tap "Jetzt umsetzen" on it next).
+            return UITestWait.appears(app.navigationBars["Vorschau"], "plan screen for \(what)", timeout: 30)
         }
         print("UI_FACT nothing recommended for \(what): a new album of two photos instead")
         return openManualPlan("Testalbum \(what)")
@@ -544,10 +544,16 @@ final class SortlyFlowUITests: XCTestCase {
 
         // Apply
         if tap(button("ausgewählte Alben anlegen"), "open plan", timeout: 20) {
-            sleep(3)
-            shot("10-plan"); audit("plan")
+            let shownAt = Date()
             // The plan names every album it will make, not only the counts.
             let list = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Diese Alben werden")).firstMatch
+            // The plan's content before the audit, not only its bar (second review of C2): the
+            // start button, the unlock card or the album list; and at least the old 3 s.
+            UITestWait.until("plan screen shown", timeout: 30) {
+                app.buttons["plan.apply"].exists || app.staticTexts["Albumist freischalten"].exists || list.exists
+            }
+            UITestWait.atLeast(3, since: shownAt)
+            shot("10-plan"); audit("plan")
             print(list.waitForExistence(timeout: 5) ? "UI_STEP_OK plan lists albums" : "UI_STEP_MISSING plan lists albums")
             if list.exists {
                 app.swipeUp(); sleep(1)
@@ -596,7 +602,9 @@ final class SortlyFlowUITests: XCTestCase {
         prepare()
         // Travel atlas
         if tap(button("Reise-Atlas"), "open atlas", timeout: 30) {
-            sleep(8)
+            UITestWait.appears(app.navigationBars["Reise-Atlas"], "atlas screen", timeout: 30)
+            // pacing: the map draws its tiles for the screenshot (the screen is there)
+            sleep(3)
             shot("12-atlas")
             app.swipeUp(); sleep(1)
             shot("12b-atlas-list")
@@ -614,7 +622,13 @@ final class SortlyFlowUITests: XCTestCase {
                 back(); sleep(1)
             }
             if tap(app.buttons["Reise-Atlas teilen"], "share atlas") {
-                sleep(3)
+                let shownAt = Date()
+                // The card itself (its preview and the share button), and at least the old 3 s:
+                // the outlines and the cover load after the sheet is shown (second review of C2).
+                UITestWait.appears(button("Fertig"), "share card with its done button", timeout: 20)
+                UITestWait.appears(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Vorschau des Teilen-Bilds")).firstMatch,
+                                   "share card preview", timeout: 20)
+                UITestWait.atLeast(3, since: shownAt)
                 shot("13-share-card")
                 tap(button("Fertig"), "close share")
                 sleep(2) // the sheet slides away before the navigation bar answers again
@@ -693,6 +707,8 @@ final class SortlyFlowUITests: XCTestCase {
             if field.waitForExistence(timeout: 5) {
                 field.tap()
                 field.typeText("Rom")
+                // pacing: the results before the screenshot; nothing is asserted on them here
+                // (SearchUITests checks the results)
                 sleep(3)
                 shot("20-search-rom")
                 // Close the keyboard: it covers the tab bar, and a tap on "Übersicht" would hit it.
@@ -956,7 +972,13 @@ final class SortlyFlowUITests: XCTestCase {
             XCTAssertTrue(finished, "The trip \(step) did not finish")
             sleep(1)
             shot(shotName)
-            if finished { done.tap(); sleep(3) }
+            if finished {
+                let tapped = Date()
+                done.tap()
+                UITestWait.disappears(done, "trip workshop closed after \(step)", timeout: 20)
+                // The old 3 s at least: the trips list takes the split or merge after the close.
+                UITestWait.atLeast(3, since: tapped)
+            }
         }
 
         guard openWorkshop(tripRow(iceland), "split") else { return }
@@ -1116,8 +1138,11 @@ final class SortlyFlowUITests: XCTestCase {
     /// that each tap leads somewhere and back works: no dead rows, no crash, no lost screen.
     /// Returns how many taps led somewhere (this screen and the screens below it). Rows it
     /// leaves out are printed (UI_SWEEP_SKIP), so a sweep that taps nothing says why.
+    /// A row that does nothing fails the test in every list the sweep walks (G5-10 of the
+    /// review of 18.11.2026; before, only in "Vorschläge", elsewhere it was only a log line):
+    /// in 38 UI runs of 16.–19.11. no row on any of them did nothing.
     @discardableResult
-    private func sweep(_ screen: String, depth: Int, strict: Bool = false) -> Int {
+    private func sweep(_ screen: String, depth: Int) -> Int {
         var reached = 0
         let start = screenTitle
         let useCells = app.collectionViews.cells.count > 0
@@ -1148,7 +1173,8 @@ final class SortlyFlowUITests: XCTestCase {
             guard app.state == .runningForeground else {
                 print("UI_SWEEP_CRASH \(screen) › \(label)")
                 XCTFail("App crashed after tapping \(label) on \(screen)")
-                launch(); sleep(5)
+                launch()
+                UITestWait.appears(app.tabBars.firstMatch, "app back after the crash on \(screen)", timeout: 60)
                 return reached
             }
             let now = screenTitle
@@ -1167,7 +1193,7 @@ final class SortlyFlowUITests: XCTestCase {
                 reached += 1
             } else {
                 print("UI_SWEEP_NOOP \(screen) › \(label)")
-                if strict { XCTFail("Row '\(label)' on \(screen) did nothing") }
+                XCTFail("Row '\(label)' on \(screen) did nothing")
             }
         }
         return reached
@@ -1221,8 +1247,11 @@ final class SortlyFlowUITests: XCTestCase {
     func test3_TapThroughSweep() {
         continueAfterFailure = true
         completeOnboardingIfCutOff("test3")
+        let prepared = Date()
         prepare()
-        sleep(5)
+        UITestWait.appears(app.tabBars.firstMatch, "tab bar before the sweep", timeout: 60)
+        // The old 5 s at least (second review of C2): the overview settles before the sweep.
+        UITestWait.atLeast(5, since: prepared)
         // A sweep that reaches nothing proves nothing: every tab and the suggestions list must
         // lead somewhere. The albums tab is the exception only while the library really has no
         // album (a fresh simulator before any plan): then it must say so.
@@ -1263,7 +1292,7 @@ final class SortlyFlowUITests: XCTestCase {
         let suggestions = reviewSuggestionsButton()
         if suggestions.waitForExistence(timeout: 5) {
             suggestions.tap(); sleep(2)
-            check("Vorschläge", sweep("Vorschläge", depth: 0, strict: true))
+            check("Vorschläge", sweep("Vorschläge", depth: 0))
             back()
         } else {
             print("UI_STEP_MISSING sweep suggestions")
@@ -1289,25 +1318,25 @@ final class SortlyFlowUITests: XCTestCase {
         // Decisions and a plan in the history, made in a run that keeps the backup copy.
         launch(["-SortlyUITestBackup"])
         applyRecommended("backup", relaunchWith: ["-SortlyUITestBackup"])
-        sleep(5)
+        UITestWait.appears(app.tabBars.firstMatch, "app back after the backup plan", timeout: 60)
         // The copy must hold a history to bring back: when the earlier tests left none (test 1
         // cut off before its plan), this test creates one first instead of testing a backup
         // that has nothing to restore.
         ensureHistory()
-        // Going to the background writes the copy.
-        XCUIDevice.shared.press(.home)
-        sleep(4)
+        // Going to the background writes the copy: wait until iOS has the app there (a fixed
+        // 4 s brought device test06 back before it ever was, UI run 44480215847).
+        UITestWait.toBackground(app, "to write the backup copy", atLeast: 4, in: self)
         launch(["-SortlyUITestBackup", "-SortlyUITestRebuildDatabase"])
         let card = app.staticTexts["Entscheidungen zurückgeholt"]
         let restored = card.waitForExistence(timeout: 30)
         print(restored ? "UI_STEP_OK restored card" : "UI_STEP_MISSING restored card")
         XCTAssertTrue(restored, "The decisions did not come back after the database was rebuilt")
-        // The analysis starts again right away, as after a real rebuild.
-        sleep(4)
-        shot("40-restored-card"); audit("restored card")
-        let withHistory = anything("Alben und den Verlauf aus der Sicherung").exists
+        // The analysis starts again right away, as after a real rebuild. The card says that
+        // album records and history came back into the same library (waited for, not a fixed 4 s).
+        let withHistory = UITestWait.appears(anything("Alben und den Verlauf aus der Sicherung"),
+                                             "restore names album records and history", timeout: 30)
         print("UI_FACT restore included history \(withHistory)")
-        XCTAssertTrue(withHistory, "Album records and history were not restored into the same library")
+        shot("40-restored-card"); audit("restored card")
 
         // The history is back and the settings say when the copy was made.
         if tap(app.buttons["Einstellungen"], "settings after restore"),
@@ -1365,6 +1394,7 @@ final class SortlyFlowUITests: XCTestCase {
         let tapped = Date()
         let left = waitGone(app.buttons["plan.apply"], timeout: 30)
         print("UI_FACT plan left its preview: \(left) after \(Int(Date().timeIntervalSince(tapped))) s")
+        // pacing: the plan runs 5 s before the app is closed (the test's design); its start is checked above
         sleep(5)
         // Read by identifier: the running card's title ("Alben werden angelegt") is covered by
         // the sorting show, and a query over every element during the show took long on a slow
@@ -1482,20 +1512,22 @@ final class SortlyFlowUITests: XCTestCase {
         XCTAssertTrue(moved, "The analysis progress did not move in the foreground for 60 s")
         record("in the foreground")
 
-        // Leave the app (on the simulator iOS holds it right away) and come back.
-        XCUIDevice.shared.press(.home)
-        sleep(8)
+        // Leave the app (on the simulator iOS holds it right away) and come back: in the
+        // background for at least the old 8 s, counted once iOS has it there.
+        UITestWait.toBackground(app, "during the analysis", atLeast: 8, in: self)
         app.activate()
-        sleep(3)
-        let running = app.buttons["Pause"].exists || analysisIdle
-        print(running ? "UI_STEP_OK analysis still there after background" : "UI_STEP_MISSING analysis still there after background")
-        XCTAssertTrue(running, "After coming back the analysis neither runs nor is done")
-        XCTAssertFalse(app.buttons["analysis.resume"].exists, "Coming back from the background paused the analysis")
+        UITestWait.until("app in the foreground again", timeout: 30) { app.state == .runningForeground }
+        // Running or done, polled (no 10 s extra when it is already done), and for at least the
+        // old 3 s no "Fortsetzen": a pause that comes a moment after the return is seen too
+        // (second review of C2).
+        UITestWait.until("analysis still there after background", timeout: 10) { app.buttons["Pause"].exists || analysisIdle }
+        UITestWait.never("analysis not paused by the background", for: 3) { app.buttons["analysis.resume"].exists }
         record("after background")
         shot("61-after-background")
 
         // Switch tabs while it runs, then back to the overview.
         for name in ["Mediathek", "Alben"] {
+            // pacing: a while on each tab during the analysis (the test's design); the tap is checked
             if tap(tabButton(name), "tab \(name) during analysis") { sleep(3) }
         }
         tap(tabButton("Übersicht"), "back to overview during analysis")
@@ -1506,6 +1538,7 @@ final class SortlyFlowUITests: XCTestCase {
         // It goes on and ends with every photo analysed.
         var checks = 0
         while !analysisIdle && checks < 300 {
+            // pacing: the poll's interval
             sleep(3)
             if checks % 5 == 0 { record("while running") }
             checks += 1

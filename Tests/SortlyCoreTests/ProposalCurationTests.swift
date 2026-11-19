@@ -540,8 +540,11 @@ struct UnusualLibraryProposalTests {
         #expect(!none.contains { $0.kind == .trip })
     }
 
-    /// B17: the user already has an album of the trip's name with other photos. The plan
-    /// makes a new album in the trip folder and leaves the user's album alone.
+    /// B17: the user already has an album of the trip's name with other photos. Since "Gleicher
+    /// Name gewinnt" (Fuchs 16.11., ENTWURF-BEDIENUNG point 8; review P1-02: no share of the
+    /// content asked for) it is the trip's album: the plan adds the trip's photos to it (shown
+    /// in the preview, undoable) and makes no second "Rom, Mai 2025". Because the album holds
+    /// other photos, the suggestion is not chosen without the user looking at it.
     @Test func titleTakenByAUserAlbumWithOtherContent() throws {
         var lib = LibraryBuilder()
         lib.daily(from: "2025-01-01", to: "2025-12-31", at: Fixture.Places.munichHome, perDay: 1, hour: 18,
@@ -556,25 +559,27 @@ struct UnusualLibraryProposalTests {
         let userAlbum = CollectionSnapshot(id: "mine", title: "Rom, Mai 2025", assetIDs: others)
         let inventory = CollectionInventory([userAlbum])
         let match = AlbumMatcher().match([trip], against: inventory)[trip.id]
-        #expect(match?.status == .nameConflict)
+        #expect(match?.status == .extendable)
         let decision = ProposalDecision.recommended(for: trip, match: match)
-        #expect(decision == .createNew(title: nil, folderPath: nil))
+        #expect(decision == .extendExisting("mine"))
+        #expect(!ProposalDecision.isSafeToAcceptUnseen(trip, match: match))
 
         let plan = OrganizationPlanner(rootFolderTitle: "").makePlan(from: [ConfirmedProposal(proposal: trip, decision: decision)], inventory: inventory)
-        let created = plan.steps.compactMap { step -> String? in
-            switch step.operation {
-            case .createFolder(_, let title, _): "folder \(title)"
-            case .createAlbum(_, let title, _): "album \(title)"
-            default: nil
-            }
-        }
-        #expect(created == ["folder Reisen", "folder 2025", "album Rom, Mai 2025"])
         #expect(!plan.steps.contains { step in
             switch step.operation {
-            case .addAssets(.existing("mine"), _), .renameCollection("mine", _, _), .moveCollection("mine", _, _), .deleteCollection("mine", _): true
+            case .createFolder, .createAlbum: true
             default: false
             }
         })
-        #expect(plan.conflicts.isEmpty) // another folder: not even a hint
+        let added = plan.steps.reduce(into: Set<AssetID>()) { result, step in
+            if case .addAssets(.existing("mine"), let assets) = step.operation { result.formUnion(assets) }
+        }
+        #expect(added == trip.assetIDs)
+        #expect(!plan.steps.contains { step in
+            switch step.operation {
+            case .renameCollection("mine", _, _), .moveCollection("mine", _, _), .deleteCollection("mine", _): true
+            default: false
+            }
+        })
     }
 }

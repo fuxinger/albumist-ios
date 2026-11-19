@@ -216,16 +216,16 @@ final class AppModel {
         var photos: Int
         var proposals: Int
     }
-    /// The check mark and haptic of the finished card play once, not on every return.
-    @ObservationIgnored private var finishMomentPlayed = false
+    /// "Analyse fertig" is owed until seen, also when a short run slips in right after the run
+    /// that finished (`FinishMoment`); its check mark and haptic play once, not on every return.
+    @ObservationIgnored private var finishMoment = FinishMoment()
 
     /// True the first time the finished card is seen for this run: on screen only, so a run
     /// that ended while the app was in the background plays it when the user comes back
     /// (review minor: it was not shown at all then).
     func claimFinishMoment() -> Bool {
-        guard analysisFinished != nil, isOnScreen, !finishMomentPlayed else { return false }
-        finishMomentPlayed = true
-        return true
+        guard analysisFinished != nil, isOnScreen else { return false }
+        return finishMoment.claim()
     }
 
     @ObservationIgnored private var progressMailbox = ProgressMailbox()
@@ -499,6 +499,11 @@ final class AppModel {
     }
     /// The user's own trip splits and merges (I07), for the settings.
     private(set) var tripCorrections = TripCorrections()
+    /// Whether the trips on screen include the user's trip changes (`TripChangeLedger`): the trip
+    /// controls wait and the workshop says done only by it, not by the run's end alone.
+    private(set) var tripChangeLedger = TripChangeLedger()
+    /// `TripChangeLedger.State` for the workshop.
+    var tripChangeState: TripChangeLedger.State { tripChangeLedger.state }
     /// The user's answers to "Bist du hier öfter?", for the settings.
     private(set) var recurringPlaces = RecurringPlaceAnswers()
     /// What the latest analysis asks about recurring places, and where each trip mostly was.
@@ -1086,7 +1091,7 @@ final class AppModel {
         analysis.widths = storedWidths ?? .standard
         widthsFixed = storedWidths != nil
         analysisFinished = nil
-        finishMomentPlayed = false
+        finishMoment.runStarted()
         beginCard()
         if cause.isUserInitiated {
             // A quick check for new photos ("Neu prüfen") needs no background time: asking for
@@ -1100,6 +1105,7 @@ final class AppModel {
         }
         analysisGeneration += 1
         let generation = analysisGeneration
+        tripChangeLedger.runStarted(generation)
         let control = AnalysisRunControl()
         analysisControl = control
         startTicks(run: generation)
@@ -1168,6 +1174,11 @@ final class AppModel {
             let celebrate = AnalysisCardState.celebratesFinish(isComplete: end.isFinished,
                                                                wasQuickCheck: !runShowedBar,
                                                                ranFor: ContinuousClock.now - runClockStart)
+            // Owed before the wait below: a run that starts meanwhile (a trip change, new photos,
+            // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
+            finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
+            // The trips it made are on screen only once its end has refreshed the overview.
+            tripChangeLedger.runEnded(generation, madeSuggestions: finished.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)
             analysis.stoppedAt = analysis.position
             analysis.needsResume = end.needsResume
             analysis.isRunning = false
@@ -1196,6 +1207,7 @@ final class AppModel {
                 access = await library.access()
             }
             await refreshDerived()
+            tripChangeLedger.runSettled(generation)
             // Trip identities (names and corrections stay with their trip) are kept in the copy.
             saveSafetyBackup()
             // Another run started while this end waited (the follow-up, a change of the settings,
@@ -1204,15 +1216,18 @@ final class AppModel {
             // landed on the next run's card).
             let settled = end.afterWait(isNewest: analysisGeneration == generation)
             // "Analyse fertig" only when the analysis really finished (not paused, stopped,
-            // failed, or with a change of the settings left), and not for a quick check
-            // (point 4): in the app the card, outside it the notification. Outside the app also
-            // the notification; the card shows the moment once the app is on screen again.
-            if settled.finishMoment, celebrate, !Task.isCancelled {
-                analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
-                updateCard()
-                if UIApplication.shared.applicationState != .active {
-                    ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
+            // failed, or with a change of the settings left), owed by a long run (point 4: never
+            // for a quick check alone), also one whose own end a newer run overtook: in the app
+            // the card, outside it the notification (once). Outside the app also the card, shown
+            // once the app is on screen again.
+            if !Task.isCancelled {
+                let shown = finishMoment.afterWait(settled: settled.finishMoment,
+                                                   appActive: UIApplication.shared.applicationState == .active)
+                if shown.card {
+                    analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
+                    updateCard()
                 }
+                if shown.notification { ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count) }
             }
             BackgroundWork.scheduleRefinement()
             if end.isFinished { retry.reset() }
@@ -1755,6 +1770,7 @@ final class AppModel {
         // `beginCard` cancels it; `tickNow` only skips a tick that is not the newest run's.
         analysisGeneration += 1
         let generation = analysisGeneration
+        tripChangeLedger.runStarted(generation)
         let control = AnalysisRunControl()
         analysisControl = control
         startTicks(run: generation)
@@ -1802,6 +1818,8 @@ final class AppModel {
             tickTask?.cancel()
             tickTask = nil
         }
+        // The trips it made are on screen only once its end has refreshed the overview.
+        tripChangeLedger.runEnded(generation, madeSuggestions: report.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)
         analysis.isRunning = false
         analysis.pausing = false
         pausingSince = nil
@@ -1817,8 +1835,12 @@ final class AppModel {
         analysis.waiting = nil
         analysisBar = barBefore
         updateCard()
-        guard let ran = report else { return (false, end.next, generation) }
+        guard let ran = report else {
+            tripChangeLedger.runSettled(generation)
+            return (false, end.next, generation)
+        }
         await refreshDerived()
+        tripChangeLedger.runSettled(generation)
         saveSafetyBackup(immediately: true)
         return (ran.pausedBecause == nil, end.next, generation)
     }
@@ -1851,39 +1873,43 @@ final class AppModel {
         }
     }
 
-    func refreshDerived() async {
-        guard let store, let pipeline else { return }
+    /// `afterFailure`: the one more refresh after a failed one (`TripChangeLedger.refreshFailed`).
+    func refreshDerived(afterFailure: Bool = false) async {
+        guard let store, let pipeline else {
+            // A refresh asked for after a failure must not leave the trip controls waiting.
+            tripChangeLedger.refreshCouldNotStart()
+            return
+        }
         let call = derivedCalls.begin()
+        // The trip changes in the suggestions the store holds now (`TripChangeLedger`), until
+        // this call is over, whichever way it ends.
+        tripChangeLedger.refreshBegan(call)
+        defer { tripChangeLedger.refreshEnded(call) }
         await reconcileManagedAlbums(quiet: true)
         do {
+            // Everything is read first and assigned together, only by the newest call: an older
+            // call that finished later put back older suggestions or facts next to newer states
+            // until the next refresh (reviews G4-03, P4-10). The reopenings after a recheck are
+            // decisions, applied once whichever call gets them.
             // Results of an older matching version are matched again once (review 16.11.).
             let refresh = try await pipeline.refreshMatchesIfOutdated()
-            MainThreadWatch.shared.section("refresh: snapshot") {
-                snapshot = refresh.snapshot
-                reopenAfterRecheck(refresh.reopened)
-            }
-            recheckedSuggestions = try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0
-            recurringPlaceReport = try await pipeline.recurringPlaceReport()
-            detectedHome = try await pipeline.detectedHome()
-            homeChangeNotice = try await pipeline.homeChangeNotice()
+            reopenAfterRecheck(refresh.reopened)
+            let snapshot = refresh.snapshot
+            let rechecked = try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0
+            let recurringReport = try await pipeline.recurringPlaceReport()
+            let home = try await pipeline.detectedHome()
+            let homeNotice = try await pipeline.homeChangeNotice()
             let newFacts = try await pipeline.currentFacts()
             // The preview ranks of the whole library, worked out off the main thread with the
             // facts (second review of the build 36 fix; `previewRanks` only falls back to it).
             let newRanks = await Task.detached(priority: .userInitiated) { PreviewRank.ranks(of: newFacts) }.value
-            MainThreadWatch.shared.section("refresh: facts") {
-                facts = newFacts
-                previewRanksCache = newRanks
-            }
-            inventory = try await store.loadInventory()
-            let inventory = inventory
+            let inventory = try await store.loadInventory()
             // Albumist's own albums overlap on purpose (a country holds its trips).
             let own = Set(managedAlbums.map(\.albumID))
-            mergeSuggestions = await Task.detached(priority: .utility) { AlbumOverlapAnalyzer().suggestions(in: inventory, excluding: own) }.value
+            let merges = await Task.detached(priority: .utility) { AlbumOverlapAnalyzer().suggestions(in: inventory, excluding: own) }.value
             let plans = try await store.planHistory(limit: historyLimit + 1)
-            historyHasMore = plans.count > historyLimit
-            history = plans.prefix(historyLimit).filter { $0.reverts == nil }
-            undonePlans = try await store.undoneTargets()
-            Purchases.shared.settleUndone(undonePlans)
+            let undone = try await store.undoneTargets()
+            Purchases.shared.settleUndone(undone)
             let contents = try await store.results(ContentAnalysis.self, kind: "content")
             let stored = try await store.overrides()
             let overrides = OverrideSet(stored)
@@ -1891,11 +1917,10 @@ final class AppModel {
             for o in stored where o.decision == .neverAdd {
                 if case .assetInSource(let asset, let source) = o.scope { removed[source, default: []].insert(asset) }
             }
-            removedFromProposals = removed
             // Everything that grows with the library is worked out off the main actor; here
             // it is only assigned (review of d612bc0: with 50,000 photos this was seconds of
             // main-thread work at every call, a lead for the 7 s Pause tap of the stress run).
-            let facts = facts, snapshot = snapshot, settings = settings
+            let settings = settings
             let managed = managedAlbums, scope = analysisScope
             let derived = try await Task.detached(priority: .userInitiated) {
                 // The analysed photos still without their image labels ("Themen" or "Dokumente"
@@ -1904,7 +1929,7 @@ final class AppModel {
                 // pass through the main actor; only while one of the two is on, and only those
                 // photos, none once they are caught up (second review of the labels fix, 11).
                 let labels = try await AnalysisPipeline.photosWaitingForLabels(in: store, settings: settings)
-                return DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
+                return DerivedLibraryStatus.derive(facts: newFacts, snapshot: snapshot, settings: settings, overrides: overrides,
                                                    contents: contents, labelsMissing: labels.missing,
                                                    labelsRetrying: labels.retrying, managed: managed,
                                                    inventory: inventory, scope: scope)
@@ -1912,9 +1937,33 @@ final class AppModel {
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
             guard derivedCalls.isNewest(call), scope == analysisScope else { return }
+            MainThreadWatch.shared.section("refresh: snapshot") { self.snapshot = snapshot }
+            recheckedSuggestions = rechecked
+            recurringPlaceReport = recurringReport
+            detectedHome = home
+            homeChangeNotice = homeNotice
+            MainThreadWatch.shared.section("refresh: facts") {
+                facts = newFacts
+                previewRanksCache = newRanks
+            }
+            self.inventory = inventory
+            mergeSuggestions = merges
+            historyHasMore = plans.count > historyLimit
+            history = plans.prefix(historyLimit).filter { $0.reverts == nil }
+            undonePlans = undone
+            removedFromProposals = removed
             MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot, call: call) }
+            tripChangeLedger.refreshShown(call)
         } catch {
             message = .failure(error.localizedDescription)
+            // The newest refresh failed with a trip change written but not on screen: one more,
+            // once per failure chain (the controls wait for it meanwhile).
+            if tripChangeLedger.refreshFailed(call, newest: derivedCalls.isNewest(call), retry: afterFailure) {
+                Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    await refreshDerived(afterFailure: true)
+                }
+            }
         }
         SpotlightIndex.scheduleUpdate(self)
     }
@@ -2176,7 +2225,8 @@ final class AppModel {
     /// be made. `changeTrips` refuses exactly then; the workshop and the settings grey these
     /// controls and say why next to them (`TripChangeWaitNote`).
     var tripChangeWait: TripWorkshop.Wait? {
-        TripWorkshop.wait(creatingAlbums: execution.isRunning, analysing: analysis.isRunning, check: runIsShortCheck)
+        TripWorkshop.wait(creatingAlbums: execution.isRunning,
+                          analysing: analysis.isRunning, settling: tripChangeLedger.settling, check: runIsShortCheck)
     }
 
     /// What the workshop does once `changeTrips` stored a change and asked for its run: wait for
@@ -2206,6 +2256,7 @@ final class AppModel {
             let updated = change(try await pipeline.tripCorrections())
             try await pipeline.setTripCorrections(updated)
             tripCorrections = updated
+            tripChangeLedger.changeStored()
             saveSafetyBackup()
             startAnalysis(cause: .userChange)
             return true
@@ -3138,6 +3189,7 @@ final class AppModel {
         if let failure = execution.failure { lines.append("last execution failure: \(PlanDiagnostics.reasonCode(failure))") }
         if let deletion = DeletionLog.last { lines.append("last deletion \(deletion)") }
         lines += BackgroundRunLog.summary
+        lines += BatteryLog.summary + EnergyMetricsSubscriber.summary
         return lines.joined(separator: "\n")
     }
 

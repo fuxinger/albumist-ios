@@ -136,7 +136,8 @@ class FullGateTests(unittest.TestCase):
         self.assertEqual(ci_gate.check()[:2], (True, True))
 
     def test_a_ui_run_without_a_green_full_verdict_is_not_green(self):
-        for verdict in (("full", "failure"), None):
+        # A skipped or cancelled verdict job checked nothing (G5-08): never green either.
+        for verdict in (("full", "failure"), ("full", "skipped"), ("full", "cancelled"), None):
             with self.subTest(verdict=verdict):
                 ci_gate.api = self.fake(ui=("completed", "success"), verdict=verdict)
                 done, ok, reason = ci_gate.check()
@@ -171,6 +172,13 @@ class FullGateTests(unittest.TestCase):
     def test_green_ui_run_on_this_commit_is_green(self):
         ci_gate.api = self.fake(ui=("completed", "success"))
         self.assertEqual(ci_gate.check()[:2], (True, True))
+
+    def test_a_skipped_ui_run_is_not_green(self):
+        # G5-08: a UI flow run that GitHub skipped ran no group.
+        ci_gate.api = self.fake(ui=("completed", "skipped"))
+        done, ok, reason = ci_gate.check()
+        self.assertEqual((done, ok), (True, False))
+        self.assertIn("ended with 'skipped'", reason)
 
     def test_red_ui_run_stops(self):
         ci_gate.api = self.fake(ui=("completed", "failure"))

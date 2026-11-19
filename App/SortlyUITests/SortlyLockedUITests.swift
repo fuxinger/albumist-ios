@@ -134,14 +134,13 @@ final class SortlyLockedUITests: XCTestCase {
         print("UI_FACT locked: plans taken back to have suggestions again: \(undone)")
         back(); sleep(1)
         tap(button("Fertig"), "close settings (locked)")
-        sleep(3)
+        UITestWait.disappears(app.navigationBars["Einstellungen"], "settings closed (locked)", timeout: 20)
         return undone
     }
 
     /// Ends the app and starts it again with the same arguments, then waits for the overview.
     private func relaunch() {
-        UITestAppEnd.end(app)
-        app.launch()
+        UITestAppEnd.launch(app)  // ends it first
         let idle = anything("Fotos analysiert").waitForExistence(timeout: 120) || anything("Analyse aktuell").exists
         print(idle ? "UI_STEP_OK locked overview after relaunch" : "UI_STEP_MISSING locked overview after relaunch")
     }
@@ -207,7 +206,8 @@ final class SortlyLockedUITests: XCTestCase {
         // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked", "-SortlyUITestFastStart"]
             + UITestStalls.arguments(besides: [])
-        app.launch()
+        // Through the helper: the app of the test before is ended by its process id first.
+        UITestAppEnd.launch(app)
         let deadline = Date().addingTimeInterval(900)
         var streak = 0
         while Date() < deadline && streak < 3 {
@@ -217,7 +217,7 @@ final class SortlyLockedUITests: XCTestCase {
             sleep(2)
         }
         print(streak >= 3 ? "UI_STEP_OK prepared (locked)" : "UI_STEP_MISSING prepared (locked)")
-        UITestAppEnd.end(app)
+        // The next launch (UITestAppEnd.launch) ends this app first.
         app = XCUIApplication()
     }
 
@@ -226,7 +226,7 @@ final class SortlyLockedUITests: XCTestCase {
         prepareLibrary()
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked",
                                "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "1"] + UITestStalls.arguments(besides: [])
-        app.launch()
+        UITestAppEnd.launch(app)
         // A cut-off test 1 left the app at its welcome screen (run 43816787321).
         if !UITestOnboarding.fullFlowReachedItsEnd { UITestOnboarding.completeIfNeeded(app, in: "test7") }
         // The overview is idle (the earlier runs analysed the demo library).
@@ -275,7 +275,7 @@ final class SortlyLockedUITests: XCTestCase {
         XCTAssertNotNil(free, "Settings shows no readable \"Noch kostenlos\"")
         let left = free ?? 1
         guard tap(apply, "open plan (locked)", timeout: 20) else { return }
-        sleep(3)
+        guard UITestWait.appears(app.navigationBars["Vorschau"], "plan screen (locked)", timeout: 30) else { return }
 
         // The unlock card comes exactly when the plan needs more albums than are free
         // (PlanReviewView: !purchases.allows(albums: facts.freeAlbumUse)). freeAlbumUse of a
@@ -301,12 +301,12 @@ final class SortlyLockedUITests: XCTestCase {
             XCTAssertTrue(app.buttons["unlock.buy"].exists, "No unlock button")
             XCTAssertTrue(button("Kauf wiederherstellen").exists, "No restore button")
             guard tap(button("jetzt kostenlos anlegen"), "keep the free albums only") else { return }
-            sleep(3)
         } else {
             print("UI_FACT locked: the plan has \(planned) albums, they fit the \(left) free ones")
         }
         let start = app.buttons["plan.apply"]
-        XCTAssertTrue(start.waitForExistence(timeout: 20), "The plan within the free albums cannot be applied")
+        // Waited for (also after "jetzt kostenlos anlegen", which had a fixed 3 s before).
+        UITestWait.appears(start, "the plan within the free albums can be applied (locked)", timeout: 23)
         // What is free afterwards: the free albums less what this plan uses ("Die ersten N"
         // made the plan anew, so its summary is read again).
         let used = cardShown ? (rowCount("Neue Alben", timeout: 10) ?? 0) + (rowCount("Ergänzte Alben", timeout: 0) ?? 0) : planned

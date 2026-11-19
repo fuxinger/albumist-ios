@@ -161,6 +161,59 @@ struct TripTests {
         let (lib, _) = romeLibrary()
         #expect(detector.detect(in: lib.assets).map(\.id) == detector.detect(in: lib.assets.reversed()).map(\.id))
     }
+
+    /// A week in one place on Taveuni (Fiji), which the 180th meridian crosses: the evenings
+    /// are a few hundred metres on either side of it. It is one stop, as anywhere else, not two
+    /// (the cells of 179.99° and −179.99° were at opposite ends of the grid).
+    @Test func aStayOnTheDateLineIsOneStop() {
+        let east = GeoCoordinate(latitude: -16.80, longitude: 179.997)
+        let west = GeoCoordinate(latitude: -16.80, longitude: -179.997)
+        #expect(GeoMath.distance(east, west) < 1_000)
+        var dates: [Date] = [], coordinates: [GeoCoordinate] = []
+        for day in 0..<7 {
+            for (hour, place) in [(10, east), (20, west), (21, east)] {
+                dates.append(Fixture.date("2026-08-0\(day + 1) \(hour):00"))
+                coordinates.append(place)
+            }
+        }
+        let classified = TripDetector.classify(dates: dates, coordinates: coordinates, calendar: Fixture.calendar)
+        #expect(classified.stops == 1)
+        #expect(classified.kind == .vacation)
+        // Three places on the islands a day's drive apart, all on the west side and one across:
+        // still three stops.
+        let stops = [GeoCoordinate(latitude: -17.75, longitude: 177.45), GeoCoordinate(latitude: -16.45, longitude: 179.35), west]
+        let tour = TripDetector.classify(dates: (0..<6).map { Fixture.date("2026-08-0\($0 + 1) 20:00") },
+                                         coordinates: (0..<6).map { stops[$0 / 2] }, calendar: Fixture.calendar)
+        #expect(tour.stops == 3)
+    }
+
+    /// San Francisco and Tokyo on one trip: nothing near the date line. The stops are counted
+    /// on the usual grid, exactly as for each city alone: two places in San Francisco a few
+    /// metres apart, in one cell of that grid, are one stop, wherever a grid with its seam
+    /// elsewhere would cut between them.
+    @Test func aTripAcrossThePacificCountsItsStopsOnTheUsualGrid() throws {
+        let latitude = 37.7749
+        func plain(_ lon: Double) -> GeoCell { GeoCell(GeoCoordinate(latitude: latitude, longitude: lon), sizeMeters: 25_000) }
+        func moved(_ lon: Double) -> GeoCell { GeoCell(GeoCoordinate(latitude: latitude, longitude: lon + 360), sizeMeters: 25_000) }
+        // Two points less than a metre apart in San Francisco where a grid moved by 360° cuts
+        // and the usual one does not.
+        var a = try #require(stride(from: -122.6, to: -122.2, by: 0.001).first { plain($0) == plain($0 + 0.001) && moved($0) != moved($0 + 0.001) })
+        var b = a + 0.001
+        while b - a > 0.000_005 {
+            let mid = (a + b) / 2
+            if moved(mid) == moved(a) { a = mid } else { b = mid }
+        }
+        let sf = [GeoCoordinate(latitude: latitude, longitude: a), GeoCoordinate(latitude: latitude, longitude: b)]
+        #expect(GeoMath.distance(sf[0], sf[1]) < 1)
+        let tokyo = GeoCoordinate(latitude: 35.6762, longitude: 139.6503)
+        var dates: [Date] = [], coordinates: [GeoCoordinate] = []
+        for day in 0..<6 {
+            dates.append(Fixture.date("2026-09-0\(day + 1) 20:00"))
+            coordinates.append(day < 3 ? sf[day % 2] : tokyo)
+        }
+        let classified = TripDetector.classify(dates: dates, coordinates: coordinates, calendar: Fixture.calendar)
+        #expect(classified.stops == 2)
+    }
 }
 
 @Suite("Frequent places")

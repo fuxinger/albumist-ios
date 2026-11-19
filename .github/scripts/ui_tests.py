@@ -34,9 +34,10 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
   settle --udid U [--limit S]
       Waits like every pass does before its first test (`settle`, below) and always exits 0;
       ci.yml's "Fresh simulator" step uses it after its boot.
-  classify LOG [--status N] [--crash-report F]... [--bundle-json F]
+  classify LOG [--status N] [--crash-report F]... [--bundle-json F] [--earlier FIRST_LOG]
       Prints what `run` would decide for a finished pass (for trying the rules on a log;
-      without --bundle-json the result bundle counts as clean).
+      without --bundle-json the result bundle counts as clean). For a repeat, --earlier names
+      the log of the group's first pass, as `run` passes it (a test that passed there counts).
 
 The retry rule (`decide`): a pass that failed is repeated ONCE, on a simulator that is shut
 down, ERASED (app, photos, the runner's marker files) and booted and prepared again like a
@@ -91,7 +92,8 @@ a crash report means the app crashed; a process that started 30 s or more after 
 "UI_FACT clock T launch" means the simulator began the launch late (simulator/XCTest side);
 a process that started at once means the app itself did not come up in time (app side);
 without a record of a new process the cause stays open. A pass that ran no test at all
-fails (a renamed test would otherwise make an empty, green selection), and a repeat whose
+fails (a renamed test would otherwise make an empty, green selection), and so does a group in
+which no test passed because every test skipped itself (XCTSkip; G5-08), and a repeat whose
 selection would be empty is not started (only possible when every --only entry is a single
 test; a class or skip-only selection always starts the repeat, see `retry_arguments`). Both passes keep their own log and result bundle
 (NAME.xcresult, NAME-retry.xcresult); the screenshots of the tests that passed in the first
@@ -364,19 +366,27 @@ def daemon_crash(log: str, bundle: list[str]) -> tuple[str, list[str], list[str]
 
 
 def decide(status: int, log: str, crash_reports: list[str] | None = None, probe: str = "",
-           bundle: list[str] | None = None) -> tuple[str, list[str]]:
+           bundle: list[str] | None = None, earlier: str = "") -> tuple[str, list[str]]:
     """("pass" | "retry" | "fail", reasons) for one finished pass.
 
     status: exit code of xcodebuild; log: its whole output; crash_reports: paths of Sortly*
     reports written during the pass; probe: output of a simctl call made right after the pass
     (says whether the simulator is still there); bundle: `bundle_findings` of the pass's
-    result bundle (or the reason it could not be read). Both the log and the bundle must
-    show nothing about the app before a pass is repeated.
+    result bundle (or the reason it could not be read); earlier: the log of the group's first
+    pass when this is its repeat. Both the log and the bundle must show nothing about the app
+    before a pass is repeated.
+
+    A green pass needs a test that passed, in it or in the group's first pass (the repeat runs
+    only what did not pass there): a group whose every test skipped itself (XCTSkip) tested
+    nothing and is red, never green (G5-08 of the review of 18.11.2026).
     """
     ran = finished_tests(log)
     if status == 0:
         if not ran:
             return "fail", ["no test ran (a renamed test, or a selection that matches nothing)"]
+        if "passed" not in [*finished_tests(earlier).values(), *ran.values()]:
+            skipped = sum(1 for state in ran.values() if state == "skipped")
+            return "fail", [f"no test passed: {skipped} skipped themselves (XCTSkip), so the group tested nothing"]
         return "pass", []
     log, bundle, daemon = daemon_crash(log, list(bundle or []))
     real, infra = scan(log)
@@ -1242,6 +1252,36 @@ def print_crash_reports(paths: list[str], label: str) -> None:
 
 
 def command_run(args) -> int:
+    began = time.time()
+    try:
+        return run_group(args)
+    finally:
+        try:
+            budget_check(args.name, time.time() - began, getattr(args, "budget_min", 0) or 0)
+        except Exception as error:  # a report: never in place of the run's exit code or error
+            print(f"UI_BUDGET {args.name}: not checked ({type(error).__name__}: {error})", flush=True)
+
+
+def budget_check(name: str, seconds: float, budget_min: float) -> bool:
+    """The group's time against its budget (review P5-05: one verdict took 84 min, nobody saw
+    which group grew). Prints UI_BUDGET; over the budget a warning on the run page and a line in
+    the job summary. Never red: a slow Mac is no test result. True when within the budget."""
+    minutes = seconds / 60
+    within = not budget_min or minutes <= budget_min
+    budget = f"budget {budget_min:g} min" if budget_min else "no budget"
+    print(f"UI_BUDGET {name} {minutes:.1f} min ({budget}){'' if within else ' OVER'}", flush=True)
+    if not within:
+        text = (f"{name} took {minutes:.0f} min, over its budget of {budget_min:g} min "
+                "(.github/ui-groups.json, budget_min): a slow Mac or a test that grew; see UI_PASS_TIME and UI_TIMING")
+        print(f"::warning title=UI {name} over its time budget::{text}", flush=True)
+        path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if path:
+            with open(path, "a", encoding="utf-8") as out:
+                out.write(f"\n**Time budget:** {text}\n")
+    return within
+
+
+def run_group(args) -> int:
     os.makedirs(args.out, exist_ok=True)
     chosen = selection(args.only, args.skip)
     if args.increase_contrast:
@@ -1286,7 +1326,8 @@ def command_run(args) -> int:
                 report(text, status, "retry")
                 crashes = crash_reports(started) if status else []
                 bundle = read_bundle(bundle_path) if status else []
-                verdict, reasons = decide(status, text, crashes, bundle=watchdog_bundle(bundle) if stopped else bundle)
+                verdict, reasons = decide(status, text, crashes, bundle=watchdog_bundle(bundle) if stopped else bundle,
+                                          earlier=first_log)
                 # "infra": the repeat failed on the simulator or XCTest alone again.
                 final = {"pass": "pass", "retry": "infra"}.get(verdict, "fail")
                 again = daemon_crash_tests(first_log) & daemon_crash_tests(text)
@@ -1454,6 +1495,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--increase-contrast", action="store_true")
     r.add_argument("--video")
     r.add_argument("--a11y-summary", action="store_true")
+    r.add_argument("--budget-min", type=float, default=0,
+                   help="the group's time budget in minutes (.github/ui-groups.json); over it: a warning, not red")
     r.add_argument("--out", default="build")
     r.add_argument("--deadline", type=float, default=0,
                    help="epoch second by which a pass must end (the job's limit minus a margin); 0: none")
@@ -1465,6 +1508,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--status", type=int, default=65)
     c.add_argument("--crash-report", action="append", default=[])
     c.add_argument("--bundle-json", help="output of `xcrun xcresulttool get test-results tests` for the pass")
+    c.add_argument("--earlier", help="for a repeat: the log of the group's first pass")
     args = parser.parse_args(argv)
     # Space-separated lists are allowed too (matrix values in ui.yml).
     for key in ("only", "skip"):
@@ -1529,7 +1573,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.bundle_json:
             with open(args.bundle_json, encoding="utf-8") as tests:
                 bundle = parse_bundle(tests.read())
-        verdict, reasons = decide(args.status, text, args.crash_report, bundle=bundle)
+        earlier = ""
+        if args.earlier:
+            with open(args.earlier, encoding="utf-8", errors="replace") as first:
+                earlier = first.read()
+        verdict, reasons = decide(args.status, text, args.crash_report, bundle=bundle, earlier=earlier)
         print(f"{verdict}: {'; '.join(reasons)}")
         return 0
     return command_run(args)

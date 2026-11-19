@@ -68,7 +68,8 @@ public enum FactsAssembler {
         frequentPlaces: [FrequentPlace],
         groups: [ObservationGroup],
         inventory: CollectionInventory,
-        home: Set<AssetID> = []
+        home: Set<AssetID> = [],
+        withoutCountry: Set<AssetID> = []
     ) -> [AssetFacts] {
         var tripOf: [AssetID: SortlyID] = [:]
         for trip in trips { for id in trip.geotaggedAssetIDs { tripOf[id] = trip.id } }
@@ -105,7 +106,9 @@ public enum FactsAssembler {
                 atHome: home.contains(asset.id),
                 looksLikeDocument: content?.isDocumentLike ?? false,
                 // A failed read says nothing about the picture: it stays unknown.
-                contentKnown: content.map { $0.failedAttempts == nil } ?? false
+                contentKnown: content.map { $0.failedAttempts == nil } ?? false,
+                // Only while it has no place: one found since wins.
+                countryOutOfReach: place == nil && withoutCountry.contains(asset.id)
             )
         }
     }

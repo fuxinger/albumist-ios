@@ -41,6 +41,57 @@ struct GeoTests {
         }
     }
 
+    /// G1-01 (review 18.11.2026): far in the north the query looked at 25 sample points instead
+    /// of every cell the circle touches, and a photo within the radius could be missed (78° N
+    /// Spitzbergen, 85° N, 88.5° N, across the antimeridian). The query must find exactly what a
+    /// check of every point finds, at any latitude, also with a radius below the cell size.
+    @Test(arguments: [0.0, 48.1, 60.0, 71.0, 78.2, 85.0, 88.5, 89.6, -54.8, -78.0, -89.7])
+    func spatialIndexFindsEveryNeighbourAtAnyLatitude(latitude: Double) {
+        var rng = SeededRandom(seed: UInt64(bitPattern: Int64(latitude * 1_000)))
+        for (cellSize, radius) in [(5_000.0, 5_000.0), (5_000.0, 3_100.0), (200.0, 200.0)] {
+            var points: [(GeoCoordinate, Int)] = []
+            var centers: [GeoCoordinate] = []
+            for i in 0..<60 {
+                // Half of the centres right at the antimeridian.
+                let lon = i.isMultiple(of: 2) ? rng.double(-180, 180) : (rng.double(0, 1) < 0.5 ? 179.99 : -179.99)
+                let center = GeoCoordinate(latitude: max(-90, min(90, latitude + rng.double(-0.02, 0.02))), longitude: lon)
+                centers.append(center)
+                for _ in 0..<40 {
+                    // Points in every direction up to a bit beyond the radius.
+                    let distance = rng.double(0, 1.15 * radius), bearing = rng.double(0, 2 * .pi)
+                    points.append((Self.destination(center, distance: distance, bearing: bearing), points.count))
+                }
+                // Straight north and south at the radius: the latitude band of a cell is not a
+                // degree of the earth's own size.
+                points.append((Self.destination(center, distance: 0.999 * radius, bearing: 0), points.count))
+                points.append((Self.destination(center, distance: 0.999 * radius, bearing: .pi), points.count))
+            }
+            let index = GeoSpatialIndex(cellSize: cellSize, points: points)
+            var missed = 0, extra = 0
+            for center in centers {
+                let expected = Set(points.filter { GeoMath.distance($0.0, center) <= radius }.map(\.1))
+                let actual = Set(index.query(near: center, radius: radius).map(\.element))
+                missed += expected.subtracting(actual).count
+                extra += actual.subtracting(expected).count
+            }
+            #expect(missed == 0, "latitude \(latitude), cell \(cellSize) m, radius \(radius) m: \(missed) points within the radius missed")
+            #expect(extra == 0)
+        }
+    }
+
+    /// The point `distance` metres from `start` in direction `bearing` (radians from north), on
+    /// the sphere `GeoMath.distance` measures on.
+    static func destination(_ start: GeoCoordinate, distance: Double, bearing: Double) -> GeoCoordinate {
+        let d = distance / GeoMath.earthRadiusMeters
+        let lat1 = start.latitude * .pi / 180, lon1 = start.longitude * .pi / 180
+        let lat2 = asin(sin(lat1) * cos(d) + cos(lat1) * sin(d) * cos(bearing))
+        let lon2 = lon1 + atan2(sin(bearing) * sin(d) * cos(lat1), cos(d) - sin(lat1) * sin(lat2))
+        var lon = lon2 * 180 / .pi
+        while lon > 180 { lon -= 360 }
+        while lon < -180 { lon += 360 }
+        return GeoCoordinate(latitude: lat2 * 180 / .pi, longitude: lon)
+    }
+
     @Test func dbscanSeparatesTwoDenseAreasAndNoise() {
         var coords: [GeoCoordinate] = []
         for i in 0..<30 { coords.append(Fixture.jitter(Fixture.Places.munichHome, seed: i, meters: 80)) }

@@ -89,6 +89,8 @@ final class AccessibilityUITests: XCTestCase {
         var undo: String
         var atlas: String
         var shareAtlas: String
+        /// The share card's preview image (ShareCardSheet).
+        var sharePreview: String
         var searchQuery: String
         var country: String
         /// Titles of screens the walk opens and goes back from: it waits for their bar.
@@ -100,14 +102,14 @@ final class AccessibilityUITests: XCTestCase {
                                   suggestionTitle: "Vorschlag", suggestionsTitle: "Vorschläge", rowMarker: "Fotos",
                                   starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
                                   applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
-                                  shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom", country: "Italien",
+                                  shareAtlas: "Reise-Atlas teilen", sharePreview: "Vorschau des Teilen-Bilds", searchQuery: "Rom", country: "Italien",
                                   receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ suggestions?.*",
                                    suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
                                    starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
                                    applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
-                                   shareAtlas: "Share Travel Atlas", searchQuery: "Rome", country: "Italy",
+                                   shareAtlas: "Share Travel Atlas", sharePreview: "Preview of the share image", searchQuery: "Rome", country: "Italy",
                                    receiptTitle: "Changes", historyTitle: "History and Undo")
     }
 
@@ -326,6 +328,7 @@ final class AccessibilityUITests: XCTestCase {
 
         // Travel atlas and the share image
         if tap(button(w.atlas), "\(tag) open atlas", timeout: 20), opened(app.navigationBars[w.atlas], "\(tag) atlas") {
+            // pacing: the map draws before the audit; opened() checked the atlas screen
             sleep(3)
             check("\(tag) atlas", english: english)
             if !short {
@@ -341,7 +344,13 @@ final class AccessibilityUITests: XCTestCase {
                 }
                 app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
-                    sleep(3)
+                    let shownAt = Date()
+                    // The card itself before the audit (its preview), and at least the old 3 s:
+                    // the outlines and the cover load after the sheet is shown (second review of C2).
+                    UITestWait.appears(button(w.done), "\(tag) share card with its done button", timeout: 20)
+                    UITestWait.appears(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", w.sharePreview)).firstMatch,
+                                       "\(tag) share card preview", timeout: 20)
+                    UITestWait.atLeast(3, since: shownAt)
                     check("\(tag) share sheet", english: english)
                     tap(button(w.done), "\(tag) close share")
                     sleep(2)
@@ -403,6 +412,8 @@ final class AccessibilityUITests: XCTestCase {
             if field.waitForExistence(timeout: 5) {
                 field.tap()
                 field.typeText(w.searchQuery)
+                // pacing: the results before the audit; nothing is asserted on them here
+                // (SearchUITests checks the results)
                 sleep(3)
                 // The keyboard covers the lower half; the results and chips above it count.
                 check("\(tag) search results", english: english)
@@ -728,8 +739,8 @@ final class AccessibilityUITests: XCTestCase {
     private func launch(english: Bool = false, textSize: String? = nil, dark: Bool = false) {
         // The app's stalls and stacks of each launch (UITestStalls; the contrast run's long
         // stalls before "close settings" had no stack, UI run 44012530107).
-        // Ended first: the stall file holds the app's process id for the Mac (`UITestAppEnd`).
-        UITestAppEnd.end(app)
+        // The app of the last launch is ended in UITestAppEnd.launch (its process id stays known
+        // when the report removes the stall file, `UITestLaunchRecord`).
         UITestStalls.report()
         if !stallsReportedAtEnd {
             stallsReportedAtEnd = true
@@ -742,7 +753,7 @@ final class AccessibilityUITests: XCTestCase {
         accessibilitySize = textSize?.contains("Accessibility") ?? false
         if dark { arguments.append("-SortlyUITestDark") }
         app.launchArguments = arguments
-        app.launch()
+        UITestAppEnd.launch(app)
     }
 
     private var stallsReportedAtEnd = false

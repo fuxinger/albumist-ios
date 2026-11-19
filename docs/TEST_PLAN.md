@@ -500,3 +500,20 @@ Pipeline-Teil (Workflows gehören einem anderen Agenten, hier nicht geändert):
 3. Was dann noch über 15 Min. liegt: das erste `prepare` je Job (ein fertig analysierter
    Simulator als Vorlage würde es sparen), Barrierefreiheit test2 (559 s) und das Warten von
    Ablauf test6 auf das Ende der Analyse.
+
+## Befunde der Prüfungen vom 18.11. (Stand 19.11.2026)
+Jede Zeile ein Befund aus `docs/BEFUNDE-STATUS.md`, jeder mit einem Test, der vor der Behebung rot war.
+
+| Regel | Test (Linux) |
+|---|---|
+| „Gleicher Name gewinnt“: das einzige bearbeitbare Album mit dem Namen wird ergänzt, was es auch enthält (P1-02) | AlbumInterplayReviewTests.theOnlyAlbumOfTheNameIsExtendedWhateverItHolds, sameNameWinsAlsoWhenTheAlbumHoldsLittleOfTheCountry, sameNameWinsAlsoWhenTheAlbumHoldsOtherPhotosToo, withTwoAlbumsOfTheNameTheContentPicksOne; MatchingTests.sameNameDifferentContentIsExtendedNotMadeTwice |
+| Ein Album mit dem ganzen Vorschlag gewinnt vor dem Namen; andere passende Alben zählen weiter; der Ring sinkt nie unter Version 4 | AlbumInterplayReviewTests.anAlbumHoldingTheWholeSuggestionWinsOverTheName, theAlbumThatFitsByContentKeepsCountingWhenTheNameWins, theNameRuleNeverLowersTheSortedCount, theNameRuleNeverCountsFewerThanVersionFour, photosWithoutALocationCountForOtherAlbums |
+| Ältere Entscheidungen gegen die Namensregel werden nach dem Neuabgleich wieder offen | DecisionLifecycleTests.decisionsAgainstTheSameNameRuleAreReopenedWithoutTheStricterNotice, theRematchLeavesOutPhotosWithoutALocationLikeTheAnalysis |
+| Fotos mit Datum in der Zukunft zählen wie die anderen (P1-03) | NeverDoneTests.photosDatedInTheFutureCountLikeTheOthers, aPhotoTakenAfterTheSuggestionsStillCountsAsUnsorted |
+| Ein unlesbares Foto wird nach einer Woche noch einmal versucht, ohne die Analyse aufzuhalten (P1-08) | NeverDoneTests.aPhotoGivenUpAsUnreadableIsTriedAgainAWeekLater, aPhotoTriedAgainIsReadAtMostOnceAWeekWhateverTheError, aPhotoReadAgainIsNoNewPhoto, photosTriedAgainNeverKeepTheAnalysisFromFinishing |
+| Fotos ohne findbares Land bleiben nicht für immer offen (P1-09) | NeverDoneTests.photosThatCannotGetACountryAreNotCountedAsWaiting, photosNearABorderWithoutTheOnlineLookupAreNotOpenForGood, photosTakenAtSeaAreNotOpenForGood, photosWaitingForAnOnlineLookupStayOpen |
+| Umkreis-Suche findet jedes Foto im Kreis, auf jeder Breite (G1-01) | GeoTests.spatialIndexFindsEveryNeighbourAtAnyLatitude |
+| Eine Reise über die Datumsgrenze ist ein Halt | TripTests.aStayOnTheDateLineIsOneStop, aTripAcrossThePacificCountsItsStopsOnTheUsualGrid |
+| Reisen bearbeiten: Knöpfe warten auf das Neuberechnen, werden nach einem Fehler frei, genau ein weiterer Versuch | TripChangeLedgerTests.aRefreshThatCannotStartFreesTheControls, aNewerRefreshThatFailsIsTriedOnceMore, onlyTheNewestFailureWithAChangeLeftAsksAgain, theControlsWaitWhileTheTripsAreWorkedOutAgain |
+| „Analyse fertig“: keine Mitteilung für ein schon in der App gezeigtes Ende | FinishMomentTests.aFinishShownInTheAppIsNotNotifiedLater, onlyAFinishedLongRunOwesTheMoment |
+| Akku pro 1.000 Fotos und MetricKit im Diagnosebericht | BatteryUseTests.percentPerThousandPhotosForeachPlaceAndCombined, manyPhotosWithLittleDropGiveAnUpperBound, tooFewPhotosOrTooLittleDropSaysSo; EnergyMetricsLogTests.hangsAreTheSumOfTheBucketCounts, aSecondPayloadOfTheSameDayKeepsWhatTheFirstSaid |

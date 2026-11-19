@@ -3,8 +3,9 @@
 Mit TestFlight läuft Albumist als echte App auf dem iPhone, mit der echten Mediathek und ohne
 Zeitlimit. Eine neue Version testet, baut, signiert und lädt GitHub zu TestFlight hoch, sobald
 jemand den Lauf startet (Actions > **TestFlight** > Run workflow auf `main`,
-`.github/workflows/testflight.yml`) oder morgens der tägliche Build startet, und erst, wenn du
-das Hochladen freigegeben hast (Abschnitt „Zwei Tore“ und `docs/launch/FREIGABE_EINRICHTEN.md`).
+`.github/workflows/testflight.yml`) oder morgens der tägliche Build startet, und nur, wenn jedes
+Tor des Laufs grün ist; seit 19.11.2026 ohne deinen Klick (Abschnitt „Hochladen ohne Klick“ und
+`docs/launch/FREIGABE_EINRICHTEN.md`).
 Alles hier geht vom Windows-PC im Browser oder vom iPhone aus; ein Mac ist nicht nötig.
 
 ## 1. Apple Developer Program beitreten (einmalig, 99 € im Jahr)
@@ -39,8 +40,8 @@ Alles hier geht vom Windows-PC im Browser oder vom iPhone aus; ein Mac ist nicht
 ## 4. Vier Secrets in GitHub eintragen (in der Umgebung `testflight-upload`)
 
 Seit 18.11.2026 liegen sie nicht mehr als Repository-Secrets, sondern als Secrets der
-GitHub-Umgebung `testflight-upload`, die vor jedem Hochladen dich fragt. Anlegen, dich als Prüfer
-eintragen und die Secrets dort speichern: `docs/launch/FREIGABE_EINRICHTEN.md` (Schritte 1 bis 5).
+GitHub-Umgebung `testflight-upload`, die nur der Zweig `main` benutzen darf. Anlegen, die Regel
+`main` setzen und die Secrets dort speichern: `docs/launch/FREIGABE_EINRICHTEN.md`.
 
 | Name | Inhalt |
 |---|---|
@@ -50,7 +51,7 @@ eintragen und die Secrets dort speichern: `docs/launch/FREIGABE_EINRICHTEN.md` (
 | `APPLE_TEAM_ID` | Team-ID |
 
 Danach baut GitHub einen TestFlight-Build, sobald jemand Actions > **TestFlight** > Run workflow
-auf `main` startet oder der tägliche Build startet, und lädt ihn nach deiner Freigabe hoch.
+auf `main` startet oder der tägliche Build startet, und lädt ihn hoch, wenn alles grün ist.
 
 ## 5. Auf dem iPhone installieren
 
@@ -89,9 +90,9 @@ Actions > **TestFlight feedback** > Run workflow.
 - E-Mail-Adressen und Namen der Tester holt das Skript nie, auch nicht bei full. Texte der Tester
   erscheinen nur als Text (kein HTML, keine Links, keine Erwähnungen) und nie im Protokoll des Laufs.
 - Eigener Schlüssel, nicht der des Uploads (seit 18.11.2026): den Upload-Schlüssel bekommt nur
-  der Upload-Job nach deiner Freigabe. Der Feedback-Schlüssel hat die Rolle **Developer** und
+  der Upload-Job. Der Feedback-Schlüssel hat die Rolle **Developer** und
   liegt als Repository-Secrets `ASC_FEEDBACK_KEY_ID`, `ASC_FEEDBACK_ISSUER_ID` und
-  `ASC_FEEDBACK_KEY_P8` (`docs/launch/FREIGABE_EINRICHTEN.md`, Schritt 6, freiwillig). Ohne sie
+  `ASC_FEEDBACK_KEY_P8` (`docs/launch/FREIGABE_EINRICHTEN.md`, „Freiwillig“). Ohne sie
   meldet der Lauf nur „Skipped“. Mit einer Rolle ohne Lesezugriff meldet er „HTTP 403“ und nennt
   die fehlende Rolle (Admin, App Manager oder Developer geht). Die Rolle eines Schlüssels lässt
   sich nicht ändern: neuen Schlüssel mit passender Rolle erzeugen, alten widerrufen, die drei
@@ -113,22 +114,37 @@ Actions > **TestFlight feedback** > Run workflow.
 - Ablauf in GitHub (ein Lauf, Profi-Analyse, 17.11.2026): Actions > **TestFlight** > Run workflow
   auf `main` (oder `gh workflow run testflight.yml --ref main`). Der Lauf prüft genau diesen Commit
   selbst: erst CI (Regeln, Kern-Tests, iOS-Tests auf einem Mac), dann nebeneinander die UI-Tests
-  (kleines Tor: nur zwei Gruppen, Abschnitt „Zwei Tore“) und den kleinen Härtetest, bei beiden
-  Toren. Nur wenn alles grün ist und du freigegeben hast (`docs/launch/FREIGABE_EINRICHTEN.md`),
+  (kleines Tor: nur zwei Gruppen, Abschnitt „Zwei Tore“), den kleinen Härtetest und den
+  Release-Kurztest (unten), bei beiden Toren. Nur wenn alles grün ist (seit 19.11.2026 ohne Klick, `docs/launch/FREIGABE_EINRICHTEN.md`),
   baut ein Mac das Archiv, prüft es, signiert es beim Export, lädt es hoch und setzt „Was testen“;
-  danach bekommt der Commit das Git-Tag `build-<Nummer>`. Zwei bis zweieinhalb Stunden bis zur
-  Freigabe, wenn alle UI-Gruppen laufen (die UI-Tests allein 75–100 Minuten); laufen nur einzelne
+  danach bekommt der Commit das Git-Tag `build-<Nummer>`. Zwei bis zweieinhalb Stunden bis zum
+  Upload-Job, wenn alle UI-Gruppen laufen (die UI-Tests allein 75–100 Minuten); laufen nur einzelne
   Gruppen oder keine (Abschnitt „UI-Tests: nur betroffene Gruppen“), bestimmt der Härtetest (rund 45
-  Minuten) die Dauer, ebenso beim kleinen Tor: rund 70 Minuten bis zur Freigabe. Nach der Freigabe
+  Minuten) die Dauer, ebenso beim kleinen Tor: rund 70 Minuten bis zum Upload-Job. Dann
   15–20 Minuten bis zum Hochladen, „Was testen“ setzt derselbe Job meist wenige Minuten danach
   (höchstens 20). Kein Teil wartet auf andere Läufe. Ein zweiter TestFlight-Lauf wartet, bis der
-  erste ganz fertig ist, auch während der erste auf deine Freigabe wartet. Wiederholungen nach einem
+  erste ganz fertig ist. Wiederholungen nach einem
   Simulator-Ausfall und Tests, die erst in der Wiederholung grün wurden, zählt der Job „Repeats and
-  flaky tests“ für UI-Tests und Härtetest zusammen.
+  flaky tests“ für UI-Tests, Härtetest und Release-Kurztest zusammen.
+- Release-Kurztest (Prüfbefund P5-03, 19.11.2026): alle UI-Tests laufen auf einem Debug-Build mit
+  Test-Schaltern; die Release-Fassung, die hochgeladen wird, startete vorher kein Test. Der Job
+  „Release build smoke test (UI)“ baut die UI-Tests mit `-configuration Release` und lässt einen
+  Test laufen (`App/SortlyUITests/ReleaseSmokeUITests.swift`): Einführung, Beispiel-Mediathek und
+  Analyse, empfohlene Vorschläge, ein Plan in den Gratis-Alben, in Fotos angelegt, ohne
+  Test-Schalter wie bei einem neuen Nutzer. Bei beiden Toren, neben UI-Tests und Härtetest (rund
+  25–35 Minuten, kürzer als der Härtetest), und er muss grün sein, sonst wird nicht hochgeladen; ein
+  übersprungener Test zählt als Fehler. Nie mehr als fünf Macs zugleich: im TestFlight-Lauf laufen
+  höchstens drei UI-Gruppen gleichzeitig, die längste (Gerätebedingungen) zuerst; die zwei kurzen
+  warten auf einen Mac und sind trotzdem vor ihr fertig, der Lauf dauert also nicht länger.
+  Ein roter Release-Kurztest gilt wie ein roter Härtetest nur für seinen Lauf: „Re-run failed
+  jobs“ macht ihn nicht grün, ein neuer Lauf auf derselben App startet ihn aber neu (anders als
+  eine UI-Gruppe, deren Rot das UI-Tor für diese App und diesen Testcode behält). Der tägliche
+  Build startet keinen neuen Lauf auf einem Commit, der schon in einem TestFlight-Lauf war (oder
+  nur Doku dazu bringt); von Hand erst die Ursache beheben. **Ungeprüft bis zum ersten Lauf auf einem Mac.**
 - Kein Push und kein Merge in `main` startet einen Build (16.11.: das Zusammenführen der
   Webseite startete sonst einen Build mit altem App-Stand). Von selbst startet nur der tägliche
-  Build mit kleinem Tor (`daily-build.yml`, Abschnitt „Zwei Tore“), und auch er lädt erst nach
-  deiner Freigabe hoch. Läufe auf anderen Zweigen als `main` tun nichts (der erste Job läuft nur
+  Build mit kleinem Tor (`daily-build.yml`, Abschnitt „Zwei Tore“); er lädt seit 19.11.2026 ohne
+  Klick hoch, wenn alles grün ist, als internen Build nur für dich. Läufe auf anderen Zweigen als `main` tun nichts (der erste Job läuft nur
   auf `main`, die Umgebung lässt nur `main` zu). Der alte Release-Zweig `claude/sortly-app` lädt
   nichts mehr hoch (Beschluss Fuchs 18.11., Zweig bleibt bestehen): seit 1358f7f lässt sich seine
   `testflight.yml` nur von Hand starten und bricht sofort ab, ohne Secrets, ohne Mac, ohne
@@ -147,7 +163,10 @@ Actions > **TestFlight feedback** > Run workflow.
   der Nachricht des Tags („attempt 2; earlier attempts: …“). Kann der Upload-Job die früheren
   Versuche nicht lesen (GitHub-API antwortet nicht), lädt er ebenfalls nicht hoch; dann nur ihn
   wiederholen. Die gebauten UI-Tests bleiben für **Re-run failed jobs** 3 Tage liegen; danach
-  einen neuen Lauf starten. Dasselbe gilt über Läufe hinweg: war eine UI-Gruppe für genau diese
+  einen neuen Lauf starten. Hat ein Lauf schon hochgeladen (es gibt den Tag `build-<Nummer>` des
+  Laufs), hält jede Wiederholung im ersten Job und am Anfang des Upload-Jobs an („Not uploaded by
+  this run yet“): dieselbe Build-Nummer nähme App Store Connect nicht noch einmal; ein neuer Build
+  braucht einen neuen Lauf. Dasselbe gilt über Läufe hinweg: war eine UI-Gruppe für genau diese
   App und genau ihren Testcode einmal rot, zählt ein späteres Grün derselben Kombination nicht,
   auch nicht aus einem anderen Lauf. Erst eine Änderung am Test oder an der App (die Korrektur)
   macht sie wieder hochladbar.
@@ -159,10 +178,10 @@ Actions > **TestFlight feedback** > Run workflow.
   einzige Wahl ist das Tor (groß oder klein, beide von Fuchs beschlossen, Abschnitt „Zwei Tore“).
 - Welcher Build an Tester gehen darf (Entscheidungen 10 und 12, 18.11.2026): `docs/TEST_PLAN.md`,
   Abschnitt „Tore“. Dieser Lauf setzt die Tests des großen Tors durch; Fälle mit ⛔ im Testplan
-  prüft vor jeder Freigabe an Tester der Koordinator. Offene Fälle ohne ⛔ halten keinen Build auf.
+  prüft vor jeder Weitergabe an Tester der Koordinator. Offene Fälle ohne ⛔ halten keinen Build auf.
 - Härtetest (Regel Fuchs, 17.11.2026, und Entscheidung 4): vor jedem TestFlight-Build, mit beiden
   Toren, der kleine Durchgang mit 10.000 Fotos und 15 Minuten Messung (rund 45 Minuten); auch vor
-  dem täglichen Build mit kleinem Tor, denn er lädt nach deiner Freigabe hoch. Er
+  dem täglichen Build mit kleinem Tor, denn er lädt auch hoch. Er
   läuft im TestFlight-Lauf neben den UI-Tests und muss grün sein, sonst wird nicht hochgeladen;
   grün heißt, test12 ist durchgelaufen (ein übersprungener test12 zählt als Fehler). Von Hand:
   Actions > **UI stress** > Run workflow, Vorgaben unverändert lassen (oder `gh workflow run
@@ -210,9 +229,19 @@ Testcode gibt.
   Byte für Byte dieselben Dateien.
 - **Fingerabdruck einer Gruppe**: ihre Testdateien, alle Hilfsdateien, die diese benutzen (zum
   Beispiel `UITestOnboarding.swift`), ihre Zeile in `.github/ui-groups.json` und alles, über
-  das jede Gruppe läuft: jedes Skript unter `.github/scripts/` (außer dessen Unit-Tests in
-  `tests/`) und jeder Workflow unter `.github/workflows/` (eine Änderung daran lässt also alle
-  Gruppen laufen).
+  das jede Gruppe läuft: die beiden UI-Workflows (`ui.yml`, `ui-stress.yml`) und jede Datei
+  unter `.github/`, die sie nennen, und jedes Skript, das ein solches Skript nennt oder
+  importiert (`ui_tests.py`, `pick_simulator.py`, `toolchain.py`, `ui_evidence.py`, ...; ohne
+  die Unit-Tests in `tests/` und ohne `ui-groups.json`, dort zählt nur die Zeile der Gruppe).
+  Eine Änderung daran lässt alle Gruppen laufen; eine Änderung an einem Workflow oder Skript,
+  das kein UI-Job ausführt (`testflight.yml`, `ci.yml`, `ci_gate.py`, ...), lässt jedes grüne
+  Ergebnis stehen (Prüfer 5, P5-08 c). Im Zweifel zählt jede Datei unter `.github/`: wenn ein
+  UI-Workflow fehlt oder `ui_tests.py` nicht erreicht, ein Skript nicht lesbar ist oder ein
+  Name sich nicht auflösen lässt (ein Skript- oder Pfadname aus einer Variablen, ein Pfad, den
+  es nicht gibt), und wenn ein Skript Code startet, den der Leser nicht sieht: ein zur Laufzeit
+  gebauter Shell-Befehl (`shell=True`, `os.system`, `bash -c`, `python -c`), `exec`, `eval`,
+  `compile`, oder ein Ordner unter `.github/`, den es auflistet (`glob`, `listdir`, `walk`).
+  Datendateien zählen mit jeder Endung.
   Swift-Dateien der UI-Tests zählen mit ihrem Code, nicht Byte für Byte: Kommentare,
   Einrückung und Leerzeilen zählen nicht, Zeichenketten und Regex-Literale schon (Zeichen für
   Zeichen). Ein geänderter Kommentar ist also keine Änderung des Tests: ein rotes Ergebnis
@@ -421,44 +450,46 @@ Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-
 4. Beim ersten Lauf nach dem Zusammenführen laufen alle UI-Gruppen einmal (ältere Läufe tragen
    noch keine Fingerabdrücke). Erst danach werden Ergebnisse übernommen.
 
-## Freigabe vor dem Hochladen (Entscheidung Fuchs 18.11.2026, Nr. 5)
+## Hochladen ohne Klick (Entscheidung Fuchs 19.11.2026; ersetzt Nr. 5 vom 18.11.)
 
-Kein Build geht ohne deinen Klick zu TestFlight. Der Upload-Job von `testflight.yml` läuft in der
-GitHub-Umgebung `testflight-upload`; ihr Prüfer bist du. Die vier Secrets (`ASC_KEY_ID`,
-`ASC_ISSUER_ID`, `ASC_KEY_P8`, `APPLE_TEAM_ID`) liegen nur dort: GitHub gibt sie allein diesem Job,
-und erst, nachdem du ihn freigegeben hast. Kein anderer Job eines Workflows nennt sie (Test in
-`.github/scripts/tests/test_workflows.py`); die Jobs davor (CI, UI-Tests, Härtetest, UI-Tor)
-brauchen sie nicht.
+Ein Build geht von selbst zu TestFlight, nur von `main` und nur, wenn jedes Tor seines Laufs grün
+ist: CI mit seinem Tor, UI-Tests und UI-Tor, Härtetest, Release-Kurztest und die früheren Versuche
+des Laufs (`earlier_attempts.py`: ein roter Test wird nie durch Wiederholen grün). Keine Eingabe
+überspringt eines davon. Der Upload-Job von `testflight.yml` läuft in der GitHub-Umgebung
+`testflight-upload`, die nur der Zweig `main` benutzen darf. Die vier Secrets (`ASC_KEY_ID`,
+`ASC_ISSUER_ID`, `ASC_KEY_P8`, `APPLE_TEAM_ID`) liegen nur dort: GitHub gibt sie allein diesem Job.
+Kein anderer Job eines Workflows nennt sie (Test in `.github/scripts/tests/test_workflows.py`); die
+Jobs davor brauchen sie nicht.
 
-- **Einrichten** (einmalig, etwa 10 Minuten): `docs/launch/FREIGABE_EINRICHTEN.md`. Bis dahin
-  hält jeder TestFlight-Lauf im ersten Job „Upload approval“ an (vor jeder Mac-Minute), und der
+- **Einrichten** (einmalig, etwa 5 Minuten): `docs/launch/FREIGABE_EINRICHTEN.md`. Bis dahin
+  hält jeder TestFlight-Lauf im ersten Job „Upload setup“ an (vor jeder Mac-Minute), und der
   tägliche Build startet nicht.
 - **Warum der erste Job das prüft** (`.github/scripts/upload_approval.py`): nennt ein Job eine
-  Umgebung, die es noch nicht gibt, legt GitHub sie ohne jede Regel an, und der Job liefe ohne
-  Frage los. Der erste Job liest darum die Einstellungen der Umgebung und lässt den Lauf nur
-  weiter, wenn sie einen Prüfer verlangt und nur der Zweig `main` sie nutzen darf (genau eine
-  Regel `main`; fehlt sie, oder steht dort „Protected branches“ oder ein anderes Muster, hält der
-  Lauf an: sonst könnte ein geänderter Ablauf von einem anderen Zweig unter irreführendem Namen um
-  deine Freigabe bitten). Ist „Prevent self-review“ an, steht eine Warnung im Lauf. Ob die alten Repository-Secrets gelöscht sind,
-  kann kein Job prüfen, ohne sie zu lesen: das ist Schritt 5 der Anleitung.
-- **Freigeben**: im wartenden Lauf **Review deployments** > `testflight-upload` > **Approve and
-  deploy** (oder **Reject**). Danach prüft der Job zuerst, dass alle vier Secrets da sind (nur ob,
-  nie ihren Inhalt), archiviert, lädt hoch und setzt „Was testen“. Das macht jetzt derselbe Job
-  auf dem Mac (höchstens 20 Minuten Warten, meist wenige), weil nur er den Schlüssel bekommt; ein
-  eigener Job dafür bräuchte eine zweite Freigabe.
-- **Solange ein Lauf wartet**, hält er die Gruppe `testflight`: ein weiterer TestFlight-Lauf
-  wartet dahinter, und der tägliche Build startet nicht. Darum am selben Tag freigeben oder
-  ablehnen. Nach 30 Tagen bricht GitHub einen nicht freigegebenen Lauf ab.
-- **Abgelehnt** endet der Upload-Job ohne Schritt. „Re-run failed jobs“ fragt dich dann noch
-  einmal; die Tests laufen nicht neu, `earlier_attempts.py` zählt das als Technik, nicht als Rot.
+  Umgebung, die es noch nicht gibt, legt GitHub sie ohne jede Regel an, und der Job liefe von
+  jedem Zweig aus. Der erste Job lässt den Lauf darum nur weiter, wenn die Umgebung besteht und
+  nur der Zweig `main` sie nutzen darf (genau eine Regel `main`; fehlt sie, oder steht dort
+  „Protected branches“, ein Muster, ein zweiter Zweig oder eine Tag-Regel, hält der Lauf an). Diese
+  Regel ist jetzt der einzige Zaun: wer auf `main` schreiben darf, kann hochladen; den Schutz von
+  `main` stellst du in den Einstellungen ein (P5-09). Verlangt dort nichts einen Pull Request für
+  `main` (weder ein Ruleset noch der klassische Zweigschutz), steht im ersten Job die Warnung
+  „main ist nicht geschützt: wer auf main pushen kann, kann hochladen“ (nur eine Warnung, der
+  Lauf geht weiter); kann der Lauf den klassischen Zweigschutz nicht lesen (er braucht dafür
+  Admin-Rechte), sagt die Warnung das. Ist noch ein Prüfer eingetragen, steht eine
+  Warnung im Lauf, und der Upload wartet weiter auf deinen Klick. Ob die alten Repository-Secrets
+  gelöscht sind, kann kein Job prüfen, ohne sie zu lesen: das ist Schritt 5 der Anleitung.
+- Der Upload-Job prüft zuerst, dass alle vier Secrets da sind (nur ob, nie ihren Inhalt),
+  liest die früheren Versuche des Laufs, archiviert, lädt hoch und setzt „Was testen“ (höchstens
+  20 Minuten Warten, meist wenige).
 - **Feedback-Abruf**: `asc-feedback.yml` hat einen eigenen Schlüssel mit Rolle Developer
-  (Abschnitt „Abstürze und Feedback abholen“), damit er nicht jeden Morgen auf dich wartet.
-- Die Freigabe gibt nur Fuchs, nie ein Agent.
-- **Grenze:** Prüfer für eine Umgebung setzt GitHub bei Free, Pro und Team nur in öffentlichen
-  Repositorys durch (bei Free in privaten auch keine Umgebungs-Secrets). Darum hält der erste Job
-  jeden Lauf an, sobald das Repository nicht öffentlich ist (`upload_approval.py` liest die
-  Sichtbarkeit): nach einem Wechsel auf privat lädt nichts mehr hoch, bis die Freigabe neu gelöst
-  ist. Vor dem Wechsel darum zuerst die Freigabe neu lösen.
+  (Abschnitt „Abstürze und Feedback abholen“).
+- **Privates Repository** (GitHub-Hilfe „Managing environments for deployment“, gelesen am
+  19.11.2026): mit GitHub Free gibt es Umgebungen, ihre Secrets und ihre Zweig-Regeln nur in
+  öffentlichen Repositorys; GitHub Pro, Team und Enterprise haben sie auch in privaten. Eine
+  Regel, die die API in einem privaten Repository mit Free noch zeigt, setzt GitHub nicht durch,
+  und der Lauf kann den Tarif nicht lesen. Darum hält der erste Job in einem privaten Repository
+  immer an (mit Hinweis auf GitHub Free), außer die Repository-Variable `UPLOAD_PRIVATE_PLAN_OK`
+  steht auf `true`; die setzt der Eigentümer erst, wenn sein Tarif Umgebungen in privaten
+  Repositorys hat. Dann gelten dieselben Prüfungen wie im öffentlichen Repository.
 
 ## Zwei Tore: täglicher Build und Build für Tester (Entscheidung Fuchs 18.11.2026, Nr. 10)
 
@@ -469,8 +500,9 @@ brauchen sie nicht.
 | UI-Tests | nur die zwei kurzen Gruppen `flow-full` (ganzer Ablauf mit Video) und `contrast` (Kontrast), je Job rund 18 Minuten, nebeneinander | alle Gruppen (`auto`: jede ohne Grün für genau diese App und ihren Testcode) |
 | UI-Tor | diese zwei Gruppen grün für genau diese App und ihren Testcode, keine davon je rot dafür | alle Gruppen, gleiche Regeln |
 | Härtetest 10.000 Fotos | ja (vor jedem Upload: Regel 17.11., Entscheidung 4), neben den zwei Gruppen | ja |
-| Bis zur Freigabe | rund 70 Minuten (CI rund 20, dann bestimmt der Härtetest mit rund 45 die Dauer) | 2–2,5 Stunden (ohne UI-Gruppen rund 65–70 Minuten wie das kleine Tor) |
-| Hochladen | erst nach deiner Freigabe | erst nach deiner Freigabe |
+| Release-Kurztest | ja (P5-03: die Release-Fassung einmal gestartet), daneben | ja |
+| Bis zum Upload-Job | rund 70 Minuten (CI rund 20, dann bestimmt der Härtetest mit rund 45 die Dauer) | 2–2,5 Stunden (ohne UI-Gruppen rund 65–70 Minuten wie das kleine Tor) |
+| Hochladen | von selbst, wenn alles grün ist (seit 19.11.2026; jeden Tag, an dem sich die App geändert hat) | von selbst, wenn alles grün ist (seit 19.11.2026) |
 | Erkennbar an | Laufname „TestFlight daily build (small gate, only for the owner)“, Nachricht des Tags, letzte Zeile von „Was testen“ | Laufname „TestFlight“ |
 | Für wen | nur dich (interne Tests); nicht an externe Tester geben | Tester und App Store |
 
@@ -478,8 +510,8 @@ brauchen sie nicht.
   TestFlight-Lauf zur Zeit“ bleiben, wie sie sind. `daily-build.yml` (Linux, eine Minute, ohne
   Secrets) startet nur den Lauf; `.github/scripts/daily_build.py` entscheidet, ob.
 - **Der tägliche Build startet nicht** (die Zusammenfassung von Actions > Daily build sagt,
-  warum), wenn: die Freigabe noch nicht eingerichtet ist; ein TestFlight-Lauf läuft oder auf
-  deine Freigabe wartet; die App seit dem letzten hochgeladenen Build gleich ist (nur Doku, Tests
+  warum), wenn: die Umgebung `testflight-upload` noch nicht eingerichtet ist; ein TestFlight-Lauf
+  läuft oder wartet; die App seit dem letzten hochgeladenen Build gleich ist (nur Doku, Tests
   oder Bau-Strecke geändert; derselbe Fingerabdruck der App wie bei den UI-Tests, verglichen mit
   den Tags `build-<Nummer>`); oder genau dieser Commit, oder ein früherer mit derselben App, nach
   dem nur Doku (`*.md`, `docs/`) dazukam, schon einmal in einem TestFlight-Lauf war (rot, abgelehnt
@@ -487,12 +519,13 @@ brauchen sie nicht.
   Bau-Strecke ändert, nie durch Wiederholen grün, und einen abgelehnten Build bietet er nicht jeden
   Tag neu an, auch nicht, wenn danach nur Doku dazukommt. Von Hand geht es trotzdem.
 - Der tägliche Build achtet nicht auf die Mac-Warteschlange (eigene Gruppen wie jeder
-  TestFlight-Lauf); er braucht höchstens drei Macs zugleich (zwei UI-Gruppen und den Härtetest), um
+  TestFlight-Lauf); er braucht höchstens vier Macs zugleich (zwei UI-Gruppen, den Härtetest und den
+  Release-Kurztest), um
   03:30 UTC sind die nächtlichen Läufe meist fertig.
 - **Nicht in `nightly.yml`**: dessen Jobs sind seit 18.11. bewusst unverändert der Vergleichslauf
   für den StoreKit-Fall („no product“), und ein TestFlight-Build braucht die Laufnummern von
   `testflight.yml` (Build-Nummer) und dessen Gruppe `testflight`.
-- **Kleines Tor = CI + `flow-full` + `contrast` + Härtetest**, rund 70 Minuten bis zur Freigabe. Den
-  Härtetest verlangen deine Regel vom 17.11. und Entscheidung 4 vor jedem Upload, und auch der
-  tägliche Build kann nach deinem Klick hochladen. Die Dauer bestimmt darum der Härtetest (rund 45
+- **Kleines Tor = CI + `flow-full` + `contrast` + Härtetest + Release-Kurztest**, rund 70 Minuten
+  bis zum Upload-Job. Den Härtetest verlangen deine Regel vom 17.11. und Entscheidung 4 vor jedem
+  Upload, und auch der tägliche Build lädt hoch. Die Dauer bestimmt darum der Härtetest (rund 45
   Minuten nach CI), nicht die UI-Tests; die Fable-Analyse (P6-02) wünschte höchstens 20 Minuten.

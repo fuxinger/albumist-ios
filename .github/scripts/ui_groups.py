@@ -30,22 +30,27 @@ without the "_" comments), the files that hold its tests, every file those use (
 a Swift file uses another when it names a type, function or extension member that file declares
 for the others; private declarations are not seen from outside), every file of App/SortlyUITests
 that is not Swift (Info.plist and the like) or declares an XCTestObservation, every Swift file of
-the target that no group's tests reach (fails closed), and the harness: every file under
-.github/scripts/ (but its tests/) and .github/workflows/. A Swift file of the target goes in by
+the target that no group's tests reach (fails closed), and the harness: the UI workflows
+(ui.yml, ui-stress.yml) and every script and .github/ file they name or import, transitively
+(harness_files; every file under .github/ when unsure, ui-groups.json never: each group's own
+definition counts). A Swift file of the target goes in by
 its code (swift_code: comments left out, whitespace outside literals reduced to "line break or
 not", literals byte for byte), so editing a comment or the indentation of a test leaves its
 fingerprint, and a red result under it stays red (Prüfer B G5-04, 18.11.); a Swift file the reader
 cannot read for sure, and every other file, by its git blob id. In a quick run (SORTLY_UI_QUICK=1) a
 line "mode quick" is added for every group. So a change to a shared helper
 (UITestOnboarding.swift) changes the fingerprint of every group whose tests use it, and only of
-those; a change to any script or workflow changes every group's.
+those; a change to the harness changes every group's, a change to another workflow or script
+(testflight.yml, ci_gate.py) none.
 """
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -53,17 +58,369 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 GROUPS_FILE = ".github/ui-groups.json"
 UI_DIR = "App/SortlyUITests/"
-# Everything that builds, starts, names or judges the groups: every script (the runner, the
-# matrix generator ui_groups.py, ui_evidence.py, ...) and every workflow. A branch that changes
-# any of them gets other fingerprints for every group, so its results never count for the
-# unchanged ones (and the reverse). Only the scripts' own unit tests are left out: they never
-# run in a UI job.
-HARNESS_PREFIXES = (".github/scripts/", ".github/workflows/")
+# The harness: what builds, starts, names or judges the groups. It starts at the two workflows
+# that run UI tests (HARNESS_ROOTS) and takes every file under .github/ they name (scripts,
+# workflows, local actions, data), then every file those name or import in their code (not in a
+# comment or docstring), and so on (harness_files). So the UI runner, its helpers, the matrix
+# generator and the evidence reader count, and a change to a workflow or script no UI job runs
+# (testflight.yml, ci.yml, ci_gate.py, ...) leaves every group's green standing (review P5-08
+# (c): any script change made every green result worthless, and a fix to the pipeline cost a
+# full UI run). It fails safe, toward "harness changed" (every file under .github/ counts):
+#   - a root that is missing, a script that does not parse, roots that do not reach the runner;
+#   - a name it cannot resolve: a .github/ path that is no file and no folder, a script or
+#     module built from a variable ("${TOOL}.py", import_module(name), ["-m", name]).
+#   - a script a Python script starts with the interpreter ([sys.executable, script]) when
+#     `script` holds no script name the reader can see.
+#   - code it cannot see (third review of C6): a shell command built at run time (shell=True,
+#     os.system, os.popen, subprocess.getoutput, bash -c, python -c, a shell script from a
+#     variable), exec, eval and compile, and a folder of .github/ that a script lists (glob,
+#     listdir, scandir, walk, Path.glob/rglob/iterdir; also a walk of the whole repository, or
+#     a folder built from __file__ the reader cannot follow). A folder outside .github/ or one
+#     handed in from outside (an argument, the environment) is not the harness's.
+# What it resolves (second review of C6): a .github/ path anywhere in a line (also after
+# $GITHUB_WORKSPACE/ or ${{ github.workspace }}/); in a workflow or shell script a folder
+# (working-directory, uses: ./.github/actions/x: every file in it); a file name with any
+# extension ("other.py", "pins.csv", os.path.join parts such as "toolchain.json": every file of
+# that name under .github/, but no workflow: a bare "testflight.yml" is the API's name for the workflow,
+# and a workflow runs only when GitHub runs it, which needs its path); "python3 -m x", imports
+# and importlib.import_module("x"). One file too many is harmless; one too few is not. A folder
+# named in a Python string is data the script reads (ui_groups.py reads them all to fingerprint
+# them); what a script runs goes through the ways above.
+# Not harness: the scripts' own unit tests (they never run in a UI job) and ui-groups.json
+# (GROUPS_FILE): each group's own definition is in its fingerprint, so an edit to another
+# group, a budget or a comment runs no group again.
+HARNESS_ROOTS = (".github/workflows/ui.yml", ".github/workflows/ui-stress.yml")
+HARNESS_RUNNER = ".github/scripts/ui_tests.py"
+HARNESS_PREFIX = ".github/"
 HARNESS_EXCLUDED = (".github/scripts/tests/",)
+SCRIPTS_DIR = ".github/scripts/"
+WORKFLOWS_DIR = ".github/workflows/"
+NAMED_PATH = re.compile(r"\.github/[A-Za-z0-9_.+/-]*")
+# A .github/ path or a script name with a variable in it: cannot be resolved.
+VARIABLE_NAME = re.compile(r"\.github/[A-Za-z0-9_.+/-]*[$%{]|[}$][A-Za-z0-9_-]*\.py\b")
+# A file name with any extension ("pins.csv", "Info.plist"): a name that is no file under .github/
+# ("os.path", "github.token") resolves to nothing and is harmless (third review of C6: data files
+# with other extensions were left out).
+NAMED_FILE = re.compile(r"(?<![A-Za-z0-9_.+-])([A-Za-z0-9_+-][A-Za-z0-9_.+-]*\.[A-Za-z][A-Za-z0-9]*)\b")
+DASH_M = re.compile(r"\bpython3?(?:\s+-[A-Za-z]+)*\s+-m\s+([A-Za-z_][\w.]*)")
+DYNAMIC_CALLS = {"import_module", "__import__", "run_module", "run_path", "spec_from_file_location"}
+RUN_CALLS = {"run", "Popen", "call", "check_call", "check_output", "system", "execv", "execvp", "spawnv"}
+INTERPRETER = re.compile(r"(?:.*/)?python[0-9.]*$")
+# Third review of C6: what runs code the reader cannot see counts everything when it is built at
+# run time: a shell string (shell=True, os.system and the like, bash -c, python -c), exec, eval
+# and compile (always: their code is a string the reader does not parse), and a folder of .github/
+# that is listed (glob, listdir, walk: the files are picked at run time).
+SHELL_CALLS = {"system", "popen", "getoutput", "getstatusoutput"}
+CODE_CALLS = {"exec", "eval", "compile"}
+LIST_CALLS = {"glob", "iglob", "listdir", "scandir", "walk", "fwalk", "iterdir", "rglob"}
+# Calls that go down into every folder below, also hidden ones such as .github (glob.glob skips
+# hidden folders unless include_hidden; pathlib does not).
+RECURSIVE_CALLS = {"walk", "fwalk", "rglob"}
+LIST_MODULES = {"glob", "os", "pathlib", "posixpath"}
+SHELL = re.compile(r"(?:.*/)?(?:ba|z|da|k)?sh$")
+ENV = re.compile(r"(?:.*/)?env$")
+# Where a path computed from __file__ lands, for listing calls: the repository as REPO, scripts
+# run from its root (the workflows' working directory).
+REPO = "/repository"
+WILDCARD = re.compile(r"[*?\[]")
+
+
+def _is_text(node) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _path_of(node, values: dict, script: str, depth: int = 0) -> str | None:
+    """The path an expression stands for, as far as the reader can follow it (constants,
+    __file__, names given once, os.path.join/dirname/abspath, pathlib's Path, / and .parent,
+    f-strings and +); None when it cannot."""
+    if depth > 12 or node is None:
+        return None
+    again = lambda n: _path_of(n, values, script, depth + 1)  # noqa: E731
+    if _is_text(node):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return f"{REPO}/{script}"
+        return again(values.get(node.id))
+    if isinstance(node, ast.JoinedStr):
+        parts = [again(v.value) if isinstance(v, ast.FormattedValue) else again(v) for v in node.values]
+        return None if None in parts else "".join(parts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Div)):
+        left, right = again(node.left), again(node.right)
+        if left is None or right is None:
+            return None
+        return left + right if isinstance(node.op, ast.Add) else posixpath.join(left, right)
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        inner = again(node.value)
+        return None if inner is None else posixpath.dirname(posixpath.normpath(inner))
+    if isinstance(node, ast.Call):
+        func = node.func
+        called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        args = [again(a) for a in node.args]
+        if None in args:
+            return None
+        if called in ("join", "Path", "PurePath", "PosixPath") and args:
+            return posixpath.join(*args)
+        if called == "dirname" and len(args) == 1:
+            return posixpath.dirname(posixpath.normpath(args[0]))
+        if called in ("abspath", "realpath", "normpath") and len(args) == 1:
+            return posixpath.normpath(args[0])
+        if called in ("resolve", "absolute") and not args and isinstance(func, ast.Attribute):
+            return again(func.value)
+    return None
+
+
+def _from_location(node, values: dict, depth: int = 0) -> bool:
+    """Whether an expression is built from __file__ or a .github/ string, also through the names
+    it uses: a folder the reader could not follow that may well be one of .github/."""
+    if depth > 12 or node is None:
+        return False
+    for part in ast.walk(node):
+        if isinstance(part, ast.Name):
+            if part.id == "__file__" or _from_location(values.get(part.id), values, depth + 1):
+                return True
+        elif _is_text(part) and ".github" in part.value:
+            return True
+    return False
+
+
+def _lists_harness(node: ast.Call, called: str, values: dict, script: str) -> str:
+    """Why a listing call (glob, listdir, walk, Path.iterdir ...) may pick files of .github/ at run
+    time, "" when it does not (a folder outside .github/, or one handed in from outside)."""
+    func = node.func
+    module_call = isinstance(func, ast.Name) or (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                                                 and func.value.id in LIST_MODULES)
+    if module_call:
+        target = node.args[0] if node.args else ast.Constant(".")
+        pattern_of_path = called in ("glob", "iglob")
+    else:  # Path(...).glob(pattern), .rglob(pattern), .iterdir()
+        target = func.value
+        if node.args:
+            target = ast.BinOp(left=func.value, op=ast.Div(), right=node.args[0])
+        pattern_of_path = True
+    path = _path_of(target, values, script)
+    if path is None:
+        return f"{called}() of a folder built from the script's place" if _from_location(target, values) else ""
+    path = posixpath.normpath(posixpath.join(REPO, path))
+    literal = WILDCARD.split(path, 1)[0] if pattern_of_path else path
+    literal = literal.rstrip("/") or "/"
+    if "/.github" in path[len(REPO):] or (literal + "/").startswith(f"{REPO}/.github/"):
+        return f"{called}() of a folder of .github/"
+    hidden = not module_call or any(k.arg == "include_hidden" for k in node.keywords)
+    recursive = called in RECURSIVE_CALLS or (pattern_of_path and "**" in path and hidden)
+    if recursive and (REPO + "/").startswith(literal.rstrip("/") + "/"):
+        return f"{called}() of the whole repository, .github/ included"
+    return ""
+
+
+def _runs_hidden_code(node: ast.Call, called: str, values: dict, script: str) -> str:
+    """Why a call runs code the reader cannot see, "" when it does not (third review of C6)."""
+    func = node.func
+    if (isinstance(func, ast.Name) and func.id in CODE_CALLS) or (
+            isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "builtins"
+            and func.attr in CODE_CALLS):
+        return f"{called}() of code the reader does not parse"
+    first = node.args[0] if node.args else None
+    shell = next((k.value for k in node.keywords if k.arg == "shell"), None)
+    if called in RUN_CALLS and shell is not None and not (isinstance(shell, ast.Constant) and not shell.value):
+        if not _is_text(first):
+            return "a shell command built at run time (shell=True)"
+    if called in SHELL_CALLS and first is not None and not _is_text(first):
+        return f"{called}() of a shell command built at run time"
+    if called in RUN_CALLS and isinstance(first, (ast.List, ast.Tuple)):
+        argv = list(first.elts)
+        while argv and _is_text(argv[0]) and ENV.match(argv[0].value):
+            argv = argv[1:]
+        program = argv[0] if argv else None
+        python = (isinstance(program, ast.Attribute) and program.attr == "executable") or (
+            _is_text(program) and INTERPRETER.match(program.value))
+        shell_program = _is_text(program) and SHELL.match(program.value)
+        rest = argv[1:]
+        for i, item in enumerate(rest):
+            if _is_text(item) and item.value == "-c" and (python or shell_program):
+                code = rest[i + 1] if i + 1 < len(rest) else None
+                return "" if _is_text(code) else "code for -c built at run time"
+        if shell_program:
+            script_arg = next((a for a in rest if not (_is_text(a) and a.value.startswith("-"))), None)
+            if script_arg is not None and not _is_text(script_arg):
+                return "a shell script started from a name built at run time"
+    if called in LIST_CALLS:
+        return _lists_harness(node, called, values, script)
+    return ""
 
 
 def is_harness(path: str) -> bool:
-    return path.startswith(HARNESS_PREFIXES) and not path.startswith(HARNESS_EXCLUDED)
+    """The broad rule, when unsure: every file under .github/ except the scripts' tests and the
+    group file."""
+    return path.startswith(HARNESS_PREFIX) and not path.startswith(HARNESS_EXCLUDED) and path != GROUPS_FILE
+
+
+class Names:
+    """What a file names: .github/ paths, file names, modules; `unresolved` when a name is built
+    from a variable."""
+
+    def __init__(self, folders_run: bool):
+        # In a workflow or shell script a named folder is where something runs (all its files
+        # count); in a Python string it is data.
+        self.folders_run = folders_run
+        self.paths: set[str] = set()
+        self.files: set[str] = set()
+        self.modules: set[str] = set()
+        self.unresolved = ""
+
+    def read_text(self, text: str) -> None:
+        """Paths, file names and "python -m" modules in a piece of code or a string."""
+        variable = VARIABLE_NAME.search(text)
+        if variable:
+            self.unresolved = self.unresolved or f"a name built from a variable: {variable.group(0)}"
+        self.paths |= {m.rstrip("./") for m in NAMED_PATH.findall(text)}
+        self.files |= set(NAMED_FILE.findall(text))
+        self.modules |= {m.split(".")[0] for m in DASH_M.findall(text)}
+
+
+def workflow_names(text: str) -> Names:
+    """What a workflow or shell script names outside its whole-line comments (a trailing comment
+    stays in: one name too many is harmless) and outside "sparse-checkout:" (checking a folder out
+    runs nothing in it)."""
+    names = Names(folders_run=True)
+    code = [line for line in text.splitlines()
+            if not line.lstrip().startswith("#") and not line.lstrip().startswith("sparse-checkout:")]
+    names.read_text("\n".join(code))
+    return names
+
+
+def script_names(text: str, path: str = SCRIPTS_DIR + "script.py") -> Names | None:
+    """What a Python script imports or names in a string that is not a docstring (a path it runs
+    or loads, "x.py", "toolchain.json", a module for import_module or "-m"); None when it cannot
+    be parsed (the caller then counts everything). Comments and docstrings name scripts for the
+    reader only. Code it runs in a way the reader cannot follow (_runs_hidden_code) makes the
+    names unresolved. path: where the script is (for __file__)."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docstrings.add(id(first.value))
+    names = Names(folders_run=False)
+    # The script names each variable is ever given (script = os.path.join(HERE, "x.py")), and
+    # the expression a name was last given (for the paths of listing calls).
+    assigned: dict[str, set[str]] = {}
+    values: dict[str, ast.AST] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    values[target.id] = node.value
+            given = {c.value for c in ast.walk(node.value) if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assigned.setdefault(target.id, set()).update(
+                        f for text in given for f in NAMED_FILE.findall(text) if f.endswith(".py"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.modules |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.modules.add(node.module.split(".")[0])
+        elif isinstance(node, ast.Call):
+            func = node.func
+            called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            hidden = _runs_hidden_code(node, called, values, path)
+            if hidden:
+                names.unresolved = names.unresolved or hidden
+            if called in DYNAMIC_CALLS:
+                first = node.args[0] if node.args else None
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    names.modules.add(first.value.split(".")[0])
+                    names.read_text(first.value)
+                else:
+                    names.unresolved = names.unresolved or f"{called}() of a name built at run time"
+            elif called in RUN_CALLS and node.args and isinstance(node.args[0], (ast.List, ast.Tuple)):
+                argv = node.args[0].elts
+                program = argv[0] if argv else None
+                runs_python = (isinstance(program, ast.Attribute) and program.attr == "executable") or (
+                    isinstance(program, ast.Constant) and isinstance(program.value, str) and INTERPRETER.match(program.value))
+                script = argv[1] if len(argv) > 1 else None
+                if runs_python and script is not None and not (isinstance(script, ast.Constant) and isinstance(script.value, str)):
+                    seen = assigned.get(script.id, set()) if isinstance(script, ast.Name) else {
+                        f for c in ast.walk(script) if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                        for f in NAMED_FILE.findall(c.value) if f.endswith(".py")}
+                    if not seen:
+                        names.unresolved = names.unresolved or "a script started from a name built at run time"
+        elif isinstance(node, (ast.List, ast.Tuple)):
+            items = node.elts
+            for i, item in enumerate(items[:-1]):
+                if isinstance(item, ast.Constant) and item.value == "-m":
+                    after = items[i + 1]
+                    if isinstance(after, ast.Constant) and isinstance(after.value, str):
+                        names.modules.add(after.value.split(".")[0])
+                    else:
+                        names.unresolved = names.unresolved or "python -m with a module built at run time"
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
+            names.read_text(node.value)
+    return names
+
+
+def resolve(names: Names, blobs) -> set[str] | None:
+    """The files of the tree that `names` stands for; None when one cannot be resolved."""
+    if names.unresolved:
+        return None
+    found = set()
+    for path in names.paths:
+        if not path.startswith(HARNESS_PREFIX):
+            continue  # ".github" alone: nothing in particular
+        if path in blobs:
+            found.add(path)
+            continue
+        inside = {p for p in blobs if p.startswith(path + "/")}
+        if not inside:
+            return None  # a .github/ path that is neither a file nor a folder
+        if names.folders_run:
+            found |= inside
+    for name in names.files:
+        found |= {p for p in blobs if p.startswith(HARNESS_PREFIX) and not p.startswith(WORKFLOWS_DIR)
+                  and p.rsplit("/", 1)[-1] == name}
+    for module in names.modules:
+        script, package = f"{SCRIPTS_DIR}{module}.py", f"{SCRIPTS_DIR}{module}/"
+        found |= {p for p in blobs if p == script or p.startswith(package)}
+    return {p for p in found if not p.startswith(HARNESS_EXCLUDED) and p != GROUPS_FILE}
+
+
+def harness_files(tree) -> set[str]:
+    """The harness of a tree (see HARNESS_ROOTS): the UI workflows and, transitively, every file
+    under .github/ they and the files they reach name or import (workflow_names, script_names,
+    resolve). Fails safe, toward "changed": without both roots, with a script that cannot be
+    parsed, with a name that cannot be resolved, or when the UI workflows do not reach the
+    runner, every file under .github/ counts (is_harness)."""
+    blobs = tree.files()
+    everything = {p for p in blobs if is_harness(p)}
+    if any(root not in blobs for root in HARNESS_ROOTS):
+        return everything
+    found, todo = set(), list(HARNESS_ROOTS)
+    while todo:
+        path = todo.pop()
+        if path in found:
+            continue
+        found.add(path)
+        text = tree.read(path) or ""
+        if path.endswith(".py"):
+            named = script_names(text, path)
+            if named is None:
+                return everything
+        elif path.endswith((".yml", ".yaml", ".sh")):
+            named = workflow_names(text)
+        else:
+            continue  # data (JSON and the like) names nothing that runs
+        reached = resolve(named, blobs)
+        if reached is None:
+            return everything
+        todo += [p for p in reached if p not in found]
+    if HARNESS_RUNNER not in found:
+        return everything
+    return found
 
 
 NOT_APP_PREFIXES = ("App/SortlyUITests/", "App/SortlyTests/", "Tests/", "docs/", ".github/", "scripts/", "tools/",
@@ -577,8 +934,14 @@ def load_groups(tree) -> list[dict] | None:
     return groups
 
 
+# Keys of a group that only report and never change what runs: left out of the test
+# fingerprint, so a new budget does not run a group again.
+REPORT_ONLY = ("budget_min",)
+
+
 def definition(group: dict) -> dict:
-    return {k: v for k, v in group.items() if not k.startswith("_")}
+    """What a group runs: its keys without the comments ("_...") and the report-only keys."""
+    return {k: v for k, v in group.items() if not k.startswith("_") and k not in REPORT_ONLY}
 
 
 class Groups:
@@ -600,7 +963,7 @@ class Groups:
         blobs = tree.files()
         shared = ({p for p in blobs if p.startswith(UI_DIR) and not p.endswith(".swift")}
                   | {p for p, f in self.files.items() if f.observer}
-                  | {p for p in blobs if is_harness(p)})
+                  | harness_files(tree))
         # Fails closed: a Swift file of the target that no group's tests reach (a helper whose use
         # this reader missed, a test class it could not see) counts for every group.
         reached = set()
@@ -667,6 +1030,8 @@ class Groups:
         entry = {k: g.get(k, "") for k in ("group", "title", "device", "only", "skip")}
         for flag in ("video", "reduce_motion", "increase_contrast"):
             entry[flag] = bool(g.get(flag, False))
+        # The group's time budget in minutes (0: none), checked by ui_tests.py --budget-min.
+        entry["budget_min"] = int(self.group(name).get("budget_min", 0) or 0)
         if quick:
             entry["title"] += " (quick)"
         entry["quick"] = quick

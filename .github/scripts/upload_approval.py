@@ -1,35 +1,53 @@
-"""Whether a TestFlight upload waits for the owner's approval (the owner's decision 5 of 18.11.2026).
+"""Whether the TestFlight upload is fenced in: it runs only in the environment testflight-upload,
+and only the branch main may use it (the owner's decision of 19.11.2026, which replaced decision 5
+of 18.11.: the upload runs without a click once every gate of the run is green).
 
   python3 .github/scripts/upload_approval.py check
-      For testflight.yml (job "Upload approval", Linux, no secret) and daily_build.py. Reads the
-      GitHub environment ENVIRONMENT (GET /repos/{repo}/environments/{name}; actions: read) and
-      exits 0 only when it exists and asks a required reviewer before a job may use it; then it
-      writes ready=true to $GITHUB_OUTPUT. Otherwise an error that points to SETUP, exit 1.
+      For testflight.yml (job "Upload setup", Linux, no secret) and daily_build.py. Reads the
+      GitHub environment ENVIRONMENT (GET /repos/{repo}/environments/{name} and its
+      deployment-branch-policies; actions: read) and exits 0 only when it exists and may be used
+      from the branch main only; then it writes ready=true to $GITHUB_OUTPUT. Otherwise an error
+      that points to SETUP, exit 1.
 
 Why: the upload job of testflight.yml is the only job that names this environment, and the App
 Store Connect secrets live in it (docs/launch/FREIGABE_EINRICHTEN.md). GitHub creates an
-environment that a job names but that does not exist yet, without any protection rule: that job
-would start without asking anyone, and it could still read the four secrets if they were left
-in the repository. So no run gets past its first job unless the environment asks the owner.
-That the secrets left the repository cannot be read from here (a job outside the environment
-would have to read them for that); the setup steps say to delete them.
+environment that a job names but that does not exist yet, without any rule: that job could then
+run from any branch. So no run gets past its first job unless the environment exists with its
+branch rule, and the upload job never creates one.
 
-It also stops when the repository is not public: on GitHub Free, Pro and Team a required
-reviewer of an environment is enforced in public repositories only, and whether the API still
-lists such a rule after a switch to private is not known. Going private needs another approval
-path first (docs/launch/FREIGABE_EINRICHTEN.md); until then nothing is uploaded.
+The branch rule is the only fence now, so it is strict: a custom rule for exactly the branch
+main (GET .../deployment-branch-policies); no rule, "protected branches", a pattern, a second
+branch or a tag rule stops the run (second review of bundle-p: a changed testflight.yml started
+from another branch must not reach the secrets).
 
-It also stops unless the environment may be used from the branch main only (a custom rule for
-exactly the branch main, GET .../deployment-branch-policies): with no rule, or "protected
-branches", or another pattern, a changed testflight.yml started from another branch could ask
-for the owner's approval under a misleading name (second review of bundle-p).
+A private repository (GitHub's docs, "Managing environments for deployment", 19.11.2026): on GitHub
+Free, environments, environment secrets and deployment branch rules exist for public
+repositories only; GitHub Pro, Team and Enterprise have them in private ones too. The API may
+still list a branch rule in a private repository on Free, which GitHub then does not enforce, and
+the run's token cannot read the plan. So a private repository is refused, with a message that
+names GitHub Free, unless the owner has set the repository variable UPLOAD_PRIVATE_PLAN_OK to
+"true" (PLAN_VARIABLE; testflight.yml and daily-build.yml pass it in) once his plan has
+environments in private repositories; then the same checks as in a public one apply (third
+review of fix/pipeline, 19.11.).
 
-Warning, no block: "Prevent self-review" is on (the owner could not approve a run he started himself;
-the daily build is started by GitHub Actions, so it does not matter there).
+Warnings, no block: a required reviewer is still set (the upload then waits for a click, as before
+19.11.); nothing requires a pull request on main (main_protection: rulesets, then the classic
+branch protection), so whoever can push to main can upload ("main ist nicht geschützt"), or
+that could not be read.
 
-When the API does not answer, check fails (no upload without knowing): re-run the job.
+  python3 .github/scripts/upload_approval.py not-uploaded
+      For testflight.yml (first job, and the start of the upload job): exits 1 when the tag
+      build-<GITHUB_RUN_NUMBER> exists, so "Re-run all jobs" (or a re-run of the upload job) on a
+      run that uploaded does not upload again (third review of fix/pipeline).
 
-Environment: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_API_URL, GITHUB_OUTPUT, GITHUB_STEP_SUMMARY.
+When the API does not answer, check and not-uploaded fail (no upload without knowing): re-run
+the job.
+
+The file keeps its name (daily_build.py and the tests import it); the job and its texts say
+"setup" since 19.11.
+
+Environment: GH_TOKEN, GITHUB_REPOSITORY, GITHUB_API_URL, GITHUB_OUTPUT, GITHUB_STEP_SUMMARY,
+UPLOAD_PRIVATE_PLAN_OK (the repository variable).
 """
 from __future__ import annotations
 
@@ -83,7 +101,36 @@ def fetch_public() -> bool:
     return repository.get("private") is False and repository.get("visibility", "public") == "public"
 
 
-def _get(path: str) -> dict | None:
+UNPROTECTED = "main ist nicht geschützt: wer auf main pushen kann, kann hochladen"
+
+
+def main_protection(get=None) -> tuple[bool | None, str]:
+    """(True: a rule requires a pull request for main; False: nothing this run can read does;
+    None: main has a branch protection this run's token cannot read), and how it was read.
+    The rulesets that apply to main (GET /repos/{repo}/rules/branches/main, readable with read
+    access), then the classic branch protection: GET .../branches/main says whether there is
+    one, .../protection/required_pull_request_reviews whether it requires a pull request (that
+    one needs admin rights; HTTP 403 is "cannot read"). An API error is raised (ApiError)."""
+    get = get or _get
+    rules = get("rules/branches/main", final=(403,))
+    if any(isinstance(r, dict) and r.get("type") == "pull_request" for r in rules or []):
+        return True, "a ruleset requires a pull request for main"
+    branch = get("branches/main", final=(403,))
+    if not (branch or {}).get("protected"):
+        return False, "no ruleset requires a pull request for main, and main has no branch protection"
+    try:
+        reviews = get("branches/main/protection/required_pull_request_reviews", final=(403,))
+    except ApiError:
+        return None, ("main has a branch protection that this run cannot read (it needs admin rights): "
+                      "check that it requires a pull request")
+    if reviews is None:
+        return False, "neither a ruleset nor the branch protection of main requires a pull request"
+    return True, "the branch protection of main requires a pull request"
+
+
+def _get(path: str, final: tuple[int, ...] = ()) -> dict | list | None:
+    """GET /repos/{repo}/path: the JSON answer, None for HTTP 404. A status in final raises
+    ApiError at once (no retry: it will not change); anything else is tried three times."""
     repo = os.environ["GITHUB_REPOSITORY"]
     url = f"{API}/repos/{repo}" + (f"/{path}" if path else "")
     name = path or repo
@@ -98,6 +145,8 @@ def _get(path: str) -> dict | None:
         except urllib.error.HTTPError as error:
             if error.code == 404:
                 return None
+            if error.code in final:
+                raise ApiError(f"GitHub API: {name}: HTTP {error.code}") from error
             last = error
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             last = error
@@ -105,76 +154,128 @@ def _get(path: str) -> dict | None:
     raise ApiError(f"GitHub API: {name}: {last}")
 
 
-NOT_PUBLIC = ("the repository is not public, and GitHub enforces a required reviewer of an environment in a "
-              "private repository only with GitHub Enterprise")
+# The repository variable by which the owner says that his plan has environments in private
+# repositories (GitHub Pro, Team or Enterprise); only "true" counts.
+PLAN_VARIABLE = "UPLOAD_PRIVATE_PLAN_OK"
+PRIVATE_ON_FREE = ("the repository is private: on GitHub Free, environments, their secrets and their branch rules "
+                   "exist only in public repositories, and a rule the API still lists is not enforced; make the "
+                   "repository public, or, once the plan is GitHub Pro, Team or Enterprise, set the repository variable "
+                   f"{PLAN_VARIABLE} to true (Settings > Secrets and variables > Actions > Variables), as in {{setup}}")
 
 
-def review(environment: dict | None, public: bool = True,
-           branches: list[dict] | None = None) -> tuple[list[str], list[str], list[str]]:
-    """(problems that block the upload, warnings, reviewers) of an environment; None: it does not exist.
+def private_plan_ok(environ=None) -> bool:
+    """Whether the owner set PLAN_VARIABLE to "true" (any case, spaces around it ignored)."""
+    return str((os.environ if environ is None else environ).get(PLAN_VARIABLE, "")).strip().lower() == "true"
+
+
+def main_only(environment: dict | None, branches: list[dict] | None) -> bool:
+    """Whether the environment may be used from the branch main only (a custom rule for exactly it)."""
+    policy = (environment or {}).get("deployment_branch_policy") or {}
+    named = sorted((str((b or {}).get("name")), str((b or {}).get("type", "branch"))) for b in branches or [])
+    return bool(policy.get("custom_branch_policies")) and not policy.get("protected_branches") and named == MAIN_ONLY
+
+
+def review(environment: dict | None, public: bool = True, branches: list[dict] | None = None,
+           plan_ok: bool = False) -> tuple[list[str], list[str], list[str]]:
+    """(problems that block the upload, warnings, notes) of an environment; None: it does not exist.
     public: whether the repository is public (fetch_public). branches: its custom branch rules
-    (fetch_branches)."""
-    if not public:
-        return [NOT_PUBLIC], [], []
+    (fetch_branches). plan_ok: the owner's PLAN_VARIABLE (private_plan_ok), needed when private."""
+    if not public and not plan_ok:
+        return [PRIVATE_ON_FREE.format(setup=SETUP)], [], []
     if environment is None:
         return [f"the environment {ENVIRONMENT} does not exist"], [], []
-    rules = environment.get("protection_rules") or []
-    reviewing = [r for r in rules if isinstance(r, dict) and r.get("type") == "required_reviewers"]
-    reviewers = []
-    for rule in reviewing:
-        for entry in rule.get("reviewers") or []:
-            who = (entry or {}).get("reviewer") or {}
-            reviewers.append(who.get("login") or who.get("slug") or who.get("name") or "?")
-    # A rule always has a reviewer in GitHub's settings; an answer that lists none counts as none.
-    if not reviewing or all(isinstance(r.get("reviewers"), list) and not r["reviewers"] for r in reviewing):
-        return [f"the environment {ENVIRONMENT} has no required reviewer"], [], []
-    policy = environment.get("deployment_branch_policy") or {}
-    rules_named = sorted((str((b or {}).get("name")), str((b or {}).get("type", "branch"))) for b in branches or [])
-    if policy.get("protected_branches") or not policy.get("custom_branch_policies") or rules_named != MAIN_ONLY:
+    if not main_only(environment, branches):
         return [f"the environment {ENVIRONMENT} may be used from other branches than main: set 'Deployment "
                 "branches and tags' to 'Selected branches and tags' with the one rule main"], [], []
     warnings = []
-    if any(r.get("prevent_self_review") for r in reviewing):
-        warnings.append("'Prevent self-review' is on: a reviewer cannot approve a run he started himself")
-    return [], warnings, reviewers
+    rules = environment.get("protection_rules") or []
+    if any(isinstance(r, dict) and r.get("type") == "required_reviewers" for r in rules):
+        warnings.append(f"the environment {ENVIRONMENT} still has a required reviewer: the upload waits for a click "
+                        f"(since 19.11.2026 it should run by itself; remove the reviewer as in {SETUP})")
+    notes = [f"only the branch main may use the environment {ENVIRONMENT}"]
+    if not public:
+        notes.append(f"the repository is private and {PLAN_VARIABLE} is true: the owner's plan has environments "
+                     "in private repositories")
+    return [], warnings, notes
 
 
-def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches) -> int:
+def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches, plan_ok=private_plan_ok,
+          protection=main_protection) -> int:
     try:
         environment = fetcher()
         is_public = public()
         branches = branches_of(environment, branch_fetcher)
     except ApiError as error:
-        print(command("error", "Upload approval", f"the environment {ENVIRONMENT} could not be read ({error}); "
+        print(command("error", "Upload setup", f"the environment {ENVIRONMENT} could not be read ({error}); "
                       "re-run this job when the API answers"))
         return 1
-    problems, warnings, reviewers = review(environment, is_public, branches)
+    problems, warnings, notes = review(environment, is_public, branches, plan_ok())
+    if not problems:
+        # Only a warning, never a block: the environment admits main alone, and whoever can push
+        # to main can upload (third review of fix/pipeline, P5-09).
+        try:
+            protected, how = protection()
+        except ApiError as error:
+            protected, how = None, f"the rules of main could not be read ({error})"
+        if protected is False:
+            warnings.append(f"{UNPROTECTED} ({how})")
+        elif protected is None:
+            warnings.append(f"whether main requires a pull request could not be checked: {how}")
+        else:
+            notes.append(how)
     for text in warnings:
-        print(command("warning", "Upload approval", text))
+        print(command("warning", "Upload setup", text))
     with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:
         if problems:
-            out.write(f"### No upload: the approval is not set up\n\n{'; '.join(problems).capitalize()}. The upload "
-                      f"waits for the owner's approval in the environment `{ENVIRONMENT}`; set it up once as in "
-                      f"`{SETUP}` (about 10 minutes), then start a new run.\n")
+            out.write(f"### No upload: the upload environment is not set up\n\n{'; '.join(problems).capitalize()}. "
+                      f"The upload runs in the environment `{ENVIRONMENT}`, which only the branch main may use; set "
+                      f"it up once as in `{SETUP}` (about 5 minutes), then start a new run.\n")
         else:
-            out.write(f"### Upload approval\n\nThe upload job waits until {', '.join(reviewers) or 'a reviewer'} "
-                      f"approves it (environment `{ENVIRONMENT}`).\n" + "".join(f"\n- Warning: {w}" for w in warnings)
+            out.write(f"### Upload setup\n\nThe upload runs by itself once every gate is green; "
+                      f"{'; '.join(notes)}.\n" + "".join(f"\n- Warning: {w}" for w in warnings)
                       + ("\n" if warnings else ""))
     if problems:
-        print(command("error", "Upload approval", "; ".join(problems) + f". No upload without the owner's approval: "
-                      f"set it up as in {SETUP}, then start a new run."))
+        print(command("error", "Upload setup", "; ".join(problems) + f". No upload: set it up as in {SETUP}, then "
+                      "start a new run."))
         return 1
-    print(f"UPLOAD_APPROVAL {ENVIRONMENT}: required reviewer(s) {', '.join(reviewers) or '(listed by GitHub)'}")
+    print(f"UPLOAD_SETUP {ENVIRONMENT}: main only")
     with open(os.environ.get("GITHUB_OUTPUT", os.devnull), "a", encoding="utf-8") as out:
         out.write("ready=true\n")
     return 0
 
 
+def not_uploaded(get=None) -> int:
+    """0 when this run has not uploaded its build yet: no tag build-<GITHUB_RUN_NUMBER> (the tag
+    job of testflight.yml gives one to every uploaded build, and the build number is the run
+    number). Otherwise an error: "Re-run all jobs" on a run that uploaded would upload the same
+    build number again (App Store Connect refuses it, after an hour of Macs). 1 also when the API
+    does not answer (no upload without knowing)."""
+    number = os.environ["GITHUB_RUN_NUMBER"]
+    tag = f"build-{number}"
+    try:
+        answer = (get or _get)(f"git/ref/tags/{tag}")
+    except ApiError as error:
+        print(command("error", "Already uploaded", f"whether the tag {tag} exists could not be read ({error}); "
+                      "re-run this job when the API answers"))
+        return 1
+    found = isinstance(answer, dict) and answer.get("ref") == f"refs/tags/{tag}"
+    if not found:
+        print(f"NOT_UPLOADED {tag}: no such tag, this run has not uploaded its build")
+        return 0
+    print(command("error", "Already uploaded", f"TestFlight build {number} was uploaded by this run already (tag "
+                  f"{tag}); a re-run would upload the same build number again, which App Store Connect refuses. "
+                  "For a new build start a new run: Actions > TestFlight > Run workflow"))
+    with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:
+        out.write(f"### No upload: build {number} was already uploaded by this run\n\nThe tag `{tag}` exists. "
+                  "Start a new run for a new build (Actions > TestFlight > Run workflow).\n")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("command", choices=["check"])
-    parser.parse_args(argv)
-    return check()
+    parser.add_argument("command", choices=["check", "not-uploaded"])
+    args = parser.parse_args(argv)
+    return not_uploaded() if args.command == "not-uploaded" else check()
 
 
 if __name__ == "__main__":

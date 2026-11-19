@@ -6,14 +6,16 @@ run-name: >-
   ${{ github.event_name == 'pull_request' && format('[merge {0}] {1}', github.sha, github.event.pull_request.title) || '' }}
 
 # End-to-end UI tests on the simulator. Separate from CI, in the repository's one Mac queue
-# (see "concurrency" below): one UI run or stress pass at a time across all branches; a new
-# push does not cancel a running UI run, the newest waiting run goes next.
+# (see "concurrency" below): one UI run or stress pass at a time across all branches, the newest
+# waiting run goes next; a new push to a pull request cancels the UI runs of its older commits
+# (ui-supersede.yml).
 #
 #   1. Core tests (Linux): the core library's tests on a free Linux runner. No macOS runner
 #      starts for a commit whose core tests fail (fast first, then expensive).
 #   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
 #   3. The test groups (.github/ui-groups.json), each on its own runner and freshly booted
-#      simulator (test-without-building), at most four at a time (max-parallel), so the slowest
+#      simulator (test-without-building), at most four at a time (max-parallel; three when
+#      TestFlight calls it, beside its stress pass and Release smoke test), so the slowest
 #      group sets the wall time, not the sum. Measured times per group: docs/TESTFLIGHT.md
 #      ("Messung"). "other flows" is defined as "everything the other groups do not run", so a
 #      new test class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests
@@ -101,7 +103,7 @@ env:
 # The Mac queue (Profi-Analyse 16.11., Top 3, decided 17.11.: only one Mac-heavy strand at a
 # time). Every UI run and every stress pass (ui-stress.yml) of every branch shares the group
 # "mac-queue", and GitHub keeps such a group like this:
-#   - one run at a time; a running run is never cancelled (cancel-in-progress: false);
+#   - one run at a time; the queue never cancels a running run (cancel-in-progress: false);
 #   - at most ONE run waits. A run that joins while another one waits takes its place: GitHub
 #     cancels the waiting one ("Canceling since a higher priority waiting request for
 #     'mac-queue' exists"). So the newest waiting run always goes next, also across branches
@@ -122,13 +124,25 @@ env:
 #     group it would wait behind the UI run of its own commit (about an hour), and while it
 #     waits the next run to join, e.g. the UI run of the next push, would cancel it.
 #   - the Mac jobs of nightly.yml and codeql.yml (one Mac each).
-# Not done: cancelling the older run of the same branch when a newer one starts (also in the
-# analysis). With one group for all branches, cancel-in-progress would cancel whatever runs,
-# another branch's run too.
+#   - runs on main (by hand or after a merge): a queue of their own, "mac-queue-main", since
+#     19.11.2026. That day the stress pass dispatched on main after PR #9 waited in "mac-queue",
+#     Dependabot rebased its pull request, and that UI run replaced the waiting pass. No pull
+#     request can replace a run on main now; a run on main may run beside a pull request's run
+#     (its jobs then wait for a free Mac, nothing is cancelled). Inside "mac-queue-main" a newer
+#     run on main replaces a waiting older one, as before.
+#   - Dependabot pull requests: group "ui-dependabot", and no job runs for them (plan below), so
+#     a version bump uses no Mac and can never replace a waiting run. Before merging one, start
+#     "UI flow" by hand on its branch (Run workflow); that run is in "mac-queue" like any other.
+# The older run of the same pull request: cancel-in-progress cannot do it here (with one group
+# for all branches it would cancel whatever runs, another branch's run too), so a newer push
+# cancels the waiting or running UI runs of the older commits of its pull request in a
+# workflow of its own, outside the queue: ui-supersede.yml (since 19.11.2026).
 concurrency:
   group: >-
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ui-{0}', github.run_id)
-    || (github.event.pull_request.head.repo.fork && 'ui-fork' || 'mac-queue') }}
+    || (github.event.pull_request.head.repo.fork && 'ui-fork')
+    || (github.event.pull_request.user.login == 'dependabot[bot]' && 'ui-dependabot')
+    || (github.ref == 'refs/heads/main' && 'mac-queue-main' || 'mac-queue') }}
   cancel-in-progress: false
 
 jobs:
@@ -136,6 +150,9 @@ jobs:
     # Which groups run (top of this file). Reads the earlier group jobs of ui.yml and
     # testflight.yml through the API (actions: read); when it cannot, every group runs.
     name: UI plan (which groups run)
+    # Not for a Dependabot pull request (see "concurrency"): every later job needs this one, so
+    # nothing runs and no Mac starts. The job "Dependabot: UI by hand" says so on the run page.
+    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -157,6 +174,22 @@ jobs:
           UI_GROUPS: ${{ inputs.groups || 'auto' }}
         run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick}
 
+  dependabot-note:
+    name: 'Dependabot: UI by hand'
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: No Mac for a version bump until someone starts the UI run
+        run: |
+          {
+            echo "### UI flow: not started for a Dependabot pull request"
+            echo "A version bump uses no Mac by itself, so it can never replace a waiting run on main"
+            echo "(19.11.2026). Before the merge: Actions > UI flow > Run workflow on this branch."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::UI flow for Dependabot runs by hand before the merge (Run workflow on this branch)."
+
   core-linux:
     # Same tests as CI's "Core tests (Linux)" (CI runs them for this commit too, but a manual
     # UI run on a branch has no CI run to wait for). ~4 min on a free runner. Not in a
@@ -176,7 +209,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install SQLite headers
-        run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev > /dev/null
+        run: bash .github/scripts/apt_install.sh libsqlite3-dev
       - name: Build and test
         run: swift test --parallel
 
@@ -244,9 +277,15 @@ jobs:
     strategy:
       fail-fast: false
       # Four groups + CI's macOS job = five macOS jobs at the peak (see the top of this file).
-      max-parallel: 4
+      # Called by TestFlight (release): three, as the stress pass and the Release smoke test run
+      # beside the groups there (CI's Mac job has ended), so five Macs at most, the account's
+      # limit. The group order (.github/ui-groups.json) starts the longest, device conditions,
+      # first; the two short ones wait for a free Mac and still end before it (TestFlight run
+      # 44461253154: device 62 min, flow-full 12, contrast 15 at the end), so the run takes no
+      # longer (second review of C7; test_workflows.py ReleaseSmokeTests).
+      max-parallel: ${{ inputs.release && 3 || 4 }}
       # The groups of .github/ui-groups.json that run (UI plan): group, title, device, only,
-      # skip, video, reduce_motion, increase_contrast, app, tests.
+      # skip, video, reduce_motion, increase_contrast, budget_min, app, tests.
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       GROUP: ${{ matrix.group }}
@@ -256,6 +295,8 @@ jobs:
       INCREASE_CONTRAST: ${{ matrix.increase_contrast }}
       REDUCE_MOTION: ${{ matrix.reduce_motion }}
       VIDEO: ${{ matrix.video }}
+      # Minutes; over it the group gets a warning, never red (ui_tests.py budget_check).
+      BUDGET_MIN: ${{ matrix.budget_min }}
       # Quick mode (SORTLY_UI_QUICK=1 in the tests; xcodebuild hands TEST_RUNNER_* variables to
       # the test runner without the prefix): every group of a quick run (matrix.quick).
       TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}
@@ -316,7 +357,8 @@ jobs:
           [ "$INCREASE_CONTRAST" = "true" ] && flags+=(--increase-contrast)
           [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
-            --only "$ONLY" --skip "$SKIP" --deadline "$((UI_JOB_START + (150 - 12) * 60))" "${flags[@]}"
+            --only "$ONLY" --skip "$SKIP" --deadline "$((UI_JOB_START + (150 - 12) * 60))" \
+            --budget-min "${BUDGET_MIN:-0}" "${flags[@]}"
           status=$?
           # 75: every pass failed on the simulator or XCTest alone, no test result
           # (build/no-test-result); the next step fails the job, not this one.
@@ -430,6 +472,10 @@ jobs:
     if: ${{ always() && needs.ui.result != 'skipped' && !inputs.release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # actions: read for the runs, jobs and retry records of the last days (UI history).
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -446,3 +492,15 @@ jobs:
         run: |
           mapfile -t records < <(find flaky -name 'flaky-*.json' 2>/dev/null | sort)
           python3 .github/scripts/ui_tests.py flaky-summary "${records[@]}" >> "$GITHUB_STEP_SUMMARY"
+      - name: UI history of the last 7 days
+        # Every UI run's group jobs by result (test red, no result, machinery, cancelled; also
+        # earlier attempts) and their repeats and flaky tests, across runs (review P5-06: 8 of 15
+        # red runs were no app bug, and nobody counted them). .github/scripts/flaky_history.py;
+        # it stops early so the UI plan and gate keep their API calls, and after 2 minutes. Never
+        # fails the run: continue-on-error, its own time limit, and earlier_attempts.py counts it
+        # as machinery (a re-run of it hides no test).
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/flaky_history.py --days 7 >> "$GITHUB_STEP_SUMMARY"

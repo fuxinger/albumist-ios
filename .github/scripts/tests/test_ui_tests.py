@@ -8,6 +8,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -16,6 +17,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import ui_tests  # noqa: E402
+import ui_groups  # noqa: E402
 
 # Job 133263283907 (contrast pass): the runner never came up.
 AX_TIMEOUT = """\
@@ -112,6 +114,16 @@ TESTMANAGERD_BUNDLE = [
 ]
 PASSED_ONE = "Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' passed (9.0 seconds).\n"
 
+# Every selected test skipped itself (XCTSkip): xcodebuild succeeds without having tested anything.
+SKIPPED_ONLY = """\
+Test Case '-[SortlyUITests.DeviceConditionUITests test11_LargeLibrary]' started.
+Test Case '-[SortlyUITests.DeviceConditionUITests test11_LargeLibrary]' skipped (0.012 seconds).
+Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' started.
+Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' skipped (0.010 seconds).
+\t Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.022 (0.030) seconds
+** TEST SUCCEEDED **
+"""
+
 # Job 133113879733: a compile error (xcodebuild test builds first).
 COMPILE_ERROR = """\
 /Users/runner/work/sortly-ios/sortly-ios/App/Sortly/Platform/SamplePhotos.swift:162:66: error: cannot infer key path type from context; consider explicitly specifying a root type
@@ -180,6 +192,34 @@ class DecideTests(unittest.TestCase):
         verdict, reasons = ui_tests.decide(0, log)
         self.assertEqual(verdict, "fail")
         self.assertIn("no test ran", reasons[0])
+
+    def test_green_pass_where_every_test_skipped_itself_fails(self):
+        # G5-08 (review of 18.11.2026): a group whose every test skips itself (XCTSkip, e.g.
+        # DeviceConditionUITests test11 in a quick run and test12 outside the stress run) ran no
+        # test; it must never count as green.
+        verdict, reasons = ui_tests.decide(0, SKIPPED_ONLY)
+        self.assertEqual(verdict, "fail")
+        self.assertIn("no test passed", reasons[0])
+        self.assertIn("2 skipped", reasons[0])
+        # One passed test next to the skipped ones: green, as before.
+        self.assertEqual(ui_tests.decide(0, PASSED_ONE + SKIPPED_ONLY), ("pass", []))
+        # A repeat that ran only tests which skip themselves passes when the first pass of the
+        # same group passed a test (the repeat runs only what did not pass there).
+        self.assertEqual(ui_tests.decide(0, SKIPPED_ONLY, earlier=PASSED_ONE), ("pass", []))
+        self.assertEqual(ui_tests.decide(0, SKIPPED_ONLY, earlier=AX_TIMEOUT)[0], "fail")
+
+    def test_classify_takes_the_first_pass_of_a_repeat(self):
+        # The manual `classify` decides like `run`: a repeat is judged with its first pass.
+        with tempfile.TemporaryDirectory() as folder:
+            first, repeat = os.path.join(folder, "first.log"), os.path.join(folder, "retry.log")
+            for path, text in ((first, PASSED_ONE + SERVICE_INTERRUPTED), (repeat, SKIPPED_ONLY)):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+            for extra, verdict in (([], "fail"), (["--earlier", first], "pass")):
+                with self.subTest(extra=extra):
+                    with contextlib.redirect_stdout(io.StringIO()) as out:
+                        self.assertEqual(ui_tests.main(["classify", repeat, "--status", "0"] + extra), 0)
+                    self.assertTrue(out.getvalue().startswith(verdict + ":"), out.getvalue())
 
     def test_assertion_is_not_retried(self):
         self.assertEqual(ui_tests.decide(65, FLOW_ASSERTION)[0], "fail")
@@ -443,6 +483,20 @@ class SelectionTests(unittest.TestCase):
         self.assertIn("UI_RESULT device fail", log)
         self.assertIn("UI_RESULT device pass", self.run_with_passes(["** TEST SUCCEEDED **\n" + PASSED_ONE])[2])
 
+    def test_a_group_whose_every_test_skipped_itself_is_red(self):
+        # G5-08: never green, also not as "no result": the selection tested nothing.
+        code, marker, log = self.run_with_passes([SKIPPED_ONLY])
+        self.assertEqual((code, marker), (1, False))
+        self.assertIn("UI_VERDICT device first: fail (no test passed", log)
+        self.assertIn("UI_RESULT device fail", log)
+        # The first pass lost the simulator before any test, the repeat only skipped: red.
+        self.assertEqual(self.run_with_passes([AX_TIMEOUT, SKIPPED_ONLY])[:2], (1, False))
+        # The first pass passed a test and then lost the simulator; the repeat ran only the
+        # tests that skip themselves: the group passed a test, so green.
+        code, marker, log = self.run_with_passes([PASSED_ONE + SERVICE_INTERRUPTED, SKIPPED_ONLY])
+        self.assertEqual((code, marker), (0, False), log)
+        self.assertIn("UI_RESULT device pass", log)
+
     def test_a_testmanagerd_crash_is_repeated_and_no_red_on_its_own(self):
         verdict, reasons = ui_tests.decide(65, TESTMANAGERD_CRASH, bundle=TESTMANAGERD_BUNDLE)
         self.assertEqual((verdict, reasons[0]), ("retry", "XCTest daemon testmanagerd crashed"))
@@ -632,6 +686,40 @@ class FlakyTests(unittest.TestCase):
             with open(path, "w") as f:
                 json.dump(ui_tests.flaky_record("accessibility", RESTART, ["simulator not booted"], self.RETRY_LOG, "pass"), f)
             self.assertEqual(ui_tests.main(["flaky-summary", path, os.path.join(folder, "missing.json")]), 0)
+
+
+class SweepStrictTests(unittest.TestCase):
+    """G5-10 (review of 18.11.2026): the tap-through sweep (SortlyFlowUITests test3) checked rows
+    strictly only in "Vorschläge"; on "Übersicht", "Mediathek", "Alben" and every screen one level
+    down a row that did nothing was only a UI_SWEEP_NOOP line in the log. Every list it walks is
+    strict now: each NOOP line is followed by a failure, or by `return 0`, which check() fails."""
+
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+
+    def swift(self):
+        with open(os.path.join(self.ROOT, "App", "SortlyUITests", "SortlyFlowUITests.swift"), encoding="utf-8") as f:
+            return f.read()
+
+    @staticmethod
+    def lenient(source: str) -> list[int]:
+        """Lines whose code (comments and string literals left out) names a `strict` switch."""
+        code = ui_groups.strip_swift(source)
+        return [i + 1 for i, line in enumerate(code.splitlines()) if re.search(r"\bstrict\b", line)]
+
+    def test_no_list_is_walked_leniently(self):
+        self.assertEqual(self.lenient("// strict in every list\nlet s = \"strict\"\n"), [])
+        self.assertEqual(self.lenient("func sweep(depth: Int, strict: Bool = false) {}\n"), [1])
+        self.assertEqual(self.lenient(self.swift()), [])
+
+    def test_every_dead_row_fails_the_test(self):
+        lines = self.swift().splitlines()
+        noops = [i for i, line in enumerate(lines) if "UI_SWEEP_NOOP" in line and "print(" in line]
+        self.assertGreaterEqual(len(noops), 4)  # the sweep's rows, and the search's three
+        for i in noops:
+            with self.subTest(line=i + 1, text=lines[i].strip()[:80]):
+                self.assertRegex(lines[i + 1], r"^\s*(XCTFail\(|XCTAssert\w*\(|return 0\s*$)")
+        # A screen whose sweep reached nothing (the search's `return 0`) fails in check().
+        self.assertRegex(self.swift(), r"if reached == 0 \{ XCTFail\(")
 
 
 class SweepSkipTests(unittest.TestCase):
@@ -850,7 +938,8 @@ class GroupTests(unittest.TestCase):
     def test_at_most_four_groups_at_a_time(self):
         # With CI's one macOS job, five macOS jobs at the peak; contrast (the shortest) waits.
         import re
-        self.assertRegex(self.workflow(), r"\n      max-parallel: 4\n")
+        # Three when TestFlight calls it (test_workflows.py ReleaseSmokeTests: five Macs at most).
+        self.assertRegex(self.workflow(), r"\n      max-parallel: \$\{\{ inputs\.release && 3 \|\| 4 \}\}\n")
         self.assertEqual(list(self.groups())[-1], "contrast")
 
     def test_other_flows_skip_exactly_what_the_others_run(self):
@@ -1130,7 +1219,94 @@ class HostTerminateTests(unittest.TestCase):
                 swift = open(os.path.join(folder, name), encoding="utf-8").read()
                 self.assertNotIn(".terminate()", swift)
                 if "app = XCUIApplication()" in swift:
-                    self.assertIn("UITestAppEnd.end(app", swift)
+                    # UITestAppEnd.launch ends the app first (since the first launch of a test
+                    # goes through it as well).
+                    self.assertRegex(swift, r"UITestAppEnd\.(end|launch)\(app")
+
+    def test_every_home_press_goes_through_the_wait_that_tries_again(self):
+        # UI run 44497741096 (19.11.): after the Home press the app stayed in the foreground
+        # for 30 s in device test03 and test06; the press was lost on the CI simulator.
+        # UITestWait.toBackground tries Home once more and then brings the Settings app to the
+        # front, each extra try a counted UI_FLAKY_RETRY line that names the test. No UI test
+        # presses Home anywhere else, so every move to the background gets that escalation.
+        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".swift") or name == "UITestWait.swift":
+                continue
+            with self.subTest(name):
+                with open(os.path.join(folder, name), encoding="utf-8") as source:
+                    code = ui_groups.strip_swift(source.read())
+                self.assertNotRegex(code, r"\.press\(\s*\.home\s*\)")
+                for call in re.finditer(r"UITestWait\.toBackground\(", code):
+                    self.assertRegex(code[call.end():call.end() + 200], r"^[^()]*\bin: self\b")
+        with open(os.path.join(folder, "UITestWait.swift"), encoding="utf-8") as source:
+            wait = source.read()
+        body = wait[wait.index("static func toBackground("):wait.index("static func testID(")]
+        self.assertEqual(len(re.findall(r"\.press\(\.home\)", body)), 1)  # in the loop of ways
+        self.assertIn('("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30)', body)
+        # The time in the background counts from when iOS reported it, not from the first press:
+        # after a late way the app stayed there 1 s only (second review of 5d730ac, 6d6baf1), and
+        # SortlyFlowUITests says "at least the old 8 s, counted once iOS has it there".
+        self.assertIn("inBackgroundSince = since", body)
+        self.assertIn("let wait = reached ? max(atLeast - Date().timeIntervalSince(inBackgroundSince), 1) : 0", body)
+        self.assertNotRegex(body, r"atLeast - took\b")
+        self.assertIn('XCUIApplication(bundleIdentifier: "com.apple.Preferences").activate()', body)
+        retry = re.search(r'print\("UI_FLAKY_RETRY \\\(testID\(test\)\) ([^"]*)"\)', body)
+        self.assertIsNotNone(retry)
+        line = "UI_FLAKY_RETRY DeviceConditionUITests.test03_X app still in the foreground (state 4) 12 s after the Home press why, tried: second Home press"
+        self.assertEqual(ui_tests.INSIDE_RETRY.findall(line)[0][0], "DeviceConditionUITests.test03_X")
+
+    @staticmethod
+    def launch_calls(source: str) -> list[int]:
+        """Line numbers of `.launch()` calls (any spacing) in Swift code, comments and string
+        literals left out."""
+        code = ui_groups.strip_swift(source)
+        return [code.count("\n", 0, m.start()) + 1 for m in re.finditer(r"\.\s*launch\s*\(\s*\)", code)]
+
+    def test_every_launch_goes_through_the_helper_that_records_the_process_id(self):
+        # The first launch of each test ended the app of the test before through a new
+        # XCUIApplication without launch arguments, so `UITestAppEnd.processID` found no watch
+        # file and the Mac fell back to `simctl terminate` by bundle id: the race of 945446e (a
+        # late end hits the NEW launch) and simctl's hangs (device test08 of job 135412549414:
+        # 114 s, "by XCTest after the Mac"). Every launch now goes through UITestAppEnd.launch,
+        # which ends the last launch's app, adds -SortlyUITestWatchMainLog when the arguments
+        # lack it and notes the launch (UITestLaunchRecord), so the next end knows the process
+        # from any XCUIApplication. No UI test file launches the app itself.
+        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        for sample, found in (("app.launch()", 1), ("app.launch( )", 1), ("app\n  .launch ()", 1),
+                              ("// app.launch()", 0), ('print("app.launch()")', 0), ("UITestAppEnd.launch(app)", 0)):
+            with self.subTest(sample=sample):
+                self.assertEqual(len(self.launch_calls(sample)), found)
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".swift") or name == "UITestAppEnd.swift":
+                continue
+            with self.subTest(name):
+                with open(os.path.join(folder, name), encoding="utf-8") as f:
+                    source = f.read()
+                self.assertEqual(self.launch_calls(source), [], "launch through UITestAppEnd.launch(app)")
+                # The helper ends the app before every launch; a plain end "before the next
+                # launch" in front of it would wait a second time for an app still running
+                # (60 s for the Mac, then XCTest). Ends with their own reason stay.
+                self.assertEqual(ui_groups.strip_swift(source).count("UITestAppEnd.end(app)"), 0)
+        with open(os.path.join(folder, "UITestAppEnd.swift"), encoding="utf-8") as f:
+            helper = f.read()
+        body = helper[helper.index("static func launch(_ app: XCUIApplication"):]
+        body = body[:body.index("\n    }\n")]
+        self.assertEqual(body.count("app.launch()"), 1)
+        order = [body.index(s) for s in ("end(app", "UITestStalls.arguments(besides: app.launchArguments)",
+                                         "UITestLaunchRecord.shared.launching(app.launchArguments)", "app.launch()")]
+        self.assertEqual(order, sorted(order), "end, watch file, record, then launch")
+        # The device tests' launch clock (compared with the app's process start by
+        # lost_app_at_launch) is taken after that end, right before the launch.
+        with open(os.path.join(folder, "DeviceConditionUITests.swift"), encoding="utf-8") as f:
+            self.assertIn('UITestAppEnd.launch(app, justBefore: { UITestOnboarding.clock("launch") })', f.read())
+        self.assertLess(body.index("justBefore()"), body.index("app.launch()"))
+        self.assertLess(body.index("end(app"), body.index("justBefore()"))
+        # The end reads the process of the last launch, and the stall report keeps it when it
+        # removes the file (DeviceConditionUITests and AccessibilityUITests report in teardown).
+        self.assertIn("UITestLaunchRecord.shared.processID(", helper)
+        with open(os.path.join(folder, "UITestStalls.swift"), encoding="utf-8") as f:
+            self.assertIn("UITestLaunchRecord.shared.read(", f.read())
 
     def test_the_test_lines_about_the_end_are_no_finding(self):
         log = ("UI_FACT clock 10:00:00.0 end the app before the next launch\nUI_HOST_TERMINATE_APP 1763500000\n"
@@ -1323,6 +1499,188 @@ class SettleCommandTests(unittest.TestCase):
             self.assertEqual(ui_tests.main(["settle", "--udid", "U"]), 0)
         self.assertEqual(seen, [(0.5, ui_tests.SETTLE_LIMIT)])
         self.assertIn("UI_BOOT_TIMING wait for the simulator", out.getvalue())
+
+
+class SleepRuleTests(unittest.TestCase):
+    """Fixed sleeps in the UI tests (review P5-05 of 18.11.: 249 of them). A fixed sleep that
+    stands in for a state the app has to reach (a screen, the background, a running plan) turns
+    red on a starved Mac: device test06 waited a fixed 4 s for the background and failed (UI run
+    44480215847, fixed in d8f863f with a wait for the state). New waits wait for a condition
+    with a deadline; a sleep that is only pacing (an animation before a screenshot, the interval
+    of a poll) says so."""
+
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+    FOLDER = os.path.join(ROOT, "App", "SortlyUITests")
+    # sleep(s), usleep(µs), Thread.sleep(forTimeInterval:/until:), RunLoop's run(until:).
+    SLEEP = re.compile(r"(?<![\w.])(u?sleep)\(|\b(Thread\.sleep)\(|\b(RunLoop\.\w+\.run)\(\s*until:")
+    # Calls of sleep()/usleep() per file (code only). The count may only go down; lower it here
+    # when a sleep becomes a condition wait.
+    CEILING = {
+        "AccessibilityUITests.swift": 48,
+        "DeviceConditionUITests.swift": 45,
+        "SearchUITests.swift": 4,
+        "SortlyFlowUITests.swift": 123,
+        "SortlyLockedUITests.swift": 15,
+        "UITestOnboarding.swift": 3,
+        # The poll intervals of the condition waits (until, toBackground, never), the minimum
+        # time in the background, and atLeast: the rest of an old fixed time after the state was
+        # reached (second review of C2). Its callers are counted in AT_LEAST.
+        "UITestWait.swift": 5,
+    }
+    # UITestWait.atLeast calls per file (a fixed minimum after a wait; second review of C2):
+    # counted like the sleeps, so a new one is a decision, not a habit.
+    AT_LEAST = {"AccessibilityUITests.swift": 1, "ReleaseSmokeUITests.swift": 1, "SortlyFlowUITests.swift": 4}
+    # Long sleeps (3 s or more, or a computed length) without a "// pacing:" note, per file:
+    # the ones still standing in for a state. None left since the condition waits of
+    # UITestWait.swift; a new one fails test_a_long_sleep_is_pacing_and_says_so.
+    STATE_SLEEPS_LEFT: dict[str, int] = {}
+
+    @classmethod
+    def sleeps(cls, source: str) -> list[tuple[int, str]]:
+        """(line number, argument text) of every sleep()/usleep() call in Swift code; comments
+        and string literals left out."""
+        code = ui_groups.strip_swift(source)
+        found = []
+        for m in cls.SLEEP.finditer(code):
+            depth, j = 1, m.end()
+            while j < len(code) and depth:
+                depth += {"(": 1, ")": -1}.get(code[j], 0)
+                j += 1
+            kind = m.group(1) or m.group(2) or m.group(3)
+            found.append((code.count("\n", 0, m.start()) + 1, kind + ":" + code[m.end():j - 1].strip()))
+        return found
+
+    @staticmethod
+    def is_long(call: str) -> bool:
+        """3 s or more, or a length the code computes (it can be anything)."""
+        kind, argument = call.split(":", 1)
+        if kind in ("sleep", "usleep"):
+            literal = argument.replace("_", "")
+            if not literal.isdigit():
+                return True
+            return int(literal) >= (3 if kind == "sleep" else 3_000_000)
+        # Thread.sleep(forTimeInterval: 2), RunLoop.main.run(until: Date().addingTimeInterval(1)):
+        # seconds as a literal; anything else (until: a date the code computes) is long.
+        number = r"([0-9][0-9_]*(?:\.[0-9]+)?)"
+        for shape in (rf"forTimeInterval:\s*{number}", rf"Date\(timeIntervalSinceNow:\s*{number}\)",
+                      rf"Date\(\)\.addingTimeInterval\({number}\)"):
+            found = re.fullmatch(shape, argument.strip())
+            if found:
+                return float(found.group(1).replace("_", "")) >= 3
+        return True
+
+    @staticmethod
+    def has_pacing_note(lines: list[str], number: int) -> bool:
+        """A "// pacing:" note on the sleep's line or in the comment block right above it."""
+        if "// pacing:" in lines[number - 1]:
+            return True
+        n = number - 1
+        while n >= 1 and lines[n - 1].lstrip().startswith("//"):
+            if "// pacing:" in lines[n - 1]:
+                return True
+            n -= 1
+        return False
+
+    def files(self):
+        for name in sorted(os.listdir(self.FOLDER)):
+            if name.endswith(".swift"):
+                with open(os.path.join(self.FOLDER, name), encoding="utf-8") as f:
+                    yield name, f.read()
+
+    def test_the_finder_reads_code_only(self):
+        sample = 'sleep(1)\n// sleep(9)\nprint("sleep(9)")\nusleep(UInt32(wait * 1_000_000))\n  usleep(250_000); x()\n'
+        self.assertEqual(self.sleeps(sample), [(1, "sleep:1"), (4, "usleep:UInt32(wait * 1_000_000)"), (5, "usleep:250_000")])
+        self.assertEqual([self.is_long(c) for _, c in self.sleeps(sample)], [False, True, False])
+        self.assertTrue(self.is_long("sleep:3"))
+        self.assertTrue(self.is_long("usleep:3_000_000"))
+        self.assertFalse(self.is_long("usleep:2_900_000"))
+        self.assertTrue(self.has_pacing_note(["// pacing: the poll's interval", "sleep(interval)"], 2))
+        self.assertTrue(self.has_pacing_note(["sleep(3) // pacing: the show's animation"], 1))
+        self.assertFalse(self.has_pacing_note(["sleep(3)"], 1))
+        self.assertTrue(self.has_pacing_note(["// pacing: the results", "// (more)", "sleep(3)"], 3))
+        # Second review of C1: the other ways to sleep count too.
+        other = ("Thread.sleep(forTimeInterval: 2)\nThread.sleep(forTimeInterval: 0.5)\nThread.sleep(until: end)\n"
+                 "RunLoop.current.run(until: Date(timeIntervalSinceNow: 4))\nRunLoop.main.run(until: Date().addingTimeInterval(1))\n"
+                 "app.run(x)\n")
+        found = self.sleeps(other)
+        self.assertEqual([n for n, _ in found], [1, 2, 3, 4, 5])
+        self.assertEqual([self.is_long(c) for _, c in found], [False, False, True, True, False])
+        self.assertFalse(self.has_pacing_note(["// pacing: the results", "x()", "sleep(3)"], 3))
+
+    def test_the_number_of_fixed_sleeps_only_goes_down(self):
+        counts = {name: len(self.sleeps(source)) for name, source in self.files()}
+        for name, count in counts.items():
+            with self.subTest(name):
+                ceiling = self.CEILING.get(name, 0)
+                self.assertLessEqual(count, ceiling, f"{name}: {count} fixed sleeps, at most {ceiling}: wait for a "
+                                     "condition (an element, a state) with a deadline instead")
+                self.assertEqual(count, ceiling, f"{name}: {count} fixed sleeps now; lower CEILING to {count}")
+        self.assertEqual(set(self.CEILING) - set(counts), set(), "CEILING names a file that is gone")
+
+    def test_the_minimums_after_a_wait_are_counted(self):
+        counts = {name: len(re.findall(r"\bUITestWait\.atLeast\(", ui_groups.strip_swift(source)))
+                  for name, source in self.files()}
+        self.assertEqual({n: c for n, c in counts.items() if c}, self.AT_LEAST)
+
+    def test_a_long_sleep_is_pacing_and_says_so(self):
+        for name, source in self.files():
+            lines = source.split("\n")
+            unmarked = [f"{name}:{n} {call}" for n, call in self.sleeps(source)
+                        if self.is_long(call) and not self.has_pacing_note(lines, n)]
+            with self.subTest(name):
+                self.assertEqual(len(unmarked), self.STATE_SLEEPS_LEFT.get(name, 0),
+                                 "a sleep of 3 s or more stands in for a state: wait for it with a deadline "
+                                 "(UI_STEP_MISSING and a failure when it runs out), or note "
+                                 "\"// pacing: <why>\" when it is only pacing:\n" + "\n".join(unmarked))
+
+
+class BudgetTests(unittest.TestCase):
+    """A group's time against its budget (review P5-05; ui-groups.json budget_min)."""
+
+    def check(self, seconds, budget):
+        with tempfile.NamedTemporaryFile("r", suffix=".md") as summary, \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": summary.name}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            within = ui_tests.budget_check("device", seconds, budget)
+            with open(summary.name, encoding="utf-8") as f:
+                return within, out.getvalue(), f.read()
+
+    def test_within_the_budget_is_one_line(self):
+        within, out, summary = self.check(50 * 60, 70)
+        self.assertTrue(within)
+        self.assertEqual(out, "UI_BUDGET device 50.0 min (budget 70 min)\n")
+        self.assertEqual(summary, "")
+
+    def test_over_the_budget_warns_and_says_so_in_the_summary(self):
+        within, out, summary = self.check(75.5 * 60, 70)
+        self.assertFalse(within)
+        self.assertIn("UI_BUDGET device 75.5 min (budget 70 min) OVER", out)
+        self.assertIn("::warning title=UI device over its time budget::device took 76 min, over its budget of 70 min", out)
+        self.assertIn("**Time budget:** device took 76 min", summary)
+
+    def test_no_budget_never_warns(self):
+        within, out, _ = self.check(500 * 60, 0)
+        self.assertTrue(within)
+        self.assertIn("(no budget)", out)
+
+    def test_the_run_reports_its_time_also_when_it_fails(self):
+        args = argparse.Namespace(name="flow-full", budget_min=1)
+        with mock.patch.object(ui_tests, "run_group", side_effect=RuntimeError("boom")), \
+                mock.patch.object(ui_tests, "budget_check") as check, self.assertRaises(RuntimeError):
+            ui_tests.command_run(args)
+        self.assertEqual(check.call_args[0][0], "flow-full")
+        self.assertEqual(check.call_args[0][2], 1)
+        # A broken budget report never replaces the run's own exit code or error (second review).
+        with mock.patch.object(ui_tests, "run_group", return_value=75), \
+                mock.patch.object(ui_tests, "budget_check", side_effect=OSError("summary not writable")):
+            self.assertEqual(ui_tests.command_run(args), 75)
+        with mock.patch.object(ui_tests, "run_group", side_effect=RuntimeError("boom")), \
+                mock.patch.object(ui_tests, "budget_check", side_effect=OSError("x")), self.assertRaises(RuntimeError):
+            ui_tests.command_run(args)
+        seen = []
+        with mock.patch.object(ui_tests, "command_run", lambda a: seen.append(a.budget_min) or 0):
+            self.assertEqual(ui_tests.main(["run", "--udid", "U", "--name", "n", "--budget-min", "70"]), 0)
+        self.assertEqual(seen, [70])
 
 
 if __name__ == "__main__":

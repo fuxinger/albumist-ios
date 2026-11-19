@@ -95,7 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install SQLite headers
-        run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev python3 > /dev/null
+        run: bash .github/scripts/apt_install.sh libsqlite3-dev python3
       - name: Build and test
         run: |
           set -o pipefail
@@ -123,7 +123,9 @@ jobs:
     # (about an hour), and since GitHub keeps only one waiting run per group, the next run to
     # join would cancel it. Per branch only the newest CI run goes on (concurrency above).
     needs: [changes, lint, core-linux]
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' }}
+    # Not for a Dependabot pull request: a version bump uses no Mac by itself; its UI run by hand
+    # before the merge builds and tests the app (ui.yml, "concurrency").
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: xcode-27
     timeout-minutes: 45
     steps:
@@ -255,8 +257,13 @@ jobs:
           fi
       - name: Build UI tests
         # The UI tests run in their own workflow (ui.yml); building them here finds a compile
-        # error in them within this run instead of after the long simulator setup there.
-        if: steps.sim.outputs.udid != ''
+        # error in them within this run instead of after the long simulator setup there. Not in
+        # a TestFlight run (release): there ui.yml's "UI build" builds exactly this (scheme
+        # SortlyUI, build-for-testing) right after this job, in the same run, and a compile error
+        # stops the upload there (about 1 min of this Mac, TestFlight run 44461253154).
+        # test_workflows.py ReleaseSkipTests: a step left out in release mode is one whose
+        # build ui.yml really does itself.
+        if: steps.sim.outputs.udid != '' && !inputs.release
         run: |
           cd App
           xcodebuild build-for-testing \

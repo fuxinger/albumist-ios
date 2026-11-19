@@ -270,6 +270,7 @@ enum UITestOnboarding {
             streak = condition() ? streak + 1 : 0
             reportSlowCheck(since: asked)
             if streak >= 3 { return true }
+            // pacing: the poll's interval
             sleep(interval)
         }
         return false

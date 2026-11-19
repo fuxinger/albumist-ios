@@ -107,6 +107,21 @@ def job_field(text, job, field):
     return " ".join(value.split())
 
 
+class AptTests(unittest.TestCase):
+    """19.11.2026: archive.ubuntu.com was unreachable, a bare apt-get waited 6-13 minutes and the
+    core tests on main never ran. Every Ubuntu package goes through apt_install.sh (short
+    timeouts, retries, a second mirror; see test_apt_install.py)."""
+
+    def test_no_workflow_calls_apt_get_directly(self):
+        found = 0
+        for path in WORKFLOWS:
+            text = "\n".join(strip_comment(line) for line in read(path).splitlines())
+            with self.subTest(workflow=os.path.basename(path)):
+                self.assertNotRegex(text, r"\bapt(?:-get)?\s+(?:update|install)\b")
+            found += text.count(".github/scripts/apt_install.sh")
+        self.assertGreaterEqual(found, 3)  # ci.yml, ui.yml, nightly.yml
+
+
 class CacheTests(unittest.TestCase):
     """No Actions cache anywhere: the owner's rule (a Mac build cache only if it provably cannot ship
     stale code; none is used)."""
@@ -136,9 +151,10 @@ APPLE_SECRET = re.compile(r"secrets\.(%s)\b" % "|".join(APPLE_SECRETS))
 
 
 class UploadApprovalTests(unittest.TestCase):
-    """The owner's decision 5 of 18.11.2026: an upload only with his approval. The upload job runs in
-    the environment testflight-upload, whose required reviewer is the owner; the four App Store
-    Connect secrets are environment secrets there; nothing else can read them."""
+    """The upload job runs in the environment testflight-upload, which only the branch main may
+    use; the four App Store Connect secrets are environment secrets there; nothing else can read
+    them. Since the owner's decision of 19.11.2026 (it replaced decision 5 of 18.11.) the upload
+    runs without a click once every gate is green."""
 
     def test_the_upload_job_runs_in_the_protected_environment(self):
         import sys
@@ -150,8 +166,8 @@ class UploadApprovalTests(unittest.TestCase):
         self.assertIn(f"\n    environment: {upload_approval.ENVIRONMENT}\n", release + "\n")
         if yaml is not None:
             self.assertEqual(yaml.safe_load(text)["jobs"]["release"]["environment"], upload_approval.ENVIRONMENT)
-        # No other job of any workflow names this environment: no second door to its secrets,
-        # and one approval per upload (pages.yml has its own, github-pages).
+        # No other job of any workflow names this environment: no second door to its secrets
+        # (pages.yml has its own, github-pages).
         for path in WORKFLOWS:
             for job, block in job_blocks(read(path)).items():
                 if (os.path.basename(path), job) != ("testflight.yml", "release"):
@@ -179,7 +195,7 @@ class UploadApprovalTests(unittest.TestCase):
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         self.assertIn("run: python3 .github/scripts/upload_approval.py check", job_blocks(text)["check"])
 
-    def test_the_first_job_is_the_approval_check_the_daily_build_reads(self):
+    def test_the_first_job_is_the_setup_check_the_daily_build_reads(self):
         import sys
         sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
         import daily_build
@@ -187,12 +203,35 @@ class UploadApprovalTests(unittest.TestCase):
         check = job_blocks(text)["check"]
         self.assertIn(f"\n    name: {daily_build.CHECK_JOB}\n", "\n" + check + "\n")
         self.assertIn("\n    if: github.ref == 'refs/heads/main'\n", "\n" + check + "\n")
-        self.assertIn("ready: ${{ steps.approval.outputs.ready }}", check)
-        # The secrets' presence is checked after the approval without their values in a step.
+        self.assertIn("ready: ${{ steps.setup.outputs.ready }}", check)
+        self.assertIn("\n      - name: Upload setup checked\n        id: setup\n", "\n" + check)
+        # A private repository needs the owner's word that his plan has environments there
+        # (upload_approval.PLAN_VARIABLE); the daily build reads the same variable.
+        variable = "UPLOAD_PRIVATE_PLAN_OK: ${{ vars.UPLOAD_PRIVATE_PLAN_OK }}"
+        self.assertIn(variable, check.split("- name: Upload setup checked", 1)[1].split("\n      - ", 1)[0])
+        daily = read(os.path.join(ROOT, ".github", "workflows", "daily-build.yml"))
+        self.assertIn(variable, daily.split("run: python3 .github/scripts/daily_build.py decide", 1)[0].rsplit("\n      - ", 1)[1])
+        # Runs of before 19.11. named the job "Upload approval"; the daily build reads both.
+        self.assertEqual(daily_build.CHECK_JOBS, (daily_build.CHECK_JOB, "Upload approval"))
+        # The secrets' presence is checked first in the upload job, without their values in a step.
         release = job_blocks(text)["release"]
         first = release.split("\n      - ", 2)[1]
         self.assertTrue(first.startswith("name: App Store Connect secrets present"), first[:60])
         self.assertNotRegex(first, r"\$\{\{\s*secrets\.\w+\s*\}\}")
+        # "Re-run all jobs" on a run that uploaded stops in its first job, and a re-run of the
+        # upload job alone stops at its start, before the archive (upload_approval.py
+        # not-uploaded; the tag build-<run number> exists).
+        step = "\n      - name: Not uploaded by this run yet\n"
+        for job, before in (("check", "- name: Choose the gate"), ("release", "- name: Earlier attempts of this run")):
+            with self.subTest(job=job):
+                block = job_blocks(text)[job]
+                self.assertIn(step, "\n" + block)
+                own = block.split(step.strip("\n"), 1)[1].split("\n      - ", 1)[0]
+                self.assertIn("run: python3 .github/scripts/upload_approval.py not-uploaded", own)
+                self.assertIn("GH_TOKEN: ${{ github.token }}", own)
+                self.assertLess(block.index(step.strip("\n")), block.index(before))
+        import earlier_attempts
+        self.assertIn("Not uploaded by this run yet", earlier_attempts.MACHINERY_STEPS)
         # "Was testen" is set in the upload job now: no other job sets it with the key.
         self.assertEqual([job for job, block in job_blocks(text).items() if "testflight_notes.py upload" in block],
                          ["release"])
@@ -260,7 +299,7 @@ class TestFlightWiringTests(unittest.TestCase):
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         self.assertIn("python3 .github/scripts/ui_evidence.py gate", text)
         release = text.split("\n  release:\n", 1)[1].split("\n  tag:\n", 1)[0]
-        self.assertIn("needs: [check, tests, ui, stress, ui-gate]", release)
+        self.assertIn("needs: [check, tests, ui, stress, release-smoke, ui-gate]", release)
         self.assertIn("needs.ui-gate.result == 'success'", release)
 
     def test_nothing_skips_the_tests_before_an_upload(self):
@@ -296,7 +335,7 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertNotIn("gate", stress)  # the same small pass with either gate
         self.assertIn("photos: '10000'", stress)
         self.assertIn("minutes: '15'", stress)
-        for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "ui-gate"))):
+        for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "release-smoke", "ui-gate"))):
             with self.subTest(job=job):
                 rule = job_field(text, job, "if")
                 self.assertNotIn("||", rule)
@@ -407,5 +446,263 @@ class TestFlightWiringTests(unittest.TestCase):
                 self.assertIn(step, names)
 
 
+def job_steps(text, job):
+    """[(name, if, run)] of a job's steps, read by indentation (comments left out). A folded
+    "if: >-" is joined into one line."""
+    steps = []
+    for chunk in re.split(r"\n      - ", "\n" + job_blocks(text)[job])[1:]:
+        lines = chunk.splitlines()
+        fields, i = {}, 0
+        keyed = [(lines[0], 0)] + [(line[8:], n) for n, line in enumerate(lines[1:], 1)
+                                   if line.startswith("        ") and not line.startswith("         ")]
+        for line, n in keyed:
+            found = re.match(r"([a-z-]+):(?: (.*))?$", line)
+            if not found or found.group(1) in fields:
+                continue
+            value = (found.group(2) or "").strip()
+            if value in (">-", ">", "|"):
+                more = []
+                for later in lines[n + 1:]:
+                    if not later.strip():
+                        continue  # an empty line, or a comment line of the script (left out)
+                    if not later.startswith("          "):
+                        break
+                    more.append(later.strip())
+                value = (" " if value.startswith(">") else "\n").join(more)
+            fields[found.group(1)] = value
+        steps.append((fields.get("name", ""), " ".join(fields.get("if", "").split()), fields.get("run", "")))
+    return steps
+
+
+class ReleaseSkipTests(unittest.TestCase):
+    """In a TestFlight run (release) CI's Mac job leaves out a step only when ui.yml, called in
+    the same run right after it, builds the same thing itself (coordinator's rule for C4: no
+    step whose product nobody else makes is dropped)."""
+
+    def test_a_step_left_out_in_release_is_built_by_the_ui_flow(self):
+        ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        build = "\n".join(run for _, _, run in job_steps(ui, "build"))
+        left_out = [(name, run) for name, rule, run in job_steps(ci, "ios") if "!inputs.release" in rule.replace(" ", "")]
+        self.assertEqual([name for name, _ in left_out], ["Build UI tests"])
+        for name, run in left_out:
+            with self.subTest(step=name):
+                actions = re.findall(r"xcodebuild\s+(?:\\\s*)?([a-z-]+)", run)
+                schemes = re.findall(r"-scheme\s+(\S+)", run)
+                self.assertTrue(actions and schemes, "the step builds something with xcodebuild")
+                for action in actions:
+                    self.assertRegex(build, rf"xcodebuild\s+(?:\\\s*)?{action}\b")
+                for scheme in schemes:
+                    self.assertRegex(build, rf"-scheme\s+{re.escape(scheme)}\b")
+        # ui.yml's build runs in release mode (Linux core tests skipped there) and the TestFlight
+        # run calls the UI flow after CI.
+        self.assertIn("(inputs.release && needs.core-linux.result == 'skipped')", job_field(ui, "build", "if"))
+        tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        self.assertIn("tests", [need.strip() for need in job_field(tf, "ui", "needs").split(",")])
+        self.assertIn("release: true", job_blocks(tf)["ui"])
+
+    def test_the_step_reader(self):
+        text = ("on: push\njobs:\n  a:\n    steps:\n      - name: One\n        if: x && !inputs.release\n        run: |\n"
+                "          xcodebuild build-for-testing -scheme S\n      - uses: actions/checkout@v1\n      - name: Two\n"
+                "        run: echo\n")
+        self.assertEqual([(n, r) for n, r, _ in job_steps(text, "a")], [("One", "x && !inputs.release"), ("", ""), ("Two", "")])
+        # A comment line inside a script does not end it.
+        text = "on: push\njobs:\n  a:\n    steps:\n      - name: One\n        run: |\n          a\n          # note\n          b\n"
+        self.assertEqual(job_steps(text, "a")[0][2], "a\nb")
+
+
+class ReleaseSmokeTests(unittest.TestCase):
+    """Review P5-03: every UI test ran a Debug build with -SortlyUITest switches, and the Release
+    build that is uploaded was never started before the upload (the archive and the manual
+    Appetize job were the only Release builds). One UI test now runs on a Release build in every
+    TestFlight run, beside the UI flow and the stress pass, and the upload needs it green."""
+
+    def test_the_uploaded_configuration_is_ui_tested_first(self):
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        jobs = job_blocks(text)
+        self.assertIn("release-smoke", jobs)
+        smoke = jobs["release-smoke"]
+        steps = {name: run for name, _, run in job_steps(text, "release-smoke")}
+        build = steps["Build for testing (Release)"]
+        self.assertRegex(build, r"xcodebuild build-for-testing\b")
+        self.assertIn("-scheme SortlyUI", build)
+        self.assertIn("-configuration Release", build)
+        self.assertIn("Release-iphonesimulator/Sortly.app", build)
+        run = steps["Run UI tests"]
+        self.assertIn("--only ReleaseSmokeUITests", run)
+        self.assertIn("TEST_RUNNER_SORTLY_RELEASE_SMOKE: '1'", smoke)
+        # A skipped test is no pass (the test skips itself without the variable).
+        self.assertIn("Test Case '-[SortlyUITests.ReleaseSmokeUITests test1_ReleaseBuildOnboardsAnalysesAndApplies]' passed", run)
+        # Beside the UI flow and the stress pass, not after them: it needs the tests only.
+        self.assertEqual([n.strip() for n in job_field(text, "release-smoke", "needs").split(",")], ["tests"])
+        self.assertEqual(job_field(text, "release-smoke", "if"), "")
+        # The upload needs it green, with either gate.
+        self.assertIn("release-smoke", [n.strip() for n in job_field(text, "release", "needs").split(",")])
+        self.assertIn("needs.release-smoke.result == 'success'", job_field(text, "release", "if"))
+        # Its repeats and flaky tests are counted with the others (flaky_history.RECORD).
+        self.assertIn("name: ui-flaky-release-smoke-attempt-${{ github.run_attempt }}", smoke)
+        self.assertIn("release-smoke", [n.strip() for n in job_field(text, "flaky", "needs").split(",")])
+
+    def test_a_testflight_run_never_needs_more_than_five_macs(self):
+        # Second review of C7: the account runs five Macs at once. After CI (its Mac job ends
+        # before anything else starts), a TestFlight run has the UI groups (max-parallel in
+        # release mode), the stress pass and the smoke test at the same time; the UI build job runs
+        # before the groups.
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        found = re.search(r"\n      max-parallel: \$\{\{ inputs\.release && (\d) \|\| (\d) \}\}\n", ui)
+        self.assertIsNotNone(found, "ui.yml: max-parallel ${{ inputs.release && N || 4 }}")
+        in_release, otherwise = int(found.group(1)), int(found.group(2))
+        self.assertEqual(otherwise, 4)
+        tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        beside = [job for job in ("stress", "release-smoke")
+                  if [n.strip() for n in job_field(tf, job, "needs").split(",")] == ["tests"]]
+        self.assertEqual(beside, ["stress", "release-smoke"])
+        self.assertLessEqual(in_release + len(beside), 5)
+
+    def test_the_smoke_test_runs_only_there_and_as_a_user_would(self):
+        path = os.path.join(ROOT, "App", "SortlyUITests", "ReleaseSmokeUITests.swift")
+        swift = read(path)
+        self.assertIn('environment["SORTLY_RELEASE_SMOKE"] == "1"', swift)
+        self.assertIn("throw XCTSkip(", swift)
+        self.assertIn("func test1_ReleaseBuildOnboardsAnalysesAndApplies()", swift)
+        # No test switch of the app: a Release build ignores them, and the test must not lean on one.
+        self.assertNotIn('"-SortlyUITest', swift)
+        for name in ("ui.yml", "ui-stress.yml", "ci.yml"):
+            with self.subTest(workflow=name):
+                self.assertNotIn("SORTLY_RELEASE_SMOKE", read(os.path.join(ROOT, ".github", "workflows", name)))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+def gh_expr(expr, ctx):
+    """Evaluates the small part of GitHub's expression language the concurrency groups and job
+    conditions use: names with dots (missing = None), 'strings', format(), ==, !=, !, &&, ||,
+    parentheses. && and || return an operand, as in GitHub."""
+    tokens = re.findall(r"'(?:[^']|'')*'|&&|\|\||==|!=|!|\(|\)|,|[A-Za-z_][\w.\-\[\]']*|\d+", expr)
+    pos = [0]
+
+    def peek():
+        return tokens[pos[0]] if pos[0] < len(tokens) else None
+
+    def take():
+        pos[0] += 1
+        return tokens[pos[0] - 1]
+
+    def primary():
+        tok = take()
+        if tok == "(":
+            value = either()
+            assert take() == ")"
+            return value
+        if tok == "!":
+            return not primary()
+        if tok.startswith("'"):
+            return tok[1:-1].replace("''", "'")
+        if tok in ("true", "false"):
+            return tok == "true"
+        if tok == "format":
+            assert take() == "("
+            args = [either()]
+            while peek() == ",":
+                take()
+                args.append(either())
+            assert take() == ")"
+            return args[0].format(*args[1:])
+        value = ctx
+        for part in tok.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+        return value
+
+    def compare():
+        left = primary()
+        while peek() in ("==", "!="):
+            op, right = take(), primary()
+            left = (left == right) if op == "==" else (left != right)
+        return left
+
+    def both():
+        left = compare()
+        while peek() == "&&":
+            take()
+            right = compare()
+            left = right if left else left
+        return left
+
+    def either():
+        left = both()
+        while peek() == "||":
+            take()
+            right = both()
+            left = left if left else right
+        return left
+
+    return either()
+
+
+def concurrency_group(text):
+    found = re.search(r"\nconcurrency:\n  group: >-\n((?:    .*\n)+)", text)
+    return " ".join(strip_comment(line) for line in found.group(1).split("\n")).replace("${{", "").replace("}}", "")
+
+
+def pr_context(user="someone", fork=False):
+    return {"github": {"event_name": "pull_request", "workflow": "UI flow", "run_id": 7,
+                       "ref": "refs/pull/8/merge",
+                       "event": {"pull_request": {"user": {"login": user}, "head": {"repo": {"fork": fork}}}}},
+            "inputs": {}}
+
+
+def dispatch_context(ref, workflow="UI flow", release=False, event="workflow_dispatch"):
+    return {"github": {"event_name": event, "workflow": workflow, "run_id": 7, "ref": ref, "event": {}},
+            "inputs": {"release": release} if release else {}}
+
+
+class MacQueueTests(unittest.TestCase):
+    """19.11.2026: the stress pass dispatched on main after PR #9 waited in "mac-queue"; Dependabot
+    rebased PR #8 and its UI run joined the queue and replaced the waiting pass (GitHub keeps one
+    waiting run per group). Runs on main have a queue of their own now, and a Dependabot pull
+    request uses no Mac until someone starts its UI run by hand before the merge."""
+
+    def setUp(self):
+        self.ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        self.stress = read(os.path.join(ROOT, ".github", "workflows", "ui-stress.yml"))
+        self.ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+
+    def test_main_has_its_own_queue(self):
+        for name, text in (("ui", self.ui), ("ui-stress", self.stress)):
+            group = concurrency_group(text)
+            with self.subTest(workflow=name):
+                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main")), "mac-queue-main")
+                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/feature")), "mac-queue")
+
+    def test_no_pull_request_joins_the_queue_of_main(self):
+        group = concurrency_group(self.ui)
+        self.assertEqual(gh_expr(group, pr_context()), "mac-queue")
+        self.assertEqual(gh_expr(group, pr_context(fork=True)), "ui-fork")
+        self.assertEqual(gh_expr(group, pr_context(user="dependabot[bot]")), "ui-dependabot")
+
+    def test_testflight_and_the_weekly_pass_keep_their_own_groups(self):
+        self.assertEqual(gh_expr(concurrency_group(self.ui), dispatch_context("refs/heads/main", "TestFlight", True, "workflow_call")),
+                         "testflight-ui-7")
+        group = concurrency_group(self.stress)
+        self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main", "TestFlight", True, "workflow_call")),
+                         "testflight-stress-7")
+        self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main", "UI stress", event="schedule")), "stress-weekly")
+
+    def test_a_dependabot_pull_request_starts_no_mac(self):
+        bot, person = pr_context(user="dependabot[bot]"), pr_context()
+        plan_if = job_field(self.ui, "plan", "if")
+        self.assertTrue(plan_if, "the UI plan needs a condition for Dependabot")
+        self.assertFalse(gh_expr(plan_if.replace("${{", "").replace("}}", ""), bot))
+        self.assertTrue(gh_expr(plan_if.replace("${{", "").replace("}}", ""), person))
+        self.assertTrue(gh_expr(plan_if.replace("${{", "").replace("}}", ""), dispatch_context("refs/heads/dependabot/x")))
+        for job in ("core-linux", "build", "ui", "verdict"):
+            with self.subTest(job=job):
+                self.assertIn("plan", job_field(self.ui, job, "needs"))
+        self.assertIn("github.event.pull_request.user.login != 'dependabot[bot]'", job_field(self.ci, "ios", "if"))
+
+    def test_the_evaluator(self):
+        self.assertEqual(gh_expr("a.b == 'x' && 'yes' || 'no'", {"a": {"b": "x"}}), "yes")
+        self.assertEqual(gh_expr("a.b == 'x' && 'yes' || 'no'", {"a": {"b": "y"}}), "no")
+        self.assertEqual(gh_expr("!a && format('q-{0}', n)", {"n": 3}), "q-3")

@@ -6,11 +6,14 @@
     "flow-other is 'everything the other groups do not run', so a new test class always runs somewhere and no test runs twice",
     "(test_ui_tests.py GroupTests checks every UI test against the groups). Keep its skip list in step with the others.",
     "The order is the start order: with max-parallel 4 in ui.yml the last group (contrast, the shortest) is the one that waits.",
-    "A change here changes the test fingerprint of the group that changed (ui_groups.py), so that group runs again."
+    "A change here changes the test fingerprint of the group that changed (ui_groups.py), so that group runs again.",
+    "budget_min: minutes for the group's test passes (ui_tests.py budget_check); over it the run shows a warning, never red. Report-only, so not in the fingerprint.",
+    "Measured in TestFlight run 44461253154 (19.11.): device 62, flow-full 12, flow-other 52, accessibility 20, contrast 15 min (the step Run UI tests)."
   ],
   "groups": [
     {
       "group": "device",
+      "budget_min": 70,
       "title": "device conditions",
       "_why": "The device-condition switches (App/Sortly/Platform/UITestSwitches.swift) on the Pro simulator. A test that resets the photo access asks the Mac to give it back (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07 and 08 (undo, interrupted plan) run with the other flows; test12 is the stress test and skips itself here (ui-stress.yml).",
       "device": "pro",
@@ -19,6 +22,7 @@
     },
     {
       "group": "flow-full",
+      "budget_min": 20,
       "title": "full flow and video",
       "_why": "Onboarding, demo library, plan and the sorting-show video.",
       "device": "pro",
@@ -28,6 +32,7 @@
     },
     {
       "group": "flow-other",
+      "budget_min": 60,
       "title": "other flows, purchase and search",
       "_why": "Every other UI test except the accessibility tests (flow tests 1b-6, locked purchase, search, and DeviceConditionUITests 05, 07, 08). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
       "device": "pro",
@@ -36,6 +41,7 @@
     },
     {
       "group": "accessibility",
+      "budget_min": 30,
       "title": "accessibility (small iPhone)",
       "_why": "AccessibilityUITests 1-4 on a small iPhone (SE, 375 pt) with Reduce Motion. These tests fail on findings.",
       "device": "se",
@@ -45,6 +51,7 @@
     },
     {
       "group": "contrast",
+      "budget_min": 20,
       "title": "contrast (small iPhone)",
       "_why": "AccessibilityUITests test5 on its own small iPhone with Reduce Motion, Increase Contrast and Reduce Transparency switched on before the first launch; the test onboards by itself (onboardAndSeed). Its own job since 16.11. (UI run 43906501407).",
       "device": "se",

@@ -611,6 +611,293 @@ struct SameNameWinsTests {
         #expect(ProposalDecision.recommended(for: country, match: r[country.id]) == .extendExisting("it"))
     }
 
+    /// P1-02 (review 18.11.2026): the rule held only while the country would extend the album by
+    /// itself (at least 25 % of the country in it). After five trips the user's "Italien", made
+    /// after the first one, holds 100 of the country's 600 photos: the country got only a
+    /// possible match, the 2019 trip took the album, and a second "Italien" was offered.
+    @Test func sameNameWinsAlsoWhenTheAlbumHoldsLittleOfTheCountry() throws {
+        let years = [2019, 2021, 2022, 2023, 2024]
+        let sets = years.map { set("it\($0)", 0..<120) }
+        let trips = zip(years, sets).map {
+            AlbumProposal(id: SortlyID("t\($0)"), kind: .trip, title: "Italien · Mai \($0)", folderPath: ["Reisen", "\($0)"], assetIDs: $1)
+        }
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: sets.reduce(into: Set<AssetID>()) { $0.formUnion($1) })
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it2019", 0..<100))
+        for ps in [trips + [country], [country] + trips, [country]] {
+            let results = matcher.match(ps, against: CollectionInventory([album]), trips: sets)
+            let c = try #require(results[country.id])
+            #expect(ProposalDecision.recommended(for: country, match: c) == .extendExisting("it"), "\(ps.count) suggestions: \(c.status)")
+            #expect(c.reasons.contains(.missingItems(count: 500)))
+            guard ps.count > 1 else { continue }
+            let t = try #require(results[trips[0].id])
+            #expect(ProposalDecision.recommended(for: trips[0], match: t) == .createNew(title: nil, folderPath: nil), "\(t.status)")
+            #expect(t.alternatives.contains { $0.albumID == "it" })
+        }
+    }
+
+    /// P1-02: "Italien" holds 150 of the country's 300 photos and 50 from the way there through
+    /// Austria (75 % of the album is Italy, below the 80 % for extending by content). It is the
+    /// country's album all the same: extended (only Italy photos are added, nothing taken out),
+    /// not a second "Italien". Because it holds other photos too, it is not chosen without the
+    /// user looking at it ("Empfohlene auswählen").
+    @Test func sameNameWinsAlsoWhenTheAlbumHoldsOtherPhotosToo() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it", 0..<150).union(set("at", 0..<50)))
+        let c = try #require(matcher.match([country], against: CollectionInventory([album]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: c) == .extendExisting("it"), "\(c.status)")
+        #expect(c.reasons.contains(.missingItems(count: 150)))
+        #expect(!ProposalDecision.isSafeToAcceptUnseen(country, match: c))
+        // The same album with only Italy photos may be chosen unseen, as before.
+        let pure = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it", 0..<150))
+        let p = try #require(matcher.match([country], against: CollectionInventory([pure]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: p) == .extendExisting("it"))
+        #expect(ProposalDecision.isSafeToAcceptUnseen(country, match: p))
+    }
+
+    /// P1-02, as decided (ENTWURF-BEDIENUNG point 8, Fuchs 16.11.): "Dein Album 'Italien' gehört
+    /// dem Vorschlag 'Italien'", with no share of its content asked for: two albums "Italien"
+    /// confuse more than one extended album. The user's only album of that name is extended
+    /// whatever else it holds, also with no photo of the country in it yet; never a second one.
+    @Test func theOnlyAlbumOfTheNameIsExtendedWhateverItHolds() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        for album in [
+            CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it", 0..<40).union(set("food", 0..<200))),
+            CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it", 0..<2).union(set("food", 0..<20))),
+            CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("food", 0..<20)),
+            CollectionSnapshot(id: "it", title: "Italien", assetIDs: []),
+        ] {
+            let c = try #require(matcher.match([country], against: CollectionInventory([album]))[country.id])
+            #expect(ProposalDecision.recommended(for: country, match: c) == .extendExisting("it"), "\(album.assetIDs.count): \(c.status)")
+            #expect(c.reasons.contains(.missingItems(count: 300 - album.assetIDs.intersection(italy).count)))
+            // Its other photos stay where they are, and with them in it, the user looks first.
+            #expect(!ProposalDecision.isSafeToAcceptUnseen(country, match: c) || album.assetIDs.isSubset(of: italy))
+        }
+        // The user said it does not fit: then it is not its album.
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("food", 0..<20))
+        let rejected = OverrideSet([UserOverride(scope: .albumForSource("it", country.id), decision: .notMatchingAlbum)])
+        let r = try #require(matcher.match([country], against: CollectionInventory([album]), overrides: rejected)[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: r) == .createNew(title: nil, folderPath: nil))
+    }
+
+    /// P1-02: photos without a location in the user's "Italien" (from the camera roll, a
+    /// messenger) can never be in a place suggestion, so they never count against it: 150 Italy
+    /// photos and 160 without a location is an album that is all Italy, chosen unseen like one.
+    @Test func photosWithoutALocationDoNotCountAgainstAPlace() throws {
+        let italy = set("it", 0..<300)
+        let unlocated = set("noloc", 0..<160)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let album = CollectionSnapshot(id: "it", title: "Italien", assetIDs: set("it", 0..<150).union(unlocated))
+        let c = try #require(matcher.match([country], against: CollectionInventory([album]), unlocated: unlocated)[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: c) == .extendExisting("it"))
+        #expect(c.best?.metrics.purity == 1)
+        #expect(ProposalDecision.isSafeToAcceptUnseen(country, match: c))
+        // Only for the album of the name (third review 19.11., S6): under another name the
+        // content decides with every photo, and 160 of 310 are not Italy.
+        let named = CollectionSnapshot(id: "u", title: "Urlaub in Italien", assetIDs: album.assetIDs)
+        let u = try #require(matcher.match([country], against: CollectionInventory([named]), unlocated: unlocated)[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: u).extendedAlbum == nil, "\(u.status)")
+        // Not for a theme: a photo without a location can be a dog photo.
+        let dogs = AlbumProposal(id: SortlyID("dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: set("dog", 0..<100))
+        let h = CollectionSnapshot(id: "h", title: "Meine Tiere", assetIDs: set("dog", 0..<60).union(unlocated))
+        let d = try #require(matcher.match([dogs], against: CollectionInventory([h]), unlocated: unlocated)[dogs.id])
+        #expect(d.best.map { $0.metrics.purity < 0.5 } ?? true)
+    }
+
+    /// Third review 19.11. (S6): photos without a location are left out only for the album
+    /// named exactly like the place. An album that holds the whole country among many photos
+    /// without a location ("Alle Fotos", "iPhone-Export", "Sommer 2019") stays what it was by
+    /// its content: never the country's album, never "so lassen", and the country's photos do
+    /// not count as sorted through it (review 16.11., A1 and A3).
+    @Test(arguments: [("Sommer 2019", 1_000), ("Alle Fotos", 5_000), ("iPhone-Export", 300)])
+    func photosWithoutALocationCountForOtherAlbums(title: String, unlocatedCount: Int) throws {
+        let italy = set("it", 0..<300)
+        let unlocated = set("noloc", 0..<unlocatedCount)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let album = CollectionSnapshot(id: "x", title: title, assetIDs: italy.union(unlocated))
+        let plain = try #require(matcher.match([country], against: CollectionInventory([album]))[country.id])
+        let with = try #require(matcher.match([country], against: CollectionInventory([album]), unlocated: unlocated)[country.id])
+        #expect(with.status != .alreadyComplete && with.status != .extendable, "\(title): \(with.status)")
+        #expect(ProposalDecision.recommended(for: country, match: with).existingAlbum == nil)
+        #expect(!matcher.sortingAlbums(with, kind: country.kind, title: country.title).contains("x"))
+        #expect(with.status == plain.status && with.best?.albumID == plain.best?.albumID)
+    }
+
+    /// Third review 19.11. (M3): another album of the user already holds the whole country
+    /// ("Italia" with all 300 photos, or "Urlaub Italien"). It stays the country's album, as
+    /// complete, and keeps the photos counted as sorted; the album named "Italien" (a few of the
+    /// photos and others, one trip, or empty) gets nothing. Before, the name won and the ring
+    /// fell back by 298 photos at launch without the user doing anything.
+    @Test func anAlbumHoldingTheWholeSuggestionWinsOverTheName() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let full = CollectionSnapshot(id: "full", title: "Italia", assetIDs: italy)
+        let strays: [Set<AssetID>] = [set("it", 0..<2).union(set("food", 0..<20)), set("food", 0..<20), [], set("it", 0..<100)]
+        for stray in strays {
+            let named = CollectionSnapshot(id: "named", title: "Italien", assetIDs: stray)
+            let m = try #require(matcher.match([country], against: CollectionInventory([full, named]))[country.id])
+            #expect(m.status == .alreadyComplete && m.best?.albumID == "full", "\(stray.count): \(m.status) \(String(describing: m.best?.albumID))")
+            #expect(ProposalDecision.recommended(for: country, match: m) == .keepExisting("full"))
+            #expect(matcher.sortingAlbums(m, kind: country.kind, title: country.title).contains("full"))
+        }
+        // Both hold everything: the album of the name stays it, complete.
+        let both = CollectionSnapshot(id: "named", title: "Italien", assetIDs: italy.union(set("food", 0..<20)))
+        let b = try #require(matcher.match([country], against: CollectionInventory([full, both]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: b) == .keepExisting("named"), "\(b.status)")
+        // "Urlaub Italien" holds every trip, "Italien" the first one (matched with the trips).
+        let trips = [set("it", 0..<100), set("it", 100..<200), set("it", 200..<300)]
+        let holiday = CollectionSnapshot(id: "holiday", title: "Urlaub Italien", assetIDs: italy)
+        let first = CollectionSnapshot(id: "named", title: "Italien", assetIDs: trips[0])
+        let m = try #require(matcher.match([country], against: CollectionInventory([holiday, first]), trips: trips)[country.id])
+        #expect(m.status == .alreadyComplete && m.best?.albumID == "holiday", "\(m.status) \(String(describing: m.best?.albumID))")
+        #expect(ProposalDecision.recommended(for: country, match: m) == .keepExisting("holiday"))
+        // Without such an album the name still wins.
+        let alone = try #require(matcher.match([country], against: CollectionInventory([first]), trips: trips)[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: alone) == .extendExisting("named"))
+    }
+
+    /// The country's photos the ring counts as sorted: those in an album that sorts them.
+    func sortedCount(_ proposal: AlbumProposal, _ albums: [CollectionSnapshot]) throws -> Int {
+        let inventory = CollectionInventory(albums)
+        let m = try #require(matcher.match([proposal], against: inventory)[proposal.id])
+        let sorting = matcher.sortingAlbums(m, kind: proposal.kind, title: proposal.title)
+        return proposal.assetIDs.filter { id in sorting.contains { inventory[$0]?.assetIDs.contains(id) == true } }.count
+    }
+
+    /// Final check 19.11. (N1): the user's "Urlaub in Italien" holds most of the country and is
+    /// its album by content; "Italien" holds a few photos. The name rule makes "Italien" the
+    /// album to extend (decision Fuchs 16.11.), but the photos in "Urlaub in Italien" stay
+    /// sorted: before the rule, 200, 250 and 290 counted, after it only 50, 10 and 100, and the
+    /// ring fell back at launch without any step of the user.
+    @Test(arguments: [(200, 50), (250, 10), (290, 100)])
+    func theAlbumThatFitsByContentKeepsCountingWhenTheNameWins(holiday: Int, named: Int) throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let urlaub = CollectionSnapshot(id: "urlaub", title: "Urlaub in Italien", assetIDs: set("it", 0..<holiday))
+        let italien = CollectionSnapshot(id: "named", title: "Italien", assetIDs: set("it", (300 - named)..<300))
+        let m = try #require(matcher.match([country], against: CollectionInventory([urlaub, italien]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: m) == .extendExisting("named"))
+        #expect(try sortedCount(country, [urlaub, italien]) >= holiday)
+        #expect(matcher.sortingAlbums(m, kind: country.kind, title: country.title).contains("urlaub"))
+    }
+
+    /// N1 as a rule over many sizes: adding the album named like the suggestion (the name rule
+    /// then decides) never lowers the number of the suggestion's photos counted as sorted.
+    @Test func theNameRuleNeverLowersTheSortedCount() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        var checked = 0
+        for holiday in [0, 30, 80, 150, 200, 250, 290, 300] {
+            for other in [0, 20, 60] {
+                let urlaub = CollectionSnapshot(id: "urlaub", title: "Urlaub in Italien", assetIDs: set("it", 0..<holiday).union(set("other", 0..<other)))
+                let before = try sortedCount(country, [urlaub])
+                for named in [0, 10, 50, 100, 200, 300] {
+                    for food in [0, 40] {
+                        let italien = CollectionSnapshot(id: "named", title: "Italien",
+                                                         assetIDs: set("it", (300 - named)..<300).union(set("food", 0..<food)))
+                        let after = try sortedCount(country, [urlaub, italien])
+                        #expect(after >= before, "Urlaub \(holiday)+\(other), Italien \(named)+\(food): \(after) < \(before)")
+                        checked += 1
+                    }
+                }
+            }
+        }
+        #expect(checked == 288)
+    }
+
+    /// Sorted counts of the country "Italien" (300 photos) before the name rule, measured with
+    /// integ/next (matching version 4): album "U" ("Urlaub in Italien") or "S" ("Sommer") with
+    /// the first h photos of Italy and `other` other photos, and "Italien" with the last n and
+    /// `food` other photos. Entries: kind,h,other,n,food,sorted.
+    static let versionFourSortedCounts = """
+        U,65,0,0,0,0 U,65,0,0,40,0 U,65,0,5,0,65 U,65,0,5,40,0 U,65,0,10,0,10 U,65,0,10,40,0 U,65,0,100,0,100
+        U,65,0,100,40,0 U,65,0,300,0,300 U,65,0,300,40,300 U,65,60,0,0,0 U,65,60,0,40,0 U,65,60,5,0,0
+        U,65,60,5,40,0 U,65,60,10,0,0 U,65,60,10,40,0 U,65,60,100,0,100 U,65,60,100,40,0 U,65,60,300,0,300
+        U,65,60,300,40,300 U,70,0,0,0,0 U,70,0,0,40,0 U,70,0,5,0,70 U,70,0,5,40,0 U,70,0,10,0,70 U,70,0,10,40,0
+        U,70,0,100,0,100 U,70,0,100,40,0 U,70,0,300,0,300 U,70,0,300,40,300 U,70,60,0,0,0 U,70,60,0,40,0
+        U,70,60,5,0,0 U,70,60,5,40,0 U,70,60,10,0,0 U,70,60,10,40,0 U,70,60,100,0,100 U,70,60,100,40,0
+        U,70,60,300,0,300 U,70,60,300,40,300 U,150,0,0,0,150 U,150,0,0,40,150 U,150,0,5,0,150 U,150,0,5,40,150
+        U,150,0,10,0,150 U,150,0,10,40,150 U,150,0,100,0,100 U,150,0,100,40,150 U,150,0,300,0,300
+        U,150,0,300,40,300 U,150,60,0,0,0 U,150,60,0,40,0 U,150,60,5,0,0 U,150,60,5,40,0 U,150,60,10,0,0
+        U,150,60,10,40,0 U,150,60,100,0,100 U,150,60,100,40,0 U,150,60,300,0,300 U,150,60,300,40,300
+        U,250,0,0,0,250 U,250,0,0,40,250 U,250,0,5,0,250 U,250,0,5,40,250 U,250,0,10,0,250 U,250,0,10,40,250
+        U,250,0,100,0,250 U,250,0,100,40,250 U,250,0,300,0,300 U,250,0,300,40,300 U,250,60,0,0,250
+        U,250,60,0,40,250 U,250,60,5,0,250 U,250,60,5,40,250 U,250,60,10,0,250 U,250,60,10,40,250
+        U,250,60,100,0,250 U,250,60,100,40,250 U,250,60,300,0,300 U,250,60,300,40,300 U,300,0,0,0,300
+        U,300,0,0,40,300 U,300,0,5,0,300 U,300,0,5,40,300 U,300,0,10,0,300 U,300,0,10,40,300 U,300,0,100,0,300
+        U,300,0,100,40,300 U,300,0,300,0,300 U,300,0,300,40,300 U,300,60,0,0,300 U,300,60,0,40,300 U,300,60,5,0,300
+        U,300,60,5,40,300 U,300,60,10,0,300 U,300,60,10,40,300 U,300,60,100,0,300 U,300,60,100,40,300
+        U,300,60,300,0,300 U,300,60,300,40,300 S,65,0,0,0,0 S,65,0,0,40,0 S,65,0,5,0,0 S,65,0,5,40,0 S,65,0,10,0,0
+        S,65,0,10,40,0 S,65,0,100,0,100 S,65,0,100,40,0 S,65,0,300,0,300 S,65,0,300,40,300 S,65,60,0,0,0
+        S,65,60,0,40,0 S,65,60,5,0,0 S,65,60,5,40,0 S,65,60,10,0,0 S,65,60,10,40,0 S,65,60,100,0,100
+        S,65,60,100,40,0 S,65,60,300,0,300 S,65,60,300,40,300 S,70,0,0,0,0 S,70,0,0,40,0 S,70,0,5,0,0 S,70,0,5,40,0
+        S,70,0,10,0,0 S,70,0,10,40,0 S,70,0,100,0,100 S,70,0,100,40,0 S,70,0,300,0,300 S,70,0,300,40,300
+        S,70,60,0,0,0 S,70,60,0,40,0 S,70,60,5,0,0 S,70,60,5,40,0 S,70,60,10,0,0 S,70,60,10,40,0 S,70,60,100,0,100
+        S,70,60,100,40,0 S,70,60,300,0,300 S,70,60,300,40,300 S,150,0,0,0,0 S,150,0,0,40,0 S,150,0,5,0,0
+        S,150,0,5,40,0 S,150,0,10,0,0 S,150,0,10,40,0 S,150,0,100,0,100 S,150,0,100,40,0 S,150,0,300,0,300
+        S,150,0,300,40,300 S,150,60,0,0,0 S,150,60,0,40,0 S,150,60,5,0,0 S,150,60,5,40,0 S,150,60,10,0,0
+        S,150,60,10,40,0 S,150,60,100,0,100 S,150,60,100,40,0 S,150,60,300,0,300 S,150,60,300,40,300 S,250,0,0,0,0
+        S,250,0,0,40,0 S,250,0,5,0,0 S,250,0,5,40,0 S,250,0,10,0,0 S,250,0,10,40,0 S,250,0,100,0,100
+        S,250,0,100,40,0 S,250,0,300,0,300 S,250,0,300,40,300 S,250,60,0,0,0 S,250,60,0,40,0 S,250,60,5,0,0
+        S,250,60,5,40,0 S,250,60,10,0,0 S,250,60,10,40,0 S,250,60,100,0,100 S,250,60,100,40,0 S,250,60,300,0,300
+        S,250,60,300,40,300 S,300,0,0,0,300 S,300,0,0,40,300 S,300,0,5,0,300 S,300,0,5,40,300 S,300,0,10,0,300
+        S,300,0,10,40,300 S,300,0,100,0,300 S,300,0,100,40,300 S,300,0,300,0,300 S,300,0,300,40,300
+        S,300,60,0,0,300 S,300,60,0,40,300 S,300,60,5,0,300 S,300,60,5,40,300 S,300,60,10,0,300 S,300,60,10,40,300
+        S,300,60,100,0,300 S,300,60,100,40,300 S,300,60,300,0,300 S,300,60,300,40,300
+        """
+
+    /// Final check 19.11. (N1, the last gap): measured against version 4 itself, the name rule
+    /// never lowers the sorted count. "Urlaub in Italien" with 70 of 300 photos and "Italien"
+    /// with 5 were several matching albums with "Urlaub" first, which counted (70); after the
+    /// rule only 5 counted, because "Urlaub" holds less than 25 % of the country.
+    @Test func theNameRuleNeverCountsFewerThanVersionFour() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let rows = Self.versionFourSortedCounts.split(whereSeparator: \.isWhitespace).map { $0.split(separator: ",") }
+        #expect(rows.count == 200)
+        for row in rows {
+            let n = row.dropFirst().compactMap { Int($0) }
+            try #require(n.count == 5)
+            let first = CollectionSnapshot(id: "u", title: row[0] == "U" ? "Urlaub in Italien" : "Sommer",
+                                           assetIDs: set("it", 0..<n[0]).union(set("other", 0..<n[1])))
+            let named = CollectionSnapshot(id: "n", title: "Italien", assetIDs: set("it", (300 - n[2])..<300).union(set("food", 0..<n[3])))
+            let now = try sortedCount(country, [first, named])
+            #expect(now >= n[4], "\(row.joined(separator: ",")): \(now) sorted, version 4 counted \(n[4])")
+        }
+    }
+
+    /// P1-02: with two albums of that name the content picks between them; a third "Italien" is
+    /// never made. When they fit exactly as well, the user picks (nothing is decided for them).
+    @Test func withTwoAlbumsOfTheNameTheContentPicksOne() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"], assetIDs: italy)
+        let first = CollectionSnapshot(id: "it1", title: "Italien", assetIDs: set("it", 0..<60))
+        let second = CollectionSnapshot(id: "it2", title: "Italien", assetIDs: set("it", 100..<130))
+        let two = try #require(matcher.match([country], against: CollectionInventory([first, second]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: two) == .extendExisting("it1"), "\(two.status)")
+        // One mostly other photos: still the content picks the one with more of the country.
+        let food = CollectionSnapshot(id: "it2", title: "Italien", assetIDs: set("it", 100..<102).union(set("food", 0..<300)))
+        let mixed = try #require(matcher.match([country], against: CollectionInventory([first, food]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: mixed) == .extendExisting("it1"), "\(mixed.status)")
+        // Neither holds any of it: the user picks.
+        let a = CollectionSnapshot(id: "a", title: "Italien", assetIDs: set("food", 0..<10))
+        let b = CollectionSnapshot(id: "b", title: "Italien", assetIDs: set("wine", 0..<10))
+        let none = try #require(matcher.match([country], against: CollectionInventory([a, b]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: none) == .undecided, "\(none.status)")
+        let offered = Set(none.alternatives.map(\.albumID) + [none.best?.albumID].compactMap { $0 })
+        #expect(offered.isSuperset(of: ["a", "b"]))
+    }
+
     /// A year in the name stays a part: the trip keeps "Italien 2019", the country does not
     /// grow it. Another name: the content decides, as before.
     @Test func yearOrOtherNameDoNotWin() throws {

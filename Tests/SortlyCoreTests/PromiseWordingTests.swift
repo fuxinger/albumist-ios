@@ -15,7 +15,16 @@ struct PromiseWordingTests {
         try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
     }
 
-    static let placeNamesDE = "Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst"
+    /// What goes to Apple: the photo locations and the language the names should come in
+    /// (`SystemGeocoder` passes `preferredLocale`), nothing else from Albumist (second review
+    /// of 752ba07: "nur Koordinaten" left out the language).
+    static let placeNamesDE = "Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst"
+    static let placeNamesEN = "For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service"
+
+    /// Whitespace folded, so a sentence wrapped across lines in Markdown is still found.
+    static func flat(_ path: String) throws -> String {
+        try text(path).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
 
     /// The files that make promises to the user: the app's strings, the store, the website.
     static let promises = [
@@ -44,6 +53,50 @@ struct PromiseWordingTests {
         #expect(PrivacySettings().allowOnlineGeocoding)
     }
 
+    /// The sentences themselves, where each promise is made (second review of 752ba07: the
+    /// old texts in the settings, the privacy pages and PRIVACY.md passed the test unchanged).
+    // A constant, not an inline list: the coverage map reads a test's name after its arguments.
+    static let sentences: [(String, [String])] = [
+        ("App/Sortly/Views/SettingsView.swift", [
+            "Die Analyse läuft immer auf deinem Gerät. \(placeNamesDE), nie ein Foto.",
+            "\(placeNamesDE). Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Fotos verlassen dein Gerät nie.",
+        ]),
+        ("App/Sortly/Views/OnboardingView.swift", ["Deine Fotos bleiben auf deinem Gerät. Kein Foto wird hochgeladen.",
+                                                   "\(placeNamesDE) – das kannst du in den Einstellungen ausschalten."]),
+        ("docs/PRIVACY.md", ["Kein Foto wird hochgeladen;", "\(placeNamesDE); das ist ab Werk an und in den Einstellungen abschaltbar",
+                             "und die Sprache der Ortsnamen", "IP-Adresse"]),
+        ("website/pages/de/datenschutz.html", ["Kein Foto wird hochgeladen. \(placeNamesDE) – das ist ab Werk eingeschaltet",
+                                               "nur Koordinaten und die Sprache der Ortsnamen, keine Fotos und keine Namen", "IP-Adresse",
+                                               "Einstellungen › Datenschutz › Orte online genauer bestimmen"]),
+        ("website/pages/en/privacy.html", ["No photo is ever uploaded. \(placeNamesEN). This is on by default",
+                                           "only coordinates and the language for place names, no photos and no names", "IP address"]),
+        ("website/pages/de/index.html", ["Kein Foto wird hochgeladen.", "\(placeNamesDE) – das kannst du in der App ausschalten.",
+                                         "<h3>Länder, auf Wunsch auch Städte</h3>"]),
+        ("website/pages/en/index.html", ["No photo is ever uploaded.", "\(placeNamesEN); you can turn this off in the app.",
+                                         "<h3>Countries, and cities if you like</h3>"]),
+        ("website/pages/de/support.html", ["Nein, kein Foto wird hochgeladen.", "Nur f\(placeNamesDE.dropFirst()) – das kannst du in der App unter"]),
+        ("website/pages/en/support.html", ["No, no photo is ever uploaded.", "Only f\(placeNamesEN.dropFirst()); you can turn this off in the app under"]),
+        ("docs/launch/APP_STORE_DE.md", ["Kein Foto wird hochgeladen", "\(placeNamesDE) – das kannst du in den Einstellungen ausschalten"]),
+        ("docs/launch/APP_STORE_EN.md", ["No photo is ever uploaded", "\(placeNamesEN); you can turn this off in Settings."]),
+    ]
+
+    @Test(arguments: sentences)
+    func everyPromiseSaysTheSameSentence(path: String, sentences: [String]) throws {
+        let text = try Self.flat(path)
+        for sentence in sentences { #expect(text.contains(sentence), "\(path): \(sentence)") }
+    }
+
+    /// The geocoder is `CLGeocoder` (Apple's map service), not MapKit, and the language goes
+    /// along, so no text says that nothing else is sent.
+    @Test func noTextNamesMapKitOrDeniesTheLanguage() throws {
+        for path in Self.promises + ["docs/launch/APP_REVIEW_NOTES.md", "docs/launch/LAUNCH_CHECKLIST.md"] {
+            let text = try Self.flat(path)
+            for wrong in ["MapKit", "keine anderen Daten", "No photos, names or other data", "(nur Koordinaten)", "(coordinates only)"] {
+                #expect(!text.contains(wrong), "\(path): \(wrong)")
+            }
+        }
+    }
+
     @Test func theSentencesHaveEnglish() throws {
         let data = try Data(contentsOf: Self.root.appendingPathComponent("App/Sortly/Resources/Localizable.xcstrings"))
         let catalog = try #require((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["strings"] as? [String: [String: Any]])
@@ -53,6 +106,7 @@ struct PromiseWordingTests {
             let english = ((catalog[key]?["localizations"] as? [String: Any])?["en"] as? [String: Any])?["stringUnit"] as? [String: Any]
             let value = try #require(english?["value"] as? String, "\(key)")
             #expect(value.contains("photo"), "\(key): \(value)")
+            if key.contains(Self.placeNamesDE) { #expect(value.contains(Self.placeNamesEN), "\(key): \(value)") }
         }
     }
 

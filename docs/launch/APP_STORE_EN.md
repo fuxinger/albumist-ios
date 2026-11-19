@@ -12,7 +12,7 @@ COUNTRIES, AND CITIES IF YOU LIKE — photos land in country albums automaticall
 SCREENSHOTS, DOCUMENTS, TOPICS — orders, tickets, recipes, receipts, dogs, beaches or food, recognized on device.
 YOUR ALBUMS STAY YOURS — existing albums are recognized and completed instead of duplicated. You review every suggestion first, and you can undo everything.
 YOUR TRAVEL ATLAS — a world map that lights up every country you photographed in, ready for your story.
-PRIVATE BY DESIGN — analysis runs entirely on your iPhone. No photo is ever uploaded, no account, no tracking. For place names, iOS sends single photo locations (coordinates only) to Apple’s map service; you can turn this off in Settings. Originals are never deleted, changed or copied.
+PRIVATE BY DESIGN — analysis runs entirely on your iPhone. No photo is ever uploaded, no account, no tracking. For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service; you can turn this off in Settings. Originals are never deleted, changed or copied.
 FAIR PRICE — your first 10 albums are free, then a one-time unlock. No subscription.
 
 **Keywords:** photos,albums,organize,sort,trip,travel,library,screenshots,folders,map,world map,private

@@ -5281,12 +5281,12 @@
         }
       }
     },
-    "Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst, nie ein Foto. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst." : {
+    "Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst, nie ein Foto. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The analysis always runs on your device. For place names, iOS sends single photo locations (coordinates only) to Apple’s map service, never a photo. Only screenshots and documents are downloaded from iCloud, never videos, and only over Wi‑Fi unless you choose otherwise."
+            "value" : "The analysis always runs on your device. For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service, never a photo. Only screenshots and documents are downloaded from iCloud, never videos, and only over Wi‑Fi unless you choose otherwise."
           }
         }
       }
@@ -5371,12 +5371,12 @@
         }
       }
     },
-    "Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Fotos verlassen dein Gerät nie." : {
+    "Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Fotos verlassen dein Gerät nie." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "For place names, iOS sends single photo locations (coordinates only) to Apple’s map service. This is on by default and can be turned off under “Refine places online”. Photos never leave your device."
+            "value" : "For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service. This is on by default and can be turned off under “Refine places online”. Photos never leave your device."
           }
         }
       }
@@ -5491,12 +5491,12 @@
         }
       }
     },
-    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten." : {
+    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device. For place names, iOS sends single photo locations (coordinates only) to Apple’s map service; you can turn this off in Settings."
+            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device. For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service; you can turn this off in Settings."
           }
         }
       }

@@ -169,7 +169,7 @@ struct OnboardingView: View {
                 .fixedSize(horizontal: false, vertical: true)
             // Said where the user agrees (decision Fuchs 18.11.2026, review P2-03): place names come
             // from Apple, on by default, switch in the settings.
-            Text("Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten.")
+            Text("Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             // Testers asked exactly here whether "full access" means the app may delete.

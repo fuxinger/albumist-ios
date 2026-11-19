@@ -28,7 +28,7 @@ Eine Weltkarte, auf der alle Länder leuchten, in denen du fotografiert hast. Mi
 PRIVAT VON ANFANG AN
 • Die Analyse läuft komplett auf deinem iPhone
 • Kein Foto wird hochgeladen, kein Konto, kein Tracking
-• Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten
+• Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten
 • Originale werden nie gelöscht, verändert oder kopiert
 
 FAIRER PREIS

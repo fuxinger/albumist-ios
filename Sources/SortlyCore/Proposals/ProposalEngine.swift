@@ -199,6 +199,7 @@ public struct ProposalEngine: Sendable {
             var title: String
         }
         var drafts: [Draft] = []
+        var finder = TimeZoneFinder()
         for trip in trips where profile.shots(in: trip.geotaggedAssetIDs) >= settings.trips.minPhotos {
             if trip.kind == .dayTrip && !settings.trips.includeDayTrips { continue }
             // A routine visit (the parents' town, the lake every summer Sunday) is not a trip of
@@ -208,11 +209,11 @@ public struct ProposalEngine: Sendable {
             let (name, key, country) = Self.primaryPlaceName(places, kind: trip.kind, labels: labels,
                                                              isHome: { home.isHome($0, at: trip.start) })
             // The first day where the first photo was taken, the last day where the last one was
-            // (the photos are in time order): Munich – New York – Tokyo ends on Tokyo's date.
-            let zones = places.compactMap(\.timeZoneIdentifier)
-            let timeZone = zones.first.flatMap(TimeZone.init(identifier:)) ?? calendar.timeZone
-            let formatter = DateRangeFormatter(language: settings.titleLanguage, timeZone: timeZone,
-                                               endTimeZone: zones.last.flatMap(TimeZone.init(identifier:)))
+            // (the photos are in time order): Munich – New York – Tokyo ends on Tokyo's date. The
+            // zones the places tell: online their own, offline their country's (review P1-15).
+            let zones = trip.geotaggedAssetIDs.compactMap { id in byID[id].flatMap { finder.zone(of: $0.gpsPlace, at: $0.asset.usableLocation) } }
+            let timeZone = zones.first ?? calendar.timeZone
+            let formatter = DateRangeFormatter(language: settings.titleLanguage, timeZone: timeZone, endTimeZone: zones.last)
             var path = [labels.folder(for: .trips)]
             if settings.trips.folderPerYear {
                 var cal = calendar
@@ -303,7 +304,8 @@ public struct ProposalEngine: Sendable {
     private func collection(id: SortlyID, name: String, key: PlaceKey?, members: [AssetID], facts: [AssetID: AssetFacts]) -> AlbumProposal {
         let assets = Set(members)
         let dates = members.compactMap { facts[$0]?.asset.creationDate }
-        let days = Set(dates.map { calendar.startOfDay(for: $0) }).count
+        // Days on the photos' own clocks (review P1-15).
+        let days = Set(members.compactMap { facts[$0]?.wallClock(or: calendar.timeZone) }.map(LocalTime.day)).count
         var reasons: [ProposalReason] = []
         if let first = dates.min(), let last = dates.max() {
             reasons.append(.photosInPlaceDuringPeriod(count: assets.count, place: name, start: first, end: last))
@@ -350,12 +352,15 @@ public struct ProposalEngine: Sendable {
     func regularDestinations(_ trips: [Trip], facts: [AssetID: AssetFacts]) -> RegularDestinations {
         struct DayPoint { var trip: Int; var short: Bool; var members: [AssetID]; var point: GeoCoordinate }
         var points: [DayPoint] = []
+        // Days on the photos' own clocks (review P1-15).
+        let zone = calendar.timeZone
+        func day(_ id: AssetID) -> Int? { facts[id]?.wallClock(or: zone).map(LocalTime.day) }
         for (index, trip) in trips.enumerated() {
             let short = trip.kind == .dayTrip || trip.kind == .weekendTrip || trip.kind == .shortTrip
-            var byDay: [Date: [(AssetID, GeoCoordinate)]] = [:]
+            var byDay: [Int: [(AssetID, GeoCoordinate)]] = [:]
             for id in trip.geotaggedAssetIDs {
-                guard let asset = facts[id]?.asset, let c = asset.usableLocation, let date = asset.creationDate else { continue }
-                byDay[calendar.startOfDay(for: date), default: []].append((id, c))
+                guard let c = facts[id]?.asset.usableLocation, let day = day(id) else { continue }
+                byDay[day, default: []].append((id, c))
             }
             for day in byDay.keys.sorted() {
                 let items = byDay[day] ?? []
@@ -369,9 +374,9 @@ public struct ProposalEngine: Sendable {
         let clusters = GeoClusterer(epsilonMeters: Self.destinationRadius, minPoints: 1).cluster(points.map(\.point)).clusters
         var result = RegularDestinations()
         var routineMembers: [Int: Int] = [:]
-        let located = facts.values.compactMap { f -> (id: AssetID, at: GeoCoordinate, date: Date)? in
-            guard let c = f.asset.usableLocation, let date = f.asset.creationDate else { return nil }
-            return (f.id, c, date)
+        let located = facts.values.compactMap { f -> (id: AssetID, at: GeoCoordinate, day: Int)? in
+            guard let c = f.asset.usableLocation, let wall = f.wallClock(or: zone) else { return nil }
+            return (f.id, c, LocalTime.day(wall))
         }
         for cluster in clusters {
             let shortTrips = Set(cluster.memberIndices.filter { points[$0].short }.map { points[$0].trip })
@@ -381,13 +386,15 @@ public struct ProposalEngine: Sendable {
             // before or after: somebody who lived in Hamburg until last year and now visits it
             // gets the visits, not the years of everyday life there.
             let visits = Set(cluster.memberIndices.map { points[$0].trip }).map { trips[$0] }
-            guard let first = visits.map(\.start).min(), let last = visits.map(\.end).max() else { continue }
-            let from = calendar.startOfDay(for: first)
-            let until = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: last)) ?? last
+            // A trip starts with its first photo and ends with its last one: their days (outside
+            // a trial year's photos, the calendar's).
+            func first(_ trip: Trip) -> Int { trip.geotaggedAssetIDs.first.flatMap(day) ?? LocalTime.day(LocalTime.wallClock(trip.start, in: zone)) }
+            func last(_ trip: Trip) -> Int { trip.geotaggedAssetIDs.last.flatMap(day) ?? LocalTime.day(LocalTime.wallClock(trip.end, in: zone)) }
+            guard let from = visits.map(first).min(), let until = visits.map(last).max() else { continue }
             let spots = GeoSpatialIndex(cellSize: Self.destinationRadius, points: cluster.memberIndices.map { (points[$0].point, $0) })
             let reach = (cluster.memberIndices.map { GeoMath.distance(points[$0].point, cluster.centroid) }.max() ?? 0) + Self.destinationRadius
             let members = located.filter { photo in
-                photo.date >= from && photo.date < until && GeoMath.distance(photo.at, cluster.centroid) <= reach
+                photo.day >= from && photo.day <= until && GeoMath.distance(photo.at, cluster.centroid) <= reach
                     && !spots.query(near: photo.at, radius: Self.destinationRadius).isEmpty
             }.map(\.id).sorted()
             let anchor = String(format: "%.2f,%.2f", cluster.centroid.latitude, cluster.centroid.longitude)
@@ -613,7 +620,8 @@ public struct ProposalEngine: Sendable {
         guard let leaf = levels.last else { return [] }
         let grouper = ChronologyGrouper(calendar: calendar)
         let formatter = DateRangeFormatter(language: settings.titleLanguage, timeZone: calendar.timeZone)
-        let (buckets, _) = grouper.group(facts.map(\.asset), levels: levels)
+        // Each photo in the month and year of its own clock (review P1-15).
+        let (buckets, _) = grouper.group(facts, levels: levels)
         var result: [AlbumProposal] = buckets.compactMap { path, assets in
             guard assets.count >= settings.chronology.minPhotos, let key = path.last else { return nil }
             let folders = [labels.folder(for: .chronology)] + path.dropLast().map(formatter.label(for:))
@@ -712,11 +720,13 @@ public struct ProposalEngine: Sendable {
 
     func imageCategoryProposals(_ facts: [AssetFacts], profile: LibraryProfile = LibraryProfile()) -> [AlbumProposal] {
         var groups: [String: Set<AssetID>] = [:]
-        var days: [String: Set<Date>] = [:]
+        // Days on the photos' own clocks (review P1-15).
+        var days: [String: Set<Int>] = [:]
         for f in facts where !f.asset.isScreenshotLike {
+            let day = f.wallClock(or: calendar.timeZone).map(LocalTime.day)
             for (id, reliability) in f.categories where reliability >= settings.imageCategories.minimumReliability {
                 groups[id, default: []].insert(f.id)
-                if let date = f.asset.creationDate { days[id, default: []].insert(calendar.startOfDay(for: date)) }
+                if let day { days[id, default: []].insert(day) }
             }
         }
         // 15 photos at least, and 2.5 per thousand photos: 125 in a library of 50,000.

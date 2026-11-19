@@ -103,18 +103,32 @@ public struct ChronologyGrouper: Sendable {
     /// Groups assets into nested buckets. `levels` must be ordered coarse → fine,
     /// e.g. [.year, .month]. Assets without date land in `undated`.
     public func group(_ assets: [AssetSnapshot], levels: [ChronologyGranularity]) -> (buckets: [[ChronologyKey]: [AssetID]], undated: [AssetID]) {
+        group(assets.lazy.map { ($0.id, $0.creationDate, $0.usableLocation?.latitude) }, levels: levels)
+    }
+
+    /// Groups photos by the days, months and years of their own clocks (review P1-15,
+    /// `LocalTime`): a photo taken in New York at 23:00 on 31 January is January's, whatever
+    /// `calendar`'s zone. Facts without a zone are read in `calendar`'s zone, as `group(_:levels:)`.
+    public func group(_ facts: [AssetFacts], levels: [ChronologyGranularity]) -> (buckets: [[ChronologyKey]: [AssetID]], undated: [AssetID]) {
+        let zone = calendar.timeZone
+        let wall = ChronologyGrouper(calendar: LocalTime.wallCalendar(calendar))
+        return wall.group(facts.lazy.map { ($0.id, $0.wallClock(or: zone), $0.asset.usableLocation?.latitude) }, levels: levels)
+    }
+
+    private func group(_ items: some Sequence<(AssetID, Date?, Double?)>,
+                       levels: [ChronologyGranularity]) -> (buckets: [[ChronologyKey]: [AssetID]], undated: [AssetID]) {
         var buckets: [[ChronologyKey]: [AssetID]] = [:]
         var undated: [AssetID] = []
-        for asset in assets {
+        for (id, date, latitude) in items {
             var path: [ChronologyKey] = []
             for level in levels {
-                guard let key = key(for: asset.creationDate, granularity: level, latitude: asset.usableLocation?.latitude) else { break }
+                guard let key = key(for: date, granularity: level, latitude: latitude) else { break }
                 path.append(key)
             }
             if path.count == levels.count {
-                buckets[path, default: []].append(asset.id)
+                buckets[path, default: []].append(id)
             } else {
-                undated.append(asset.id)
+                undated.append(id)
             }
         }
         return (buckets, undated)

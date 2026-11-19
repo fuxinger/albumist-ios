@@ -274,6 +274,12 @@ public actor AnalysisPipeline {
         static let heldSuggestions = "user.heldSuggestions"
         /// A change in "Dein Zuhause" no suggestions were made for yet (`PendingHomeChange`).
         static let pendingHomeChange = "analysis.pendingHomeChange"
+        /// The clock of photos whose place tells no time zone (review P1-15, `LocalTime`): the
+        /// iPhone's time zone at the first analysis, as an IANA identifier. Stored once and kept
+        /// when the iPhone travels, so its time zone during an analysis changes no album. Kept
+        /// like the user's settings: "Analyse neu aufbauen" leaves it, the safety copy carries it.
+        /// A database from before gets the time zone of its first run after the update.
+        static let homeTimeZone = "user.homeTimeZone"
     }
 
     private let store: SortlyStore
@@ -516,12 +522,184 @@ public actor AnalysisPipeline {
     }
 
     /// A trial run over one year analyses only the photos of that year (and the trips that
-    /// touch it); the rest is looked at once the user takes in the whole library.
-    static func dateRange(of scope: OrganizationScope, calendar: Calendar) -> Range<Date>? {
-        guard case .year(let year) = scope,
-              let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
-              let end = calendar.date(byAdding: .year, value: 1, to: start) else { return nil }
-        return start..<end
+    /// touch it); the rest is looked at once the user takes in the whole library. A photo's year
+    /// is that of its own clock (review P1-15): the range holds every instant that is in the year
+    /// on a clock in `calendar`'s zone (the home time zone) or in one of `zones` (those of the
+    /// places in the library). Which photos are in the year is told by their facts
+    /// (`OrganizationScope.includes`); this range only limits the work.
+    static func dateRange(of scope: OrganizationScope, calendar: Calendar, zones: Set<TimeZone> = []) -> Range<Date>? {
+        guard case .year(let year) = scope else { return nil }
+        var range: Range<Date>?
+        for zone in [calendar.timeZone] + zones.sorted(by: { $0.identifier < $1.identifier }) {
+            var local = calendar
+            local.timeZone = zone
+            guard let start = local.date(from: DateComponents(year: year, month: 1, day: 1)),
+                  let end = local.date(byAdding: .year, value: 1, to: start) else { continue }
+            range = range.map { min($0.lowerBound, start)..<max($0.upperBound, end) } ?? start..<end
+        }
+        return range
+    }
+
+    /// The clocks a year begins first and ends last on (the date line): with them `dateRange`
+    /// holds every instant that is in the year somewhere.
+    static let everyClock: Set<TimeZone> = [TimeZone(secondsFromGMT: 14 * 3600)!, TimeZone(secondsFromGMT: -12 * 3600)!]
+
+    /// The clock of photos whose place tells no time zone (review P1-15): the zone of the home
+    /// (second review), as stored by the last run; the zone of the home the user chose in "Dein
+    /// Zuhause", or of the one the last analysis found while none is stored; while no home is
+    /// known, the iPhone's at the first analysis (stored then), or the iPhone's.
+    public func homeTimeZone() async throws -> TimeZone {
+        try await homeTimeZoneInEffect(all: nil).zone
+    }
+
+    /// The home time zone and whether a run stores it (`settleHomeTimeZone`), in this order:
+    /// - the zone of the home the user chose, whatever is stored;
+    /// - the stored one (a home the analysis finds later changes it before the trips are
+    ///   detected, `patternsClock`);
+    /// - none stored (or none this system can read): the zone of the home the last analysis
+    ///   found, when the home is left to the analysis (an update on a trip abroad: the home
+    ///   in Munich gives Berlin time, not the iPhone's Los Angeles time);
+    /// - no home known: the iPhone's, stored only when nothing is stored.
+    /// `all`: the library, where a run or `resuggest()` has it read (`placeTimeZones`).
+    private func homeTimeZoneInEffect(all: [AssetSnapshot]?) async throws -> (zone: TimeZone, store: Bool) {
+        let stored = try await storedHomeTimeZone()
+        let home = try await homeSettings()
+        if home.currentMode == .confirmed, let place = home.confirmed,
+           let zone = try await zone(ofHomeAt: place.center, components: place.components, all: all) {
+            if case .zone(let current) = stored, current.identifier == zone.identifier { return (zone, false) }
+            return (zone, true)
+        }
+        if case .zone(let zone) = stored { return (zone, false) }
+        if home.currentMode == .automatic,
+           let found = try await readable({ try await store.value(DetectedHome.self, forKey: Key.detectedHome) }),
+           let zone = try await zone(ofHomeAt: found.center, components: nil, all: all) {
+            return (zone, true)
+        }
+        if case .none = stored { return (calendar.timeZone, true) }
+        return (calendar.timeZone, false)
+    }
+
+    /// The time zone of a home (second review of P1-15): the one its place names (a home the user
+    /// chose: online its own zone, else its country's there); else that of the country the
+    /// offline map finds at its centre; else the most common one of the photos within the home
+    /// radius (no map, or a centre at sea).
+    private func zone(ofHomeAt center: GeoCoordinate, components: PlaceComponents?, all: [AssetSnapshot]?) async throws -> TimeZone? {
+        if let zone = LocalTime.zone(of: components, at: center) { return zone }
+        if let map, let zone = LocalTime.zone(of: map.lookup(center).components(language: .english), at: center) { return zone }
+        let zones = try await placeTimeZones(library: all)
+        guard !zones.isEmpty else { return nil }
+        let radius = settings.trips.advanced.homeRadiusMeters
+        var library = all
+        if library == nil { library = try await store.allAssets() }
+        let near = (library ?? []).filter { $0.usableLocation.map { GeoMath.distance($0, center) <= radius } ?? false }
+        var counts: [String: Int] = [:]
+        for asset in near { if let zone = zones[asset.id] { counts[zone.identifier, default: 0] += 1 } }
+        return counts.max(by: { ($0.value, $1.key) < ($1.value, $0.key) }).flatMap { TimeZone(identifier: $0.key) }
+    }
+
+    /// What the store holds as the home time zone.
+    private enum StoredHomeTimeZone {
+        case none
+        case zone(TimeZone)
+        /// A zone this system's database does not know (newer, from the safety copy of a newer
+        /// iPhone) or a value in a shape a later version stored: kept as it is, never replaced
+        /// for that (second review of P1-15). Meanwhile the iPhone's zone stands in, in memory.
+        case unreadable
+    }
+
+    private func storedHomeTimeZone() async throws -> StoredHomeTimeZone {
+        do {
+            guard let identifier = try await store.value(String.self, forKey: Key.homeTimeZone) else { return .none }
+            return TimeZone(identifier: identifier).map(StoredHomeTimeZone.zone) ?? .unreadable
+        } catch is DecodingError {
+            return .unreadable
+        }
+    }
+
+    /// Stores the home time zone in effect (`homeTimeZoneInEffect`) where it changed: the zone of
+    /// the home the user chose, of the home found before the update, or the iPhone's at the first
+    /// analysis while no home is known. Only a run or `resuggest()` stores it (before the trips
+    /// are detected, `patternsClock`), never a read of the facts: it goes into the safety copy,
+    /// and a fresh database gets the decisions of a copy only while it holds nothing of its own.
+    private func settleHomeTimeZone(all: [AssetSnapshot]) async throws -> TimeZone {
+        let (zone, changed) = try await homeTimeZoneInEffect(all: all)
+        if changed { try await store.setValue(zone.identifier, forKey: Key.homeTimeZone) }
+        return zone
+    }
+
+    /// The calendar the analysis counts days in where no photo's own clock is asked (home days,
+    /// trips at home, the places the user is often at): the iPhone's calendar in the home time
+    /// zone, so the iPhone's time zone during an analysis changes nothing (review P1-15).
+    private func homeCalendar() async throws -> Calendar {
+        var home = calendar
+        home.timeZone = try await homeTimeZone()
+        return home
+    }
+
+    /// The zone each photo's place tells (online its own, offline its country's there), for the
+    /// photos that have one (review P1-15). Worked out once for each state of the places and the
+    /// photos' locations (`SortlyStore.placesRevision`): a run asked for them up to four times
+    /// and every read of the facts once more, about three seconds each over 100,000 photos in as
+    /// many places (second review). Off the actor, like the facts (`offActor`).
+    /// `library`: the photos as the store holds them, where a run or `resuggest()` has them read
+    /// (only a run writes the photos, and the two take turns); otherwise they are read here.
+    /// While no place is known (a first run before its places step) no photo is read: a read of
+    /// 50,000 photos made the trips step stand silent for longer than it may.
+    private func placeTimeZones(library: [AssetSnapshot]? = nil) async throws -> [AssetID: TimeZone] {
+        let revision = await store.placesRevision
+        if let cached = placeZones, cached.revision == revision { return cached.zones }
+        let places = try await store.places()
+        var zones: [AssetID: TimeZone] = [:]
+        if !places.isEmpty {
+            zoneProbe?()
+            var assets = library
+            if assets == nil { assets = try await store.allAssets() }
+            let photos = assets ?? []
+            zones = await Task.detached(priority: Task.currentPriority) { LocalTime.placeZones(of: photos, places: places) }.value
+        }
+        // A write meanwhile made them older than the store: they serve this caller only.
+        if await store.placesRevision == revision { placeZones = (revision, zones) }
+        return zones
+    }
+
+    /// `placeTimeZones()` and the state of the places they were worked out for.
+    private var placeZones: (revision: Int, zones: [AssetID: TimeZone])?
+
+    /// The photos the image step of a trial run over one year looks at (second review of P1-15):
+    /// those of the year on their own clock, as their facts read it (`PhotoClocks`, with the
+    /// places known so far). The count of the step and the photos it looks at are the same.
+    struct PhotosOfTheYear: Sendable {
+        /// The time they were taken in: the year on the clocks of the home and of the places
+        /// (`dateRange`), to find them in the store.
+        let range: Range<Date>
+        /// The photos taken in `range` that are of another year on their own clock: New Year's
+        /// Eve at home lies in the new year of Sydney's clock once a photo of Sydney is known.
+        let otherYears: Set<AssetID>
+        /// How many there are.
+        let count: Int
+
+        func contains(_ asset: AssetSnapshot) -> Bool {
+            (asset.creationDate.map(range.contains) ?? false) && !otherYears.contains(asset.id)
+        }
+    }
+
+    /// `PhotosOfTheYear` of a run over `scope`; nil for the whole library.
+    private func photosOfTheYear(_ scope: OrganizationScope, all: [AssetSnapshot], trips: [Trip]) async throws -> PhotosOfTheYear? {
+        guard case .year = scope else { return nil }
+        let home = try await homeCalendar()
+        let zones = try await placeTimeZones(library: all)
+        guard let range = Self.dateRange(of: scope, calendar: home, zones: Set(zones.values)) else { return nil }
+        let clocks = PhotoClocks(places: zones, trips: trips, home: home.timeZone)
+        var otherYears = Set<AssetID>()
+        var count = 0
+        for asset in all where asset.creationDate.map(range.contains) ?? false {
+            if scope.includes(AssetFacts(asset: asset, timeZone: clocks.zone(of: asset.id)), calendar: home) {
+                count += 1
+            } else {
+                otherYears.insert(asset.id)
+            }
+        }
+        return PhotosOfTheYear(range: range, otherYears: otherYears, count: count)
     }
 
     /// Pauses the run in progress at its next check; `run` then returns with `.userPaused`.
@@ -680,21 +858,25 @@ public actor AnalysisPipeline {
         })
         report.completedStages.append(.patterns)
 
-        // The photos this run analyses: all of them, or one year and the trips that touch it.
-        let range = Self.dateRange(of: scope, calendar: calendar)
+        // The photos this run analyses: all of them, or one year and the trips that touch it. A
+        // photo's year is that of its own clock (review P1-15): places are looked for wherever a
+        // photo may be in the year on any clock (`reach`), the image step looks at the photos of
+        // the year on the clocks known (`year`, again after the places step).
+        var year = try await photosOfTheYear(scope, all: all, trips: trips)
+        let reach = Self.dateRange(of: scope, calendar: calendar, zones: Self.everyClock)
         // Read once: the workload said below and the image step count the same photos.
         let labels = Self.wantsLabels(settings) ? Self.labelsVersion : nil
         report.settingsUsed.labels = labels != nil
         let scoped: [AssetSnapshot]
-        if let range {
-            let inYear = Set(all.filter { $0.creationDate.map(range.contains) ?? false }.map(\.id))
+        if let reach {
+            let inYear = Set(all.filter { $0.creationDate.map(reach.contains) ?? false }.map(\.id))
             let tripMembers = Set(trips.filter { !inYear.isDisjoint(with: $0.geotaggedAssetIDs) }.flatMap(\.geotaggedAssetIDs))
             scoped = all.filter { inYear.contains($0.id) || tripMembers.contains($0.id) }
         } else {
             scoped = all
         }
         onProgress(Progress(stage: .patterns, completed: grouped.of, total: grouped.of,
-                            workload: try await workload(all: all, scoped: scoped, range: range, labels: labels)))
+                            workload: try await workload(all: all, scoped: scoped, year: year, labels: labels)))
 
         // 3. Places
         // What `resolvePlaces` reads first thing (same moment, no wait in between).
@@ -707,6 +889,8 @@ public actor AnalysisPipeline {
         trips = try await inDestinationTime(trips, all: all)
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
         report.completedStages.append(.places)
+        // A trial year also goes by the clocks of the places found in this run (review P1-15).
+        if year != nil { year = try await photosOfTheYear(scope, all: all, trips: trips) }
 
         // 4. Content
         let peopleRequest = ContentAnalysisRequest(
@@ -716,14 +900,14 @@ public actor AnalysisPipeline {
             featurePrint: true
         )
         // Photos given up as unreadable a week ago or longer get one more read (review P1-08).
-        try await reopenGivenUpPhotos(all, within: range, labels: labels)
+        try await reopenGivenUpPhotos(all, within: year, labels: labels)
         // With labels wanted, also the photos analysed while they were not: only their labels
         // are asked for (`labelsOnly` below). Each counts as one photo, like a full look.
-        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range)
+        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
+                                                                within: year?.range, excluding: year?.otherYears ?? [])
         // Shown over the whole library: after a pause the count goes on from what is done
         // (first device test 15.11.: "1.450 von 14.332", then "2.700 von 12.708").
-        let inRange = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
-        let contentBefore = max(0, inRange - contentTotal)
+        let contentBefore = max(0, (year?.count ?? all.count) - contentTotal)
         // Every report of this step goes through here: the early suggestions are said with the
         // newest one (`earlySuggestions`). Nothing of an earlier run's step.
         contentShown = nil
@@ -782,7 +966,8 @@ public actor AnalysisPipeline {
             // were saved by a run that ended before it marked them (or only their place or date
             // changed since), so they are not looked at twice; or they could not be read before.
             let stored = contentTotal > 0
-                ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion, within: range)
+                ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion,
+                                                 within: year?.range, excluding: year?.otherYears ?? [])
                 : [:]
             // Photos given up before and read once more (`reopenGivenUpPhotos`): whatever goes
             // wrong with that read, the photo is given up again for another week. An analyzer
@@ -816,12 +1001,13 @@ public actor AnalysisPipeline {
                 // Deferred photos can come back only without a cursor (behind it they are past).
                 let limit = batchSize + (cursor == nil ? deferred.count : 0)
                 var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, limit: limit,
-                                                                olderThan: cursor, within: range)
+                                                                olderThan: cursor, within: year?.range, excluding: year?.otherYears ?? [])
                 if raw.isEmpty, cursor != nil {
                     // Past the oldest dated photo: one plain pass picks up photos without a date.
                     cursor = nil
                     raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
-                                                                limit: batchSize + deferred.count, within: range)
+                                                                limit: batchSize + deferred.count, within: year?.range,
+                                                                excluding: year?.otherYears ?? [])
                 }
                 var batch = raw.filter { !deferred.contains($0.id) }
                 if batch.isEmpty { break }
@@ -1041,11 +1227,14 @@ public actor AnalysisPipeline {
     }
 
     /// `progress(grouped, of)`: photos with a location grouped so far (see `TripDetector.analyse`).
+    /// Detected once, on the clock of the home (`patternsClock`), and stored as it goes.
     private func detectPatterns(all: [AssetSnapshot],
                                 progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) async throws -> (trips: [Trip], frequent: [FrequentPlace]) {
         let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
         let answers = try await recurringPlaceAnswers()
-        let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar)
+        var home = calendar
+        home.timeZone = try await patternsClock(all: all, corrections: corrections, answers: answers, progress: progress)
+        let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: home)
             .analyse(in: all, corrections: corrections, places: answers, home: try await homeSettings(), progress: progress)
         let detected = tripAnalysis.trips
         // Trips keep their identity when their photos change a little (an older photo
@@ -1061,8 +1250,10 @@ public actor AnalysisPipeline {
         // Places keep their IDs by their photos, from the places the last analysis stored (names,
         // "Nicht jetzt", decisions and albums are bound to them). An unreadable list counts as none.
         let previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
-        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar)
-            .detect(in: all, previous: previousPlaces ?? [])
+        // A place's days: those of the clocks its photos were taken on, where their places are
+        // known so far (review P1-15).
+        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: home)
+            .detect(in: all, previous: previousPlaces ?? [], zones: try await placeTimeZones(library: all))
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
@@ -1075,21 +1266,57 @@ public actor AnalysisPipeline {
         return (trips, frequent)
     }
 
+    /// The clock the trips are detected on, which follows the home (second review of P1-15):
+    /// the home time zone in effect, stored where it changed (`settleHomeTimeZone`). Where the
+    /// user left the home to the analysis and the home found on that clock has another zone
+    /// (found for the first time, or a move), that zone, if the home found on its clock has it
+    /// too. Two homes with about as many photo days can each have the more days on the other's
+    /// clock (Munich and Auckland, half a day apart): following the detection would swap the zone
+    /// with every run, so it stays as it was. Only the home is detected for this
+    /// (`TripDetector.detectedHome`, a small part of the work), so the trips are detected once,
+    /// with their count going on: a second detection on another clock stood silent for longer
+    /// than the step may. The count is named first (`progress`, at 0).
+    private func patternsClock(all: [AssetSnapshot], corrections: TripCorrections, answers: RecurringPlaceAnswers,
+                               progress: (_ grouped: Int, _ of: Int) -> Void) async throws -> TimeZone {
+        let zone = try await settleHomeTimeZone(all: all)
+        guard try await homeSettings().currentMode == .automatic else { return zone }
+        func homeFound(on zone: TimeZone, progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) -> DetectedHome? {
+            var clock = calendar
+            clock.timeZone = zone
+            return TripDetector(configuration: settings.trips.advanced, calendar: clock)
+                .detectedHome(in: all, corrections: corrections, places: answers, progress: progress)
+        }
+        guard let found = homeFound(on: zone, progress: progress),
+              let other = try await self.zone(ofHomeAt: found.center, components: nil, all: all),
+              other.identifier != zone.identifier,
+              let again = homeFound(on: other),
+              try await self.zone(ofHomeAt: again.center, components: nil, all: all)?.identifier == other.identifier else { return zone }
+        try await store.setValue(other.identifier, forKey: Key.homeTimeZone)
+        return other
+    }
+
     /// Day trip or weekend is decided in the destination's days, once places know its time
-    /// zone (an evening in New York is already the next day in Munich). Stored when it changed.
+    /// zone (an evening in New York is already the next day in Munich): the zone the online
+    /// lookup names, else the country's there (review P1-15). Stored when it changed.
     private func inDestinationTime(_ trips: [Trip], all: [AssetSnapshot]) async throws -> [Trip] {
-        let zones = try await store.places().compactMapValues(\.components.timeZoneIdentifier)
+        // Only the trips' photos count: with the zones of countries known offline nearly every
+        // photo with a location has one.
+        let members = Set(trips.lazy.flatMap(\.geotaggedAssetIDs))
+        let travelled = all.filter { members.contains($0.id) }
+        let placeZones = try await placeTimeZones(library: all)
+        var zones: [AssetID: String] = [:]
+        for id in members { if let zone = placeZones[id] { zones[id] = zone.identifier } }
         guard !zones.isEmpty else { return trips }
-        let localTrips = TripDetector.inDestinationTime(trips, assets: Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) }),
-                                                        timeZones: zones, calendar: calendar)
+        let localTrips = TripDetector.inDestinationTime(trips, assets: Dictionary(uniqueKeysWithValues: travelled.map { ($0.id, $0) }),
+                                                        timeZones: zones, calendar: try await homeCalendar())
         if localTrips != trips { try await store.setValue(localTrips, forKey: Key.trips) }
         return localTrips
     }
 
     /// How much work this run has (see `AnalysisWorkload`): the amounts over the part of the
     /// library the run works on, and what is still to do in the image and text steps.
-    private func workload(all: [AssetSnapshot], scoped: [AssetSnapshot], range: Range<Date>?, labels: Int?) async throws -> AnalysisWorkload {
-        let photos = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
+    private func workload(all: [AssetSnapshot], scoped: [AssetSnapshot], year: PhotosOfTheYear?, labels: Int?) async throws -> AnalysisWorkload {
+        let photos = year?.count ?? all.count
         let screenshots = scoped.filter(\.isScreenshotLike)
         let read = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
         let located = scoped.filter { $0.usableLocation != nil }
@@ -1104,13 +1331,15 @@ public actor AnalysisPipeline {
         // Of the photos still to look at: those analysed already that get only their labels.
         var labelsLeft = 0
         if let labels {
-            labelsLeft = try await store.countNeedingLabelsOnly(version: Self.contentVersion, labelsVersion: labels, within: range)
+            labelsLeft = try await store.countNeedingLabelsOnly(version: Self.contentVersion, labelsVersion: labels,
+                                                                within: year?.range, excluding: year?.otherYears ?? [])
         }
         return AnalysisWorkload(
             photos: photos,
             located: located.count,
             screenshots: screenshots.count,
-            contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range),
+            contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
+                                                              within: year?.range, excluding: year?.otherYears ?? []),
             textLeft: screenshots.filter { read[$0.id] == nil }.count,
             placesLeft: placesLeft,
             labelsLeft: labelsLeft
@@ -1125,7 +1354,7 @@ public actor AnalysisPipeline {
     /// week. Looked for at most once a day (it reads every photo's result) and only in the
     /// part of the library the run works on. Not a photo this run reads anyway for its labels
     /// ("Themen" turned on later: one more full look for a photo given up, `labels`).
-    private func reopenGivenUpPhotos(_ all: [AssetSnapshot], within range: Range<Date>?, labels: Int?) async throws {
+    private func reopenGivenUpPhotos(_ all: [AssetSnapshot], within year: PhotosOfTheYear?, labels: Int?) async throws {
         let now = now()
         if let checked = try await store.value(Date.self, forKey: Key.givenUpChecked),
            (0..<86_400).contains(now.timeIntervalSince(checked)) { return }
@@ -1134,9 +1363,7 @@ public actor AnalysisPipeline {
         if let labels, !due.isEmpty {
             due.subtract(try await store.unlabelledAssets(version: Self.contentVersion, labelsVersion: labels))
         }
-        let reopen = all.filter { asset in
-            due.contains(asset.id) && (range.map { r in asset.creationDate.map(r.contains) ?? false } ?? true)
-        }.map(\.id)
+        let reopen = all.filter { asset in due.contains(asset.id) && (year?.contains(asset) ?? true) }.map(\.id)
         if !reopen.isEmpty { try await store.markAnalyzed(reopen, version: 0) }
         try await store.setValue(now, forKey: Key.givenUpChecked)
     }
@@ -1653,6 +1880,10 @@ public actor AnalysisPipeline {
     private var offActorProbe: (@Sendable () async -> Void)?
     func setOffActorProbe(_ probe: (@Sendable () async -> Void)?) { offActorProbe = probe }
 
+    /// Tests only: called whenever the zones of the photos' places are worked out.
+    private var zoneProbe: (@Sendable () -> Void)?
+    func setZoneProbe(_ probe: (@Sendable () -> Void)?) { zoneProbe = probe }
+
     /// After a change in "Dein Zuhause" that no suggestions were made for yet
     /// (`PendingHomeChange`), whichever step makes them (`resuggest()`, a run, the early set):
     /// the suggestions the user chose before the change keep their content (`HeldSuggestions`),
@@ -1676,9 +1907,10 @@ public actor AnalysisPipeline {
         // An early set has no image or text themes (`ProposalSnapshot.isEarly`), also when photos
         // were analysed already (a first run paused in the image step): only the full set, made
         // once every photo is looked at, offers those.
+        let home = try await homeCalendar()
         let facts = try await currentFacts(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups,
                                            analysed: !early)
-            .filter { scope.includes($0, calendar: calendar) }
+            .filter { scope.includes($0, calendar: home) }
         // Dropped meanwhile: the suggestions (seconds over a large library) are not made at all.
         if abandonable { try Task.checkCancellation() }
         let overrides = OverrideSet(try await store.overrides())
@@ -1695,7 +1927,7 @@ public actor AnalysisPipeline {
         )
         analysis.applied = Set(Self.assignments(try await store.managedAlbums()).keys)
         analysis.chosen = try await chosenSuggestions()
-        let engine = ProposalEngine(settings: settings, calendar: calendar)
+        let engine = ProposalEngine(settings: settings, calendar: home)
         let input = analysis
         var suggestions = await offActor { engine.suggestions(for: input, overrides: overrides) }
         if abandonable { try Task.checkCancellation() }
@@ -1960,10 +2192,12 @@ public actor AnalysisPipeline {
         let texts = analysed ? try await store.results(TextResult.self, kind: "text") : [:]
         let home = try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
         let withoutCountry = try await store.value(Set<AssetID>.self, forKey: Key.placesWithoutCountry) ?? []
+        let homeZone = try await homeTimeZone()
+        let placeZones = try await placeTimeZones()
         return await offActor {
             FactsAssembler.assemble(assets: all, places: places, contents: contents, texts: texts, trips: trips,
                                     frequentPlaces: frequent, groups: groups, inventory: inventory, home: home,
-                                    withoutCountry: withoutCountry)
+                                    withoutCountry: withoutCountry, homeTimeZone: homeZone, placeZones: placeZones)
         }
     }
 

@@ -1,0 +1,488 @@
+# Additions to the IANA zone.tab for tools/gen_country_time_zones.py (review P1-15, 19.11.2026).
+#
+# zone.tab names one principal place per time zone. Taking the zone whose principal place is
+# nearest to a photo picks the wrong zone in large parts of a few countries: Seattle and Portland
+# lie nearer to Boise than to Los Angeles, Dallas and Nashville nearer to the small Indiana and
+# Kentucky zones than to Chicago, Alice Springs nearer to Eucla than to Darwin, Quebec nearer
+# to Moncton than to Toronto. The places below are more reference points for zones the country
+# already has in zone.tab (the script refuses any other zone): big cities and much-visited
+# places, most of them near the borders between the zones.
+#
+# CITY  <country> <zone> <latitude> <longitude> <name>   one more reference point
+# MERGE <country> <territory>...                         the offline map counts these territories
+#                                                        as part of the country (Natural Earth's
+#                                                        France holds Réunion, Martinique, ...)
+# DROP  <country> <zone>                                 leaves out the zone of an enclave whose
+#                                                        clock has long been that of the country's
+#                                                        main zone: its principal place would
+#                                                        draw a large part of the country
+# ALIAS <code> <zone>                                    a code Apple reports that zone.tab lacks
+# AREA  <disputed area id> <country>                     a disputed area (DisputedAreas.swift)
+#                                                        has no country code: the clock there is
+#                                                        that of these zones. Areas not listed
+#                                                        (Kashmir, Golan, Abkhazia) count as
+#                                                        unknown (the home time zone).
+
+MERGE FR GF GP MQ RE YT
+MERGE NL BQ
+MERGE AU CC CX
+MERGE NZ TK
+
+# Büsingen keeps Zurich's clock, the same as Berlin's since 1981; Ceuta and Melilla keep Madrid's
+# since 1986. As reference places they would draw Baden-Württemberg, Bavaria and Andalusia.
+# (Svalbard, which the offline map counts as part of Norway, keeps Oslo's clock: no merge.)
+DROP DE Europe/Busingen
+DROP ES Africa/Ceuta
+
+ALIAS XK Europe/Belgrade
+
+AREA crimea UA
+AREA kosovo XK
+AREA northern-cyprus CY
+AREA taiwan TW
+AREA western-sahara EH
+
+# United States: Pacific
+CITY US America/Los_Angeles 47.61 -122.33 Seattle
+CITY US America/Los_Angeles 47.66 -117.43 Spokane
+CITY US America/Los_Angeles 47.68 -116.78 Coeur d'Alene
+CITY US America/Los_Angeles 46.42 -117.02 Lewiston
+CITY US America/Los_Angeles 46.06 -118.34 Walla Walla
+CITY US America/Los_Angeles 45.52 -122.68 Portland
+CITY US America/Los_Angeles 44.06 -121.31 Bend
+CITY US America/Los_Angeles 44.05 -123.09 Eugene
+CITY US America/Los_Angeles 42.33 -122.87 Medford
+CITY US America/Los_Angeles 40.59 -122.39 Redding
+CITY US America/Los_Angeles 38.58 -121.49 Sacramento
+CITY US America/Los_Angeles 38.94 -119.98 South Lake Tahoe
+CITY US America/Los_Angeles 39.53 -119.81 Reno
+CITY US America/Los_Angeles 40.83 -115.76 Elko
+CITY US America/Los_Angeles 37.77 -122.42 San Francisco
+CITY US America/Los_Angeles 37.75 -119.59 Yosemite Valley
+CITY US America/Los_Angeles 36.74 -119.79 Fresno
+CITY US America/Los_Angeles 36.46 -116.87 Death Valley
+CITY US America/Los_Angeles 36.17 -115.14 Las Vegas
+CITY US America/Los_Angeles 36.80 -114.07 Mesquite
+CITY US America/Los_Angeles 35.37 -119.02 Bakersfield
+CITY US America/Los_Angeles 34.42 -119.70 Santa Barbara
+CITY US America/Los_Angeles 33.83 -116.55 Palm Springs
+CITY US America/Los_Angeles 34.85 -114.61 Needles
+CITY US America/Los_Angeles 39.25 -114.89 Ely
+CITY US America/Los_Angeles 32.72 -117.16 San Diego
+# United States: Mountain (southern Idaho)
+CITY US America/Boise 42.56 -114.46 Twin Falls
+CITY US America/Boise 43.49 -112.03 Idaho Falls
+CITY US America/Boise 43.70 -114.35 Sun Valley
+# United States: Mountain
+CITY US America/Denver 40.76 -111.89 Salt Lake City
+CITY US America/Denver 41.22 -111.97 Ogden
+CITY US America/Denver 40.23 -111.66 Provo
+CITY US America/Denver 37.10 -113.58 St. George
+CITY US America/Denver 40.74 -114.04 West Wendover
+CITY US America/Denver 37.19 -112.99 Zion
+CITY US America/Denver 37.63 -112.17 Bryce Canyon
+CITY US America/Denver 37.05 -112.53 Kanab
+CITY US America/Denver 38.57 -109.55 Moab
+CITY US America/Denver 36.98 -110.10 Monument Valley
+CITY US America/Denver 36.73 -110.25 Kayenta
+CITY US America/Denver 36.15 -109.55 Chinle
+CITY US America/Denver 35.68 -109.05 Window Rock
+CITY US America/Denver 35.08 -106.65 Albuquerque
+CITY US America/Denver 35.69 -105.94 Santa Fe
+CITY US America/Denver 36.41 -105.57 Taos
+CITY US America/Denver 34.40 -103.21 Clovis
+CITY US America/Denver 35.17 -103.72 Tucumcari
+CITY US America/Denver 35.53 -108.74 Gallup
+CITY US America/Denver 32.32 -106.76 Las Cruces
+CITY US America/Denver 32.78 -106.17 White Sands
+CITY US America/Denver 32.42 -104.23 Carlsbad
+CITY US America/Denver 32.18 -104.44 Carlsbad Caverns
+CITY US America/Denver 31.76 -106.49 El Paso
+CITY US America/Denver 38.83 -104.82 Colorado Springs
+CITY US America/Denver 37.28 -107.88 Durango
+CITY US America/Denver 39.06 -108.55 Grand Junction
+CITY US America/Denver 39.19 -106.82 Aspen
+CITY US America/Denver 41.14 -104.82 Cheyenne
+CITY US America/Denver 42.87 -106.31 Casper
+CITY US America/Denver 43.48 -110.76 Jackson
+CITY US America/Denver 44.46 -110.83 Yellowstone
+CITY US America/Denver 44.53 -109.06 Cody
+CITY US America/Denver 45.78 -108.50 Billings
+CITY US America/Denver 45.68 -111.04 Bozeman
+CITY US America/Denver 46.59 -112.04 Helena
+CITY US America/Denver 46.87 -113.99 Missoula
+CITY US America/Denver 48.50 -113.98 Glacier
+CITY US America/Denver 47.50 -111.30 Great Falls
+CITY US America/Denver 44.08 -103.23 Rapid City
+CITY US America/Denver 41.87 -103.67 Scottsbluff
+CITY US America/Denver 41.13 -101.72 Ogallala
+CITY US America/Denver 46.88 -102.79 Dickinson
+CITY US America/Denver 46.91 -103.52 Medora
+CITY US America/Denver 39.35 -101.71 Goodland
+# United States: Arizona (no daylight saving time)
+CITY US America/Phoenix 32.22 -110.97 Tucson
+CITY US America/Phoenix 32.69 -114.63 Yuma
+CITY US America/Phoenix 35.20 -111.65 Flagstaff
+CITY US America/Phoenix 34.87 -111.76 Sedona
+CITY US America/Phoenix 36.06 -112.14 Grand Canyon
+CITY US America/Phoenix 36.91 -111.46 Page
+CITY US America/Phoenix 36.95 -112.53 Fredonia
+CITY US America/Phoenix 34.48 -114.32 Lake Havasu City
+CITY US America/Phoenix 35.19 -114.05 Kingman
+CITY US America/Phoenix 34.90 -110.16 Holbrook
+CITY US America/Phoenix 35.02 -110.70 Winslow
+# United States: Central
+CITY US America/Chicago 43.04 -87.91 Milwaukee
+CITY US America/Chicago 44.51 -88.01 Green Bay
+CITY US America/Chicago 43.07 -89.40 Madison
+CITY US America/Chicago 44.98 -93.27 Minneapolis
+CITY US America/Chicago 46.79 -92.10 Duluth
+CITY US America/Chicago 46.88 -96.79 Fargo
+CITY US America/Chicago 46.81 -100.78 Bismarck
+CITY US America/Chicago 48.23 -101.30 Minot
+CITY US America/Chicago 48.15 -103.62 Williston
+CITY US America/Chicago 43.55 -96.73 Sioux Falls
+CITY US America/Chicago 44.37 -100.35 Pierre
+CITY US America/Chicago 41.12 -100.77 North Platte
+CITY US America/Chicago 41.26 -95.94 Omaha
+CITY US America/Chicago 41.59 -93.62 Des Moines
+CITY US America/Chicago 39.10 -94.58 Kansas City
+CITY US America/Chicago 37.69 -97.34 Wichita
+CITY US America/Chicago 37.75 -100.02 Dodge City
+CITY US America/Chicago 38.63 -90.20 St. Louis
+CITY US America/Chicago 37.21 -93.29 Springfield (Missouri)
+CITY US America/Chicago 39.78 -89.65 Springfield (Illinois)
+CITY US America/Chicago 37.97 -87.57 Evansville
+CITY US America/Chicago 41.59 -87.35 Gary
+CITY US America/Chicago 37.08 -88.60 Paducah
+CITY US America/Chicago 36.99 -86.44 Bowling Green
+CITY US America/Chicago 36.16 -86.78 Nashville
+CITY US America/Chicago 36.16 -85.50 Cookeville
+CITY US America/Chicago 35.95 -85.03 Crossville
+CITY US America/Chicago 35.15 -90.05 Memphis
+CITY US America/Chicago 34.73 -86.59 Huntsville
+CITY US America/Chicago 33.52 -86.80 Birmingham
+CITY US America/Chicago 32.38 -86.30 Montgomery
+CITY US America/Chicago 30.69 -88.04 Mobile
+CITY US America/Chicago 30.42 -87.22 Pensacola
+CITY US America/Chicago 30.16 -85.66 Panama City
+CITY US America/Chicago 32.30 -90.18 Jackson (Mississippi)
+CITY US America/Chicago 34.75 -92.29 Little Rock
+CITY US America/Chicago 29.95 -90.07 New Orleans
+CITY US America/Chicago 30.45 -91.15 Baton Rouge
+CITY US America/Chicago 32.53 -93.75 Shreveport
+CITY US America/Chicago 29.76 -95.37 Houston
+CITY US America/Chicago 29.30 -94.80 Galveston
+CITY US America/Chicago 32.78 -96.80 Dallas
+CITY US America/Chicago 30.27 -97.74 Austin
+CITY US America/Chicago 29.42 -98.49 San Antonio
+CITY US America/Chicago 27.80 -97.40 Corpus Christi
+CITY US America/Chicago 25.90 -97.50 Brownsville
+CITY US America/Chicago 27.51 -99.51 Laredo
+CITY US America/Chicago 29.36 -100.90 Del Rio
+CITY US America/Chicago 29.33 -103.21 Big Bend
+CITY US America/Chicago 31.90 -104.80 Guadalupe Mountains
+CITY US America/Chicago 32.00 -102.08 Midland
+CITY US America/Chicago 33.58 -101.86 Lubbock
+CITY US America/Chicago 35.22 -101.83 Amarillo
+CITY US America/Chicago 35.47 -97.52 Oklahoma City
+CITY US America/Chicago 36.15 -95.99 Tulsa
+# United States: Eastern
+CITY US America/New_York 42.36 -71.06 Boston
+CITY US America/New_York 43.66 -70.26 Portland (Maine)
+CITY US America/New_York 44.39 -68.20 Bar Harbor
+CITY US America/New_York 44.48 -73.21 Burlington
+CITY US America/New_York 42.65 -73.75 Albany
+CITY US America/New_York 42.89 -78.88 Buffalo
+CITY US America/New_York 43.09 -79.06 Niagara Falls
+CITY US America/New_York 39.95 -75.17 Philadelphia
+CITY US America/New_York 40.44 -80.00 Pittsburgh
+CITY US America/New_York 39.29 -76.61 Baltimore
+CITY US America/New_York 38.90 -77.04 Washington
+CITY US America/New_York 37.54 -77.44 Richmond
+CITY US America/New_York 36.85 -76.29 Norfolk
+CITY US America/New_York 35.78 -78.64 Raleigh
+CITY US America/New_York 35.23 -80.84 Charlotte
+CITY US America/New_York 35.60 -82.55 Asheville
+CITY US America/New_York 35.71 -83.51 Gatlinburg
+CITY US America/New_York 35.96 -83.92 Knoxville
+CITY US America/New_York 35.05 -85.31 Chattanooga
+CITY US America/New_York 33.75 -84.39 Atlanta
+CITY US America/New_York 32.46 -84.99 Columbus (Georgia)
+CITY US America/New_York 32.08 -81.09 Savannah
+CITY US America/New_York 32.78 -79.93 Charleston (South Carolina)
+CITY US America/New_York 33.69 -78.89 Myrtle Beach
+CITY US America/New_York 30.33 -81.66 Jacksonville
+CITY US America/New_York 30.44 -84.28 Tallahassee
+CITY US America/New_York 29.73 -84.98 Apalachicola
+CITY US America/New_York 28.54 -81.38 Orlando
+CITY US America/New_York 27.95 -82.46 Tampa
+CITY US America/New_York 26.64 -81.87 Fort Myers
+CITY US America/New_York 25.76 -80.19 Miami
+CITY US America/New_York 24.56 -81.78 Key West
+CITY US America/New_York 39.96 -83.00 Columbus (Ohio)
+CITY US America/New_York 41.50 -81.69 Cleveland
+CITY US America/New_York 39.10 -84.51 Cincinnati
+CITY US America/New_York 41.65 -83.54 Toledo
+CITY US America/New_York 38.04 -84.50 Lexington
+CITY US America/New_York 38.35 -81.63 Charleston (West Virginia)
+CITY US America/Detroit 42.96 -85.67 Grand Rapids
+CITY US America/Detroit 44.76 -85.62 Traverse City
+CITY US America/Detroit 45.78 -84.73 Mackinaw City
+CITY US America/Detroit 46.54 -87.40 Marquette
+CITY US America/Detroit 45.75 -87.06 Escanaba
+CITY US America/Menominee 45.82 -88.07 Iron Mountain
+CITY US America/Indiana/Indianapolis 41.08 -85.14 Fort Wayne
+CITY US America/Indiana/Indianapolis 41.68 -86.25 South Bend
+
+# Canada
+CITY CA America/Toronto 45.50 -73.57 Montreal
+CITY CA America/Toronto 46.81 -71.21 Quebec
+CITY CA America/Toronto 45.42 -75.70 Ottawa
+CITY CA America/Toronto 46.12 -74.60 Mont-Tremblant
+CITY CA America/Toronto 45.40 -71.89 Sherbrooke
+CITY CA America/Toronto 48.43 -71.07 Saguenay
+CITY CA America/Toronto 48.45 -68.52 Rimouski
+CITY CA America/Toronto 48.83 -64.48 Gaspé
+CITY CA America/Toronto 44.23 -76.49 Kingston
+CITY CA America/Toronto 43.09 -79.08 Niagara Falls
+CITY CA America/Toronto 46.49 -80.99 Sudbury
+CITY CA America/Toronto 46.52 -84.33 Sault Ste. Marie
+CITY CA America/Toronto 48.38 -89.25 Thunder Bay
+CITY CA America/Halifax 46.24 -63.13 Charlottetown
+CITY CA America/St_Johns 48.95 -57.95 Corner Brook
+CITY CA America/St_Johns 51.37 -55.58 St. Anthony
+CITY CA America/Winnipeg 49.77 -94.49 Kenora
+CITY CA America/Winnipeg 58.77 -94.17 Churchill
+CITY CA America/Winnipeg 54.77 -101.87 Flin Flon
+CITY CA America/Winnipeg 53.83 -101.24 The Pas
+CITY CA America/Winnipeg 52.11 -101.27 Swan River
+CITY CA America/Winnipeg 51.15 -100.05 Dauphin
+CITY CA America/Winnipeg 49.85 -99.95 Brandon
+CITY CA America/Winnipeg 49.85 -100.93 Virden
+CITY CA America/Winnipeg 50.78 -101.29 Russell
+CITY CA America/Regina 52.13 -106.67 Saskatoon
+CITY CA America/Regina 55.10 -105.28 La Ronge
+CITY CA America/Regina 55.17 -102.81 Pelican Narrows
+CITY CA America/Regina 53.96 -102.27 Cumberland House
+CITY CA America/Regina 52.86 -102.39 Hudson Bay
+CITY CA America/Regina 51.21 -102.46 Yorkton
+CITY CA America/Regina 50.14 -101.67 Moosomin
+CITY CA America/Regina 49.14 -102.99 Estevan
+CITY CA America/Edmonton 51.05 -114.07 Calgary
+CITY CA America/Edmonton 51.18 -115.57 Banff
+CITY CA America/Edmonton 51.43 -116.18 Lake Louise
+CITY CA America/Edmonton 52.87 -118.08 Jasper
+CITY CA America/Edmonton 51.30 -116.97 Golden
+CITY CA America/Edmonton 49.51 -115.77 Cranbrook
+CITY CA America/Edmonton 49.69 -112.84 Lethbridge
+CITY CA America/Edmonton 52.27 -113.81 Red Deer
+CITY CA America/Edmonton 56.73 -111.38 Fort McMurray
+CITY CA America/Edmonton 62.45 -114.37 Yellowknife
+CITY CA America/Vancouver 48.43 -123.37 Victoria
+CITY CA America/Vancouver 50.12 -122.95 Whistler
+CITY CA America/Vancouver 49.89 -119.50 Kelowna
+CITY CA America/Vancouver 50.67 -120.33 Kamloops
+CITY CA America/Vancouver 50.99 -118.20 Revelstoke
+CITY CA America/Vancouver 52.83 -119.26 Valemount
+CITY CA America/Vancouver 49.49 -117.29 Nelson
+CITY CA America/Vancouver 53.92 -122.75 Prince George
+CITY CA America/Vancouver 49.15 -125.91 Tofino
+CITY CA America/Vancouver 54.31 -130.32 Prince Rupert
+
+# Australia
+CITY AU Australia/Darwin -23.70 133.88 Alice Springs
+CITY AU Australia/Darwin -25.24 130.99 Uluru
+CITY AU Australia/Darwin -24.25 131.49 Kings Canyon
+CITY AU Australia/Darwin -14.47 132.26 Katherine
+CITY AU Australia/Darwin -19.65 134.19 Tennant Creek
+CITY AU Australia/Darwin -12.67 132.84 Kakadu
+CITY AU Australia/Perth -17.96 122.24 Broome
+CITY AU Australia/Perth -15.77 128.74 Kununurra
+CITY AU Australia/Perth -18.22 127.67 Halls Creek
+CITY AU Australia/Perth -21.93 114.13 Exmouth
+CITY AU Australia/Perth -20.31 118.58 Port Hedland
+CITY AU Australia/Perth -30.75 121.47 Kalgoorlie
+CITY AU Australia/Perth -33.86 121.89 Esperance
+CITY AU Australia/Perth -33.95 115.08 Margaret River
+CITY AU Australia/Perth -35.02 117.88 Albany
+CITY AU Australia/Sydney -28.64 153.61 Byron Bay
+CITY AU Australia/Sydney -28.18 153.54 Tweed Heads
+CITY AU Australia/Sydney -28.33 153.40 Murwillumbah
+CITY AU Australia/Sydney -29.05 152.02 Tenterfield
+CITY AU Australia/Sydney -30.30 153.11 Coffs Harbour
+CITY AU Australia/Sydney -31.43 152.91 Port Macquarie
+CITY AU Australia/Sydney -30.51 151.67 Armidale
+CITY AU Australia/Sydney -29.47 149.84 Moree
+CITY AU Australia/Sydney -30.09 145.94 Bourke
+CITY AU Australia/Sydney -32.93 151.78 Newcastle
+CITY AU Australia/Sydney -33.71 150.31 Katoomba
+CITY AU Australia/Sydney -35.28 149.13 Canberra
+CITY AU Australia/Sydney -32.25 148.60 Dubbo
+CITY AU Australia/Sydney -35.12 147.37 Wagga Wagga
+CITY AU Australia/Sydney -36.08 146.92 Albury
+CITY AU Australia/Sydney -36.50 148.30 Thredbo
+CITY AU Australia/Brisbane -28.02 153.40 Gold Coast
+CITY AU Australia/Brisbane -28.17 153.53 Coolangatta
+CITY AU Australia/Brisbane -28.13 153.48 Currumbin
+CITY AU Australia/Brisbane -28.20 153.27 Springbrook
+CITY AU Australia/Brisbane -28.65 151.93 Stanthorpe
+CITY AU Australia/Brisbane -26.39 153.09 Noosa
+CITY AU Australia/Brisbane -27.56 151.95 Toowoomba
+CITY AU Australia/Brisbane -28.55 150.31 Goondiwindi
+CITY AU Australia/Brisbane -24.87 152.35 Bundaberg
+CITY AU Australia/Brisbane -23.38 150.51 Rockhampton
+CITY AU Australia/Brisbane -19.26 146.82 Townsville
+CITY AU Australia/Brisbane -16.92 145.77 Cairns
+CITY AU Australia/Brisbane -16.48 145.47 Port Douglas
+CITY AU Australia/Brisbane -20.73 139.49 Mount Isa
+CITY AU Australia/Brisbane -23.44 144.25 Longreach
+CITY AU Australia/Brisbane -25.90 139.35 Birdsville
+CITY AU Australia/Adelaide -29.01 134.75 Coober Pedy
+CITY AU Australia/Adelaide -32.13 133.68 Ceduna
+CITY AU Australia/Adelaide -31.45 130.90 Nullarbor
+CITY AU Australia/Adelaide -34.73 135.86 Port Lincoln
+CITY AU Australia/Adelaide -32.49 137.76 Port Augusta
+CITY AU Australia/Adelaide -35.66 137.64 Kangaroo Island
+CITY AU Australia/Adelaide -37.83 140.78 Mount Gambier
+CITY AU Australia/Adelaide -34.17 140.75 Renmark
+CITY AU Australia/Melbourne -34.21 142.14 Mildura
+CITY AU Australia/Melbourne -35.34 143.55 Swan Hill
+CITY AU Australia/Melbourne -36.76 144.28 Bendigo
+CITY AU Australia/Melbourne -37.56 143.85 Ballarat
+CITY AU Australia/Melbourne -38.38 142.48 Warrnambool
+CITY AU Australia/Melbourne -39.03 146.32 Wilsons Promontory
+
+# Brazil
+CITY BR America/Sao_Paulo -25.52 -54.58 Foz do Iguaçu
+CITY BR America/Sao_Paulo -24.96 -53.46 Cascavel
+CITY BR America/Sao_Paulo -25.43 -49.27 Curitiba
+CITY BR America/Sao_Paulo -23.42 -51.94 Maringá
+CITY BR America/Sao_Paulo -22.12 -51.39 Presidente Prudente
+CITY BR America/Sao_Paulo -20.82 -49.38 São José do Rio Preto
+CITY BR America/Sao_Paulo -21.21 -50.43 Araçatuba
+CITY BR America/Sao_Paulo -27.60 -48.55 Florianópolis
+CITY BR America/Sao_Paulo -27.10 -52.62 Chapecó
+CITY BR America/Sao_Paulo -30.03 -51.23 Porto Alegre
+CITY BR America/Sao_Paulo -29.38 -50.88 Gramado
+CITY BR America/Sao_Paulo -29.75 -57.09 Uruguaiana
+CITY BR America/Sao_Paulo -15.79 -47.88 Brasília
+CITY BR America/Sao_Paulo -16.68 -49.25 Goiânia
+CITY BR America/Sao_Paulo -18.92 -48.28 Uberlândia
+CITY BR America/Sao_Paulo -19.92 -43.94 Belo Horizonte
+CITY BR America/Sao_Paulo -22.91 -43.17 Rio de Janeiro
+CITY BR America/Sao_Paulo -23.22 -44.71 Paraty
+CITY BR America/Campo_Grande -21.13 -56.48 Bonito
+CITY BR America/Campo_Grande -22.22 -54.81 Dourados
+CITY BR America/Campo_Grande -19.01 -57.65 Corumbá
+CITY BR America/Campo_Grande -20.75 -51.68 Três Lagoas
+
+# Mexico
+CITY MX America/Cancun 20.21 -87.47 Tulum
+CITY MX America/Cancun 20.63 -87.07 Playa del Carmen
+CITY MX America/Cancun 18.68 -88.39 Bacalar
+CITY MX America/Cancun 18.50 -88.30 Chetumal
+CITY MX America/Merida 20.68 -88.57 Chichén Itzá
+CITY MX America/Merida 20.69 -88.20 Valladolid
+CITY MX America/Merida 19.85 -90.53 Campeche
+CITY MX America/Merida 18.51 -89.39 Xpujil
+CITY MX America/Mexico_City 20.65 -105.23 Puerto Vallarta
+CITY MX America/Mexico_City 20.67 -103.35 Guadalajara
+CITY MX America/Mexico_City 17.07 -96.73 Oaxaca
+CITY MX America/Mexico_City 15.86 -97.07 Puerto Escondido
+CITY MX America/Mexico_City 16.85 -99.82 Acapulco
+CITY MX America/Mexico_City 16.74 -92.64 San Cristóbal de las Casas
+CITY MX America/Mexico_City 17.51 -91.98 Palenque
+CITY MX America/Mexico_City 17.99 -92.93 Villahermosa
+CITY MX America/Mexico_City 19.17 -96.13 Veracruz
+CITY MX America/Mexico_City 20.91 -100.74 San Miguel de Allende
+CITY MX America/Mexico_City 22.77 -102.58 Zacatecas
+CITY MX America/Mexico_City 22.15 -100.98 San Luis Potosí
+CITY MX America/Mazatlan 21.50 -104.89 Tepic
+CITY MX America/Mazatlan 21.54 -105.28 San Blas
+CITY MX America/Mazatlan 21.02 -105.27 Rincón de Guayabitos
+CITY MX America/Mazatlan 24.14 -110.31 La Paz
+CITY MX America/Mazatlan 22.89 -109.92 Cabo San Lucas
+CITY MX America/Mazatlan 26.01 -111.35 Loreto
+CITY MX America/Mazatlan 24.80 -107.39 Culiacán
+CITY MX America/Monterrey 24.02 -104.67 Durango
+CITY MX America/Monterrey 25.54 -103.41 Torreón
+CITY MX America/Monterrey 22.25 -97.86 Tampico
+CITY MX America/Matamoros 27.48 -99.51 Nuevo Laredo
+CITY MX America/Matamoros 28.70 -100.52 Piedras Negras
+CITY MX America/Tijuana 31.87 -116.60 Ensenada
+CITY MX America/Tijuana 32.62 -115.45 Mexicali
+CITY MX America/Hermosillo 31.32 -113.54 Puerto Peñasco
+CITY MX America/Hermosillo 32.46 -114.77 San Luis Río Colorado
+
+# Chile
+CITY CL America/Santiago -39.27 -71.98 Pucón
+CITY CL America/Santiago -41.47 -72.94 Puerto Montt
+CITY CL America/Santiago -42.48 -73.76 Castro
+CITY CL America/Santiago -42.92 -72.71 Chaitén
+
+# China (Xinjiang keeps its own zone in IANA; Tibet, Qinghai and Gansu are on Beijing time)
+CITY CN Asia/Shanghai 29.65 91.17 Lhasa
+CITY CN Asia/Shanghai 29.27 88.88 Shigatse
+CITY CN Asia/Shanghai 36.40 94.90 Golmud
+CITY CN Asia/Shanghai 40.14 94.66 Dunhuang
+CITY CN Asia/Shanghai 36.62 101.78 Xining
+CITY CN Asia/Shanghai 36.06 103.83 Lanzhou
+CITY CN Asia/Shanghai 30.66 104.07 Chengdu
+CITY CN Asia/Shanghai 25.04 102.71 Kunming
+
+# Russia
+CITY RU Europe/Moscow 55.79 49.12 Kazan
+CITY RU Europe/Moscow 56.33 44.00 Nizhny Novgorod
+CITY RU Europe/Moscow 59.94 30.31 Saint Petersburg
+CITY RU Europe/Moscow 68.97 33.07 Murmansk
+CITY RU Europe/Moscow 43.60 39.73 Sochi
+CITY RU Europe/Moscow 42.98 47.50 Makhachkala
+CITY RU Europe/Moscow 43.02 44.68 Vladikavkaz
+CITY RU Europe/Moscow 53.20 45.00 Penza
+CITY RU Europe/Moscow 47.24 39.70 Rostov-on-Don
+CITY RU Europe/Moscow 46.31 44.26 Elista
+CITY RU Asia/Yekaterinburg 54.74 55.97 Ufa
+CITY RU Asia/Yekaterinburg 51.77 55.10 Orenburg
+CITY RU Asia/Yekaterinburg 58.01 56.25 Perm
+CITY RU Asia/Yekaterinburg 55.16 61.40 Chelyabinsk
+CITY RU Asia/Yekaterinburg 57.15 65.53 Tyumen
+CITY RU Asia/Yekaterinburg 58.20 68.25 Tobolsk
+CITY RU Asia/Yekaterinburg 61.25 73.40 Surgut
+CITY RU Asia/Yekaterinburg 66.08 76.68 Novy Urengoy
+CITY RU Asia/Yekaterinburg 66.53 66.60 Salekhard
+CITY RU Asia/Krasnoyarsk 69.35 88.20 Norilsk
+CITY RU Asia/Krasnoyarsk 67.47 86.57 Igarka
+CITY RU Asia/Novokuznetsk 55.35 86.09 Kemerovo
+CITY RU Asia/Barnaul 51.96 85.96 Gorno-Altaysk
+CITY RU Europe/Samara 56.85 53.20 Izhevsk
+CITY RU Asia/Irkutsk 51.83 107.58 Ulan-Ude
+CITY RU Asia/Vladivostok 48.48 135.08 Khabarovsk
+
+# Indonesia
+CITY ID Asia/Jakarta -7.25 112.75 Surabaya
+CITY ID Asia/Jakarta -8.22 114.37 Banyuwangi
+CITY ID Asia/Jakarta -7.98 112.63 Malang
+CITY ID Asia/Jakarta -7.80 110.36 Yogyakarta
+CITY ID Asia/Jakarta 3.59 98.67 Medan
+CITY ID Asia/Jakarta -2.21 113.92 Palangkaraya
+CITY ID Asia/Makassar -8.65 115.22 Denpasar
+CITY ID Asia/Makassar -8.58 116.12 Mataram
+CITY ID Asia/Makassar -8.50 119.89 Labuan Bajo
+CITY ID Asia/Makassar -1.27 116.83 Balikpapan
+CITY ID Asia/Makassar -3.32 114.59 Banjarmasin
+CITY ID Asia/Makassar 1.47 124.84 Manado
+CITY ID Asia/Jayapura -3.70 128.18 Ambon
+CITY ID Asia/Jayapura 0.79 127.38 Ternate
+CITY ID Asia/Jayapura -0.88 131.25 Sorong
+
+# Ukraine (Simferopol is Crimea's zone)
+CITY UA Europe/Kyiv 46.48 30.73 Odesa
+CITY UA Europe/Kyiv 46.64 32.62 Kherson
+CITY UA Europe/Kyiv 47.84 35.14 Zaporizhzhia
+CITY UA Europe/Kyiv 48.46 35.05 Dnipro
+
+# DR Congo
+CITY CD Africa/Lubumbashi 0.52 25.19 Kisangani
+CITY CD Africa/Lubumbashi -1.68 29.22 Goma
+CITY CD Africa/Kinshasa 0.05 18.26 Mbandaka

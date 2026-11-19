@@ -109,6 +109,18 @@
   die schon unter „Von Albumist angelegt oder ergänzt“ stehen (P3-16 = G3-02).
 - 19.11.: Die Foto-Großansicht baut nur noch die Seiten um das gezeigte Foto (50 davor und
   danach) statt aller geladenen Fotos und schiebt sie beim Blättern nach (P4-11).
+- 19.11.: Tage, Monate und Jahre folgen der Ortszeit des Fotos wie in Apple Fotos (P1-15): ein Foto
+  von 23 Uhr in New York am 31. Januar bleibt im Januar, auch auf einem iPhone mit deutscher Zeit.
+  Die Zeitzone des iPhones während der Analyse ändert kein Album mehr. Offline kommt die Zeitzone
+  aus dem Land (IANA-Liste). Fotos ohne Ort zählen in der Zeitzone des Zuhauses, des gewählten
+  oder gefundenen (auch bei einem Update auf Reisen, nach einem Umzug in der des neuen), auf einer
+  Reise in der ihres Ziels; die des iPhones gilt nur, solange kein Zuhause bekannt ist.
+- 19.11., zweite Prüfung von P1-15: „Nur 2026“ sieht sich genau die Fotos des Jahres nach ihrer
+  Uhr an und zählt sie (mit einer Reise nach Sydney zählte Silvester zu Hause zu 2026); eine
+  gespeicherte Zeitzone, die das System nicht kennt, wird nicht mehr ersetzt; offline hat der
+  Süden der Gold Coast die Zeit von Queensland, West Wendover die von Utah, Norilsk die von
+  Krasnojarsk und Flin Flon die von Manitoba. Die Zonen der Orte werden einmal je Stand der Orte
+  bestimmt, die Reisen einmal je Analyse erkannt.
 - 19.11.: Fotos mit einem Datum in der Zukunft bleiben nicht mehr für immer unsortiert (P1-03);
   ein als unlesbar aufgegebenes Foto wird eine Woche später noch einmal versucht (P1-08); Fotos,
   deren Land sich nicht finden lässt, gelten nicht mehr für immer als offen (P1-09); die

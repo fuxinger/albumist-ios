@@ -273,6 +273,7 @@ public struct TripChangeLedger: Sendable, Equatable {
     /// by `refreshEnded` on every way out (`defer`), also when a newer call replaced it or it
     /// threw.
     public mutating func refreshBegan(_ call: Int) {
+        oneMoreComing = false
         if written > shown { refreshes[call] = written }
     }
 
@@ -280,6 +281,22 @@ public struct TripChangeLedger: Sendable, Equatable {
     /// lands later never takes it back.
     public mutating func refreshShown(_ call: Int) {
         if let read = refreshes[call] { shown = max(shown, read) }
+    }
+
+    /// A failed refresh with changes left to show: one more refresh comes, and the controls wait
+    /// for it (third review of 194971b, SHOULD-1).
+    private var oneMoreComing = false
+
+    /// Refresh `call` threw (called in its `catch`, before `refreshEnded`). Whether to ask for
+    /// exactly one more: only for the newest call (a newer one shows what it read), only while
+    /// changes are written but not shown, and not for the one more itself (`retry`), so a store
+    /// that keeps throwing is not asked for ever. Before, the change read "Gespeichert … sobald
+    /// die Analyse fertig ist" with the controls free over the old trips, and no analysis was
+    /// coming.
+    public mutating func refreshFailed(_ call: Int, newest: Bool, retry: Bool) -> Bool {
+        guard newest, !retry, written > shown else { return false }
+        oneMoreComing = true
+        return true
     }
 
     /// Refresh `call` is over, shown or not.
@@ -292,7 +309,7 @@ public struct TripChangeLedger: Sendable, Equatable {
     /// refresh can be replaced by a newer one (pull to refresh, an ignore tap, a settings save)
     /// that lands after the end is settled (second review of 194971b, M1).
     public var settling: Bool {
-        !reading.isEmpty || !ending.isEmpty || refreshes.values.contains { $0 > shown }
+        !reading.isEmpty || !ending.isEmpty || oneMoreComing || refreshes.values.contains { $0 > shown }
     }
 
     public var state: State {

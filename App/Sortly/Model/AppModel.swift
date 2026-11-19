@@ -1873,7 +1873,8 @@ final class AppModel {
         }
     }
 
-    func refreshDerived() async {
+    /// `afterFailure`: the one more refresh after a failed one (`TripChangeLedger.refreshFailed`).
+    func refreshDerived(afterFailure: Bool = false) async {
         guard let store, let pipeline else { return }
         let call = derivedCalls.begin()
         // The trip changes in the suggestions the store holds now (`TripChangeLedger`), until
@@ -1951,6 +1952,14 @@ final class AppModel {
             tripChangeLedger.refreshShown(call)
         } catch {
             message = .failure(error.localizedDescription)
+            // The newest refresh failed with a trip change written but not on screen: one more,
+            // once per failure chain (the controls wait for it meanwhile).
+            if tripChangeLedger.refreshFailed(call, newest: derivedCalls.isNewest(call), retry: afterFailure) {
+                Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    await refreshDerived(afterFailure: true)
+                }
+            }
         }
         SpotlightIndex.scheduleUpdate(self)
     }

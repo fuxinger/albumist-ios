@@ -189,7 +189,8 @@ struct TripChangeLedgerTests {
     /// The end's own refresh is replaced by a newer one (pull to refresh, an ignore tap, a
     /// settings save) and assigns nothing; the end is settled before the newer one lands. The
     /// change waits for the newer refresh (second review of 194971b, M1: it read "Gespeichert"
-    /// and the controls were free for the newer refresh's 1–3 s, so the merge that drops the
+    /// and the controls were free while the newer refresh ran, by estimate 1–3 s with a large
+    /// library, so the merge that drops the
     /// split was possible again).
     @Test func aNewerRefreshThatLandsAfterTheEndKeepsItWaiting() {
         var ledger = TripChangeLedger()
@@ -208,21 +209,73 @@ struct TripChangeLedgerTests {
         #expect(!ledger.settling)
     }
 
-    /// The newer refresh fails: nothing more is coming, so the change is saved and the controls
-    /// are free; the next refresh that lands shows it (and the sheet then says it is made).
-    @Test func aNewerRefreshThatFailsLeavesItSavedUntilTheNextOne() {
+    /// The newer refresh fails (third review of 194971b, SHOULD-1): the end's own assigned
+    /// nothing, so the change is written but not on screen and no analysis is coming. Before, it
+    /// read "Gespeichert … sobald die Analyse fertig ist" with the controls free over the old
+    /// trips, and a merge there could drop the split. Now one more refresh comes, and the
+    /// controls wait for it; the sheet reaches done when it lands.
+    @Test func aNewerRefreshThatFailsIsTriedOnceMore() {
+        var ledger = TripChangeLedger()
+        ledger.changeStored()
+        ledger.runStarted(1)
+        ledger.runEnded(1, madeSuggestions: true)
+        ledger.refreshBegan(10)          // the end's own refresh: it reads the change
+        ledger.refreshBegan(11)          // pull to refresh or an ignore tap: the end's own assigns nothing
+        ledger.refreshEnded(10)
+        ledger.runSettled(1)
+        let again = ledger.refreshFailed(11, newest: true, retry: false)
+        ledger.refreshEnded(11)          // the defer after the catch
+        #expect(again, "no refresh came after the failed one: the change stayed off screen")
+        #expect(ledger.state == .waiting, "said Gespeichert although no analysis is coming")
+        #expect(ledger.settling, "the trip controls were free over the old trips")
+        Self.refresh(&ledger, call: 12)  // the one more refresh lands
+        #expect(ledger.state == .applied)
+        #expect(!ledger.settling)
+    }
+
+    /// Exactly one more per failure chain: a store that keeps throwing does not loop. After the
+    /// second failure the change is saved and the controls are free; the next refresh shows it.
+    @Test func aStoreThatKeepsThrowingIsNotAskedForEver() {
         var ledger = TripChangeLedger()
         ledger.changeStored()
         ledger.runStarted(1)
         ledger.runEnded(1, madeSuggestions: true)
         ledger.refreshBegan(10)
-        ledger.refreshBegan(11)
+        let first = ledger.refreshFailed(10, newest: true, retry: false)
         ledger.refreshEnded(10)
         ledger.runSettled(1)
-        ledger.refreshEnded(11)          // threw
+        #expect(first)
+        ledger.refreshBegan(11)          // the one more
+        let second = ledger.refreshFailed(11, newest: true, retry: true)
+        ledger.refreshEnded(11)
+        #expect(!second, "a failing store was asked again and again")
         #expect(ledger.state == .savedForLater)
         #expect(!ledger.settling, "the trip controls stayed grey with nothing coming")
         Self.refresh(&ledger, call: 12)
+        #expect(ledger.state == .applied)
+    }
+
+    /// No extra refresh where none is needed: an older call failed (the newest one is still
+    /// going and shows the change), or nothing written waits to be shown.
+    @Test func onlyTheNewestFailureWithAChangeLeftAsksAgain() {
+        var ledger = TripChangeLedger()
+        ledger.refreshBegan(1)
+        let nothingLeft = ledger.refreshFailed(1, newest: true, retry: false)
+        ledger.refreshEnded(1)
+        #expect(!nothingLeft, "a failed refresh with nothing to show asked for one more")
+        #expect(!ledger.settling)
+        ledger.changeStored()
+        ledger.runStarted(2)
+        ledger.runEnded(2, madeSuggestions: true)
+        ledger.refreshBegan(10)
+        ledger.refreshBegan(11)
+        let older = ledger.refreshFailed(10, newest: false, retry: false)
+        ledger.refreshEnded(10)
+        ledger.runSettled(2)
+        #expect(!older, "an older call's failure asked for one more")
+        #expect(ledger.settling, "the newest refresh still shows the change")
+        ledger.refreshShown(11)
+        ledger.refreshEnded(11)
         #expect(ledger.state == .applied)
     }
 
@@ -293,6 +346,13 @@ struct TripChangeLedgerTests {
         #expect(endsAlways, "a refresh that returns early or throws is not ended")
         let shown = order("guard derivedCalls.isNewest(call)", "tripChangeLedger.refreshShown(call)", in: refresh)
         #expect(shown, "refreshDerived counts trips as shown that an older call read")
+        // A failed newest refresh with a change left asks for exactly one more (SHOULD-1).
+        let catchPart = refresh.components(separatedBy: "} catch {").dropFirst().joined()
+        let asksAgain = catchPart.contains("if tripChangeLedger.refreshFailed(call, newest: derivedCalls.isNewest(call), retry: afterFailure) {")
+            && catchPart.contains("await refreshDerived(afterFailure: true)")
+        #expect(asksAgain, "a failed refresh leaves the change off screen with the controls free")
+        let declared = AppSource.code(model).contains("func refreshDerived(afterFailure: Bool = false) async {")
+        #expect(declared, "refreshDerived does not know whether it is the one more after a failure")
         // The sheet is done when the trips shown include the change, not when no run runs.
         let doneByTheLedger = workshop.contains(".onChange(of: model.tripChangeState)")
         #expect(doneByTheLedger, "the workshop says done when the run ends, before the trips are shown")

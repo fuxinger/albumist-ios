@@ -1201,5 +1201,23 @@ class SettleTests(unittest.TestCase):
         self.assertLessEqual(now[0], 120 + 30)
 
 
+class SettleCommandTests(unittest.TestCase):
+    """`ui_tests.py settle`: ci.yml's "Fresh simulator" waits like a UI pass (CI 44437759869:
+    the load never went under 3.5, so the step always waited its whole 5 min)."""
+
+    def test_it_probes_the_simulator_and_never_fails_the_step(self):
+        seen = []
+
+        def fake_settle(probe, limit=ui_tests.SETTLE_LIMIT, **_):
+            seen.append((probe(), limit))
+            return False
+        with mock.patch.object(ui_tests, "settle", fake_settle), \
+                mock.patch.object(ui_tests, "simulator_probe", lambda udid: {"U": 0.5}[udid]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ui_tests.main(["settle", "--udid", "U"]), 0)
+        self.assertEqual(seen, [(0.5, ui_tests.SETTLE_LIMIT)])
+        self.assertIn("UI_BOOT_TIMING wait for the simulator", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

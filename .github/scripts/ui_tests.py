@@ -29,6 +29,9 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       on an idle app in UI run 44446270757 (test07). The test only reads the app's state
       meanwhile and ends it through XCTest itself after 60 s; a request older than 30 s is not
       answered any more (`terminate_app`), so a late end never hits the next launch.
+  settle --udid U [--limit S]
+      Waits like every pass does before its first test (`settle`, below) and always exits 0;
+      ci.yml's "Fresh simulator" step uses it after its boot.
   classify LOG [--status N] [--crash-report F]... [--bundle-json F]
       Prints what `run` would decide for a finished pass (for trying the rules on a log;
       without --bundle-json the result bundle counts as clean).
@@ -618,7 +621,8 @@ def simulator_probe(udid: str) -> float | None:
 
 
 def settle(probe, load=lambda: os.getloadavg()[0], sleep=time.sleep, top=None,
-           limit: float = SETTLE_LIMIT, step: float = SETTLE_STEP, clock=time.monotonic) -> bool:
+           limit: float = SETTLE_LIMIT, step: float = SETTLE_STEP, clock=time.monotonic,
+           going_on: str = "the pass starts anyway") -> bool:
     """Waits until the simulator answers quickly again (SETTLE_CALM probes in a row under
     SETTLE_PROBE s, `simulator_probe`), at most `limit` s, before a pass starts its first test.
     Every probe and the Mac's 1-minute load are a SIM_SETTLE line, what keeps the Mac busy a
@@ -649,7 +653,7 @@ def settle(probe, load=lambda: os.getloadavg()[0], sleep=time.sleep, top=None,
             for line in (top or busiest)():
                 print(f"SIM_TOP {line}", flush=True)
         if waited >= limit:
-            print(f"SIM_SETTLE still slow after {waited:.0f} s; the pass starts anyway", flush=True)
+            print(f"SIM_SETTLE still slow after {waited:.0f} s; {going_on}", flush=True)
             return False
         if calm == 0:
             sleep(min(step, limit - waited))
@@ -1386,6 +1390,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--out", default="build")
     r.add_argument("--deadline", type=float, default=0,
                    help="epoch second by which a pass must end (the job's limit minus a margin); 0: none")
+    w = sub.add_parser("settle")
+    w.add_argument("--udid", required=True)
+    w.add_argument("--limit", type=float, default=SETTLE_LIMIT)
     c = sub.add_parser("classify")
     c.add_argument("log")
     c.add_argument("--status", type=int, default=65)
@@ -1442,6 +1449,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"::notice title=UI sweep::{skipped} row(s) not tapped by the tap-through sweep "
                   "(listed in the run summary)", file=sys.stderr)
         print(markdown)
+        return 0
+    if args.command == "settle":
+        started = time.monotonic()
+        settle(lambda: simulator_probe(args.udid), limit=args.limit, going_on="the next step starts anyway")
+        timing("wait for the simulator", started)
         return 0
     if args.command == "classify":
         with open(args.log, encoding="utf-8", errors="replace") as log:

@@ -53,6 +53,9 @@
 - UI-Tests: jede Gruppe wartet vor ihrem ersten Test (und vor einer Wiederholung) bis zu 5 Min.,
   bis der Simulator nach seinem Start wieder schnell antwortet (`SIM_SETTLE`);
   vorher verlor XCTest dabei die App beim ersten Start (UI-Lauf 44437759848, test05).
+- CI: der frische Simulator in `ci.yml` wartet wie die UI-Gruppen, bis er schnell antwortet
+  (`ui_tests.py settle`), statt auf eine Last unter 3,5, die die Macs nie erreichen (wartete
+  jedes Mal die vollen 5 Min.).
 - UI-Gerätetests: vor einem Neustart beendet in CI der Mac die laufende App (`simctl terminate`),
   nicht XCTest, dessen Beenden bei einer ruhenden App scheiterte (UI-Lauf 44446270757, test07).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb

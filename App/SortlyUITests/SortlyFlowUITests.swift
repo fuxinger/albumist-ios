@@ -1325,7 +1325,7 @@ final class SortlyFlowUITests: XCTestCase {
         ensureHistory()
         // Going to the background writes the copy: wait until iOS has the app there (a fixed
         // 4 s brought device test06 back before it ever was, UI run 44480215847).
-        UITestWait.toBackground(app, "to write the backup copy", atLeast: 4)
+        UITestWait.toBackground(app, "to write the backup copy", atLeast: 4, in: self)
         launch(["-SortlyUITestBackup", "-SortlyUITestRebuildDatabase"])
         let card = app.staticTexts["Entscheidungen zurückgeholt"]
         let restored = card.waitForExistence(timeout: 30)
@@ -1514,7 +1514,7 @@ final class SortlyFlowUITests: XCTestCase {
 
         // Leave the app (on the simulator iOS holds it right away) and come back: in the
         // background for at least the old 8 s, counted once iOS has it there.
-        UITestWait.toBackground(app, "during the analysis", atLeast: 8)
+        UITestWait.toBackground(app, "during the analysis", atLeast: 8, in: self)
         app.activate()
         UITestWait.until("app in the foreground again", timeout: 30) { app.state == .runningForeground }
         // Running or done, polled (no 10 s extra when it is already done), and for at least the

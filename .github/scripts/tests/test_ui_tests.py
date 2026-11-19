@@ -1223,6 +1223,33 @@ class HostTerminateTests(unittest.TestCase):
                     # goes through it as well).
                     self.assertRegex(swift, r"UITestAppEnd\.(end|launch)\(app")
 
+    def test_every_home_press_goes_through_the_wait_that_tries_again(self):
+        # UI run 44497741096 (19.11.): after the Home press the app stayed in the foreground
+        # for 30 s in device test03 and test06; the press was lost on the CI simulator.
+        # UITestWait.toBackground tries Home once more and then brings the Settings app to the
+        # front, each extra try a counted UI_FLAKY_RETRY line that names the test. No UI test
+        # presses Home anywhere else, so every move to the background gets that escalation.
+        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".swift") or name == "UITestWait.swift":
+                continue
+            with self.subTest(name):
+                with open(os.path.join(folder, name), encoding="utf-8") as source:
+                    code = ui_groups.strip_swift(source.read())
+                self.assertNotRegex(code, r"\.press\(\s*\.home\s*\)")
+                for call in re.finditer(r"UITestWait\.toBackground\(", code):
+                    self.assertRegex(code[call.end():call.end() + 200], r"^[^()]*\bin: self\b")
+        with open(os.path.join(folder, "UITestWait.swift"), encoding="utf-8") as source:
+            wait = source.read()
+        body = wait[wait.index("static func toBackground("):wait.index("static func testID(")]
+        self.assertEqual(len(re.findall(r"\.press\(\.home\)", body)), 1)  # in the loop of ways
+        self.assertIn('("Home press", min(timeout, 12)), ("second Home press", 15), ("Settings app in front", 30)', body)
+        self.assertIn('XCUIApplication(bundleIdentifier: "com.apple.Preferences").activate()', body)
+        retry = re.search(r'print\("UI_FLAKY_RETRY \\\(testID\(test\)\) ([^"]*)"\)', body)
+        self.assertIsNotNone(retry)
+        line = "UI_FLAKY_RETRY DeviceConditionUITests.test03_X app still in the foreground (state 4) 12 s after the Home press why, tried: second Home press"
+        self.assertEqual(ui_tests.INSIDE_RETRY.findall(line)[0][0], "DeviceConditionUITests.test03_X")
+
     @staticmethod
     def launch_calls(source: str) -> list[int]:
         """Line numbers of `.launch()` calls (any spacing) in Swift code, comments and string

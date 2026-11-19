@@ -394,14 +394,15 @@ public struct TripDetector: Sendable {
     public static func classify(dates: [Date], coordinates: [GeoCoordinate], calendar: Calendar) -> (kind: TripKind, stops: Int) {
         guard let start = dates.first, let end = dates.last else { return (.dayTrip, 1) }
         // Distinct stops: ~25 km cells where photos were taken in the evening/night.
-        // A trip across the 180th meridian (Fiji, Kiribati, Chukotka) is counted with the grid's
-        // seam on the other side of the earth: a stay on either side of it is one stop, not cells
-        // at opposite ends of the grid (second review 19.11.).
-        let lons = coordinates.map(\.longitude)
-        let acrossDateLine = (lons.max() ?? 0) - (lons.min() ?? 0) > 180
+        // The cell the 180th meridian cuts is one cell on both sides of it: a stay on Taveuni
+        // (Fiji) is one stop, not cells at opposite ends of the grid (second review 19.11.). Every
+        // other photo keeps its usual cell, also on a trip across the Pacific (third review).
         func cell(_ c: GeoCoordinate) -> GeoCell {
-            guard acrossDateLine, c.longitude < 0 else { return GeoCell(c, sizeMeters: 25_000) }
-            return GeoCell(GeoCoordinate(latitude: c.latitude, longitude: c.longitude + 360), sizeMeters: 25_000)
+            let usual = GeoCell(c, sizeMeters: 25_000)
+            guard c.longitude < 0 else { return usual }
+            let across = GeoCell(GeoCoordinate(latitude: c.latitude, longitude: c.longitude + 360), sizeMeters: 25_000)
+            let cut = GeoCell(GeoCoordinate(latitude: c.latitude, longitude: 180), sizeMeters: 25_000)
+            return across == cut ? across : usual
         }
         var nights: [GeoCell: Set<Date>] = [:]
         for (date, c) in zip(dates, coordinates) {

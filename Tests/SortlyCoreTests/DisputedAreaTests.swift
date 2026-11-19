@@ -48,6 +48,18 @@ struct DisputedAreaTests {
         ("Liuqiu", 22.34, 120.37, "taiwan"),
         ("Matsu, Nangan", 26.1597, 119.95, "taiwan"),
         ("Pratas", 20.70, 116.72, "taiwan"),
+        // Taiwan-held islands off Xiamen and Fujian the map does not draw either (review of
+        // bundle-i, 19.11.: Apple's "CN" made them "China").
+        ("Lieyu (Klein-Kinmen)", 24.43, 118.24, "taiwan"),
+        ("Dadan", 24.383, 118.133, "taiwan"),
+        ("Erdan", 24.367, 118.117, "taiwan"),
+        ("Wuqiu", 24.983, 119.45, "taiwan"),
+        // The waters of Northern Cyprus (review of bundle-i: 3 km off Kyrenia Apple's "CY"
+        // made it "Republik Zypern").
+        ("vor Kyrenia, 3 km", 35.37, 33.32, "northern-cyprus"),
+        ("vor Varosha", 35.11, 34.02, "northern-cyprus"),
+        ("Bucht von Morphou", 35.25, 32.85, "northern-cyprus"),
+        ("vor Kap Apostolos Andreas", 35.72, 34.65, "northern-cyprus"),
     ])
     func disputedPointsTakeNoSide(name: String, lat: Double, lon: Double, area: String) throws {
         let m = at(lat, lon)
@@ -112,6 +124,65 @@ struct DisputedAreaTests {
         }
         #expect(leaks.isEmpty, "\(leaks)")
     }
+
+    /// Sea and undrawn land next to the new outlines keep no area: Apple's answer decides there
+    /// as before (review of bundle-i, 19.11.).
+    @Test(arguments: [
+        ("Xiamen, Ostküste", 24.45, 118.18), ("Gulangyu", 24.447, 118.067), ("Dadeng", 24.56, 118.32),
+        ("vor Larnaka", 34.88, 33.70), ("vor Limassol", 34.62, 33.08), ("vor Paphos", 34.74, 32.35),
+        ("vor Protaras", 35.04, 34.11), ("Bucht von Polis", 35.08, 32.40), ("vor Kato Pyrgos und Kokkina", 35.21, 32.65),
+    ])
+    func seaAndIslandsNextToTheOutlinesTakeNoArea(name: String, lat: Double, lon: Double) {
+        let m = at(lat, lon)
+        #expect(m.disputedArea == nil, "\(name)")
+    }
+
+    // MARK: Atlas map
+
+    /// The atlas map never fills a disputed area as a visited country (review of bundle-i,
+    /// 19.11.: Crimea lit up with Russia, Northern Cyprus with Cyprus, Kashmir with India and
+    /// Pakistan, also in the share picture). Every country is visited here; full detail.
+    @Test(arguments: [
+        ("Simferopol", 44.9521, 34.1024), ("Srinagar", 34.0837, 74.7973), ("Leh", 34.1526, 77.5771),
+        ("Gilgit", 35.9208, 74.3089), ("Muzaffarabad", 34.3700, 73.4711), ("Aksai Chin", 35.2, 79.5),
+        ("Kyrenia", 35.3364, 33.3199), ("Pristina", 42.6629, 21.1655), ("Taipeh", 25.0330, 121.5654),
+        ("Katzrin", 32.9925, 35.6914), ("El Aaiún", 27.1253, -13.1625), ("Smara", 26.7384, -11.6719),
+        ("Abchasien", 43.05, 41.20),
+    ])
+    func atlasNeverFillsADisputedArea(name: String, lat: Double, lon: Double) {
+        let point = GeoCoordinate(latitude: lat, longitude: lon)
+        #expect(AtlasShapes.filledCode(at: point, in: Self.shapes, visited: Self.everyCode) == nil, "\(name)")
+    }
+
+    @Test(arguments: [
+        ("Moskau", 55.7558, 37.6173, "RU"), ("Kiew", 50.4501, 30.5234, "UA"), ("Delhi", 28.6139, 77.2090, "IN"),
+        ("Lahore", 31.5204, 74.3587, "PK"), ("Tiflis", 41.7151, 44.8271, "GE"), ("Tel Aviv", 32.0853, 34.7818, "IL"),
+        ("Rabat", 34.0209, -6.8416, "MA"), ("Peking", 39.9042, 116.4074, "CN"), ("Limassol", 34.7071, 33.0226, "CY"),
+        ("Belgrad", 44.7866, 20.4489, "RS"), ("Damaskus", 33.5138, 36.2765, "SY"),
+        // Syrian-held Golan east of the line: the Golan outline is painted over Israel only.
+        ("Hader", 33.2670, 35.8500, "SY"),
+    ])
+    func atlasFillsTheCountriesAround(name: String, lat: Double, lon: Double, code: String) {
+        let point = GeoCoordinate(latitude: lat, longitude: lon)
+        #expect(AtlasShapes.filledCode(at: point, in: Self.shapes, visited: Self.everyCode) == code, "\(name)")
+    }
+
+    @Test func atlasShapesForTheApp() {
+        let coarse = AtlasShapes.make(from: Self.map, minimumStepDegrees: 0.3)
+        #expect(coarse.filter { !$0.isNeutral }.count > 200)
+        #expect(!coarse.contains { $0.code == "AQ" })
+        // Northern Cyprus shares "CY" in the map: it is never filled with the Republic.
+        #expect(coarse.filter { $0.code == "CY" }.count == 1)
+        for shape in coarse where shape.isNeutral {
+            #expect(shape.code.isEmpty && !shape.rings.isEmpty)
+            #expect(shape.neutralOver.allSatisfy { $0.count == 2 })
+        }
+        // No outline over the sea only (the waters of Crimea) is painted: it would draw land.
+        #expect(Set(coarse.flatMap(\.neutralOver)) == ["RU", "IN", "PK", "GE", "CN", "IL", "MA"])
+    }
+
+    static let shapes = AtlasShapes.make(from: map, minimumStepDegrees: 0)
+    static let everyCode = Set(shapes.map(\.code).filter { !$0.isEmpty })
 
     /// Northern Cyprus has "CY" in the map too: Apple's "CY" for a photo in south Nicosia, near
     /// the Green Line (the map is not sure there), names the Republic of Cyprus.

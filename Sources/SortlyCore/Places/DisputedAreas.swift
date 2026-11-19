@@ -93,19 +93,33 @@ public enum DisputedAreas {
                                  (34.30, 79.50), (34.40, 78.80), (34.95, 78.30), (35.40, 77.95)]],
                      outlineCountries: ["People's Republic of China", "India"]),
         DisputedArea(id: "northern-cyprus", nameDE: "Nordzypern", nameEN: "Northern Cyprus", continent: .europe,
-                     mapCountries: ["Turkish Republic of Northern Cyprus"], mapRegions: [], outlines: []),
+                     mapCountries: ["Turkish Republic of Northern Cyprus"], mapRegions: [],
+                     // The waters of the north, about 20 km out: from Limnitis (east of Kato
+                     // Pyrgos and Kokkina) round Cape Apostolos Andreas to Varosha, ending
+                     // north of Deryneia and Protaras; the line back crosses the island. Only
+                     // the sea (review of bundle-i: 3 km off Kyrenia was "Republik Zypern").
+                     outlines: [[(35.17, 32.72), (35.45, 32.72), (35.55, 33.40), (35.60, 33.90), (35.80, 34.40), (35.80, 34.75),
+                                 (35.55, 34.75), (35.30, 34.30), (35.075, 34.20), (35.075, 33.97)]],
+                     outlineCountries: []),
         DisputedArea(id: "kosovo", nameDE: "Kosovo", nameEN: "Kosovo", continent: .europe,
                      mapCountries: ["Kosovo"], mapRegions: [], outlines: []),
         DisputedArea(id: "taiwan", nameDE: "Taiwan", nameEN: "Taiwan", continent: .asia,
                      mapCountries: ["Taiwan"], mapRegions: [],
                      // The waters of Taiwan with Penghu, Liuqiu, Green Island and Orchid Island;
-                     // the Matsu Islands; Pratas. The map draws some of these islands not at
+                     // the Matsu Islands; Pratas; the islands off Xiamen. The map draws some of these islands not at
                      // all. Only the sea and the map's Taiwan: the coast of Fujian keeps its country.
                      outlines: [
                          [(25.50, 121.40), (25.40, 122.15), (24.00, 122.00), (22.60, 121.75), (21.80, 121.70), (21.80, 120.70),
                           (22.25, 120.15), (23.00, 119.25), (23.90, 119.25), (24.60, 120.40), (25.20, 120.95)],
                          [(26.45, 119.89), (26.45, 120.55), (25.92, 120.55), (25.92, 119.89)],
                          [(20.85, 116.65), (20.85, 116.95), (20.55, 116.95), (20.55, 116.65)],
+                         // Lieyu (Little Kinmen), Dadan and Erdan off Xiamen, and Wuqiu (review of
+                         // bundle-i). Kept 2-4 km clear of Xiamen, Gulangyu and Dadeng, which the
+                         // map does not all draw either.
+                         [(24.47, 118.215), (24.47, 118.285), (24.395, 118.285), (24.395, 118.215)],
+                         [(24.395, 118.12), (24.395, 118.15), (24.372, 118.15), (24.372, 118.12)],
+                         [(24.374, 118.105), (24.374, 118.128), (24.355, 118.128), (24.355, 118.105)],
+                         [(25.01, 119.42), (25.01, 119.48), (24.96, 119.48), (24.96, 119.42)],
                      ],
                      outlineCountries: ["Taiwan"]),
         DisputedArea(id: "golan", nameDE: "Golanhöhen", nameEN: "Golan Heights", continent: .asia,

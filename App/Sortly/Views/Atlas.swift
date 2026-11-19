@@ -7,11 +7,12 @@ import SortlyWorldMap
 
 // MARK: - Data
 
-/// Country outlines for drawing, decoded once from the offline map and kept in memory.
+/// Country outlines for drawing, decoded once from the offline map and kept in memory, and
+/// the disputed areas painted as unvisited land over them (`AtlasShapes`).
 @MainActor
 final class AtlasOutlines {
     static let shared = AtlasOutlines()
-    typealias Country = (code: String, rings: [[GeoCoordinate]])
+    typealias Country = AtlasShape
     private(set) var countries: [Country] = []
     private var loading: Task<[Country], Never>?
 
@@ -20,9 +21,7 @@ final class AtlasOutlines {
         if let loading { return await loading.value }
         let task = Task.detached(priority: .userInitiated) { () -> [Country] in
             guard let map = map ?? (try? WorldMapResource.load()) else { return [] }
-            return map.regions
-                .filter { $0.level == .country && $0.isoCode != "AQ" }
-                .map { (String($0.isoCode.prefix(2)).uppercased(), map.outline(of: $0, minimumStepDegrees: 0.3)) }
+            return AtlasShapes.make(from: map, minimumStepDegrees: 0.3)
         }
         loading = task
         countries = await task.value
@@ -130,8 +129,11 @@ struct AtlasMap: View {
     var body: some View {
         Canvas { context, size in
             var land = Path(), visited = Path(), recent = Path()
+            var neutral: [(path: Path, over: Set<String>)] = [], byCode: [String: Path] = [:]
             MainThreadWatch.shared.section("atlas map paths") {
                 for (country, path) in zip(outlines, countryPaths(in: size)) {
+                    if country.isNeutral { neutral.append((path, country.neutralOver)); continue }
+                    if !country.code.isEmpty { byCode[country.code, default: Path()].addPath(path) }
                     if country.code == latest { recent.addPath(path) }
                     else if highlighted.contains(country.code) { visited.addPath(path) }
                     else { land.addPath(path) }
@@ -141,6 +143,16 @@ struct AtlasMap: View {
             context.fill(land, with: .color(AtlasStyle.land), style: fill)
             context.fill(visited, with: .color(AtlasStyle.visited), style: fill)
             context.fill(recent, with: .color(AtlasStyle.latest), style: fill)
+            // A disputed area is never a visited country's (decision Fuchs 18.11.2026): painted
+            // as unvisited land over the fill, only inside the countries it lies in.
+            let filled = highlighted.union(latest.map { [$0] } ?? [])
+            for area in neutral where !area.over.isDisjoint(with: filled) {
+                var clip = Path()
+                for code in area.over { if let path = byCode[code] { clip.addPath(path) } }
+                var layer = context
+                layer.clip(to: clip, style: fill)
+                layer.fill(area.path, with: .color(AtlasStyle.land), style: fill)
+            }
         }
         .aspectRatio(360 / 139, contentMode: .fit)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { measured.size = $0 }

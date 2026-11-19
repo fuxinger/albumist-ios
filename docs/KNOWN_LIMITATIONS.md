@@ -22,7 +22,8 @@
   Nordzypern, Kosovo, Taiwan, Golanhöhen und Abchasien heißen mit ihrem eigenen Namen statt eines
   Landes, ihr Vorschlag ist „Unsicher“. Die Umrisse von Westsahara, Golanhöhen und Aksai Chin
   und die Umrisse auf dem Wasser (um die Krim mit der Straße von Kertsch, um Taiwan, Penghu und
-  die kleinen Inseln, Kästen um Matsu und Pratas) sind grob (einige Kilometer). An der Grenze
+  die kleinen Inseln, Kästen um Matsu, Pratas, Lieyu, Dadan, Erdan und Wuqiu, die Gewässer im
+  Norden Zyperns) sind grob (einige Kilometer). An der Grenze
   (bis etwa 1,5 km), wo die Karte nicht sicher ist und Apple das Nachbarland nennt (etwa
   Serbien am Kosovo, Republik Zypern an der Pufferzone), gilt das Nachbarland. Orte, die vor dem Update bestimmt wurden, behalten ihr altes Land, bis „Analyse
   neu aufbauen“ sie neu bestimmt. Eine automatische Nachprüfung gibt es bewusst nicht: Die
@@ -30,9 +31,14 @@
   Nordzypern, Westsahara und Kaschmir bleibt der alte Länderschlüssel („Russland“) für den Rest
   des Landes bestehen; eine Entscheidung zu „Russland“ ließe sich nicht sauber auf „Krim“
   übertragen. Im Reise-Atlas zählen diese Gebiete nicht als Land (ihre Reisen und Orte zählen
-  mit dem Gebietsnamen); die Suche findet sie über den Gebiets- oder Ortsnamen, nicht als
+  mit dem Gebietsnamen), und die Atlas-Karte (auch im Teilen-Bild) füllt sie nie mit einem
+  besuchten Land (`AtlasShapes`); wer auf die Krim tippt, tippt auf Russlands Fläche und sieht
+  Russlands Fotos (ohne die der Krim). Die Suche findet sie über den Gebiets- oder Ortsnamen, nicht als
   Land. Nicht in der Liste: Südossetien, Transnistrien, Somaliland,
-  Westjordanland und Ost-Jerusalem (dort gilt die Karte wie bisher).
+  Westjordanland und Ost-Jerusalem (dort gilt die Karte wie bisher). Noch nicht behandelt, offene
+  Frage an Fuchs: das Shaksgam-Tal (von China verwaltet, von Indien als Teil Kaschmirs beansprucht;
+  die Karte sagt sicher „China“), Arunachal Pradesh (von China beansprucht; die Karte sagt
+  „Indien“) und die südlichen Kurilen (von Japan beansprucht; die Karte sagt „Russland“).
 - Sprache der Albumnamen gewechselt (Prüfbefund P1-12): Länder und Regionen aller
   gespeicherten Orte werden beim nächsten Lauf aus der Offline-Karte neu benannt (der Wechsel
   startet einen Lauf). Städte und Ortsteile kommen von Apples Ortssuche und bleiben in der

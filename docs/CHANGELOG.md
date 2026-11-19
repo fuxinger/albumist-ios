@@ -66,7 +66,12 @@
   `KNOWN_LIMITATIONS.md`). Die Golanhöhen enden im Westen an der Linie von 1949 (Gonen, Kfar
   Szold und Kibbutz Dan bleiben in Israel); im Osten und auf dem Hermon reichen sie bis an die
   Linie von 1974, so weit die Karte dort Israel zeichnet (vorher hieß etwa Alonei HaBashan
-  „Israel“). Eine Stadt aus Apples Antwort gilt nur, wenn das
+  „Israel“). Auch Lieyu (Klein-Kinmen), Dadan, Erdan und Wuqiu, die die Karte nicht zeichnet,
+  und die Gewässer im Norden Zyperns sind „Unsicher“ (vorher entschied Apples Antwort: „China“
+  bzw. „Republik Zypern“). Die Atlas-Karte und das Teilen-Bild füllen ein umstrittenes Gebiet
+  nie mit einem besuchten Land (die Krim nicht mit Russland, Nordzypern nicht mit Zypern,
+  Kaschmir nicht mit Indien oder Pakistan); es bleibt Landfarbe. Der Text der Fotozugriffs-Frage
+  sagt „Kein Foto wird hochgeladen“ wie alle anderen Texte. Eine Stadt aus Apples Antwort gilt nur, wenn das
   gefragte Foto auf derselben Seite der Linie liegt wie das Foto, um das es geht. Im Reise-Atlas
   zählt ein Gebiet nicht als Land, seine Reisen und Orte zählen aber und tragen den
   Gebietsnamen; „Ausland“ in der Suche und das erkannte Zuhause kennen die Gebiete. Orte, die

@@ -76,6 +76,8 @@ extension CountryTimeZones {
             Reference("Australia/Perth", -35.0200, 117.8800),  // Albany
             Reference("Australia/Sydney", -28.6400, 153.6100),  // Byron Bay
             Reference("Australia/Sydney", -28.1800, 153.5400),  // Tweed Heads
+            Reference("Australia/Sydney", -28.3300, 153.4000),  // Murwillumbah
+            Reference("Australia/Sydney", -29.0500, 152.0200),  // Tenterfield
             Reference("Australia/Sydney", -30.3000, 153.1100),  // Coffs Harbour
             Reference("Australia/Sydney", -31.4300, 152.9100),  // Port Macquarie
             Reference("Australia/Sydney", -30.5100, 151.6700),  // Armidale
@@ -89,6 +91,10 @@ extension CountryTimeZones {
             Reference("Australia/Sydney", -36.0800, 146.9200),  // Albury
             Reference("Australia/Sydney", -36.5000, 148.3000),  // Thredbo
             Reference("Australia/Brisbane", -28.0200, 153.4000),  // Gold Coast
+            Reference("Australia/Brisbane", -28.1700, 153.5300),  // Coolangatta
+            Reference("Australia/Brisbane", -28.1300, 153.4800),  // Currumbin
+            Reference("Australia/Brisbane", -28.2000, 153.2700),  // Springbrook
+            Reference("Australia/Brisbane", -28.6500, 151.9300),  // Stanthorpe
             Reference("Australia/Brisbane", -26.3900, 153.0900),  // Noosa
             Reference("Australia/Brisbane", -27.5600, 151.9500),  // Toowoomba
             Reference("Australia/Brisbane", -28.5500, 150.3100),  // Goondiwindi
@@ -219,7 +225,21 @@ extension CountryTimeZones {
             Reference("America/St_Johns", 51.3700, -55.5800),  // St. Anthony
             Reference("America/Winnipeg", 49.7700, -94.4900),  // Kenora
             Reference("America/Winnipeg", 58.7700, -94.1700),  // Churchill
+            Reference("America/Winnipeg", 54.7700, -101.8700),  // Flin Flon
+            Reference("America/Winnipeg", 53.8300, -101.2400),  // The Pas
+            Reference("America/Winnipeg", 52.1100, -101.2700),  // Swan River
+            Reference("America/Winnipeg", 51.1500, -100.0500),  // Dauphin
+            Reference("America/Winnipeg", 49.8500, -99.9500),  // Brandon
+            Reference("America/Winnipeg", 49.8500, -100.9300),  // Virden
+            Reference("America/Winnipeg", 50.7800, -101.2900),  // Russell
             Reference("America/Regina", 52.1300, -106.6700),  // Saskatoon
+            Reference("America/Regina", 55.1000, -105.2800),  // La Ronge
+            Reference("America/Regina", 55.1700, -102.8100),  // Pelican Narrows
+            Reference("America/Regina", 53.9600, -102.2700),  // Cumberland House
+            Reference("America/Regina", 52.8600, -102.3900),  // Hudson Bay
+            Reference("America/Regina", 51.2100, -102.4600),  // Yorkton
+            Reference("America/Regina", 50.1400, -101.6700),  // Moosomin
+            Reference("America/Regina", 49.1400, -102.9900),  // Estevan
             Reference("America/Edmonton", 51.0500, -114.0700),  // Calgary
             Reference("America/Edmonton", 51.1800, -115.5700),  // Banff
             Reference("America/Edmonton", 51.4300, -116.1800),  // Lake Louise
@@ -598,6 +618,10 @@ extension CountryTimeZones {
             Reference("Asia/Yekaterinburg", 57.1500, 65.5300),  // Tyumen
             Reference("Asia/Yekaterinburg", 58.2000, 68.2500),  // Tobolsk
             Reference("Asia/Yekaterinburg", 61.2500, 73.4000),  // Surgut
+            Reference("Asia/Yekaterinburg", 66.0800, 76.6800),  // Novy Urengoy
+            Reference("Asia/Yekaterinburg", 66.5300, 66.6000),  // Salekhard
+            Reference("Asia/Krasnoyarsk", 69.3500, 88.2000),  // Norilsk
+            Reference("Asia/Krasnoyarsk", 67.4700, 86.5700),  // Igarka
             Reference("Asia/Novokuznetsk", 55.3500, 86.0900),  // Kemerovo
             Reference("Asia/Barnaul", 51.9600, 85.9600),  // Gorno-Altaysk
             Reference("Europe/Samara", 56.8500, 53.2000),  // Izhevsk
@@ -718,6 +742,7 @@ extension CountryTimeZones {
             Reference("America/Denver", 41.2200, -111.9700),  // Ogden
             Reference("America/Denver", 40.2300, -111.6600),  // Provo
             Reference("America/Denver", 37.1000, -113.5800),  // St. George
+            Reference("America/Denver", 40.7400, -114.0400),  // West Wendover
             Reference("America/Denver", 37.1900, -112.9900),  // Zion
             Reference("America/Denver", 37.6300, -112.1700),  // Bryce Canyon
             Reference("America/Denver", 37.0500, -112.5300),  // Kanab

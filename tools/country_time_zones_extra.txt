@@ -78,6 +78,7 @@ CITY US America/Denver 40.76 -111.89 Salt Lake City
 CITY US America/Denver 41.22 -111.97 Ogden
 CITY US America/Denver 40.23 -111.66 Provo
 CITY US America/Denver 37.10 -113.58 St. George
+CITY US America/Denver 40.74 -114.04 West Wendover
 CITY US America/Denver 37.19 -112.99 Zion
 CITY US America/Denver 37.63 -112.17 Bryce Canyon
 CITY US America/Denver 37.05 -112.53 Kanab
@@ -253,7 +254,21 @@ CITY CA America/St_Johns 48.95 -57.95 Corner Brook
 CITY CA America/St_Johns 51.37 -55.58 St. Anthony
 CITY CA America/Winnipeg 49.77 -94.49 Kenora
 CITY CA America/Winnipeg 58.77 -94.17 Churchill
+CITY CA America/Winnipeg 54.77 -101.87 Flin Flon
+CITY CA America/Winnipeg 53.83 -101.24 The Pas
+CITY CA America/Winnipeg 52.11 -101.27 Swan River
+CITY CA America/Winnipeg 51.15 -100.05 Dauphin
+CITY CA America/Winnipeg 49.85 -99.95 Brandon
+CITY CA America/Winnipeg 49.85 -100.93 Virden
+CITY CA America/Winnipeg 50.78 -101.29 Russell
 CITY CA America/Regina 52.13 -106.67 Saskatoon
+CITY CA America/Regina 55.10 -105.28 La Ronge
+CITY CA America/Regina 55.17 -102.81 Pelican Narrows
+CITY CA America/Regina 53.96 -102.27 Cumberland House
+CITY CA America/Regina 52.86 -102.39 Hudson Bay
+CITY CA America/Regina 51.21 -102.46 Yorkton
+CITY CA America/Regina 50.14 -101.67 Moosomin
+CITY CA America/Regina 49.14 -102.99 Estevan
 CITY CA America/Edmonton 51.05 -114.07 Calgary
 CITY CA America/Edmonton 51.18 -115.57 Banff
 CITY CA America/Edmonton 51.43 -116.18 Lake Louise
@@ -293,6 +308,8 @@ CITY AU Australia/Perth -33.95 115.08 Margaret River
 CITY AU Australia/Perth -35.02 117.88 Albany
 CITY AU Australia/Sydney -28.64 153.61 Byron Bay
 CITY AU Australia/Sydney -28.18 153.54 Tweed Heads
+CITY AU Australia/Sydney -28.33 153.40 Murwillumbah
+CITY AU Australia/Sydney -29.05 152.02 Tenterfield
 CITY AU Australia/Sydney -30.30 153.11 Coffs Harbour
 CITY AU Australia/Sydney -31.43 152.91 Port Macquarie
 CITY AU Australia/Sydney -30.51 151.67 Armidale
@@ -306,6 +323,10 @@ CITY AU Australia/Sydney -35.12 147.37 Wagga Wagga
 CITY AU Australia/Sydney -36.08 146.92 Albury
 CITY AU Australia/Sydney -36.50 148.30 Thredbo
 CITY AU Australia/Brisbane -28.02 153.40 Gold Coast
+CITY AU Australia/Brisbane -28.17 153.53 Coolangatta
+CITY AU Australia/Brisbane -28.13 153.48 Currumbin
+CITY AU Australia/Brisbane -28.20 153.27 Springbrook
+CITY AU Australia/Brisbane -28.65 151.93 Stanthorpe
 CITY AU Australia/Brisbane -26.39 153.09 Noosa
 CITY AU Australia/Brisbane -27.56 151.95 Toowoomba
 CITY AU Australia/Brisbane -28.55 150.31 Goondiwindi
@@ -428,6 +449,10 @@ CITY RU Asia/Yekaterinburg 55.16 61.40 Chelyabinsk
 CITY RU Asia/Yekaterinburg 57.15 65.53 Tyumen
 CITY RU Asia/Yekaterinburg 58.20 68.25 Tobolsk
 CITY RU Asia/Yekaterinburg 61.25 73.40 Surgut
+CITY RU Asia/Yekaterinburg 66.08 76.68 Novy Urengoy
+CITY RU Asia/Yekaterinburg 66.53 66.60 Salekhard
+CITY RU Asia/Krasnoyarsk 69.35 88.20 Norilsk
+CITY RU Asia/Krasnoyarsk 67.47 86.57 Igarka
 CITY RU Asia/Novokuznetsk 55.35 86.09 Kemerovo
 CITY RU Asia/Barnaul 51.96 85.96 Gorno-Altaysk
 CITY RU Europe/Samara 56.85 53.20 Izhevsk

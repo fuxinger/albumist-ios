@@ -50,6 +50,21 @@ struct CountryTimeZoneTests {
         // The offline map counts Réunion as part of France (Natural Earth).
         ("FR", "Réunion", -21.1151, 55.5364, "Indian/Reunion"),
         ("FR", "Paris", 48.8566, 2.3522, "Europe/Paris"),
+        // Second review: the south of the Gold Coast keeps Queensland's clock up to the border
+        // (its airport, Coolangatta, Currumbin, Palm Beach); Tweed Heads across it and the towns
+        // behind it keep New South Wales'.
+        ("AU", "Gold Coast Airport", -28.1644, 153.5047, "Australia/Brisbane"),
+        ("AU", "Coolangatta", -28.1680, 153.5360, "Australia/Brisbane"),
+        ("AU", "Currumbin", -28.1330, 153.4830, "Australia/Brisbane"),
+        ("AU", "Palm Beach", -28.1140, 153.4640, "Australia/Brisbane"),
+        ("AU", "Springbrook", -28.2000, 153.3000, "Australia/Brisbane"),
+        ("AU", "Tweed Heads", -28.1800, 153.5450, "Australia/Sydney"),
+        ("AU", "Kingscliff", -28.2590, 153.5780, "Australia/Sydney"),
+        ("AU", "Murwillumbah", -28.3270, 153.3960, "Australia/Sydney"),
+        // West Wendover (Nevada) keeps Utah's clock, Norilsk Krasnoyarsk's, Flin Flon Manitoba's.
+        ("US", "West Wendover", 40.7391, -114.0733, "America/Denver"),
+        ("RU", "Norilsk", 69.3490, 88.2010, "Asia/Krasnoyarsk"),
+        ("CA", "Flin Flon", 54.7670, -101.8770, "America/Winnipeg"),
     ])
     func nearestZoneOfTheCountry(country: String, place: String, latitude: Double, longitude: Double, zone: String) {
         #expect(CountryTimeZones.zone(country: country, near: GeoCoordinate(latitude: latitude, longitude: longitude)) == zone, "\(place)")

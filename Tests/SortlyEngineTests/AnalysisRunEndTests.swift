@@ -253,9 +253,9 @@ struct AnalysisRunEndTests {
         #expect(Self.end(followUp).isFinished)
     }
 
-    /// The reviewer's probe: Pause tapped while the suggestions are made does not stop the run.
-    /// With "Themen" turned on during it, the run reads as paused ("Fortsetzen"), and
-    /// "Fortsetzen" gives the labels.
+    /// The reviewer's probe: Pause tapped while the suggestions are made. Since review P4-07 it
+    /// stops the run there (before, the run went on to the end). With "Themen" turned on during
+    /// it, the run reads as paused ("Fortsetzen"), and "Fortsetzen" gives the labels.
     @Test func pauseDuringTheSuggestionsKeepsTheChangeForFortsetzen() async throws {
         let s = try T.setup(photos: 12, screenshots: 0, labels: false)
         let pipeline = s.pipeline
@@ -271,7 +271,7 @@ struct AnalysisRunEndTests {
             if p.stage == .proposals, p.completed == 0 { control.pause() }
         })
         _ = await change.task.withLock { $0 }?.value
-        #expect(report.isComplete)
+        #expect(!report.isComplete && !report.completedStages.contains(.proposals))
         let end = Self.end(report, pauseTapped: control.isPaused)
         #expect(end.report?.pausedBecause == .userPaused)
         #expect(end.next == .nothing && !end.isFinished && !end.needsResume)

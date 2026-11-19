@@ -545,13 +545,29 @@ public actor AnalysisPipeline {
     static let everyClock: Set<TimeZone> = [TimeZone(secondsFromGMT: 14 * 3600)!, TimeZone(secondsFromGMT: -12 * 3600)!]
 
     /// The clock of photos whose place tells no time zone (review P1-15): the one stored at the
-    /// first analysis, or the iPhone's while none is stored yet.
+    /// first analysis, or the iPhone's while none is stored yet (or none this system can read).
     public func homeTimeZone() async throws -> TimeZone {
-        try await storedHomeTimeZone() ?? calendar.timeZone
+        if case .zone(let zone) = try await storedHomeTimeZone() { return zone }
+        return calendar.timeZone
     }
 
-    private func storedHomeTimeZone() async throws -> TimeZone? {
-        try await readable { try await store.value(String.self, forKey: Key.homeTimeZone) }.flatMap(TimeZone.init(identifier:))
+    /// What the store holds as the home time zone.
+    private enum StoredHomeTimeZone {
+        case none
+        case zone(TimeZone)
+        /// A zone this system's database does not know (newer, from the safety copy of a newer
+        /// iPhone) or a value in a shape a later version stored: kept as it is, never replaced
+        /// for that (second review of P1-15). Meanwhile the iPhone's zone stands in, in memory.
+        case unreadable
+    }
+
+    private func storedHomeTimeZone() async throws -> StoredHomeTimeZone {
+        do {
+            guard let identifier = try await store.value(String.self, forKey: Key.homeTimeZone) else { return .none }
+            return TimeZone(identifier: identifier).map(StoredHomeTimeZone.zone) ?? .unreadable
+        } catch is DecodingError {
+            return .unreadable
+        }
     }
 
     /// Stores the iPhone's time zone as the home time zone where none is stored yet: at the first
@@ -560,9 +576,15 @@ public actor AnalysisPipeline {
     /// gets the decisions of a copy only while it holds nothing of its own.
     @discardableResult
     private func settleHomeTimeZone() async throws -> TimeZone {
-        if let zone = try await storedHomeTimeZone() { return zone }
-        try await store.setValue(calendar.timeZone.identifier, forKey: Key.homeTimeZone)
-        return calendar.timeZone
+        switch try await storedHomeTimeZone() {
+        case .zone(let zone):
+            return zone
+        case .unreadable:
+            return calendar.timeZone
+        case .none:
+            try await store.setValue(calendar.timeZone.identifier, forKey: Key.homeTimeZone)
+            return calendar.timeZone
+        }
     }
 
     /// The calendar the analysis counts days in where no photo's own clock is asked (home days,

@@ -332,6 +332,37 @@ struct LocalTimePipelineTests {
         #expect(try await Self.storedHomeZone(fresh) == "Europe/Berlin")
     }
 
+    /// A stored home time zone this system cannot read (a zone newer than its database, from the
+    /// safety copy of a newer iPhone; or a value a later version stored in another shape) is
+    /// never replaced for that. Photos without a place are read on the iPhone's clock meanwhile;
+    /// the stored value stays for a system that can read it.
+    @Test func aHomeTimeZoneTheSystemCannotReadIsKept() async throws {
+        var lib = LibraryBuilder()
+        // Without a location: no home whose zone could take its place.
+        for day in 1...20 { _ = lib.photo(at: Self.local(String(format: "2026-01-%02d 12:00", day), "Europe/Berlin"), nil) }
+        let reader = InMemoryLibraryReader(assets: lib.assets)
+        let newer = try SortlyStore(url: nil)
+        try await newer.setValue("America/Nuuk_Two", forKey: AnalysisPipeline.Key.homeTimeZone)
+        let reshaped = try SortlyStore(url: nil)
+        try await reshaped.setValue(["zone": "Europe/Berlin", "since": "2026-01-01"], forKey: AnalysisPipeline.Key.homeTimeZone)
+
+        var lines: [String] = []
+        for (name, store) in [("unknown zone", newer), ("other shape", reshaped)] {
+            let pipeline = Self.pipeline(store: store, reader: reader, geocoder: nil, deviceZone: "Asia/Tokyo")
+            #expect(try await pipeline.run().isComplete)
+            let inMemory = try await pipeline.homeTimeZone().identifier
+            let zones = Set(try await pipeline.currentFacts().compactMap(\.timeZone?.identifier))
+            lines.append("\(name): in memory \(inMemory), photos on \(zones.sorted())")
+            #expect(inMemory == "Asia/Tokyo", "\(name)")
+            #expect(zones == ["Asia/Tokyo"], "\(name)")
+        }
+        let keptZone = try await newer.value(String.self, forKey: AnalysisPipeline.Key.homeTimeZone)
+        let keptShape = (try? await reshaped.value([String: String].self, forKey: AnalysisPipeline.Key.homeTimeZone)) ?? nil
+        print("P1-15-UNREADABLE " + lines.joined(separator: " | ") + "; stored afterwards: \(keptZone ?? "none"), \(keptShape ?? [:])")
+        #expect(keptZone == "America/Nuuk_Two")
+        #expect(keptShape == ["zone": "Europe/Berlin", "since": "2026-01-01"])
+    }
+
     /// The assembler gives each photo the clock of its place: the zone the online lookup named
     /// (it wins over the country's), else the zone of its country there (Denver, Perth offline),
     /// else the home time zone (no location, a place guessed from the content). Without a home

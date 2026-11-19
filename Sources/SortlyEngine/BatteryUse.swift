@@ -67,6 +67,19 @@ public struct BatteryStretch: Codable, Sendable, Equatable {
 
     public var duration: TimeInterval { end.timeIntervalSince(start) }
 
+    /// At most `limit` stretches, in order. Over it, the oldest without photos of the image step
+    /// go first (second review: short stretches of checks without new photos never push out the
+    /// ones with photos), then the oldest.
+    public static func capped(_ stretches: [BatteryStretch], at limit: Int) -> [BatteryStretch] {
+        var excess = stretches.count - limit
+        guard excess > 0 else { return stretches }
+        var kept: [BatteryStretch] = []
+        for stretch in stretches {
+            if excess > 0, stretch.photos == 0 { excess -= 1 } else { kept.append(stretch) }
+        }
+        return Array(kept.suffix(limit))
+    }
+
     /// A level in percentage points, to a tenth: UIDevice gives a `Float` (0.85 arrives as
     /// 0.8500000238…), and the steps are whole points anyway.
     static func points(_ level: Double) -> Double { (level * 1_000).rounded() / 10 }
@@ -138,6 +151,13 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
     }
 
     public private(set) var open: Open?
+
+    /// Whether the analysis works, for `Observation.analysing`: a busy run that waits neither for
+    /// the device (heat, battery) nor for Apple's place names (only the overnight refinement
+    /// waits for them; second review). Waiting is no work of the analysis.
+    public static func isAnalysing(running: Bool, waitingForDevice: Bool, waitingForApple: Bool) -> Bool {
+        running && !waitingForDevice && !waitingForApple
+    }
 
     public init() {}
 

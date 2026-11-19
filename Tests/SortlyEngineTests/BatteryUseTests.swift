@@ -203,6 +203,26 @@ struct BatteryUseTests {
         #expect(closed.map(\.endLevel) == [0.69])
     }
 
+    /// Second review: waiting for the device (heat, battery) or for Apple's place names is no
+    /// analysis work; only a busy run counts.
+    @Test func onlyABusyRunThatWaitsForNothingIsAnalysing() {
+        #expect(BatteryStretchTracker.isAnalysing(running: true, waitingForDevice: false, waitingForApple: false))
+        #expect(!BatteryStretchTracker.isAnalysing(running: true, waitingForDevice: true, waitingForApple: false))
+        #expect(!BatteryStretchTracker.isAnalysing(running: true, waitingForDevice: false, waitingForApple: true))
+        #expect(!BatteryStretchTracker.isAnalysing(running: false, waitingForDevice: false, waitingForApple: false))
+    }
+
+    /// Second review: at the cap, stretches without photos of the image step go first (short
+    /// stretches of checks without new photos never push out the ones with photos).
+    @Test func theCapDropsStretchesWithoutPhotosFirst() {
+        let withPhotos = (0..<3).map { Self.stretch(from: 0.9, to: 0.89, photos: 100 + $0) }
+        let without = (0..<3).map { _ in Self.stretch(from: 0.9, to: 0.9, photos: 0) }
+        let list = [without[0], withPhotos[0], without[1], withPhotos[1], without[2], withPhotos[2]]
+        #expect(BatteryStretch.capped(list, at: 4) == [withPhotos[0], withPhotos[1], without[2], withPhotos[2]])
+        #expect(BatteryStretch.capped(list, at: 2) == [withPhotos[1], withPhotos[2]])
+        #expect(BatteryStretch.capped(list, at: 10) == list)
+    }
+
     // MARK: The number
 
     @Test func percentPerThousandPhotosForeachPlaceAndCombined() {

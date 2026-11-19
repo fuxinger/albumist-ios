@@ -39,9 +39,10 @@ enum BatteryLog {
     private static var sceneOnScreen: Bool?
     private static var onScreen: Bool { sceneOnScreen ?? (UIApplication.shared.applicationState == .active) }
 
-    /// Every change of the analysis. Works while a run is busy and does not wait for the device.
+    /// Every change of the analysis.
     static func analysisChanged(_ analysis: AppModel.AnalysisState) {
-        analysing = analysis.isRunning && analysis.waiting == nil
+        analysing = BatteryStretchTracker.isAnalysing(running: analysis.isRunning, waitingForDevice: analysis.waiting != nil,
+                                                      waitingForApple: analysis.appleWaitLeft != nil)
         stage = analysis.stage
         completed = analysis.completed
         observe()
@@ -124,7 +125,7 @@ enum BatteryLog {
     private static var stretches: [BatteryStretch] { load(stretchesKey) ?? [] }
 
     private static func append(_ ended: [BatteryStretch]) {
-        save(Array((stretches + ended).suffix(kept)), stretchesKey)
+        save(BatteryStretch.capped(stretches + ended, at: kept), stretchesKey)
     }
 
     private static func load<T: Decodable>(_ key: String) -> T? {

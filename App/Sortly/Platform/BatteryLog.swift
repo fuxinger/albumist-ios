@@ -25,9 +25,10 @@ enum BatteryLog {
     private static var tracker: BatteryStretchTracker = load(trackerKey) ?? BatteryStretchTracker()
     private static var lastSaved = Date.distantPast
     /// Progress alone is read at most every two seconds (it changes several times a second);
-    /// a start, an end or a scene change always.
+    /// a start, an end, a new step or a scene change always (the tracker settles a count only on
+    /// a second reading of the same step, so a new step must never be skipped).
     private static var lastObserved = Date.distantPast
-    private static var observedState: (analysing: Bool, onScreen: Bool)?
+    private static var observedState: (analysing: Bool, onScreen: Bool, stage: AnalysisPipeline.Stage?)?
     private static var monitoring = false
     /// The analysis as last published, for scene changes.
     private static var analysing = false
@@ -88,7 +89,7 @@ enum BatteryLog {
         // Most calls: no analysis works and no stretch is open, nothing to read.
         guard analysing || tracker.open != nil else { return }
         let now = Date()
-        let state = (analysing: analysing, onScreen: onScreen)
+        let state = (analysing: analysing, onScreen: onScreen, stage: stage)
         if let observedState, observedState == state, now.timeIntervalSince(lastObserved) < 2 { return }
         observedState = state
         lastObserved = now

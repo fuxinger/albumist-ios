@@ -121,12 +121,20 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
         var place: BatteryStretch.Place { onScreen ? .foreground : .background }
     }
 
-    /// The stretch in progress, with where the count stood when it was last seen.
+    /// The stretch in progress, with the step last seen and the count photos are counted from.
+    ///
+    /// The count is settled only by a second reading of the same step (second review of the
+    /// battery branch): the app sets a step and its count in two statements, and a run (the
+    /// overnight refinement too) starts with the last run's step and count still set. A reading
+    /// right after a new step or a new start can therefore pair a step with another step's count
+    /// (the image step with the places' 6.000, then its own 13.990 analysed before), and that jump
+    /// is no work. Whatever order the app publishes in, a count is never taken from such a reading.
     public struct Open: Codable, Sendable, Equatable {
         public var stretch: BatteryStretch
         var lastSeen: Date
         var stage: AnalysisPipeline.Stage?
-        var completed: Int
+        /// `nil` until a reading of the same step settles it.
+        var completed: Int?
     }
 
     public private(set) var open: Open?
@@ -137,6 +145,9 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
     /// otherwise; never more than one, as a stretch it begins cannot end in the same call).
     public mutating func observe(_ seen: Observation) -> [BatteryStretch] {
         var ended: [BatteryStretch] = []
+        /// A stretch that ends only because the screen or the power changed hands its settled
+        /// count on: the run and its step go on.
+        var settled: Int?
         if var current = open {
             if seen.now.timeIntervalSince(current.lastSeen) > Self.maxSilence {
                 ended.append(current.stretch)
@@ -145,6 +156,7 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
                 // The power changed between the last reading and this one: the stretch ends at
                 // the last reading, which still belongs to it.
                 if seen.device.isCharging == current.stretch.charging { Self.advance(&current, with: seen) }
+                if seen.analysing, current.completed != nil, current.stage == seen.stage { settled = seen.completed }
                 ended.append(current.stretch)
                 open = nil
             } else {
@@ -156,7 +168,7 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
             let stretch = BatteryStretch(place: seen.place, start: seen.now, end: seen.now, startLevel: seen.device.batteryLevel,
                                          endLevel: seen.device.batteryLevel, charging: seen.device.isCharging, photos: 0,
                                          hottest: seen.device.thermal.rawValue, lowPower: seen.device.isLowPowerMode)
-            open = Open(stretch: stretch, lastSeen: seen.now, stage: seen.stage, completed: seen.completed)
+            open = Open(stretch: stretch, lastSeen: seen.now, stage: seen.stage, completed: settled)
         }
         return ended.filter(Self.isKept)
     }
@@ -174,11 +186,16 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
     private static func advance(_ current: inout Open, with seen: Observation) {
         // Only the image step's photos, and only what this stretch saw it do: a run that goes
         // on starts the step at the photos analysed before (`contentBefore`), which is no work.
-        if seen.stage == .content, current.stage == .content, seen.completed > current.completed {
-            current.stretch.photos += seen.completed - current.completed
+        // A new step only settles on its next reading (`Open`).
+        if seen.stage != current.stage {
+            current.stage = seen.stage
+            current.completed = nil
+        } else {
+            if seen.stage == .content, let from = current.completed, seen.completed > from {
+                current.stretch.photos += seen.completed - from
+            }
+            current.completed = seen.completed
         }
-        current.stage = seen.stage
-        current.completed = seen.completed
         current.lastSeen = seen.now
         current.stretch.end = seen.now
         current.stretch.endLevel = seen.device.batteryLevel

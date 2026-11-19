@@ -34,6 +34,7 @@ struct BatteryUseTests {
     @Test func aRunInTheAppIsOneStretchWithItsPhotosAndLevels() {
         var tracker = BatteryStretchTracker()
         #expect(tracker.observe(Self.seen(0, completed: 2_431, Self.device(0.84))).isEmpty)
+        #expect(tracker.observe(Self.seen(1, completed: 2_431, Self.device(0.84))).isEmpty)
         #expect(tracker.observe(Self.seen(60, completed: 2_600, Self.device(0.83, thermal: .fair))).isEmpty)
         #expect(tracker.observe(Self.seen(120, completed: 2_900, Self.device(0.82, lowPower: true))).isEmpty)
         let closed = tracker.observe(Self.seen(125, analysing: false, completed: 2_900, Self.device(0.82)))
@@ -56,6 +57,7 @@ struct BatteryUseTests {
         _ = tracker.observe(Self.seen(30, stage: .places, completed: 1_600, Self.device(0.9)))
         // The image step begins with the photos analysed before (contentBefore): no jump counted.
         _ = tracker.observe(Self.seen(40, stage: .content, completed: 1_200, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(41, stage: .content, completed: 1_200, Self.device(0.9)))
         _ = tracker.observe(Self.seen(90, stage: .content, completed: 1_500, Self.device(0.89)))
         _ = tracker.observe(Self.seen(100, stage: .text, completed: 0, Self.device(0.89)))
         _ = tracker.observe(Self.seen(130, stage: .text, completed: 80, Self.device(0.89)))
@@ -63,9 +65,48 @@ struct BatteryUseTests {
         #expect(s.map(\.photos) == [300])
     }
 
+    /// Second review: the app sets the stage and the count in two steps, so a reading can show
+    /// the new step with the old step's count (places 6.000) before the image step's own count
+    /// (13.990 analysed before). Only the photos after that count; nothing from the jump.
+    @Test func aNewStepWithTheOldStepsCountAddsNothing() {
+        var tracker = BatteryStretchTracker()
+        _ = tracker.observe(Self.seen(0, stage: .places, completed: 0, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(1, stage: .places, completed: 0, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(30, stage: .places, completed: 6_000, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(31, stage: .content, completed: 6_000, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(32, stage: .content, completed: 13_990, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(90, stage: .content, completed: 14_000, Self.device(0.89)))
+        let ended = tracker.observe(Self.seen(91, analysing: false, stage: .content, completed: 14_000, Self.device(0.89)))
+        #expect(ended.map(\.photos) == [10])
+    }
+
+    /// The same when the step's first count was replaced by a later one before it was read: the
+    /// first photos are not counted, never the jump.
+    @Test func aNewStepWhoseFirstCountWasMissedCountsFromItsSecond() {
+        var tracker = BatteryStretchTracker()
+        _ = tracker.observe(Self.seen(0, stage: .places, completed: 0, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(1, stage: .places, completed: 6_000, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(2, stage: .content, completed: 6_000, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(3, stage: .content, completed: 13_995, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(60, stage: .content, completed: 14_000, Self.device(0.89)))
+        let ended = tracker.observe(Self.seen(61, analysing: false, stage: .content, completed: 14_000, Self.device(0.89)))
+        #expect(ended.map(\.photos) == [5])
+    }
+
+    /// A run (or the overnight refinement) starts with the last run's step and count still set,
+    /// and sets its own a moment later: nothing of that counts.
+    @Test func aRunStartingWithTheLastRunsCountAddsNothing() {
+        var tracker = BatteryStretchTracker()
+        _ = tracker.observe(Self.seen(0, stage: .content, completed: 5_000, Self.device(0.9)))
+        _ = tracker.observe(Self.seen(1, stage: .content, completed: 5_683, Self.device(0.9)))
+        let ended = tracker.observe(Self.seen(60, analysing: false, stage: .content, completed: 5_683, Self.device(0.89)))
+        #expect(ended.map(\.photos) == [0])
+    }
+
     @Test func leavingTheScreenStartsABackgroundStretch() {
         var tracker = BatteryStretchTracker()
         _ = tracker.observe(Self.seen(0, completed: 0, Self.device(0.8)))
+        _ = tracker.observe(Self.seen(1, completed: 0, Self.device(0.8)))
         let first = tracker.observe(Self.seen(60, onScreen: false, completed: 100, Self.device(0.79)))
         #expect(first.map(\.place) == [.foreground])
         #expect(first.map(\.photos) == [100])
@@ -90,6 +131,7 @@ struct BatteryUseTests {
     @Test func pluggingInEndsTheStretchAtTheLastReadingWithoutPower() {
         var tracker = BatteryStretchTracker()
         _ = tracker.observe(Self.seen(0, completed: 0, Self.device(0.6)))
+        _ = tracker.observe(Self.seen(1, completed: 0, Self.device(0.6)))
         _ = tracker.observe(Self.seen(60, completed: 200, Self.device(0.58)))
         let closed = tracker.observe(Self.seen(70, completed: 230, Self.device(0.59, charging: true)))
         #expect(closed.count == 1)
@@ -108,6 +150,7 @@ struct BatteryUseTests {
     @Test func aLongSilenceEndsTheStretchWhereItWasLastSeen() {
         var tracker = BatteryStretchTracker()
         _ = tracker.observe(Self.seen(0, onScreen: false, completed: 0, Self.device(0.7)))
+        _ = tracker.observe(Self.seen(1, onScreen: false, completed: 0, Self.device(0.7)))
         _ = tracker.observe(Self.seen(30, onScreen: false, completed: 40, Self.device(0.7)))
         let closed = tracker.observe(Self.seen(3_600, onScreen: false, completed: 40, Self.device(0.55)))
         #expect(closed.count == 1)
@@ -121,6 +164,7 @@ struct BatteryUseTests {
     @Test func closingEndsAtTheLastReading() {
         var tracker = BatteryStretchTracker()
         _ = tracker.observe(Self.seen(0, onScreen: false, completed: 0, Self.device(0.7)))
+        _ = tracker.observe(Self.seen(1, onScreen: false, completed: 0, Self.device(0.7)))
         _ = tracker.observe(Self.seen(45, onScreen: false, completed: 90, Self.device(0.69)))
         let closed = tracker.close()
         #expect(closed?.end == Self.t0.addingTimeInterval(45))
@@ -148,6 +192,7 @@ struct BatteryUseTests {
     @Test func theTrackerSurvivesARelaunch() throws {
         var tracker = BatteryStretchTracker()
         _ = tracker.observe(Self.seen(0, onScreen: false, completed: 0, Self.device(0.7)))
+        _ = tracker.observe(Self.seen(1, onScreen: false, completed: 0, Self.device(0.7)))
         _ = tracker.observe(Self.seen(30, onScreen: false, completed: 60, Self.device(0.69)))
         let data = try JSONEncoder().encode(tracker)
         var restored = try JSONDecoder().decode(BatteryStretchTracker.self, from: data)

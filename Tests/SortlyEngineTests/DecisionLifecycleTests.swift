@@ -502,6 +502,42 @@ struct DecisionLifecycleTests {
         #expect(try await store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions) == named)
     }
 
+    /// Final check 19.11. (S8): "ergänzen Urlaub in Italien", chosen before the name rule, for an
+    /// album that fits the country by its content. After the launch re-match the country's
+    /// recommendation is the user's "Italien" (name rule), but "Urlaub in Italien" still fits
+    /// for sure: the decision stays, and the notice "nur noch, wenn sie sicher passen" does not
+    /// count it.
+    @Test func anExtendOfTheAlbumThatFitsByContentStaysAfterTheNameRule() async throws {
+        var lib = LibraryBuilder()
+        let trips = [("2019-05-10", "2019-05-17", Fixture.Places.rome), ("2021-09-03", "2021-09-10", Fixture.Places.florence),
+                     ("2023-06-01", "2023-06-08", Fixture.Places.naples)]
+        lib.daily(from: "2019-01-01", to: "2024-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: trips.map { ($0.0, $0.1) })
+        let away = trips.map { lib.daily(from: $0.0, to: $0.1, at: $0.2, perDay: 4, hour: 10) }
+        let holiday = CollectionSnapshot(id: "urlaub", title: "Urlaub in Italien", assetIDs: Set(away[0] + away[1]))
+        let named = CollectionSnapshot(id: "named", title: "Italien", assetIDs: Set(away[2].prefix(10)))
+        var settings = OrganizationSettings()
+        settings.titleLanguage = .german
+        let store = try SortlyStore(url: nil)
+        let pipeline = AnalysisPipeline(
+            store: store, reader: InMemoryLibraryReader(assets: lib.assets, inventory: CollectionInventory([holiday, named])),
+            analyzer: FakeContentAnalyzer(), geocoder: FakeGeocoder(), map: Self.map,
+            conditions: FakeConditions(pauseAfterChecks: nil), settings: settings, calendar: Fixture.calendar,
+            time: ManualTime().source, batchSize: 50)
+        _ = try await pipeline.run()
+        var stored = try #require(try await pipeline.latestProposals())
+        let country = try #require(stored.proposals.first { $0.title == "Italien" })
+        #expect(ProposalDecision.recommended(for: country, match: stored.matches[country.id]) == .extendExisting("named"))
+        #expect(AlbumMatcher().sortingAlbums(stored.matches[country.id], kind: country.kind, title: country.title).contains("urlaub"))
+
+        let chosen: [SortlyID: ProposalDecision] = [country.id: .extendExisting("urlaub")]
+        try await store.setValue(chosen, forKey: AnalysisPipeline.Key.decisions)
+        stored.matcherVersion = 4
+        try await store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)
+        #expect(try await pipeline.refreshMatchesIfOutdated().reopened.isEmpty)
+        #expect(try await store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions) == chosen)
+        #expect((try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0) == 0)
+    }
+
     /// The launch re-match judges the user's "Italien" like the analysis: its photos without a
     /// location (messenger pictures) do not count against the country, so it stays the
     /// country's clean album. The re-match reads the photos only for such albums.

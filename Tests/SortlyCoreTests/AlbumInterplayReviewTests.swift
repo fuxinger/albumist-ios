@@ -763,6 +763,57 @@ struct SameNameWinsTests {
         #expect(ProposalDecision.recommended(for: country, match: alone) == .extendExisting("named"))
     }
 
+    /// The country's photos the ring counts as sorted: those in an album that sorts them.
+    func sortedCount(_ proposal: AlbumProposal, _ albums: [CollectionSnapshot]) throws -> Int {
+        let inventory = CollectionInventory(albums)
+        let m = try #require(matcher.match([proposal], against: inventory)[proposal.id])
+        let sorting = matcher.sortingAlbums(m, kind: proposal.kind, title: proposal.title)
+        return proposal.assetIDs.filter { id in sorting.contains { inventory[$0]?.assetIDs.contains(id) == true } }.count
+    }
+
+    /// Final check 19.11. (N1): the user's "Urlaub in Italien" holds most of the country and is
+    /// its album by content; "Italien" holds a few photos. The name rule makes "Italien" the
+    /// album to extend (decision Fuchs 16.11.), but the photos in "Urlaub in Italien" stay
+    /// sorted: before the rule, 200, 250 and 290 counted, after it only 50, 10 and 100, and the
+    /// ring fell back at launch without any step of the user.
+    @Test(arguments: [(200, 50), (250, 10), (290, 100)])
+    func theAlbumThatFitsByContentKeepsCountingWhenTheNameWins(holiday: Int, named: Int) throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let urlaub = CollectionSnapshot(id: "urlaub", title: "Urlaub in Italien", assetIDs: set("it", 0..<holiday))
+        let italien = CollectionSnapshot(id: "named", title: "Italien", assetIDs: set("it", (300 - named)..<300))
+        let m = try #require(matcher.match([country], against: CollectionInventory([urlaub, italien]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: m) == .extendExisting("named"))
+        #expect(try sortedCount(country, [urlaub, italien]) >= holiday)
+        #expect(matcher.sortingAlbums(m, kind: country.kind, title: country.title).contains("urlaub"))
+    }
+
+    /// N1 as a rule over many sizes: adding the album named like the suggestion (the name rule
+    /// then decides) never lowers the number of the suggestion's photos counted as sorted.
+    @Test func theNameRuleNeverLowersTheSortedCount() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        var checked = 0
+        for holiday in [0, 30, 80, 150, 200, 250, 290, 300] {
+            for other in [0, 20, 60] {
+                let urlaub = CollectionSnapshot(id: "urlaub", title: "Urlaub in Italien", assetIDs: set("it", 0..<holiday).union(set("other", 0..<other)))
+                let before = try sortedCount(country, [urlaub])
+                for named in [0, 10, 50, 100, 200, 300] {
+                    for food in [0, 40] {
+                        let italien = CollectionSnapshot(id: "named", title: "Italien",
+                                                         assetIDs: set("it", (300 - named)..<300).union(set("food", 0..<food)))
+                        let after = try sortedCount(country, [urlaub, italien])
+                        #expect(after >= before, "Urlaub \(holiday)+\(other), Italien \(named)+\(food): \(after) < \(before)")
+                        checked += 1
+                    }
+                }
+            }
+        }
+        #expect(checked == 288)
+    }
+
     /// P1-02: with two albums of that name the content picks between them; a third "Italien" is
     /// never made. When they fit exactly as well, the user picks (nothing is decided for them).
     @Test func withTwoAlbumsOfTheNameTheContentPicksOne() throws {

@@ -769,8 +769,22 @@ public struct AlbumMatcher: Sendable {
     /// album already holds most of it. "Bello" for Hunde, "Italien 2019" for the year 2019 or
     /// "Italien, Mai 2024" for the month Mai 2024 stay possible matches (review 16.11.).
     func isCertain(_ candidate: MatchCandidate, for proposal: AlbumProposal) -> Bool {
-        if proposal.kind.isEventLike || candidate.metrics.coverage >= thresholds.unnamedCollectionCoverage { return true }
-        return Self.nameSaysCollection(album: candidate.albumTitle, proposal: proposal.title)
+        isCertain(candidate, kind: proposal.kind, title: proposal.title)
+    }
+
+    func isCertain(_ candidate: MatchCandidate, kind: ProposalKind, title: String?) -> Bool {
+        if kind.isEventLike || candidate.metrics.coverage >= thresholds.unnamedCollectionCoverage { return true }
+        return title.map { Self.nameSaysCollection(album: candidate.albumTitle, proposal: $0) } ?? false
+    }
+
+    /// An album that would be the suggestion's album by its content alone, as before
+    /// "Gleicher Name gewinnt" whatever the album holds: editable, mostly this suggestion, no
+    /// part, and complete or extendable by the content rules (`status`).
+    func fitsByContent(_ candidate: MatchCandidate, kind: ProposalKind, title: String?) -> Bool {
+        guard candidate.isEditable, candidate.relation == .equivalent || candidate.relation == .partOfProposal,
+              candidate.metrics.purity >= thresholds.extendablePurity, !isPart(candidate, kind: kind, title: title) else { return false }
+        return candidate.relation == .equivalent || candidate.metrics.missing == 0
+            || candidate.metrics.coverage >= thresholds.extendableCoverage && isCertain(candidate, kind: kind, title: title)
     }
 
     static func nameSaysCollection(album: String, proposal: String) -> Bool {
@@ -805,18 +819,30 @@ public struct AlbumMatcher: Sendable {
     /// default). With several matching albums only those that are mostly this suggestion
     /// (purity ≥ `extendablePurity`): the best one and the ones tied with it. A possible match
     /// and a read-only album never count (review 16.11.).
+    ///
+    /// When the album named like the suggestion is its album by the name alone ("Gleicher Name
+    /// gewinnt"), every other album that fits it by content (`fitsByContent`, "Urlaub in
+    /// Italien" with 250 of 300 photos) keeps sorting its photos: the rule chooses which album
+    /// is extended, and never lowers the sorted count (final check 19.11., N1: the ring fell
+    /// from 250 to 10 at launch).
     public func sortingAlbums(_ result: MatchResult?, kind: ProposalKind, title: String? = nil) -> Set<CollectionID> {
         guard let result, let best = result.best, best.isEditable else { return [] }
+        var albums: Set<CollectionID>
         switch result.status {
         case .alreadyComplete, .extendable:
-            return [best.albumID]
+            albums = [best.albumID]
         case .multipleMatches:
-            var albums = Set(tiedWithBest(result, kind: kind, title: title).map(\.albumID))
+            albums = Set(tiedWithBest(result, kind: kind, title: title).map(\.albumID))
             if best.metrics.purity >= thresholds.extendablePurity { albums.insert(best.albumID) }
-            return albums
         default:
             return []
         }
+        if result.sameNameAlbums.contains(best.albumID) {
+            for c in result.alternatives where !result.sameNameAlbums.contains(c.albumID) && fitsByContent(c, kind: kind, title: title) {
+                albums.insert(c.albumID)
+            }
+        }
+        return albums
     }
 
     struct Weights { var purity: Double; var coverage: Double; var name: Double }

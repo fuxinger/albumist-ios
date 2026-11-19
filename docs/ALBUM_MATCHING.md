@@ -155,7 +155,12 @@ In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen V
   oder „Urlaub Italien“ mit allen Italien-Fotos), bleibt es dessen Album („Album so lassen“,
   die Fotos zählen weiter als sortiert), und das Album mit dem Namen bekommt nichts, außer es
   enthält selbst schon alles (dritte Prüfung 19.11.2026, M3: Zahlen gehen ohne Zutun des
-  Nutzers nie zurück). Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
+  Nutzers nie zurück). Gibt die Regel „Italien“ den Vorschlag, zählen die Fotos in einem
+  anderen bearbeitbaren Album, das nach dem Inhalt allein sicher passt („Urlaub in Italien“
+  mit 250 der 300 Fotos: ergänzbar oder vollständig nach den Schwellen oben, kein Teil),
+  weiter als sortiert, und eine gewählte Entscheidung „Urlaub in Italien ergänzen“ bleibt
+  bestehen. Die Regel bestimmt, welches Album ergänzt wird; die Zahl der sortierten Fotos
+  senkt sie nie (letzte Prüfung 19.11.2026, N1). Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
   die Reise. Ausnahmen: Albumist hat das Album schon für einen anderen Vorschlag angelegt
   oder ergänzt („Alben anderer Vorschläge“), oder ein Vorschlag mit genau diesem Namen ist
   schon vollständig darin.

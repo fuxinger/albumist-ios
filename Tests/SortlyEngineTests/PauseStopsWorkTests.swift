@@ -150,4 +150,239 @@ struct PauseStopsWorkTests {
         #expect(analyzer.counts.withLock { $0.finished } == 0, "texts finished after the Pause")
         #expect(report.textRecognized == 0)
     }
+
+    // MARK: Second review: what is counted and what is stored stays right
+
+    static func needing(_ store: SortlyStore) async throws -> Int {
+        try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion)
+    }
+
+    /// Photos cancelled for the Pause are neither done nor failed: the paused run says exactly
+    /// the photos it finished ("x von y"), "Fortsetzen" starts the count there and analyses each
+    /// remaining photo once.
+    @Test func resumeAfterCancelledPhotosCountsOnExactly() async throws {
+        let analyzer = GatedAnalyzer(gateContent: true)
+        let (store, pipeline) = try pipeline(analyzer: analyzer)
+        let said = Mutex<[[AnalysisPipeline.Progress]]>([[], []])
+        let control = AnalysisRunControl()
+        let run = Task { try await pipeline.run(control: control) { p in if p.stage == .content { said.withLock { $0[0].append(p) } } } }
+        while analyzer.counts.withLock({ $0.started }) == 0 { try await Task.sleep(for: .milliseconds(1)) }
+        control.pause()
+        let first = try await run.value
+        analyzer.open.withLock { $0 = true }
+        let total = try await store.allAssets().count
+        let done = total - (try await Self.needing(store))
+        #expect(first.pausedBecause == .userPaused)
+        #expect(done == first.contentAnalyzed, "marked done \(done), analysed \(first.contentAnalyzed)")
+        let second = try await pipeline.run { p in if p.stage == .content { said.withLock { $0[1].append(p) } } }
+        let (before, after) = said.withLock { ($0[0], $0[1]) }
+        #expect(before.last?.completed == done && before.last?.total == total)
+        #expect(after.first?.completed == done && after.last?.completed == total && after.last?.total == total)
+        #expect(second.isComplete)
+        #expect(first.contentAnalyzed + second.contentAnalyzed == total)
+        let contents = try await store.results(ContentAnalysis.self, kind: "content")
+        #expect(contents.count == total && contents.values.allSatisfy { $0.failedAttempts == nil })
+    }
+
+    /// Pause and the photos in work ending at the same moment, in both orders: every photo is
+    /// done with a result or still to do, never done without one; "Fortsetzen" does the rest.
+    @Test(arguments: 0..<12) func pauseRacingTheEndOfThePhotos(_ seed: Int) async throws {
+        let analyzer = GatedAnalyzer(gateContent: true)
+        let (store, pipeline) = try pipeline(analyzer: analyzer)
+        let control = AnalysisRunControl()
+        let run = Task { try await pipeline.run(control: control) }
+        while analyzer.counts.withLock({ $0.started }) < 2 { try await Task.sleep(for: .milliseconds(1)) }
+        if seed % 2 == 0 {
+            control.pause()
+            analyzer.open.withLock { $0 = true }
+        } else {
+            analyzer.open.withLock { $0 = true }
+            control.pause()
+        }
+        let first = try await run.value
+        let total = try await store.allAssets().count
+        let done = total - (try await Self.needing(store))
+        #expect(first.pausedBecause == .userPaused)
+        #expect(done == first.contentAnalyzed, "marked done \(done), analysed \(first.contentAnalyzed)")
+        #expect(try await store.results(ContentAnalysis.self, kind: "content").values.allSatisfy { $0.failedAttempts == nil })
+        let second = try await pipeline.run()
+        #expect(second.isComplete && first.contentAnalyzed + second.contentAnalyzed == total)
+    }
+
+    /// A text read cancelled for the Pause leaves nothing behind (no try counted, no text), and
+    /// "Fortsetzen" reads every text.
+    @Test func textCancelledForThePauseIsReadByFortsetzen() async throws {
+        let analyzer = GatedAnalyzer(gateText: true)
+        let (store, pipeline) = try pipeline(analyzer: analyzer)
+        let first = try await runAndPauseInWork(pipeline, analyzer)
+        #expect(first.pausedBecause == .userPaused)
+        let stored = try await store.results(TextResult.self, kind: "text")
+        #expect(stored.isEmpty, "stored for cancelled reads: \(stored.values.map { $0.retries ?? 0 })")
+        let second = try await pipeline.run()
+        #expect(second.isComplete && second.textRecognized == 5)
+    }
+
+    /// Everything the trips step stores, as the store holds it.
+    struct Stored: Equatable {
+        var trips: [Trip]?
+        var identities: [TripIdentity]?
+        var report: RecurringPlaceReport?
+        var frequent: [FrequentPlace]?
+        var home: Set<AssetID>?
+        var detectedHome: DetectedHome?
+        var zone: String?
+
+        /// Nothing stored.
+        init(nothing: Void) {}
+
+        init(_ store: SortlyStore) async throws {
+            typealias K = AnalysisPipeline.Key
+            trips = try await store.value([Trip].self, forKey: K.trips)
+            identities = try await store.value([TripIdentity].self, forKey: K.tripIdentities)
+            report = try await store.value(RecurringPlaceReport.self, forKey: K.recurringPlaceReport)
+            frequent = try await store.value([FrequentPlace].self, forKey: K.frequentPlaces)
+            home = try await store.value(Set<AssetID>.self, forKey: K.home)
+            detectedHome = try await store.value(DetectedHome.self, forKey: K.detectedHome)
+            zone = try await store.value(String.self, forKey: K.homeTimeZone)
+        }
+    }
+
+    /// A move from Munich to New York with a trip after it, read by a run on the analysis of
+    /// before. Paused at any of the trips step's checks (choosing the clock, after the
+    /// detection, right before storing): nothing of it is stored, also not the new home time
+    /// zone; the trips, places and home of before stay as they were. Not paused, all of it
+    /// changes (so the comparison means something).
+    @Test(arguments: [nil, AnalysisPipeline.StopPoint.tripsClockChosen, .tripsDetected, .tripsBeforeStoring])
+    func pauseInTheTripsStepStoresAllOrNothing(_ point: AnalysisPipeline.StopPoint?) async throws {
+        typealias L = LocalTimePipelineTests
+        var lib = LibraryBuilder()
+        lib.daily(from: "2025-06-01", to: "2026-01-31", at: Fixture.Places.munichHome, perDay: 2, skipping: [("2025-10-10", "2025-10-17")])
+        lib.daily(from: "2025-10-10", to: "2025-10-17", at: Fixture.Places.rome, perDay: 4, hour: 10)
+        let beforeTheMove = lib.assets
+        lib.daily(from: "2026-02-15", to: "2026-08-31", at: L.newYork, perDay: 2, skipping: [("2026-06-01", "2026-06-08")])
+        lib.daily(from: "2026-06-01", to: "2026-06-08", at: GeoCoordinate(latitude: 25.7617, longitude: -80.1918), perDay: 4, hour: 10)
+        let store = try SortlyStore(url: nil)
+        let first = L.pipeline(store: store, reader: InMemoryLibraryReader(assets: beforeTheMove), geocoder: nil, deviceZone: "Europe/Berlin")
+        #expect(try await first.run().isComplete)
+        let before = try await Stored(store)
+        let moved = L.pipeline(store: store, reader: InMemoryLibraryReader(assets: lib.assets), geocoder: nil, deviceZone: "Europe/Berlin")
+        let control = AnalysisRunControl()
+        let seen = Mutex<[AnalysisPipeline.StopPoint]>([])
+        await moved.setStopPointProbe { p in
+            seen.withLock { $0.append(p) }
+            if p == point { control.pause() }
+        }
+        let report = try await moved.run(control: control) { p in
+            // Not paused: stopped once the trips step is done, before its results are used.
+            if point == nil, p.stage == .places { control.pause() }
+        }
+        let after = try await Stored(store)
+        let order: [AnalysisPipeline.StopPoint] = [.tripsClockChosen, .tripsDetected, .tripsBeforeStoring]
+        let reached = point.flatMap { order.firstIndex(of: $0) }.map { Array(order[...$0]) } ?? order
+        #expect(Array(seen.withLock { $0 }.prefix(reached.count)) == reached)
+        if point == nil {
+            #expect(report.completedStages == [.inventory, .patterns])
+            #expect(after.zone != before.zone && after.trips != before.trips && after.identities != before.identities)
+            #expect(after.home != before.home && after.detectedHome != before.detectedHome && after.report != before.report)
+        } else {
+            #expect(report.pausedBecause == .userPaused && report.completedStages == [.inventory])
+            #expect(after == before, "stored although paused at \(String(describing: point))")
+            // No further part of the step began after the Pause.
+            #expect(seen.withLock { $0 }.count == reached.count, "\(seen.withLock { $0 })")
+        }
+    }
+
+    /// The first run, paused in the trips step: not even the home time zone of the first
+    /// analysis (the iPhone's) is stored; the run that finishes the step stores it.
+    @Test(arguments: [AnalysisPipeline.StopPoint.tripsClockChosen, .tripsDetected, .tripsBeforeStoring])
+    func firstRunPausedInTheTripsStepStoresNoHomeZone(_ point: AnalysisPipeline.StopPoint) async throws {
+        typealias L = LocalTimePipelineTests
+        var lib = LibraryBuilder()
+        lib.daily(from: "2025-06-01", to: "2026-01-31", at: Fixture.Places.munichHome, perDay: 2)
+        let store = try SortlyStore(url: nil)
+        let pipeline = L.pipeline(store: store, reader: InMemoryLibraryReader(assets: lib.assets), geocoder: nil, deviceZone: "Asia/Tokyo")
+        let control = AnalysisRunControl()
+        await pipeline.setStopPointProbe { if $0 == point { control.pause() } }
+        let report = try await pipeline.run(control: control)
+        #expect(report.pausedBecause == .userPaused && report.completedStages == [.inventory])
+        #expect(try await Stored(store) == Stored(nothing: ()))
+        await pipeline.setStopPointProbe(nil)
+        #expect(try await pipeline.run().isComplete)
+        #expect(try await L.storedHomeZone(store) != nil)
+    }
+
+    /// Pause right before the suggestions are saved: the full set is not saved, the early set
+    /// of the first run stays.
+    @Test func pauseRightBeforeTheSuggestionsAreSavedSavesNothing() async throws {
+        let (_, pipeline) = try pipeline()
+        let control = AnalysisRunControl()
+        let inProposals = Mutex(false)
+        await pipeline.setStopPointProbe { p in
+            if p == .suggestionsBeforeSaving, inProposals.withLock({ $0 }) { control.pause() }
+        }
+        let report = try await pipeline.run(control: control) { p in
+            if p.stage == .proposals { inProposals.withLock { $0 = true } }
+        }
+        #expect(control.isPaused, "the suggestions were never about to be saved")
+        #expect(report.pausedBecause == .userPaused && !report.completedStages.contains(.proposals))
+        #expect(try await pipeline.latestProposals()?.isEarly == true)
+    }
+
+    /// Work of the suggestions given up at the Pause (here held where it runs): the run ends
+    /// at once, and "Fortsetzen" begins only once that work has ended, never beside it.
+    @Test func fortsetzenWaitsForTheWorkGivenUpAtThePause() async throws {
+        let (_, pipeline) = try pipeline()
+        let control = AnalysisRunControl()
+        let inProposals = Mutex(false)
+        let held = Mutex<(holding: Bool, release: Bool)>((false, false))
+        await pipeline.setOffActorProbe {
+            guard inProposals.withLock({ $0 }), !control.isPaused else { return }
+            held.withLock { $0.holding = true }
+            control.pause()
+            while !held.withLock({ $0.release }) { try? await Task.sleep(for: .milliseconds(2)) }
+            held.withLock { $0.holding = false }
+        }
+        let report = try await pipeline.run(control: control) { p in
+            if p.stage == .proposals { inProposals.withLock { $0 = true } }
+        }
+        #expect(report.pausedBecause == .userPaused)
+        #expect(held.withLock { $0.holding }, "the run waited for the work it gave up")
+        await pipeline.setOffActorProbe(nil)
+        let began = Mutex(false)
+        let resumed = Task { try await pipeline.run { _ in began.withLock { $0 = true } } }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!began.withLock { $0 }, "Fortsetzen began beside the work given up")
+        held.withLock { $0.release = true }
+        #expect(try await resumed.value.isComplete)
+        #expect(began.withLock { $0 })
+    }
+
+    /// The work given up at a Pause asks its own task and ends early (its result is dropped):
+    /// the facts stop within 1,000 photos, the suggestions and the matching at once. Asked
+    /// "never", they give what they always gave.
+    @Test func workGivenUpEndsEarly() async throws {
+        let (store, pipeline) = try pipeline()
+        #expect(try await pipeline.run().isComplete)
+        let all = try await store.allAssets()
+        let inventory = try await store.loadInventory()
+        func facts(_ stop: () -> Bool) -> [AssetFacts] {
+            FactsAssembler.assemble(assets: all, places: [:], contents: [:], texts: [:], trips: [], frequentPlaces: [], groups: [],
+                                    inventory: inventory, stoppingWhen: stop)
+        }
+        var asked = 0
+        #expect(facts({ asked += 1; return asked > 1 }).count == 1_000 || all.count <= 1_000)
+        #expect(facts({ true }).isEmpty)
+        #expect(facts({ false }).map(\.id) == facts({ false }).map(\.id) && facts({ false }).count == all.count)
+        let snapshot = try #require(try await pipeline.latestProposals())
+        let current = try await pipeline.currentFacts()
+        let engine = ProposalEngine(settings: OrganizationSettings(), calendar: Fixture.calendar)
+        let analysis = AnalysisSnapshot(facts: current, trips: [], frequentPlaces: [], groups: [], recurringPlaces: [], home: HomeSettings())
+        #expect(engine.suggestions(for: analysis, stoppingWhen: { true }).open.isEmpty)
+        #expect(engine.suggestions(for: analysis, stoppingWhen: { false }).open == engine.suggestions(for: analysis).open)
+        let matched = AnalysisPipeline.match(snapshot.proposals, dismissed: [], against: inventory, overrides: OverrideSet(), assignments: [:])
+        #expect(AnalysisPipeline.match(snapshot.proposals, dismissed: [], against: inventory, overrides: OverrideSet(), assignments: [:],
+                                       stoppingWhen: { true }).isEmpty)
+        #expect(AnalysisPipeline.match(snapshot.proposals, dismissed: [], against: inventory, overrides: OverrideSet(), assignments: [:],
+                                       stoppingWhen: { false }) == matched)
+    }
 }

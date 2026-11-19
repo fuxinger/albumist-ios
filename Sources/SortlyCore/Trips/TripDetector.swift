@@ -103,12 +103,34 @@ public struct TripDetector: Sendable {
         excludeFromInference: (AssetSnapshot) -> Bool = { _ in false },
         progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }
     ) -> TripAnalysis {
+        // Never asked to stop, so it never throws.
+        (try? analyse(in: assets, corrections: corrections, places: places, home: homeSettings,
+                      excludeFromInference: excludeFromInference, progress: progress, stoppingWhen: { false }))
+            ?? TripAnalysis(trips: [], stays: [], places: [])
+    }
+
+    /// `analyse`, given up with `CancellationError` as soon as `stop` says so: asked between the
+    /// parts of the work and every `progressEvery` photos (review P4-07: a Pause waited for the
+    /// whole of it, 6.3 s over 100,000 photos). Not stopped, the result is the same.
+    public func analyse(
+        in assets: [AssetSnapshot],
+        corrections: TripCorrections = .init(),
+        places: RecurringPlaceAnswers = .init(),
+        home homeSettings: HomeSettings = .init(),
+        excludeFromInference: (AssetSnapshot) -> Bool = { _ in false },
+        progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in },
+        stoppingWhen stop: () -> Bool
+    ) throws -> TripAnalysis {
+        func check() throws { if stop() { throw CancellationError() } }
+        try check()
         let geotagged = Self.located(assets, corrections: corrections)
         guard !geotagged.isEmpty else { return TripAnalysis(trips: [], stays: [], places: []) }
         progress(0, geotagged.count)
+        try check()
 
         let oftenHere = places.oftenHere
         let detection = habitualArea(of: geotagged, places: places)
+        try check()
         // The home the user chose wins over the detection, date by date (`HomeSettings.home(at:)`).
         let home = HomeReference(detection: detection, settings: homeSettings, radius: configuration.homeRadiusMeters,
                                  extraHomes: oftenHere.map(\.center))
@@ -140,7 +162,10 @@ public struct TripDetector: Sendable {
         }
 
         for (index, asset) in geotagged.enumerated() {
-            if index > 0, index % Self.progressEvery == 0 { progress(index, geotagged.count) }
+            if index > 0, index % Self.progressEvery == 0 {
+                progress(index, geotagged.count)
+                try check()
+            }
             let date = asset.creationDate!
             let coordinate = asset.usableLocation!
             let distanceHome = home.distanceToHome(coordinate, at: date)
@@ -186,6 +211,7 @@ public struct TripDetector: Sendable {
             splitBefore.append(currentSplit)
         }
         progress(geotagged.count, geotagged.count)
+        try check()
 
         // A trip the user split stays split into all its parts, however small a part is, as
         // long as the whole trip was big enough to be found (audit 2, 2.1): the workshop
@@ -210,6 +236,7 @@ public struct TripDetector: Sendable {
         var trips: [Trip] = []
         var stays: [AwayStay] = []
         for (index, members) in segments.enumerated() {
+            if index > 0, index % 100 == 0 { try check() }
             let photos = members.map { (date: $0.creationDate!, coordinate: $0.usableLocation!) }
             var stay = AwayStay(start: photos.first!.date, end: photos.last!.date,
                                 mainPlace: RecurringPlaces.mainPlace(of: photos, calendar: calendar) ?? photos[0].coordinate,
@@ -223,9 +250,16 @@ public struct TripDetector: Sendable {
         // Where the user lives: never a place album of its own, so these photos do not count
         // for "Länder und Orte" (decision Fuchs 15.11.: the home town and its surroundings, not
         // the whole home country).
-        let atHome = geotagged.filter { asset in home.isAtHome(asset.usableLocation!, at: asset.creationDate!) }
-        return TripAnalysis(trips: trips, stays: stays, places: placesOftenVisited(oftenHere, photos: geotagged, home: home),
-                            atHome: Set(atHome.map(\.id)),
+        var atHome = Set<AssetID>()
+        for (index, asset) in geotagged.enumerated() {
+            if index % Self.progressEvery == 0 { try check() }
+            if home.isAtHome(asset.usableLocation!, at: asset.creationDate!) { atHome.insert(asset.id) }
+        }
+        try check()
+        let oftenVisited = placesOftenVisited(oftenHere, photos: geotagged, home: home)
+        try check()
+        return TripAnalysis(trips: trips, stays: stays, places: oftenVisited,
+                            atHome: atHome,
                             detectedHome: detection.mainHome(at: geotagged.last!.creationDate!))
     }
 
@@ -238,10 +272,24 @@ public struct TripDetector: Sendable {
     public func detectedHome(in assets: [AssetSnapshot], corrections: TripCorrections = .init(),
                              places: RecurringPlaceAnswers = .init(),
                              progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) -> DetectedHome? {
+        // Never asked to stop, so it never throws.
+        (try? detectedHome(in: assets, corrections: corrections, places: places, progress: progress, stoppingWhen: { false })) ?? nil
+    }
+
+    /// `detectedHome`, given up with `CancellationError` as soon as `stop` says so (asked
+    /// before and after the days are grouped). Not stopped, the result is the same.
+    public func detectedHome(in assets: [AssetSnapshot], corrections: TripCorrections = .init(),
+                             places: RecurringPlaceAnswers = .init(),
+                             progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in },
+                             stoppingWhen stop: () -> Bool) throws -> DetectedHome? {
+        if stop() { throw CancellationError() }
         let geotagged = Self.located(assets, corrections: corrections)
         guard let last = geotagged.last?.creationDate else { return nil }
         progress(0, geotagged.count)
-        return habitualArea(of: geotagged, places: places).mainHome(at: last)
+        if stop() { throw CancellationError() }
+        let area = habitualArea(of: geotagged, places: places)
+        if stop() { throw CancellationError() }
+        return area.mainHome(at: last)
     }
 
     /// The photos the trips are detected from: with a date and a location, no screenshots,

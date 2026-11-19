@@ -49,9 +49,27 @@ public struct LibraryBuckets: Sendable, Equatable {
                             resolver: OrganizationStatusResolver,
                             shouldStop: () -> Bool = { false },
                             inScope: (AssetFacts) -> Bool = { _ in true }) -> LibraryBuckets? {
+        var photoReads = 0
+        return make(facts: facts, states: states, resolver: resolver, shouldStop: shouldStop, inScope: inScope,
+                    photoReads: &photoReads)
+    }
+
+    /// `make`, adding to `photoReads` one per comparison of two photos' dates while ordering them
+    /// and one per photo put into its areas: about n log n for n photos, once (tests count it
+    /// instead of timing it; review P5-14 b).
+    static func make(facts: [AssetFacts], states: [AssetID: AssetOrganizationState],
+                     resolver: OrganizationStatusResolver,
+                     shouldStop: () -> Bool = { false },
+                     inScope: (AssetFacts) -> Bool = { _ in true },
+                     photoReads: inout Int) -> LibraryBuckets? {
         if shouldStop() { return nil }
+        var reads = 0
+        defer { photoReads += reads }
         let dates = facts.map { $0.asset.creationDate ?? .distantPast }
-        let order = facts.indices.sorted { a, b in dates[a] != dates[b] ? dates[a] > dates[b] : a < b }
+        let order = facts.indices.sorted { a, b in
+            reads += 1
+            return dates[a] != dates[b] ? dates[a] > dates[b] : a < b
+        }
         if shouldStop() { return nil }
         var result = LibraryBuckets()
         result.rank.reserveCapacity(facts.count)
@@ -59,6 +77,7 @@ public struct LibraryBuckets: Sendable, Equatable {
         members[.all]?.reserveCapacity(facts.count)
         for (position, index) in order.enumerated() {
             if position % 5_000 == 4_999, shouldStop() { return nil }
+            reads += 1
             let f = facts[index]
             // A photo listed twice keeps its first (newest) place.
             guard result.rank[f.id] == nil else { continue }
@@ -85,6 +104,16 @@ public struct LibraryBuckets: Sendable, Equatable {
     /// area, so a large selection costs about one pass per area, not one per photo.
     public func updating(_ ids: some Sequence<AssetID>, to new: [AssetID: AssetOrganizationState],
                          resolver: OrganizationStatusResolver) -> LibraryBuckets {
+        var photoReads = 0
+        return updating(ids, to: new, resolver: resolver, photoReads: &photoReads)
+    }
+
+    /// `updating`, adding to `photoReads` the members of the areas it looked at: one per step of
+    /// a binary search (about log n per moved photo and area) and one per member of an area it
+    /// merges. A tap or two never goes through a whole area (tests count it instead of timing
+    /// it; review P5-14 b).
+    func updating(_ ids: some Sequence<AssetID>, to new: [AssetID: AssetOrganizationState],
+                  resolver: OrganizationStatusResolver, photoReads: inout Int) -> LibraryBuckets {
         let all = self[.all]
         var belongs: [AssetID: Set<InboxBucket>] = [:]
         for id in ids {
@@ -99,15 +128,15 @@ public struct LibraryBuckets: Sendable, Equatable {
             var leaving: Set<AssetID> = []
             var joining: [Item] = []
             for id in moved {
-                let isIn = index(of: id, in: list) != nil
+                let isIn = index(of: id, in: list, reads: &photoReads) != nil
                 let goes = belongs[id]!.contains(bucket)
                 if isIn && !goes { leaving.insert(id) }
                 if !isIn && goes { joining.append(all[rank[id]!]) }
             }
             guard !leaving.isEmpty || !joining.isEmpty else { continue }
             result.members[bucket] = leaving.count + joining.count <= Self.fewMoves
-                ? moving(leaving, joining, in: list)
-                : merging(leaving, joining, into: list)
+                ? moving(leaving, joining, in: list, reads: &photoReads)
+                : merging(leaving, joining, into: list, reads: &photoReads)
         }
         return result
     }
@@ -116,34 +145,36 @@ public struct LibraryBuckets: Sendable, Equatable {
     static let fewMoves = 16
 
     /// Where the photo is in an area, by binary search on its place among all photos.
-    private func index(of id: AssetID, in list: [Item]) -> Int? {
+    private func index(of id: AssetID, in list: [Item], reads: inout Int) -> Int? {
         guard let place = rank[id] else { return nil }
-        let i = firstIndex(atOrAfter: place, in: list)
+        let i = firstIndex(atOrAfter: place, in: list, reads: &reads)
         return i < list.count && list[i].id == id ? i : nil
     }
 
     /// The first member at or after `place` in the order of all photos.
-    private func firstIndex(atOrAfter place: Int, in list: [Item]) -> Int {
+    private func firstIndex(atOrAfter place: Int, in list: [Item], reads: inout Int) -> Int {
         var low = 0, high = list.count
         while low < high {
+            reads += 1
             let mid = (low + high) / 2
             if (rank[list[mid].id] ?? .max) < place { low = mid + 1 } else { high = mid }
         }
         return low
     }
 
-    private func moving(_ leaving: Set<AssetID>, _ joining: [Item], in list: [Item]) -> [Item] {
+    private func moving(_ leaving: Set<AssetID>, _ joining: [Item], in list: [Item], reads: inout Int) -> [Item] {
         var list = list
-        for id in leaving { if let i = index(of: id, in: list) { list.remove(at: i) } }
-        for item in joining { list.insert(item, at: firstIndex(atOrAfter: rank[item.id] ?? .max, in: list)) }
+        for id in leaving { if let i = index(of: id, in: list, reads: &reads) { list.remove(at: i) } }
+        for item in joining { list.insert(item, at: firstIndex(atOrAfter: rank[item.id] ?? .max, in: list, reads: &reads)) }
         return list
     }
 
     /// `joining` in the order of all photos.
-    private func merging(_ leaving: Set<AssetID>, _ joining: [Item], into list: [Item]) -> [Item] {
+    private func merging(_ leaving: Set<AssetID>, _ joining: [Item], into list: [Item], reads: inout Int) -> [Item] {
         var merged: [Item] = []
         merged.reserveCapacity(list.count + joining.count)
         var next = 0
+        reads += list.count
         for item in list where !leaving.contains(item.id) {
             let place = rank[item.id] ?? .max
             while next < joining.count, (rank[joining[next].id] ?? .max) < place {

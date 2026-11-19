@@ -780,10 +780,12 @@ final class AccessibilityUITests: XCTestCase {
         func visible() -> Bool {
             element.exists && !element.frame.isEmpty && app.frame.contains(element.frame)
         }
+        // No fixed sleep after a swipe (SleepRuleTests): XCTest waits for the app to be idle,
+        // and only the width and height of the label are measured, not its position.
         var swipes = 0
-        while !visible() && swipes < 4 { list.swipeDown(); swipes += 1; sleep(1); if !element.exists { element = app.staticTexts[identifier] } }
+        while !visible() && swipes < 4 { list.swipeDown(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
         swipes = 0
-        while !visible() && swipes < 6 { list.swipeUp(); swipes += 1; sleep(1); if !element.exists { element = app.staticTexts[identifier] } }
+        while !visible() && swipes < 6 { list.swipeUp(); swipes += 1; if !element.exists { element = app.staticTexts[identifier] } }
         guard visible() else {
             print("UI_STEP_MISSING \(screen) label '\(text)' on screen")
             XCTFail("\(screen): the label '\(text)' was not found on screen")

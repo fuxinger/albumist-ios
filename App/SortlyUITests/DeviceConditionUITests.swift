@@ -150,10 +150,15 @@ final class DeviceConditionUITests: XCTestCase {
         }
         // Plain values, no closures: XCUIDevice and XCUIApplication belong to the main actor.
         let ways: [(name: String, wait: TimeInterval)] = [
-            ("Home press", min(timeout, 12)), ("second Home press", 15), ("Settings app in front", 30),
+            ("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30),
         ]
         var reached = false
+        // The time in the background counts from the way that worked: a second press or the
+        // Settings app can be 20-35 s after the first press, and the test still needs its
+        // `atLeast` seconds there (second review, 19.11.: else test03's expiry might not happen).
+        var wayStarted = pressed
         for (index, way) in ways.enumerated() {
+            wayStarted = Date()
             if index > 0 {
                 print("UI_FLAKY_RETRY \(testID) app still in the foreground (state \(app.state.rawValue)) \(Int(Date().timeIntervalSince(pressed))) s after the Home press \(why), tried: \(way.name)")
             }
@@ -172,7 +177,7 @@ final class DeviceConditionUITests: XCTestCase {
         print("UI_FACT app in the background \(why): state \(app.state.rawValue) after \(String(format: "%.1f", took)) s")
         print(reached ? "UI_STEP_OK app in the background \(why)" : "UI_STEP_MISSING app in the background \(why) (Home twice and Settings, \(Int(took)) s)")
         XCTAssertTrue(reached, "The app did not reach the background \(why)")
-        let wait = max(atLeast - took, reached ? 1 : 0)
+        let wait = reached ? max(atLeast - Date().timeIntervalSince(wayStarted), 1) : 0
         if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
         return reached
     }

@@ -122,6 +122,35 @@ final class DeviceConditionUITests: XCTestCase {
         }
     }
 
+    /// Sends the app to the background and waits until iOS reports it there, then at least
+    /// `atLeast` seconds in all. A fixed sleep was not enough on a starved Mac: in PR #9's UI run
+    /// 44480215847 (test06, 19.11.) the app was back before it had ever entered the background,
+    /// so the full disk (cleared by didEnterBackground) stayed full and the analysis stood still
+    /// for 2 min with the notice coming back. One more second after the state changed gives the
+    /// app's own didEnterBackground observers their turn.
+    @discardableResult
+    private func sendToBackground(_ why: String, atLeast: TimeInterval, timeout: TimeInterval = 30) -> Bool {
+        let pressed = Date()
+        XCUIDevice.shared.press(.home)
+        UITestOnboarding.clock("wait start app in the background \(why)")
+        var reached = false
+        while Date().timeIntervalSince(pressed) < timeout {
+            let state = app.state
+            if state == .runningBackground || state == .runningBackgroundSuspended || state == .notRunning {
+                reached = true
+                break
+            }
+            usleep(250_000)
+        }
+        let took = Date().timeIntervalSince(pressed)
+        print("UI_FACT app in the background \(why): state \(app.state.rawValue) after \(String(format: "%.1f", took)) s")
+        print(reached ? "UI_STEP_OK app in the background \(why)" : "UI_STEP_MISSING app in the background \(why) (timeout \(Int(timeout)) s)")
+        XCTAssertTrue(reached, "The app did not reach the background \(why)")
+        let wait = max(atLeast - took, reached ? 1 : 0)
+        if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
+        return reached
+    }
+
     /// Polls until `condition` held on `stableChecks` checks in a row (2 s apart).
     @discardableResult
     private func waitStable(_ what: String, timeout: TimeInterval, stableChecks: Int = 3, _ condition: () -> Bool) -> Bool {
@@ -861,8 +890,7 @@ final class DeviceConditionUITests: XCTestCase {
         start(["-SortlyUITestSlowAnalysis", "-SortlyUITestExpireInBackground"])
         guard rebuildAnalysis(), waitForImageStep("image step before leaving") else { return }
         record("before leaving")
-        XCUIDevice.shared.press(.home)
-        sleep(6) // the run ends in the background: iOS took the time away
+        sendToBackground("for the background time to run out", atLeast: 6) // the run ends there: iOS took the time away
         app.activate()
         var caughtUp = false
         let goesOn = waitStable("analysis goes on after the background time ran out", timeout: 40, stableChecks: 2) {
@@ -1049,8 +1077,7 @@ final class DeviceConditionUITests: XCTestCase {
         // Space is freed in the Settings app; back in Albumist the analysis goes on by itself
         // (its count moves). That it then ends with every photo is
         // DeviceConditionRunTests.fullDiskDuringTheAnalysisThenSpaceAgainEndsWithEveryPhoto.
-        XCUIDevice.shared.press(.home)
-        sleep(4)
+        sendToBackground("to free space", atLeast: 4)
         app.activate()
         expectAnalysisGoesOn("after the disk had space again", dismissing: true)
         shot("11-after-disk-full-analysis")

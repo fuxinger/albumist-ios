@@ -216,16 +216,16 @@ final class AppModel {
         var photos: Int
         var proposals: Int
     }
-    /// The check mark and haptic of the finished card play once, not on every return.
-    @ObservationIgnored private var finishMomentPlayed = false
+    /// "Analyse fertig" is owed until seen, also when a short run slips in right after the run
+    /// that finished (`FinishMoment`); its check mark and haptic play once, not on every return.
+    @ObservationIgnored private var finishMoment = FinishMoment()
 
     /// True the first time the finished card is seen for this run: on screen only, so a run
     /// that ended while the app was in the background plays it when the user comes back
     /// (review minor: it was not shown at all then).
     func claimFinishMoment() -> Bool {
-        guard analysisFinished != nil, isOnScreen, !finishMomentPlayed else { return false }
-        finishMomentPlayed = true
-        return true
+        guard analysisFinished != nil, isOnScreen else { return false }
+        return finishMoment.claim()
     }
 
     @ObservationIgnored private var progressMailbox = ProgressMailbox()
@@ -1086,7 +1086,7 @@ final class AppModel {
         analysis.widths = storedWidths ?? .standard
         widthsFixed = storedWidths != nil
         analysisFinished = nil
-        finishMomentPlayed = false
+        finishMoment.runStarted()
         beginCard()
         if cause.isUserInitiated {
             // A quick check for new photos ("Neu prüfen") needs no background time: asking for
@@ -1168,6 +1168,9 @@ final class AppModel {
             let celebrate = AnalysisCardState.celebratesFinish(isComplete: end.isFinished,
                                                                wasQuickCheck: !runShowedBar,
                                                                ranFor: ContinuousClock.now - runClockStart)
+            // Owed before the wait below: a run that starts meanwhile (a trip change, new photos,
+            // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
+            finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
             analysis.stoppedAt = analysis.position
             analysis.needsResume = end.needsResume
             analysis.isRunning = false
@@ -1204,15 +1207,18 @@ final class AppModel {
             // landed on the next run's card).
             let settled = end.afterWait(isNewest: analysisGeneration == generation)
             // "Analyse fertig" only when the analysis really finished (not paused, stopped,
-            // failed, or with a change of the settings left), and not for a quick check
-            // (point 4): in the app the card, outside it the notification. Outside the app also
-            // the notification; the card shows the moment once the app is on screen again.
-            if settled.finishMoment, celebrate, !Task.isCancelled {
-                analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
-                updateCard()
-                if UIApplication.shared.applicationState != .active {
-                    ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count)
+            // failed, or with a change of the settings left), owed by a long run (point 4: never
+            // for a quick check alone), also one whose own end a newer run overtook: in the app
+            // the card, outside it the notification (once). Outside the app also the card, shown
+            // once the app is on screen again.
+            if !Task.isCancelled {
+                let shown = finishMoment.afterWait(settled: settled.finishMoment,
+                                                   appActive: UIApplication.shared.applicationState == .active)
+                if shown.card {
+                    analysisFinished = AnalysisFinished(photos: analysisCounts.analyzed, proposals: openProposals.count)
+                    updateCard()
                 }
+                if shown.notification { ContinuedAnalysis.notifyFinished(openSuggestions: openProposals.count) }
             }
             BackgroundWork.scheduleRefinement()
             if end.isFinished { retry.reset() }

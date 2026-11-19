@@ -103,17 +103,12 @@ public struct TripDetector: Sendable {
         excludeFromInference: (AssetSnapshot) -> Bool = { _ in false },
         progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }
     ) -> TripAnalysis {
-        let geotagged = assets
-            .filter { $0.usableLocation != nil && $0.creationDate != nil && !$0.isScreenshotLike && !corrections.excludedAssets.contains($0.id) }
-            .sorted { ($0.creationDate!, $0.id) < ($1.creationDate!, $1.id) }
+        let geotagged = Self.located(assets, corrections: corrections)
         guard !geotagged.isEmpty else { return TripAnalysis(trips: [], stays: [], places: []) }
         progress(0, geotagged.count)
 
-        // A place the user is often at counts like the habitual area, at every time: its stays
-        // are not trips, and an excursion from there starts there.
         let oftenHere = places.oftenHere
-        let detection = HabitualArea(assets: geotagged, calendar: calendar, windowDays: configuration.homeWindowDays,
-                                     homeRadius: configuration.homeRadiusMeters, extraHomes: oftenHere.map(\.center))
+        let detection = habitualArea(of: geotagged, places: places)
         // The home the user chose wins over the detection, date by date (`HomeSettings.home(at:)`).
         let home = HomeReference(detection: detection, settings: homeSettings, radius: configuration.homeRadiusMeters,
                                  extraHomes: oftenHere.map(\.center))
@@ -232,6 +227,32 @@ public struct TripDetector: Sendable {
         return TripAnalysis(trips: trips, stays: stays, places: placesOftenVisited(oftenHere, photos: geotagged, home: home),
                             atHome: Set(atHome.map(\.id)),
                             detectedHome: detection.mainHome(at: geotagged.last!.creationDate!))
+    }
+
+    /// The home `analyse` finds (`TripAnalysis.detectedHome`), without the trips: from the days
+    /// with photos alone, a small part of the work. Days count on `calendar`'s clock, so the
+    /// home found can differ from clock to clock; the analysis asks this to choose the clock it
+    /// detects the trips on (second review of P1-15).
+    public func detectedHome(in assets: [AssetSnapshot], corrections: TripCorrections = .init(),
+                             places: RecurringPlaceAnswers = .init()) -> DetectedHome? {
+        let geotagged = Self.located(assets, corrections: corrections)
+        guard let last = geotagged.last?.creationDate else { return nil }
+        return habitualArea(of: geotagged, places: places).mainHome(at: last)
+    }
+
+    /// The photos the trips are detected from: with a date and a location, no screenshots,
+    /// none the user took out; in time order.
+    private static func located(_ assets: [AssetSnapshot], corrections: TripCorrections) -> [AssetSnapshot] {
+        assets
+            .filter { $0.usableLocation != nil && $0.creationDate != nil && !$0.isScreenshotLike && !corrections.excludedAssets.contains($0.id) }
+            .sorted { ($0.creationDate!, $0.id) < ($1.creationDate!, $1.id) }
+    }
+
+    /// Where the user lived when. A place the user is often at counts like the habitual area,
+    /// at every time: its stays are not trips, and an excursion from there starts there.
+    private func habitualArea(of located: [AssetSnapshot], places: RecurringPlaceAnswers) -> HabitualArea {
+        HabitualArea(assets: located, calendar: calendar, windowDays: configuration.homeWindowDays,
+                     homeRadius: configuration.homeRadiusMeters, extraHomes: places.oftenHere.map(\.center))
     }
 
     /// Whether the photos at home between a trip's photo (`lastAway` at `last`) and the next one

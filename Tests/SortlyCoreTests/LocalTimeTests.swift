@@ -285,6 +285,42 @@ struct LocalTimeTests {
         #expect(rules.evaluate(.year(2027), unknown))
     }
 
+    /// Second review: the analysis chooses the clock it detects the trips on by the home alone
+    /// (`TripDetector.detectedHome`), so the trips are detected once. That home is the one the
+    /// whole analysis finds on the same clock: two homes half a day apart (two weeks in Munich,
+    /// two in Auckland, photos at 10:00 and 14:00 on the clock there) give Auckland on Berlin's
+    /// clock and Munich on Auckland's; with photos taken out and a place the user is often at too.
+    @Test func theHomeAloneIsTheHomeOfTheWholeAnalysis() throws {
+        let auckland = GeoCoordinate(latitude: -36.8485, longitude: 174.7633)
+        let days = DateFormatter()
+        days.locale = Locale(identifier: "en_US_POSIX")
+        days.timeZone = TimeZone(identifier: "UTC")
+        days.dateFormat = "yyyy-MM-dd"
+        var lib = LibraryBuilder()
+        for n in stride(from: 0, to: 365, by: 2) {
+            let day = days.string(from: Fixture.date("2025-03-01").addingTimeInterval(Double(n) * 86_400))
+            let inMunich = (n / 14) % 2 == 0
+            for time in ["10:00", "14:00"] {
+                _ = lib.photo(at: Self.local("\(day) \(time)", inMunich ? "Europe/Berlin" : "Pacific/Auckland"),
+                              inMunich ? Fixture.Places.munichHome : auckland, jitterMeters: 300)
+            }
+        }
+        let takenOut = TripCorrections(excludedAssets: Set(lib.assets.prefix(30).map(\.id)))
+        let oftenThere = RecurringPlaceAnswers().answering(true, at: Fixture.Places.tegernsee, name: "Tegernsee", date: Fixture.date("2025-06-01"))
+        var found: [String: String] = [:]
+        for zone in ["Europe/Berlin", "Pacific/Auckland"] {
+            let detector = TripDetector(calendar: Self.calendar(zone))
+            for (corrections, places) in [(TripCorrections(), RecurringPlaceAnswers()), (takenOut, oftenThere)] {
+                let home = detector.detectedHome(in: lib.assets, corrections: corrections, places: places)
+                #expect(home == detector.analyse(in: lib.assets, corrections: corrections, places: places).detectedHome, "\(zone)")
+            }
+            let home = try #require(detector.detectedHome(in: lib.assets))
+            found[zone] = GeoMath.distance(home.center, auckland) < 50_000 ? "Auckland" : "Munich"
+        }
+        #expect(found == ["Europe/Berlin": "Auckland", "Pacific/Auckland": "Munich"])
+        #expect(TripDetector(calendar: Self.calendar("Europe/Berlin")).detectedHome(in: []) == nil)
+    }
+
     /// The search finds a photo by the day and month of its clock, on an iPhone in Auckland:
     /// New Year's Eve in Munich at 23:30 is 11:30 on New Year's Day there.
     @Test func searchUsesThePhotosClock() {

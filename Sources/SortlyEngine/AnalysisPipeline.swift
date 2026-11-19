@@ -554,13 +554,13 @@ public actor AnalysisPipeline {
 
     /// The home time zone and whether a run stores it (`settleHomeTimeZone`), in this order:
     /// - the zone of the home the user chose, whatever is stored;
-    /// - the stored one (a home the analysis finds later changes it after the trips are
-    ///   detected, `detectPatterns`);
+    /// - the stored one (a home the analysis finds later changes it before the trips are
+    ///   detected, `patternsClock`);
     /// - none stored (or none this system can read): the zone of the home the last analysis
     ///   found, when the home is left to the analysis (an update on a trip abroad: the home
     ///   in Munich gives Berlin time, not the iPhone's Los Angeles time);
     /// - no home known: the iPhone's, stored only when nothing is stored.
-    /// `all`: the library, where the caller has it (`zone(ofHomeAt:components:all:)`).
+    /// `all`: the library, where a run or `resuggest()` has it read (`placeTimeZones`).
     private func homeTimeZoneInEffect(all: [AssetSnapshot]?) async throws -> (zone: TimeZone, store: Bool) {
         let stored = try await storedHomeTimeZone()
         let home = try await homeSettings()
@@ -586,11 +586,12 @@ public actor AnalysisPipeline {
     private func zone(ofHomeAt center: GeoCoordinate, components: PlaceComponents?, all: [AssetSnapshot]?) async throws -> TimeZone? {
         if let zone = LocalTime.zone(of: components, at: center) { return zone }
         if let map, let zone = LocalTime.zone(of: map.lookup(center).components(language: .english), at: center) { return zone }
+        let zones = try await placeTimeZones(library: all)
+        guard !zones.isEmpty else { return nil }
         let radius = settings.trips.advanced.homeRadiusMeters
         var library = all
         if library == nil { library = try await store.allAssets() }
         let near = (library ?? []).filter { $0.usableLocation.map { GeoMath.distance($0, center) <= radius } ?? false }
-        let zones = try await placeTimeZones()
         var counts: [String: Int] = [:]
         for asset in near { if let zone = zones[asset.id] { counts[zone.identifier, default: 0] += 1 } }
         return counts.max(by: { ($0.value, $1.key) < ($1.value, $0.key) }).flatMap { TimeZone(identifier: $0.key) }
@@ -618,7 +619,7 @@ public actor AnalysisPipeline {
     /// Stores the home time zone in effect (`homeTimeZoneInEffect`) where it changed: the zone of
     /// the home the user chose, of the home found before the update, or the iPhone's at the first
     /// analysis while no home is known. Only a run or `resuggest()` stores it (before the trips
-    /// are detected, `detectPatterns`), never a read of the facts: it goes into the safety copy,
+    /// are detected, `patternsClock`), never a read of the facts: it goes into the safety copy,
     /// and a fresh database gets the decisions of a copy only while it holds nothing of its own.
     private func settleHomeTimeZone(all: [AssetSnapshot]) async throws -> TimeZone {
         let (zone, changed) = try await homeTimeZoneInEffect(all: all)
@@ -640,13 +641,22 @@ public actor AnalysisPipeline {
     /// photos' locations (`SortlyStore.placesRevision`): a run asked for them up to four times
     /// and every read of the facts once more, about three seconds each over 100,000 photos in as
     /// many places (second review). Off the actor, like the facts (`offActor`).
-    private func placeTimeZones() async throws -> [AssetID: TimeZone] {
+    /// `library`: the photos as the store holds them, where a run or `resuggest()` has them read
+    /// (only a run writes the photos, and the two take turns); otherwise they are read here.
+    /// While no place is known (a first run before its places step) no photo is read: a read of
+    /// 50,000 photos made the trips step stand silent for longer than it may.
+    private func placeTimeZones(library: [AssetSnapshot]? = nil) async throws -> [AssetID: TimeZone] {
         let revision = await store.placesRevision
         if let cached = placeZones, cached.revision == revision { return cached.zones }
-        zoneProbe?()
         let places = try await store.places()
-        let assets = try await store.allAssets()
-        let zones = await Task.detached(priority: Task.currentPriority) { LocalTime.placeZones(of: assets, places: places) }.value
+        var zones: [AssetID: TimeZone] = [:]
+        if !places.isEmpty {
+            zoneProbe?()
+            var assets = library
+            if assets == nil { assets = try await store.allAssets() }
+            let photos = assets ?? []
+            zones = await Task.detached(priority: Task.currentPriority) { LocalTime.placeZones(of: photos, places: places) }.value
+        }
         // A write meanwhile made them older than the store: they serve this caller only.
         if await store.placesRevision == revision { placeZones = (revision, zones) }
         return zones
@@ -658,7 +668,7 @@ public actor AnalysisPipeline {
     /// `dateRange` of a run: over the zones of the places known so far.
     private func dateRange(of scope: OrganizationScope, all: [AssetSnapshot]) async throws -> Range<Date>? {
         guard case .year = scope else { return nil }
-        return Self.dateRange(of: scope, calendar: try await homeCalendar(), zones: Set(try await placeTimeZones().values))
+        return Self.dateRange(of: scope, calendar: try await homeCalendar(), zones: Set(try await placeTimeZones(library: all).values))
     }
 
     /// Pauses the run in progress at its next check; `run` then returns with `.userPaused`.
@@ -1184,37 +1194,13 @@ public actor AnalysisPipeline {
     }
 
     /// `progress(grouped, of)`: photos with a location grouped so far (see `TripDetector.analyse`).
-    /// Detected on the home clock, which follows the home (second review of P1-15): first the
-    /// home time zone in effect is stored (`settleHomeTimeZone`). Where the user left the home to
-    /// the analysis and the home it finds has another zone (found for the first time, or a move),
-    /// the trips and places are detected again on that zone's clock, and the zone is taken only
-    /// if the home found on that clock has it too. Two homes with about as many photo days can
-    /// each have the more days on the other's clock (Munich and Auckland, half a day apart):
-    /// following the detection would swap the zone with every run, so it stays as it was.
+    /// Detected once, on the clock of the home (`patternsClock`), and stored as it goes.
     private func detectPatterns(all: [AssetSnapshot],
                                 progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) async throws -> (trips: [Trip], frequent: [FrequentPlace]) {
-        let zone = try await settleHomeTimeZone(all: all)
-        let found = try await detectPatterns(all: all, on: zone, progress: progress)
-        guard try await homeSettings().currentMode == .automatic, let home = found.home,
-              let other = try await self.zone(ofHomeAt: home.center, components: nil, all: all),
-              other.identifier != zone.identifier else { return (found.trips, found.frequent) }
-        let again = try await detectPatterns(all: all, on: other)
-        if let home = again.home, try await self.zone(ofHomeAt: home.center, components: nil, all: all)?.identifier == other.identifier {
-            try await store.setValue(other.identifier, forKey: Key.homeTimeZone)
-            return (again.trips, again.frequent)
-        }
-        let kept = try await detectPatterns(all: all, on: zone)
-        return (kept.trips, kept.frequent)
-    }
-
-    /// Step 2 on the clock of `zone`, stored as it goes; with the home it found.
-    private func detectPatterns(all: [AssetSnapshot], on zone: TimeZone,
-                                progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) async throws
-        -> (trips: [Trip], frequent: [FrequentPlace], home: DetectedHome?) {
         let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
         let answers = try await recurringPlaceAnswers()
         var home = calendar
-        home.timeZone = zone
+        home.timeZone = try await patternsClock(all: all, corrections: corrections, answers: answers)
         let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: home)
             .analyse(in: all, corrections: corrections, places: answers, home: try await homeSettings(), progress: progress)
         let detected = tripAnalysis.trips
@@ -1234,7 +1220,7 @@ public actor AnalysisPipeline {
         // A place's days: those of the clocks its photos were taken on, where their places are
         // known so far (review P1-15).
         var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: home)
-            .detect(in: all, previous: previousPlaces ?? [], zones: try await placeTimeZones())
+            .detect(in: all, previous: previousPlaces ?? [], zones: try await placeTimeZones(library: all))
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
@@ -1244,7 +1230,34 @@ public actor AnalysisPipeline {
         } else {
             try await store.removeValue(forKey: Key.detectedHome)
         }
-        return (trips, frequent, tripAnalysis.detectedHome)
+        return (trips, frequent)
+    }
+
+    /// The clock the trips are detected on, which follows the home (second review of P1-15):
+    /// the home time zone in effect, stored where it changed (`settleHomeTimeZone`). Where the
+    /// user left the home to the analysis and the home found on that clock has another zone
+    /// (found for the first time, or a move), that zone, if the home found on its clock has it
+    /// too. Two homes with about as many photo days can each have the more days on the other's
+    /// clock (Munich and Auckland, half a day apart): following the detection would swap the zone
+    /// with every run, so it stays as it was. Only the home is detected for this
+    /// (`TripDetector.detectedHome`, a small part of the work), so the trips are detected once,
+    /// with their count going on: a second detection on another clock stood silent for longer
+    /// than the step may.
+    private func patternsClock(all: [AssetSnapshot], corrections: TripCorrections, answers: RecurringPlaceAnswers) async throws -> TimeZone {
+        let zone = try await settleHomeTimeZone(all: all)
+        guard try await homeSettings().currentMode == .automatic else { return zone }
+        func homeFound(on zone: TimeZone) -> DetectedHome? {
+            var clock = calendar
+            clock.timeZone = zone
+            return TripDetector(configuration: settings.trips.advanced, calendar: clock).detectedHome(in: all, corrections: corrections, places: answers)
+        }
+        guard let found = homeFound(on: zone),
+              let other = try await self.zone(ofHomeAt: found.center, components: nil, all: all),
+              other.identifier != zone.identifier,
+              let again = homeFound(on: other),
+              try await self.zone(ofHomeAt: again.center, components: nil, all: all)?.identifier == other.identifier else { return zone }
+        try await store.setValue(other.identifier, forKey: Key.homeTimeZone)
+        return other
     }
 
     /// Day trip or weekend is decided in the destination's days, once places know its time
@@ -1255,7 +1268,7 @@ public actor AnalysisPipeline {
         // photo with a location has one.
         let members = Set(trips.lazy.flatMap(\.geotaggedAssetIDs))
         let travelled = all.filter { members.contains($0.id) }
-        let placeZones = try await placeTimeZones()
+        let placeZones = try await placeTimeZones(library: all)
         var zones: [AssetID: String] = [:]
         for id in members { if let zone = placeZones[id] { zones[id] = zone.identifier } }
         guard !zones.isEmpty else { return trips }

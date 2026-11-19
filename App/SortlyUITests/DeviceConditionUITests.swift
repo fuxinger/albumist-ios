@@ -31,11 +31,13 @@ final class DeviceConditionUITests: XCTestCase {
         app.launch()
     }
 
-    /// Ends the app of the last launch before the next one, and waits until it is gone. Left to
-    /// `launch()`, XCTest ends it with a short wait of its own: on a busy CI Mac that failed with
-    /// "Failed to terminate app.albumist.ios:20655" although the app stood idle on the overview
-    /// (test07, UI run 44446270757, 6 s after the last tap). The time it takes is logged, so a
-    /// slow end shows up before it fails.
+    /// Ends the app of the last launch before the next one, and logs how long that took. Left to
+    /// `launch()`, XCTest ends it on its own: on a busy CI Mac that failed with "Failed to
+    /// terminate app.albumist.ios:20655" although the app stood idle on the overview (test07,
+    /// UI run 44446270757, 6 s after the last tap). `terminate()` here goes through the same
+    /// XCTest call with its own time limit, so it can fail the same way; this does not prevent
+    /// the failure, it shows how long ending takes (and whether ending itself hangs). The extra
+    /// wait only matters when `terminate()` returns with the app still there.
     private func endRunningApp() {
         guard app.state != .notRunning else { return }
         let asked = Date()

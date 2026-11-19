@@ -84,26 +84,30 @@ struct AlbumsView: View {
                 }
             }
 
-            Section("Deine Alben") {
-                if model.access == .limited {
-                    // iOS shows an app no albums at all while only some photos are shared.
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Deine Alben sind nicht sichtbar, solange du Albumist nur ausgewählte Fotos freigibst. So regelt iOS das.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            Button("Alle Fotos erlauben") { openURL(url) }
-                                .font(.subheadline.weight(.semibold))
+            // Left out while every album is Albumist's: "Noch keine Alben" under the list above
+            // read as wrong (UI run 44570945716). With limited access it always explains why.
+            if sections.showsYourAlbums || model.access == .limited {
+                Section("Deine Alben") {
+                    if model.access == .limited {
+                        // iOS shows an app no albums at all while only some photos are shared.
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            Text("Deine Alben sind nicht sichtbar, solange du Albumist nur ausgewählte Fotos freigibst. So regelt iOS das.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                Button("Alle Fotos erlauben") { openURL(url) }
+                                    .font(.subheadline.weight(.semibold))
+                            }
                         }
+                        .padding(.vertical, 4)
+                    } else if sections.saysNoAlbums {
+                        Text("Noch keine Alben").foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 4)
-                } else if sections.yours.isEmpty {
-                    Text("Noch keine Alben").foregroundStyle(.secondary)
-                }
-                ForEach(sections.yours) { collection in
-                    CollectionRow(collection: collection)
-                        .disabled(preparing != nil)
-                        .accessibilityHint(waitHint)
+                    ForEach(sections.yours) { collection in
+                        CollectionRow(collection: collection)
+                            .disabled(preparing != nil)
+                            .accessibilityHint(waitHint)
+                    }
                 }
             }
         }

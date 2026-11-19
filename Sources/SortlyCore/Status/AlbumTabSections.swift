@@ -19,6 +19,13 @@ public struct AlbumTabSections: Sendable, Equatable {
             .sorted(by: Self.order)
     }
 
+    /// The section "Deine Alben" is shown: when it lists something, or when the library has no
+    /// album at all (then it says so). With only Albumist's albums it is left out: "Noch keine
+    /// Alben" right under a list of albums read as wrong (UI run 44570945716).
+    public var showsYourAlbums: Bool { !yours.isEmpty || fromAlbumist.isEmpty }
+    /// "Noch keine Alben" stands in it: only for a library without any album.
+    public var saysNoAlbums: Bool { yours.isEmpty && fromAlbumist.isEmpty }
+
     /// Folders before albums, then by title as Finder and Photos sort ("Album 2" before "Album 10").
     public static func order(_ a: CollectionSnapshot, _ b: CollectionSnapshot) -> Bool {
         if (a.kind == .folder) != (b.kind == .folder) { return a.kind == .folder }

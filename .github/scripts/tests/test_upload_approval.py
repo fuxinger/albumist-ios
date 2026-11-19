@@ -135,7 +135,7 @@ class CheckTests(unittest.TestCase):
         with open(path, encoding="utf-8") as f:
             return f.read()
 
-    def check(self, answer, public=True, branches=MAIN, plan_ok=False):
+    def check(self, answer, public=True, branches=MAIN, plan_ok=False, main=(True, "a ruleset requires a pull request")):
         def fetcher():
             if isinstance(answer, Exception):
                 raise answer
@@ -146,7 +146,11 @@ class CheckTests(unittest.TestCase):
                 raise public
             return public
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            code = upload_approval.check(fetcher, visibility, lambda: branches, lambda: plan_ok)
+            def protection():
+                if isinstance(main, Exception):
+                    raise main
+                return main
+            code = upload_approval.check(fetcher, visibility, lambda: branches, lambda: plan_ok, protection)
         return code, log.getvalue()
 
     def test_set_up(self):
@@ -184,6 +188,80 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(code, 0, log)
         self.assertEqual(self.read(self.output), "ready=true\n")
         self.assertIn("UPLOAD_PRIVATE_PLAN_OK", self.read(self.summary))
+
+    def test_an_unprotected_main_is_a_warning_never_a_block(self):
+        # The branch rule of the environment is the only fence since 19.11.: whoever can push to
+        # main can upload. When nothing requires a pull request on main, say so (third review).
+        for main, words in (((False, "no ruleset requires a pull request"), upload_approval.UNPROTECTED),
+                            ((None, "cannot read the branch protection"), "could not be checked"),
+                            (upload_approval.ApiError("down"), "could not be checked")):
+            with self.subTest(main=main):
+                os.remove(self.output) if os.path.exists(self.output) else None
+                code, log = self.check(SET_UP, main=main)
+                self.assertEqual(code, 0, log)
+                self.assertEqual(self.read(self.output), "ready=true\n")
+                self.assertIn("::warning title=Upload setup::", log)
+                self.assertIn(words, log)
+                self.assertIn(words, self.read(self.summary))
+        self.assertEqual(upload_approval.UNPROTECTED, "main ist nicht geschützt: wer auf main pushen kann, kann hochladen")
+        code, log = self.check(SET_UP)
+        self.assertEqual(code, 0, log)
+        self.assertNotIn("::warning", log)
+        self.assertIn("pull request", self.read(self.summary))
+
+    def test_the_protection_of_main_is_read_from_rulesets_and_branch_protection(self):
+        pull = {"type": "pull_request", "ruleset_source_type": "Repository", "ruleset_id": 7,
+                "parameters": {"required_approving_review_count": 0}}
+        forbidden = upload_approval.ApiError("GitHub API: HTTP 403")
+        for answers, protected in (
+                ({"rules/branches/main": [pull]}, True),
+                ({"rules/branches/main": [{"type": "deletion"}], "branches/main": {"protected": False}}, False),
+                ({"rules/branches/main": [], "branches/main": {"name": "main"}}, False),
+                ({"rules/branches/main": [], "branches/main": {"protected": True},
+                  "branches/main/protection/required_pull_request_reviews": {"required_approving_review_count": 1}}, True),
+                ({"rules/branches/main": [], "branches/main": {"protected": True},
+                  "branches/main/protection/required_pull_request_reviews": None}, False),
+                ({"rules/branches/main": [{"type": "non_fast_forward"}], "branches/main": {"protected": True},
+                  "branches/main/protection/required_pull_request_reviews": forbidden}, None)):
+            with self.subTest(answers=answers):
+                asked = []
+
+                def get(path, **_):
+                    asked.append(path)
+                    answer = answers[path]
+                    if isinstance(answer, Exception):
+                        raise answer
+                    return answer
+                found, how = upload_approval.main_protection(get)
+                self.assertIs(found, protected, how)
+                self.assertTrue(how)
+                self.assertEqual(asked, [p for p in answers][:len(asked)])
+        # A failed read of the rulesets is the caller's to report (check: a warning, no block).
+        with self.assertRaises(upload_approval.ApiError):
+            upload_approval.main_protection(lambda path, **_: (_ for _ in ()).throw(upload_approval.ApiError("down")))
+
+    def test_a_forbidden_answer_is_not_tried_again_when_it_cannot_change(self):
+        import urllib.error
+        import urllib.request
+        calls, sleeps = [], []
+        originals = urllib.request.urlopen, upload_approval.time.sleep
+        self.addCleanup(lambda: (setattr(urllib.request, "urlopen", originals[0]),
+                                 setattr(upload_approval.time, "sleep", originals[1])))
+        from unittest import mock
+        environment = mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repo", "GH_TOKEN": "token"})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+        def forbidden(request, timeout):
+            calls.append(request.full_url)
+            raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, None)
+        urllib.request.urlopen, upload_approval.time.sleep = forbidden, sleeps.append
+        with self.assertRaisesRegex(upload_approval.ApiError, "HTTP 403"):
+            upload_approval._get("branches/main/protection/required_pull_request_reviews", final=(403,))
+        self.assertEqual((len(calls), sleeps), (1, []))
+        with self.assertRaises(upload_approval.ApiError):
+            upload_approval._get("environments/testflight-upload")
+        self.assertEqual(len(calls), 4)  # three tries without final
 
     def test_visibility_is_read_from_the_repository(self):
         originals = upload_approval._get

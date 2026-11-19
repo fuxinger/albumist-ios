@@ -464,7 +464,11 @@ Jobs davor brauchen sie nicht.
   nur der Zweig `main` sie nutzen darf (genau eine Regel `main`; fehlt sie, oder steht dort
   „Protected branches“, ein Muster, ein zweiter Zweig oder eine Tag-Regel, hält der Lauf an). Diese
   Regel ist jetzt der einzige Zaun: wer auf `main` schreiben darf, kann hochladen; den Schutz von
-  `main` stellst du in den Einstellungen ein (P5-09). Ist noch ein Prüfer eingetragen, steht eine
+  `main` stellst du in den Einstellungen ein (P5-09). Verlangt dort nichts einen Pull Request für
+  `main` (weder ein Ruleset noch der klassische Zweigschutz), steht im ersten Job die Warnung
+  „main ist nicht geschützt: wer auf main pushen kann, kann hochladen“ (nur eine Warnung, der
+  Lauf geht weiter); kann der Lauf den klassischen Zweigschutz nicht lesen (er braucht dafür
+  Admin-Rechte), sagt die Warnung das. Ist noch ein Prüfer eingetragen, steht eine
   Warnung im Lauf, und der Upload wartet weiter auf deinen Klick. Ob die alten Repository-Secrets
   gelöscht sind, kann kein Job prüfen, ohne sie zu lesen: das ist Schritt 5 der Anleitung.
 - Der Upload-Job prüft zuerst, dass alle vier Secrets da sind (nur ob, nie ihren Inhalt),

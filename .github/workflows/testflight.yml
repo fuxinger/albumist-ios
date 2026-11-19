@@ -35,7 +35,8 @@ run-name: >-
 #      and the token cannot read the plan. Otherwise the run stops here, before any macOS minute, and
 #      names the setup steps. GitHub would create a missing environment without any rule as
 #      soon as the upload job names it, so this check is what keeps the upload job from ever
-#      starting without the fence. It reads no secret.
+#      starting without the fence. It reads no secret. When nothing requires a pull request on
+#      main, it warns (never stops): whoever can push to main can upload.
 #   2. Tests: CI (ci.yml) with the app rules, the Linux core tests and then, on one Mac, the
 #      iOS build, core and app tests. Its iOS job always runs here.
 #   3. Then side by side: the UI flow (ui.yml, at most four Macs) and the small stress pass
@@ -151,7 +152,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # actions: read for the environment's settings (GET /repos/{repo}/environments/{name}).
+    # actions: read for the environment's settings (GET /repos/{repo}/environments/{name}). The
+    # rulesets of main and whether it has a branch protection need only read access; whether
+    # that protection requires a pull request needs admin rights, which no job gets (the check
+    # then warns that it could not read it).
     permissions:
       contents: read
       actions: read

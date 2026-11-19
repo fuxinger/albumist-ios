@@ -30,8 +30,10 @@ names GitHub Free, unless the owner has set the repository variable UPLOAD_PRIVA
 environments in private repositories; then the same checks as in a public one apply (third
 review of fix/pipeline, 19.11.).
 
-Warning, no block: a required reviewer is still set (the upload then waits for a click, as before
-19.11.).
+Warnings, no block: a required reviewer is still set (the upload then waits for a click, as before
+19.11.); nothing requires a pull request on main (main_protection: rulesets, then the classic
+branch protection), so whoever can push to main can upload ("main ist nicht geschützt"), or
+that could not be read.
 
 When the API does not answer, check fails (no upload without knowing): re-run the job.
 
@@ -93,7 +95,36 @@ def fetch_public() -> bool:
     return repository.get("private") is False and repository.get("visibility", "public") == "public"
 
 
-def _get(path: str) -> dict | None:
+UNPROTECTED = "main ist nicht geschützt: wer auf main pushen kann, kann hochladen"
+
+
+def main_protection(get=None) -> tuple[bool | None, str]:
+    """(True: a rule requires a pull request for main; False: nothing this run can read does;
+    None: main has a branch protection this run's token cannot read), and how it was read.
+    The rulesets that apply to main (GET /repos/{repo}/rules/branches/main, readable with read
+    access), then the classic branch protection: GET .../branches/main says whether there is
+    one, .../protection/required_pull_request_reviews whether it requires a pull request (that
+    one needs admin rights; HTTP 403 is "cannot read"). An API error is raised (ApiError)."""
+    get = get or _get
+    rules = get("rules/branches/main", final=(403,))
+    if any(isinstance(r, dict) and r.get("type") == "pull_request" for r in rules or []):
+        return True, "a ruleset requires a pull request for main"
+    branch = get("branches/main", final=(403,))
+    if not (branch or {}).get("protected"):
+        return False, "no ruleset requires a pull request for main, and main has no branch protection"
+    try:
+        reviews = get("branches/main/protection/required_pull_request_reviews", final=(403,))
+    except ApiError:
+        return None, ("main has a branch protection that this run cannot read (it needs admin rights): "
+                      "check that it requires a pull request")
+    if reviews is None:
+        return False, "neither a ruleset nor the branch protection of main requires a pull request"
+    return True, "the branch protection of main requires a pull request"
+
+
+def _get(path: str, final: tuple[int, ...] = ()) -> dict | list | None:
+    """GET /repos/{repo}/path: the JSON answer, None for HTTP 404. A status in final raises
+    ApiError at once (no retry: it will not change); anything else is tried three times."""
     repo = os.environ["GITHUB_REPOSITORY"]
     url = f"{API}/repos/{repo}" + (f"/{path}" if path else "")
     name = path or repo
@@ -108,6 +139,8 @@ def _get(path: str) -> dict | None:
         except urllib.error.HTTPError as error:
             if error.code == 404:
                 return None
+            if error.code in final:
+                raise ApiError(f"GitHub API: {name}: HTTP {error.code}") from error
             last = error
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             last = error
@@ -160,7 +193,8 @@ def review(environment: dict | None, public: bool = True, branches: list[dict] |
     return [], warnings, notes
 
 
-def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches, plan_ok=private_plan_ok) -> int:
+def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches, plan_ok=private_plan_ok,
+          protection=main_protection) -> int:
     try:
         environment = fetcher()
         is_public = public()
@@ -170,6 +204,19 @@ def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches, pla
                       "re-run this job when the API answers"))
         return 1
     problems, warnings, notes = review(environment, is_public, branches, plan_ok())
+    if not problems:
+        # Only a warning, never a block: the environment admits main alone, and whoever can push
+        # to main can upload (third review of fix/pipeline, P5-09).
+        try:
+            protected, how = protection()
+        except ApiError as error:
+            protected, how = None, f"the rules of main could not be read ({error})"
+        if protected is False:
+            warnings.append(f"{UNPROTECTED} ({how})")
+        elif protected is None:
+            warnings.append(f"whether main requires a pull request could not be checked: {how}")
+        else:
+            notes.append(how)
     for text in warnings:
         print(command("warning", "Upload setup", text))
     with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:

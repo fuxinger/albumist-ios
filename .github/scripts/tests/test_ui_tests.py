@@ -994,22 +994,23 @@ class GrantPhotosTests(unittest.TestCase):
         self.assertIn("UI_HOST photo access NOT granted after 2 attempts", out)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class SettleTests(unittest.TestCase):
     """The wait for the Mac's load before a pass (ui_tests.settle; UI runs 44397301774, 44437759848)."""
 
     def run_settle(self, loads, limit=300):
-        values, slept, tops = list(loads), [], []
+        values, slept, tops, now = list(loads), [], [], [1000.0]
+
+        def sleep(seconds):
+            slept.append(seconds)
+            now[0] += seconds
 
         def top():
             tops.append(len(slept))
             return ["99.0 R Simulator"]
         with contextlib.redirect_stdout(io.StringIO()) as log:
             settled = ui_tests.settle(load=lambda: values.pop(0) if len(values) > 1 else values[0],
-                                      sleep=slept.append, top=top, limit=limit, step=10)
+                                      sleep=sleep, top=top, limit=limit, step=10, clock=lambda: now[0])
         return settled, slept, tops, log.getvalue()
 
     def test_a_quiet_mac_starts_at_once(self):
@@ -1036,4 +1037,30 @@ class SettleTests(unittest.TestCase):
     def test_every_pass_waits_before_xcodebuild(self):
         source = open(ui_tests.__file__, encoding="utf-8").read()
         body = source.split("def run_pass(", 1)[1].split("\ndef ", 1)[0]
-        self.assertLess(body.index("settle()"), body.index("subprocess.Popen"))
+        self.assertLess(body.index("settle(limit=settle_limit("), body.index("subprocess.Popen"))
+
+    def test_the_wait_never_eats_the_time_a_retry_was_promised(self):
+        self.assertEqual(ui_tests.settle_limit(0, 5000.0), ui_tests.SETTLE_LIMIT)
+        self.assertEqual(ui_tests.settle_limit(5000.0 + 3600, 5000.0), ui_tests.SETTLE_LIMIT)
+        # 12 min left before the deadline: 2 of them for the wait, 10 for the tests.
+        self.assertEqual(ui_tests.settle_limit(5000.0 + 12 * 60, 5000.0), 120)
+        self.assertEqual(ui_tests.settle_limit(5000.0 + 9 * 60, 5000.0), 0)
+
+    def test_slow_probes_count_towards_the_limit(self):
+        now, slept = [0.0], []
+
+        def top():
+            now[0] += 30  # ps on a starved Mac: its whole timeout
+            return []
+
+        def sleep(seconds):
+            slept.append(seconds)
+            now[0] += seconds
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(ui_tests.settle(load=lambda: 50.0, sleep=sleep, top=top, limit=120, step=10,
+                                             clock=lambda: now[0]))
+        self.assertLessEqual(now[0], 120 + 30)
+
+
+if __name__ == "__main__":
+    unittest.main()

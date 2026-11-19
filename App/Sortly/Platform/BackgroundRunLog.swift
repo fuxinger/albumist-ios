@@ -27,8 +27,8 @@ enum BackgroundRunLog {
         var lastEndState: String?
         /// How the last analysis run ended: when, why, and whether the app was on screen.
         var lastRunEnd: String?
-        /// iOS's memory warnings (P4-06): how many, and the last one (`MemoryPressure.line`).
-        var memoryWarnings: Int?
+        /// iOS's last memory warning (P4-06, `MemoryPressure.line`), kept across launches: iOS
+        /// may end the app right after it. The report adds this launch's count.
         var lastMemoryWarning: String?
     }
 
@@ -57,10 +57,7 @@ enum BackgroundRunLog {
 
     /// iOS warned that memory runs low (`AppModel.memoryWarning`).
     static func memoryWarning(_ line: String) {
-        update {
-            $0.memoryWarnings = ($0.memoryWarnings ?? 0) + 1
-            $0.lastMemoryWarning = line
-        }
+        update { $0.lastMemoryWarning = line }
     }
 
     /// The memory iOS still allows the app, in MB; `nil` where it sets no limit (the simulator).
@@ -105,7 +102,7 @@ enum BackgroundRunLog {
             "background time requested \(e.requested), started \(e.started), refused \(e.refused) (\(e.lastRefusal ?? "-")), "
                 + "last start \(start) at \(percent(e.lastStartProgress)), last end \(end) \(e.lastEndReason ?? "-") at \(progress), \(e.lastEndState ?? "-")",
             "last analysis run \(e.lastRunEnd ?? "-")",
-            "memory warnings \(e.memoryWarnings ?? 0), last \(e.lastMemoryWarning ?? "-")",
+            "memory warnings this launch \(MemoryPressure.shared.warnings), last \(e.lastMemoryWarning ?? "-")",
             "device now \(deviceState()), hottest during the last run \(HeatLog.hottest)",
         ]
     }

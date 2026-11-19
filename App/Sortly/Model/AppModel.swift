@@ -16,8 +16,10 @@ final class AppModel {
     static let shared = AppModel()
 
     init() {
-        // The copies made from the facts go when iOS warns that memory runs low (P4-06).
+        // The copies made from the facts go when iOS warns that memory runs low (P4-06), and the
+        // previews loaded ahead for the analysis.
         MemoryPressure.shared.register("library caches", owner: self) { $0.dropCaches() }
+        PreviewCache.registerForMemoryWarnings()
     }
 
     enum Phase: Equatable {
@@ -323,15 +325,28 @@ final class AppModel {
     @ObservationIgnored private var datesCache: [AssetID: Date]?
     @ObservationIgnored private var previewRanksCache: [AssetID: PreviewRank]?
     @ObservationIgnored private var factsIndex: [AssetID: AssetFacts]?
+    /// A memory warning dropped `factsIndex`: single lookups search the facts until a caller
+    /// that looks up many photos makes the index again (`fullFactsIndex`).
+    @ObservationIgnored private var factsIndexDropped = false
 
-    /// Facts by photo id (search hits, photo view).
-    var factsByID: [AssetID: AssetFacts] {
+    /// Facts by photo id (search hits, photo view). While a memory warning dropped the index,
+    /// each lookup searches the facts for its one photo: the next swipe in the photo view does
+    /// not make the index for all photos again on the main thread (second review of P4-06).
+    var factsByID: FactsLookup {
+        access(keyPath: \.facts)
+        if factsIndex == nil && factsIndexDropped { return FactsLookup(facts: facts) }
+        return FactsLookup(index: fullFactsIndex)
+    }
+
+    /// The index of all photos, made when it is missing: for callers that look up many photos.
+    private var fullFactsIndex: [AssetID: AssetFacts] {
         access(keyPath: \.facts)
         if let factsIndex { return factsIndex }
         let index = MainThreadWatch.shared.section("facts by id") {
             Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         }
         factsIndex = index
+        factsIndexDropped = false
         return index
     }
 
@@ -370,21 +385,22 @@ final class AppModel {
     }
 
     /// The copies made from the facts that are made again at their next use: the search index
-    /// (off the main thread, at the next search), the facts by id, the capture dates, the atlas
-    /// and its countries, and the library tab's areas while the tab is not on screen (made again
-    /// when it comes back). Never the facts, states, suggestions or decisions. A search index or
-    /// library pass still being made is left to finish: a search or the grid waits for it. The
-    /// preview ranks stay: small, and made off the main thread only when the facts are refreshed.
+    /// (off the main thread, at the next search), the facts by id (single lookups search
+    /// meanwhile, `factsByID`), the capture dates and the atlas's country photos. Never the
+    /// facts, states, suggestions or decisions. A search index still being made is left to
+    /// finish: a search waits for it. Kept (second review of P4-06): the library tab's areas (a
+    /// few MB; the grid under the photo view would lose its place), the atlas (a few KB, 100 to
+    /// 250 ms to make again on the main thread) and the preview ranks (small, made off the main
+    /// thread only when the facts are refreshed).
     private func dropCaches() {
+        let dropped = (searchIndexCache, factsIndex, datesCache, countryCache)
         searchIndexCache = nil
         factsIndex = nil
+        factsIndexDropped = true
         datesCache = nil
-        atlasCache = [:]
         countryCache = [:]
-        if !libraryBucketsShown && libraryBucketsTask == nil {
-            libraryBuckets = nil
-            libraryBucketsMadeFor = -1
-        }
+        // Freed off the main thread: letting go of 100,000 entries takes a moment.
+        Task.detached(priority: .background) { withExtendedLifetime(dropped) {} }
     }
 
     /// Photos the user took out of a suggestion ("Aus Vorschlag entfernen").
@@ -2318,7 +2334,7 @@ final class AppModel {
     /// any of its trips, until the user answers it there or on another trip.
     func recurringPlaceQuestion(for proposal: AlbumProposal) -> RecurringPlaceCandidate? {
         guard isTripLike(proposal), let report = recurringPlaceReport else { return nil }
-        let facts = factsByID
+        let facts = fullFactsIndex
         guard let question = report.question(for: proposal, tripOf: { facts[$0]?.tripID }) else { return nil }
         // Answered since the last analysis ("Nein" starts none): not asked again.
         return recurringPlaces.answer(near: question.center) == nil ? question : nil
@@ -2327,7 +2343,7 @@ final class AppModel {
     /// Whether "Keine Reise, hier bin ich öfter" can be offered: the place of the trip is known.
     func canMarkRecurringPlace(_ proposal: AlbumProposal) -> Bool {
         guard isTripLike(proposal), let report = recurringPlaceReport else { return false }
-        let facts = factsByID
+        let facts = fullFactsIndex
         return report.place(for: proposal, tripOf: { facts[$0]?.tripID }) != nil
     }
 
@@ -2338,7 +2354,7 @@ final class AppModel {
     /// question.
     func answerRecurringPlace(_ oftenHere: Bool, for proposal: AlbumProposal) async -> Bool {
         guard let report = recurringPlaceReport else { return false }
-        let facts = factsByID
+        let facts = fullFactsIndex
         let tripOf: (AssetID) -> SortlyID? = { facts[$0]?.tripID }
         guard let center = report.question(for: proposal, tripOf: tripOf)?.center ?? report.place(for: proposal, tripOf: tripOf) else { return false }
         // The place's name as the suggestion shows it, for the settings only; never what the

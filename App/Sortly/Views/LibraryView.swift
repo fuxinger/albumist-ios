@@ -24,8 +24,7 @@ struct LibraryView: View {
 
     var body: some View {
         let _ = MainThreadWatch.shared.count("library body")
-        // Made off the main thread (`AppModel.libraryBuckets`); `nil` only before the first pass
-        // (also the first after a memory warning while the tab was not on screen).
+        // Made off the main thread (`AppModel.libraryBuckets`); `nil` only before the first pass.
         let members = model.libraryBuckets?[bucket]
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {

@@ -61,6 +61,13 @@ enum PreviewCache {
         manager.stopCachingImagesForAllAssets()
     }
 
+    /// On a memory warning the previews loaded ahead go (P4-06). The analysis asks Photos for
+    /// each photo it reads (`ImageLoader`), so it goes on, only without the photos loaded ahead;
+    /// `willAnalyze` loads the next ones ahead again.
+    @MainActor static func registerForMemoryWarnings() {
+        MemoryPressure.shared.register("analysis previews", owner: manager) { $0.stopCachingImagesForAllAssets() }
+    }
+
     /// Analysed: its preview is not kept for longer than needed.
     static func stop(_ asset: PHAsset) {
         manager.stopCachingImages(for: [asset], targetSize: size, contentMode: .aspectFit, options: options())

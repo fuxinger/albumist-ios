@@ -17,11 +17,12 @@ final class ThumbnailCache {
         cache.totalCostLimit = 80 * 1024 * 1024
         cache.countLimit = 2000
         assets.countLimit = 6000
-        // On a memory warning the thumbnails go at once (P4-06); each comes again from Photos
-        // when it is shown.
+        // On a memory warning the thumbnails go at once (P4-06), and what the image manager
+        // keeps; each comes again from Photos when it is shown.
         MemoryPressure.shared.register("thumbnails", owner: self) {
             $0.cache.removeAllObjects()
             $0.assets.removeAllObjects()
+            $0.manager.value.stopCachingImagesForAllAssets()
         }
     }
 

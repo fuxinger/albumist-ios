@@ -27,8 +27,9 @@ run-name: >-
 # any workflow names them (.github/scripts/tests/test_workflows.py).
 #
 #   1. Upload approval (Linux, a minute): only on main, and only when the repository is public
-#      and the environment testflight-upload asks a required reviewer first (GitHub enforces
-#      that rule in a private repository only with Enterprise; .github/scripts/upload_approval.py);
+#      and the environment testflight-upload asks a required reviewer first and may be used
+#      from the branch main only (GitHub enforces the reviewer in a private repository only with
+#      Enterprise; .github/scripts/upload_approval.py);
 #      otherwise the run stops here, before any macOS minute, and names the setup steps. GitHub
 #      would create a missing environment without any rule as soon as the upload job names it, so
 #      this check is what keeps an upload from starting without the owner. It reads no secret.

@@ -57,11 +57,29 @@ class ReviewTests(unittest.TestCase):
                 (SET_UP, [], "custom without a rule"),
                 (SET_UP, [{"name": "*", "type": "branch"}], "every branch by pattern"),
                 (SET_UP, MAIN + [{"name": "dev", "type": "branch"}], "main and another"),
-                (SET_UP, [{"name": "main", "type": "tag"}], "a tag named main")):
+                (SET_UP, [{"name": "main", "type": "tag"}], "a tag named main"),
+                (dict(SET_UP, deployment_branch_policy=protected), MAIN, "protected branches, rules listed"),
+                (dict(SET_UP, deployment_branch_policy=None), MAIN, "no rule, rules listed")):
             with self.subTest(why=why):
                 problems, _, _ = upload_approval.review(environment, branches=branches)
                 self.assertEqual(len(problems), 1)
                 self.assertIn("other branches than main", problems[0])
+
+    def test_a_rule_without_a_type_is_a_branch_rule(self):
+        # Answers from before GitHub added tag rules name no type; such a rule is a branch rule.
+        self.assertEqual(upload_approval.review(SET_UP, branches=[{"id": 3, "name": "main"}])[0], [])
+
+    def test_the_rules_are_read_from_branch_policies(self):
+        originals = upload_approval._get
+        self.addCleanup(setattr, upload_approval, "_get", originals)
+        paths = []
+        upload_approval._get = lambda path: paths.append(path) or {"total_count": 1, "branch_policies": MAIN}
+        self.assertEqual(upload_approval.fetch_branches(), MAIN)
+        self.assertEqual(paths, ["environments/testflight-upload/deployment-branch-policies"])
+        upload_approval._get = lambda path: None
+        self.assertIsNone(upload_approval.fetch_branches())
+        self.assertIsNone(upload_approval.branches_of(CREATED_BY_A_JOB, lambda: MAIN))
+        self.assertEqual(upload_approval.branches_of(SET_UP, lambda: MAIN), MAIN)
 
     def test_self_review_is_a_warning(self):
         strict = dict(SET_UP, protection_rules=[dict(SET_UP["protection_rules"][0], prevent_self_review=True)])
@@ -279,6 +297,16 @@ class DailyBuildTests(unittest.TestCase):
         self.assertIn("DAILY_BUILD no build: TestFlight run 50", log.getvalue())
         with open(output, encoding="utf-8") as f:
             self.assertEqual(f.read(), "start=false\n")
+
+        # An environment that other branches may use: no daily build either.
+        upload_approval.fetch_branches = lambda: [{"name": "*", "type": "branch"}]
+        os.remove(output)
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(daily_build.main(["decide"]), 0)
+        self.assertIn("other branches than main", log.getvalue())
+        with open(output, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "start=false\n")
+        upload_approval.fetch_branches = lambda: MAIN
 
         def down():
             raise upload_approval.ApiError("down")

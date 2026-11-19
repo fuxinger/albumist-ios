@@ -52,7 +52,7 @@
 - Bau-Strecke (Entscheidungen 5 und 10 vom 18.11.): TestFlight lädt nur noch nach der Freigabe von
   Fuchs hoch. Der Upload-Job läuft in der GitHub-Umgebung `testflight-upload`, nur dort liegen die
   Apple-Schlüssel; der erste Job hält den Lauf an, solange die Umgebung keinen Prüfer verlangt
-  (Anleitung `docs/launch/FREIGABE_EINRICHTEN.md`). Neu: ein täglicher Build mit kleinem Tor
+  oder nicht nur der Zweig `main` sie nutzen darf (Anleitung `docs/launch/FREIGABE_EINRICHTEN.md`). Neu: ein täglicher Build mit kleinem Tor
   (`daily-build.yml`: CI, die UI-Gruppen „ganzer Ablauf“ und „Kontrast“ und der Härtetest, der vor
   jedem Upload läuft; rund 70 Minuten, nur an Tagen mit geänderter App); das große Tor mit allen
   UI-Gruppen und Härtetest bleibt für Tester und App Store. „Was testen“ nennt das kleine Tor; der

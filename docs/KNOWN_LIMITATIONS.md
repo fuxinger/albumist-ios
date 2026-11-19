@@ -215,6 +215,14 @@
     andere Schriften für dieselben Wörter (kyrillische oder griechische Buchstaben, die wie
     lateinische aussehen) nicht.
 
+## Suche
+- Orte, denen du einen Namen gibst, findet die Suche unter diesem Namen, auch bevor ihr Album
+  angelegt ist (Prüfbefund G1-05). Umbenannte Reisen und andere Vorschläge, die keine Orte
+  sind, findet sie unter dem neuen Namen erst über ihr Album.
+- Ein Name aus mehreren Wörtern wird als Ganzes gefunden, wie bei Städten und Alben: ein Wort
+  daraus allein („Kleingarten“ für „Mein Kleingarten“) findet den Ort nicht. Beim Tippen bietet
+  die Suche den ganzen Namen an.
+
 ## Jahreszeiten
 - Jahreszeiten sind noch nicht als Alben wählbar. Werden sie es, gilt: Frühling und Herbst
   heißen auf beiden Halbkugeln gleich („Herbst 2026“ für April in Sydney und Oktober in

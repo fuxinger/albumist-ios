@@ -1687,8 +1687,12 @@ final class DeviceConditionUITests: XCTestCase {
         var firstLook: (line: String, took: Double)?
         var reacted: Double?
         var resumeShown: Double?
+        // Each look's start and the count in its line (one snapshot: the count read separately
+        // came half a second later and dated a move during the tap after Fortsetzen, TestFlight
+        // run 44461253154; `PauseCountCheck`).
+        var looks: [(at: Date, count: Int?)] = []
         var last = before
-        var lastMove = tapped
+        var lastSeen = tapped
         while Date().timeIntervalSince(tapped) < 60 {
             let looked = Date()
             let line = progressText() ?? ""
@@ -1697,14 +1701,27 @@ final class DeviceConditionUITests: XCTestCase {
                 reacted = looked.timeIntervalSince(tapped)
             }
             if resumeShown == nil, resume.exists { resumeShown = Date().timeIntervalSince(tapped) }
-            let now = analysisCount()?.done ?? last
-            if now != last { last = now; lastMove = Date() }
-            if resumeShown != nil && Date().timeIntervalSince(lastMove) > 5 { break }
+            let now = PauseCountCheck.done(in: line)
+            looks.append((looked, now))
+            if let now, now != last { last = now; lastSeen = Date() }
+            if resumeShown != nil && Date().timeIntervalSince(lastSeen) > 5 { break }
             usleep(100_000)
         }
-        let stopped = max(0, lastMove.timeIntervalSince(tapped))
+        let lookedUntil = Date()
         func s(_ v: Double?) -> String { v.map { String(format: "%.2f", $0) } ?? "never" }
-        print("UI_TIMING stress pause: tap \(s(tapped.timeIntervalSince(tapStarted))) s, first look '\(firstLook?.line ?? "")' (took \(s(firstLook?.took)) s), reacted \(s(reacted)) s, Fortsetzen \(s(resumeShown)) s, counting stopped \(s(stopped)) s (\(last - before) more photos)")
+        // The earliest the count can have moved for the last time, from the test's looks; the
+        // app's record of the line (its own clock) decides when it can be read.
+        let fromLooks = PauseCountCheck.lastMoveFromLooks(before: before, readBefore: tapStarted, looks: looks)
+        var stopped = max(0, (fromLooks ?? tapStarted).timeIntervalSince(tapped))
+        var limit = (resumeShown ?? 0) + 0.5
+        var measure = "test's looks"
+        if let lines = readProgressRecord(from: tapStarted, to: lookedUntil)?.lines,
+           let record = PauseCountCheck.afterPausedInRecord(lines) {
+            stopped = max(0, (record.lastMove ?? record.paused).timeIntervalSince(tapped))
+            limit = max(0, record.paused.timeIntervalSince(tapped)) + 0.5
+            measure = "app record: paused \(s(record.paused.timeIntervalSince(tapped))) s, \(record.more) more photos after it"
+        }
+        print("UI_TIMING stress pause: tap \(s(tapped.timeIntervalSince(tapStarted))) s, first look '\(firstLook?.line ?? "")' (took \(s(firstLook?.took)) s), reacted \(s(reacted)) s, Fortsetzen \(s(resumeShown)) s, counting stopped \(s(stopped)) s (\(measure); \(last - before) more photos than before the tap)")
         let firstShows = firstLook.map { $0.line.hasPrefix("Wird angehalten") || $0.line.hasPrefix("Analyse pausiert") } ?? false
         XCTAssertTrue(firstShows, "The first look after Pause still read '\(firstLook?.line ?? "")'")
         // Pause under 1 s: the app's main thread (which changes the card in the tap's own call)
@@ -1719,7 +1736,7 @@ final class DeviceConditionUITests: XCTestCase {
             XCTAssertLessThan(tapped.timeIntervalSince(tapStarted), 1, "The Pause tap took \(s(tapped.timeIntervalSince(tapStarted))) s")
         }
         XCTAssertLessThan(resumeShown ?? 99, 10, "Fortsetzen came \(s(resumeShown)) s after Pause")
-        XCTAssertLessThanOrEqual(stopped, (resumeShown ?? 0) + 0.5, "The count went on after the analysis showed it was paused")
+        XCTAssertLessThanOrEqual(stopped, limit, "The count went on after the analysis showed it was paused (\(measure))")
         shot("26a-stress-paused")
         guard resumeShown != nil else { print("UI_STEP_MISSING stress continue"); return }
         let resumed = Date()

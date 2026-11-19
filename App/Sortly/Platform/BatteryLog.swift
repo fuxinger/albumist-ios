@@ -72,7 +72,7 @@ enum BatteryLog {
         func value(_ estimate: BatteryUse.Estimate) -> String {
             switch estimate {
             case .perThousand(let points): String(localized: "\(BatteryUse.number(points, locale: locale)) %")
-            case .below(let points): String(localized: "unter \(BatteryUse.number(points, locale: locale)) %")
+            case .aboutAtMost(let points): String(localized: "etwa höchstens \(BatteryUse.number(points, locale: locale)) %")
             case .tooLittle: String(localized: "noch zu wenig gemessen")
             }
         }

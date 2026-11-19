@@ -267,9 +267,10 @@ struct BatteryUseTests {
     }
 
     @Test func manyPhotosWithLittleDropGiveAnUpperBound() {
-        // 4.000 photos for 2 points: less than 3 points, so less than 0,75 % per 1.000.
+        // 4.000 photos for 2 points: about at most 3 points (each stretch can be a point off),
+        // so about at most 0,75 % per 1.000.
         let use = BatteryUse([Self.stretch(from: 0.90, to: 0.88, photos: 4_000)])
-        #expect(use.all.estimate == .below(0.75))
+        #expect(use.all.estimate == .aboutAtMost(0.75))
     }
 
     /// Some iPhones say the level only in 5-point steps: 5 points measured could be almost 0 or
@@ -282,7 +283,7 @@ struct BatteryUseTests {
         #expect(coarse.coarseSteps)
         #expect(coarse.all.estimate == .tooLittle)
         // The upper bound goes by the larger minimum too: under 10 points for 2.500 photos.
-        #expect(BatteryUse([Self.stretch(from: 0.85, to: 0.80, photos: 2_500)]).all.estimate == .below(4))
+        #expect(BatteryUse([Self.stretch(from: 0.85, to: 0.80, photos: 2_500)]).all.estimate == .aboutAtMost(4))
         let enough = BatteryUse([Self.stretch(from: 0.85, to: 0.75, photos: 2_000)])
         #expect(enough.all.estimate == .perThousand(5))
         let fine = BatteryUse([Self.stretch(from: 0.85, to: 0.81, photos: 1_000)])

@@ -12733,16 +12733,6 @@
         }
       }
     },
-    "unter %@ %%" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "below %@%%"
-          }
-        }
-      }
-    },
     "noch zu wenig gemessen" : {
       "localizations" : {
         "en" : {
@@ -12779,6 +12769,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Battery: %1$@ per 1,000 photos (%2$@; %3$@ photos measured)"
+          }
+        }
+      }
+    },
+    "etwa höchstens %@ %%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "about at most %@%%"
           }
         }
       }

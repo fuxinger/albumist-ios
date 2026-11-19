@@ -210,20 +210,22 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
 /// a number only once the counted stretches together cover at least 500 photos and a drop of
 /// at least 3 points (10 on a phone that reports 5-point steps). With 3 points the reading can
 /// be off by about one point, so the number is a rough one, which is what the report needs.
-/// Many photos for less drop give an upper bound ("unter 0,8 %"): less than the minimum drop
-/// was used, or it would have shown. Anything else says "noch zu wenig gemessen".
+/// Many photos (2.000 or more) for less drop give a rough bound, "etwa höchstens 0,8 %": the
+/// minimum drop spread over the photos. Each stretch can be off by up to a point, so it is no
+/// hard limit (second review), and with fewer photos it would say too little to be worth
+/// showing. Anything else says "noch zu wenig gemessen".
 public struct BatteryUse: Sendable, Equatable {
     public static let minPhotos = 500
     public static let minDrop = 3.0
     public static let minDropCoarse = 10.0
-    /// From this many photos, a drop below the minimum gives an upper bound.
+    /// From this many photos, a drop below the minimum gives a rough bound.
     public static let boundPhotos = 2_000
 
     public enum Estimate: Sendable, Equatable {
         /// Percentage points per 1.000 photos.
         case perThousand(Double)
-        /// Less than this per 1.000 photos.
-        case below(Double)
+        /// About at most this per 1.000 photos (the minimum drop over the photos).
+        case aboutAtMost(Double)
         case tooLittle
     }
 
@@ -247,7 +249,7 @@ public struct BatteryUse: Sendable, Equatable {
             if photos >= BatteryUse.minPhotos, drop >= minDrop {
                 estimate = .perThousand(drop * 1_000 / Double(photos))
             } else if photos >= BatteryUse.boundPhotos, drop < minDrop {
-                estimate = .below(minDrop * 1_000 / Double(photos))
+                estimate = .aboutAtMost(minDrop * 1_000 / Double(photos))
             } else {
                 estimate = .tooLittle
             }

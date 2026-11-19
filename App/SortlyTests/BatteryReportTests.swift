@@ -42,8 +42,9 @@ struct BatteryReportTests {
         }
         let places = english("Vordergrund %@, Hintergrund %@", english("%@ %%", "2.1"), english("noch zu wenig gemessen"))
         #expect(places == "foreground 2.1%, background not enough measured yet")
-        #expect(english("Akku: %@ pro 1.000 Fotos (%@; %@ Fotos gemessen)", english("unter %@ %%", "0.8"), places, "4,200")
-                == "Battery: below 0.8% per 1,000 photos (foreground 2.1%, background not enough measured yet; 4,200 photos measured)")
+        // Each stretch can be a point off: the bound is "about at most", never a hard "below".
+        #expect(english("Akku: %@ pro 1.000 Fotos (%@; %@ Fotos gemessen)", english("etwa höchstens %@ %%", "0.8"), places, "4,200")
+                == "Battery: about at most 0.8% per 1,000 photos (foreground 2.1%, background not enough measured yet; 4,200 photos measured)")
         #expect(english("Akku: noch zu wenig gemessen (Fotos: %@, verbraucht: %@ %%)", "320", "1")
                 == "Battery: not enough measured yet (photos: 320, used: 1%)")
     }

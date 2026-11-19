@@ -996,10 +996,10 @@ class GrantPhotosTests(unittest.TestCase):
 
 
 class SettleTests(unittest.TestCase):
-    """The wait for the Mac's load before a pass (ui_tests.settle; UI runs 44397301774, 44437759848)."""
+    """The wait for the simulator before a pass (ui_tests.settle; UI runs 44397301774, 44437759848)."""
 
-    def run_settle(self, loads, limit=300):
-        values, slept, tops, now = list(loads), [], [], [1000.0]
+    def run_settle(self, answers, limit=300, load=400.0):
+        values, slept, tops, now = list(answers), [], [], [1000.0]
 
         def sleep(seconds):
             slept.append(seconds)
@@ -1009,26 +1009,27 @@ class SettleTests(unittest.TestCase):
             tops.append(len(slept))
             return ["99.0 R Simulator"]
         with contextlib.redirect_stdout(io.StringIO()) as log:
-            settled = ui_tests.settle(load=lambda: values.pop(0) if len(values) > 1 else values[0],
+            settled = ui_tests.settle(lambda: values.pop(0) if len(values) > 1 else values[0], load=lambda: load,
                                       sleep=sleep, top=top, limit=limit, step=10, clock=lambda: now[0])
         return settled, slept, tops, log.getvalue()
 
-    def test_a_quiet_mac_starts_at_once(self):
-        settled, slept, tops, log = self.run_settle([1.2])
+    def test_a_quick_simulator_starts_at_once_whatever_the_load(self):
+        # The load stays in the hundreds after a boot even when tests pass: it is logged only.
+        settled, slept, tops, log = self.run_settle([0.3, 0.4], load=600.0)
         self.assertTrue(settled)
         self.assertEqual((slept, tops), ([], []))
-        self.assertIn("SIM_SETTLE load(1m)=1.20 after 0 s", log)
+        self.assertIn("SIM_SETTLE simulator answered in 0.3 s, load(1m)=600.00, after 0 s", log)
 
-    def test_a_busy_mac_waits_until_the_load_is_down_and_logs_what_is_busy(self):
-        settled, slept, tops, log = self.run_settle([40.0, 22.0, 9.0, 3.4])
+    def test_a_slow_simulator_is_waited_for_until_it_answers_quickly_twice(self):
+        settled, slept, tops, log = self.run_settle([9.0, None, 1.5, 6.0, 0.8, 0.5])
         self.assertTrue(settled)
-        self.assertEqual(slept, [10, 10, 10])
+        self.assertEqual(slept, [10, 10, 10])  # after 9.0, failed and 6.0; never right after a quick answer
         self.assertEqual(tops, [0])  # once a minute, from the first value
         self.assertIn("SIM_TOP 99.0 R Simulator", log)
-        self.assertIn("SIM_SETTLE load(1m)=3.40 after 30 s", log)
+        self.assertIn("answered in failed", log)
 
     def test_the_wait_has_a_limit_and_the_pass_then_starts_anyway(self):
-        settled, slept, tops, log = self.run_settle([50.0], limit=120)
+        settled, slept, tops, log = self.run_settle([12.0], limit=120)
         self.assertFalse(settled)
         self.assertEqual(sum(slept), 120)
         self.assertEqual(tops, [0, 6, 12])
@@ -1037,7 +1038,8 @@ class SettleTests(unittest.TestCase):
     def test_every_pass_waits_before_xcodebuild(self):
         source = open(ui_tests.__file__, encoding="utf-8").read()
         body = source.split("def run_pass(", 1)[1].split("\ndef ", 1)[0]
-        self.assertLess(body.index("settle(limit=settle_limit("), body.index("subprocess.Popen"))
+        self.assertLess(body.index("settle(lambda: simulator_probe(args.udid), limit=settle_limit("),
+                        body.index("subprocess.Popen"))
 
     def test_the_wait_never_eats_the_time_a_retry_was_promised(self):
         self.assertEqual(ui_tests.settle_limit(0, 5000.0), ui_tests.SETTLE_LIMIT)
@@ -1049,16 +1051,16 @@ class SettleTests(unittest.TestCase):
     def test_slow_probes_count_towards_the_limit(self):
         now, slept = [0.0], []
 
-        def top():
-            now[0] += 30  # ps on a starved Mac: its whole timeout
-            return []
+        def probe():
+            now[0] += 30  # a probe on a starved Mac: its whole timeout
+            return None
 
         def sleep(seconds):
             slept.append(seconds)
             now[0] += seconds
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertFalse(ui_tests.settle(load=lambda: 50.0, sleep=sleep, top=top, limit=120, step=10,
-                                             clock=lambda: now[0]))
+            self.assertFalse(ui_tests.settle(probe, load=lambda: 50.0, sleep=sleep, top=lambda: [], limit=120,
+                                             step=10, clock=lambda: now[0]))
         self.assertLessEqual(now[0], 120 + 30)
 
 

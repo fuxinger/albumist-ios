@@ -62,9 +62,10 @@ with a test still running a hang, red, never repeated (UI_HANG); with none runni
 tests, before the first) a deadline line that counts as infrastructure (UI_DEADLINE). A repeat
 is not started with less than 30 min left (10 min after the erase): then no result. While a pass runs, failed test cases and ": error: -["
 lines are echoed into the job log at once (UI_LIVE), so a cancel after a failure stays red.
-Before every pass (first and repeat) `settle` waits up to 5 min for the Mac's load after the
-simulator's boot (SIM_SETTLE, SIM_TOP), never into the 10 min a repeat keeps; then the pass
-starts anyway. No test is repeated for it.
+Before every pass (first and repeat) `settle` waits up to 5 min until the simulator answers a
+trivial process twice in a row in under 2 s (the Mac is starved after the boot; SIM_SETTLE with
+the load, SIM_TOP), never into the 10 min a repeat keeps; then the pass starts anyway. No test
+is repeated for it.
 A watchdog (class Watchdog) stops a pass early when the simulator leaves "Booted" before
 the first test started (two checks 20 s apart); the UI_WATCHDOG line it leaves in the log is
 one of the infrastructure failures above, and the stop counts as FLAKY_BOOT. It never stops a
@@ -582,7 +583,8 @@ def timing(what: str, started: float) -> None:
     print(f"UI_BOOT_TIMING {what} {time.monotonic() - started:.1f} s", flush=True)
 
 
-SETTLE_LOAD = 3.5
+SETTLE_PROBE = 2.0
+SETTLE_CALM = 2
 SETTLE_LIMIT = 300
 SETTLE_STEP = 10
 
@@ -596,34 +598,50 @@ def settle_limit(deadline: float, now: float) -> float:
     return max(0.0, min(SETTLE_LIMIT, deadline - now - RETRY_AFTER_RESET))
 
 
-def settle(load=lambda: os.getloadavg()[0], sleep=time.sleep, top=None,
+def simulator_probe(udid: str) -> float | None:
+    """Seconds the simulator takes to start and end a trivial process (`simctl spawn U
+    /usr/bin/true`); None when it failed."""
+    started = time.monotonic()
+    code, _ = sh(["xcrun", "simctl", "spawn", udid, "/usr/bin/true"], timeout=30, quiet=True)
+    return time.monotonic() - started if code == 0 else None
+
+
+def settle(probe, load=lambda: os.getloadavg()[0], sleep=time.sleep, top=None,
            limit: float = SETTLE_LIMIT, step: float = SETTLE_STEP, clock=time.monotonic) -> bool:
-    """Waits until the Mac's 1-minute load is below SETTLE_LOAD (at most `limit` s), before a
-    pass starts its first test. Every value is a SIM_SETTLE line, what keeps the Mac busy a
+    """Waits until the simulator answers quickly again (SETTLE_CALM probes in a row under
+    SETTLE_PROBE s, `simulator_probe`), at most `limit` s, before a pass starts its first test.
+    Every probe and the Mac's 1-minute load are a SIM_SETTLE line, what keeps the Mac busy a
     SIM_TOP line once a minute. True when it settled.
 
-    Why: right after the simulator's boot the hosted Mac (3 cores) is starved for minutes
-    (ci.yml has the same wait since CI 44376522818). The first launch of a UI group then took
-    30 s (device test06, UI run 44397301774) or XCTest lost the app although it had started
-    and drawn its first screen (flow-other test05, UI run 44437759848: process after 4 s, its
-    code after 9 s, a 2.3 s stall in dyld/os_log, "does not have a process ID" after 150 s).
-    The pass still runs when the load stays high: the wait only gives the Mac its time."""
-    # Measured on the clock: on a starved Mac `ps` (busiest) alone can take its 30 s timeout.
-    start, next_top = clock(), 0.0
+    Why: right after the simulator's boot the hosted Mac (3 cores) is starved for minutes. The
+    first launch of a UI group then took 30 s (device test06, UI run 44397301774) or XCTest lost
+    the app although it had started and drawn its first screen (flow-other test05, UI run
+    44437759848: process after 4 s, its code after 9 s, a 2.3 s stall in dyld/os_log, "does not
+    have a process ID" after 150 s). The load is logged only: on these Macs it stays at 200-850
+    for minutes after the boot even when tests pass (ci.yml's SIM_SETTLE lines, CI 44437759869
+    and 44397301952), so a load limit would always wait the whole time (second review of
+    aadb7f1). How fast the simulator answers is what the launch needs. The pass still runs when
+    it stays slow: the wait only gives the Mac its time."""
+    # Measured on the clock: on a starved Mac a probe or `ps` (busiest) can take its 30 s timeout.
+    start, next_top, calm = clock(), 0.0, 0
     while True:
+        answer = probe()
         value = load()
         waited = clock() - start
-        print(f"SIM_SETTLE load(1m)={value:.2f} after {waited:.0f} s", flush=True)
-        if value < SETTLE_LOAD:
+        took = "failed" if answer is None else f"{answer:.1f} s"
+        print(f"SIM_SETTLE simulator answered in {took}, load(1m)={value:.2f}, after {waited:.0f} s", flush=True)
+        calm = calm + 1 if answer is not None and answer < SETTLE_PROBE else 0
+        if calm >= SETTLE_CALM:
             return True
-        if waited >= next_top:
+        if calm == 0 and waited >= next_top:
             next_top += 60
             for line in (top or busiest)():
                 print(f"SIM_TOP {line}", flush=True)
         if waited >= limit:
-            print(f"SIM_SETTLE still {value:.2f} after {waited:.0f} s; the pass starts anyway", flush=True)
+            print(f"SIM_SETTLE still slow after {waited:.0f} s; the pass starts anyway", flush=True)
             return False
-        sleep(min(step, limit - waited))
+        if calm == 0:
+            sleep(min(step, limit - waited))
 
 
 def busiest() -> list[str]:
@@ -940,8 +958,8 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
                    "-scheme", args.scheme, "CODE_SIGNING_ALLOWED=NO"]
     command += ["-destination", f"id={args.udid}", "-resultBundlePath", result] + chosen
     settled = time.monotonic()
-    settle(limit=settle_limit(getattr(args, "deadline", 0) or 0, time.time()))
-    timing(f"load settled before the {label} pass", settled)
+    settle(lambda: simulator_probe(args.udid), limit=settle_limit(getattr(args, "deadline", 0) or 0, time.time()))
+    timing(f"wait for the simulator before the {label} pass", settled)
     print(f"UI_PASS {args.name} {label}: {' '.join(chosen) or 'all tests'}", flush=True)
     # SwiftUI reports broken navigation (link without destination) and similar runtime problems
     # only in the system log, so it is recorded during the whole pass.

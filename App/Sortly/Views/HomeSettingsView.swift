@@ -308,7 +308,10 @@ struct HomePlacePicker: View {
         var id: String { candidate.id }
     }
 
-    private var candidates: [HomeCandidate] { HomeCandidates.filter(model.homeCandidates, query: query) }
+    private var candidates: [HomeCandidate] { HomeCandidates.filter(model.homeCandidates ?? [], query: query) }
+    /// The places are made off the main thread when the screen opens (`AppModel.homeCandidates`):
+    /// until then no "Noch keine Orte".
+    private var placesMade: Bool { model.homeCandidates != nil }
     /// Picking the current home changes it at once: not while Albumist is busy. The other
     /// purposes only fill in a form.
     private var busy: Bool { purpose == .current && !model.canChangeHome }
@@ -333,9 +336,10 @@ struct HomePlacePicker: View {
                 }
             }
             Section {
-                if candidates.isEmpty && !query.isEmpty {
+                // Nothing while the places are made (a fraction of a second).
+                if placesMade && candidates.isEmpty && !query.isEmpty {
                     ContentUnavailableView.search(text: query)
-                } else if candidates.isEmpty {
+                } else if placesMade && candidates.isEmpty {
                     ContentUnavailableView {
                         Label("Noch keine Orte", systemImage: "mappin.slash")
                     } description: {

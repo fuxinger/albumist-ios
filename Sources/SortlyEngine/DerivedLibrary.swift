@@ -8,14 +8,16 @@ import SortlyStore
 /// Review P4-02: the app read the facts, and next to them the image results of every photo and
 /// the album list a second time, and awaited each pass over all photos one after the other (the
 /// preview ranks, the albums that overlap, the ring); the start of the app waits for all of it.
-/// Now every input is read once and the passes run side by side once the facts are there: the
+/// Now every input is read once and the passes run side by side once everything is read: the
 /// ring does not wait for the albums that overlap (only the "Alben" tab shows them), nor for
 /// the preview ranks or the caches of the first draw.
 ///
 /// Review P4-09: what the first screens made from all photos on the main thread at their first
 /// draw after each refresh (the capture dates of the previews, the atlas of all years and its
-/// years, the places "Dein Zuhause" offers) is made here too, with the same functions the app's
-/// caches fall back on (after a memory warning, say).
+/// years) is made here too, with the same functions the app's caches fall back on (after a
+/// memory warning, say). Not the places "Dein Zuhause" offers: only that screen needs them, and
+/// at every refresh they would cost battery for nothing (the app makes them off the main thread
+/// when the screen asks, `AppModel.homeCandidates`).
 public struct DerivedLibrary: Sendable {
     public var facts: [AssetFacts] = []
     public var previewRanks: [AssetID: PreviewRank] = [:]
@@ -29,8 +31,6 @@ public struct DerivedLibrary: Sendable {
     /// The atlas of all years (`TravelAtlas.compute(facts:year: nil)`) and the years it offers.
     public var atlas = TravelAtlas()
     public var atlasYears: [Int] = []
-    /// `HomeCandidates.make(facts:)`.
-    public var homeCandidates: [HomeCandidate] = []
 
     public init() {}
 
@@ -67,42 +67,49 @@ extension AnalysisPipeline {
                                     scope: OrganizationScope, ownAlbums: Set<CollectionID>,
                                     probe: DerivedLibrary.Probe?) async throws -> DerivedLibrary {
         let store = self.store
-        // Each input once (`factsForOverview`); then the passes side by side.
+        // Each input once (`factsForOverview`), and everything read before any pass starts: once
+        // they run, nothing throws, so no pass is left running when a read fails.
         let read = try await factsForOverview()
         let inventory = read.inventory, facts = read.facts, contents = read.contents
-        async let merges = Self.pass(.merges, probe) { AlbumOverlapAnalyzer().suggestions(in: inventory, excluding: ownAlbums) }
         let stored = try await store.overrides()
         let overrides = OverrideSet(stored)
         // The analysed photos still without their image labels ("Themen" or "Dokumente" turned
         // on since): only while one of the two is on, and only those photos.
         let labels = try await AnalysisPipeline.photosWaitingForLabels(in: store, settings: settings)
-        async let status = Self.pass(.status, probe) {
+        // Side by side, with the priorities they had in the app: what the overview shows at once
+        // user-initiated, the albums that overlap (only the "Alben" tab) as utility work until
+        // they are awaited last (awaiting a task raises its priority to the waiting one's).
+        let status = Self.pass(.status, .userInitiated, probe) {
             DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
                                         contents: contents, labelsMissing: labels.missing, labelsRetrying: labels.retrying,
                                         managed: managed, inventory: inventory, scope: scope)
         }
-        async let ranks = Self.pass(.previewRanks, probe) { PreviewRank.ranks(of: facts) }
-        async let firstDraw = Self.pass(.firstDraw, probe) {
-            (DerivedLibrary.creationDates(of: facts), TravelAtlas.compute(facts: facts, year: nil), TravelAtlas.years(facts: facts),
-             HomeCandidates.make(facts: facts))
+        let ranks = Self.pass(.previewRanks, .userInitiated, probe) { PreviewRank.ranks(of: facts) }
+        let firstDraw = Self.pass(.firstDraw, .userInitiated, probe) {
+            (DerivedLibrary.creationDates(of: facts), TravelAtlas.compute(facts: facts, year: nil), TravelAtlas.years(facts: facts))
         }
+        let merges = Self.pass(.merges, .utility, probe) { AlbumOverlapAnalyzer().suggestions(in: inventory, excluding: ownAlbums) }
         var result = DerivedLibrary()
         result.facts = facts
         result.inventory = inventory
         result.removed = DerivedLibrary.removedFromProposals(stored)
-        result.status = await status
-        result.previewRanks = await ranks
-        (result.creationDates, result.atlas, result.atlasYears, result.homeCandidates) = await firstDraw
-        result.merges = await merges
+        result.status = await status.value
+        result.previewRanks = await ranks.value
+        (result.creationDates, result.atlas, result.atlasYears) = await firstDraw.value
+        result.merges = await merges.value
         return result
     }
 
-    /// One pass over the whole library, off any actor (a child task of `derivedLibrary`).
-    private nonisolated static func pass<T: Sendable>(_ piece: DerivedLibrary.Piece, _ probe: DerivedLibrary.Probe?,
-                                                      _ work: @Sendable () -> T) async -> T {
-        await probe?(piece, false)
-        let value = work()
-        await probe?(piece, true)
-        return value
+    /// One pass over the whole library, started off any actor with its own priority (`derivedLibrary`
+    /// awaits each one).
+    private nonisolated static func pass<T: Sendable>(_ piece: DerivedLibrary.Piece, _ priority: TaskPriority,
+                                                      _ probe: DerivedLibrary.Probe?,
+                                                      _ work: @escaping @Sendable () -> T) -> Task<T, Never> {
+        Task.detached(priority: priority) {
+            await probe?(piece, false)
+            let value = work()
+            await probe?(piece, true)
+            return value
+        }
     }
 }

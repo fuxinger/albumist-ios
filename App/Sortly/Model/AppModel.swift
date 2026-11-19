@@ -266,7 +266,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
+    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; homeCandidatesTask = nil; factsVersion &+= 1; detectedHomePlaceCache = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { libraryInputsChanged() } }
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
@@ -556,7 +556,11 @@ final class AppModel {
         var mode: AnalysisPipeline.Mode
         var cause: AnalysisStartCause
     }
-    @ObservationIgnored private var homeCandidatesCache: [HomeCandidate]?
+    /// Observed: the screen that asked draws again when they are made (`homeCandidates`).
+    private var homeCandidatesCache: [HomeCandidate]?
+    @ObservationIgnored private var homeCandidatesTask: Task<Void, Never>?
+    /// Counts the values of the facts (`makeHomeCandidates`).
+    @ObservationIgnored private var factsVersion = 0
     @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
     var execution = ExecutionState()
     /// A constant: views observe its properties, not the model (see `ExecutionProgress`).
@@ -1940,12 +1944,14 @@ final class AppModel {
             // through the main actor.
             let settings = settings
             let managed = managedAlbums, scope = analysisScope
-            // Albumist's own albums overlap on purpose (a country holds its trips).
-            let derived = try await pipeline.derivedLibrary(snapshot: snapshot, settings: settings, managed: managed, scope: scope,
-                                                            ownAlbums: Set(managed.map(\.albumID)))
+            // Before the library is read, as before: a read that fails there does not skip
+            // settling the purchases with the plans taken back.
             let plans = try await store.planHistory(limit: historyLimit + 1)
             let undone = try await store.undoneTargets()
             Purchases.shared.settleUndone(undone)
+            // Albumist's own albums overlap on purpose (a country holds its trips).
+            let derived = try await pipeline.derivedLibrary(snapshot: snapshot, settings: settings, managed: managed, scope: scope,
+                                                            ownAlbums: Set(managed.map(\.albumID)))
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
             guard derivedCalls.isNewest(call), scope == analysisScope else { return }
@@ -1957,13 +1963,12 @@ final class AppModel {
             MainThreadWatch.shared.section("refresh: facts") {
                 facts = derived.facts
                 // Made with the facts off the main thread (a new value of the facts empties
-                // them): the first draw of the overview, the atlas and "Dein Zuhause" does not
-                // go over all photos on the main thread (review P4-09).
+                // them): the first draw of the overview and the atlas does not go over all
+                // photos on the main thread (review P4-09).
                 previewRanksCache = derived.previewRanks
                 datesCache = derived.creationDates
                 atlasCache[0] = derived.atlas
                 atlasYearsCache = derived.atlasYears
-                homeCandidatesCache = derived.homeCandidates
             }
             self.inventory = derived.inventory
             mergeSuggestions = derived.merges
@@ -2394,13 +2399,29 @@ final class AppModel {
         return place
     }
 
-    /// The places of the library the user can choose from, most photo days first.
-    var homeCandidates: [HomeCandidate] {
+    /// The places of the library the user can choose from, most photo days first. `nil` while
+    /// they are made off the main thread: once for each value of the facts, only when a screen
+    /// asks for them ("Dein Zuhause"), never at a refresh (review P4-09: 322 ms on the main
+    /// thread at 50,000 photos when the screen opened; at every refresh it would cost battery).
+    var homeCandidates: [HomeCandidate]? {
         access(keyPath: \.facts)
         if let homeCandidatesCache { return homeCandidatesCache }
-        let candidates = HomeCandidates.make(facts: facts)
-        homeCandidatesCache = candidates
-        return candidates
+        makeHomeCandidates()
+        return nil
+    }
+
+    /// Starts making `homeCandidates` for the facts as they are, unless that is under way.
+    /// Observed `homeCandidatesCache` draws the screen again when they are there; facts that
+    /// change meanwhile drop the result (`factsVersion`) and the next ask starts anew.
+    private func makeHomeCandidates() {
+        guard homeCandidatesTask == nil else { return }
+        let facts = facts, version = factsVersion
+        homeCandidatesTask = Task { [weak self] in
+            let made = await Task.detached(priority: .userInitiated) { HomeCandidates.make(facts: facts) }.value
+            guard let self, version == self.factsVersion else { return }
+            self.homeCandidatesTask = nil
+            self.homeCandidatesCache = made
+        }
     }
 
     /// The places the user is often at ("Eltern", "Zweitwohnung", answers to "Bist du hier öfter?").

@@ -29,8 +29,10 @@ struct DerivedRefreshTests {
         }
     }
 
-    /// An analysed library: Munich every day and a week in Rome, two albums of Rome that overlap
-    /// (a merge suggestion), a photo ignored, one taken out of a suggestion, two not readable yet.
+    /// An analysed library with "Themen" on: Munich every day and a week in Rome, three albums of
+    /// Rome that overlap (Albumist's own "Rom" left out, the other two a merge suggestion), a
+    /// photo ignored, one taken out of a suggestion, two not readable yet, three still without
+    /// their image labels (one of them tried before).
     func analysed() async throws -> Library {
         var lib = LibraryBuilder()
         _ = lib.daily(from: "2025-11-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-05-12", "2026-05-19")])
@@ -38,10 +40,12 @@ struct DerivedRefreshTests {
         let inventory = CollectionInventory([
             CollectionSnapshot(id: "rom", title: "Rom", assetIDs: Set(rome)),
             CollectionSnapshot(id: "rom-2026", title: "Rom 2026", assetIDs: Set(rome.dropLast(2))),
+            CollectionSnapshot(id: "rom-ausflug", title: "Ausflug Rom", assetIDs: Set(rome.dropFirst(2))),
         ])
         let store = try SortlyStore(url: nil)
         var settings = OrganizationSettings()
         settings.titleLanguage = .german
+        settings.enabledAreas.insert(.imageCategories)
         let library = Library(store: store, reader: InMemoryLibraryReader(assets: lib.assets, inventory: inventory), settings: settings, rome: rome)
         _ = try await library.launch().run()
         try await store.addOverride(UserOverride(scope: .asset(rome[0]), decision: .ignoreAsset))
@@ -49,11 +53,15 @@ struct DerivedRefreshTests {
             try await store.addOverride(UserOverride(scope: .assetInSource(photo, suggestion.id), decision: .neverAdd))
         }
         let contents = try await store.results(ContentAnalysis.self, kind: "content")
-        for id in contents.keys.sorted(by: { $0.rawValue < $1.rawValue }).prefix(2) {
+        for id in rome[1...2] {
             var failed = try #require(contents[id])
             failed.failedAttempts = 1
             try await store.saveResult(failed, kind: "content", asset: id, version: AnalysisPipeline.contentVersion)
         }
+        try await store.saveResults([] as [(AssetID, ContentAnalysis)], kind: "content", version: AnalysisPipeline.contentVersion,
+                                    markingAnalyzed: Array(rome[3...5]), labelsVersion: 0)
+        try await store.saveResult(LabelAttempts(failedAttempts: 1, lastAttempt: Fixture.date("2026-06-30")), kind: "labels", asset: rome[3],
+                                   version: AnalysisPipeline.contentVersion)
         return library
     }
 
@@ -126,7 +134,9 @@ struct DerivedRefreshTests {
 
         let store = library.store
         let snapshot = try await pipeline.latestProposals()
-        let facts = try await pipeline.currentFacts()
+        // From a pipeline of its own: the zones of the places the refresh worked out are not
+        // reused (second review: a fault in handing them over cancelled out).
+        let facts = try await library.launch().currentFacts()
         let inventory = try await store.loadInventory()
         let contents = try await store.results(ContentAnalysis.self, kind: "content")
         let stored = try await store.overrides()
@@ -144,6 +154,7 @@ struct DerivedRefreshTests {
         #expect(derived.previewRanks == PreviewRank.ranks(of: facts))
         #expect(derived.inventory == inventory)
         let merges = AlbumOverlapAnalyzer().suggestions(in: inventory, excluding: ["rom"])
+        #expect(merges.map(\.albumIDs) == [["rom-2026", "rom-ausflug"]])
         #expect(derived.merges == merges)
         #expect(!removed.isEmpty)
         #expect(derived.removed == removed)
@@ -154,9 +165,10 @@ struct DerivedRefreshTests {
         #expect(derived.status.photos == status.photos)
         #expect(derived.status.analyzed == status.analyzed)
         #expect(derived.status.unreadable == status.unreadable)
-        #expect(status.unreadable == (scope == .all ? 2 : status.unreadable))
+        #expect(status.unreadable == 2)
         #expect(derived.status.labelsMissing == status.labelsMissing)
         #expect(derived.status.labelsUntried == status.labelsUntried)
+        #expect(status.labelsMissing == 3 && status.labelsUntried == 2)
         #expect(derived.status.ignored == status.ignored)
         #expect(!status.ignored.isEmpty)
         #expect(derived.status.ifNotIgnored == status.ifNotIgnored)
@@ -167,7 +179,6 @@ struct DerivedRefreshTests {
         #expect(derived.atlas == TravelAtlas.compute(facts: facts, year: nil))
         #expect(derived.atlas.countryCodes.contains("IT"))
         #expect(derived.atlasYears == TravelAtlas.years(facts: facts))
-        #expect(!derived.homeCandidates.isEmpty && derived.homeCandidates == HomeCandidates.make(facts: facts))
     }
 }
 
@@ -197,16 +208,31 @@ struct DerivedRefreshAppTests {
     }
 
     /// P4-09: what the first screens make from all photos at their first draw after a refresh (the
-    /// capture dates of the previews, the atlas of all years and its years, the places "Dein
-    /// Zuhause" offers) was made on the main thread there; the engine makes it off the main
-    /// thread and the refresh hands it over with the facts (after them: a new value of the facts
-    /// empties these caches).
+    /// capture dates of the previews, the atlas of all years and its years) was made on the main
+    /// thread there; the engine makes it off the main thread and the refresh hands it over with
+    /// the facts (after them: a new value of the facts empties these caches).
     @Test func refreshDerivedHandsOverWhatTheFirstDrawMadeOnTheMainThread() throws {
         let body = try Self.refreshBody()
         let facts = try #require(body.range(of: "(?<![A-Za-z0-9_.])facts = ", options: .regularExpression), "refreshDerived assigns no facts")
-        for cache in ["previewRanksCache = ", "datesCache = ", "atlasCache[0] = ", "atlasYearsCache = ", "homeCandidatesCache = "] {
+        for cache in ["previewRanksCache = ", "datesCache = ", "atlasCache[0] = ", "atlasYearsCache = "] {
             let handed = body.range(of: cache).map { $0.lowerBound > facts.lowerBound } ?? false
             #expect(handed, "refreshDerived does not hand over \(cache)…: the first draw makes it on the main thread")
         }
+    }
+
+    /// P4-09, second review: the places "Dein Zuhause" offers (322 ms at 50,000 photos) are made
+    /// only when that screen asks, off the main thread, and never at a refresh (battery).
+    @Test func homePlacesAreMadeOffTheMainThreadOnlyWhenTheScreenAsks() throws {
+        let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
+        let engine = AppSource.code(try AppSource.read("Sources/SortlyEngine/DerivedLibrary.swift"))
+        #expect(AppSource.calls(of: "HomeCandidates.make(", in: engine).isEmpty, "every refresh makes the home places")
+        let handed = try Self.refreshBody().contains("homeCandidatesCache =")
+        #expect(!handed, "every refresh hands over the home places")
+        let getter = AppSource.code(AppSource.body(of: "var homeCandidates: [HomeCandidate]?", in: model) ?? "")
+        #expect(!getter.isEmpty && AppSource.calls(of: "HomeCandidates.make(", in: getter).isEmpty,
+                "the screen makes the home places on the main thread")
+        let make = AppSource.code(AppSource.body(of: "private func makeHomeCandidates(", in: model) ?? "")
+        let offMain = !AppSource.calls(of: "Task.detached(", in: make).isEmpty && !AppSource.calls(of: "HomeCandidates.make(", in: make).isEmpty
+        #expect(offMain, "the home places are not made off the main thread")
     }
 }

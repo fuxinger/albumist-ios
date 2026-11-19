@@ -351,6 +351,26 @@ struct NeverDoneTests {
         #expect(!w.places(d, border).contains(AreaStatus.analysisImpossible.rawValue))
     }
 
+    /// The overview says "N Orte werden später genauer bestimmt" from the run's count of places
+    /// waiting for the online lookup. Photos that cannot get a country because the lookup is
+    /// switched off are not waiting: three such photos from Konstanz do not change the count.
+    @Test func photosThatCannotGetACountryAreNotCountedAsWaiting() async throws {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2026-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1)
+        let everyday = lib.assets
+        let konstanz = GeoCoordinate(latitude: 47.6588, longitude: 9.1750)
+        _ = (0..<3).map { lib.photo(at: Fixture.date("2026-04-0\($0 + 1) 12:00"), konstanz, jitterMeters: 100) }
+        func waiting(_ assets: [AssetSnapshot]) async throws -> Int {
+            let w = try Self.world(assets, configure: { $0.privacy.allowOnlineGeocoding = false })
+            let report = try await w.pipeline.run()
+            #expect(report.isComplete)
+            return report.placesPendingOnline
+        }
+        let without = try await waiting(everyday)
+        let with = try await waiting(lib.assets)
+        #expect(with == without, "\(with) places waiting with the photos from Konstanz, \(without) without them")
+    }
+
     /// Online lookup on, but Apple cannot be reached right now: the photos at the border wait for
     /// it ("offen"), as before; only a lookup that is switched off or has answered "nothing here"
     /// makes a place impossible.

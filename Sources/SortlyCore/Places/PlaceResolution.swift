@@ -120,7 +120,8 @@ public actor PlaceResolutionService {
 
     public struct Outcome: Sendable, Hashable {
         public var resolved = 0
-        /// Assets that still need an online lookup (offline, disabled, rate limit, budget).
+        /// Assets that still need an online lookup (offline, disabled, rate limit, budget). Not
+        /// those in `withoutCountry`.
         public var pendingOnline: Set<AssetID> = []
         public var onlineRequests = 0
         public var cacheHits = 0
@@ -352,8 +353,11 @@ public actor PlaceResolutionService {
                 outcome.stoppedAtRequestLimit = true
             }
             guard let online else {
-                outcome.pendingOnline.formUnion(members.map(\.assetID))
-                if switchedOff { outcome.withoutCountry.formUnion(members.filter(hasNoCountry).map(\.assetID)) }
+                // Without a country and with the lookup switched off they wait for nothing: not
+                // "später genauer bestimmt" (second review of P1-09). Turned on, they are asked.
+                let outOfReach = switchedOff ? Set(members.filter(hasNoCountry).map(\.assetID)) : []
+                outcome.withoutCountry.formUnion(outOfReach)
+                outcome.pendingOnline.formUnion(members.map(\.assetID).filter { !outOfReach.contains($0) })
                 continue
             }
             var batch: [AssetID: ResolvedPlace] = [:]

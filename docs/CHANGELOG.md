@@ -110,6 +110,38 @@
   „Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in 25 s“, über einer Minute
   „weiter in 2 Minuten“. Nach einer Wartezeit nimmt eine Abfrage ihren Platz in Albumists Grenze
   neu, statt sich nur einzutragen.
+- Entscheidungen Fuchs 18.11. (Punkte 3, 8 und 14 der Rückgabe): Der erste Bildschirm sagt
+  „Kein Foto wird hochgeladen“ statt „Nichts wird hochgeladen“; die Zugriffs-Seite sagt in einem
+  Satz, dass iOS für Ortsnamen einzelne Aufnahmeorte (nur Koordinaten und die Sprache der
+  Ortsnamen) an Apples Kartendienst schickt und dass man das in den Einstellungen ausschalten
+  kann. Der Schalter „Orte online
+  genauer bestimmen“ bleibt ab Werk an; Einstellungen, Datenschutz-Seite, Website und
+  Store-Texte sagen dasselbe. Umstrittene Gebiete (Krim, Westsahara, Kaschmir, Nordzypern,
+  Kosovo, Taiwan, Golanhöhen, Abchasien) bekommen kein Land mehr: Das Gebiet heißt mit seinem
+  eigenen Namen („Krim“), sein Vorschlag ist „Unsicher“ mit der Begründung „Umstrittenes
+  Gebiet …“; Städte darin behalten ihren Namen. Das gilt auch auf dem Wasser davor (Krim mit
+  der Straße von Kertsch, Taiwans Inseln mit Penghu, Matsu und Pratas) und an der Grenze, wo
+  Apples Antwort die Seite bestimmt: nennt Apple dort das Gebiet oder eine Region darin, bleibt
+  der Ort „Unsicher“. Nennt Apple an der Grenze das Nachbarland, gilt dieses (siehe
+  `KNOWN_LIMITATIONS.md`). Die Golanhöhen enden im Westen an der Linie von 1949 (Gonen, Kfar
+  Szold und Kibbutz Dan bleiben in Israel); im Osten und auf dem Hermon reichen sie bis an die
+  Linie von 1974, so weit die Karte dort Israel zeichnet (vorher hieß etwa Alonei HaBashan
+  „Israel“). Auch Lieyu (Klein-Kinmen), Dadan, Erdan, Wuqiu und Dongding, die die Karte nicht zeichnet,
+  und die Gewässer im Norden Zyperns sind „Unsicher“ (vorher entschied Apples Antwort: „China“
+  bzw. „Republik Zypern“). Die Atlas-Karte und das Teilen-Bild füllen ein umstrittenes Gebiet
+  nie mit einem besuchten Land (die Krim nicht mit Russland, Nordzypern nicht mit Zypern,
+  Kaschmir nicht mit Indien oder Pakistan); es bleibt Landfarbe, ausgeschnitten statt übermalt
+  (kein Rand in der Farbe des Landes), und ein Tippen darauf öffnet kein Land mehr (vorher
+  öffnete die Krim „Russland“). Ein Tippen neben ein kleines besuchtes Land misst jetzt bis
+  zu seiner Küste oder Grenze, nicht bis zu der eines umstrittenen Gebiets darin (vorher öffnete etwa ein Tippen auf Paris „Russland“, wenn nur
+  Russland besucht war). Auch ein Streifen zwischen Sewastopol und der übrigen Krim, Ränder vor Jewpatorija und bei Perekop blieben in der Farbe Russlands, weil die Karte Russland und die Regionen der Krim jedes für sich vereinfachte; Länder mit umstrittenen Regionen und diese Regionen behalten jetzt jeden Punkt. Der Text der Fotozugriffs-Frage
+  sagt „Kein Foto wird hochgeladen“ wie alle anderen Texte. Eine Stadt aus Apples Antwort gilt nur, wenn das
+  gefragte Foto auf derselben Seite der Linie liegt wie das Foto, um das es geht. Im Reise-Atlas
+  zählt ein Gebiet nicht als Land, seine Reisen und Orte zählen aber und tragen den
+  Gebietsnamen; „Ausland“ in der Suche und das erkannte Zuhause kennen die Gebiete. Orte, die
+  vor dem Update bestimmt wurden, behalten ihr altes Land, bis „Analyse neu aufbauen“ sie neu
+  bestimmt. Die Store-Texte versprechen „Länder, auf Wunsch auch
+  Städte“ statt Städte-Alben ab Werk (Standard bleibt: nur Länder).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

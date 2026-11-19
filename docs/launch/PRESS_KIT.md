@@ -20,7 +20,7 @@ Betreff: Neue iPhone-App: Fotos automatisch in Alben – komplett auf dem Gerät
 
 Hallo [Name der Redakteurin/des Redakteurs],
 
-ich bin [Name] aus [Ort] und habe eine iPhone-App gebaut, die ich [Magazin]-Leser:innen gern vorstellen würde: Albumist sortiert die Fotomediathek automatisch in echte Alben – Reisen mit Datum, Länder, Städte, Screenshots und Dokumente. Das Besondere: Alles passiert auf dem iPhone, kein Foto wird hochgeladen, vorhandene Alben werden ergänzt statt dupliziert, und alles lässt sich rückgängig machen.
+ich bin [Name] aus [Ort] und habe eine iPhone-App gebaut, die ich [Magazin]-Leser:innen gern vorstellen würde: Albumist sortiert die Fotomediathek automatisch in echte Alben – Reisen mit Datum, Länder (auf Wunsch auch Städte), Screenshots und Dokumente. Das Besondere: Alles passiert auf dem iPhone, kein Foto wird hochgeladen, vorhandene Alben werden ergänzt statt dupliziert, und alles lässt sich rückgängig machen.
 
 Die App erscheint am [Datum]. Gern schicke ich Ihnen vorab einen Code für die Vollversion. Bilder und Infos: [Link]. Sperrfrist: [Datum, Uhrzeit].
 

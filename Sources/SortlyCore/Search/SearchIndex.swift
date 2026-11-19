@@ -118,6 +118,7 @@ public struct SearchIndex: Sendable {
         var vocabulary = SearchVocabulary()
         var placeNames: [String: String] = [:]              // key → display name as stored
         var countryNames: [String: [String: Int]] = [:]     // code → display name → photos
+        var areaPhotos: [String: Int] = [:]                 // "disputed-<id>" → photos (no country code)
         var merchantNames: [String: String] = [:]
         var termSets: [String: [Int32]] = [:]
         for (i, f) in sorted.enumerated() {
@@ -136,10 +137,14 @@ public struct SearchIndex: Sendable {
                 if let code = place.isoCountryCode {
                     post(.country(code))
                     if let name = place.country { countryNames[code, default: [:]][name, default: 0] += 1 }
+                } else if let area = place.disputedArea {
+                    areaPhotos["disputed-" + area, default: 0] += 1
                 }
                 var seen = Set<String>()
+                // A disputed area ("Krim") has no country code; its name is found like a place's.
                 for name in [place.locality, place.subLocality, place.administrativeArea, place.subAdministrativeArea,
-                             place.inlandWater, place.ocean, place.areaOfInterest].compactMap({ $0 }) {
+                             place.inlandWater, place.ocean, place.areaOfInterest,
+                             place.disputedArea != nil ? place.country : nil].compactMap({ $0 }) {
                     let key = SearchText.key(name)
                     guard !key.isEmpty, seen.insert(key).inserted else { continue }
                     post(.place(key))
@@ -190,14 +195,15 @@ public struct SearchIndex: Sendable {
         // "Ausland": the home country of each photo's date. Where the detection decides, its
         // everyday countries (as for the suggestions, from the photos outside trips); with none
         // known, or with "Kein Zuhause", the country with the most photos, as before.
-        let mostPhotos = countryNames.max { a, b in
-            (postings[.country(a.key)]?.count ?? 0, b.key) < (postings[.country(b.key)]?.count ?? 0, a.key)
-        }?.key
+        // A disputed area counts like a country here (second review of 752ba07: a library at
+        // home in Taiwan had its photos at home as "Ausland", or none).
+        let photosPerCountry = countryNames.keys.map { ($0, postings[.country($0)]?.count ?? 0) } + areaPhotos.map { ($0.key, $0.value) }
+        let mostPhotos = photosPerCountry.max { a, b in (a.1, b.0) < (b.1, a.0) }?.0
         let homeContext = HomeContext(settings: home, profile: LibraryProfile(facts: facts.filter { $0.tripID == nil }, trips: []), facts: facts)
         var abroad = Bitset(count: sorted.count)
         var countryKeys: [String: PlaceKey] = [:]
         for (i, f) in sorted.enumerated() {
-            guard let place = f.gpsPlace, let code = place.isoCountryCode else { continue }
+            guard let place = f.gpsPlace, let code = place.isoCountryCode ?? place.disputedArea.map({ "disputed-" + $0 }) else { continue }
             let key: PlaceKey
             if let known = countryKeys[code] {
                 key = known

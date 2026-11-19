@@ -174,6 +174,8 @@ enum ReasonText {
             return String(localized: "\(count) Fotos passen zur Regel „\(rule)“.")
         case .inferredWithoutLocation(let count):
             return String(localized: "\(count) Fotos ohne Ort passen zeitlich dazu und sind nur vorgeschlagen.")
+        case .disputedArea(let place):
+            return String(localized: "Umstrittenes Gebiet: Zu welchem Land es gehört, ist nicht sicher. Albumist ordnet „\(place)“ darum keinem Land zu.")
         }
     }
 

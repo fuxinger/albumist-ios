@@ -27,6 +27,31 @@
 - Die Karte der nächtlichen Verfeinerung (bei geöffneter App) nennt keine Fertig-Uhrzeit, und
   ihr Titel ist der Name des Schritts, nicht „Verfeinerung“.
 - `CLGeocoder` ist in iOS 26 als veraltet markiert; der Nachfolger in MapKit ist geplant.
+- Umstrittene Gebiete (Entscheidung Fuchs 18.11., `DisputedAreas`): Krim, Westsahara, Kaschmir,
+  Nordzypern, Kosovo, Taiwan, Golanhöhen und Abchasien heißen mit ihrem eigenen Namen statt eines
+  Landes, ihr Vorschlag ist „Unsicher“. Die Umrisse von Westsahara, Golanhöhen und Aksai Chin
+  und die Umrisse auf dem Wasser (um die Krim mit der Straße von Kertsch, um Taiwan, Penghu und
+  die kleinen Inseln, Kästen um Matsu, Pratas, Lieyu, Dadan, Erdan, Wuqiu und Dongding, die Gewässer im
+  Norden Zyperns) sind grob (einige Kilometer). Die winzigen, unbewohnten Inseln Fuxing und
+  Shiyu westlich von Lieyu liegen womöglich außerhalb des Kastens (ihre Lage ist nicht sicher
+  geprüft); dort entscheidet Apples Antwort. An der Grenze
+  (bis etwa 1,5 km), wo die Karte nicht sicher ist und Apple das Nachbarland nennt (etwa
+  Serbien am Kosovo, Republik Zypern an der Pufferzone), gilt das Nachbarland. Orte, die vor dem Update bestimmt wurden, behalten ihr altes Land, bis „Analyse
+  neu aufbauen“ sie neu bestimmt. Eine automatische Nachprüfung gibt es bewusst nicht: Die
+  Entscheidungen, Titel und Alben eines Ortsvorschlags hängen an seinem Schlüssel, und für Krim,
+  Nordzypern, Westsahara und Kaschmir bleibt der alte Länderschlüssel („Russland“) für den Rest
+  des Landes bestehen; eine Entscheidung zu „Russland“ ließe sich nicht sauber auf „Krim“
+  übertragen. Im Reise-Atlas zählen diese Gebiete nicht als Land (ihre Reisen und Orte zählen
+  mit dem Gebietsnamen), und die Atlas-Karte (auch im Teilen-Bild) füllt sie nie mit einem
+  besuchten Land (`AtlasShapes`). Ein Tippen auf ein Gebiet öffnet nichts: Für ein Gebiet gibt es
+  keine eigene Seite, und die Seite eines der Länder ergriffe Partei (`AtlasShapes.tappedCode`).
+  Das Malen der Karte und das Tippen sind bisher nur auf Linux (Regel) und im Code geprüft, noch
+  nicht auf einem Mac (`AtlasRenderingTests`). Die Suche findet sie über den Gebiets- oder Ortsnamen, nicht als
+  Land. Nicht in der Liste: Südossetien, Transnistrien, Somaliland,
+  Westjordanland und Ost-Jerusalem (dort gilt die Karte wie bisher). Noch nicht behandelt, offene
+  Frage an Fuchs: das Shaksgam-Tal (von China verwaltet, von Indien als Teil Kaschmirs beansprucht;
+  die Karte sagt sicher „China“), Arunachal Pradesh (von China beansprucht; die Karte sagt
+  „Indien“) und die südlichen Kurilen (von Japan beansprucht; die Karte sagt „Russland“).
 - Sprache der Albumnamen gewechselt (Prüfbefund P1-12): Länder und Regionen aller
   gespeicherten Orte werden beim nächsten Lauf aus der Offline-Karte neu benannt (der Wechsel
   startet einen Lauf). Städte und Ortsteile kommen von Apples Ortssuche und bleiben in der

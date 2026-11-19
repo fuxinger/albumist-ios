@@ -141,14 +141,17 @@ public struct ProposalEngine: Sendable {
                     if let n = displayName(value.components, level: parent) { path.append(n) }
                 }
             }
+            // A disputed area stands where a country would: which country it is, is not sure
+            // (decision Fuchs 18.11.2026), so the user decides, never Albumist.
+            let disputed = key.level == .country && value.components.disputedArea != nil
             return AlbumProposal(
                 id: .stable("place", key.description),
                 kind: .placeCollection(key.level),
                 title: name,
                 folderPath: path,
                 assetIDs: value.assets,
-                reliability: .certain,
-                reasons: [.photosInPlace(count: value.assets.count, place: name)],
+                reliability: disputed ? .uncertain : .certain,
+                reasons: [.photosInPlace(count: value.assets.count, place: name)] + (disputed ? [.disputedArea(place: name)] : []),
                 placeKeys: keysOf[key] ?? [key]
             )
         }

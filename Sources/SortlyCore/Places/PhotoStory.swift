@@ -17,6 +17,8 @@ public enum PhotoStory {
     public static func facts(_ scope: Scope, facts all: [AssetFacts], calendar: Calendar = .current) -> [String] {
         let german = Locale(identifier: "de_DE")
         func country(_ code: String) -> String { german.localizedString(forRegionCode: code) ?? code }
+        // A trip to a disputed area names the area, not a country (decision Fuchs 18.11.2026).
+        func country(of trip: TravelAtlas.TripSummary) -> String { trip.areaName ?? country(trip.countryCode) }
         func year(_ date: Date) -> String { String(calendar.component(.year, from: date)) }
         let months = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"]
         let weekdays = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"]
@@ -49,11 +51,11 @@ public enum PhotoStory {
             if let since = atlas.sinceYear { lines.append("Fotos mit Ort seit: \(since)") }
             let firsts = atlas.countriesByFirstVisit.prefix(12).compactMap { code in atlas.firstVisits[code].map { "\(country(code)) (\(year($0)))" } }
             if !firsts.isEmpty { lines.append("Länder in der Reihenfolge des ersten Besuchs: " + firsts.joined(separator: ", ")) }
-            if let first = atlas.trips.first { lines.append("Erste Reise: \(first.place), \(country(first.countryCode)), \(year(first.start)), \(first.days) Tage") }
+            if let first = atlas.trips.first { lines.append("Erste Reise: \(first.place), \(country(of: first)), \(year(first.start)), \(first.days) Tage") }
             if let longest = atlas.trips.max(by: { $0.days < $1.days }) {
-                lines.append("Längste Reise: \(longest.place), \(country(longest.countryCode)), \(year(longest.start)), \(longest.days) Tage")
+                lines.append("Längste Reise: \(longest.place), \(country(of: longest)), \(year(longest.start)), \(longest.days) Tage")
             }
-            if let latest = atlas.trips.last { lines.append("Letzte Reise: \(latest.place), \(country(latest.countryCode)), \(year(latest.start))") }
+            if let latest = atlas.trips.last { lines.append("Letzte Reise: \(latest.place), \(country(of: latest)), \(year(latest.start))") }
             if let city = atlas.favoriteTripCity { lines.append("Meistfotografierter Reiseort: \(city)") }
 
         case .year(let y):
@@ -69,7 +71,7 @@ public enum PhotoStory {
             let t = topics(limit: 4)
             if !t.isEmpty { lines.append("Häufigste Motive: " + t.joined(separator: ", ")) }
             if !atlas.trips.isEmpty {
-                lines.append("Reisen in diesem Jahr: " + atlas.trips.prefix(8).map { "\($0.place) (\(country($0.countryCode)), \($0.days) Tage)" }.joined(separator: ", "))
+                lines.append("Reisen in diesem Jahr: " + atlas.trips.prefix(8).map { "\($0.place) (\(country(of: $0)), \($0.days) Tage)" }.joined(separator: ", "))
             }
             if !atlas.countryCodes.isEmpty { lines.append("Länder in diesem Jahr: " + atlas.countryCodes.sorted().map(country).joined(separator: ", ")) }
 
@@ -83,7 +85,7 @@ public enum PhotoStory {
             if !t.isEmpty { lines.append("Lieblingsmotive: " + t.joined(separator: ", ")) }
             lines.append("Länder: \(atlas.countryCodes.count), Reisen: \(atlas.tripCount), Städte: \(atlas.cityCount)")
             var tripsPerCountry: [String: Int] = [:]
-            for trip in atlas.trips { tripsPerCountry[trip.countryCode, default: 0] += 1 }
+            for trip in atlas.trips where !trip.countryCode.isEmpty { tripsPerCountry[trip.countryCode, default: 0] += 1 }
             if let fav = tripsPerCountry.max(by: { ($0.value, $1.key) < ($1.value, $0.key) }), fav.value > 1 {
                 lines.append("Am häufigsten bereistes Land: \(country(fav.key)) (\(fav.value) Reisen)")
             }

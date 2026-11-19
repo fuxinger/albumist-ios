@@ -435,6 +435,10 @@ jobs:
     if: ${{ always() && needs.ui.result != 'skipped' && !inputs.release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # actions: read for the runs, jobs and retry records of the last days (UI history).
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -451,3 +455,12 @@ jobs:
         run: |
           mapfile -t records < <(find flaky -name 'flaky-*.json' 2>/dev/null | sort)
           python3 .github/scripts/ui_tests.py flaky-summary "${records[@]}" >> "$GITHUB_STEP_SUMMARY"
+      - name: UI history of the last 7 days
+        # Every UI run's group jobs by result (test red, no result, machinery, cancelled; also
+        # earlier attempts) and their repeats and flaky tests, across runs (review P5-06: 8 of 15
+        # red runs were no app bug, and nobody counted them). .github/scripts/flaky_history.py;
+        # it stops early so the UI plan and gate keep their API calls. Never fails the run.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/flaky_history.py --days 7 >> "$GITHUB_STEP_SUMMARY"

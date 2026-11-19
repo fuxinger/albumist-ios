@@ -104,7 +104,8 @@ class EntryTests(unittest.TestCase):
 
     def test_entries_are_counted(self):
         text = ("| 🔜 | Zeitgrenze gelockert: A.swift | S | x |\n| ✅ | Zeitgrenze gelockert: B.swift, wieder 5 s | S | x |\n"
-                "| offen | Zeitgrenze gelockert: C.swift | S | x |\nZeitgrenze gelockert im Fließtext\n")
+                "| offen | Zeitgrenze gelockert: C.swift | S | x |\nZeitgrenze gelockert im Fließtext: D.swift\n"
+                "| 🔜 | Regel: eine Zeile, die „Zeitgrenze gelockert“ sagt, prüft `time_limit_rule.py` | S | x |\n")
         self.assertEqual(rule.count_entries(text), (3, 2))
 
 

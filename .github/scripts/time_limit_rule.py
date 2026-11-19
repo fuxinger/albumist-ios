@@ -52,6 +52,8 @@ SWIFT_LIMITS = (
 WORKFLOW_LIMITS = ((re.compile(r"^\s*timeout-minutes\s*:\s*" + NUMBER + r"\s*(?:#.*)?$"), lambda m: 60.0),)
 SWIFT_DIRS = ("App/SortlyUITests/", "App/SortlyTests/", "Tests/")
 WORKFLOW_DIR = ".github/workflows/"
+# A file whose limits the rule reads, as an entry names it.
+LIMIT_FILE = re.compile(r"\b[\w.+-]+\.(?:swift|ya?ml)\b")
 
 
 def patterns_for(path: str):
@@ -146,8 +148,11 @@ def missing_entries(found: list[dict], added: list[str]) -> list[dict]:
 
 
 def count_entries(text: str) -> tuple[int, int]:
-    """(rows with the marker, of them still open: 🔜 or "offen") in docs/IMPROVEMENTS.md."""
-    rows = [line for line in text.splitlines() if line.startswith("|") and MARKER in line]
+    """(entries, of them still open: 🔜 or "offen") in docs/IMPROVEMENTS.md. An entry is a table
+    row with the marker and the name of a test or workflow file (a row that only describes the
+    rule names none)."""
+    rows = [line for line in text.splitlines()
+            if line.startswith("|") and MARKER in line and LIMIT_FILE.search(line)]
     open_rows = [r for r in rows if re.match(r"\|\s*(🔜|offen)", r)]
     return len(rows), len(open_rows)
 

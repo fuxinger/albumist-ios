@@ -171,8 +171,12 @@ public actor AnalysisPipeline {
         /// Of `contentAnalyzed`: the photos looked at in full, without those that only got
         /// their labels ("Themen" or "Dokumente" turned on later). The overview calls only these
         /// new photos (review of the labels fix, M2: "Beim Prüfen 5.683 neue Fotos analysiert"
-        /// after "Themen" was turned on, with no new photo at all).
-        public var newPhotosAnalyzed: Int { max(0, contentAnalyzed - labelsAdded) }
+        /// after "Themen" was turned on, with no new photo at all), and without photos given up
+        /// as unreadable and read again a week later (`givenUpReadAgain`, second review of P1-08).
+        public var newPhotosAnalyzed: Int { max(0, contentAnalyzed - labelsAdded - givenUpReadAgain) }
+        /// Of `contentAnalyzed`: photos given up as unreadable that were read in their weekly
+        /// further try (`reopenGivenUpPhotos`), not counted in `labelsAdded`.
+        public var givenUpReadAgain = 0
         public var textRecognized = 0
         public var textWaitingForOriginal = 0
         /// How long reading the texts took in this run (diagnostic report: photos per minute).
@@ -916,7 +920,11 @@ public actor AnalysisPipeline {
                             results.append((asset.id, result))
                             finished.append(asset.id)
                             analyzed += 1
-                            if labelsOnly[asset.id] != nil || analysedBefore[asset.id] != nil { report.labelsAdded += 1 }
+                            if labelsOnly[asset.id] != nil || analysedBefore[asset.id] != nil {
+                                report.labelsAdded += 1
+                            } else if triedAgain.contains(asset.id) {
+                                report.givenUpReadAgain += 1
+                            }
                             // "Gerade angesehen" shows no screenshot, and no document, receipt or
                             // card either (second review of the build 36 fix): this result
                             // says whether the picture is one, before any text is read.

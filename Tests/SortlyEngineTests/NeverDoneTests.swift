@@ -170,6 +170,33 @@ struct NeverDoneTests {
         #expect(try await w.store.result(ContentAnalysis.self, kind: "content", asset: late)?.failedAttempts == nil)
     }
 
+    /// The overview sums up a check with "Beim Prüfen N neue Fotos analysiert". A photo given
+    /// up and read a week later, now readable, is no new photo: the run that reads it says
+    /// nothing of new photos.
+    @Test func aPhotoReadAgainIsNoNewPhoto() async throws {
+        var lib = LibraryBuilder()
+        let ids = lib.daily(from: "2026-05-01", to: "2026-05-30", at: Fixture.Places.munichHome, perDay: 1)
+        let photo = ids[7]
+        let analyzer = LateAnalyzer(failures: [photo: ContentAnalysis.maxFailedAttempts])
+        let clock = Clock()
+        let w = try Self.world(lib.assets, analyzer: analyzer, now: { clock.now })
+        for _ in 0..<ContentAnalysis.maxFailedAttempts {
+            #expect(try await w.pipeline.run().isComplete)
+            clock.advance(ContentAnalysis.retrySpacing)
+        }
+        clock.advance(8 * 86_400)
+        let report = try await w.pipeline.run()
+        #expect(report.isComplete && report.contentAnalyzed == 1, "the photo was not read again")
+        #expect(report.newPhotosAnalyzed == 0)
+        #expect(report.labelsAdded == 0)
+        // A photo that comes in later is new.
+        let added = lib.photo(at: Fixture.date("2026-06-02 12:00"), Fixture.Places.munichHome)
+        await w.reader.set(assets: lib.assets)
+        clock.advance(3_600)
+        let next = try await w.pipeline.run()
+        #expect(next.contentAnalyzed == 1 && next.newPhotosAnalyzed == 1, "\(added) not counted as new")
+    }
+
     /// Reads a photo that is not readable (`AnalysisError.unreadable`) a few times, and after
     /// that fails with an error of the analyzer itself (Vision), as on a device where Vision
     /// stops working for a photo it could not read before.

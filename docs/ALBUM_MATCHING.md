@@ -157,7 +157,10 @@ In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen V
   enthält selbst schon alles (dritte Prüfung 19.11.2026, M3: Zahlen gehen ohne Zutun des
   Nutzers nie zurück). Gibt die Regel „Italien“ den Vorschlag, zählen die Fotos in einem
   anderen bearbeitbaren Album, das nach dem Inhalt allein sicher passt („Urlaub in Italien“
-  mit 250 der 300 Fotos: ergänzbar oder vollständig nach den Schwellen oben, kein Teil),
+  mit 250 der 300 Fotos: ergänzbar oder vollständig nach den Schwellen oben, kein Teil;
+  oder eines von mehreren passenden Alben, also zu ≥ 80 % Fotos des Vorschlags und weniger
+  als 0,15 Punkte hinter dem besten Album nach Inhalt, wie „Urlaub in Italien“ mit 70 neben
+  „Italien“ mit 5),
   weiter als sortiert, und eine gewählte Entscheidung „Urlaub in Italien ergänzen“ bleibt
   bestehen. Die Regel bestimmt, welches Album ergänzt wird; die Zahl der sortierten Fotos
   senkt sie nie (letzte Prüfung 19.11.2026, N1). Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an

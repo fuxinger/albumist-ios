@@ -814,6 +814,68 @@ struct SameNameWinsTests {
         #expect(checked == 288)
     }
 
+    /// Sorted counts of the country "Italien" (300 photos) before the name rule, measured with
+    /// integ/next (matching version 4): album "U" ("Urlaub in Italien") or "S" ("Sommer") with
+    /// the first h photos of Italy and `other` other photos, and "Italien" with the last n and
+    /// `food` other photos. Entries: kind,h,other,n,food,sorted.
+    static let versionFourSortedCounts = """
+        U,65,0,0,0,0 U,65,0,0,40,0 U,65,0,5,0,65 U,65,0,5,40,0 U,65,0,10,0,10 U,65,0,10,40,0 U,65,0,100,0,100
+        U,65,0,100,40,0 U,65,0,300,0,300 U,65,0,300,40,300 U,65,60,0,0,0 U,65,60,0,40,0 U,65,60,5,0,0
+        U,65,60,5,40,0 U,65,60,10,0,0 U,65,60,10,40,0 U,65,60,100,0,100 U,65,60,100,40,0 U,65,60,300,0,300
+        U,65,60,300,40,300 U,70,0,0,0,0 U,70,0,0,40,0 U,70,0,5,0,70 U,70,0,5,40,0 U,70,0,10,0,70 U,70,0,10,40,0
+        U,70,0,100,0,100 U,70,0,100,40,0 U,70,0,300,0,300 U,70,0,300,40,300 U,70,60,0,0,0 U,70,60,0,40,0
+        U,70,60,5,0,0 U,70,60,5,40,0 U,70,60,10,0,0 U,70,60,10,40,0 U,70,60,100,0,100 U,70,60,100,40,0
+        U,70,60,300,0,300 U,70,60,300,40,300 U,150,0,0,0,150 U,150,0,0,40,150 U,150,0,5,0,150 U,150,0,5,40,150
+        U,150,0,10,0,150 U,150,0,10,40,150 U,150,0,100,0,100 U,150,0,100,40,150 U,150,0,300,0,300
+        U,150,0,300,40,300 U,150,60,0,0,0 U,150,60,0,40,0 U,150,60,5,0,0 U,150,60,5,40,0 U,150,60,10,0,0
+        U,150,60,10,40,0 U,150,60,100,0,100 U,150,60,100,40,0 U,150,60,300,0,300 U,150,60,300,40,300
+        U,250,0,0,0,250 U,250,0,0,40,250 U,250,0,5,0,250 U,250,0,5,40,250 U,250,0,10,0,250 U,250,0,10,40,250
+        U,250,0,100,0,250 U,250,0,100,40,250 U,250,0,300,0,300 U,250,0,300,40,300 U,250,60,0,0,250
+        U,250,60,0,40,250 U,250,60,5,0,250 U,250,60,5,40,250 U,250,60,10,0,250 U,250,60,10,40,250
+        U,250,60,100,0,250 U,250,60,100,40,250 U,250,60,300,0,300 U,250,60,300,40,300 U,300,0,0,0,300
+        U,300,0,0,40,300 U,300,0,5,0,300 U,300,0,5,40,300 U,300,0,10,0,300 U,300,0,10,40,300 U,300,0,100,0,300
+        U,300,0,100,40,300 U,300,0,300,0,300 U,300,0,300,40,300 U,300,60,0,0,300 U,300,60,0,40,300 U,300,60,5,0,300
+        U,300,60,5,40,300 U,300,60,10,0,300 U,300,60,10,40,300 U,300,60,100,0,300 U,300,60,100,40,300
+        U,300,60,300,0,300 U,300,60,300,40,300 S,65,0,0,0,0 S,65,0,0,40,0 S,65,0,5,0,0 S,65,0,5,40,0 S,65,0,10,0,0
+        S,65,0,10,40,0 S,65,0,100,0,100 S,65,0,100,40,0 S,65,0,300,0,300 S,65,0,300,40,300 S,65,60,0,0,0
+        S,65,60,0,40,0 S,65,60,5,0,0 S,65,60,5,40,0 S,65,60,10,0,0 S,65,60,10,40,0 S,65,60,100,0,100
+        S,65,60,100,40,0 S,65,60,300,0,300 S,65,60,300,40,300 S,70,0,0,0,0 S,70,0,0,40,0 S,70,0,5,0,0 S,70,0,5,40,0
+        S,70,0,10,0,0 S,70,0,10,40,0 S,70,0,100,0,100 S,70,0,100,40,0 S,70,0,300,0,300 S,70,0,300,40,300
+        S,70,60,0,0,0 S,70,60,0,40,0 S,70,60,5,0,0 S,70,60,5,40,0 S,70,60,10,0,0 S,70,60,10,40,0 S,70,60,100,0,100
+        S,70,60,100,40,0 S,70,60,300,0,300 S,70,60,300,40,300 S,150,0,0,0,0 S,150,0,0,40,0 S,150,0,5,0,0
+        S,150,0,5,40,0 S,150,0,10,0,0 S,150,0,10,40,0 S,150,0,100,0,100 S,150,0,100,40,0 S,150,0,300,0,300
+        S,150,0,300,40,300 S,150,60,0,0,0 S,150,60,0,40,0 S,150,60,5,0,0 S,150,60,5,40,0 S,150,60,10,0,0
+        S,150,60,10,40,0 S,150,60,100,0,100 S,150,60,100,40,0 S,150,60,300,0,300 S,150,60,300,40,300 S,250,0,0,0,0
+        S,250,0,0,40,0 S,250,0,5,0,0 S,250,0,5,40,0 S,250,0,10,0,0 S,250,0,10,40,0 S,250,0,100,0,100
+        S,250,0,100,40,0 S,250,0,300,0,300 S,250,0,300,40,300 S,250,60,0,0,0 S,250,60,0,40,0 S,250,60,5,0,0
+        S,250,60,5,40,0 S,250,60,10,0,0 S,250,60,10,40,0 S,250,60,100,0,100 S,250,60,100,40,0 S,250,60,300,0,300
+        S,250,60,300,40,300 S,300,0,0,0,300 S,300,0,0,40,300 S,300,0,5,0,300 S,300,0,5,40,300 S,300,0,10,0,300
+        S,300,0,10,40,300 S,300,0,100,0,300 S,300,0,100,40,300 S,300,0,300,0,300 S,300,0,300,40,300
+        S,300,60,0,0,300 S,300,60,0,40,300 S,300,60,5,0,300 S,300,60,5,40,300 S,300,60,10,0,300 S,300,60,10,40,300
+        S,300,60,100,0,300 S,300,60,100,40,300 S,300,60,300,0,300 S,300,60,300,40,300
+        """
+
+    /// Final check 19.11. (N1, the last gap): measured against version 4 itself, the name rule
+    /// never lowers the sorted count. "Urlaub in Italien" with 70 of 300 photos and "Italien"
+    /// with 5 were several matching albums with "Urlaub" first, which counted (70); after the
+    /// rule only 5 counted, because "Urlaub" holds less than 25 % of the country.
+    @Test func theNameRuleNeverCountsFewerThanVersionFour() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let rows = Self.versionFourSortedCounts.split(whereSeparator: \.isWhitespace).map { $0.split(separator: ",") }
+        #expect(rows.count == 200)
+        for row in rows {
+            let n = row.dropFirst().compactMap { Int($0) }
+            try #require(n.count == 5)
+            let first = CollectionSnapshot(id: "u", title: row[0] == "U" ? "Urlaub in Italien" : "Sommer",
+                                           assetIDs: set("it", 0..<n[0]).union(set("other", 0..<n[1])))
+            let named = CollectionSnapshot(id: "n", title: "Italien", assetIDs: set("it", (300 - n[2])..<300).union(set("food", 0..<n[3])))
+            let now = try sortedCount(country, [first, named])
+            #expect(now >= n[4], "\(row.joined(separator: ",")): \(now) sorted, version 4 counted \(n[4])")
+        }
+    }
+
     /// P1-02: with two albums of that name the content picks between them; a third "Italien" is
     /// never made. When they fit exactly as well, the user picks (nothing is decided for them).
     @Test func withTwoAlbumsOfTheNameTheContentPicksOne() throws {

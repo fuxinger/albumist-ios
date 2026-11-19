@@ -777,14 +777,33 @@ public struct AlbumMatcher: Sendable {
         return title.map { Self.nameSaysCollection(album: candidate.albumTitle, proposal: $0) } ?? false
     }
 
-    /// An album that would be the suggestion's album by its content alone, as before
-    /// "Gleicher Name gewinnt" whatever the album holds: editable, mostly this suggestion, no
-    /// part, and complete or extendable by the content rules (`status`).
-    func fitsByContent(_ candidate: MatchCandidate, kind: ProposalKind, title: String?) -> Bool {
+    /// An album that would make the suggestion's photos count as sorted by its content alone,
+    /// as before "Gleicher Name gewinnt" whatever the album holds: editable, mostly this
+    /// suggestion (purity ≥ `extendablePurity`), no part, and either complete or extendable by
+    /// the content rules (`status`), or one of several matching albums (`multipleMatches`):
+    /// within `multipleMatchScoreGap` of the best album by content while another such album
+    /// is too (`closeToBest`, final check 19.11.: "Urlaub in Italien" with 70 of 300 photos next
+    /// to "Italien" with 5 counted 70 before the rule).
+    func fitsByContent(_ candidate: MatchCandidate, kind: ProposalKind, title: String?, closeToBest: Set<CollectionID> = []) -> Bool {
         guard candidate.isEditable, candidate.relation == .equivalent || candidate.relation == .partOfProposal,
               candidate.metrics.purity >= thresholds.extendablePurity, !isPart(candidate, kind: kind, title: title) else { return false }
-        return candidate.relation == .equivalent || candidate.metrics.missing == 0
+        return candidate.relation == .equivalent || candidate.metrics.missing == 0 || closeToBest.contains(candidate.albumID)
             || candidate.metrics.coverage >= thresholds.extendableCoverage && isCertain(candidate, kind: kind, title: title)
+    }
+
+    /// The albums of a result that would have been several matching albums by content alone
+    /// (`multipleMatches` before "Gleicher Name gewinnt"): among the editable albums that are
+    /// candidates by content (no larger collection, no part), those mostly this suggestion and
+    /// within `multipleMatchScoreGap` of the best one, when at least one besides the best is.
+    func closeToBestByContent(_ result: MatchResult, kind: ProposalKind, title: String?) -> Set<CollectionID> {
+        let pool = ([result.best].compactMap { $0 } + result.alternatives).filter {
+            $0.isEditable && $0.relation != .broaderCollection && $0.metrics.purity >= thresholds.candidatePurity
+                && !isPart($0, kind: kind, title: title)
+        }
+        guard let top = pool.max(by: { ($0.score, $1.albumID.rawValue) < ($1.score, $0.albumID.rawValue) }) else { return [] }
+        let close = pool.filter { $0.metrics.purity >= thresholds.extendablePurity && top.score - $0.score < thresholds.multipleMatchScoreGap }
+        guard close.contains(where: { $0.albumID != top.albumID }) else { return [] }
+        return Set(close.map(\.albumID))
     }
 
     static func nameSaysCollection(album: String, proposal: String) -> Bool {
@@ -838,7 +857,9 @@ public struct AlbumMatcher: Sendable {
             return []
         }
         if result.sameNameAlbums.contains(best.albumID) {
-            for c in result.alternatives where !result.sameNameAlbums.contains(c.albumID) && fitsByContent(c, kind: kind, title: title) {
+            let close = closeToBestByContent(result, kind: kind, title: title)
+            for c in result.alternatives where !result.sameNameAlbums.contains(c.albumID)
+                && fitsByContent(c, kind: kind, title: title, closeToBest: close) {
                 albums.insert(c.albumID)
             }
         }

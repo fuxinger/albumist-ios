@@ -112,6 +112,16 @@ TESTMANAGERD_BUNDLE = [
 ]
 PASSED_ONE = "Test Case '-[SortlyUITests.SortlyFlowUITests test6_AnalysisKeepsGoingThroughBackgroundAndTabs]' passed (9.0 seconds).\n"
 
+# Every selected test skipped itself (XCTSkip): xcodebuild succeeds without having tested anything.
+SKIPPED_ONLY = """\
+Test Case '-[SortlyUITests.DeviceConditionUITests test11_LargeLibrary]' started.
+Test Case '-[SortlyUITests.DeviceConditionUITests test11_LargeLibrary]' skipped (0.012 seconds).
+Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' started.
+Test Case '-[SortlyUITests.DeviceConditionUITests test12_StressManyPhotosICloudOnlyOffline]' skipped (0.010 seconds).
+\t Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.022 (0.030) seconds
+** TEST SUCCEEDED **
+"""
+
 # Job 133113879733: a compile error (xcodebuild test builds first).
 COMPILE_ERROR = """\
 /Users/runner/work/sortly-ios/sortly-ios/App/Sortly/Platform/SamplePhotos.swift:162:66: error: cannot infer key path type from context; consider explicitly specifying a root type
@@ -180,6 +190,21 @@ class DecideTests(unittest.TestCase):
         verdict, reasons = ui_tests.decide(0, log)
         self.assertEqual(verdict, "fail")
         self.assertIn("no test ran", reasons[0])
+
+    def test_green_pass_where_every_test_skipped_itself_fails(self):
+        # G5-08 (review of 18.11.2026): a group whose every test skips itself (XCTSkip, e.g.
+        # DeviceConditionUITests test11 in a quick run and test12 outside the stress run) ran no
+        # test; it must never count as green.
+        verdict, reasons = ui_tests.decide(0, SKIPPED_ONLY)
+        self.assertEqual(verdict, "fail")
+        self.assertIn("no test passed", reasons[0])
+        self.assertIn("2 skipped", reasons[0])
+        # One passed test next to the skipped ones: green, as before.
+        self.assertEqual(ui_tests.decide(0, PASSED_ONE + SKIPPED_ONLY), ("pass", []))
+        # A repeat that ran only tests which skip themselves passes when the first pass of the
+        # same group passed a test (the repeat runs only what did not pass there).
+        self.assertEqual(ui_tests.decide(0, SKIPPED_ONLY, earlier=PASSED_ONE), ("pass", []))
+        self.assertEqual(ui_tests.decide(0, SKIPPED_ONLY, earlier=AX_TIMEOUT)[0], "fail")
 
     def test_assertion_is_not_retried(self):
         self.assertEqual(ui_tests.decide(65, FLOW_ASSERTION)[0], "fail")
@@ -442,6 +467,20 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual((code, marker), (1, False))
         self.assertIn("UI_RESULT device fail", log)
         self.assertIn("UI_RESULT device pass", self.run_with_passes(["** TEST SUCCEEDED **\n" + PASSED_ONE])[2])
+
+    def test_a_group_whose_every_test_skipped_itself_is_red(self):
+        # G5-08: never green, also not as "no result": the selection tested nothing.
+        code, marker, log = self.run_with_passes([SKIPPED_ONLY])
+        self.assertEqual((code, marker), (1, False))
+        self.assertIn("UI_VERDICT device first: fail (no test passed", log)
+        self.assertIn("UI_RESULT device fail", log)
+        # The first pass lost the simulator before any test, the repeat only skipped: red.
+        self.assertEqual(self.run_with_passes([AX_TIMEOUT, SKIPPED_ONLY])[:2], (1, False))
+        # The first pass passed a test and then lost the simulator; the repeat ran only the
+        # tests that skip themselves: the group passed a test, so green.
+        code, marker, log = self.run_with_passes([PASSED_ONE + SERVICE_INTERRUPTED, SKIPPED_ONLY])
+        self.assertEqual((code, marker), (0, False), log)
+        self.assertIn("UI_RESULT device pass", log)
 
     def test_a_testmanagerd_crash_is_repeated_and_no_red_on_its_own(self):
         verdict, reasons = ui_tests.decide(65, TESTMANAGERD_CRASH, bundle=TESTMANAGERD_BUNDLE)

@@ -332,6 +332,162 @@ struct LocalTimePipelineTests {
         #expect(try await Self.storedHomeZone(fresh) == "Europe/Berlin")
     }
 
+    /// Second review: the home time zone is that of the home once Albumist knows it, not the
+    /// iPhone's. A user at home in Munich updates the app on a trip to Los Angeles: the home the
+    /// last analysis found gives Berlin time before and after the first run; and a library
+    /// analysed for the first time over there gets Berlin time from the home that run finds.
+    /// The photo without a location of 03:00 on 1 February in Munich (18:00 on 31 January in
+    /// Los Angeles) stays in February.
+    @Test func aUserAtHomeInMunichWhoUpdatesInLosAngelesGetsBerlinTime() async throws {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2025-11-01", to: "2026-03-31", at: Fixture.Places.munichHome, perDay: 1)
+        let unlocated = lib.photo(at: Self.local("2026-02-01 03:00", "Europe/Berlin"), nil)
+        let reader = InMemoryLibraryReader(assets: lib.assets)
+
+        // The database of the version before: analysed at home, no home time zone stored.
+        let store = try SortlyStore(url: nil)
+        #expect(try await Self.pipeline(store: store, reader: reader, geocoder: nil, deviceZone: "Europe/Berlin").run().isComplete)
+        try await store.removeValue(forKey: AnalysisPipeline.Key.homeTimeZone)
+        let updated = Self.pipeline(store: store, reader: reader, geocoder: nil, deviceZone: "America/Los_Angeles")
+        #expect(try await updated.detectedHome() != nil)
+        let beforeTheRun = try await updated.homeTimeZone().identifier
+        #expect(try await updated.run().isComplete)
+
+        // A library analysed for the first time in Los Angeles.
+        let fresh = try SortlyStore(url: nil)
+        let firstAbroad = Self.pipeline(store: fresh, reader: reader, geocoder: nil, deviceZone: "America/Los_Angeles")
+        #expect(try await firstAbroad.run().isComplete)
+
+        var found = ["update, before its first run: \(beforeTheRun)"]
+        for (name, pipeline, s) in [("update", updated, store), ("first analysis", firstAbroad, fresh)] {
+            let stored = try await Self.storedHomeZone(s)
+            let months = try await Self.months(pipeline)
+            let zone = try await pipeline.currentFacts().first { $0.id == unlocated }?.timeZone?.identifier
+            found.append("\(name): stored \(stored ?? "none"), photo on \(zone ?? "none") in \(months.filter { $0.value.contains(unlocated) }.map(\.key))")
+            #expect(stored == "Europe/Berlin", "\(name)")
+            #expect(zone == "Europe/Berlin", "\(name)")
+            #expect(months["Februar 2026"]?.contains(unlocated) == true, "\(name): \(Self.describe(months))")
+        }
+        print("P1-15-HOME-ZONE iPhone on Los Angeles time, home in Munich: " + found.joined(separator: " | "))
+        #expect(beforeTheRun == "Europe/Berlin")
+    }
+
+    /// The home the user chose in "Dein Zuhause" gives the home time zone, also where Albumist
+    /// finds no home (two days of photos) and on an iPhone set to another zone. "Kein Zuhause
+    /// festlegen" afterwards leaves it as it is: no home is known, so nothing changes it.
+    @Test func theHomeTheUserChoseGivesTheHomeTimeZone() async throws {
+        var lib = LibraryBuilder()
+        for day in ["2026-01-10", "2026-01-11"] { _ = lib.photo(at: Self.local("\(day) 12:00", "America/New_York"), Self.newYork) }
+        // 22:00 on 31 January in New York: 04:00 on 1 February in Berlin.
+        let unlocated = lib.photo(at: Self.local("2026-01-31 22:00", "America/New_York"), nil)
+        let store = try SortlyStore(url: nil)
+        let pipeline = Self.pipeline(store: store, reader: InMemoryLibraryReader(assets: lib.assets), geocoder: nil, deviceZone: "Europe/Berlin")
+        let home = HomePlace(center: Self.newYork, components: PlaceComponents(isoCountryCode: "US", country: "Vereinigte Staaten", locality: "New York"))
+        try await pipeline.setHomeSettings(HomeSettings().choosing(home, from: nil, date: Fixture.date("2026-02-01")))
+        let beforeTheRun = try await pipeline.homeTimeZone().identifier
+        #expect(try await pipeline.run().isComplete)
+        let stored = try await Self.storedHomeZone(store)
+        let zone = try await pipeline.currentFacts().first { $0.id == unlocated }?.timeZone?.identifier
+
+        try await pipeline.setHomeSettings(HomeSettings().withoutHome(date: Fixture.date("2026-02-02")))
+        #expect(try await pipeline.run().isComplete)
+        let withoutHome = try await Self.storedHomeZone(store)
+        print("P1-15-CHOSEN-HOME home New York, iPhone on Berlin time: before the run \(beforeTheRun), stored \(stored ?? "none"), "
+              + "photo without location on \(zone ?? "none"); after „Kein Zuhause“ \(withoutHome ?? "none")")
+        #expect(beforeTheRun == "America/New_York")
+        #expect(stored == "America/New_York")
+        #expect(zone == "America/New_York")
+        #expect(withoutHome == "America/New_York")
+    }
+
+    /// A move to another zone takes the home time zone along once the analysis finds the new
+    /// home (Munich, then New York from mid-February): suggestions keep their IDs, a declined one
+    /// stays declined, and the next run changes nothing.
+    @Test func aMoveTakesTheHomeTimeZoneAlong() async throws {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2025-06-01", to: "2026-01-31", at: Fixture.Places.munichHome, perDay: 2)
+        let beforeTheMove = lib.assets
+        _ = lib.daily(from: "2026-02-15", to: "2026-08-31", at: Self.newYork, perDay: 2)
+        // 22:00 on 30 June in New York: 04:00 on 1 July in Berlin.
+        let unlocated = lib.photo(at: Self.local("2026-06-30 22:00", "America/New_York"), nil)
+        let store = try SortlyStore(url: nil)
+        let first = Self.pipeline(store: store, reader: InMemoryLibraryReader(assets: beforeTheMove), geocoder: nil, deviceZone: "Europe/Berlin")
+        #expect(try await first.run().isComplete)
+        let atFirst = try await Self.storedHomeZone(store)
+        let before = try #require(try await first.latestProposals())
+        let december = try #require(before.proposals.first { $0.kind == .chronology(.month) && $0.title == "Dezember 2025" })
+        try await store.addOverride(UserOverride(scope: .source(december.id), decision: .rejectProposal))
+
+        let reader = InMemoryLibraryReader(assets: lib.assets)
+        let moved = Self.pipeline(store: store, reader: reader, geocoder: nil, deviceZone: "Europe/Berlin")
+        #expect(try await moved.run().isComplete)
+        let afterTheMove = try await Self.storedHomeZone(store)
+        let after = try #require(try await moved.latestProposals())
+        let months = try await Self.months(moved)
+        let again = Self.pipeline(store: store, reader: reader, geocoder: nil, deviceZone: "Europe/Berlin")
+        #expect(try await again.run().isComplete)
+        let next = try #require(try await again.latestProposals())
+        print("P1-15-MOVE home zone \(atFirst ?? "none") → \(afterTheMove ?? "none") → \(try await Self.storedHomeZone(store) ?? "none"); "
+              + "photo of 30.6. 22:00 New York in \(months.filter { $0.value.contains(unlocated) }.map(\.key))")
+        #expect(atFirst == "Europe/Berlin")
+        #expect(afterTheMove == "America/New_York")
+        #expect(try await Self.storedHomeZone(store) == "America/New_York")
+        #expect(months["Juni 2026"]?.contains(unlocated) == true, "\(Self.describe(months))")
+        // The months before the move keep their suggestions; December stays declined.
+        let earlier = Set(Self.identity(before.proposals.filter { $0.kind == .chronology(.month) && $0.id != december.id }))
+        #expect(earlier.isSubset(of: Set(Self.identity(after.proposals))))
+        #expect(after.dismissed.map(\.id) == [december.id])
+        #expect(!after.proposals.contains { $0.title == "Dezember 2025" })
+        #expect(Self.identity(next.proposals) == Self.identity(after.proposals))
+    }
+
+    /// Two homes, half a day apart: two weeks in Munich and two in Auckland all year, every other
+    /// day photos at 10:00 and 14:00 on the clock there. Counted on Berlin's clock Auckland has
+    /// the more photo days, on Auckland's Munich: following the home Albumist finds would swap
+    /// the home time zone with every run. It stays as it is, and so do the suggestions.
+    @Test func twoHomesHalfADayApartDoNotSwapTheHomeTimeZone() async throws {
+        var lib = LibraryBuilder()
+        let days = DateFormatter()
+        days.locale = Locale(identifier: "en_US_POSIX")
+        days.timeZone = TimeZone(identifier: "UTC")
+        days.dateFormat = "yyyy-MM-dd"
+        for n in stride(from: 0, to: 365, by: 2) {
+            let day = days.string(from: Fixture.date("2025-03-01").addingTimeInterval(Double(n) * 86_400))
+            let inMunich = (n / 14) % 2 == 0
+            for time in ["10:00", "14:00"] {
+                _ = lib.photo(at: Self.local("\(day) \(time)", inMunich ? "Europe/Berlin" : "Pacific/Auckland"),
+                              inMunich ? Fixture.Places.munichHome : Self.auckland, jitterMeters: 300)
+            }
+        }
+        // 23:30 on 31 January in Munich: 11:30 on 1 February in Auckland.
+        let unlocated = lib.photo(at: Self.local("2026-01-31 23:30", "Europe/Berlin"), nil)
+        func found(on zone: String) -> String {
+            let home = TripDetector(calendar: Self.calendar(zone)).analyse(in: lib.assets).detectedHome
+            return home.map { GeoMath.distance($0.center, Self.auckland) < 50_000 ? "Auckland" : "Munich" } ?? "none"
+        }
+        #expect(found(on: "Europe/Berlin") == "Auckland")
+        #expect(found(on: "Pacific/Auckland") == "Munich")
+
+        let store = try SortlyStore(url: nil)
+        let reader = InMemoryLibraryReader(assets: lib.assets)
+        var zones: [String] = []
+        var months: [String] = []
+        var suggestions: [[String]] = []
+        for _ in 0..<3 {
+            let pipeline = Self.pipeline(store: store, reader: reader, geocoder: nil, deviceZone: "Europe/Berlin")
+            #expect(try await pipeline.run().isComplete)
+            zones.append(try await Self.storedHomeZone(store) ?? "none")
+            months.append(try await Self.months(pipeline).filter { $0.value.contains(unlocated) }.map(\.key).joined())
+            suggestions.append(Self.identity(try await pipeline.latestProposals()?.proposals ?? []))
+        }
+        print("P1-15-TWO-HOMES home time zone after each run: \(zones.joined(separator: ", ")); "
+              + "the photo without a location of 31.1. 23:30 (Munich time) in \(months.joined(separator: ", "))")
+        #expect(Set(zones).count == 1, "\(zones)")
+        #expect(Set(months).count == 1, "\(months)")
+        let unchanged = suggestions[1] == suggestions[2]
+        #expect(unchanged)
+    }
+
     /// A stored home time zone this system cannot read (a zone newer than its database, from the
     /// safety copy of a newer iPhone; or a value a later version stored in another shape) is
     /// never replaced for that. Photos without a place are read on the iPhone's clock meanwhile;

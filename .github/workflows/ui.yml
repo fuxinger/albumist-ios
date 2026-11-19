@@ -363,13 +363,32 @@ jobs:
         # build/flaky-*.json: repeats after a simulator failure and the tests that passed only
         # on them (ui_tests.py); the summary job below counts them over all groups. One record
         # per attempt: "Re-run failed jobs" keeps the earlier attempt's record next to its own.
+        # GitHub's artifact service sometimes does not answer (UI run 44446270757, accessibility:
+        # "Failed to CreateArtifact: Unable to make request: ETIMEDOUT" after all tests passed),
+        # so a failed upload is tried once more a minute later; only if that fails too is the
+        # job red (the record must not go missing from the count).
+        id: flaky_upload
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-flaky-${{ matrix.group }}-attempt-${{ github.run_attempt }}
           path: build/flaky-*.json
           retention-days: 14
           if-no-files-found: ignore
+          overwrite: true
+      - name: Wait before the second try of the retry record
+        if: always() && steps.flaky_upload.outcome == 'failure'
+        run: echo "FLAKY_UPLOAD retry record upload failed, second try in 60 s"; sleep 60
+      - name: Keep the retry record for the run summary (second try)
+        if: always() && steps.flaky_upload.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-flaky-${{ matrix.group }}-attempt-${{ github.run_attempt }}
+          path: build/flaky-*.json
+          retention-days: 14
+          if-no-files-found: ignore
+          overwrite: true
 
   verdict:
     # The run's verdict (the owner's rule of 17.11.): every group green for exactly this app and

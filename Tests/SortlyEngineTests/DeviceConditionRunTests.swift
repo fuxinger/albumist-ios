@@ -28,9 +28,9 @@ struct DeviceConditionRunTests {
         var photos: Int
 
         /// A pipeline on this store, as the app makes one at every launch.
-        func pipeline() -> AnalysisPipeline {
+        func pipeline(analyzer other: (any ContentAnalyzing)? = nil) -> AnalysisPipeline {
             AnalysisPipeline(
-                store: store, reader: reader, analyzer: analyzer, geocoder: FakeGeocoder(), map: DeviceConditionRunTests.map,
+                store: store, reader: reader, analyzer: other ?? analyzer, geocoder: FakeGeocoder(), map: DeviceConditionRunTests.map,
                 conditions: conditions, settings: settings, calendar: Fixture.calendar, time: time.source, batchSize: 10
             )
         }
@@ -208,6 +208,154 @@ struct DeviceConditionRunTests {
         #expect(again.isComplete)
         #expect(again.contentAnalyzed == 0)
         #expect(s.analyzer.counts.withLock { $0.content } <= 2 * s.photos)
+    }
+
+    /// DeviceConditionUITests.test06 as it ran (TestFlight run 44461253154): the disk fills up
+    /// after the 25th photo of the image step (`UITestAnalyzer`), the run ends on SQLITE_FULL,
+    /// and back in the app the next run goes on from where it stopped. While that run is on the
+    /// steps before the image step, the card says "Gleich wieder bei Schritt 4 von 6"; the count
+    /// beside it was the library read's ("246 von 246 Fotos"), and it fell to the image step's
+    /// "36 von 246" once the run got there. Read as the UI test reads the card (step and count
+    /// of the progress element), no count read later is below one read earlier: while catching
+    /// up, the card shows where the run stopped in the step it names.
+    @Test func fullDiskInTheImageStepThenTheCardNeverCountsBack() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("albumist-diskfull-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = try SortlyStore(url: dir.appendingPathComponent("sortly.sqlite"))
+        let s = try setup(store: store)
+        let filling = DiskFillingAnalyzer(base: s.analyzer, store: store, after: 25)
+        let pipeline = s.pipeline(analyzer: filling)
+
+        let first = ProgressReports()
+        var failedOnFullDisk = false
+        do {
+            _ = try await pipeline.run(onProgress: first.onProgress)
+        } catch let error as SQLiteError {
+            failedOnFullDisk = true
+            #expect(error.code == 13, "\(error)") // SQLITE_FULL
+        }
+        #expect(failedOnFullDisk, "The run did not meet the full disk")
+        let shownFirst = CardAsTheAppShowsIt.readings(first.values, goingOnFrom: nil)
+        let marker = try #require(shownFirst.marker)
+        #expect(marker.stage == AnalysisPipeline.Stage.content.number)
+        let stoppedAt = try #require(marker.completed)
+        #expect(stoppedAt > 0 && stoppedAt < s.photos)
+
+        // Space again (the app was in the background): the run on return goes on by itself.
+        try await store.freeDiskForTest()
+        let second = ProgressReports()
+        let after = try await pipeline.run(onProgress: second.onProgress)
+        #expect(after.isComplete)
+        let shownSecond = CardAsTheAppShowsIt.readings(second.values, goingOnFrom: marker)
+        // The first count on return is where the run stopped, in the step the card names.
+        #expect(shownSecond.readings.first.map { [$0.step, $0.done, $0.total] }
+                == [AnalysisStep.content.number, stoppedAt, s.photos])
+        let readings = shownFirst.readings + shownSecond.readings
+        for (i, earlier) in readings.enumerated() {
+            for later in readings[(i + 1)...] {
+                let back = later.step < earlier.step
+                    || (later.step == earlier.step && later.total == earlier.total && later.done < earlier.done)
+                #expect(!back, "The card went back: (step \(earlier.step), \(earlier.done) of \(earlier.total)) -> (step \(later.step), \(later.done) of \(later.total))")
+                if back { return }
+            }
+        }
+    }
+}
+
+extension DeviceConditionRunTests {
+    /// A marker of an older version has no count: while catching up the card shows none (the
+    /// step it names, "Gleich wieder bei Schritt 4 von 6"), never the count of the step it re-reads.
+    @Test func catchingUpFromAMarkerWithoutCountShowsNoCount() {
+        var i = AnalysisCardState.Inputs()
+        i.isRunning = true
+        i.position = AnalysisCardState.Position(step: .library, completed: 246, total: 246)
+        i.catchingUp(stage: AnalysisPipeline.Stage.content.number, completed: nil, total: nil)
+        guard case .running(let shown?, _, _, let catchingUp)? = AnalysisCardState.resolve(i) else {
+            Issue.record("not a running card with a position")
+            return
+        }
+        #expect(catchingUp == AnalysisStep.content.number)
+        #expect(shown.step == .content)
+        #expect(!shown.hasCount)
+    }
+}
+
+/// Every progress report of one run, in order.
+final class ProgressReports: Sendable {
+    private let seen = Mutex<[AnalysisPipeline.Progress]>([])
+    var onProgress: @Sendable (AnalysisPipeline.Progress) -> Void {
+        { progress in self.seen.withLock { $0.append(progress) } }
+    }
+    var values: [AnalysisPipeline.Progress] { seen.withLock { $0 } }
+}
+
+/// The analyzer of `-SortlyUITestDiskFull analysis` (`UITestAnalyzer`): the disk is full from
+/// the `after`th photo looked at on (once; space comes back with `freeDiskForTest`).
+final class DiskFillingAnalyzer: ContentAnalyzing, Sendable {
+    let base: FakeContentAnalyzer
+    let store: SortlyStore
+    let after: Int
+    private let analysed = Mutex(0)
+
+    init(base: FakeContentAnalyzer, store: SortlyStore, after: Int) {
+        self.base = base
+        self.store = store
+        self.after = after
+    }
+
+    func analyzeContent(_ asset: AssetSnapshot, request: ContentAnalysisRequest) async throws -> ContentAnalysis {
+        let result = try await base.analyzeContent(asset, request: request)
+        if analysed.withLock({ $0 += 1; return $0 }) == after { try await store.fillDiskForTest() }
+        return result
+    }
+
+    func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {
+        try await base.recognizeText(asset, allowNetwork: allowNetwork)
+    }
+}
+
+/// The analysis card as AppModel feeds it, over the reports of one run: a count never goes back
+/// within a stage nor a stage (`receive`), a run that goes on from the marker of the run before
+/// (`ResumedRun`, catching up while it is on the steps before), the marker kept like
+/// `AnalysisMarker.unfinished`, and the state from `AnalysisCardState.resolve` (`updateCard`).
+/// Read as `DeviceConditionUITests.analysisCount` reads the progress element: the step the card
+/// names ("Gleich wieder bei Schritt 4 von 6" while catching up) and the count shown.
+enum CardAsTheAppShowsIt {
+    struct Marker: Equatable {
+        var stage: Int
+        var completed: Int?
+        var total: Int?
+    }
+
+    static func readings(_ reports: [AnalysisPipeline.Progress], goingOnFrom resumeFrom: Marker?)
+        -> (readings: [(step: Int, done: Int, total: Int)], marker: Marker?) {
+        var resumed = resumeFrom.map { ResumedRun(stage: $0.stage, completed: $0.completed, shown: 0) }
+        var marker = resumeFrom
+        var stage: AnalysisPipeline.Stage?
+        var completed = 0
+        var readings: [(step: Int, done: Int, total: Int)] = []
+        for p in reports {
+            if let stage {
+                if p.stage.number < stage.number { continue }
+                if p.stage == stage, p.completed < completed { continue }
+            }
+            stage = p.stage
+            completed = p.completed
+            resumed?.back(at: p.stage.number, completed: p.completed, total: p.total)
+            let held = resumed?.holds(running: true) == true ? resumeFrom : nil
+            marker = held ?? Marker(stage: p.stage.number, completed: p.completed, total: p.total)
+            var i = AnalysisCardState.Inputs()
+            i.isRunning = true
+            i.position = AnalysisCardState.Position(step: AnalysisStep(p.stage), completed: p.completed, total: p.total)
+            if resumed?.isCatchingUp(running: true, at: p.stage.number) == true, let resumeFrom {
+                i.catchingUp(stage: resumeFrom.stage, completed: resumeFrom.completed, total: resumeFrom.total)
+            }
+            guard case .running(let position, _, _, let catchingUp)? = AnalysisCardState.resolve(i),
+                  let position, position.hasCount else { continue }
+            readings.append((catchingUp ?? position.step.number, position.completed, position.total))
+        }
+        return (readings, marker)
     }
 }
 

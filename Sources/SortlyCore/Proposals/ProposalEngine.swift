@@ -11,6 +11,12 @@ public struct AnalysisSnapshot: Sendable {
     public var recurringPlaces: [RecurringPlace]
     /// What the user set in "Dein Zuhause": the home of each date for trip names and place albums.
     public var home: HomeSettings
+    /// Suggestions that already have their album (from the managed-album records). Of a place
+    /// suggested both as recurring and as frequent place, the one with its album stays.
+    public var applied: Set<SortlyID> = []
+    /// Suggestions the user named in the app (`user.titles`) or chose to create (an accepted
+    /// decision): kept like a suggestion that has its album.
+    public var chosen: Set<SortlyID> = []
 
     public init(facts: [AssetFacts], trips: [Trip] = [], frequentPlaces: [FrequentPlace] = [], groups: [ObservationGroup] = [],
                 recurringPlaces: [RecurringPlace] = [], home: HomeSettings = HomeSettings()) {
@@ -52,10 +58,17 @@ public struct ProposalEngine: Sendable {
         let areas = settings.enabledAreas
         if areas.contains(.places) { result += placeProposals(usable, profile: profile) }
         if areas.contains(.trips) { result += tripProposals(analysis.trips, facts: usable, profile: profile, home: home, routineVisits: &standIns) }
-        if areas.contains(.frequentPlaces) { result += frequentPlaceProposals(analysis.frequentPlaces, facts: analysis.facts) }
+        let frequentPlaces = areas.contains(.frequentPlaces) ? analysis.frequentPlaces : []
         // A place the user is often at gets one album instead of its trips, so it comes with
         // either area (Trips/RecurringPlaces.swift).
-        if areas.contains(.frequentPlaces) || areas.contains(.trips) { result += recurringPlaceProposals(analysis.recurringPlaces, facts: usable) }
+        let recurring = areas.contains(.frequentPlaces) || areas.contains(.trips) ? recurringPlaceProposals(analysis.recurringPlaces, facts: usable) : []
+        let named = Set(frequentPlaces.filter { frequentPlaceName($0) != nil }.map(\.id))
+        let users = analysis.applied.union(analysis.chosen)
+        let once = Self.suggestEachPlaceOnce(frequent: frequentPlaces, named: named, recurring: recurring,
+                                             kept: users, rejected: overrides.isRejected)
+        standIns += once.standIns
+        // The cap on unnamed places counts the places that are shown, after the ones that went.
+        result += frequentPlaceProposals(once.frequent, facts: analysis.facts, chosen: analysis.chosen) + once.recurring
         if areas.contains(.chronology) { result += chronologyProposals(usable) }
         if areas.contains(.mediaTypes) { result += mediaTypeProposals(usable) }
         if areas.contains(.screenshots) { result += screenshotProposals(usable, profile: profile) }
@@ -65,7 +78,7 @@ public struct ProposalEngine: Sendable {
         if areas.contains(.peopleAndPets) { result += groupProposals(analysis.groups) }
         // Curated before rejections are taken out: a trip the user said no to still stands for
         // its country, which would otherwise come back as the same photos under another name.
-        let kept = curated(result, home: home, standIns: &standIns)
+        let kept = curated(result, home: home, standIns: &standIns, users: users.union(named))
         if areas.contains(.places) { standIns += placesOfTrips(kept, standIns: standIns) }
         let dismissed = { (p: AlbumProposal) in overrides.isRejected(p.id) || overrides.mustNotRecreate(p.id) }
         return Suggestions(open: kept.filter { !dismissed($0) }, dismissed: kept.filter(dismissed),
@@ -128,14 +141,17 @@ public struct ProposalEngine: Sendable {
                     if let n = displayName(value.components, level: parent) { path.append(n) }
                 }
             }
+            // A disputed area stands where a country would: which country it is, is not sure
+            // (decision Fuchs 18.11.2026), so the user decides, never Albumist.
+            let disputed = key.level == .country && value.components.disputedArea != nil
             return AlbumProposal(
                 id: .stable("place", key.description),
                 kind: .placeCollection(key.level),
                 title: name,
                 folderPath: path,
                 assetIDs: value.assets,
-                reliability: .certain,
-                reasons: [.photosInPlace(count: value.assets.count, place: name)],
+                reliability: disputed ? .uncertain : .certain,
+                reasons: [.photosInPlace(count: value.assets.count, place: name)] + (disputed ? [.disputedArea(place: name)] : []),
                 placeKeys: keysOf[key] ?? [key]
             )
         }
@@ -459,7 +475,7 @@ public struct ProposalEngine: Sendable {
     }
 
     /// Towns by number of photos (ties: first visited first).
-    private static func rankedTowns(_ places: [PlaceComponents]) -> [(name: String, key: PlaceKey, count: Int, first: Int)] {
+    static func rankedTowns(_ places: [PlaceComponents]) -> [(name: String, key: PlaceKey, count: Int, first: Int)] {
         var towns: [PlaceKey: (name: String, count: Int, first: Int)] = [:]
         for (i, p) in places.enumerated() {
             guard let key = p.key(at: .locality), let name = p.locality else { continue }
@@ -482,22 +498,79 @@ public struct ProposalEngine: Sendable {
 
     // MARK: Frequent places (4.3)
 
+    /// A place the user is often at (recurring) and a frequent place can be the same place
+    /// (Fuchs, build 36: "Bayern", 509 photos, and "Häufiger Ort in Zwiesel", 422 photos). They
+    /// are the same when they share at least half of the larger one's photos (422 of 509 do; a
+    /// favourite spot inside a large holiday area does not, and stays a place of its own). Then
+    /// the place is suggested once:
+    /// - A place that is the user's stays: a frequent place they named (in the settings or in the
+    ///   app, `chosen`), a suggestion they chose to create (`chosen`), one that has its album
+    ///   (`kept`). When both are the user's, both stay.
+    /// - Otherwise the recurring place stays: the user said they are often there (or added it as
+    ///   their place), and its album replaces the trips there.
+    /// The frequent places that stay are decided first: a recurring place goes only for a
+    /// frequent place that stays, and an unnamed frequent place only for a recurring place that
+    /// stays. Trade-off (decision of the coordinator, re-review 18.11.): the photos only the
+    /// recurring place had (Fuchs: 87 of 509) are in no frequent or recurring place when it goes;
+    /// unless another suggestion holds them (a town's place album), they stay "Nicht sortiert"
+    /// (`theRecurringPlacesOwnPhotosHaveNoPlaceSuggestionWhenItGoes`, docs/KNOWN_LIMITATIONS.md). A suggestion the user said
+    /// "Nicht jetzt" to (`rejected`) neither goes nor makes another one go. Each place that goes
+    /// leaves a stand-in: the album of the other one stands for its photos.
+    static func suggestEachPlaceOnce(frequent: [FrequentPlace], named: Set<SortlyID>, recurring: [AlbumProposal],
+                                     kept: Set<SortlyID>, rejected: (SortlyID) -> Bool)
+        -> (frequent: [FrequentPlace], recurring: [AlbumProposal], standIns: [StandIn]) {
+        guard !frequent.isEmpty, !recurring.isEmpty else { return (frequent, recurring, []) }
+        func same(_ a: Set<AssetID>, _ b: Set<AssetID>) -> Bool {
+            let (small, large) = a.count <= b.count ? (a, b) : (b, a)
+            return !large.isEmpty && small.filter(large.contains).count * 2 >= large.count
+        }
+        let frequentSets = frequent.map { Set($0.assetIDs) }
+        let isUsers = frequent.map { !rejected($0.id) && (named.contains($0.id) || kept.contains($0.id)) }
+        var standIns: [StandIn] = []
+        var droppedRecurring = Set<SortlyID>()
+        for place in recurring where !rejected(place.id) && !kept.contains(place.id) {
+            guard let i = frequent.indices.first(where: { isUsers[$0] && same(frequentSets[$0], place.assetIDs) }) else { continue }
+            droppedRecurring.insert(place.id)
+            standIns.append(StandIn(area: place.kind.area, suggestion: frequent[i].id, dropped: place.id,
+                                    assetIDs: place.assetIDs.intersection(frequentSets[i]), reason: .samePhotos))
+        }
+        let staying = recurring.filter { !droppedRecurring.contains($0.id) }
+        var droppedFrequent = Set<SortlyID>()
+        for (i, place) in frequent.enumerated() where !isUsers[i] && !rejected(place.id) {
+            guard let other = staying.first(where: { !rejected($0.id) && same(frequentSets[i], $0.assetIDs) }) else { continue }
+            droppedFrequent.insert(place.id)
+            standIns.append(StandIn(area: ProposalKind.frequentPlace.area, suggestion: other.id, dropped: place.id,
+                                    assetIDs: frequentSets[i].intersection(other.assetIDs), reason: .samePhotos))
+        }
+        return (frequent.filter { !droppedFrequent.contains($0.id) }, staying, standIns)
+    }
+
+    /// The name the user gave a frequent place in the settings (nil: none yet).
+    func frequentPlaceName(_ place: FrequentPlace) -> String? {
+        settings.frequentPlaces.names[place.id] ?? place.userName
+    }
+
     /// At most this many places without a name are offered, the most visited ones. A long tail
     /// of "Häufiger Ort 12 … 44" asks for names nobody can give (first device test 15.11.).
     static let maxUnnamedFrequentPlaces = 5
 
-    func frequentPlaceProposals(_ places: [FrequentPlace], facts: [AssetFacts] = []) -> [AlbumProposal] {
+    /// `chosen`: places the user named in the app (`user.titles`) or chose to create; they keep
+    /// the placeholder title here (the app shows the user's) but are not counted by the cap.
+    func frequentPlaceProposals(_ places: [FrequentPlace], facts: [AssetFacts] = [], chosen: Set<SortlyID> = []) -> [AlbumProposal] {
         let placeOf = Dictionary(facts.compactMap { f in f.place.map { (f.id, $0) } }, uniquingKeysWith: { first, _ in first })
-        var unnamed = 0
+        var unnamed = 0, capped = 0
         var perCity: [String: Int] = [:]
         var result: [AlbumProposal] = []
         // Most visited first (the detector's order), so the cap keeps the places that matter.
         for place in places {
-            let name = settings.frequentPlaces.names[place.id] ?? place.userName
+            let name = frequentPlaceName(place)
             var title = name ?? ""
             if name == nil {
+                if !chosen.contains(place.id) {
+                    capped += 1
+                    if capped > Self.maxUnnamedFrequentPlaces { continue }
+                }
                 unnamed += 1
-                if unnamed > Self.maxUnnamedFrequentPlaces { continue }
                 // "Häufiger Ort in München" says which place is meant; a number alone does not.
                 if let city = Self.dominantCity(of: place.assetIDs, in: placeOf) {
                     perCity[city, default: 0] += 1

@@ -138,6 +138,64 @@ final class SortlyLockedUITests: XCTestCase {
         return undone
     }
 
+    /// Ends the app and starts it again with the same arguments, then waits for the overview.
+    private func relaunch() {
+        UITestAppEnd.end(app)
+        app.launch()
+        let idle = anything("Fotos analysiert").waitForExistence(timeout: 120) || anything("Analyse aktuell").exists
+        print(idle ? "UI_STEP_OK locked overview after relaunch" : "UI_STEP_MISSING locked overview after relaunch")
+    }
+
+    /// The number of a row made of a title and a number, maybe with a word after it: the plan's
+    /// summary (PlanReviewView.row, combined into one element: "Neue Alben, 3") or Settings'
+    /// "Noch kostenlos" (LabeledContent: "1 Alben" as the element's value, or combined). Should
+    /// the two come as elements of their own, the number is the text on the title's line. nil
+    /// when no such row is there within `timeout`.
+    private func rowCount(_ title: String, timeout: TimeInterval) -> Int? {
+        func number(_ text: some StringProtocol) -> Int? {
+            let plain = text.replacingOccurrences(of: ".", with: "")
+            guard let m = plain.wholeMatch(of: #/[,:\s]*(\d+)(?:\s+\p{L}+)?\s*/#) else { return nil }
+            return Int(m.1)
+        }
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", title))
+        if timeout > 0 { _ = rows.firstMatch.waitForExistence(timeout: timeout) }
+        var titleFrame: CGRect?
+        for row in rows.allElementsBoundByIndex {
+            guard let snapshot = try? row.snapshot() else { continue }
+            if let n = number(snapshot.label.dropFirst(title.count)) { return n }
+            if snapshot.label == title {
+                if let value = snapshot.value as? String, let n = number(value) { return n }
+                titleFrame = snapshot.frame
+            }
+        }
+        guard let line = titleFrame else { return nil }
+        for text in app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "[0-9.]+( \\p{L}+)?")).allElementsBoundByIndex {
+            guard let snapshot = try? text.snapshot(), snapshot.frame.midY >= line.minY, snapshot.frame.midY <= line.maxY,
+                  snapshot.frame.minX > line.maxX, let n = number(snapshot.label) else { continue }
+            return n
+        }
+        return nil
+    }
+
+    /// "Noch kostenlos: N Alben" in Settings (SettingsView, section "Vollversion"), opened from
+    /// the overview and closed again. nil when it cannot be read.
+    private func freeAlbumsLeftInSettings() -> Int? {
+        guard tap(app.buttons["Einstellungen"], "settings for the free albums (locked)") else { return nil }
+        sleep(1)
+        let row = anything("Noch kostenlos")
+        var swipes = 0
+        while !(row.exists && row.isHittable) && swipes < 10 {
+            app.swipeUp()
+            swipes += 1
+        }
+        let left = rowCount("Noch kostenlos", timeout: 5)
+        print("UI_FACT locked: Settings says \(left.map { "\($0)" } ?? "?") free albums left")
+        shot("72-locked-free-albums")
+        tap(button("Fertig"), "close settings after the free albums (locked)")
+        sleep(2)
+        return left
+    }
+
     private func back() {
         let bar = app.navigationBars.firstMatch
         if bar.buttons.firstMatch.exists { bar.buttons.element(boundBy: 0).tap() }
@@ -146,7 +204,9 @@ final class SortlyLockedUITests: XCTestCase {
     /// CI runs groups of UI tests on separate simulators: when this test runs without the flow
     /// before it, the demo library is created and analysed first (fast start, no onboarding).
     private func prepareLibrary() {
+        // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked", "-SortlyUITestFastStart"]
+            + UITestStalls.arguments(besides: [])
         app.launch()
         let deadline = Date().addingTimeInterval(900)
         var streak = 0
@@ -157,7 +217,7 @@ final class SortlyLockedUITests: XCTestCase {
             sleep(2)
         }
         print(streak >= 3 ? "UI_STEP_OK prepared (locked)" : "UI_STEP_MISSING prepared (locked)")
-        app.terminate()
+        UITestAppEnd.end(app)
         app = XCUIApplication()
     }
 
@@ -165,7 +225,7 @@ final class SortlyLockedUITests: XCTestCase {
         continueAfterFailure = true
         prepareLibrary()
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked",
-                               "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "1"]
+                               "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "1"] + UITestStalls.arguments(besides: [])
         app.launch()
         // A cut-off test 1 left the app at its welcome screen (run 43816787321).
         if !UITestOnboarding.fullFlowReachedItsEnd { UITestOnboarding.completeIfNeeded(app, in: "test7") }
@@ -193,6 +253,16 @@ final class SortlyLockedUITests: XCTestCase {
                 while after <= before && Date() < end { sleep(2); after = openSuggestionCount() }
                 print("UI_FACT locked: open suggestions \(before) before taking back, \(after) after")
                 shot("70-locked-overview-after-takeback")
+                // Every undo gave its albums back to the free count (AppModel.finalize:
+                // returnUsage, also for plans of earlier runs: FreeAlbumLedger.giveBack lowers
+                // the old total), so more would be free now and the plan would rarely need the
+                // card. A new launch starts the count at 1 again: the locked run's purchase
+                // defaults are emptied at every launch (UITestSupport.lockedPurchaseDefaults) and
+                // set to -SortlyUITestFreeAlbumsLeft 1; the suggestions are in the database.
+                // Since the album ledger (bundle j) a set start (FreeAlbumLedger(startingWithUsed:))
+                // is never given back, so one free album should be left; not taken for granted
+                // all the same: the count is read in Settings below.
+                relaunch()
                 _ = selectRecommended("open suggestions after taking back (locked)")
             }
         }
@@ -200,11 +270,31 @@ final class SortlyLockedUITests: XCTestCase {
         print(ready ? "UI_STEP_OK something to create (locked)" : "UI_STEP_MISSING something to create (locked)")
         XCTAssertTrue(ready, "The locked run found nothing to create, not even after taking plans back")
         guard ready else { return }
+        // Read, not assumed (see the relaunch above).
+        let free = freeAlbumsLeftInSettings()
+        XCTAssertNotNil(free, "Settings shows no readable \"Noch kostenlos\"")
+        let left = free ?? 1
         guard tap(apply, "open plan (locked)", timeout: 20) else { return }
         sleep(3)
 
+        // The unlock card comes exactly when the plan needs more albums than are free
+        // (PlanReviewView: !purchases.allows(albums: facts.freeAlbumUse)). freeAlbumUse of a
+        // plan from suggestions is its new plus its extended albums (pinned by
+        // PurchaseRulesTests.previewSummaryCountsWhatTheFreeAlbumsCount), which the summary
+        // above the card shows ("Neue Alben", "Ergänzte Alben" only when > 0).
+        let newAlbums = rowCount("Neue Alben", timeout: 30)
+        let extended = rowCount("Ergänzte Alben", timeout: 0) ?? 0
+        print("UI_FACT locked: the plan has \(newAlbums.map { "\($0)" } ?? "?") new and \(extended) extended albums, \(left) free albums left")
+        XCTAssertNotNil(newAlbums, "The plan's summary shows no readable \"Neue Alben\" row")
+        let planned = (newAlbums ?? 0) + extended
         let unlock = app.staticTexts["Albumist freischalten"]
-        if unlock.waitForExistence(timeout: 10) {
+        let cardShown = unlock.waitForExistence(timeout: planned > left ? 10 : 3)
+        if newAlbums != nil && free != nil {
+            XCTAssertEqual(cardShown, planned > left, planned > left
+                           ? "A plan with \(planned) albums and \(left) free albums left shows no unlock card"
+                           : "A plan with \(planned) albums shows the unlock card although \(left) free albums are left")
+        }
+        if cardShown {
             print("UI_STEP_OK unlock card")
             XCTAssertFalse(app.buttons["plan.apply"].exists, "A plan over the free albums offered \"Alben jetzt anlegen\"")
             // With or without a price from StoreKit (W7: "Preis wird geladen …" until it is there).
@@ -213,13 +303,17 @@ final class SortlyLockedUITests: XCTestCase {
             guard tap(button("jetzt kostenlos anlegen"), "keep the free albums only") else { return }
             sleep(3)
         } else {
-            print("UI_FACT locked: the plan has a single album, it fits the free one")
+            print("UI_FACT locked: the plan has \(planned) albums, they fit the \(left) free ones")
         }
         let start = app.buttons["plan.apply"]
         XCTAssertTrue(start.waitForExistence(timeout: 20), "The plan within the free albums cannot be applied")
-        let rest = anything("noch 0 von 10 Gratis-Alben").exists
-        print(rest ? "UI_STEP_OK free albums left after this plan" : "UI_STEP_MISSING free albums left after this plan")
-        XCTAssertTrue(rest, "The plan does not say that no free album is left afterwards")
+        // What is free afterwards: the free albums less what this plan uses ("Die ersten N"
+        // made the plan anew, so its summary is read again).
+        let used = cardShown ? (rowCount("Neue Alben", timeout: 10) ?? 0) + (rowCount("Ergänzte Alben", timeout: 0) ?? 0) : planned
+        let expected = "noch \(left - used) von 10 Gratis-Alben"
+        let rest = anything(expected).exists
+        print(rest ? "UI_STEP_OK free albums left after this plan (\(expected))" : "UI_STEP_MISSING free albums left after this plan (\(expected))")
+        XCTAssertTrue(rest, "The plan does not say \"\(expected)\" (\(left) free, the plan uses \(used))")
         guard tap(start, "apply plan (locked)") else { return }
         let done = button("Rückgängig machen").waitForExistence(timeout: 300)
         print(done ? "UI_STEP_OK locked plan finished" : "UI_STEP_MISSING locked plan finished")

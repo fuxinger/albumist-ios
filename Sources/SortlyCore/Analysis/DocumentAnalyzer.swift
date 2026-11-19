@@ -64,12 +64,76 @@ public struct DocumentAnalyzer: Sendable {
         (.vehicle, ["fahrzeugschein", "zulassungsbescheinigung", "fahrgestellnummer", "tüv", "hauptuntersuchung", "kfz", "kennzeichen", "inspektion", "ölwechsel"]),
     ]
 
+    /// Words that mark a document as sensitive, in German and English (the languages the text
+    /// is read in, `VisionAnalyzer`). How a keyword has to sit in the text (second review of
+    /// G2-03, 18.11.2026), checked by `keywordSensitivity`:
+    /// - `word`: starts a word (no letter or digit before it) and may go on ("diagnosis:",
+    ///   "medications", "IBAN-Nr."), so "lab report" is not found in "Collab report",
+    ///   "au-bescheinigung" not in "Bau-Bescheinigung", "iban" not in "Libanon".
+    /// - `*word`: may also end a longer word, for German compounds ("*befund" in "Laborbefund",
+    ///   "*steuerbescheid" in "Einkommensteuerbescheid", "*arztbrief" in "Facharztbrief").
+    /// - `word$`: must also end the word ("bic$" not in "bicycle" or "cubic").
+    /// - `/regex`: a pattern of its own, for words that need more ("rezept" but not
+    ///   "Rezeption"; "patient" but not "patiently", "impatient" or "please be patient").
+    /// An apostrophe may be left out ("doctors note"). Text is matched in lower case.
     static let sensitivityKeywords: [(DocumentSensitivity, [String])] = [
-        (.identity, ["personalausweis", "reisepass", "passport", "identity card", "führerschein", "driving licence", "aufenthaltstitel", "nationalität", "date of birth", "geburtsdatum",
+        (.identity, ["*personalausweis", "*reisepass", "passport", "identity card", "*führerschein", "driving licence", "*aufenthaltstitel", "nationalität",
+                     "date of birth", "geburtsdatum",
                      // The back of an ID card names no document (review P2-04).
                      "augenfarbe", "eye colour", "eye color", "colour of eyes", "color of eyes", "ordensname", "künstlername"]),
-        (.medical, ["diagnose", "befund", "rezept", "arztbrief", "krankenkasse", "versichertennummer", "arbeitsunfähigkeit", "patient", "medikament", "prescription"]),
-        (.financial, ["kontoauszug", "iban", "bic", "lohnabrechnung", "gehaltsabrechnung", "kreditkarte", "steuerbescheid", "kontostand", "bank statement", "salary"]),
+        (.medical, ["*diagnose", "*befund", #"/rezept(?!ion)"#, "*arztbrief", "*krankenkasse",
+                    "*versichertennummer", "arbeitsunfähigkeit", "*medikament", "*prescription",
+                    // "patient" as a noun, also in "Patientin", "Patientenakte", "outpatient",
+                    // "Krebspatient"; not "patiently", "impatient" or the adjective after "be".
+                    #"/(?<!be )(?<!so )(?<!very )(?<!more )(?<!stay )(?<!remain )(?<!im)patient(?!ly)"#,
+                    // English letters name the same things in other words: "diagnosis" holds no
+                    // "diagnose" (review G2-03). Phrases rather than "medical", "hospital",
+                    // "clinic" or "doctor" alone, which stand on signs, maps and parking tickets.
+                    "diagnosis", "medication", "medical report", "medical certificate", "medical record", "medical history",
+                    "medical findings", "discharge summary", "discharge letter", "discharge report", "doctor's letter",
+                    "doctor's note", "doctor's certificate", "sick note", "fit note", "sick leave", "unfit for work", "incapacity for work",
+                    "lab report", "laboratory report", "laboratory results", "blood test", "pathology report", "radiology report",
+                    "health insurance card", "nhs number",
+                    // The same in German, and the ICD codes doctors put next to a diagnosis.
+                    "*entlassbrief", "*entlassungsbrief", "*entlassungsbericht", "*arztbericht", "*anamnese", "*medikation",
+                    "krankschreibung", "au-bescheinigung", "icd-10", "icd 10", "icd10", "icd-11", "icd 11", "icd11"]),
+        (.financial, ["*kontoauszug", "iban", "bic$", "*lohnabrechnung", "*gehaltsabrechnung", "*kreditkarte", "*steuerbescheid", "*kontostand",
+                      "bank statement", "salary"]),
+    ]
+
+    /// `sensitivityKeywords` as one pattern per level.
+    static let sensitivityPatterns: [(DocumentSensitivity, NSRegularExpression)] = sensitivityKeywords.map { level, words in
+        let parts = words.map { word -> String in
+            if word.hasPrefix("/") { return String(word.dropFirst()) }
+            var core = Substring(word)
+            let compound = core.hasPrefix("*")
+            if compound { core = core.dropFirst() }
+            let wholeWord = core.hasSuffix("$")
+            if wholeWord { core = core.dropLast() }
+            let escaped = NSRegularExpression.escapedPattern(for: String(core)).replacingOccurrences(of: "'", with: "'?")
+            return (compound ? "" : #"(?<![\p{L}\p{N}])"#) + escaped + (wholeWord ? #"(?![\p{L}\p{N}])"# : "")
+        }
+        return (level, try! NSRegularExpression(pattern: "(?:" + parts.joined(separator: "|") + ")"))
+    }
+
+    /// `sensitivityKeywords` as plain words for `SensitiveWords`, which scans stored texts
+    /// (`TextMinimizer.looksSensitive`): the marks `*` and `$` dropped. A `/pattern` is left out:
+    /// its bare word would find what the pattern excludes ("Rezeption", "please be patient"),
+    /// and a text it matches is medical and never stored (`TextMinimizer.storable`). Short words
+    /// still count only as whole words there; a long one is also found inside a word.
+    static let plainSensitivityWords: [String] = sensitivityKeywords.flatMap(\.1)
+        .filter { !$0.hasPrefix("/") }
+        .map { $0.replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "$", with: "") }
+
+    /// Words printed on a bank card or naming one ("Visa Debit", "girocard", "VALID THRU").
+    /// They do not make a document sensitive where it has a type (a receipt paid by girocard
+    /// stays a receipt and keeps its album): they name a card where no document type was
+    /// recognised (`analyze` → `.other`), and keep a picture out of previews (`PreviewRank`,
+    /// `TextMinimizer.looksSensitive`). Short parts count as whole words only (`SensitiveWords`).
+    static let paymentCardKeywords = [
+        "visa", "mastercard", "maestro", "girocard", "debit", "kreditkarte", "debitkarte", "credit card", "debit card",
+        "american express", "amex", "valid thru", "valid through", "good thru", "card number", "card no", "kartennummer",
+        "kartennr", "cvc", "cvv", "v pay", "unionpay", "diners",
     ]
 
     static let knownMerchants = [
@@ -91,15 +155,22 @@ public struct DocumentAnalyzer: Sendable {
         if amount != nil { scores[.invoice, default: 0] += scores[.invoice] != nil ? 1 : 0; scores[.receipt, default: 0] += scores[.receipt] != nil ? 1 : 0 }
 
         guard let best = scores.max(by: { ($0.value, $0.key.rawValue) < ($1.value, $1.key.rawValue) }) else {
-            // Text but no document markers: only report if it looks like a letter-sized text block.
-            return nil
+            // No document type, but a card, a statement, an ID or a medical paper (second review
+            // of the build 36 fix): reported as `.other` with its sensitivity so the picture is
+            // never a preview. Nothing else of it is kept (no subject, sender, number or amount),
+            // and `.other` never becomes an album of its own (`ProposalEngine`). What is stored of
+            // the text is decided apart from this (`TextMinimizer.storable`) and does not change.
+            // Short words only as whole words: "bic" in "Arabic … cubic" is no bank (third review);
+            // the same rules as for a document with a type (`keywordSensitivity`).
+            var sensitivity = Self.keywordSensitivity(rawText)
+            if Self.containsIBAN(rawText) || TextMinimizer.namesPaymentCard(rawText) { sensitivity = max(sensitivity, .financial) }
+            if sensitivity < .identity, Self.hasMachineReadableZone(rawText) { sensitivity = .identity }
+            guard sensitivity > .normal else { return nil }
+            return DocumentInfo(type: .other, typeReliability: .uncertain, keywords: [], sensitivity: sensitivity)
         }
         let reliability: Reliability = best.value >= 3 ? .likely : (best.value == 2 ? .plausible : .uncertain)
 
-        var sensitivity = DocumentSensitivity.normal
-        for (level, words) in Self.sensitivityKeywords where words.contains(where: { text.contains($0) }) {
-            sensitivity = max(sensitivity, level)
-        }
+        var sensitivity = Self.keywordSensitivity(rawText)
         if Self.containsIBAN(rawText) { sensitivity = max(sensitivity, .financial) }
         if sensitivity < .identity, Self.hasMachineReadableZone(rawText) { sensitivity = .identity }
         // The subject line is stored with these facts: masked like the text, and not kept at all
@@ -118,6 +189,38 @@ public struct DocumentAnalyzer: Sendable {
             keywords: Self.typeKeywords.flatMap(\.1).filter { text.contains($0) }.prefix(8).map { $0 },
             sensitivity: sensitivity
         )
+    }
+
+    /// A hyphen at the end of a line between two letters: OCR's broken word.
+    private static let brokenWord = try! NSRegularExpression(pattern: #"(?<=\p{L})-[ \t]*\r?\n\s*(?=\p{L})"#)
+
+    /// The level the words of `sensitivityKeywords` in `rawText` point to. Case does not count;
+    /// line breaks and runs of spaces count as one space (OCR splits "discharge summary" over
+    /// two lines); typographic apostrophes (’ ‘ ʼ ´ ` ′) count as a plain one ("doctor’s note").
+    /// A word OCR broke with a hyphen at the end of a line ("Diag-⏎nosis") is matched joined,
+    /// and with its hyphen too ("AU-⏎Bescheinigung").
+    static func keywordSensitivity(_ rawText: String) -> DocumentSensitivity {
+        // Umlauts stored as a letter plus a separate mark are matched like the single character.
+        var text = rawText.precomposedStringWithCanonicalMapping.lowercased().replacingOccurrences(of: "\u{00AD}", with: "")
+        for apostrophe in ["\u{2018}", "\u{2019}", "\u{02BC}", "\u{00B4}", "`", "\u{2032}"] {
+            text = text.replacingOccurrences(of: apostrophe, with: "'")
+        }
+        for hyphen in ["\u{2010}", "\u{2011}"] { text = text.replacingOccurrences(of: hyphen, with: "-") }
+        var variants = [text]
+        let whole = NSRange(text.startIndex..., in: text)
+        if brokenWord.firstMatch(in: text, range: whole) != nil {
+            variants = [brokenWord.stringByReplacingMatches(in: text, range: whole, withTemplate: ""),
+                        brokenWord.stringByReplacingMatches(in: text, range: whole, withTemplate: "-")]
+        }
+        var level = DocumentSensitivity.normal
+        for variant in variants {
+            let compact = variant.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            let range = NSRange(compact.startIndex..., in: compact)
+            for (candidate, pattern) in sensitivityPatterns where pattern.firstMatch(in: compact, range: range) != nil {
+                level = max(level, candidate)
+            }
+        }
+        return level
     }
 
     // MARK: - Field extraction

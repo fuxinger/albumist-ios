@@ -121,6 +121,106 @@
         }
       }
     },
+    "%lld ignorierte Fotos" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ignoriertes Foto"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ignorierte Fotos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ignored photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ignored photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld ignorierte Fotos aus %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ aus %2$@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg ignoriertes Foto"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg ignorierte Fotos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@ from %2$@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg ignored photo"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%arg ignored photos"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld Originale bearbeitet" : {
       "localizations" : {
         "en" : {
@@ -527,6 +627,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Umstrittenes Gebiet: Zu welchem Land es gehört, ist nicht sicher. Albumist ordnet „%@“ darum keinem Land zu." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disputed area: which country it belongs to is not certain, so Albumist doesn’t put “%@” in any country."
           }
         }
       }
@@ -1151,6 +1261,16 @@
         }
       }
     },
+    "Albumist analysiert gerade deine Fotos. Danach wieder möglich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is analysing your photos. Possible again once it's done."
+          }
+        }
+      }
+    },
     "Albumist analysiert oder ändert gerade deine Mediathek. Versuche es gleich noch einmal." : {
       "localizations" : {
         "en" : {
@@ -1167,6 +1287,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist then starts fresh and restores your decisions from the copy. Your photos, albums and purchase stay as they are."
+          }
+        }
+      }
+    },
+    "Albumist benennt Personen und Tiere nie selbst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist never names people or animals on its own."
+          }
+        }
+      }
+    },
+    "Albumist benennt persönliche Orte nie selbst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist never names personal places on its own."
           }
         }
       }
@@ -1251,6 +1391,16 @@
         }
       }
     },
+    "Albumist legt gerade Alben an. Danach wieder möglich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is creating albums. Possible again once it's done."
+          }
+        }
+      }
+    },
     "Albumist legt ohnehin ein neues Album an und bietet dieses unter „Anpassen“ nicht mehr an. Am Album selbst ändert sich nichts." : {
       "localizations" : {
         "en" : {
@@ -1281,6 +1431,16 @@
         }
       }
     },
+    "Albumist rechnet die Reisen gerade neu. Gleich wieder möglich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is recalculating your trips. Possible again in a moment."
+          }
+        }
+      }
+    },
     "Albumist teilt die Reise und plant die Vorschläge neu …" : {
       "localizations" : {
         "en" : {
@@ -1301,6 +1461,26 @@
         }
       }
     },
+    "Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist forgets which trips you split or merged. Albums already created stay as they are. The paused analysis then continues."
+          }
+        }
+      }
+    },
+    "Albumist zählt gerade nur Fotos aus %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist currently counts only photos from %@."
+          }
+        }
+      }
+    },
     "Albumist-Diagnose" : {
       "localizations" : {
         "en" : {
@@ -1317,6 +1497,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "All"
+          }
+        }
+      }
+    },
+    "Alle Fotos aus %@ liegen in deinen Hauptbereichen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All photos from %@ are in your main areas."
           }
         }
       }
@@ -1921,6 +2111,16 @@
         }
       }
     },
+    "Die pausierte Analyse läuft dann weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The paused analysis then continues."
+          }
+        }
+      }
+    },
     "Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen." : {
       "localizations" : {
         "en" : {
@@ -2221,16 +2421,6 @@
         }
       }
     },
-    "Erst einen Namen eingeben" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enter a name first"
-          }
-        }
-      }
-    },
     "Erzähl meine Geschichte" : {
       "localizations" : {
         "en" : {
@@ -2451,6 +2641,16 @@
         }
       }
     },
+    "Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved. Albumist applies the change once the analysis is done."
+          }
+        }
+      }
+    },
     "Geteilt: neue Reise ab %@" : {
       "localizations" : {
         "en" : {
@@ -2477,16 +2677,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Only what Albumist verified in your library afterwards is counted."
-          }
-        }
-      }
-    },
-    "Gib diesem Ort oder dieser Gruppe einen Namen. Albumist benennt persönliche Orte nie selbst." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Give this place or group a name. Albumist never names personal places on its own."
           }
         }
       }
@@ -2861,6 +3051,26 @@
         }
       }
     },
+    "Name für das Album" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Album name"
+          }
+        }
+      }
+    },
+    "Namen eingeben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a name"
+          }
+        }
+      }
+    },
     "Namen vorschlagen" : {
       "localizations" : {
         "en" : {
@@ -3017,6 +3227,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Not now"
+          }
+        }
+      }
+    },
+    "Nicht mitgezählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not counted"
           }
         }
       }
@@ -4131,6 +4351,16 @@
         }
       }
     },
+    "z. B. Bei Oma, Garten, Ferienhaus" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "e.g. At Grandma’s, Garden, Holiday Home"
+          }
+        }
+      }
+    },
     "z. B. Grillen bei Oma letzten Sommer" : {
       "localizations" : {
         "en" : {
@@ -4147,6 +4377,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "e.g. dogs Italy 2023"
+          }
+        }
+      }
+    },
+    "z. B. Oma, Bello, Minka" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "e.g. Grandma, Buddy, Luna"
           }
         }
       }
@@ -4317,6 +4557,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%1$@” and “%2$@” become one trip with %3$lld photos."
+          }
+        }
+      }
+    },
+    "„%@“ und „%@“ werden eine Reise mit %lld Fotos. Die pausierte Analyse läuft dann weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%1$@” and “%2$@” become one trip with %3$lld photos. The paused analysis then continues."
           }
         }
       }
@@ -5271,12 +5521,12 @@
         }
       }
     },
-    "Die Analyse läuft immer auf deinem Gerät. Für genauere Orte sendet iOS nur Koordinaten an Apple, keine Fotos. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst." : {
+    "Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst, nie ein Foto. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The analysis always runs on your device. For more precise places, iOS sends only coordinates to Apple, never photos. Only screenshots and documents are downloaded from iCloud, never videos, and only over Wi‑Fi unless you choose otherwise."
+            "value" : "The analysis always runs on your device. For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service, never a photo. Only screenshots and documents are downloaded from iCloud, never videos, and only over Wi‑Fi unless you choose otherwise."
           }
         }
       }
@@ -5361,12 +5611,12 @@
         }
       }
     },
-    "Nur wenn „Orte online genauer bestimmen“ eingeschaltet ist, schickt iOS Koordinaten an Apple, um Ortsnamen zu finden. Fotos verlassen dein Gerät nie." : {
+    "Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Fotos verlassen dein Gerät nie." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Only when “Refine places online” is on, iOS sends coordinates to Apple to find place names. Photos never leave your device."
+            "value" : "For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service. This is on by default and can be turned off under “Refine places online”. Photos never leave your device."
           }
         }
       }
@@ -5461,16 +5711,6 @@
         }
       }
     },
-    "Alles bleibt auf deinem Gerät. Nichts wird hochgeladen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Everything stays on your device. Nothing is uploaded."
-          }
-        }
-      }
-    },
     "Geschrieben von Apple Intelligence auf deinem Gerät, nur aus Zahlen, Orten und Themen." : {
       "localizations" : {
         "en" : {
@@ -5491,12 +5731,12 @@
         }
       }
     },
-    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät." : {
+    "Albumist braucht vollen Zugriff, um deine Mediathek zu analysieren und Alben anzulegen. Die Analyse passiert nur auf diesem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst – das kannst du in den Einstellungen ausschalten." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device."
+            "value" : "Albumist needs full access to analyze your library and create albums. The analysis happens only on this device. For place names, iOS sends single photo locations (only coordinates and the language for place names) to Apple’s map service; you can turn this off in Settings."
           }
         }
       }
@@ -7763,12 +8003,12 @@
         }
       }
     },
-    "Deine Fotos bleiben auf deinem Gerät. Nichts wird hochgeladen." : {
+    "Deine Fotos bleiben auf deinem Gerät. Kein Foto wird hochgeladen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your photos stay on your device. Nothing is uploaded."
+            "value" : "Your photos stay on your device. No photo is ever uploaded."
           }
         }
       }
@@ -10223,12 +10463,52 @@
         }
       }
     },
-    "Apple antwortet gleich" : {
+    "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in %lld Minuten" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in %lld Minute"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in %lld Minuten"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Place names: Apple allows only a few lookups a minute · continuing in %lld minute"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Place names: Apple allows only a few lookups a minute · continuing in %lld minutes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in %lld s" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple will answer shortly"
+            "value" : "Place names: Apple allows only a few lookups a minute · continuing in %lld s"
           }
         }
       }
@@ -12193,6 +12473,46 @@
         }
       }
     },
+    "Albumist war gerade ausgelastet und hat diese Änderung nicht an Fotos geschickt – sie ist nicht passiert. Versuche es gleich noch einmal – bei einem Plan mit „Fortsetzen“ in der Übersicht." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist was busy just now and did not send this change to Photos – it did not happen. Try again in a moment – for a plan, with “Resume” in the overview."
+          }
+        }
+      }
+    },
+    "Albumist war gerade ausgelastet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist was busy just now"
+          }
+        }
+      }
+    },
+    "Geht gleich von selbst weiter. Du musst nichts tun." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continues by itself in a moment. You don't need to do anything."
+          }
+        }
+      }
+    },
+    "Albumist war gerade ausgelastet und hat Fotos noch nicht gefragt. Versuche es gleich noch einmal." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist was busy just now and has not asked Photos yet. Try again in a moment."
+          }
+        }
+      }
+    },
     "Fotos hat eine frühere Änderung noch nicht beantwortet, deshalb schickt Albumist nichts Neues. Hält das an, beende Albumist und öffne es neu, notfalls starte das iPhone neu." : {
       "localizations" : {
         "en" : {
@@ -12389,6 +12709,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Vorschau ausgeblendet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preview hidden"
           }
         }
       }

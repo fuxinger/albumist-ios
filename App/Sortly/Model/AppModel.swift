@@ -76,8 +76,16 @@ final class AppModel {
         var widths: StepWidths = .standard
         /// Where the last run stood when it ended (the paused card: "Bei 2.433 von 5.683 Fotos").
         var stoppedAt: AnalysisCardState.Position?
-        /// Apple's geocoder makes the places step wait ("Apple antwortet gleich").
-        var appleWait = false
+        /// The places step waits for Apple's geocoder (only the overnight refinement does: a run
+        /// in the app never waits for it): about how long still, for the card's countdown
+        /// ("Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in 25 s").
+        var appleWaitLeft: Duration?
+        var appleWait: Bool { appleWaitLeft != nil }
+        /// The run is the overnight refinement (`refinePass`): the card shows it as a run of its
+        /// own (`RefinementCard`), not as the analysis going on: no catching up, no phase of its
+        /// own, no quick check, the bar from the refinement's own start. It has no `kind` of its
+        /// own and keeps the last run's (`TripWorkshop.shortCheck`).
+        var refining = false
 
         var fraction: Double { total == 0 ? 0 : min(1, Double(completed) / Double(total)) }
         /// The step the card shows (six steps; the pipeline's groups belong to the last one).
@@ -91,10 +99,10 @@ final class AppModel {
         }
         /// Still on the quick first steps of a run that goes on from further ahead.
         var isCatchingUp: Bool {
-            resumed?.isCatchingUp(running: isRunning, at: stage?.number) ?? false
+            !refining && (resumed?.isCatchingUp(running: isRunning, at: stage?.number) ?? false)
         }
         /// The value is held until the run passes where the run before stopped (`ResumedRun`).
-        var isHolding: Bool { resumed?.holds(running: isRunning) ?? false }
+        var isHolding: Bool { !refining && (resumed?.holds(running: isRunning) ?? false) }
         /// The last run finished the whole analysis: only then does the card say 100 %.
         var isComplete: Bool { outcome.isComplete(running: isRunning) }
         /// The label of a phase of its own ("Neue Fotos werden analysiert", "Analyse nach
@@ -104,6 +112,7 @@ final class AppModel {
         /// finding 7: right after "Alle 5.683 Fotos analysiert" it said "Bildinhalte werden
         /// erkannt · 0 von 5.683").
         var newWork: ResumedRun.NewWork? {
+            if refining { return nil }
             if let newWork = resumed?.newWork { return newWork }
             return kind == .check && workload?.isMostlyLabels == true ? .newAreas : nil
         }
@@ -112,6 +121,7 @@ final class AppModel {
         /// paused card said "0 %" or the value the run started from, stress run 43833158673).
         /// Never 100 % before the analysis is complete (`AnalysisPercent`).
         var shownOverall: Double {
+            if refining, isRunning { return AnalysisPercent.value(overall, isComplete: false) }
             let stopped = isRunning ? nil : stoppedAt.map { widths.overall(step: $0.step, completed: $0.completed, total: $0.total) }
             let value = resumed.map { $0.shown(running: isRunning, catchingUp: isCatchingUp, overall: overall, stopped: stopped) }
                 ?? stopped ?? overall
@@ -219,6 +229,8 @@ final class AppModel {
     }
 
     @ObservationIgnored private var progressMailbox = ProgressMailbox()
+    /// What the card shows of the overnight refinement (`refinePass`, `refinementTick`).
+    @ObservationIgnored private var refinementCard = RefinementCard()
     @ObservationIgnored private var estimator = ProgressEstimator()
     @ObservationIgnored private var glide = BarGlide()
     @ObservationIgnored private var tickTask: Task<Void, Never>?
@@ -247,7 +259,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
+    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { libraryInputsChanged() } }
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
@@ -304,6 +316,7 @@ final class AppModel {
 
     @ObservationIgnored private var countryCache: [String: CountryPhotos] = [:]
     @ObservationIgnored private var datesCache: [AssetID: Date]?
+    @ObservationIgnored private var previewRanksCache: [AssetID: PreviewRank]?
     @ObservationIgnored private var factsIndex: [AssetID: AssetFacts]?
 
     /// Facts by photo id (search hits, photo view).
@@ -328,6 +341,20 @@ final class AppModel {
         return dates
     }
 
+    /// How well each photo suits a preview or cover (`PreviewRank`): photos not analysed yet,
+    /// screenshots and documents only when there are too few analysed ordinary photos, sensitive
+    /// documents (bank cards, statements, IDs, medical papers, pictures taken for documents that
+    /// their text does not explain) never. Ordinary photos are not listed (owner's iPhone, build
+    /// 36: a bank card among the preview photos of "Häufiger Ort in Zwiesel"). Worked out off the
+    /// main thread when the facts are refreshed; computed here only when that did not happen.
+    var previewRanks: [AssetID: PreviewRank] {
+        access(keyPath: \.facts)
+        if let previewRanksCache { return previewRanksCache }
+        let ranks = MainThreadWatch.shared.section("preview ranks") { PreviewRank.ranks(of: facts) }
+        previewRanksCache = ranks
+        return ranks
+    }
+
     /// Photos the user took out of a suggestion ("Aus Vorschlag entfernen").
     var removedFromProposals: [SortlyID: Set<AssetID>] = [:]
 
@@ -336,10 +363,35 @@ final class AppModel {
         PreviewPicker.chronological(proposal.assetIDs.subtracting(removedFromProposals[proposal.id] ?? []), dates: creationDates)
     }
 
-    /// Preview photos spread over the suggestion's time span, with the cover photo.
+    /// Preview photos spread over the suggestion's time span, with its cover: ordinary photos
+    /// first, never a sensitive document, so a suggestion with too few other photos shows fewer
+    /// than `count` (its photo count, `members(of:)`, stays the same).
     func previewIDs(for proposal: AlbumProposal, count: Int = 8) -> [AssetID] {
-        PreviewPicker.pick(proposal.assetIDs.subtracting(removedFromProposals[proposal.id] ?? []),
-                           dates: creationDates, cover: proposal.coverAssetID, count: count)
+        let members = proposal.assetIDs.subtracting(removedFromProposals[proposal.id] ?? [])
+        return PreviewPicker.pick(members, dates: creationDates, cover: coverID(for: proposal), count: count, ranks: previewRanks)
+    }
+
+    /// The photo a suggestion shows in the lists and whose colours glow behind its photos: its
+    /// own cover unless that is a document or screenshot while it has ordinary photos, never a
+    /// sensitive document (`PreviewPicker.cover`). `nil` when it has no photo to show.
+    func coverID(for proposal: AlbumProposal) -> AssetID? {
+        let removed = removedFromProposals[proposal.id] ?? []
+        let ranks = previewRanks
+        // The usual case, without going through the suggestion's photos: its cover is an
+        // ordinary photo that is still in it.
+        if let cover = proposal.coverAssetID, ranks[cover] == nil, !removed.contains(cover), proposal.assetIDs.contains(cover) {
+            return cover
+        }
+        return PreviewPicker.cover(proposal.assetIDs.subtracting(removed), preferred: proposal.coverAssetID, proposal: proposal.id, ranks: ranks)
+    }
+
+    /// Every photo of the suggestion is a sensitive document: its preview is the tile "Vorschau
+    /// ausgeblendet" (`ThumbnailGrid`), which VoiceOver says as the grid's value.
+    func previewHidden(for proposal: AlbumProposal) -> Bool {
+        let removed = removedFromProposals[proposal.id] ?? []
+        let ranks = previewRanks
+        let members = proposal.assetIDs.lazy.filter { !removed.contains($0) }
+        return !members.isEmpty && !members.contains { ranks[$0] != .sensitive }
     }
 
     /// Takes photos out of one suggestion only; they stay in the library and in other suggestions.
@@ -427,13 +479,24 @@ final class AppModel {
     }
     var analysisCounts = AnalysisCounts()
     /// The part of the library Albumist works on: everything, or the trial year chosen at
-    /// the start (kept for every later run).
-    var analysisScope: OrganizationScope = .all
+    /// the start (kept for every later run). The library tab's "Sortiert" and "Nicht sortiert"
+    /// follow it like the ring (`LibraryBuckets.make(…scope:)`).
+    var analysisScope: OrganizationScope = .all { didSet { if oldValue != analysisScope { libraryInputsChanged() } } }
     /// Photos changed while a run was busy (`LibraryChangeWatcher`): one more pass follows when
     /// it ends, unless the user paused it. Taken by the end of every run, in the app and the
     /// overnight refinement (`AnalysisRunEnd`). A change of the settings needs no request: the
     /// end of the run compares what the run read with the settings then.
     @ObservationIgnored var catchUpAfterRun = false
+    /// A change of the user's (a trip change) asked for its run while another run was going: that
+    /// run may have read the old state, so its end starts one more (`AnalysisStartCause
+    /// .asksForARunAfter`, `AnalysisRunEnd` `changeRequested`; re-review of 7e8aba3).
+    @ObservationIgnored private var changeAfterRun = false
+    /// Reads and clears the request in one step, so no end of a run can forget the clear (an
+    /// uncleared request would start a follow-up after every later run; third review of d7da886).
+    private func takeChangeRequest() -> Bool {
+        defer { changeAfterRun = false }
+        return changeAfterRun
+    }
     /// The user's own trip splits and merges (I07), for the settings.
     private(set) var tripCorrections = TripCorrections()
     /// The user's answers to "Bist du hier öfter?", for the settings.
@@ -454,7 +517,7 @@ final class AppModel {
     struct QueuedAnalysis {
         var scope: OrganizationScope?
         var mode: AnalysisPipeline.Mode
-        var userInitiated: Bool
+        var cause: AnalysisStartCause
     }
     @ObservationIgnored private var homeCandidatesCache: [HomeCandidate]?
     @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
@@ -498,10 +561,13 @@ final class AppModel {
     /// answering): tried again a little later instead of only at the next start of the app, and
     /// the end of a plan keeps that wait (`UnattendedRetry`, open point D of the labels fix).
     @ObservationIgnored private var retry = UnattendedRetry()
-    /// The last run ended because Photos did not answer (`PhotosNotResponding`): the card says
-    /// "Fotos antwortet gerade nicht" until the next run starts, and that run comes by itself
-    /// (`retryUnattendedRun`).
-    @ObservationIgnored private var photosRetryDue = false
+    /// The last run ended because Photos did not answer (`PhotosNotResponding`, `.photos`): the
+    /// card says "Fotos antwortet gerade nicht" until the next run starts, and that run comes by
+    /// itself (`retryUnattendedRun`). `.busy`: a call into Photos never got a thread (Albumist's
+    /// own work kept them all busy, nothing was asked of Photos): the card says so, and the run
+    /// comes again the same way (review of f7439fb, MF1: it ended silently and stopped for good
+    /// after two more such ends).
+    @ObservationIgnored private var retryCause: UnattendedRetry.Cause?
     /// "Analyse neu aufbauen" is clearing the tables: no analysis starts meanwhile. Observed: the
     /// suggestion's "Ja, hier bin ich öfter" says why it waits.
     private(set) var analysisResetting = false
@@ -883,7 +949,7 @@ final class AppModel {
         phase = .ready
         if access.canRead { LibraryChangeWatcher.shared.start() }
         ContinuedAnalysis.requestNotificationPermission()
-        startAnalysis(scope: scope, userInitiated: true)
+        startAnalysis(scope: scope, cause: .tap)
     }
 
     /// "Nur 2026" or the whole library, also later in Settings and on the overview. A run in
@@ -891,6 +957,10 @@ final class AppModel {
     func changeScope(_ scope: OrganizationScope) {
         guard scope != analysisScope else { return }
         analysisScope = scope
+        // The ring counts the new part at once, over what is analysed already, like the lists
+        // (`analysisScope` makes them anew): "Sortiert" and "x von y" agree right away, not only
+        // once the run for the new part has ended (second review 18.11.).
+        Task { await refreshDerived() }
         Task {
             // Stored first: whichever run starts next (this one, a catch-up, the next launch)
             // works on the new part, also if another run slips in before ours.
@@ -902,7 +972,7 @@ final class AppModel {
             guard analysisScope == scope else { return }
             // Only now: late progress of the old run cannot mark the new part as half done.
             AnalysisMarker.reset()
-            startAnalysis(userInitiated: true)
+            startAnalysis(cause: .tap)
         }
     }
 
@@ -933,7 +1003,7 @@ final class AppModel {
             from: previous, to: settings, running: analysis.isRunning,
             pausedByUser: analysis.pausing || analysis.isPausedByUser, mayStart: runMayStartNow)
         switch next {
-        case .now: startAnalysis(userInitiated: true)
+        case .now: startAnalysis(cause: .tap)
         case .afterCurrentRun, .whenResumed, .noRun: break
         }
     }
@@ -947,45 +1017,55 @@ final class AppModel {
 
     // MARK: Analysis
 
-    /// `userInitiated`: started by a tap. Every long run asks iOS to go on in the background
-    /// with progress on the Lock Screen (iOS 26 continued processing), not only the first one
-    /// (first device test 15.11.: shown once, then never again).
+    /// `cause`: why the run is asked for (`AnalysisStartCause`). One the user asked for (a tap,
+    /// or a change of the user's that needs a run) asks iOS to go on in the background with
+    /// progress on the Lock Screen (iOS 26 continued processing) for every long run, not only
+    /// the first one (first device test 15.11.: shown once, then never again).
     /// `scope`: a new part of the library to work on; `nil` keeps the stored one.
-    func startAnalysis(scope: OrganizationScope? = nil, mode: AnalysisPipeline.Mode = .incremental, userInitiated: Bool = false) {
+    func startAnalysis(scope: OrganizationScope? = nil, mode: AnalysisPipeline.Mode = .incremental,
+                       cause: AnalysisStartCause = .automatic) {
         MainThreadWatch.shared.section("start analysis") {
-            startAnalysisNow(scope: scope, mode: mode, userInitiated: userInitiated)
+            startAnalysisNow(scope: scope, mode: mode, cause: cause)
         }
     }
 
-    private func startAnalysisNow(scope: OrganizationScope?, mode: AnalysisPipeline.Mode, userInitiated: Bool) {
+    private func startAnalysisNow(scope: OrganizationScope?, mode: AnalysisPipeline.Mode, cause: AnalysisStartCause) {
+        // A run slipped in between storing the user's change and this start (a change in Photos,
+        // a retry): one more run follows it, so the change is always applied.
+        if cause.asksForARunAfter(running: analysis.isRunning) { changeAfterRun = true }
         guard !analysis.isRunning, !analysisResetting, let pipeline else { return }
-        // Paused by the user: only a tap goes on ("Fortsetzen", "Analyse neu aufbauen", another
-        // part of the library). The start at every launch, follow-ups, retries, the end of a plan,
-        // changes in Photos or in the settings wait for it (second review of the app-speed branch:
-        // the start at launch ended the Pause; decision, reversible).
-        if analysis.pausedByUser && !userInitiated { return }
+        // Paused by the user (`AnalysisStartCause`): a tap goes on ("Fortsetzen", "Analyse neu
+        // aufbauen", another part of the library), and so does a change of the user's that needs
+        // a run (a split, a merge, "Aufheben", "Reisen wieder automatisch erkennen"; owner
+        // decision 18.11.2026: before, the change was stored and nothing applied it). The start
+        // at every launch, follow-ups, retries, the end of a plan, changes in Photos or in the
+        // settings wait for it (second review of the app-speed branch: the start at launch ended
+        // the Pause; decision, reversible).
+        let pausedBefore = analysis.pausedByUser
+        guard cause.startsRun(pausedByUser: pausedBefore) else { return }
         // A change in "Dein Zuhause" is being applied: the run starts right after it, so it
         // never takes the run lock in the middle of the change. Several requests meanwhile are
-        // one run; one started by a tap keeps what a tap gets (background time, retries reset).
+        // one run; one the user asked for keeps what it gets (background time, retries reset,
+        // the end of a Pause).
         if homeChangeRunning {
             let queued = analysisAfterHomeChange
             analysisAfterHomeChange = QueuedAnalysis(scope: scope ?? queued?.scope,
                                                      mode: mode == .incremental ? (queued?.mode ?? mode) : mode,
-                                                     userInitiated: userInitiated || (queued?.userInitiated ?? false))
+                                                     cause: cause.joined(with: queued?.cause))
             return
         }
         analysis.isRunning = true
-        photosRetryDue = false
+        retryCause = nil
         retry.runStarted()
-        // A run goes on: the Pause no longer stands.
-        setPausedByUser(false)
+        // A run goes on: the Pause no longer stands (only a cause that ends it starts under it).
+        setPausedByUser(cause.pausedAfterStart(pausedByUser: pausedBefore))
         analysis.needsResume = false
         analysis.pausing = false
         analysis.stage = nil
         analysis.completed = 0
         analysis.total = 0
         analysis.waiting = nil
-        analysis.appleWait = false
+        analysis.appleWaitLeft = nil
         analysis.stoppedAt = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
         analysis.resumed = analysis.resumeFrom.map {
@@ -1008,7 +1088,7 @@ final class AppModel {
         analysisFinished = nil
         finishMomentPlayed = false
         beginCard()
-        if userInitiated {
+        if cause.isUserInitiated {
             // A quick check for new photos ("Neu prüfen") needs no background time: asking for
             // it put "Albumist analysiert deine Fotos · Schritt 1 von 7" on the Lock Screen for
             // a few seconds after every check (device test 15.11. 23:16).
@@ -1047,10 +1127,13 @@ final class AppModel {
             } catch is CancellationError {
                 // Stopped on purpose ("Analyse neu aufbauen", a new scope): not an error to show
                 // (plugin review N3: "Swift.CancellationError error 1").
-            } catch is PhotosNotResponding {
+            } catch let quiet as PhotosNotResponding {
                 // Photos did not answer (app-speed): said on the card, not in an alert, and the
-                // run comes again by itself. Nothing of it counts as done.
-                photosRetryDue = true
+                // run comes again by itself. Nothing of it counts as done. A read that never
+                // began waited for Albumist's own work, not for Photos: the card says that
+                // instead of "Fotos antwortet gerade nicht", and the run comes again the same
+                // way (reviews of 045f297, S1, and f7439fb, MF1).
+                retryCause = quiet.neverBegan ? .busy : .photos
             } catch {
                 message = .failure(error.localizedDescription)
             }
@@ -1061,7 +1144,8 @@ final class AppModel {
             // keeps that work for "Fortsetzen"; changes in Photos meanwhile get their pass. The
             // request for that pass is taken here, whatever follows.
             let end = AnalysisRunEnd(report: finished, settings: settings, pauseTapped: control.isPaused,
-                                     catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow)
+                                     catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow,
+                                     changeRequested: takeChangeRequest())
             catchUpAfterRun = false
             // Also a Pause tapped before the run ended unfinished for another reason (an error,
             // the heat, Photos) stays (`AnalysisRunEnd.pauseHeld`).
@@ -1090,7 +1174,7 @@ final class AppModel {
             analysis.pausing = false
             analysis.stage = nil
             analysis.waiting = nil
-            analysis.appleWait = false
+            analysis.appleWaitLeft = nil
             endCard()
             if end.isFinished {
                 AnalysisMarker.finished()
@@ -1162,7 +1246,7 @@ final class AppModel {
     /// while a plan holds the analysis back does not start; the end of the plan starts it
     /// (`releaseExecution`).
     private func retryUnattendedRun(after run: Int) {
-        guard let delay = retry.schedule(photos: photosRetryDue, now: .now) else { return }
+        guard let delay = retry.schedule(after: retryCause, now: .now) else { return }
         Task {
             try? await Task.sleep(for: delay)
             guard analysisGeneration == run, analysis.needsResume, !analysis.isRunning, runMayStartNow else { return }
@@ -1204,7 +1288,7 @@ final class AppModel {
         // Not cleared here: a report sent just before a wait for the device began can be taken
         // after it (the tick runs every 250 ms); the wait comes and goes with the pipeline's
         // own word, taken in order from the mailbox (`tick`).
-        analysis.appleWait = progress.waitLeft != nil
+        analysis.appleWaitLeft = progress.waitLeft
         analysis.mapPass = progress.stage == .places ? progress.mapPass : nil
         let step = AnalysisStep(progress.stage)
         if !analysis.pausing {
@@ -1318,6 +1402,10 @@ final class AppModel {
     private func tickNow(run: Int) {
         guard run == analysisGeneration, analysis.isRunning else { return }
         let now = ContinuousClock.now
+        if analysis.refining {
+            refinementTick(at: now)
+            return
+        }
         let taken = progressMailbox.take()
         let previousTick = lastTickClock?.0
         lastTickClock = (now, Date())
@@ -1437,6 +1525,26 @@ final class AppModel {
         updateCard(now: now)
     }
 
+    /// The tick of the overnight refinement: its count, its waits (Apple's limit with the
+    /// countdown, the device) and its bar, from `RefinementCard`. Nothing a run in the app does
+    /// at its tick: no marker for a run that goes on, no finish time, no "Schon fertig", no
+    /// request for background time (the refinement has its own task).
+    private func refinementTick(at now: ContinuousClock.Instant) {
+        let gliding = !analysis.pausing && isOnScreen && !UIAccessibility.isReduceMotionEnabled
+        let shown = refinementCard.take(progressMailbox.take(), at: now, gliding: gliding)
+        var next = analysis
+        next.stage = shown.stage
+        next.completed = shown.completed
+        next.total = shown.total
+        next.mapPass = shown.mapPass
+        next.appleWaitLeft = shown.waitLeft
+        next.waiting = shown.waiting
+        next.widths = shown.widths
+        if next != analysis { analysis = next }
+        if abs(shown.bar - analysisBar) > 0.000_05 { analysisBar = shown.bar }
+        updateCard(now: now)
+    }
+
     /// Decides the card's state from the model (pure rules in `AnalysisCardState`).
     func updateCard(now: ContinuousClock.Instant = .now) {
         var i = AnalysisCardState.Inputs()
@@ -1444,9 +1552,10 @@ final class AppModel {
         i.isQuickCheck = isQuickCheck
         i.runningFor = now - runClockStart
         i.position = analysis.position
+        // The step it goes back to, and where in it the run before stopped: the card shows that
+        // count, not the count of the step it is catching up in (TestFlight run 44461253154).
         if analysis.isCatchingUp, let resume = analysis.resumeFrom {
-            i.catchingUpTo = AnalysisPipeline.Stage.allCases.indices.contains(resume.stage - 1)
-                ? AnalysisStep(AnalysisPipeline.Stage.allCases[resume.stage - 1]).number : nil
+            i.catchingUp(stage: resume.stage, completed: resume.completed, total: resume.total)
         }
         i.waiting = analysis.waiting
         i.slower = analysis.isRunning ? DeviceState(
@@ -1455,7 +1564,9 @@ final class AppModel {
         ).slowerReason : nil
         i.appleWait = analysis.appleWait
         // Photos has had no answer for 10 s or more (still waiting), or the run ended on it.
-        i.photosNotResponding = photosRetryDue || (analysis.isRunning && PhotoKitLibrary.deadline.slowFor() != nil)
+        i.photosNotResponding = retryCause == .photos || (analysis.isRunning && PhotoKitLibrary.deadline.slowFor() != nil)
+        // The run ended because Albumist's own work kept every thread busy (MF1).
+        i.albumistBusy = retryCause == .busy
         i.pausingFor = analysis.pausing ? pausingSince.map { now - $0 } ?? .zero : nil
         i.pausedByUser = analysis.isPausedByUser
         i.pausedAt = analysis.stoppedAt
@@ -1484,7 +1595,7 @@ final class AppModel {
     /// A check for new photos after everything was analysed once: no step numbers and no bar
     /// that starts at zero again, only "Sucht neue Fotos", unless there is real work to show.
     var isQuickCheck: Bool {
-        guard analysis.kind == .check else { return false }
+        guard analysis.kind == .check, !analysis.refining else { return false }
         if let stage = analysis.stage, [.content, .text].contains(stage), analysis.remaining >= 50 { return false }
         return true
     }
@@ -1518,7 +1629,9 @@ final class AppModel {
         // missing as "remaining" although a run in the app looks up at most a few, so every
         // quick check asked iOS for background time (device test 15.11. 23:16: the Lock Screen
         // and the Dynamic Island showed the analysis every few seconds).
-        guard analysis.isRunning, let stage = analysis.stage,
+        // Never for the overnight refinement seen in the app: the user did not start it, and its
+        // end must not read "Analyse wartet auf dich" on the Lock Screen (review of d744b74).
+        guard analysis.isRunning, !analysis.refining, let stage = analysis.stage,
               [.content, .text].contains(stage), analysis.remaining >= 100 else { return }
         ContinuedAnalysis.begin()
     }
@@ -1616,16 +1729,46 @@ final class AppModel {
         if let previous, analysisGeneration != previous { return nil }
         guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !refinementHeldByPause,
               !Task.isCancelled else { return nil }
+        // Seen in the app, the card shows the refinement as a run of its own, fed and ticked like
+        // a run in the app (`RefinementCard`): its count and the countdown while it waits for
+        // Apple's limit (heat or a low battery stop it, they never make it wait). Before, its reports reached no one and the card stood on
+        // the last run's position without a word (second review of the no-wait fix, device test
+        // 18.11., build 36). What the card showed of the analysis comes back when it ends.
+        let shownBefore = analysis
+        let barBefore = analysisBar
         analysis.isRunning = true
-        updateCard()
-        // Late progress of the run before must not show up during this one.
+        analysis.refining = true
+        analysis.stage = nil
+        analysis.completed = 0
+        analysis.total = 0
+        analysis.mapPass = nil
+        analysis.appleWaitLeft = nil
+        analysis.waiting = nil
+        analysisFinish = nil
+        analysisStepRemaining = nil
+        analysisRecent = []
+        analysisBar = 0
+        refinementCard = RefinementCard()
+        progressMailbox = ProgressMailbox()
+        // Late progress of the run before must not show up during this one. The tick of this
+        // refinement ends with it (its end below), or when a newer run's `startTicks` or
+        // `beginCard` cancels it; `tickNow` only skips a tick that is not the newest run's.
         analysisGeneration += 1
         let generation = analysisGeneration
         let control = AnalysisRunControl()
         analysisControl = control
+        startTicks(run: generation)
+        updateCard()
         // Held like a foreground run, so "Analyse neu aufbauen" can wait until this run has
         // really ended before it clears the tables (audit 2, 4.1).
-        let run = Task { try await pipeline.run(mode: .refinement, control: control) }
+        let mailbox = progressMailbox
+        let run = Task {
+            try await pipeline.run(mode: .refinement, control: control, onProgress: { progress in
+                mailbox.post(progress)
+            }, onWaiting: { reason in
+                mailbox.wait(reason)
+            })
+        }
         analysisTask = Task { await withTaskCancellationHandler { _ = try? await run.value } onCancel: { run.cancel() } }
         // `nil`: cut off (iOS ended the background time); what was analysed stays analysed.
         let report = try? await withTaskCancellationHandler { try await run.value } onCancel: { run.cancel() }
@@ -1635,7 +1778,8 @@ final class AppModel {
         // the overview was refreshed, the Pause was lost and one more run started).
         if analysisControl === control { analysisControl = nil }
         let end = AnalysisRunEnd(report: report, settings: settings, pauseTapped: control.isPaused,
-                                 catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow, background: true)
+                                 catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow, background: true,
+                                 changeRequested: takeChangeRequest())
         catchUpAfterRun = false
         setPausedByUser(end.keepsPause)
         if let ended = end.report {
@@ -1652,8 +1796,26 @@ final class AppModel {
         // settings it missed: not done (the next pass, or the app when opened); cut off or
         // stopped by the device: as it was.
         analysis.needsResume = end.needsResume(afterRefinement: analysis.needsResume)
+        // The card's tick for this refinement ends with it, also when it was cut off or stopped
+        // (a newer run's tick is left alone).
+        if analysisGeneration == generation {
+            tickTask?.cancel()
+            tickTask = nil
+        }
         analysis.isRunning = false
         analysis.pausing = false
+        pausingSince = nil
+        // The refinement's own step, count, waits and bar go; the card shows the analysis as
+        // before (a wait for Apple's limit ends with the refinement, also one cut off).
+        analysis.refining = false
+        analysis.stage = shownBefore.stage
+        analysis.completed = shownBefore.completed
+        analysis.total = shownBefore.total
+        analysis.mapPass = shownBefore.mapPass
+        analysis.widths = shownBefore.widths
+        analysis.appleWaitLeft = nil
+        analysis.waiting = nil
+        analysisBar = barBefore
         updateCard()
         guard let ran = report else { return (false, end.next, generation) }
         await refreshDerived()
@@ -1705,7 +1867,13 @@ final class AppModel {
             detectedHome = try await pipeline.detectedHome()
             homeChangeNotice = try await pipeline.homeChangeNotice()
             let newFacts = try await pipeline.currentFacts()
-            MainThreadWatch.shared.section("refresh: facts") { facts = newFacts }
+            // The preview ranks of the whole library, worked out off the main thread with the
+            // facts (second review of the build 36 fix; `previewRanks` only falls back to it).
+            let newRanks = await Task.detached(priority: .userInitiated) { PreviewRank.ranks(of: newFacts) }.value
+            MainThreadWatch.shared.section("refresh: facts") {
+                facts = newFacts
+                previewRanksCache = newRanks
+            }
             inventory = try await store.loadInventory()
             let inventory = inventory
             // Albumist's own albums overlap on purpose (a country holds its trips).
@@ -1956,7 +2124,7 @@ final class AppModel {
         await removeRejection(of: nil)
         for (id, decision) in decisions where decision == .reject { decisions[id] = nil }
         persistDecisions()
-        startAnalysis(userInitiated: true)
+        startAnalysis(cause: .tap)
     }
 
     // MARK: Trip workshop (I07)
@@ -2004,16 +2172,42 @@ final class AppModel {
         _ = await changeTrips { $0.withoutSplitsAndMerges() }
     }
 
+    /// Why a split, a merge, "Aufheben" or the reset in the settings waits now, nil when one can
+    /// be made. `changeTrips` refuses exactly then; the workshop and the settings grey these
+    /// controls and say why next to them (`TripChangeWaitNote`).
+    var tripChangeWait: TripWorkshop.Wait? {
+        TripWorkshop.wait(creatingAlbums: execution.isRunning, analysing: analysis.isRunning, check: runIsShortCheck)
+    }
+
+    /// What the workshop does once `changeTrips` stored a change and asked for its run: wait for
+    /// a short check, or say the change is saved and stay free to close. A change during a Pause
+    /// starts the run that goes on with the paused analysis, which can take tens of minutes
+    /// (review of 163d656: the sheet waited for it with no way to close).
+    var afterTripChange: TripWorkshop.AfterChange {
+        TripWorkshop.afterChange(running: analysis.isRunning, check: runIsShortCheck)
+    }
+
+    /// The run in progress is a short check: not one with work of its own (labels after "Themen"
+    /// or "Dokumente", many new photos), not the refinement (review of b240899: each said
+    /// "Gleich wieder möglich").
+    private var runIsShortCheck: Bool {
+        TripWorkshop.shortCheck(kind: analysis.kind == .check, newWork: analysis.newWork != nil, refinement: analysis.refining)
+    }
+
     /// Stores the change (it is part of the decisions copy in the backup) and starts the
     /// analysis that applies it. Not while an analysis already read the old corrections.
+    /// The change is the user's own: its run starts at once, like a tap, and ends a Pause
+    /// (`AnalysisStartCause.userChange`; owner decision 18.11.2026, "Analyse läuft dann weiter").
+    /// Before, a Pause held the run back: the change was stored, and the workshop or the
+    /// settings kept the old trips with no word why until "Fortsetzen".
     private func changeTrips(_ change: (TripCorrections) -> TripCorrections) async -> Bool {
-        guard let pipeline, !analysis.isRunning, !execution.isRunning else { return false }
+        guard let pipeline, tripChangeWait == nil else { return false }
         do {
             let updated = change(try await pipeline.tripCorrections())
             try await pipeline.setTripCorrections(updated)
             tripCorrections = updated
             saveSafetyBackup()
-            startAnalysis()
+            startAnalysis(cause: .userChange)
             return true
         } catch {
             message = .failure(error.localizedDescription)
@@ -2094,7 +2288,8 @@ final class AppModel {
     }
 
     /// Like `changeTrips`: an answer that changes the trips is not stored while an analysis
-    /// already read the old answers.
+    /// already read the old answers, and its run starts at once and ends a Pause (the user's own
+    /// change, `AnalysisStartCause.userChange`).
     private func changeRecurringPlaces(rerun: Bool, _ change: (RecurringPlaceAnswers) -> RecurringPlaceAnswers) async -> Bool {
         guard let pipeline, !rerun || (!analysis.isRunning && !execution.isRunning) else { return false }
         do {
@@ -2102,7 +2297,7 @@ final class AppModel {
             try await pipeline.setRecurringPlaceAnswers(updated)
             recurringPlaces = updated
             saveSafetyBackup()
-            if rerun { startAnalysis() }
+            if rerun { startAnalysis(cause: .userChange) }
             return true
         } catch {
             message = .failure(error.localizedDescription)
@@ -2222,7 +2417,7 @@ final class AppModel {
             homeChangeRunning = false
             if let queued = analysisAfterHomeChange {
                 analysisAfterHomeChange = nil
-                startAnalysis(scope: queued.scope, mode: queued.mode, userInitiated: queued.userInitiated)
+                startAnalysis(scope: queued.scope, mode: queued.mode, cause: queued.cause)
             }
         }
         do {
@@ -2294,8 +2489,9 @@ final class AppModel {
         persistDecisions()
     }
 
+    /// A blank title removes the name (the suggestion says "Name fehlt" again).
     func setUserTitle(_ title: String, for proposal: AlbumProposal) {
-        userTitles[proposal.id] = title
+        userTitles[proposal.id] = UserTitle.stored(title)
         Task { [userTitles] in
             try? await store?.setValue(userTitles, forKey: Key.titles)
             saveSafetyBackup()
@@ -2444,8 +2640,14 @@ final class AppModel {
                 }
             }
             ended = result
+            let finished = result.status == .completed || result.status == .completedWithErrors
+            // The free albums first: the result (an undo's "Rückgängig gemacht") shows only once
+            // the count is written, not after the slow part of `finalize` (Photos may take
+            // seconds to answer). `finalize` does it again, which changes nothing; a store that
+            // cannot be read now leaves it to `finalize`.
+            if finished { try? await settleFreeAlbums(result) }
             execution.finished = result
-            if result.status == .completed || result.status == .completedWithErrors {
+            if finished {
                 resultsStored = await finalize(result)
             }
         } catch {
@@ -2525,6 +2727,10 @@ final class AppModel {
         var undone: SortlyID?
         var stored = false
         do {
+            // Counted, or given back after a completed undo, before the store write and before
+            // Photos is asked: counting twice or giving back twice is impossible (per plan id,
+            // written as one value), and a crash in between is completed at the next launch.
+            try await settleFreeAlbums(result)
             let after = try await library.currentInventory()
             try await store.saveInventory(after)
             inventory = after
@@ -2537,14 +2743,8 @@ final class AppModel {
                     newDecisions[id] = nil
                     previewOnly[id] = nil
                 }
-                // Counted before the store write: counting twice is impossible (per plan id),
-                // and a crash in between is completed at the next launch.
-                Purchases.shared.recordUsage(plan: result.id, albums: result.freeAlbumUse(applied: true))
             } else if let original = result.reverts, result.status == .completed, let executed = try await store.plan(original) {
-                // A completed undo: part of the same recoverable finalization, so a crash right
-                // after the undo still gives the free albums back (audit 2, 6.3). Both are
-                // idempotent when the finalization runs again.
-                Purchases.shared.returnUsage(plan: executed.id, albums: executed.freeAlbumUse(applied: true))
+                // A completed undo (its free albums came back above, audit 2, 6.3).
                 // A removal that is taken back lets its suggestions come back as well.
                 let sources = executed.removalSources
                 if !sources.isEmpty {
@@ -2580,6 +2780,18 @@ final class AppModel {
             message = .failure(error.localizedDescription)
         }
         return stored
+    }
+
+    /// The free albums of a finished plan: counted from what it really changed, or, after a
+    /// completed undo, given back for the plan it took back (audit 2, 6.3). Part of the
+    /// recoverable finalization: idempotent per plan id (`FreeAlbumLedger`), so running it
+    /// again after a crash, at launch or from `finalize` changes nothing.
+    private func settleFreeAlbums(_ result: ChangePlan) async throws {
+        if result.reverts == nil {
+            Purchases.shared.recordUsage(plan: result.id, albums: result.freeAlbumUse(applied: true))
+        } else if let original = result.reverts, result.status == .completed, let executed = try await store?.plan(original) {
+            Purchases.shared.returnUsage(plan: executed.id, albums: executed.freeAlbumUse(applied: true))
+        }
     }
 
     private func setPendingFinalization(adding id: SortlyID? = nil, removing gone: Set<SortlyID> = []) async throws {
@@ -2886,7 +3098,7 @@ final class AppModel {
         var lines = ["Albumist diagnostic report", "created \(iso.string(from: Date()))", ""]
         lines.append("app \(AppInfo.version), \(system), \(device), language \(Locale.current.language.languageCode?.identifier ?? "?")")
         lines.append("photo access \(access.rawValue), onboarding done \(onboardingDone)")
-        lines.append("photos \(progress.total), fully sorted \(progress.fully), partly \(progress.partially), unsorted \(progress.unorganized), pending \(progress.pending)")
+        lines.append("photos \(progress.total), fully sorted \(progress.fully), partly \(progress.partially), unsorted \(progress.unorganized), pending \(progress.pending), ignored \(progress.ignored), excluded \(progress.excluded)")
         // Where the sorted count comes from, per main area (device test 15.11.: 811 sorted before
         // "Analyse neu aufbauen", 141 after it).
         var areaLines: [String] = []
@@ -2997,7 +3209,8 @@ final class AppModel {
     func receipt(for plan: ChangePlan) async -> (plan: PlanReceipt, undos: [PlanReceipt]) {
         let undos = (try? await store?.reverts(of: plan.id)) ?? []
         return MainThreadWatch.shared.section("receipt") {
-            (PlanReceipt(plan: plan, inventory: inventory), undos.map { PlanReceipt(plan: $0, inventory: inventory) })
+            (PlanReceipt(plan: plan, inventory: inventory, ranks: previewRanks),
+             undos.map { PlanReceipt(plan: $0, inventory: inventory, ranks: previewRanks) })
         }
     }
 
@@ -3034,12 +3247,13 @@ final class AppModel {
     private func makeLibraryBuckets() {
         guard libraryBucketsTask == nil else { return }
         let inputs = libraryInputs
-        let facts = facts, states = states, resolver = resolver
+        let facts = facts, states = states, resolver = resolver, scope = analysisScope
         libraryTapsDuringPass = []
         libraryTapInputs = 0
         libraryBucketsTask = Task { [weak self] in
             let made = await Task.detached(priority: .userInitiated) {
-                LibraryBuckets.make(facts: facts, states: states, resolver: resolver)
+                // The ring's part of the library: "Sortiert" shows the ring's number (Fuchs 18.11.).
+                LibraryBuckets.make(facts: facts, states: states, resolver: resolver, scope: scope)
             }.value
             guard let self else { return }
             self.libraryBucketsTask = nil
@@ -3211,12 +3425,14 @@ final class AppModel {
         }
     }
 
-    /// Search index over the current facts and album names, built once per change and off
-    /// the main thread (a large library takes a moment); every search then only combines
-    /// prepared sets.
+    /// Search index over the current facts, album names and the names the user gave places,
+    /// built once per change and off the main thread (a large library takes a moment); every
+    /// search then only combines prepared sets.
     @ObservationIgnored private var searchIndexCache: SearchIndex?
     @ObservationIgnored private var searchIndexTask: Task<SearchIndex, Never>?
     @ObservationIgnored private var searchIndexGeneration = 0
+    /// The names of places the index was made with.
+    @ObservationIgnored private var searchIndexPlaceNames: [NamedPlace] = []
 
     private func resetSearchIndex() {
         searchIndexCache = nil
@@ -3225,14 +3441,25 @@ final class AppModel {
     }
 
     func searchIndex() async -> SearchIndex {
+        // The names the user gave places, as their suggestions show them (`userTitles`): read
+        // at every search, so a name typed, changed or taken back counts at once, also before
+        // the place's album exists (review G1-05). They stay on the iPhone: only this index in
+        // memory reads them.
+        let placeNames = NamedPlace.resolve(titles: userTitles, settings: settings.frequentPlaces, suggestions: proposals)
+        if placeNames != searchIndexPlaceNames {
+            resetSearchIndex()
+            searchIndexPlaceNames = placeNames
+        }
         if let searchIndexCache { return searchIndexCache }
         if let searchIndexTask { return await searchIndexTask.value }
         let facts = facts, inventory = inventory, generation = searchIndexGeneration
         let home = homeSettings
-        let task = Task.detached(priority: .userInitiated) { SearchIndex(facts: facts, inventory: inventory, home: home) }
+        let task = Task.detached(priority: .userInitiated) {
+            SearchIndex(facts: facts, inventory: inventory, namedPlaces: placeNames, home: home)
+        }
         searchIndexTask = task
         let index = await task.value
-        // Facts that changed meanwhile start a new index on the next search.
+        // Facts or names that changed meanwhile start a new index on the next search.
         if generation == searchIndexGeneration {
             searchIndexCache = index
             searchIndexTask = nil
@@ -3263,9 +3490,17 @@ final class AppModel {
         // Reading the query compares unknown words with every word on screenshots (typos);
         // off the main thread, so typing stays smooth in a large library.
         let parsed = await Task.detached(priority: .userInitiated) { index.parse(query) }.value
-        // The organization state of every photo only when the query asks for it ("nicht sortiert").
-        let statuses = parsed.usesStatus ? states.mapValues { resolver.overall($0) } : [:]
-        return await Task.detached(priority: .userInitiated) { SearchEngine().run(parsed, in: index, statuses: statuses) }.value
+        // The organization state of every photo only when the query asks for it ("nicht sortiert"),
+        // by the ring's rule over the chosen part of the library: the search finds exactly the
+        // photos of the list "Nicht sortiert" (`LibraryStatus.searchStatuses`, Fuchs 18.11.).
+        let wantsStatus = parsed.usesStatus
+        let facts = wantsStatus ? self.facts : [], states = wantsStatus ? self.states : [:]
+        let resolver = self.resolver, scope = analysisScope
+        return await Task.detached(priority: .userInitiated) {
+            let statuses = wantsStatus
+                ? LibraryStatus.searchStatuses(facts: facts, states: states, resolver: resolver, scope: scope) : [:]
+            return SearchEngine().run(parsed, in: index, statuses: statuses)
+        }.value
     }
 
     /// Completions for the word being typed, from the user's own places, topics and albums.

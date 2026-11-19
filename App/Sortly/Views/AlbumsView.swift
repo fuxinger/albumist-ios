@@ -200,8 +200,10 @@ struct CollectionRow: View {
             if collection.kind == .folder {
                 IconTile(systemName: symbol, tint: Theme.tint(for: .neutral))
             } else {
-                // The newest photo, as Photos shows albums (design review N4).
-                AssetThumbnail(id: PreviewPicker.newest(collection.assetIDs, dates: model.creationDates) ?? AssetID(""), side: 44)
+                // The newest photo, as Photos shows albums (design review N4), but never a
+                // sensitive document such as a bank card (`PreviewRank`).
+                CoverThumbnail(id: PreviewPicker.newest(collection.assetIDs, dates: model.creationDates, ranks: model.previewRanks),
+                               side: 44, hidden: !collection.assetIDs.isEmpty)
                     .frame(width: 44, height: 44)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
             }

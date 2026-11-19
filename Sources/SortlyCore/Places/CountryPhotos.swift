@@ -19,6 +19,9 @@ public struct CountryPhotos: Hashable, Sendable {
     /// Cities and towns by number of photos, most photographed first (at most five).
     public var topPlaces: [String] = []
     public var tripCount = 0
+    /// The photo whose colours glow behind the country: its newest photo that suits a cover
+    /// (`PreviewRank`: an ordinary photo when there is one, never a sensitive document).
+    public var cover: AssetID?
 
     public var assetIDs: Set<AssetID> { Set(years.flatMap { $0.photos.map(\.id) }) }
 
@@ -50,6 +53,8 @@ public struct CountryPhotos: Hashable, Sendable {
         result.photoCount = byYear.values.reduce(0) { $0 + $1.count }
         result.topPlaces = places.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.prefix(5).map(\.key)
         result.tripCount = trips.count
+        let byDate = result.years.flatMap(\.photos)
+        result.cover = PreviewPicker.firstSuited(byDate.map(\.id), count: 1, ranks: PreviewRank.ranks(of: byDate)).first
         return result
     }
 

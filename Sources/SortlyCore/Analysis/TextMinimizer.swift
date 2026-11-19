@@ -6,11 +6,7 @@ import Foundation
 /// - IBANs and valid card numbers are masked in every other text.
 public enum TextMinimizer {
     public static func sensitivity(of rawText: String) -> DocumentSensitivity {
-        let text = rawText.lowercased()
-        var level = DocumentSensitivity.normal
-        for (candidate, words) in DocumentAnalyzer.sensitivityKeywords where words.contains(where: { text.contains($0) }) {
-            level = max(level, candidate)
-        }
+        var level = DocumentAnalyzer.keywordSensitivity(rawText)
         // The back of an ID card or a passport page names no document, but carries the
         // machine-readable zone (review P2-04).
         if level < .identity, DocumentAnalyzer.hasMachineReadableZone(rawText) { level = .identity }
@@ -33,6 +29,34 @@ public enum TextMinimizer {
         maskCardNumbers(maskIBANs(text))
     }
 
+    /// What stands in a stored text where an IBAN was.
+    static let ibanMask = "IBAN ••••"
+    /// What stands in a stored text where a card number was.
+    static let cardMask = "•••• ••••"
+
+    /// Whether a stored text had an IBAN or a card number masked: the photo shows a bank card,
+    /// a statement or a banking app, also when no document type was recognised in it (a card
+    /// says "Visa Debit", not "Kontoauszug"). Such a photo is never a preview (`PreviewRank`).
+    public static func showsMaskedNumber(_ storedText: String) -> Bool {
+        storedText.contains(cardMask) || storedText.contains(ibanMask)
+    }
+
+    /// Whether a stored text (`storable`) shows that the picture is a bank card, a statement, a
+    /// banking app or another sensitive paper: a masked card number or IBAN, a financial,
+    /// identity or medical word, or a card word ("Visa Debit", "girocard"; `DocumentAnalyzer.
+    /// paymentCardKeywords`). Worked out once where the facts are assembled
+    /// (`AssetFacts.textLooksSensitive`), off the main thread, in one pass over the text's bytes:
+    /// a library has thousands of stored texts. Such a picture is never a preview.
+    public static func looksSensitive(_ storedText: String) -> Bool {
+        guard !storedText.isEmpty else { return false }
+        return SensitiveWords.all.occurs(in: storedText)
+    }
+
+    /// Whether lower-cased `text` has a card word (`DocumentAnalyzer.paymentCardKeywords`).
+    static func namesPaymentCard(_ text: String) -> Bool {
+        SensitiveWords.cards.occurs(in: text)
+    }
+
     // MARK: Masks
 
     /// Raised when the masks change, so texts stored by an older version are masked again
@@ -40,8 +64,9 @@ public enum TextMinimizer {
     /// 3: dots, hyphens, slashes and wide spaces between groups, the back of an ID card
     /// (review P2-04, 18.11.2026). 4: a space or underscore after the country code, underscores
     /// between groups, the checksum for IBANs in an unusual form, card groups of four around a
-    /// slash (second review of P2-04).
-    public static let maskVersion = 4
+    /// slash (second review of P2-04). 5: medical letters in English and more medical words
+    /// (review G2-03, 18.11.2026): their stored text and subject are removed.
+    public static let maskVersion = 5
 
     /// IBAN shape in any letter case. Between groups: up to four spaces of any kind, a line
     /// break (OCR splits long lines), nothing, or one dot, hyphen, slash or underscore with a
@@ -69,7 +94,7 @@ public enum TextMinimizer {
             let candidate = String(result[range])
             let compact = candidate.uppercased().filter { $0.isLetter || $0.isNumber }
             let printed = printedIBANPattern.firstMatch(in: candidate, range: NSRange(candidate.startIndex..., in: candidate)) != nil
-            if printed || DocumentAnalyzer.startsWithValidIBAN(compact) { result.replaceSubrange(range, with: "IBAN ••••") }
+            if printed || DocumentAnalyzer.startsWithValidIBAN(compact) { result.replaceSubrange(range, with: ibanMask) }
         }
         return result
     }
@@ -124,7 +149,7 @@ public enum TextMinimizer {
             }
         }
         let result = NSMutableString(string: text)
-        for r in merged.reversed() { result.replaceCharacters(in: r, with: "•••• ••••") }
+        for r in merged.reversed() { result.replaceCharacters(in: r, with: cardMask) }
         return result as String
     }
 
@@ -140,5 +165,144 @@ public enum TextMinimizer {
             }
         }
         return sum % 10 == 0
+    }
+}
+
+/// Words searched for in a text in one pass over its UTF-8 bytes, ignoring case for ASCII and
+/// the upper-case letters of Latin-1 ("FÜHRERSCHEIN"), and taking any run of white space (also
+/// a line break or a non-breaking space) as one space ("VALID\nTHRU"). A word whose first part
+/// has four letters or fewer must start a word, one whose last part has four letters or fewer
+/// must end one ("bic", "visa", "card no": not in "Arabic", "Bicycle", "Revisaa" or "card not");
+/// longer parts match inside words ("Kreditkartenabrechnung"). Only letters count against a
+/// word boundary: punctuation, symbols and emoji („VISA“, VISA®, 💳VISA, »IBAN«) do not.
+struct SensitiveWords: Sendable {
+    private struct Word: Sendable {
+        var bytes: [UInt8]
+        /// The byte before must not be part of a letter.
+        var startsWord: Bool
+        /// The byte after must not start a letter.
+        var endsWord: Bool
+    }
+
+    /// The words by their first byte (256 entries: a table, no hashing per byte).
+    private let byFirstByte: [[Word]]
+
+    /// `exact`: matched anywhere, also inside words (the masks).
+    init(_ words: [String], exact: [String] = []) {
+        var index = [[Word]](repeating: [], count: 256)
+        func add(_ word: String, startsWord: Bool, endsWord: Bool) {
+            let bytes = Self.normalized(Array(word.utf8))
+            guard let first = bytes.first else { return }
+            index[Int(first)].append(Word(bytes: bytes, startsWord: startsWord, endsWord: endsWord))
+        }
+        for word in words {
+            let parts = word.split(separator: " ")
+            add(word, startsWord: (parts.first?.count ?? 0) <= 4, endsWord: (parts.last?.count ?? 0) <= 4)
+        }
+        for word in exact { add(word, startsWord: false, endsWord: false) }
+        byFirstByte = index
+    }
+
+    /// Masked numbers, every sensitivity word of `DocumentAnalyzer` and the card words.
+    static let all = SensitiveWords(DocumentAnalyzer.plainSensitivityWords + DocumentAnalyzer.paymentCardKeywords,
+                                    exact: [TextMinimizer.cardMask, TextMinimizer.ibanMask])
+    static let cards = SensitiveWords(DocumentAnalyzer.paymentCardKeywords)
+
+    /// Lower case (ASCII and Latin-1 upper-case letters), fullwidth letters ("ＶＩＳＡ", U+FF21–
+    /// FF3A and U+FF41–FF5A) as ASCII ones, and every run of white space as one space: ASCII
+    /// white space, the no-break space, the spaces U+2000–U+200A, the line and paragraph
+    /// separators, the narrow no-break space U+202F, U+205F and the ideographic space U+3000.
+    static func normalized(_ input: [UInt8]) -> [UInt8] {
+        var out: [UInt8] = []
+        out.reserveCapacity(input.count)
+        let n = input.count
+        var i = 0
+        while i < n {
+            let b = input[i]
+            if b < 0x80 {
+                if (b >= 0x09 && b <= 0x0D) || b == 0x20 {
+                    if out.last != 0x20 { out.append(0x20) }
+                } else {
+                    out.append(b >= 0x41 && b <= 0x5A ? b + 0x20 : b)
+                }
+                i += 1
+                continue
+            }
+            let b1: UInt8 = i + 1 < n ? input[i + 1] : 0
+            let b2: UInt8 = i + 2 < n ? input[i + 2] : 0
+            var space = false
+            var width = 1
+            switch b {
+            case 0xC2 where b1 == 0xA0:
+                space = true; width = 2
+            case 0xC3 where b1 >= 0x80 && b1 <= 0x9E && b1 != 0x97:
+                // À–Þ (not ×) to à–þ: "Ü" C3 9C → "ü" C3 BC.
+                out.append(b); out.append(b1 + 0x20); i += 2; continue
+            case 0xE2 where b1 == 0x80 && ((b2 >= 0x80 && b2 <= 0x8A) || b2 == 0xA8 || b2 == 0xA9 || b2 == 0xAF),
+                 0xE2 where b1 == 0x81 && b2 == 0x9F,
+                 0xE3 where b1 == 0x80 && b2 == 0x80:
+                space = true; width = 3
+            case 0xEF where b1 == 0xBC && b2 >= 0xA1 && b2 <= 0xBA:
+                out.append(b2 - 0xA1 + 0x61); i += 3; continue
+            case 0xEF where b1 == 0xBD && b2 >= 0x81 && b2 <= 0x9A:
+                out.append(b2 - 0x81 + 0x61); i += 3; continue
+            default:
+                break
+            }
+            if space {
+                if out.last != 0x20 { out.append(0x20) }
+            } else {
+                out.append(b)
+            }
+            i += width
+        }
+        return out
+    }
+
+    /// Whether the character whose first byte is `lead` (followed by `next`) is a letter:
+    /// ASCII letters (the text is lower-cased, fullwidth letters are folded to them) and the
+    /// letters of other scripts. Not letters: ASCII digits and punctuation; 0xC2 (non-breaking
+    /// space, ©, ®, «, »); × and ÷; 0xE2 (general punctuation „ “ – •, ™, arrows); CJK symbols
+    /// and punctuation U+3000–U+303F (E3 80: 「」、。); 0xEE–0xEF (private use, fullwidth
+    /// punctuation and digits, specials); emoji (4 bytes).
+    static func isLetter(lead: UInt8, next: UInt8?) -> Bool {
+        switch lead {
+        case 0x61...0x7A: true
+        case 0xC3: next != 0x97 && next != 0xB7
+        case 0xC4...0xDF: true
+        case 0xE3: next != 0x80
+        case 0xE0, 0xE1, 0xE4...0xED: true
+        default: false
+        }
+    }
+
+    func occurs(in text: String) -> Bool {
+        let bytes = Self.normalized(Array(text.utf8))
+        return bytes.withUnsafeBufferPointer { text in
+            // The character that ends right before `index`: back over continuation bytes.
+            func letterBefore(_ index: Int) -> Bool {
+                var lead = index - 1
+                while lead > 0, lead > index - 4, text[lead] & 0xC0 == 0x80 { lead -= 1 }
+                guard lead >= 0 else { return false }
+                return Self.isLetter(lead: text[lead], next: lead + 1 < index ? text[lead + 1] : nil)
+            }
+            func letterAt(_ index: Int) -> Bool {
+                guard index < text.count else { return false }
+                return Self.isLetter(lead: text[index], next: index + 1 < text.count ? text[index + 1] : nil)
+            }
+            for start in text.indices {
+                let candidates = byFirstByte[Int(text[start])]
+                if candidates.isEmpty { continue }
+                for word in candidates where start + word.bytes.count <= text.count {
+                    var same = true
+                    for k in 1..<max(word.bytes.count, 1) where text[start + k] != word.bytes[k] { same = false; break }
+                    guard same else { continue }
+                    if word.startsWord && letterBefore(start) { continue }
+                    if word.endsWord && letterAt(start + word.bytes.count) { continue }
+                    return true
+                }
+            }
+            return false
+        }
     }
 }

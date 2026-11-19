@@ -9,27 +9,28 @@ Buildnummer und der Commit werden automatisch angehängt.
 - Markdown wird zu einfachem Text: Überschriften werden zu Zeilen, `-` zu `•`.
 - Text vor dem nächsten Build anpassen, der etwas Neues zum Testen hat. Der alte Text wandert
   darunter nach „Frühere Builds“.
-- Ein Push startet keinen Build (außer auf `claude/sortly-app`, solange dort die alte
-  `testflight.yml` liegt); TestFlight-Läufe startet man von Hand (`docs/TESTFLIGHT.md`).
-- Ein Notfall-Build ohne Tests („force“) bekommt automatisch eine Warnung davor
-  („FORCED – untested“).
+- Ein Push startet keinen Build; TestFlight-Läufe startet man von Hand auf `main`
+  (`docs/TESTFLIGHT.md`). Der alte Zweig `claude/sortly-app` lädt seit 18.11. nichts mehr hoch.
+- Jeder Build hat seine Tests bestanden; einen Notfall-Build ohne Tests gibt es nicht mehr
+  (Beschluss 17.11.).
 
 <!-- testflight:start -->
-Danke fürs Testen! Dieser Build bringt vor allem Stabilität. Bitte achte besonders auf:
+Danke fürs Testen! Dieser Build bringt viele Korrekturen aus deinen Tests. Bitte achte besonders auf:
 
-- Ausblenden: Fotos, die du ausblendest oder wieder einblendest, verschwinden bzw. erscheinen sofort. Die Zahlen ziehen kurz danach nach.
-- Mediathek-Tab: öffnet schneller, auch bei einer großen Mediathek.
-- Fotos hängt: Antwortet Fotos einmal nicht (z. B. während iCloud lädt), friert weder die Analyse noch das Umsetzen eines Plans ein. Albumist sagt, worauf es wartet, und macht danach weiter.
-- Rückgängig nach einem abgebrochenen Plan: Albumist entfernt nur, was sicher von Albumist ist, und sagt dir genau, falls etwas in Fotos bleibt. Deine Fotos bleiben unverändert.
-- Suche mit Zeiträumen: Probiere „seit 2024“, „vor 2022“ und „vor 2022 oder nach 2024“.
-- Themen und Dokumente später einschalten: Fotos, die schon analysiert waren, bekommen ihre Themen danach im Hintergrund.
-- Sprache der Albumnamen ändern: Orte bekommen neue Namen, Vorschläge, die du abgelehnt hast, kommen nicht zurück.
-- Reisen: Ein ganzer Tag zu Hause zwischen zwei Reisetagen trennt die Reise in zwei.
+- Orte, an denen du öfter bist: heißen jetzt nach der Stadt (nicht „Bayern“), und derselbe Ort kommt nur einmal. Dein Zuhause erkennt Albumist an den Fotos des ganzen Tages.
+- Ortsnamen: Während du die App offen hast, wartet die Analyse nicht mehr auf Apple. Was dann noch fehlt, holt Albumist später nach; die Karte zeigt das als eigene Verfeinerung.
+- Ring „Sortiert“: Ignorierte Fotos zählen nicht mehr mit, der Ring kann 100 % erreichen. Die Liste „Sortiert“ in der Mediathek zeigt dieselbe Zahl.
+- Vorschaubilder: Bankkarten, Ausweise und andere sensible Dokumente erscheinen nie mehr als Vorschau oder Titelbild.
+- Namensfeld: Einen Ort selbst benennen geht jetzt wie in den Einstellungen von iOS; „Anpassen“ zeigt den Namen, den du getippt hast.
+- Pause: Änderst du während einer Pause eine Reise (teilen, zusammenlegen, „Aufheben“), läuft die Analyse weiter und wendet die Änderung an.
+- Suche: Orte, die du selbst benannt hast, findest du über ihren Namen, auch bevor es ihr Album gibt.
+- Umstrittene Gebiete (etwa Krim, Taiwan, Kosovo): Albumist ordnet sie keinem Land zu und sagt „nicht sicher“.
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
 <!-- testflight:end -->
 
 ## Frühere Builds
 
+- Build nach PR #7 (19.11.2026): Ausblenden sofort sichtbar, Mediathek-Tab schneller, Fotos hängt nie fest, Rückgängig nach Abbruch, Suche mit Zeiträumen, Themen später einschalten, Sprache der Albumnamen, Tag zu Hause trennt eine Reise.
 - Bis 18.11.2026: Rückgängig fragt nach dem Löschen; Analyse läuft bei Wärme weiter; Probejahr bleibt; Fotos groß ansehen.
 - Build 27 (15.11.2026): erster Text, Inhalt wie oben.

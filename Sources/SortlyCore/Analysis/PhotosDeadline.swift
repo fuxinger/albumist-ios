@@ -12,17 +12,55 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
     public var lane: PhotosDeadline.Lane
     /// The call, for the diagnostic report ("createAlbum", "fetchAssets").
     public var what: String
-    /// The call was never sent: an earlier call of the same kind still had no answer.
+    /// The call was never sent: an earlier call of the same kind still had no answer, or the
+    /// call never began (`neverBegan`).
     public var notSent: Bool
     /// The call waited for the user: iOS asks before albums are deleted, and that question may
     /// still be on screen (its own words, second review of the PhotoKit limits, 7).
     public var asksUser: Bool
+    /// The call never began: Albumist's own work kept every thread busy past the call's limit
+    /// and grace, so it was given up before it reached Photos, and it never runs later. Nothing
+    /// was asked of Photos and nothing hangs; trying again is safe (second review of 6c45378, P1).
+    /// Always with `notSent`. Only a call given up at its limit says this; a caller cancelled
+    /// before its call began gets `CancellationError` (that call never runs either).
+    public var neverBegan: Bool
+    /// Reported by a library call before it sent any change (a read it makes first, such as
+    /// the check that the album is still there): whatever happened to that read, nothing of
+    /// the call reached Photos as a change (`beforeAnyChange`, review of f7439fb, SF1).
+    public var noChangeSent: Bool
 
-    public init(lane: PhotosDeadline.Lane, what: String, notSent: Bool, asksUser: Bool = false) {
+    public init(lane: PhotosDeadline.Lane, what: String, notSent: Bool, asksUser: Bool = false, neverBegan: Bool = false,
+                noChangeSent: Bool = false) {
         self.lane = lane
         self.what = what
-        self.notSent = notSent
+        self.notSent = notSent || neverBegan
         self.asksUser = asksUser
+        self.neverBegan = neverBegan
+        self.noChangeSent = noChangeSent
+    }
+}
+
+extension PhotosNotResponding {
+    /// The same, reported by a library call before it sent any change (a read it makes
+    /// first): the executor leaves the step as it was (`noChangeSent`).
+    public var beforeAnyChange: PhotosNotResponding {
+        var quiet = self
+        quiet.noChangeSent = true
+        return quiet
+    }
+
+    /// The library call that reported this sent no change, as far as it can say: a change
+    /// request never sent, or anything before the call's first change (`beforeAnyChange`).
+    public var reachedPhotosWithNoChange: Bool { noChangeSent || (notSent && lane == .write) }
+
+    /// The same, reported by a library call after a change of that call had already been sent
+    /// (`PhotoKitLibrary.deleteCollections` reads back and may ask once more): the call as a
+    /// whole is a write whose outcome is not known, never "not sent", whatever the later call
+    /// was (a read-back that got no thread says nothing about the change before it; review of
+    /// 045f297, M2). The question iOS asks may only still be open if this was that change
+    /// itself, without an answer.
+    public var afterAChangeWasSent: PhotosNotResponding {
+        PhotosNotResponding(lane: .write, what: what, notSent: false, asksUser: lane == .write && !notSent && asksUser)
     }
 }
 
@@ -33,7 +71,9 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
 /// - Every call gets a limit; a long read gets it as a limit without any sign of progress
 ///   (`Heartbeat`), so reading 50,000 photos is not cut off while it moves. The limit counts
 ///   from when the call starts running and is watched on a Dispatch timer, so a busy thread
-///   pool neither delays it nor cuts off a call that has not started.
+///   pool neither delays it nor cuts off a call that has not started. A call that still has no
+///   thread after its limit plus `notBegunGrace` is given up and never runs later: it was not
+///   sent, does not hang, and says so (`PhotosNotResponding.neverBegan`).
 /// - After the limit the caller gets `PhotosNotResponding` and goes on. The call itself cannot
 ///   be taken back from Photos: it goes on in the background and its answer is dropped.
 /// - While such a call still hangs, no new call of the same kind is sent (`Lane`). A write fails
@@ -49,9 +89,12 @@ public struct PhotosNotResponding: Error, Sendable, Equatable {
 /// - A look at a call that comes much later than planned means the app was suspended: the call
 ///   gets its limit again from then (`cameBack` does the same when the app is on screen again),
 ///   so time the app did not run in never cuts a call off.
-/// - A call cancelled by its caller that has not returned counts as hanging the same way.
-/// - `slowFor`: how long the oldest call has gone without an answer (or a sign of progress),
-///   once that is `slowAfter` or more, for the honest "Fotos antwortet gerade nicht" on screen
+/// - A call cancelled by its caller that began and has not returned counts as hanging the same
+///   way; one that had not begun never runs.
+/// - `slowFor`: how long the oldest waiting call has gone without an answer (or a sign of
+///   progress), once that is `slowAfter` or more (a call handed to the pool that still waits
+///   for a thread waits for Albumist, not for Photos; one waiting for its lane waits for Photos
+///   and counts), for the honest "Fotos antwortet gerade nicht" on screen
 ///   while Albumist still waits (owner limit: nothing stands still for more than 10 s).
 public final class PhotosDeadline: @unchecked Sendable {
     public enum Lane: String, Sendable, Equatable {
@@ -74,6 +117,9 @@ public final class PhotosDeadline: @unchecked Sendable {
         private var last: ContinuousClock.Instant
         private var began = false
         private var stopped = false
+        /// Its task was handed to the pool (`run`): until it begins, it waits for a thread, that
+        /// is for Albumist's own work, not for Photos.
+        private var queued = false
 
         init(_ now: ContinuousClock.Instant) { last = now }
 
@@ -82,7 +128,9 @@ public final class PhotosDeadline: @unchecked Sendable {
         /// read nobody waits for no longer keeps its lane busy for minutes (third review, N1).
         public var isCancelled: Bool { lock.withLock { stopped } }
 
-        func cancel() { lock.withLock { stopped = true } }
+        /// Stops the call: true if it had begun. Atomic with `begin`: a call stopped before it
+        /// began never begins, so it was never sent to Photos.
+        func stop() -> Bool { lock.withLock { stopped = true; return began } }
 
         public func beat() {
             let now = ContinuousClock.now
@@ -91,14 +139,24 @@ public final class PhotosDeadline: @unchecked Sendable {
 
         /// The call starts running: its limit counts from here. A call whose task has not got a
         /// thread yet (the analysis keeps them all busy) is not cut off for Photos' sake.
-        func begin() {
+        /// False when the call was given up before it got a thread: it must not run then.
+        func begin() -> Bool {
             let now = ContinuousClock.now
-            lock.withLock { last = now; began = true }
+            return lock.withLock {
+                guard !stopped else { return false }
+                last = now
+                began = true
+                return true
+            }
         }
 
-        var lastBeat: ContinuousClock.Instant { lock.withLock { last } }
-        /// The last beat, once the call has started running.
-        var quietSince: ContinuousClock.Instant? { lock.withLock { began ? last : nil } }
+        /// The call's task is handed to the pool.
+        func handedOver() { lock.withLock { queued = true } }
+
+        /// One look under one lock: the last beat, whether the call began running, and whether
+        /// its task was handed to the pool (review of 045f297, S2: two separate reads could see
+        /// a beat from before `begin` with "running").
+        var state: (last: ContinuousClock.Instant, began: Bool, queued: Bool) { lock.withLock { (last, began, queued) } }
     }
 
     /// How the watch goes on after one look at a call.
@@ -124,7 +182,7 @@ public final class PhotosDeadline: @unchecked Sendable {
     /// One look at a call: `quiet` since its last beat (for a call not running yet, beyond
     /// `notBegunGrace`), `late` how much later than planned this look came.
     static func quiet(now: ContinuousClock.Instant, lastBeat: ContinuousClock.Instant, running: Bool,
-                      grace: Duration = notBegunGrace) -> Duration {
+                      grace: Duration) -> Duration {
         // Not running yet (its task has no thread): only its wait beyond the grace counts.
         running ? now - lastBeat : max(.zero, now - lastBeat - grace)
     }
@@ -155,14 +213,22 @@ public final class PhotosDeadline: @unchecked Sendable {
     /// Swift's shared pool was busy for 78 s (CI 44380367650 on Linux, even trivial tests took
     /// that long), and calls that never got a thread were given up after 60 s + their limit.
     let grace: Duration
+    /// Tests only: awaited by a call's task before it begins, to hold a call that has no thread.
+    private let startGate: (@Sendable () async -> Void)?
+    /// Tests only: hears what `Heartbeat.begin` returned for each call's task, so a test knows
+    /// for certain that a call given up first did not run (instead of waiting a while).
+    private let begun: (@Sendable (Bool) -> Void)?
 
     public convenience init(slowAfter: Duration = .seconds(10)) {
         self.init(slowAfter: slowAfter, notBegunGrace: Self.notBegunGrace)
     }
 
-    init(slowAfter: Duration = .seconds(10), notBegunGrace: Duration) {
+    init(slowAfter: Duration = .seconds(10), notBegunGrace: Duration, startGate: (@Sendable () async -> Void)? = nil,
+         begun: (@Sendable (Bool) -> Void)? = nil) {
         self.slowAfter = slowAfter
         self.grace = notBegunGrace
+        self.startGate = startGate
+        self.begun = begun
     }
 
     /// Calls of this kind that went past their limit and still have not returned.
@@ -176,10 +242,18 @@ public final class PhotosDeadline: @unchecked Sendable {
     }
 
     /// How long the oldest waiting call has gone without an answer or a beat, when that is
-    /// `slowAfter` or more. Calls that wait for the user (`reportsSlow: false`) do not count.
+    /// `slowAfter` or more. Calls that wait for the user (`reportsSlow: false`) do not count, nor
+    /// do calls whose task was handed to the pool and has no thread yet. A call that waits for
+    /// its lane (an earlier one hangs) counts: it waits for Photos.
     public func slowFor(now: ContinuousClock.Instant = .now) -> Duration? {
         let longest = lock.withLock {
-            calls.values.filter(\.reportsSlow).map { now - $0.heartbeat.lastBeat }.max()
+            calls.values.filter(\.reportsSlow).compactMap { call -> Duration? in
+                let state = call.heartbeat.state
+                // Waiting for a thread: for Albumist's own work, not for Photos (second review of
+                // 6c45378, P2). Not a call waiting for its lane (review of 045f297, M1).
+                if state.queued && !state.began { return nil }
+                return now - state.last
+            }.max()
         }
         guard let longest, longest >= slowAfter else { return nil }
         return longest
@@ -208,11 +282,19 @@ public final class PhotosDeadline: @unchecked Sendable {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
                 answer.set(continuation)
+                let gate = startGate
+                let begun = begun
                 // Not sent at all when the caller was cancelled before this point.
                 let started = answer.start {
-                    Task.detached(priority: priority) {
+                    heartbeat.handedOver()
+                    return Task.detached(priority: priority) {
+                        if let gate { await gate() }
+                        // Given up before it got a thread: never sent, never run (second review
+                        // of 6c45378, P1). `giveUp` did not count it as hanging.
+                        let running = heartbeat.begin()
+                        begun?(running)
+                        guard running else { return }
                         let result: Result<T, any Error>
-                        heartbeat.begin()
                         do { result = .success(try await work(heartbeat)) } catch { result = .failure(error) }
                         self.returned(id, lane: lane, answer: answer, result: result)
                     }
@@ -240,7 +322,8 @@ public final class PhotosDeadline: @unchecked Sendable {
                           answer: Answer<T>, planned: ContinuousClock.Instant?, cameBack: Int) {
         guard !answer.isDone else { return }
         let now = ContinuousClock.now
-        let quiet = Self.quiet(now: now, lastBeat: heartbeat.lastBeat, running: heartbeat.quietSince != nil, grace: grace)
+        let state = heartbeat.state
+        let quiet = Self.quiet(now: now, lastBeat: state.last, running: state.began, grace: grace)
         let late = planned.map { max(.zero, now - $0) } ?? .zero
         let wait: Duration
         var inARow = 0
@@ -311,18 +394,27 @@ public final class PhotosDeadline: @unchecked Sendable {
     }
 
     /// The caller stops waiting (limit passed, or cancelled): it gets `error`, and a call that
-    /// was sent counts as hanging until it returns.
+    /// began running counts as hanging until it returns. A call whose task has not begun is
+    /// stopped here, atomically with `Heartbeat.begin`: it never runs, so it was never sent
+    /// and does not hang, and a `PhotosNotResponding` says so (`notSent`, `neverBegan`). Before,
+    /// such a call counted as hanging and still ran later: a change request carried out after
+    /// its plan had stopped with "outcome unknown" (second review of 6c45378, P1).
     private func giveUp<T>(_ id: UUID, lane: Lane, answer: Answer<T>, heartbeat: Heartbeat, error: any Error) {
-        let first = lock.withLock { () -> Bool in
-            let (first, sent) = answer.giveUp()
-            guard first else { return false }
+        let outcome = lock.withLock { () -> (first: Bool, began: Bool) in
+            guard answer.giveUp() else { return (false, false) }
             calls[id] = nil
-            if sent { hanging[lane, default: 0] += 1 }
-            return true
+            // True only once the call's task began running (a task never started has not).
+            let began = heartbeat.stop()
+            if began { hanging[lane, default: 0] += 1 }
+            return (true, began)
         }
-        guard first else { return }
-        heartbeat.cancel()
+        guard outcome.first else { return }
         answer.cancelWorker()
+        var error = error
+        if !outcome.began, let late = error as? PhotosNotResponding {
+            error = PhotosNotResponding(lane: late.lane, what: late.what, notSent: true, asksUser: late.asksUser,
+                                        neverBegan: true)
+        }
         answer.deliver(.failure(error))
     }
 }
@@ -347,8 +439,8 @@ private final class Answer<T: Sendable>: @unchecked Sendable {
         if let ready { continuation.resume(with: ready) }
     }
 
-    /// Starts the call unless the caller gave up already; atomic with `giveUp`, so a call is
-    /// either never sent or counted as sent.
+    /// Starts the call's task unless the caller gave up already; atomic with `giveUp`, so a
+    /// call given up first never gets a task.
     func start(_ make: () -> Task<Void, Never>) -> Bool {
         lock.withLock {
             guard !finished else { return false }
@@ -366,13 +458,14 @@ private final class Answer<T: Sendable>: @unchecked Sendable {
         }
     }
 
-    /// The caller stops waiting: `first` unless the call answered or was given up already;
-    /// `sent` when the call was started.
-    func giveUp() -> (first: Bool, sent: Bool) {
+    /// The caller stops waiting: true unless the call answered or was given up already. Whether
+    /// the call reached Photos is the heartbeat's to say (`Heartbeat.stop`): a started task may
+    /// not have begun yet.
+    func giveUp() -> Bool {
         lock.withLock {
-            guard !finished else { return (false, worker != nil) }
+            guard !finished else { return false }
             finished = true
-            return (true, worker != nil)
+            return true
         }
     }
 

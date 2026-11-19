@@ -58,6 +58,7 @@ enum UITestStalls {
     static func check() {}
 }
 """
+STALLS_SLOWER = STALLS.replace("static func check() {}", "static func check() { sleep(1) }")
 TAP = """import XCTest
 
 extension XCUIElement {
@@ -155,6 +156,85 @@ class SwiftTests(unittest.TestCase):
         self.assertNotIn("BaseUITests/testMore", tests)
 
 
+class SwiftCodeTests(unittest.TestCase):
+    """swift_code: what a test fingerprint reads of a Swift file (Prüfer B G5-04: a comment edit is
+    no change of the test, so it must not let a red result go)."""
+
+    def same(self, a, b):
+        self.assertIsNotNone(ui_groups.swift_code(a))
+        self.assertEqual(ui_groups.swift_code(a), ui_groups.swift_code(b))
+
+    def different(self, a, b):
+        self.assertIsNotNone(ui_groups.swift_code(a))
+        self.assertIsNotNone(ui_groups.swift_code(b))
+        self.assertNotEqual(ui_groups.swift_code(a), ui_groups.swift_code(b))
+
+    def test_comments_indentation_and_blank_lines_count_for_nothing(self):
+        code = "func f() {\n    let a = 1 + 2\n    g(a)\n}\n"
+        self.same(code, "// head\nfunc f() { // why\n\n\n        let a = 1 /* sum */ + 2\n\tg(a)   \n}")
+        self.same(code, "/* a /* nested */ comment */func f() {\n/** doc\n */ let a = 1 + 2\ng(a)\n}\n")
+        self.same(code, "func f() {\r\n    let a = 1 + 2\r\n    g(a)\r\n}\r\n")
+
+    def test_carriage_returns_are_line_breaks_as_in_swift(self):
+        # Swift ends a // comment and a line at "\r" as at "\n" (second review of G5-04): code
+        # after "\r" is code.
+        self.different("a // x\rb", "a // x\rc")
+        self.different("let a = 1 // x\rlet b = 2\r", "let a = 1 // x\rlet b = 3\r")
+        self.same("a // x\r\nb", "a\nb")
+        self.same("a\r\n  b\r", "a\nb")
+        self.same("a\r(b)", "a\n(b)")
+        self.same("a /* x\r y */ (b)", "a\n(b)")
+        self.assertIsNone(ui_groups.swift_code('let s = "open\rlet b = 1'))
+        self.assertIsNone(ui_groups.swift_code("let `a\rb` = 1"))
+        # The reader of uses sees the code after "\r" too.
+        f = ui_groups.SwiftFile("x.swift", "let a = 1 // note\rlet b = Helper.make()\r")
+        self.assertIn("Helper", f.words)
+        f = ui_groups.SwiftFile("x.swift", "final class CRUITests: XCTestCase {\r    func testA() {}\r}\r")
+        self.assertEqual(f.methods, {"CRUITests": ["testA"]})
+
+    def test_line_breaks_and_space_around_operators_count(self):
+        # A line break ends a statement and makes "(" no call; space decides prefix/postfix/binary.
+        self.different("let a = b\n(c)\n", "let a = b(c)\n")
+        self.different("let a = b - c\n", "let a = b -c\n")
+        self.different("let a = b\n", "let a = c\n")
+        # A comment over two lines is a line break, one on a line is a space.
+        self.same("a /* x\n y */ (b)", "a\n(b)")
+        self.same("a /* x */ - b", "a - b")
+
+    def test_literals_stay_byte_for_byte(self):
+        self.different('let s = "a  b"', 'let s = "a b"')
+        self.different('let s = "a // b"', 'let s = "a  b"')
+        self.different('let s = "x /* y */"', 'let s = "x "')
+        self.same('let s = "a // b" // c', 'let s = "a // b"')
+        self.different('let s = #"a "b" // c"#', 'let s = #"a "b" "#')
+        self.different('let s = "q\\" // still text"', 'let s = "q\\""')
+        multi = 'let s = """\n    a  // b\n      c\n    """\n'
+        self.different(multi, multi.replace("      c", "    c"))
+        self.different(multi, multi.replace("  // b", ""))
+        self.different(multi, multi.replace('    """', '  """'))  # the closing delimiter's indentation
+        self.different("let r = #/(\\d+) von /#", "let r = #/(\\d+) von/#")
+        self.different("let r = #/a//b/#", "let r = #/a/#")
+        self.different("let r = ##/a/#b/##", "let r = ##/a/##")
+        self.different("let `a b` = 1", "let `a  b` = 1")
+
+    def test_code_in_an_interpolation_is_code(self):
+        self.same('print("n \\(count(of: "x" /* why */))!")', 'print("n \\(count(of:  "x"  ))!")')
+        self.different('print("n \\(a - b)")', 'print("n \\(a -b)")')
+        self.different('print("n \\(f("a  b"))")', 'print("n \\(f("a b"))")')
+
+    def test_what_it_cannot_read_for_sure_falls_back_to_the_bytes(self):
+        for source in ("let a = b/c", "let r = /a b/", "let r = /a//", "x /=y", 'let s = "open\nlet b = 1',
+                       "/* open comment", 'let s = """\nopen', "let r = #/open", "let `a = 1", "let s = \"\ufffd\""):
+            with self.subTest(source=source):
+                self.assertIsNone(ui_groups.swift_code(source))
+                self.assertEqual(ui_groups.swift_code_id(source, "0" * 40), "blob " + "0" * 40)
+        for source in ("let a = b / c", "a /= 2\n"):
+            with self.subTest(source=source):
+                self.assertIsNotNone(ui_groups.swift_code(source))
+        self.assertEqual(ui_groups.swift_code_id(None, "1" * 40), "blob " + "1" * 40)
+        self.assertTrue(ui_groups.swift_code_id("let a = 1", "1" * 40).startswith("code "))
+
+
 class GroupTests(unittest.TestCase):
     def test_file_map(self):
         groups = ui_groups.Groups(repo())
@@ -236,15 +316,35 @@ class FingerprintTests(unittest.TestCase):
             ui_groups.Groups(repo(**{"App__SortlyUITests__DeviceUITests.swift": None}))
         changed = DEVICE.replace("test02_Cold", "test02_Colder")
         self.assertEqual(self.changed(**{"App__SortlyUITests__DeviceUITests.swift": changed}), (False, ["device"]))
-        self.assertEqual(self.changed(**{"App__SortlyUITests__FlowUITests.swift": FLOW + "\n// shorter wait\n"}),
+        longer = FLOW.replace("func test2_Other() throws {}", "func test2_Other() throws { sleep(20) }")
+        self.assertEqual(self.changed(**{"App__SortlyUITests__FlowUITests.swift": longer}), (False, ["full", "other", "small"]))
+        tapped = SEARCH.replace("app.tapIfThere()", "app.tapIfThere(); app.swipeUp()")
+        self.assertEqual(self.changed(**{"App__SortlyUITests__SearchUITests.swift": tapped}), (False, ["other"]))
+
+    def test_comments_and_indentation_leave_every_fingerprint(self):
+        # Prüfer B G5-04: the rule is "red until the test or the app changes"; a comment is no change.
+        flow = FLOW.replace("    func test2_Other", "    // waits 20 s\n  func test2_Other").replace("XCTestCase {\n", "XCTestCase { // open\n")
+        self.assertEqual(self.changed(**{"App__SortlyUITests__FlowUITests.swift": flow}), (False, []))
+        self.assertEqual(self.changed(**{"App__SortlyUITests__UITestOnboarding.swift": "/* the onboarding */\n" + ONBOARDING}),
+                         (False, []))
+        # Text in a string literal is test code (what the test types or looks for).
+        in_string = FLOW.replace("func testNotATest() {\n", "func testNotATest() { // open\n")
+        self.assertEqual(self.changed(**{"App__SortlyUITests__FlowUITests.swift": in_string}),
                          (False, ["full", "other", "small"]))
-        self.assertEqual(self.changed(**{"App__SortlyUITests__SearchUITests.swift": SEARCH + "\n"}), (False, ["other"]))
+        self.assertEqual(self.changed(**{"App__SortlyUITests__FlowUITests.swift": FLOW.replace("a { brace", "a {  brace")}),
+                         (False, ["full", "other", "small"]))
+        # A file the reader cannot read for sure counts by its bytes, comments too.
+        unsure = DEVICE.replace("func test01_Hot() {", "func test01_Hot() { let half = 1/2")
+        base = ui_groups.fingerprints(repo(**{"App__SortlyUITests__DeviceUITests.swift": unsure}))
+        after = ui_groups.fingerprints(repo(**{"App__SortlyUITests__DeviceUITests.swift": unsure + "// note\n"}))
+        self.assertNotEqual(base["groups"]["device"], after["groups"]["device"])
 
     def test_a_shared_helper_changes_every_group_that_uses_it(self):
-        self.assertEqual(self.changed(**{"App__SortlyUITests__UITestOnboarding.swift": ONBOARDING + "\n"}),
-                         (False, ["device", "full", "other", "small"]))
-        self.assertEqual(self.changed(**{"App__SortlyUITests__UITestStalls.swift": STALLS + "\n"}), (False, ["device"]))
-        self.assertEqual(self.changed(**{"App__SortlyUITests__XCUIElement+Tap.swift": TAP + "\n"}), (False, ["other"]))
+        self.assertEqual(self.changed(**{"App__SortlyUITests__UITestOnboarding.swift": ONBOARDING.replace(
+            "XCUIApplication) {}", "XCUIApplication) { app.launch() }")}), (False, ["device", "full", "other", "small"]))
+        self.assertEqual(self.changed(**{"App__SortlyUITests__UITestStalls.swift": STALLS_SLOWER}), (False, ["device"]))
+        self.assertEqual(self.changed(**{"App__SortlyUITests__XCUIElement+Tap.swift": TAP.replace(
+            "func tapIfThere() {}", "func tapIfThere() { tap() }")}), (False, ["other"]))
 
     def test_harness_resources_and_observers_count_for_every_group(self):
         everyone = (False, ["device", "full", "other", "small"])
@@ -270,9 +370,14 @@ class FingerprintTests(unittest.TestCase):
         self.assertEqual(self.changed(**{".github__ui-groups.json": json.dumps(groups)}), (False, ["small"]))
 
     def test_affected_says_why(self):
-        run, why = ui_groups.affected(self.BASE, repo(**{"App__SortlyUITests__UITestStalls.swift": STALLS + "\n"}),
+        run, why = ui_groups.affected(self.BASE, repo(**{"App__SortlyUITests__UITestStalls.swift": STALLS_SLOWER}),
                                       ["App/SortlyUITests/UITestStalls.swift"])
         self.assertEqual((run, why), (["device"], {"device": ["App/SortlyUITests/UITestStalls.swift"]}))
+        # Only comments and indentation changed: nothing to run again.
+        run, why = ui_groups.affected(self.BASE, repo(**{"App__SortlyUITests__UITestStalls.swift":
+                                                          "// Stalls\n" + STALLS.replace("    static", "  static")}),
+                                      ["App/SortlyUITests/UITestStalls.swift"])
+        self.assertEqual((run, why), ([], {}))
         run, why = ui_groups.affected(self.BASE, repo(**{"Sources__SortlyCore__Core.swift": "changed"}),
                                       ["Sources/SortlyCore/Core.swift", "docs/TESTFLIGHT.md"])
         self.assertEqual(run, ["device", "full", "other", "small"])
@@ -302,6 +407,14 @@ class RepositoryTests(unittest.TestCase):
             if path.endswith("UITests.swift"):
                 with self.subTest(path=path):
                     self.assertTrue(names, f"{path} is in no group")
+
+    def test_every_swift_file_of_the_target_is_read_as_code(self):
+        # Otherwise a comment edit in it would change its groups' fingerprints again and let a red
+        # result go (Prüfer B G5-04). Write a division as "a / b" (a bare regex /.../ can not be read).
+        for path, f in self.groups.files.items():
+            with self.subTest(path=path):
+                self.assertTrue(self.groups.code_ids[path].startswith("code "),
+                                f"{path}: ui_groups.swift_code cannot read it for sure (a \"/\" without spaces?)")
 
     def test_the_shared_onboarding_belongs_to_every_group_that_onboards(self):
         users = self.groups.file_map().get("App/SortlyUITests/UITestOnboarding.swift", [])

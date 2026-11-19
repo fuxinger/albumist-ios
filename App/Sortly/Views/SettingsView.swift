@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var confirmReset = false
     @State private var redeeming = false
     @State private var rejectedCount = 0
@@ -116,7 +117,7 @@ struct SettingsView: View {
             } header: {
                 Text("Datenschutz")
             } footer: {
-                Text("Die Analyse läuft immer auf deinem Gerät. Für genauere Orte sendet iOS nur Koordinaten an Apple, keine Fotos. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst.")
+                Text("Die Analyse läuft immer auf deinem Gerät. Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst, nie ein Foto. Aus iCloud werden nur Screenshots und Dokumente geladen, nie Videos, und nur im WLAN, wenn du nichts anderes einstellst.")
             }
 
             if rejectedCount > 0 {
@@ -137,17 +138,27 @@ struct SettingsView: View {
                 Section {
                     LabeledContent("Selbst geteilt oder zusammengelegt", value: model.tripCorrections.changeCount.formatted())
                     Button("Reisen wieder automatisch erkennen") { confirmTripReset = true }
-                        .disabled(model.analysis.isRunning || model.execution.isRunning)
+                        // Grey while an analysis runs or albums are made; the footer says why.
+                        .disabled(model.tripChangeWait != nil)
+                        .tripChangeWaitHint(model.tripChangeWait)
                         .accessibilityIdentifier("settings.resetTrips")
                         .confirmationDialog("Reisen wieder automatisch erkennen?", isPresented: $confirmTripReset, titleVisibility: .visible) {
                             Button("Automatisch erkennen") { Task { await model.resetTripCorrections() } }
                         } message: {
-                            Text("Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind.")
+                            // During a Pause the reset starts the analysis again (decision 18.11.2026).
+                            if model.analysis.isPausedByUser {
+                                Text("Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter.")
+                            } else {
+                                Text("Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind.")
+                            }
                         }
                 } header: {
                     Text("Reisen")
                 } footer: {
-                    Text("Albumist hält sich an deine Änderungen, auch bei jeder neuen Analyse.")
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        TripChangeWaitNote(identifier: "settings.resetTripsBusyNote")
+                        Text("Albumist hält sich an deine Änderungen, auch bei jeder neuen Analyse.")
+                    }
                 }
             }
 
@@ -201,6 +212,8 @@ struct SettingsView: View {
                 Text("Die Diagnose hilft bei Problemen. Sie enthält nur Zustände und Zahlen, keine Fotos, Albumnamen oder Orte, und du siehst sie vor dem Senden.")
             }
         }
+        // The trip reset greys and its note comes and goes with the run, without a jump.
+        .animation(reduceMotion ? nil : .smooth, value: model.tripChangeWait)
         .navigationTitle("Einstellungen")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -213,7 +226,7 @@ struct SettingsView: View {
                 Task {
                     // Refused during a change in "Dein Zuhause": only the busy message, no run.
                     if await model.resetAnalysis() {
-                        model.startAnalysis(userInitiated: true)
+                        model.startAnalysis(cause: .tap)
                     }
                 }
             }
@@ -372,7 +385,7 @@ struct PrivacyView: View {
                 Text("Ausweise und medizinische Dokumente werden nicht als Text gespeichert. IBANs und Kartennummern werden unkenntlich gemacht.")
             }
             Section("Was dein Gerät verlässt") {
-                Text("Nur wenn „Orte online genauer bestimmen“ eingeschaltet ist, schickt iOS Koordinaten an Apple, um Ortsnamen zu finden. Fotos verlassen dein Gerät nie.")
+                Text("Für Ortsnamen schickt iOS einzelne Aufnahmeorte (nur Koordinaten und die Sprache der Ortsnamen) an Apples Kartendienst. Das ist ab Werk eingeschaltet und lässt sich unter „Orte online genauer bestimmen“ ausschalten. Fotos verlassen dein Gerät nie.")
                 Text("Käufe laufen über Apple. Albumist sieht keine Zahlungsdaten.")
                 Text("Die Diagnose nur, wenn du sie selbst teilst: Zustände und Zahlen, keine Fotos, Namen oder Orte.")
             }

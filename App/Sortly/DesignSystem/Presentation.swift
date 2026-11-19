@@ -174,6 +174,8 @@ enum ReasonText {
             return String(localized: "\(count) Fotos passen zur Regel „\(rule)“.")
         case .inferredWithoutLocation(let count):
             return String(localized: "\(count) Fotos ohne Ort passen zeitlich dazu und sind nur vorgeschlagen.")
+        case .disputedArea(let place):
+            return String(localized: "Umstrittenes Gebiet: Zu welchem Land es gehört, ist nicht sicher. Albumist ordnet „\(place)“ darum keinem Land zu.")
         }
     }
 
@@ -300,6 +302,19 @@ enum AnalysisText {
     /// "12.000 von 50.233 mit der Karte geprüft": the places step's pass over the offline map.
     static func mapChecked(_ pass: AnalysisPipeline.MapPass) -> String {
         String(localized: "\(pass.checked.formatted()) von \(pass.of.formatted()) mit der Karte geprüft")
+    }
+
+    /// "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in 25 s": the places step
+    /// waits for the limit of Apple's geocoder (the overnight refinement only). Whole seconds up
+    /// to a minute, whole minutes above ("weiter in 2 Minuten"), rounded up (`AppleWaitCountdown`):
+    /// never less than is left, never 0 while it still waits.
+    static func appleWait(_ left: Duration) -> String {
+        switch AppleWaitCountdown(left) {
+        case .seconds(let seconds):
+            String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(seconds) s")
+        case .minutes(let minutes):
+            String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(minutes) Minuten")
+        }
     }
 
     /// "2.431 von 5.683 Fotos", number first.

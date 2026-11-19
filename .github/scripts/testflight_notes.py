@@ -1,14 +1,17 @@
 """Sets the German "Was testen" (What to Test) text of one TestFlight build.
 
-  python3 testflight_notes.py text  --notes docs/TESTFLIGHT_NOTES.md --build 28 --sha abc1234
+  python3 testflight_notes.py text  --notes docs/TESTFLIGHT_NOTES.md --build 28 --sha abc1234 [--gate small]
       Prints the text: the part of the notes file between the markers
       <!-- testflight:start --> and <!-- testflight:end -->, as plain text, plus a line with the
-      build number and commit. At most 4000 characters (App Store Connect's limit). With
-      --forced (a build uploaded by testflight.yml's emergency "force", without any test) the
-      text starts with a warning for the testers and the last line says "FORCED – untested".
-  python3 testflight_notes.py upload --notes ... --build 28 --sha ... --bundle-id app.albumist.ios
+      build number and commit. At most 4000 characters (App Store Connect's limit). Every
+      build has passed its tests (testflight.yml has no way to upload without them), so the
+      text carries no warning of its own. A build of the small gate (the daily build for the
+      owner, testflight.yml gate small) says so in that last line: it is for the owner's own
+      iPhone, not for testers (the owner's decision 10 of 18.11.2026).
+  python3 testflight_notes.py upload --notes ... --build 28 --sha ... --bundle-id app.albumist.ios [--gate small]
       Waits (bounded) until App Store Connect knows the build, then writes the text into the
-      build's German beta localization (creates it if missing). Same API key as the upload:
+      build's German beta localization (creates it if missing). Same API key as the upload, in
+      the upload job of testflight.yml (the only job that gets it, after the owner's approval):
       KEY_ID, ISSUER_ID and KEY_PATH (the .p8 file) in the environment. Exit 0 also on failure,
       with a warning: the build itself is uploaded already and stays usable.
 
@@ -28,12 +31,13 @@ import urllib.request
 
 ASC = "https://api.appstoreconnect.apple.com/v1"
 LIMIT = 4000
-FORCED_MARK = "FORCED – untested"
-FORCED_WARNING = (f"NOTFALL-BUILD OHNE TESTS ({FORCED_MARK}): Dieser Build kam ohne die automatischen "
-                  "Tests zu TestFlight. Rechne mit Fehlern und melde alles, was dir auffällt.")
 
 
-def render(notes_path, build, sha, forced=False):
+# Last line of a small-gate build (testflight.yml, gate small): who it is for.
+SMALL_GATE = "Täglicher Build mit kleinem Tor: nur für dich, nicht an Tester weitergeben"
+
+
+def render(notes_path, build, sha, gate="big"):
     with open(notes_path, encoding="utf-8") as f:
         source = f.read()
     match = re.search(r"<!--\s*testflight:start\s*-->(.*?)<!--\s*testflight:end\s*-->", source, re.S)
@@ -47,10 +51,7 @@ def render(notes_path, build, sha, forced=False):
         line = re.sub(r"(?<!\w)[*_](\S[^*_]*?)[*_](?!\w)", r"\1", line)  # italics
         lines.append(line.rstrip())
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-    footer = f"\n\nBuild {build} · {sha[:7]}"
-    if forced:
-        text = f"{FORCED_WARNING}\n\n{text}"
-        footer += f" · {FORCED_MARK}"
+    footer = f"\n\nBuild {build} · {sha[:7]}" + (f"\n{SMALL_GATE}" if gate == "small" else "")
     if len(text) + len(footer) > LIMIT:
         text = text[: LIMIT - len(footer) - 1].rstrip() + "…"
     return text + footer
@@ -98,7 +99,7 @@ def call(method, path, body=None, **params):
 
 
 def upload(args):
-    text = render(args.notes, args.build, args.sha, args.forced)
+    text = render(args.notes, args.build, args.sha, args.gate)
     print("WHAT_TO_TEST\n" + text + "\n")
     deadline = time.monotonic() + args.wait_minutes * 60
     last_error = ""
@@ -150,10 +151,11 @@ def main():
     parser.add_argument("--sha", required=True)
     parser.add_argument("--bundle-id", default="app.albumist.ios")
     parser.add_argument("--wait-minutes", type=float, default=40)
-    parser.add_argument("--forced", action="store_true", help="the build was uploaded without tests (force)")
+    parser.add_argument("--gate", choices=["big", "small"], default="big",
+                        help="the gate the build passed (testflight.yml); small names it in the last line")
     args = parser.parse_args()
     if args.command == "text":
-        print(render(args.notes, args.build, args.sha, args.forced))
+        print(render(args.notes, args.build, args.sha, args.gate))
         return 0
     return upload(args)
 

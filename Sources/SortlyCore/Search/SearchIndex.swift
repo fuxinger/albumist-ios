@@ -1,7 +1,7 @@
 import Foundation
 
 /// Names from the user's own library the parser recognizes: places, countries, merchants,
-/// albums, named people and pets, named frequent places and every Vision label that occurs.
+/// albums, named people and pets, places the user named and every Vision label that occurs.
 public struct SearchVocabulary: Sendable {
     struct Name: Sendable {
         var criterion: SearchCriterion
@@ -71,10 +71,15 @@ public struct SearchIndex: Sendable {
         var english: String
         var kind: SearchToken.Kind
         var count: Int
+        /// Offered on the empty search field (`featuredSuggestions`).
+        var startingPoint = true
     }
 
+    /// `namedPlaces`: the places the user named (`NamedPlace.resolve`), found by their names;
+    /// frequent places add the name they carry themselves (`FrequentPlace.userName`).
     public init(facts: [AssetFacts], inventory: CollectionInventory = CollectionInventory(), groups: [ObservationGroup] = [],
-                frequentPlaces: [FrequentPlace] = [], home: HomeSettings = HomeSettings(), calendar: Calendar = .sortlyDefault) {
+                frequentPlaces: [FrequentPlace] = [], namedPlaces: [NamedPlace] = [], home: HomeSettings = HomeSettings(),
+                calendar: Calendar = .sortlyDefault) {
         self.calendar = calendar
         // Newest first, like the photo grid; equal dates by id so the order is stable.
         let sorted = facts.sorted {
@@ -118,6 +123,7 @@ public struct SearchIndex: Sendable {
         var vocabulary = SearchVocabulary()
         var placeNames: [String: String] = [:]              // key → display name as stored
         var countryNames: [String: [String: Int]] = [:]     // code → display name → photos
+        var areaPhotos: [String: Int] = [:]                 // "disputed-<id>" → photos (no country code)
         var merchantNames: [String: String] = [:]
         var termSets: [String: [Int32]] = [:]
         for (i, f) in sorted.enumerated() {
@@ -136,10 +142,14 @@ public struct SearchIndex: Sendable {
                 if let code = place.isoCountryCode {
                     post(.country(code))
                     if let name = place.country { countryNames[code, default: [:]][name, default: 0] += 1 }
+                } else if let area = place.disputedArea {
+                    areaPhotos["disputed-" + area, default: 0] += 1
                 }
                 var seen = Set<String>()
+                // A disputed area ("Krim") has no country code; its name is found like a place's.
                 for name in [place.locality, place.subLocality, place.administrativeArea, place.subAdministrativeArea,
-                             place.inlandWater, place.ocean, place.areaOfInterest].compactMap({ $0 }) {
+                             place.inlandWater, place.ocean, place.areaOfInterest,
+                             place.disputedArea != nil ? place.country : nil].compactMap({ $0 }) {
                     let key = SearchText.key(name)
                     guard !key.isEmpty, seen.insert(key).inserted else { continue }
                     post(.place(key))
@@ -160,7 +170,9 @@ public struct SearchIndex: Sendable {
             for c in categories { post(.category(c)) }
             for c in sure { strong[c, default: []].append(p) }
             for label in f.keywords { post(.label(label)) }
-            if let document = f.document {
+            // A card or ID without a document type (`.other`) only keeps it out of previews: the
+            // search finds it as before, by its text, not as a document.
+            if let document = f.document, document.type != .other {
                 post(.anyDocument)
                 post(.document(document.type))
                 if let merchant = document.merchant {
@@ -181,6 +193,7 @@ public struct SearchIndex: Sendable {
                 for term in Set(SearchText.words(text)) where term.count >= 2 { termSets[term, default: []].append(p) }
             }
         }
+        let named = Self.namedPlaces(namedPlaces, frequentPlaces: frequentPlaces, sorted: sorted, postings: &postings)
         self.favorites = favorites
         self.located = located
         self.postings = postings
@@ -190,14 +203,15 @@ public struct SearchIndex: Sendable {
         // "Ausland": the home country of each photo's date. Where the detection decides, its
         // everyday countries (as for the suggestions, from the photos outside trips); with none
         // known, or with "Kein Zuhause", the country with the most photos, as before.
-        let mostPhotos = countryNames.max { a, b in
-            (postings[.country(a.key)]?.count ?? 0, b.key) < (postings[.country(b.key)]?.count ?? 0, a.key)
-        }?.key
+        // A disputed area counts like a country here (second review of 752ba07: a library at
+        // home in Taiwan had its photos at home as "Ausland", or none).
+        let photosPerCountry = countryNames.keys.map { ($0, postings[.country($0)]?.count ?? 0) } + areaPhotos.map { ($0.key, $0.value) }
+        let mostPhotos = photosPerCountry.max { a, b in (a.1, b.0) < (b.1, a.0) }?.0
         let homeContext = HomeContext(settings: home, profile: LibraryProfile(facts: facts.filter { $0.tripID == nil }, trips: []), facts: facts)
         var abroad = Bitset(count: sorted.count)
         var countryKeys: [String: PlaceKey] = [:]
         for (i, f) in sorted.enumerated() {
-            guard let place = f.gpsPlace, let code = place.isoCountryCode else { continue }
+            guard let place = f.gpsPlace, let code = place.isoCountryCode ?? place.disputedArea.map({ "disputed-" + $0 }) else { continue }
             let key: PlaceKey
             if let known = countryKeys[code] {
                 key = known
@@ -243,6 +257,14 @@ public struct SearchIndex: Sendable {
             vocabulary.add(alias, .init(criterion: ordered.count == 1 ? .place(ordered[0]) : .any(ordered.map { .place($0) }),
                                         kind: .place, german: display, english: display, dimension: "place", importance: 6))
         }
+        // Places the user named (review G1-05), ahead of the albums: an album made with the name
+        // later is the same term and keeps it a place, also in a name with a date word ("Haus
+        // Sommer" is the place, not a house in summer).
+        for (key, ids) in named.ids {
+            let name = named.names[key] ?? key
+            vocabulary.add(key, .init(criterion: ids.count == 1 ? .frequentPlace(ids[0]) : .any(ids.map { .frequentPlace($0) }),
+                                      kind: .place, german: name, english: name, dimension: "place", importance: 6))
+        }
 
         // Countries: the names in the library, all German and English country names, aliases.
         for (code, names) in countryNames {
@@ -276,16 +298,50 @@ public struct SearchIndex: Sendable {
             guard let name = group.confirmedName, !name.isEmpty else { continue }
             vocabulary.add(SearchText.key(name), .init(criterion: .group(group.id), kind: .group, german: name, english: name, importance: 5))
         }
-        for place in frequentPlaces {
-            guard let name = place.userName, !name.isEmpty else { continue }
-            vocabulary.add(SearchText.key(name), .init(criterion: .frequentPlace(place.id), kind: .place, german: name, english: name,
-                                                       dimension: "place", importance: 6))
-        }
         for case .label(let label) in postings.keys {
             vocabulary.labels[SearchText.key(label.replacingOccurrences(of: "_", with: " "))] = label
         }
         self.vocabulary = vocabulary
-        suggestionPool = buildSuggestionPool(placeNames: placeNames, countryNames: countryNames, merchantNames: merchantNames, inventory: inventory)
+        suggestionPool = buildSuggestionPool(placeNames: placeNames, namedPlaces: named.names, countryNames: countryNames,
+                                             merchantNames: merchantNames, inventory: inventory)
+    }
+
+    /// The places the user named, by folded name: their IDs and the name shown (that of the place
+    /// with the most photos). The photos of each are posted under `.frequent(id)`: those whose
+    /// facts carry the ID, or else those of its suggestion (a place the user is often at). A
+    /// place without a photo in the library is left out.
+    private static func namedPlaces(_ namedPlaces: [NamedPlace], frequentPlaces: [FrequentPlace], sorted: [AssetFacts],
+                                    postings: inout [Key: [Int32]]) -> (ids: [String: [SortlyID]], names: [String: String]) {
+        var byID: [SortlyID: NamedPlace] = [:]
+        for place in frequentPlaces {
+            if let name = place.userName { byID[place.id] = NamedPlace(id: place.id, name: name, assetIDs: Set(place.assetIDs)) }
+        }
+        for place in namedPlaces { byID[place.id] = place }
+        var ids: [String: [SortlyID]] = [:], names: [String: String] = [:], shown: [String: Int] = [:]
+        var position: [AssetID: Int32]?
+        for place in byID.values.sorted(by: { $0.id.rawValue < $1.id.rawValue }) {
+            let name = place.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = SearchText.key(name)
+            guard !key.isEmpty else { continue }
+            var photos = postings[.frequent(place.id)] ?? []
+            if photos.isEmpty, !place.assetIDs.isEmpty {
+                if position == nil {
+                    var map: [AssetID: Int32] = [:]
+                    map.reserveCapacity(sorted.count)
+                    for (i, f) in sorted.enumerated() { map[f.id] = Int32(i) }
+                    position = map
+                }
+                photos = place.assetIDs.compactMap { position?[$0] }.sorted()
+                if !photos.isEmpty { postings[.frequent(place.id)] = photos }
+            }
+            guard !photos.isEmpty else { continue }
+            ids[key, default: []].append(place.id)
+            if photos.count > shown[key, default: 0] {
+                shown[key] = photos.count
+                names[key] = name
+            }
+        }
+        return (ids, names)
     }
 
     // MARK: Text
@@ -480,12 +536,21 @@ public struct SearchIndex: Sendable {
 
     // MARK: Suggestions
 
-    private func buildSuggestionPool(placeNames: [String: String], countryNames: [String: [String: Int]], merchantNames: [String: String],
-                                     inventory: CollectionInventory) -> [SuggestionCandidate] {
+    private func buildSuggestionPool(placeNames: [String: String], namedPlaces: [String: String], countryNames: [String: [String: Int]],
+                                     merchantNames: [String: String], inventory: CollectionInventory) -> [SuggestionCandidate] {
         var pool: [SuggestionCandidate] = []
         for (key, name) in placeNames {
             let n = postings[.place(key)]?.count ?? 0
             if n > 0 { pool.append(.init(keys: [key], englishKeys: [], german: name, english: name, kind: .place, count: n)) }
+        }
+        // Places the user named: one entry for the place and an album made with its name, with
+        // the photos the search then finds; a town of the same name stands for it. Not offered on
+        // the empty search field, which starts from the library's towns and topics.
+        for (key, name) in namedPlaces where placeNames[key] == nil {
+            let n = vocabulary.names[key].map { count(of: .any($0.map(\.criterion))) } ?? 0
+            if n > 0 {
+                pool.append(.init(keys: [key], englishKeys: [], german: name, english: name, kind: .place, count: n, startingPoint: false))
+            }
         }
         for (code, names) in countryNames {
             let display = names.max { $0.value < $1.value }!.key
@@ -498,7 +563,7 @@ public struct SearchIndex: Sendable {
             let display = name.split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
             if n > 0 { pool.append(.init(keys: [key], englishKeys: [], german: display, english: display, kind: .merchant, count: n)) }
         }
-        for album in inventory.albums where !album.title.isEmpty {
+        for album in inventory.albums where !album.title.isEmpty && namedPlaces[SearchText.key(album.title)] == nil {
             let n = postings[.album(album.id)]?.count ?? 0
             if n > 0 { pool.append(.init(keys: [SearchText.key(album.title)], englishKeys: [], german: album.title, english: album.title, kind: .album, count: n)) }
         }
@@ -525,10 +590,10 @@ public struct SearchIndex: Sendable {
     /// Completions for the word being typed, from the user's own library, most photos first.
     /// Nothing is offered once the word is complete, so the results stay in view.
     public func suggestions(for text: String, limit: Int = 6) -> [SearchSuggestion] {
-        guard let last = text.split(whereSeparator: \.isWhitespace).last, text.last?.isWhitespace != true else { return [] }
+        let words = text.split(whereSeparator: \.isWhitespace)
+        guard let last = words.last, text.last?.isWhitespace != true else { return [] }
         let prefix = SearchText.key(String(last))
         guard prefix.count >= 2 else { return [] }
-        let head = String(text.dropLast(last.count))
         var seen = Set<String>()
         var result: [SearchSuggestion] = []
         for candidate in suggestionPool {
@@ -536,10 +601,21 @@ public struct SearchIndex: Sendable {
                 key.hasPrefix(prefix) || key.split(separator: "-").contains { $0.hasPrefix(prefix) }
             }
             guard !matching.isEmpty, !candidate.keys.contains(prefix) else { continue }
+            // Words typed before the last one that begin the name as well ("Mein Klein" for "Mein
+            // Kleingarten") are replaced by it instead of being written twice; a name of several
+            // words typed in full is complete.
+            var start = last.startIndex, complete = false
+            let longest = matching.map { $0.split(separator: "-").count }.max() ?? 1
+            for n in stride(from: min(words.count, longest), through: 2, by: -1) {
+                let typed = SearchText.key(words.suffix(n).joined(separator: " "))
+                if candidate.keys.contains(typed) { complete = true; break }
+                if matching.contains(where: { $0.hasPrefix(typed) }) { start = words[words.count - n].startIndex; break }
+            }
+            guard !complete else { continue }
             let english = matching.allSatisfy(candidate.englishKeys.contains)
             let label = english ? candidate.english : candidate.german
             guard seen.insert(label.lowercased()).inserted else { continue }
-            result.append(SearchSuggestion(completion: head + label, label: label, kind: candidate.kind, count: candidate.count))
+            result.append(SearchSuggestion(completion: String(text[..<start]) + label, label: label, kind: candidate.kind, count: candidate.count))
             if result.count == limit { break }
         }
         return result
@@ -550,7 +626,7 @@ public struct SearchIndex: Sendable {
     /// language of the app, since the parser understands both.
     public func featuredSuggestions(limit: Int = 6, english: Bool = false) -> [SearchSuggestion] {
         func take(_ kinds: Set<SearchToken.Kind>, _ n: Int) -> [SearchSuggestion] {
-            suggestionPool.filter { kinds.contains($0.kind) }.prefix(n).map {
+            suggestionPool.filter { kinds.contains($0.kind) && $0.startingPoint }.prefix(n).map {
                 let label = english ? $0.english : $0.german
                 return SearchSuggestion(completion: label, label: label, kind: $0.kind, count: $0.count)
             }

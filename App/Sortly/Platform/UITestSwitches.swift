@@ -183,7 +183,7 @@ extension UITestSupport {
             exit(0)
         }
         if largeLibrary > 0, await LargeLibrary.createIfNeeded(count: largeLibrary) {
-            model.startAnalysis(userInitiated: true)
+            model.startAnalysis(cause: .tap)
         }
         #endif
     }

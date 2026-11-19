@@ -76,6 +76,47 @@ struct PurchaseRulesTests {
         #expect(p.freeAlbumUse(applied: false) == 1)
     }
 
+    /// The preview's "Neue Alben" plus "Ergänzte Alben" (PlanSummary) is what the plan takes
+    /// from the free albums (freeAlbumUse), for every kind of decision on a suggestion. The two
+    /// are counted apart; the locked UI test (SortlyLockedUITests.test7) reads the summary to
+    /// know whether the unlock card must show, and the card goes by freeAlbumUse.
+    @Test func previewSummaryCountsWhatTheFreeAlbumsCount() {
+        let inventory = CollectionInventory([
+            CollectionSnapshot(id: "rom", title: "Rom", assetIDs: ["old"]),
+            CollectionSnapshot(id: "paris", title: "Paris", assetIDs: ["p1"]),
+            CollectionSnapshot(id: "zoo", title: "Zoo", assetIDs: ["z1"]),
+            CollectionSnapshot(id: "berg", title: "Berg", assetIDs: ["b1"]),
+            CollectionSnapshot(id: "see", title: "See", assetIDs: ["s1"]),
+        ])
+        func proposal(_ id: String, _ assets: Set<AssetID>, folder: [String] = []) -> AlbumProposal {
+            AlbumProposal(id: SortlyID(id), kind: .trip, title: "Album \(id)", folderPath: folder, assetIDs: assets)
+        }
+        let many = Set((0..<1_200).map { AssetID("many-\($0)") }) // more than one step of 500
+        let confirmed = [
+            ConfirmedProposal(proposal: proposal("a", ["a1"], folder: ["Reisen", "2024"]), decision: .createNew(title: nil, folderPath: nil)),
+            ConfirmedProposal(proposal: proposal("b", many), decision: .createNew(title: "Groß", folderPath: nil)),
+            // Two suggestions into the same album: one album.
+            ConfirmedProposal(proposal: proposal("c", ["n1"]), decision: .extendExisting("rom")),
+            ConfirmedProposal(proposal: proposal("d", ["n2", "n3"]), decision: .extendExisting("rom")),
+            // Everything already in the album: no step, no album.
+            ConfirmedProposal(proposal: proposal("e", ["p1"]), decision: .extendExisting("paris")),
+            ConfirmedProposal(proposal: proposal("f", ["z2"]), decision: .renameExisting("zoo", newTitle: "Tierpark", extend: false)),
+            ConfirmedProposal(proposal: proposal("g", ["b2"]), decision: .moveExisting("berg", folderPath: ["Natur"], extend: true)),
+            ConfirmedProposal(proposal: proposal("h", ["s2"]), decision: .merge(target: "see", sources: ["see"], title: nil, folderPath: nil)),
+        ]
+        let p = OrganizationPlanner().makePlan(from: confirmed, inventory: inventory)
+        let summary = p.summary
+        #expect(summary.newAlbums == 2)
+        #expect(summary.extendedAlbums == 3) // rom, berg, see
+        #expect(summary.newAlbums + summary.extendedAlbums == p.freeAlbumUse(applied: false))
+        // Every subset of the suggestions, as a user might select them.
+        for mask in 1..<(1 << confirmed.count) {
+            let some = confirmed.indices.filter { mask & (1 << $0) != 0 }.map { confirmed[$0] }
+            let plan = OrganizationPlanner().makePlan(from: some, inventory: inventory)
+            #expect(plan.summary.newAlbums + plan.summary.extendedAlbums == plan.freeAlbumUse(applied: false), "suggestions \(some.map(\.proposal.id.rawValue))")
+        }
+    }
+
     /// Only what really happened counts: a plan that made 2 of 3 albums uses 2.
     @Test func onlyAlbumsThatReallyCameCount() {
         var p = applied(plan("partial", creating: 3))
@@ -164,6 +205,94 @@ struct PurchaseRulesTests {
         let givenBackAfterSettling = beforeGiveBack.giveBack(plan: p.id, albums: 4)
         #expect(!givenBackAfterSettling)
         #expect(beforeGiveBack.remaining(limit: limit) == 10)
+    }
+
+    /// A plan counted in the older total (versions before the per-plan count) is given back
+    /// once, and the give-back stays when the two copies of the count (user defaults,
+    /// keychain) went apart: the app ended between the two writes, or one write never reached
+    /// the disk. The copies used to be put together with the larger older total, which took
+    /// the give-back away again while the plan stayed marked as given back: its undone albums
+    /// counted for good.
+    @Test func olderTotalGiveBackSurvivesCopiesThatWentApart() throws {
+        let old = applied(plan("old", creating: 3))
+        let before = FreeAlbumLedger(legacyUsed: 7)
+        var written = before
+        let givenBack = written.giveBack(plan: old.id, albums: old.freeAlbumUse(applied: true))
+        #expect(givenBack)
+        #expect(written.remaining(limit: limit) == 6)
+        // Only one copy has the give-back, in either order.
+        for merged in [before.merged(with: written), written.merged(with: before)] {
+            var relaunched = try JSONDecoder().decode(FreeAlbumLedger.self, from: JSONEncoder().encode(merged))
+            #expect(relaunched.remaining(limit: limit) == 6)
+            // The undo's finalization and the launch check run again: nothing more comes back,
+            // and the plan is not counted again either.
+            let givenBackAgain = relaunched.giveBack(plan: old.id, albums: 3)
+            let settledAgain = relaunched.settleUndone([old.id])
+            let countedAgain = relaunched.record(plan: old.id, albums: 3)
+            #expect(!givenBackAgain && !settledAgain && !countedAgain)
+            #expect(relaunched.remaining(limit: limit) == 6)
+            // Putting the copies together again changes nothing.
+            #expect(relaunched.merged(with: before) == relaunched)
+            #expect(relaunched.merged(with: written) == relaunched)
+        }
+    }
+
+    /// Two plans of the older total given back in different copies both come back; giving
+    /// back more than the older total held never makes more than the allowance free, and a
+    /// later plan still counts in full.
+    @Test func olderTotalGiveBacksAddUpAcrossCopiesButNeverPassTheAllowance() {
+        let start = FreeAlbumLedger(legacyUsed: 5)
+        var a = start
+        a.giveBack(plan: SortlyID("a"), albums: 2)
+        var b = start
+        b.giveBack(plan: SortlyID("b"), albums: 2)
+        let both = a.merged(with: b)
+        #expect(both.used == 1)
+        #expect(both == b.merged(with: a))
+        var over = both
+        over.giveBack(plan: SortlyID("c"), albums: 9)
+        #expect(over.used == 0)
+        #expect(over.remaining(limit: limit) == limit)
+        #expect(over.merged(with: start).remaining(limit: limit) == limit)
+        over.record(plan: SortlyID("new"), albums: 4)
+        #expect(over.remaining(limit: limit) == 6)
+    }
+
+    /// The ledger an earlier version wrote (its older total already lowered by its give-backs)
+    /// is read as it was; a version before this one reads the albums still counted.
+    @Test func ledgerOfEarlierVersionsStaysReadableBothWays() throws {
+        let earlier = Data(#"{"legacyUsed":4,"byPlan":{"a":2},"returned":["x"]}"#.utf8)
+        let decoded = try JSONDecoder().decode(FreeAlbumLedger.self, from: earlier)
+        #expect(decoded.used == 6)
+        // The same history kept by this version: put together, "x" comes back once.
+        var now = FreeAlbumLedger(legacyUsed: 6, byPlan: ["a": 2])
+        now.giveBack(plan: SortlyID("x"), albums: 2)
+        #expect(now.used == 6)
+        #expect(decoded.merged(with: now).used == 6)
+        #expect(now.merged(with: decoded).used == 6)
+        struct EarlierReader: Decodable { var legacyUsed: Int; var byPlan: [String: Int]; var returned: Set<String> }
+        let read = try JSONDecoder().decode(EarlierReader.self, from: JSONEncoder().encode(now))
+        #expect(read.legacyUsed == 4)
+        #expect(read.returned == ["x"])
+    }
+
+    /// A UI run starts with a set number of free albums left, in a count of its own that
+    /// begins empty at every launch. Taking back plans of earlier runs (never counted in it)
+    /// gave their albums back from that start, again at every launch that finalized the undo
+    /// once more: the run then had more free albums than it set.
+    @Test func setStartIsNotGivenBackByPlansItNeverCounted() throws {
+        var ledger = FreeAlbumLedger(startingWithUsed: 9)
+        #expect(ledger.remaining(limit: limit) == 1)
+        ledger.giveBack(plan: SortlyID("earlier-1"), albums: 3)
+        ledger.giveBack(plan: SortlyID("earlier-2"), albums: 2)
+        #expect(ledger.remaining(limit: limit) == 1)
+        // A plan of this run counts and comes back as usual.
+        ledger.record(plan: SortlyID("now"), albums: 1)
+        #expect(ledger.remaining(limit: limit) == 0)
+        ledger.giveBack(plan: SortlyID("now"), albums: 1)
+        #expect(ledger.remaining(limit: limit) == 1)
+        let relaunched = try JSONDecoder().decode(FreeAlbumLedger.self, from: JSONEncoder().encode(ledger))
+        #expect(relaunched.remaining(limit: limit) == 1)
     }
 
     /// A retry ("Erneut versuchen") does not count the albums the first run made again.

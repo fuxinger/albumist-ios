@@ -165,6 +165,64 @@ struct AtlasRenderingTests {
             Self.emit(scheme == .light ? "atlas" : "atlas-dark", screenImage.jpegData(compressionQuality: 0.7))
         }
     }
+
+    /// A disputed area is never filled with a visited country (decision Fuchs 18.11.2026;
+    /// second review of bundle-i), not even its edge: with Russia visited, every pixel of the
+    /// Crimea and the sea round it is land, background or a blend of the two, in light and dark.
+    /// Painting land over the visited fill (before b376999) left a line of the visited colour
+    /// round the coast, where both fills only partly cover a pixel; the map's simplified Russia
+    /// and Crimea regions left strips of it (review of b376999). Moscow is the control. The box
+    /// keeps out Taman (east of 36.2° E) and mainland Ukraine (north of 45.6° N). Unverified
+    /// until it runs on a Mac.
+    @Test(arguments: [ColorScheme.light, .dark])
+    func crimeaStaysLandWithRussiaVisited(scheme: ColorScheme) async throws {
+        let outlines = await AtlasOutlines.shared.load(from: nil)
+        let width = 1440.0, height = width * 139 / 360
+        let renderer = ImageRenderer(content: AtlasMap(outlines: outlines, highlighted: ["RU"])
+            .frame(width: width, height: height)
+            .background(Color(uiColor: .systemBackground))
+            .environment(\.colorScheme, scheme))
+        renderer.scale = 3
+        let image = try #require(renderer.cgImage)
+        let traits = UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)
+        let land = Self.rgb(UIColor.systemGray5.resolvedColor(with: traits))
+        let background = Self.rgb(UIColor.systemBackground.resolvedColor(with: traits))
+        let visited = Self.rgb(try #require(UIColor(named: "AccentColor")).resolvedColor(with: traits))
+        let w = image.width, h = image.height
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        let drawn = data.withUnsafeMutableBytes { bytes -> Bool in
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(data: bytes.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                          space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        try #require(drawn)
+        func x(_ lon: Double) -> Int { Int((lon + 180) / 360 * Double(w)) }
+        func y(_ lat: Double) -> Int { Int((83 - lat) / 139 * Double(h)) }
+        func pixel(_ x: Int, _ y: Int) -> [Double] { (0..<3).map { Double(data[(y * w + x) * 4 + $0]) / 255 } }
+        func distance(_ a: [Double], _ b: [Double]) -> Double { sqrt(zip(a, b).map { ($0 - $1) * ($0 - $1) }.reduce(0, +)) }
+        /// How far a colour is from every blend of land and background.
+        func offBlend(_ p: [Double]) -> Double {
+            let ab = zip(land, background).map { $1 - $0 }, ap = zip(p, background).map { $0 - $1 }
+            let t = max(0, min(1, zip(ab, ap).map { -$0 * $1 }.reduce(0, +) / ab.map { $0 * $0 }.reduce(0, +)))
+            return distance(p, zip(background, land).map { $0 + t * ($1 - $0) })
+        }
+        var tinted: [String] = []
+        for py in y(45.6)...y(44.3) {
+            for px in x(32.4)...x(36.2) where offBlend(pixel(px, py)) > 0.08 { tinted.append("\(px),\(py) \(pixel(px, py))") }
+        }
+        #expect(tinted.isEmpty, "\(tinted.count) pixels: \(tinted.prefix(5))")
+        let simferopol = pixel(x(34.1024), y(44.9521)), moscow = pixel(x(37.6173), y(55.7558))
+        #expect(distance(simferopol, land) < min(distance(simferopol, background), distance(simferopol, visited)), "Simferopol \(simferopol)")
+        #expect(distance(moscow, visited) < distance(moscow, land), "Moskau \(moscow)")
+    }
+
+    static func rgb(_ color: UIColor) -> [Double] {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return [r, g, b].map(Double.init)
+    }
 }
 
 @Suite("English localization")
@@ -428,6 +486,38 @@ struct AnalysisTextTests {
         #expect(AnalysisText.finish(.at(later), now: now) == String(localized: "Fertig gegen \(AnalysisText.time(later))"))
         #expect(AnalysisText.finish(.at(tomorrow), now: now) == String(localized: "Fertig morgen gegen \(AnalysisText.time(tomorrow))"))
         #expect(AnalysisText.finish(.soon, now: now) == String(localized: "Gleich fertig"))
+    }
+
+    /// Device test 18.11. (build 36): "Apple antwortet gleich" said nothing true and stood
+    /// still. The wait (overnight refinement only) says why, with a countdown in whole seconds.
+    @Test func appleWaitSaysWhyWithACountdown() {
+        #expect(AnalysisText.appleWait(.seconds(25)) == String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(25) s"))
+        #expect(AnalysisText.appleWait(.milliseconds(24_200)) == AnalysisText.appleWait(.seconds(25)))
+        #expect(AnalysisText.appleWait(.seconds(23)) != AnalysisText.appleWait(.seconds(25)))
+        // Never "in 0 s" while it still waits.
+        #expect(AnalysisText.appleWait(.milliseconds(300)) == AnalysisText.appleWait(.seconds(1)))
+        // Above a minute in whole minutes, rounded up (a wait after a refusal lasts up to 10 min).
+        #expect(AnalysisText.appleWait(.seconds(60)) == String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(60) s"))
+        #expect(AnalysisText.appleWait(.seconds(90)) == String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(2) Minuten"))
+        #expect(AnalysisText.appleWait(.seconds(600)) == String(localized: "Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in \(10) Minuten"))
+        var state = running(.places)
+        state.appleWaitLeft = .seconds(12)
+        #expect(state.appleWait)
+        state.appleWaitLeft = nil
+        #expect(!state.appleWait)
+    }
+
+    /// The overnight refinement on the card is a run of its own (second review of the no-wait
+    /// fix): no catching up and no phase of the analysis before it, no quick check, the bar
+    /// from its own start.
+    @Test func refinementIsShownAsARunOfItsOwn() {
+        var state = running(.places, completed: 30, total: 300)
+        state.resumed = ResumedRun(stage: 5, completed: 100, shown: 0.6)
+        state.refining = true
+        #expect(!state.isCatchingUp)
+        #expect(!state.isHolding)
+        #expect(state.newWork == nil)
+        #expect(state.shownOverall == AnalysisPercent.value(state.overall, isComplete: false))
     }
 
     @Test func alreadyDoneLeavesZerosOut() {

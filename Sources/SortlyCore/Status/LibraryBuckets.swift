@@ -12,6 +12,10 @@ import Foundation
 ///
 /// "Ignorieren" and "Nicht mehr ignorieren" move only the tapped photos (`updating`), so the
 /// grid follows the tap at once instead of waiting for the areas to be made anew.
+///
+/// "Sortiert" and "Nicht sortiert" hold what the ring counts as sorted and as not yet sorted
+/// (`OrganizationStatusResolver.ringPart`, decision Fuchs 18.11.), over the same part of the
+/// library (`inScope`).
 public struct LibraryBuckets: Sendable, Equatable {
     /// One photo in the grid: its id and the date its accessibility label says.
     public struct Item: Hashable, Sendable, Identifiable {
@@ -27,6 +31,8 @@ public struct LibraryBuckets: Sendable, Equatable {
     private var members: [InboxBucket: [Item]] = [:]
     /// Each photo's place among all photos, newest first (`.all` in this order).
     private var rank: [AssetID: Int] = [:]
+    /// Photos outside the part of the library the ring counts ("Nur 2026").
+    private var outsideScope: Set<AssetID> = []
 
     public init() {}
 
@@ -35,11 +41,14 @@ public struct LibraryBuckets: Sendable, Equatable {
 
     /// Every photo (`facts`) in the areas its state puts it in (`OrganizationStatusResolver.buckets`);
     /// a photo without a state yet is only in "Alle". Newest first; photos without a date last,
-    /// photos with the same date in the order of `facts`. `shouldStop` is asked now and then:
-    /// `true` ends the work early with `nil` (newer facts or states are on their way).
+    /// photos with the same date in the order of `facts`. `inScope`: the photo is in the part of
+    /// the library the ring counts; one outside it is in neither "Sortiert" nor "Nicht sortiert".
+    /// `shouldStop` is asked now and then: `true` ends the work early with `nil` (newer facts or
+    /// states are on their way).
     public static func make(facts: [AssetFacts], states: [AssetID: AssetOrganizationState],
                             resolver: OrganizationStatusResolver,
-                            shouldStop: () -> Bool = { false }) -> LibraryBuckets? {
+                            shouldStop: () -> Bool = { false },
+                            inScope: (AssetFacts) -> Bool = { _ in true }) -> LibraryBuckets? {
         if shouldStop() { return nil }
         let dates = facts.map { $0.asset.creationDate ?? .distantPast }
         let order = facts.indices.sorted { a, b in dates[a] != dates[b] ? dates[a] > dates[b] : a < b }
@@ -55,7 +64,9 @@ public struct LibraryBuckets: Sendable, Equatable {
             guard result.rank[f.id] == nil else { continue }
             result.rank[f.id] = members[.all, default: []].count
             let item = Item(id: f.id, date: f.asset.creationDate)
-            for bucket in buckets(states[f.id], resolver) {
+            let counted = inScope(f)
+            if !counted { result.outsideScope.insert(f.id) }
+            for bucket in buckets(states[f.id], resolver, inScope: counted) {
                 members[bucket, default: []].append(item)
             }
         }
@@ -78,7 +89,7 @@ public struct LibraryBuckets: Sendable, Equatable {
         var belongs: [AssetID: Set<InboxBucket>] = [:]
         for id in ids {
             guard let position = rank[id], position < all.count else { continue }
-            belongs[id] = Self.buckets(new[id], resolver)
+            belongs[id] = Self.buckets(new[id], resolver, inScope: !outsideScope.contains(id))
         }
         guard !belongs.isEmpty else { return self }
         let moved = belongs.keys.sorted { rank[$0]! < rank[$1]! }
@@ -147,11 +158,11 @@ public struct LibraryBuckets: Sendable, Equatable {
 
     /// Same photos in the same areas in the same order (an area without photos is empty either way).
     public static func == (lhs: LibraryBuckets, rhs: LibraryBuckets) -> Bool {
-        lhs.rank == rhs.rank && InboxBucket.allCases.allSatisfy { lhs[$0] == rhs[$0] }
+        lhs.rank == rhs.rank && lhs.outsideScope == rhs.outsideScope && InboxBucket.allCases.allSatisfy { lhs[$0] == rhs[$0] }
     }
 
-    static func buckets(_ state: AssetOrganizationState?, _ resolver: OrganizationStatusResolver) -> Set<InboxBucket> {
+    static func buckets(_ state: AssetOrganizationState?, _ resolver: OrganizationStatusResolver, inScope: Bool = true) -> Set<InboxBucket> {
         guard let state else { return [.all] }
-        return resolver.buckets(state)
+        return resolver.buckets(state, inScope: inScope)
     }
 }

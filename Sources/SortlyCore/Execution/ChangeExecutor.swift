@@ -2,6 +2,13 @@ import Foundation
 
 /// The only write interface to the photo library. Implemented with PhotoKit in the app
 /// and in memory for tests. It has no method that could delete or alter original media.
+/// A write that Photos does not answer in time throws `PhotosNotResponding`. Its `notSent` (on
+/// the write lane) means that none of the call reached Photos: a call that makes several Photos
+/// calls and had already sent a change reports `notSent: false` for anything after it
+/// (`PhotosNotResponding.afterAChangeWasSent`), because the executor then leaves the step as it
+/// was and forgets what it wrote down for it (review of 045f297, M2). What a call reports
+/// before its first change (a read it makes first) is marked `beforeAnyChange`: then nothing
+/// of it reached Photos as a change, whatever happened to that read (review of f7439fb, SF1).
 public protocol PhotoLibraryWriting: Sendable {
     func canWrite() async -> Bool
     func currentInventory() async throws -> CollectionInventory
@@ -80,9 +87,16 @@ extension PhotoLibraryWriting {
     public func hasUnansweredWrites() async -> Bool { false }
     public func createAnswered(_ id: CollectionID) async -> Bool { false }
 
-    /// One by one: albums first, then folders from the inside out.
+    /// One by one: albums first, then folders from the inside out. As every library call does
+    /// (`PhotoLibraryWriting`): no answer to the read first is reported as before any change,
+    /// and once one album is gone, nothing after it is "not sent".
     public func deleteCollections(_ ids: [CollectionID]) async throws {
-        let inventory = try await currentInventory()
+        let inventory: CollectionInventory
+        do {
+            inventory = try await currentInventory()
+        } catch let quiet as PhotosNotResponding {
+            throw quiet.beforeAnyChange
+        }
         func depth(_ id: CollectionID) -> Int {
             var d = 0, cursor = inventory[id]?.parentID
             while let parent = cursor { d += 1; cursor = inventory[parent]?.parentID }
@@ -93,7 +107,15 @@ extension PhotoLibraryWriting {
             if fa != fb { return !fa }
             return depth(a) > depth(b)
         }
-        for id in ordered { try await deleteCollection(id) }
+        var sentOnce = false
+        do {
+            for id in ordered {
+                try await deleteCollection(id)
+                sentOnce = true
+            }
+        } catch let quiet as PhotosNotResponding where sentOnce {
+            throw quiet.afterAChangeWasSent
+        }
     }
 }
 
@@ -281,11 +303,15 @@ public actor ChangeExecutor {
                 // stays journaled as running, with its intent (and the id Photos gave a new album,
                 // `maybeCreated`), like a step the app was closed in, and the run stops here. The
                 // ways out of an interrupted plan settle it later from what the library shows
-                // then. A step of which nothing reached Photos (the request was never sent, or a
-                // read before it got no answer) is as it was before (second review, 9).
+                // then. A step of which no change reached Photos (the request was never sent, or
+                // a read before it got no answer, also one inside the library call before its
+                // change) is as it was before (second review, 9). Once a change of this step
+                // was sent, the user reads it as a change whose outcome is not known ("weder
+                // erledigt noch zurückgenommen … Fortsetzen"), even when what got no answer
+                // was a read after it (review of f7439fb, SF2).
                 if !wasRunning && !sent { plan = beforeStep }
                 try await store.save(plan)
-                throw notResponding
+                throw sent ? notResponding.afterAChangeWasSent : notResponding
             } catch let wait as ExecutionError {
                 // An earlier create may still land: this step is left as it was (nothing sent).
                 plan = beforeStep
@@ -425,14 +451,19 @@ public actor ChangeExecutor {
         }
     }
 
-    /// A write of a step: `sent` once it may have reached Photos (all but a request that was
-    /// never sent, `PhotosNotResponding.notSent`).
+    /// A write of a step: `sent` once it may have reached Photos (all but a call that sent no
+    /// change: a change request never sent, `notSent` on the write lane, or anything the
+    /// library call reports before its first change, `noChangeSent`;
+    /// `PhotosNotResponding.reachedPhotosWithNoChange`). Any other read-lane error does not say
+    /// that: the call may have sent its change before that read (a deletion's read-back), so
+    /// it counts as sent, and the step stays running to be settled from the library (reviews
+    /// of 045f297, M2, and f7439fb, SF1).
     private func sending<T>(_ sent: inout Bool, _ write: () async throws -> T) async throws -> T {
         do {
             let result = try await write()
             sent = true
             return result
-        } catch let quiet as PhotosNotResponding where quiet.notSent {
+        } catch let quiet as PhotosNotResponding where quiet.reachedPhotosWithNoChange {
             throw quiet
         } catch {
             sent = true
@@ -786,9 +817,10 @@ public actor ChangeExecutor {
             // As in `execute`: the deletion may still happen (iOS may still be asking the
             // user). The steps stay running, with what goes written down, and the run stops.
             // Nothing sent (never sent, or a read before it got no answer): as before the batch.
+            // Sent: said as a change whose outcome is not known (as in `execute`).
             if !sent { plan = beforeBatch }
             try await store.save(plan)
-            throw notResponding
+            throw sent ? notResponding.afterAChangeWasSent : notResponding
         } catch {
             for i in indices { states[i] = .failed(reason: String(describing: error)) }
         }
@@ -823,7 +855,8 @@ public actor ChangeExecutor {
                     try await sending(&sent) { try await library.removeAssets(ours, from: id) }
                 } catch let notResponding as PhotosNotResponding {
                     try await store.save(plan)
-                    throw notResponding
+                    // The deletion before was sent: a change whose outcome is not known.
+                    throw sent ? notResponding.afterAChangeWasSent : notResponding
                 } catch {
                     states[i] = .failed(reason: String(describing: error))
                 }

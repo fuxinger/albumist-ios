@@ -7,7 +7,8 @@ name: UI stress
 # the test's phase).
 #
 # Which pass when (rule of the owner, 17.11.):
-#   - before each TestFlight build: the small pass, 10,000 photos and 15 min of measuring
+#   - before each TestFlight build, with either gate (the daily build too, as it can upload;
+#     the owner's decision 4): the small pass, 10,000 photos and 15 min of measuring
 #     (~45 min in all). Every TestFlight run calls this workflow for its commit (photos 10000,
 #     minutes 15) and uploads only when the pass is green (testflight.yml). The same pass by
 #     hand (the defaults):
@@ -24,13 +25,14 @@ name: UI stress
 # skips itself, because only this workflow sets SORTLY_STRESS_PHOTOS. Here a skipped test12 is
 # no pass: "Stress run" fails unless the log says test12 passed.
 #
-# The test tries Pause a tenth into the image step. The simulator analyses about 1.75 photos/s
-# there (stress runs 43833158673: 5,042 photos in 48 min; 44116350940: 3,419 in 31 min), so
-# with 10,000 photos Pause comes at about minute 12 to 13 of the 15 (later on a slow simulator,
-# then not at all: no line "UI_TIMING stress pause" in the log), and with 50,000 photos only
-# after about 60 min: the 45-minute full pass measures speed, stills, answers and memory, but
-# not Pause. (claude/ui-fix 9ff0dfc moves Pause to 200 photos or 2 min into the image step;
-# with it every pass measures Pause.)
+# The test tries Pause 200 photos or 2 min into the image step, whichever comes first (since
+# 9ff0dfc; before, a tenth into the step, which the 45-minute full pass never reached). The
+# simulator analyses about 1.75 photos/s there (stress runs 43833158673: 5,042 photos in 48 min;
+# 44116350940: 3,419 in 31 min), and the image step begins about 3 min in with 10,000 photos and
+# about 14 min in with 50,000 (44116350940: its last 31 of 45 min), so every pass measures Pause
+# and Fortsetzen ("UI_TIMING stress pause" in the log). test12 fails when it did not (Prüfer B
+# G5-07), and when no photo was counted in the image step while it measured (an analysis that
+# only waited); only a library analysed completely before Pause could come is let off.
 #
 # The full pass of 17.11., run 44116350940 (50,000 photos), FAILED: at the start of step 4 the
 # progress line stood still for 13.7 s ("0 von 50.246 Fotos", limit 10 s). The fix is on
@@ -57,7 +59,10 @@ on:
       minutes:
         # The simulator's Vision needs about 8 h for 50,000 photos (a device is faster), so the
         # analysis is measured for this many minutes after the photos are created.
-        description: Minutes of analysis measured after the photos are created; 45 for the full pass
+        # Pause comes 2 min into the image step, which begins about 3 min in with 10,000 photos
+        # and about 14 min in with 50,000 (see above); with less time test12 fails because
+        # Pause was never tried.
+        description: Minutes of analysis measured after the photos are created; 45 for the full pass; at least 8 for 10,000 photos and 20 for 50,000, or Pause is never tried and the test fails
         type: string
         default: '15'
   # testflight.yml runs the small pass for the commit it uploads, in the same run, and names
@@ -73,7 +78,7 @@ on:
         type: string
         default: '10000'
       minutes:
-        description: Minutes of analysis measured after the photos are created
+        description: Minutes of analysis measured after the photos are created; at least 8 for 10,000 photos and 20 for 50,000 (Pause)
         type: string
         default: '15'
 

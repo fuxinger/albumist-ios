@@ -207,6 +207,17 @@ struct OverviewView: View {
         if model.leftOut.noAlbum > 0 {
             parts.append(String(localized: "\(model.leftOut.noAlbum) Fotos, für die sich kein eigenes Album lohnt"))
         }
+        // Ignored photos are neither sorted nor open, so they leave the ring (Fuchs 18.11.):
+        // said here, so a total that shrinks after "Ignorieren" has its reason on screen.
+        // With "Nur 2026" the ring counts the ignored photos of that year only ("Ignoriert" in
+        // the library holds all of them).
+        if model.progress.ignored > 0 {
+            if case .year(let year) = model.analysisScope {
+                parts.append(String(localized: "\(model.progress.ignored) ignorierte Fotos aus \(String(year))"))
+            } else {
+                parts.append(String(localized: "\(model.progress.ignored) ignorierte Fotos"))
+            }
+        }
         guard !parts.isEmpty else { return nil }
         return String(localized: "Außerdem nicht mitgezählt: \(parts.formatted(.list(type: .and))).")
     }
@@ -227,7 +238,7 @@ struct OverviewView: View {
                 // Ended by the device, iOS or the photo access: the reason and the way on.
                 Text(reason.label).font(.headline)
                 Text("Die Analyse setzt genau dort fort, wo sie aufgehört hat.").font(.subheadline).foregroundStyle(.secondary)
-                Button("Fortsetzen") { model.startAnalysis(userInitiated: true) }.buttonStyle(SecondaryButtonStyle())
+                Button("Fortsetzen") { model.startAnalysis(cause: .tap) }.buttonStyle(SecondaryButtonStyle())
             } else {
                 finishedAnalysis
             }
@@ -573,7 +584,7 @@ struct StarterSetCard: View {
                     .font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: -14) {
                     ForEach(Array(set.prefix(5).enumerated()), id: \.element.id) { index, proposal in
-                        AssetThumbnail(id: proposal.coverAssetID ?? AssetID(""), side: 64)
+                        CoverThumbnail(id: model.coverID(for: proposal), side: 64)
                             .frame(width: 56, height: 56)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.background, lineWidth: 2))
@@ -633,7 +644,7 @@ struct LimitedAccessCard: View {
                 await model.refreshAccess()
                 // A Pause stays: "Fortsetzen" is the only way on (review of the Pause fix, b).
                 if model.access != before, !model.analysis.pausedByUser, !model.analysis.pausing {
-                    model.startAnalysis(userInitiated: true)
+                    model.startAnalysis(cause: .tap)
                 }
             }
         }
@@ -659,7 +670,7 @@ struct LimitedAccessCard: View {
             Task { @MainActor in
                 // A Pause stays: "Fortsetzen" is the only way on (review of the Pause fix, b).
                 guard !model.analysis.pausedByUser, !model.analysis.pausing else { return }
-                model.startAnalysis(userInitiated: true)
+                model.startAnalysis(cause: .tap)
             }
         }
     }

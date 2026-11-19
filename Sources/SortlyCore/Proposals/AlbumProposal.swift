@@ -74,6 +74,8 @@ public enum ProposalReason: Hashable, Sendable, Codable {
     case confirmedGroup(count: Int, name: String)
     case ruleMatched(count: Int, rule: String)
     case inferredWithoutLocation(count: Int)
+    /// "Krim": a disputed area, in no country's album (decision Fuchs 18.11.2026).
+    case disputedArea(place: String)
 }
 
 /// One concrete album Albumist could create or extend (prompt §7, Schritt 6).

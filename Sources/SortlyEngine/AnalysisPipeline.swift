@@ -196,6 +196,15 @@ public actor AnalysisPipeline {
     public static let labelsVersion = 1
     /// 2: screenshot categories with whole-word flight rules and short keywords as whole words
     /// (first device test 15.11.); every stored screenshot is read once more.
+    /// Not raised for `DocumentAnalyzer` reporting cards, IDs and medical papers without a
+    /// document type as `.other` (second review of the build 36 fix): texts read before keep no
+    /// document facts for them, and `PreviewRank` hides such pictures from what is stored. For
+    /// photos: taken for a document without document facts. For screenshots too (third review:
+    /// an ID or medical screenshot read before was stored with an empty text and no document
+    /// facts): any picture with an empty stored text and no document facts, and a screenshot
+    /// whose text is not read. Card and financial words in the stored text count for both.
+    /// `.other` makes no album. What is stored of a text and its masks did not change, so no
+    /// text needs reading again.
     public static let textVersion = 2
     /// Both versions together: a marker that kept another one was written before an update
     /// that changed the analysis ("Analyse nach Update", `ResumedRun`).
@@ -203,10 +212,6 @@ public actor AnalysisPipeline {
     /// Analyzer errors in a row after which a run stops instead of going through every photo:
     /// when Vision itself fails, each further photo would fail the same way.
     static let analyzerFailureLimit = 5
-    /// How long a run in the app waits for Apple's geocoder after it refused (once), before the
-    /// remaining town names are left for a later run. Without a limit, four growing waits per
-    /// place cell could hold step 3 for hours while the bar did not move.
-    static let foregroundRateLimitWait: Duration = .seconds(30)
 
     enum Key {
         static let trips = "analysis.trips"
@@ -243,6 +248,12 @@ public actor AnalysisPipeline {
         /// The user's decisions on suggestions (written by the app; here only to set decisions
         /// back to open after a rule update, together with the new matches).
         static let decisions = "user.decisions"
+        /// The names the user typed for suggestions in the app (written by the app; read here so
+        /// a named suggestion is kept, `AnalysisSnapshot.chosen`).
+        static let titles = "user.titles"
+        /// "suggestion|album" of each "ergänzen" set back to open because the album recorded for
+        /// the suggestion holds other photos (`refreshMatchesIfOutdated`): never twice.
+        static let reopenedExtensions = "user.reopenedExtensions"
         /// Suggestions the user chose before a change in "Dein Zuhause" would have changed or
         /// dropped them: kept as chosen (`HeldSuggestions`).
         static let heldSuggestions = "user.heldSuggestions"
@@ -281,9 +292,17 @@ public actor AnalysisPipeline {
     /// Online place lookups per normal run; the rest waits for the overnight refinement run.
     /// Keeps the first analysis from spending up to an hour on town names before photos are
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
+    /// A run in the app never waits for the geocoder either (device test 18.11., build 36: the
+    /// card said "Apple antwortet gleich" and the count stood for 20–30 s): it asks only while
+    /// Albumist's own throttle has a free slot (`RequestThrottle.apple`, the requests of the runs
+    /// before within its minute count, `geocoderRequests`) and stops at Apple's first refusal.
+    /// Either way the towns left come with a later run or the overnight refinement, which may wait.
     private let foregroundOnlineBudget: Int?
+    /// Every request to the geocoder of this pipeline's runs, for the throttle's window.
+    private let geocoderRequests = RequestLog()
     /// When a run in the app last asked Apple for town names and was left with towns still
-    /// waiting because asking stopped early (Apple refused, the run's budget ran out, or a Pause).
+    /// waiting because asking stopped early (Apple refused, the run's budget or the throttle's
+    /// free slots ran out, or a Pause).
     /// A one-off error, being offline or a border cell whose answer is from the other country do
     /// not count, so photos near a border do not hold back new towns. A run within the hour after it
     /// (Fortsetzen after a Pause, a restart) does not ask again: the lookups and Apple's waits
@@ -587,6 +606,9 @@ public actor AnalysisPipeline {
         if Task.isCancelled { report.pausedBecause = .timeBudget; return report }
         let scope: OrganizationScope
         if let requested { scope = requested } else { scope = try await storedScope() }
+        // Stored texts follow stricter masks first, whatever this run reads (it reads no photo):
+        // also with the text step off, and before a failed read writes an earlier result back.
+        try await remaskStoredTexts()
 
         runOnWaiting = onWaiting
         func shouldStop() async -> PauseReason? { await admission(lanes: 1).stop }
@@ -874,7 +896,10 @@ public actor AnalysisPipeline {
                             finished.append(asset.id)
                             analyzed += 1
                             if labelsOnly[asset.id] != nil || analysedBefore[asset.id] != nil { report.labelsAdded += 1 }
-                            if !asset.isScreenshotLike {
+                            // "Gerade angesehen" shows no screenshot, and no document, receipt or
+                            // card either (second review of the build 36 fix): this result
+                            // says whether the picture is one, before any text is read.
+                            if !asset.isScreenshotLike && !result.isDocumentLike {
                                 lookedAt.append(asset.id)
                                 if lookedAt.count > 3 { lookedAt.removeFirst() }
                             }
@@ -1004,7 +1029,11 @@ public actor AnalysisPipeline {
         let trips = TripIdentity.carryOver(detected, from: known)
         try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
         try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
-        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar).detect(in: all)
+        // Places keep their IDs by their photos, from the places the last analysis stored (names,
+        // "Nicht jetzt", decisions and albums are bound to them). An unreadable list counts as none.
+        let previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
+        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar)
+            .detect(in: all, previous: previousPlaces ?? [])
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
@@ -1112,7 +1141,8 @@ public actor AnalysisPipeline {
                          hasTown: stored?.precisionMeters != nil, hasCountry: stored != nil && stored?.precisionMeters == nil)
         }
         guard !requests.isEmpty else { return .init() }
-        let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time)
+        let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time,
+                                             requestLog: geocoderRequests)
         let store = self.store
         // Counted over every photo with a location, not only this run's requests: a run that
         // starts again after a pause goes on from the real state instead of from zero.
@@ -1125,7 +1155,7 @@ public actor AnalysisPipeline {
         let shown = Mutex(before)
         let control = activeControl
         let outcome = try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
-                                         maxRateLimitWait: refining ? nil : Self.foregroundRateLimitWait,
+                                         mayWait: refining,
                                          shouldStop: { [weak self] in await self?.stopRequested() ?? true },
                                          onlineAllowed: { [weak self] in await self?.settings.privacy.allowOnlineGeocoding ?? false },
                                          progress: { processed in
@@ -1145,7 +1175,8 @@ public actor AnalysisPipeline {
             let keyed = try await self?.keyedRegions(batch) ?? [:]
             try await store.setPlaces(batch.merging(keyed) { $1 })
         }
-        // Only a refusal, a used-up lookup limit or a Pause in the middle of asking starts the hour.
+        // Only a refusal, a used-up lookup limit (the budget, or the throttle's free slots: a run
+        // in the app does not wait for them) or a Pause in the middle of asking starts the hour.
         // A one-off error, being offline or towns that stay open after an answer (a border cell)
         // do not: photos added later get their towns at once.
         if !refining, outcome.onlineRequests > 0,
@@ -1211,9 +1242,6 @@ public actor AnalysisPipeline {
     ) async throws -> TextOutcome {
         var outcome = TextOutcome()
         guard Self.readsText(settings) else { return outcome }
-        // Masked first: a read that fails below writes the earlier result back, which must be
-        // the masked one.
-        try await remaskStoredTexts()
         let done = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
         let networkAllowed = await networkAllowedNow()
         let started = now()
@@ -1403,22 +1431,32 @@ public actor AnalysisPipeline {
     }
 
     /// Texts stored before the masks got stricter are masked again once (no new reading of
-    /// the photos): the stored copy only ever loses detail.
+    /// the photos): the stored copy only ever loses detail. Called at the start of every run,
+    /// also when no text is read any more (screenshots, documents and messenger pictures off):
+    /// what was stored before must not stay (second review of G2-03).
     private func remaskStoredTexts() async throws {
         let done = try await store.value(Int.self, forKey: Key.textMaskVersion) ?? 1
         guard done < TextMinimizer.maskVersion else { return }
         let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
         for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
+            // A big library takes minutes the first time; a cut-off run keeps what it did (masked
+            // rows are skipped next time) and the purge below runs when the last row is done.
+            try Task.checkCancellation()
             guard let text = result.text?.text else { continue }
-            let masked = text.isEmpty ? "" : TextMinimizer.storable(text)
+            let level = TextMinimizer.sensitivity(of: text)
+            let masked = text.isEmpty || level >= .identity ? "" : TextMinimizer.masked(text)
             // The subject line of a letter is stored with the document facts (review P2-04). An ID
             // or medical document keeps none: version 2 stored no text for it but its subject in
             // full, so it is cleared here even though there is no text to mask (second review).
             let sensitive = (result.document?.sensitivity ?? .normal) >= .identity || (!text.isEmpty && masked.isEmpty)
             let subject = sensitive ? nil : result.document?.subject.map(TextMinimizer.masked)
-            guard masked != text || subject != result.document?.subject else { continue }
+            // A document that newer words mark as sensitive (an English medical letter, review
+            // G2-03) is handled as such from now on, also by the document proposals.
+            let sensitivity = result.document.map { max($0.sensitivity, level) }
+            guard masked != text || subject != result.document?.subject || sensitivity != result.document?.sensitivity else { continue }
             result.text?.text = masked
             result.document?.subject = subject
+            if let sensitivity { result.document?.sensitivity = sensitivity }
             // An outdated result keeps its old version, so it is still read again later.
             let version = current[asset] != nil ? Self.textVersion : 0
             try await store.saveResult(result, kind: "text", asset: asset, version: version)
@@ -1428,6 +1466,10 @@ public actor AnalysisPipeline {
                 try await store.indexText(masked, for: asset)
             }
         }
+        // The old wording must not stay readable in the file: deleted rows are overwritten
+        // (secure_delete), the search index drops its old entries and the log is emptied. Once
+        // per mask version, also when an earlier, cut-off run changed the rows.
+        try await store.purgeDeletedText()
         try await store.setValue(TextMinimizer.maskVersion, forKey: Key.textMaskVersion)
     }
 
@@ -1574,7 +1616,7 @@ public actor AnalysisPipeline {
         let overrides = OverrideSet(try await store.overrides())
         let scopedIDs = Set(facts.map(\.id))
         let oftenHere = try await recurringPlaceReport()?.places ?? []
-        let analysis = AnalysisSnapshot(
+        var analysis = AnalysisSnapshot(
             facts: facts,
             trips: scope == .all ? trips : trips.filter { !scopedIDs.isDisjoint(with: $0.geotaggedAssetIDs) },
             frequentPlaces: scope == .all ? frequent : [],
@@ -1583,8 +1625,11 @@ public actor AnalysisPipeline {
             recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) },
             home: try await homeSettings()
         )
+        analysis.applied = Set(Self.assignments(try await store.managedAlbums()).keys)
+        analysis.chosen = try await chosenSuggestions()
         let engine = ProposalEngine(settings: settings, calendar: calendar)
-        var suggestions = await offActor { engine.suggestions(for: analysis, overrides: overrides) }
+        let input = analysis
+        var suggestions = await offActor { engine.suggestions(for: input, overrides: overrides) }
         if abandonable { try Task.checkCancellation() }
         // Chosen before a change in "Dein Zuhause": stays as the user chose it, in this and
         // every later run, until it is created or deselected.
@@ -1605,7 +1650,8 @@ public actor AnalysisPipeline {
             }
         }
         let tripSets = trips.map { Set($0.allAssetIDs) }
-        let found = suggestions, assignments = Self.assignments(try await store.managedAlbums()), albums = inventory
+        let found = suggestions, albums = inventory
+        let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albums)
         var matches = await offActor {
             Self.match(found.open, dismissed: found.dismissed, against: albums, overrides: overrides, assignments: assignments, trips: tripSets)
         }
@@ -1613,7 +1659,7 @@ public actor AnalysisPipeline {
             // A plan was applied while this ran: match against the albums as they are now, or
             // the suggestions would offer albums that were just created.
             let albumsNow = try await store.loadInventory(), overridesNow = OverrideSet(try await store.overrides())
-            let assignmentsNow = Self.assignments(try await store.managedAlbums())
+            let assignmentsNow = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albumsNow)
             matches = await offActor {
                 Self.match(found.open, dismissed: found.dismissed, against: albumsNow, overrides: overridesNow, assignments: assignmentsNow,
                            trips: tripSets)
@@ -1639,6 +1685,16 @@ public actor AnalysisPipeline {
         proposalsGeneration += 1
         try await store.setValues(values, removing: removing)
         return snapshot
+    }
+
+    /// The suggestions the user named in the app (`user.titles`, a name typed for it) or chose
+    /// to create (an accepted decision): the same place as another suggestion keeps them
+    /// (`ProposalEngine.suggestEachPlaceOnce`). Values this build cannot read count as none.
+    func chosenSuggestions() async throws -> Set<SortlyID> {
+        let titles = try await readable { try await store.value([SortlyID: String].self, forKey: Key.titles) } ?? [:]
+        let decisions = try await readable { try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) } ?? [:]
+        return Set(titles.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.keys)
+            .union(decisions.filter { $0.value.isAccepted }.keys)
     }
 
     /// The shown suggestions are matched on their own, as always. The dismissed ones are
@@ -1846,9 +1902,32 @@ public actor AnalysisPipeline {
         }
     }
 
-    /// Suggestion → the album it was applied to, from the managed-album records.
-    static func assignments(_ states: [ManagedAlbumState]) -> [SortlyID: CollectionID] {
-        Dictionary(states.flatMap { state in state.allSourceIDs.map { ($0, state.albumID) } }, uniquingKeysWith: { first, _ in first })
+    /// Suggestion → the album it was applied to, from the managed-album records. Two albums
+    /// can be recorded for one ID (the album of a place that had the ID before, and the one made
+    /// for the place that has it now, second review of the place IDs 18.11.): the one sharing
+    /// the most photos with the suggestion (`proposals`; its photos as in `inventory`, else as
+    /// last recorded) is its album; with none shared, the first record, as before.
+    static func assignments(_ states: [ManagedAlbumState], proposals: [AlbumProposal] = [],
+                            inventory: CollectionInventory? = nil) -> [SortlyID: CollectionID] {
+        let recorded = recordedAlbums(states)
+        var result = Dictionary(states.flatMap { state in state.allSourceIDs.map { ($0, state.albumID) } }, uniquingKeysWith: { first, _ in first })
+        let members = Dictionary(states.map { ($0.albumID, $0.lastKnownMembers) }, uniquingKeysWith: { first, _ in first })
+        for proposal in proposals {
+            guard let albums = recorded[proposal.id], albums.count > 1, let first = result[proposal.id] else { continue }
+            func shared(_ album: CollectionID) -> Int {
+                (inventory?[album]?.assetIDs ?? members[album] ?? []).intersection(proposal.assetIDs).count
+            }
+            let best = albums.sorted { $0.rawValue < $1.rawValue }.max { shared($0) < shared($1) }
+            if let best, shared(best) > shared(first) { result[proposal.id] = best }
+        }
+        return result
+    }
+
+    /// Suggestion → every album recorded for it.
+    static func recordedAlbums(_ states: [ManagedAlbumState]) -> [SortlyID: Set<CollectionID>] {
+        states.reduce(into: [:]) { result, state in
+            for id in state.allSourceIDs { result[id, default: []].insert(state.albumID) }
+        }
     }
 
     public func latestProposals() async throws -> ProposalSnapshot? {
@@ -1878,7 +1957,8 @@ public actor AnalysisPipeline {
         let inventory = try await store.loadInventory()
         let overrides = OverrideSet(try await store.overrides())
         let trips = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map { Set($0.allAssetIDs) }
-        let assignments = Self.assignments(try await store.managedAlbums()), found = snapshot
+        let found = snapshot
+        let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.proposals + found.dismissed, inventory: inventory)
         snapshot.matches = await offActor {
             Self.match(found.proposals, dismissed: found.dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
         }
@@ -1891,8 +1971,10 @@ public actor AnalysisPipeline {
         /// The suggestions with their matches (nil: there are none).
         public var snapshot: ProposalSnapshot?
         /// Suggestions whose accepted "extend this album" decision was no longer a certain
-        /// match under the new rules (`ProposalDecision.uncertainExtensions`) and is open again
-        /// in the store. The app drops them from its decisions in memory too.
+        /// match under the new rules (`ProposalDecision.uncertainExtensions`), or went into the
+        /// album recorded for the ID while that album holds other photos
+        /// (`ProposalDecision.extensionsOfOtherPhotos`), and is open again in the store. The app
+        /// drops them from its decisions in memory too.
         public var reopened: Set<SortlyID> = []
     }
 
@@ -1906,6 +1988,11 @@ public actor AnalysisPipeline {
     /// extend an album without a certain match go back to open (`reopened`); suggestions of a
     /// plan that already started (not finished) are never among them.
     ///
+    /// Every time (the app calls this after each analysis too): an accepted "ergänzen" into the
+    /// album recorded for the suggestion's ID while that album was made for other photos goes
+    /// back to open (`ProposalDecision.extensionsOfOtherPhotos`, second review of the place IDs
+    /// 18.11.: a frequent place's ID can go to a new place).
+    ///
     /// The new matches with their version stamp, the decisions without the reopened ones and
     /// the count for the overview are written in one transaction (final check 16.11.): if the
     /// app is ended in between, nothing is written and the next launch does it again. Before,
@@ -1917,22 +2004,57 @@ public actor AnalysisPipeline {
     /// `afterEachWrite`: for tests, runs inside the transaction after each value (see
     /// `SortlyStore.setValues`); throwing there is the app ending half way.
     func refreshMatchesIfOutdated(afterEachWrite: (@Sendable (String) throws -> Void)?) async throws -> MatchRefresh {
-        guard let snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
-        guard snapshot.matcherVersion < AlbumMatcher.version else { return MatchRefresh(snapshot: snapshot) }
-        guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
+        guard var snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
+        let outdated = snapshot.matcherVersion < AlbumMatcher.version
+        if outdated {
+            guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
+            snapshot = rematched
+        }
         var decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
+        let recorded = Self.recordedAlbums(try await store.managedAlbums())
+        // Most refreshes have no "ergänzen" into an album recorded for the same suggestion.
+        let ownAlbum = decisions.contains { id, decision in
+            decision.isAccepted && decision.extendedAlbum.map { recorded[id]?.contains($0) == true } == true
+        }
+        // Remembered reopenings (below) of suggestions with neither a decision nor a recorded
+        // album any more are dropped.
+        let remembered = try await readable { try await store.value(Set<String>.self, forKey: Key.reopenedExtensions) } ?? []
+        let before = remembered.filter { entry in
+            let id = SortlyID(String(entry.prefix { $0 != "|" }))
+            return decisions[id] != nil || recorded[id] != nil
+        }
+        guard outdated || ownAlbum || before != remembered else { return MatchRefresh(snapshot: snapshot) }
+        var values: [String: any Encodable & Sendable] = [:]
+        if before != remembered { values[Key.reopenedExtensions] = before }
         let started = Set(try await store.unfinishedPlans().flatMap { $0.steps.compactMap(\.sourceID) })
-        let reopened = ProposalDecision.uncertainExtensions(decisions, proposals: rematched.proposals + rematched.dismissed,
-                                                            matches: rematched.matches, protected: started)
-        var values: [String: any Encodable & Sendable] = [Key.proposals: rematched]
+        let suggested = snapshot.proposals + snapshot.dismissed
+        var reopened = outdated ? ProposalDecision.uncertainExtensions(decisions, proposals: suggested, matches: snapshot.matches,
+                                                                       protected: started) : []
+        if ownAlbum {
+            // Once per suggestion and album: an album the user picks again for it ("Anderes
+            // Album wählen") is their choice and stays (re-review 18.11.). Which way a decision
+            // was made is not stored, so the first time cannot be told apart.
+            let found = ProposalDecision.extensionsOfOtherPhotos(
+                decisions, proposals: suggested, inventory: try await store.loadInventory(), recorded: recorded,
+                overrides: OverrideSet(try await store.overrides()), protected: started)
+            let pairs = Dictionary(found.compactMap { id in decisions[id]?.extendedAlbum.map { (id, id.rawValue + "|" + $0.rawValue) } },
+                                   uniquingKeysWith: { first, _ in first })
+            let new = pairs.filter { !before.contains($0.value) }
+            if !new.isEmpty {
+                reopened.formUnion(new.keys)
+                values[Key.reopenedExtensions] = before.union(new.values)
+            }
+        }
+        guard outdated || !reopened.isEmpty || !values.isEmpty else { return MatchRefresh(snapshot: snapshot) }
+        if outdated { values[Key.proposals] = snapshot }
         if !reopened.isEmpty {
             for id in reopened { decisions[id] = nil }
             let shown = try await store.value(Int.self, forKey: Self.recheckedSuggestionsKey) ?? 0
             values[Key.decisions] = decisions
             values[Self.recheckedSuggestionsKey] = shown + reopened.count
         }
-        proposalsGeneration += 1
+        if outdated { proposalsGeneration += 1 }
         try await store.setValues(values, afterEach: afterEachWrite)
-        return MatchRefresh(snapshot: rematched, reopened: reopened)
+        return MatchRefresh(snapshot: snapshot, reopened: reopened)
     }
 }

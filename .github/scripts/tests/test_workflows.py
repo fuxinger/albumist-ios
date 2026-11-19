@@ -1,4 +1,4 @@
-"""Checks over all workflow files (plain text, no YAML library needed).
+"""Checks over all workflow files (plain text; PyYAML where it is installed, as on the runners).
 
 Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
@@ -14,6 +14,97 @@ WORKFLOWS = sorted(glob.glob(os.path.join(ROOT, ".github", "workflows", "*.yml")
 def read(path):
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+try:
+    import yaml
+except ImportError:  # PyYAML is on the hosted runners; without it the plain reading below is used
+    yaml = None
+
+# An input name that skips something, and a line of workflow code that skips or forces: an
+# input read ("inputs.force", "inputs.skip_ui"), the word force or forced on its own (not the
+# "--force" flag of git, codesign or simctl), or "untested".
+SKIP_INPUT = re.compile(r"(?i)force|skip|bypass|untested|emergency|no[-_]?tests?")
+SKIP_MARK = re.compile(r"(?i)inputs\.\w*(?:force|skip)|inputs\[['\"]\w*(?:force|skip)|(?:vars|env|secrets)\.\w*(?:force|skip)"
+                       r"|\b(?:force|skip)_\w+|(?<![-\w])forced?\b|untested")
+
+
+def strip_comment(line):
+    """The line without its YAML comment: "#" at the start or after a space, outside quotes."""
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i]
+    return line
+
+
+def workflow_inputs(text, plain=False):
+    """Names of the workflow_dispatch and workflow_call inputs, in order. With PyYAML (and not
+    plain) from the parsed file; otherwise by indentation: the keys right under "inputs:" of the
+    top-level "on:"."""
+    if yaml is not None and not plain:
+        data = yaml.safe_load(text) or {}
+        on = data.get("on", data.get(True))  # YAML 1.1 reads the key on as true
+        names = []
+        if isinstance(on, dict):
+            for event in ("workflow_dispatch", "workflow_call"):
+                spec = on.get(event)
+                if isinstance(spec, dict) and isinstance(spec.get("inputs"), dict):
+                    names += list(spec["inputs"])
+        return names
+    names, inside_on, inputs_at, child_at = [], False, None, None
+    for raw in text.splitlines():
+        line = strip_comment(raw).rstrip()
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            inside_on, inputs_at = line.startswith("on:"), None
+            continue
+        if not inside_on:
+            continue
+        if inputs_at is not None and indent <= inputs_at:
+            inputs_at = None
+        if line.strip() == "inputs:":
+            inputs_at, child_at = indent, None
+        elif inputs_at is not None:
+            child_at = indent if child_at is None else child_at
+            if indent == child_at:
+                names.append(line.strip().split(":", 1)[0])
+    return names
+
+
+def job_blocks(text):
+    """{job id: its lines without comments}, read by indentation from the top-level "jobs:"."""
+    blocks, current = {}, None
+    for raw in text.split("\njobs:\n", 1)[1].splitlines():
+        line = strip_comment(raw).rstrip()
+        found = re.match(r"^  ([A-Za-z0-9_-]+):$", line)
+        if found:
+            current = found.group(1)
+            blocks[current] = []
+        elif re.match(r"^\S", line):
+            current = None  # another top-level key after the jobs
+        elif current is not None:
+            blocks[current].append(line)
+    return {job: "\n".join(lines) for job, lines in blocks.items()}
+
+
+def job_field(text, job, field):
+    """A job's "if:" or "needs:" as one line (a list joined by ", ")."""
+    if yaml is not None:
+        value = (yaml.safe_load(text)["jobs"][job] or {}).get(field, "")
+        value = ", ".join(value) if isinstance(value, list) else str(value)
+    else:
+        block = re.split(r"\n  [A-Za-z0-9_-]+:\n", text.split(f"\n  {job}:\n", 1)[1], maxsplit=1)[0]
+        found = re.search(rf"\n    {field}: (?:>-\n)?(.*?)\n    [a-z-]+:", "\n" + block, re.S)
+        value = found.group(1) if found else ""
+    return " ".join(value.split())
 
 
 class CacheTests(unittest.TestCase):
@@ -40,15 +131,117 @@ class CacheTests(unittest.TestCase):
                         self.assertNotRegex(step, r"\n\s+ref:")
 
 
+APPLE_SECRETS = ("ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_P8", "APPLE_TEAM_ID")
+APPLE_SECRET = re.compile(r"secrets\.(%s)\b" % "|".join(APPLE_SECRETS))
+
+
+class UploadApprovalTests(unittest.TestCase):
+    """The owner's decision 5 of 18.11.2026: an upload only with his approval. The upload job runs in
+    the environment testflight-upload, whose required reviewer is the owner; the four App Store
+    Connect secrets are environment secrets there; nothing else can read them."""
+
+    def test_the_upload_job_runs_in_the_protected_environment(self):
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
+        import upload_approval
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        release = job_blocks(text)["release"]
+        self.assertEqual(upload_approval.ENVIRONMENT, "testflight-upload")
+        self.assertIn(f"\n    environment: {upload_approval.ENVIRONMENT}\n", release + "\n")
+        if yaml is not None:
+            self.assertEqual(yaml.safe_load(text)["jobs"]["release"]["environment"], upload_approval.ENVIRONMENT)
+        # No other job of any workflow names this environment: no second door to its secrets,
+        # and one approval per upload (pages.yml has its own, github-pages).
+        for path in WORKFLOWS:
+            for job, block in job_blocks(read(path)).items():
+                if (os.path.basename(path), job) != ("testflight.yml", "release"):
+                    with self.subTest(workflow=os.path.basename(path), job=job):
+                        self.assertNotIn(upload_approval.ENVIRONMENT, block)
+
+    def test_the_apple_secrets_are_named_only_in_the_upload_job(self):
+        users = []
+        for path in WORKFLOWS:
+            text = read(path)
+            name = os.path.basename(path)
+            code = "\n".join(strip_comment(line) for line in text.splitlines())
+            with self.subTest(workflow=name):
+                # Not around the jobs (a workflow-level env reaches every job), never all secrets
+                # at once (passed on to a called workflow, or as JSON), never by a computed name.
+                self.assertNotRegex(code.split("\njobs:\n", 1)[0], APPLE_SECRET)
+                self.assertNotRegex(code, r"secrets:\s*inherit|toJSON\(\s*secrets\s*\)|secrets\[")
+            blocks = job_blocks(text)
+            if yaml is not None:
+                self.assertEqual(sorted(blocks), sorted(yaml.safe_load(text)["jobs"]), name)
+            users += [(name, job, sorted(set(APPLE_SECRET.findall(block)))) for job, block in blocks.items()
+                      if APPLE_SECRET.search(block)]
+        self.assertEqual(users, [("testflight.yml", "release", sorted(APPLE_SECRETS))])
+        # The jobs before the upload need none: the first one checks the environment instead.
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        self.assertIn("run: python3 .github/scripts/upload_approval.py check", job_blocks(text)["check"])
+
+    def test_the_first_job_is_the_approval_check_the_daily_build_reads(self):
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
+        import daily_build
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        check = job_blocks(text)["check"]
+        self.assertIn(f"\n    name: {daily_build.CHECK_JOB}\n", "\n" + check + "\n")
+        self.assertIn("\n    if: github.ref == 'refs/heads/main'\n", "\n" + check + "\n")
+        self.assertIn("ready: ${{ steps.approval.outputs.ready }}", check)
+        # The secrets' presence is checked after the approval without their values in a step.
+        release = job_blocks(text)["release"]
+        first = release.split("\n      - ", 2)[1]
+        self.assertTrue(first.startswith("name: App Store Connect secrets present"), first[:60])
+        self.assertNotRegex(first, r"\$\{\{\s*secrets\.\w+\s*\}\}")
+        # "Was testen" is set in the upload job now: no other job sets it with the key.
+        self.assertEqual([job for job, block in job_blocks(text).items() if "testflight_notes.py upload" in block],
+                         ["release"])
+
+
+class FreshSimulatorTests(unittest.TestCase):
+    """ci.yml's "Fresh simulator" waits like a UI pass: until the simulator answers quickly
+    (ui_tests.py settle). Its old criterion, a 1-minute load under 3.5, never held on the hosted
+    Macs (200-850 after the boot), so the step always waited its whole 5 min."""
+
+    def step(self):
+        text = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        return text.split("- name: Fresh simulator (erased and booted)\n", 1)[1].split("\n      - name: ", 1)[0]
+
+    def test_it_waits_for_a_quick_simulator_not_for_the_load(self):
+        step = self.step().split("        run: |\n", 1)[1]
+        self.assertIn('python3 .github/scripts/ui_tests.py settle --udid "$UDID"', step)
+        self.assertNotIn("3.5", step)
+        self.assertNotIn("vm.loadavg", step)
+        # The StoreKit log starts after the wait, as before.
+        self.assertLess(step.index("ui_tests.py settle"), step.index("> storekit-live.log"))
+        self.assertLess(step.index("bootstatus"), step.index("ui_tests.py settle"))
+
+
 class TestFlightWiringTests(unittest.TestCase):
     """The upload waits for the UI gate (ui_evidence.py), which reads the group jobs' names."""
 
     def test_no_upload_starts_by_itself(self):
         # Fable P5-15: the old testflight.yml on main uploaded the old app state, untested, on
-        # every push to main (16.11.: the website merge started one). Uploads start by hand only,
-        # and no workflow that can read the App Store Connect key (named, or all secrets passed on
-        # with "secrets: inherit") starts on a push or a pull request. A schedule may read it
-        # (asc-feedback.yml fetches feedback and crash logs; it uploads nothing).
+        # every push to main (16.11.: the website merge started one). TestFlight starts by
+        # workflow_dispatch only, and no workflow that can read an App Store Connect key (named,
+        # or all secrets passed on with "secrets: inherit") starts on a push or a pull request. A
+        # schedule may read one (asc-feedback.yml fetches feedback with its own key; it uploads
+        # nothing). The one workflow that starts TestFlight by itself is the daily build
+        # (decision 10 of 18.11.2026): with the small gate, on main, and its upload still waits
+        # for the owner's approval (UploadApprovalTests).
+        starters = {}
+        for path in WORKFLOWS:
+            code = "\n".join(strip_comment(line) for line in read(path).splitlines())
+            if re.search(r"testflight\.yml(?:/dispatches)?\b", code) and re.search(r"workflow run|/dispatches", code):
+                starters[os.path.basename(path)] = code
+        self.assertEqual(sorted(starters), ["daily-build.yml"])
+        daily = starters["daily-build.yml"]
+        self.assertIn("gh workflow run testflight.yml --repo \"$GITHUB_REPOSITORY\" --ref main -f gate=small\n", daily)
+        self.assertEqual(len(re.findall(r"workflow run", daily)), 1)
+        self.assertIn("if: github.ref == 'refs/heads/main'", daily)
+        self.assertNotRegex(daily, r"secrets[.\[]|secrets:\s*inherit")
+        trigger = read(os.path.join(ROOT, ".github", "workflows", "daily-build.yml")).split("\non:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(re.findall(r"^  ([a-z_]+):", trigger, re.M), ["schedule", "workflow_dispatch"])
         for path in WORKFLOWS:
             text = read(path)
             if "secrets.ASC_" not in text and not re.search(r"secrets:\s*inherit", text):
@@ -69,6 +262,90 @@ class TestFlightWiringTests(unittest.TestCase):
         release = text.split("\n  release:\n", 1)[1].split("\n  tag:\n", 1)[0]
         self.assertIn("needs: [check, tests, ui, stress, ui-gate]", release)
         self.assertIn("needs.ui-gate.result == 'success'", release)
+
+    def test_nothing_skips_the_tests_before_an_upload(self):
+        # G5-02/G6-02: the owner decided on 17.11. to remove the emergency input "force", which
+        # uploaded a TestFlight build without running any test. No workflow has an input or a
+        # flag to skip tests or the gate, and every job before the upload runs on the results of
+        # the one before it alone.
+        for path in WORKFLOWS:
+            text = read(path)
+            code = "\n".join(strip_comment(line) for line in text.splitlines())
+            with self.subTest(workflow=os.path.basename(path)):
+                self.assertEqual([name for name in workflow_inputs(text) if SKIP_INPUT.search(name)], [])
+                self.assertEqual([line.strip() for line in code.splitlines() if SKIP_MARK.search(line)], [])
+        # Scripts: no flag that lets a run through without tests ("--forced" in earlier_attempts.py
+        # and testflight_notes.py). ui_tests.py --skip names single tests that another group runs
+        # (ui-groups.json); the UI gate needs every group green, or with --groups the groups of the
+        # small gate (the daily build, decision 10 of 18.11.2026; checked below).
+        for path in glob.glob(os.path.join(ROOT, ".github", "scripts", "*.py")):
+            with self.subTest(script=os.path.basename(path)):
+                flags = re.findall(r"add_argument\(\s*[\"']--([\w-]+)[\"']", read(path))
+                self.assertEqual([f for f in flags if re.search(r"(?i)force|untested|skip[-_]?(?:tests?|gate)|no[-_]?tests?", f)], [])
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        self.assertEqual(job_field(text, "tests", "if"), "needs.check.outputs.ready == 'true'")
+        for job in ("ui", "stress"):
+            self.assertIn("tests", [need.strip() for need in job_field(text, job, "needs").split(",")])
+        # The two gates (the owner's decision 10 of 18.11.2026) differ only in the UI groups: the
+        # stress pass runs before every upload, also before the daily build with the small gate
+        # (the owner's rule of 17.11. and decision 4), so it has no condition of its own and the
+        # UI gate and the upload need it green with either gate. The check job turns the input
+        # into big or small and stops on anything else.
+        self.assertEqual(job_field(text, "stress", "if"), "")
+        stress = job_blocks(text)["stress"]
+        self.assertNotIn("gate", stress)  # the same small pass with either gate
+        self.assertIn("photos: '10000'", stress)
+        self.assertIn("minutes: '15'", stress)
+        for job, needed in (("ui-gate", ("tests", "ui", "stress")), ("release", ("tests", "ui", "stress", "ui-gate"))):
+            with self.subTest(job=job):
+                rule = job_field(text, job, "if")
+                self.assertNotIn("||", rule)
+                self.assertNotIn("inputs.", rule)
+                self.assertNotIn("gate", rule.replace("needs.ui-gate.result", ""))
+                self.assertIn("needs.check.outputs.ready == 'true'", rule)
+                for need in needed:
+                    self.assertIn(f"needs.{need}.result == 'success'", rule)
+        check = job_blocks(text)["check"]
+        self.assertIn("GATE: ${{ inputs.gate || 'big' }}", check)
+        self.assertIn("big) groups=\"$UI_GROUPS\"; checked=\"\" ;;", check)
+        self.assertIn("small) groups=\"$SMALL_GATE_GROUPS\"; checked=\"$SMALL_GATE_GROUPS\" ;;", check)
+        self.assertIn("*) echo \"::error title=Gate::unknown gate $GATE (big or small)\"; exit 1 ;;", check)
+
+    def test_the_small_gate_is_the_two_short_ui_groups(self):
+        # docs/TESTFLIGHT.md ("Messung", "Zwei Tore"): flow-full and contrast, about 18 min each.
+        # The gate checks exactly the groups the UI flow ran.
+        import json
+        text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        small = re.search(r"\n          SMALL_GATE_GROUPS: (.+)\n", text).group(1).split()
+        self.assertEqual(small, ["flow-full", "contrast"])
+        with open(os.path.join(ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:
+            names = [g["group"] for g in json.load(f)["groups"]]
+        self.assertLess(set(small), set(names))
+        jobs = job_blocks(text)
+        self.assertIn("groups: ${{ needs.check.outputs.ui_groups }}", jobs["ui"])
+        self.assertIn("GATE_GROUPS: ${{ needs.check.outputs.gate_groups }}", jobs["ui-gate"])
+        self.assertIn('python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS"', jobs["ui-gate"])
+
+    def test_the_skip_check_finds_force_and_nothing_else(self):
+        # Second review of 51e72f3: harmless "--force" flags of other tools are no skip, a
+        # re-added input is found by both ways of reading the inputs, "#" in quotes is no comment.
+        for harmless in ("git push --force-with-lease origin HEAD", "codesign --force --sign - App.app",
+                         "xcrun simctl io booted recordVideo --force out.mp4"):
+            self.assertIsNone(SKIP_MARK.search(harmless), harmless)
+        for skip in ("if: inputs.force", "if: ${{ !inputs.skip_ui }}", "FORCED: yes", "echo untested", "      force:",
+                     "if: vars.FORCE_UPLOAD == 'true'", "if: env.SKIP_TESTS != '1'", "${{ inputs['skip_ui'] }}",
+                     "run: SKIP_TESTS=1 make"):
+            self.assertIsNotNone(SKIP_MARK.search(skip), skip)
+        sample = ("name: X\n\non:\n  workflow_dispatch:\n\n    inputs:\n      # an emergency switch\n\n      force:\n"
+                  "        type: boolean\n      ui_groups:\n        type: string\n  workflow_call:\n    inputs:\n"
+                  "      skip_gate: {type: boolean}\n\njobs:\n  a:\n    runs-on: x\n")
+        self.assertEqual(workflow_inputs(sample), ["force", "ui_groups", "skip_gate"])
+        self.assertEqual(workflow_inputs(sample, plain=True), ["force", "ui_groups", "skip_gate"])
+        for path in WORKFLOWS:
+            with self.subTest(workflow=os.path.basename(path)):
+                self.assertEqual(workflow_inputs(read(path), plain=True), workflow_inputs(read(path)))
+        self.assertEqual(strip_comment('run: echo "a # b" \'c # d\' # note'), 'run: echo "a # b" \'c # d\' ')
+        self.assertEqual(strip_comment("url: https://x.example/#anchor"), "url: https://x.example/#anchor")
 
     def test_ui_flow_plans_its_groups(self):
         text = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))

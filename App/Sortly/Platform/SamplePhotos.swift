@@ -86,7 +86,7 @@ final class SamplePhotos {
         }
         record = Self.loadRecord()
         if record.ids.isEmpty { update { $0.keepOnly([]) } } // nothing went in: the offer may come back
-        if added > 0 { model.startAnalysis(userInitiated: true) }
+        if added > 0 { model.startAnalysis(cause: .tap) }
     }
 
     /// The JPEGs of `specs` (drawing 1600 × 1200 pictures takes a moment: never on the main actor).
@@ -189,7 +189,7 @@ final class SamplePhotos {
             // forgotten too: it stays in Photos, and Albumist never offers to delete it again.
             update { $0.keepOnly(still.subtracting(notSamples)) }
             model.inventory = after
-            model.startAnalysis(userInitiated: true)
+            model.startAnalysis(cause: .tap)
             let stayed = notSamples.intersection(still).count
             if stayed > 0 {
                 model.message = AppMessage(title: String(localized: "Nicht alles entfernt"),
@@ -197,7 +197,8 @@ final class SamplePhotos {
             }
         } catch let quiet as PhotosNotResponding where quiet.lane == .write {
             // Not known whether they go: the question iOS asks may still be on screen, or an
-            // earlier change still has no answer (second review of the PhotoKit limits, 7).
+            // earlier change still has no answer (second review of the PhotoKit limits, 7). A
+            // request that never began was not sent at all: its own text says nothing changed.
             model.message = .failure(quiet.asksUser && !quiet.notSent
                 ? String(localized: "Ob die Beispielfotos entfernt werden, steht noch nicht fest: Die Rückfrage von iOS ist vielleicht noch offen. Schau in Fotos nach und versuche es danach noch einmal.")
                 : quiet.localizedDescription)

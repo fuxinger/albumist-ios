@@ -312,8 +312,36 @@ struct AssetThumbnail: View {
     }
 }
 
+/// A cover: the photo, or, when there is none to show because every photo is a sensitive
+/// document (`PreviewRank`), a quiet tile with the symbol Photos uses for hidden photos.
+/// `hidden: false` for a cover that is missing for another reason (an empty album).
+struct CoverThumbnail: View {
+    var id: AssetID?
+    var side: CGFloat = 80
+    var hidden = true
+
+    var body: some View {
+        if let id {
+            AssetThumbnail(id: id, side: side)
+        } else {
+            Rectangle()
+                .fill(Color(uiColor: .tertiarySystemFill))
+                .overlay {
+                    if hidden {
+                        Image(systemName: "eye.slash")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityHidden(true)
+        }
+    }
+}
+
 /// Grid of thumbnails with a "+N" tile. Few photos get larger tiles; screenshots and
-/// documents are shown upright from the top, where their title is.
+/// documents are shown upright from the top, where their title is. Sensitive documents are
+/// never among `ids` (`PreviewPicker`): with too few other photos the grid has fewer tiles,
+/// and with none a single tile says the preview is hidden. "+N" counts from `total`.
 struct ThumbnailGrid: View {
     var ids: [AssetID]
     /// All photos behind the preview, when `ids` is only a selection of them.
@@ -326,18 +354,37 @@ struct ThumbnailGrid: View {
         let all = total ?? ids.count
         let shown = Array(ids.prefix(limit))
         let count = min(columns, max(shown.count, 2))
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: count), spacing: 3) {
-            ForEach(Array(shown.enumerated()), id: \.element) { index, id in
-                AssetThumbnail(id: id, side: count <= 2 ? 200 : (count == 3 ? 140 : 100), anchor: portrait ? .top : .center)
-                    .aspectRatio(portrait ? 0.75 : 1, contentMode: .fill)
-                    .overlay {
-                        if index == shown.count - 1 && all > shown.count {
-                            Color.black.opacity(0.45)
-                            Text("+\(all - shown.count + 1)").font(.headline).foregroundStyle(.white)
+        if shown.isEmpty && all > 0 {
+            hiddenPreview
+        } else {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: count), spacing: 3) {
+                ForEach(Array(shown.enumerated()), id: \.element) { index, id in
+                    AssetThumbnail(id: id, side: count <= 2 ? 200 : (count == 3 ? 140 : 100), anchor: portrait ? .top : .center)
+                        .aspectRatio(portrait ? 0.75 : 1, contentMode: .fill)
+                        .overlay {
+                            if index == shown.count - 1, let more = PreviewPicker.moreCount(total: all, shown: shown.count) {
+                                Color.black.opacity(0.45)
+                                Text("+\(more)").font(.headline).foregroundStyle(.white)
+                            }
                         }
-                    }
+                }
             }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         }
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+    }
+
+    /// Every photo is a sensitive document: no picture of one, but a tile that still leads to
+    /// all photos (the grid is the button that opens them).
+    private var hiddenPreview: some View {
+        VStack(spacing: Theme.Spacing.s) {
+            Image(systemName: "eye.slash").font(.title2)
+                .accessibilityHidden(true)
+            Text("Vorschau ausgeblendet").font(.subheadline)
+                .multilineTextAlignment(.center)
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, minHeight: 120)
+        .padding(Theme.Spacing.m)
+        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 }

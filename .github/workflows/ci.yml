@@ -167,9 +167,13 @@ jobs:
         # (CI 44368423344). Boot like ui_tests.py: up to three attempts, each counted.
         # After the fresh boot the whole Mac was starved for 2-3 min: even a one-file
         # hashFiles('App/project.yml') timed out after 120 s (CI 44376522818; under 1 s before the
-        # boot). So the step waits until the load has gone down (at most 5 min, every value in the
-        # log as SIM_SETTLE), and the later steps ask whether a simulator was picked (only when
-        # App/project.yml exists) instead of hashFiles().
+        # boot). So the step waits like every UI pass (ui_tests.py settle) until the simulator
+        # answers a trivial process (launchctl) twice in a row in under 2 s, at most 5 min; every
+        # probe and the 1-minute load are in the log as SIM_SETTLE, the busiest processes as
+        # SIM_TOP. The load is not the criterion any more: it stayed at 200-850 for minutes even
+        # in green runs (CI 44437759869, 44397301952), so "under 3.5" always waited the whole
+        # 5 min. The later steps ask whether a simulator was picked (only when App/project.yml
+        # exists) instead of hashFiles().
         # CI 44383157858 and 44390350152 (erased and booted): StoreKit served the test host from
         # the App Store's sandbox, not from the local configuration. Both: "Error updating
         # Storefront ... environment: Optional("Sandbox")"; storekitd ran the product request as
@@ -191,19 +195,7 @@ jobs:
             xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
             sleep 15
           done
-          for i in $(seq 1 30); do
-            load=$(sysctl -n vm.loadavg | awk '{print $2}')
-            echo "SIM_SETTLE load(1m)=$load after $((i * 10 - 10)) s"
-            # What keeps the Mac busy, once a minute (CI 44383157858: load 330, 551, then 243 after
-            # 5 min; 44390350152: 198, 594, then 420; on three cores, before the StoreKit log
-            # started; which processes, the log did not say).
-            if [ $((i % 6)) = 1 ]; then
-              echo "SIM_TOP $(ps -A | wc -l | tr -d ' ') processes, $(pgrep -f CoreSimulator/Volumes | wc -l | tr -d ' ') from the simulator runtime; busiest:"
-              ps -Ao pcpu=,state=,comm= -r | head -12 | cut -c1-160 | sed 's/^/SIM_TOP /'
-            fi
-            awk -v l="$load" 'BEGIN { exit !(l < 3.5) }' && break
-            sleep 10
-          done
+          python3 .github/scripts/ui_tests.py settle --udid "$UDID"
           nohup xcrun simctl spawn "$UDID" log stream --style compact --level debug \
             --predicate 'process CONTAINS[c] "storekit" OR subsystem CONTAINS[c] "storekit" OR process == "appstored" OR process == "itunesstored" OR subsystem == "com.apple.AppleMediaServices"' \
             > storekit-live.log 2>&1 &

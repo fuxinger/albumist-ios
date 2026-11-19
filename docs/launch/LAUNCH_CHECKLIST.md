@@ -11,7 +11,9 @@ Was vor dem Verkaufsstart erledigt sein muss. Wird bei jeder Entscheidung ergän
 - [ ] Zwei-Schritt-Anmeldung (2FA) für das GitHub-Konto.
 
 ## Qualität
-- [ ] Testplan (`docs/TEST_PLAN.md`) ohne offene Fälle.
+- [ ] Testplan (`docs/TEST_PLAN.md`, Abschnitt „Tore“) für den App Store erfüllt: kein Fall mit ⛔;
+      jeder Fall mit ⚪ und jede Lücke in den Tests (G5) behoben oder von Fuchs bewusst offen
+      gelassen, mit Grund im Testplan; alle Punkte unter „Am iPhone prüfen“ geprüft.
 - [ ] Letzte TestFlight-Version auf einem echten iPhone durchgespielt: Analyse, Wärme, Hintergrund,
       Rückgängig, Kauf, große Schrift, VoiceOver.
 - [ ] Voller Härtetest im Simulator auf genau dem Stand, der eingereicht wird (50.000 Fotos,
@@ -34,8 +36,8 @@ Was vor dem Verkaufsstart erledigt sein muss. Wird bei jeder Entscheidung ergän
       „Preis wird geladen …“ (seit W7 nicht mehr tippbar) und lehnt nach 2.1 ab.
       Familienfreigabe: nach Entscheidung einschalten (die App zählt geteilte Käufe schon mit).
 - [ ] **App-Datenschutz** („Nutrition Label“): „Keine Daten erfasst“. Begründung für die Angaben:
-      Fotos und Analyse bleiben auf dem Gerät; „Orte online genauer bestimmen“ schickt Koordinaten an
-      Apples eigenen Kartendienst (MapKit), nicht an uns; der Kauf läuft über Apple; die Diagnose teilt
+      Fotos und Analyse bleiben auf dem Gerät; „Orte online genauer bestimmen“ schickt Koordinaten und
+      die Sprache der Ortsnamen an Apples eigenen Kartendienst (`CLGeocoder`), nicht an uns; der Kauf läuft über Apple; die Diagnose teilt
       der Nutzer nur selbst über das Teilen-Menü (freiwillige Support-Anfrage, keine laufende Erfassung).
       Keine Tracking-Domains, kein Werbe-SDK. Datenschutz-URL eintragen (siehe unten).
 - [ ] **Datenschutz-Manifest** (`PrivacyInfo.xcprivacy`) mit den genutzten „Required Reason“-APIs

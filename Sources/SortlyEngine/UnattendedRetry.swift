@@ -8,7 +8,8 @@ import Foundation
 ///   30 s, then after 60 s; then not again until a run is started by a tap, the app comes on
 ///   screen, or the analysis finishes.
 /// - Ended because Photos did not answer (`PhotosNotResponding`): every 60 s, without a cap. A try
-///   sends nothing while the call before still hangs (`PhotosDeadline`).
+///   sends nothing while the call before still hangs (`PhotosDeadline`). The same when a call
+///   into Photos never got a thread (`Cause.busy`): nothing was sent.
 /// - A plan held the analysis back meanwhile: when its claim ends, the analysis goes on only once
 ///   the try is due (app-speed 18.11.2026, open point D of the labels fix). Before, the end of
 ///   the plan started it at once, past the wait: a Vision that had just failed on a hot iPhone
@@ -26,6 +27,24 @@ public struct UnattendedRetry: Sendable, Equatable {
     public private(set) var due: ContinuousClock.Instant?
 
     public init() {}
+
+    /// Why a run ended early by itself, when it is not an ordinary error.
+    public enum Cause: Sendable, Equatable {
+        /// Photos did not answer (`PhotosNotResponding`).
+        case photos
+        /// A call into Photos never began: Albumist's own work kept every thread busy, and
+        /// nothing was asked of Photos (`PhotosNotResponding.neverBegan`).
+        case busy
+    }
+
+    /// A run ended early by itself: how long until the next try, or `nil` when none comes.
+    /// `.busy` is tried again like `.photos`, every minute without a cap: nothing was sent, a
+    /// thread pool kept busy by the analysis is busy again on the next try now and then, and
+    /// after two such ends the analysis must not stop for good with nothing said (review of
+    /// f7439fb, MF1). Neither uses up the tries of other early ends.
+    public mutating func schedule(after cause: Cause?, now: ContinuousClock.Instant) -> Duration? {
+        schedule(photos: cause != nil, now: now)
+    }
 
     /// A run ended early by itself: how long until the next try, or `nil` when none comes.
     /// `photos`: it ended because Photos did not answer.

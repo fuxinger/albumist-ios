@@ -189,7 +189,8 @@ public enum LibraryStatus {
                     a.analyzed = analyzed
                 case .documents:
                     // Only photos read as documents (a photo's labels decide whether it is read).
-                    a.applicable = f.document != nil
+                    // A card or ID without a document type (`.other`, only for previews) is none.
+                    a.applicable = f.document.map { $0.type != .other } ?? false
                 case .messenger:
                     a.applicable = f.messenger != nil
                 case .peopleAndPets:
@@ -281,6 +282,49 @@ public enum LibraryStatus {
             guard !ours.isEmpty else { continue }
             for source in state.allSourceIDs {
                 if let area = areaOf[source] { result[area, default: []].formUnion(ours) }
+            }
+        }
+        return result
+    }
+}
+
+// MARK: The library tab's lists over the ring's part of the library
+
+extension LibraryBuckets {
+    /// The library tab's lists for the part of the library the ring counts (`scope`), with the
+    /// same test as `DerivedLibraryStatus.derive` (`OrganizationScope.includes`): "Sortiert"
+    /// shows the ring's number also with "Nur 2026" (decision Fuchs 18.11.).
+    public static func make(facts: [AssetFacts], states: [AssetID: AssetOrganizationState],
+                            resolver: OrganizationStatusResolver, scope: OrganizationScope,
+                            calendar: Calendar = .sortlyDefault,
+                            shouldStop: () -> Bool = { false }) -> LibraryBuckets? {
+        guard scope != .all else { return make(facts: facts, states: states, resolver: resolver, shouldStop: shouldStop) }
+        return make(facts: facts, states: states, resolver: resolver, shouldStop: shouldStop,
+                    inScope: { scope.includes($0, calendar: calendar) })
+    }
+}
+
+extension LibraryStatus {
+    /// The status the search asks for ("nicht sortiert"), per photo, by the ring's rule
+    /// (`OrganizationStatusResolver.ringPart` over `scope`), so the search finds exactly the
+    /// photos of the list "Nicht sortiert" (second review 18.11.). A photo the ring does not count
+    /// (no main area applies, outside the chosen year) has none.
+    public static func searchStatuses(facts: [AssetFacts], states: [AssetID: AssetOrganizationState],
+                                      resolver: OrganizationStatusResolver, scope: OrganizationScope,
+                                      calendar: Calendar = .sortlyDefault) -> [AssetID: OverallStatus] {
+        var result: [AssetID: OverallStatus] = [:]
+        result.reserveCapacity(states.count)
+        for f in facts {
+            guard let state = states[f.id] else { continue }
+            let inScope = scope == .all || scope.includes(f, calendar: calendar)
+            switch resolver.ringPart(state, inScope: inScope) {
+            case .sorted: result[f.id] = .fullyOrganized
+            case .partlySorted: result[f.id] = .partiallyOrganized
+            case .unsorted: result[f.id] = .unorganized
+            case .pending: result[f.id] = .pending
+            case .ignored: result[f.id] = .ignored
+            case .excluded: result[f.id] = .excluded
+            case .outsideMainAreas, .outsideScope: break
             }
         }
         return result

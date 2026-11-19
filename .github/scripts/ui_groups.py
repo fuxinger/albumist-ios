@@ -31,7 +31,11 @@ a Swift file uses another when it names a type, function or extension member tha
 for the others; private declarations are not seen from outside), every file of App/SortlyUITests
 that is not Swift (Info.plist and the like) or declares an XCTestObservation, every Swift file of
 the target that no group's tests reach (fails closed), and the harness: every file under
-.github/scripts/ (but its tests/) and .github/workflows/. In a quick run (SORTLY_UI_QUICK=1) a
+.github/scripts/ (but its tests/) and .github/workflows/. A Swift file of the target goes in by
+its code (swift_code: comments left out, whitespace outside literals reduced to "line break or
+not", literals byte for byte), so editing a comment or the indentation of a test leaves its
+fingerprint, and a red result under it stays red (Prüfer B G5-04, 18.11.); a Swift file the reader
+cannot read for sure, and every other file, by its git blob id. In a quick run (SORTLY_UI_QUICK=1) a
 line "mode quick" is added for every group. So a change to a shared helper
 (UITestOnboarding.swift) changes the fingerprint of every group whose tests use it, and only of
 those; a change to any script or workflow changes every group's.
@@ -168,6 +172,13 @@ TEST_FUNC = re.compile(r"\bfunc\s+(test\w*)\s*\(\s*\)")
 PARENS = re.compile(r"\([^()]*\)")
 
 
+def line_end(source: str, i: int) -> int:
+    """Where the line that holds `i` ends: the first "\n" or "\r" from `i` on (Swift's lexer
+    ends a line, and a // comment, at either), or the end of the source."""
+    ends = [j for j in (source.find("\n", i), source.find("\r", i)) if j >= 0]
+    return min(ends) if ends else len(source)
+
+
 def strip_swift(source: str) -> str:
     """The source with comments and the text of string literals blanked out (newlines kept), so
     braces and names in them do not count. The code inside an interpolation "\\(...)" is kept:
@@ -184,8 +195,7 @@ def strip_swift(source: str) -> str:
         c = source[i]
         if frame[0] == "code":
             if source.startswith("//", i):
-                j = source.find("\n", i)
-                j = n if j < 0 else j
+                j = line_end(source, i)
                 out.append(" " * (j - i))
                 i = j
             elif source.startswith("/*", i):
@@ -232,7 +242,7 @@ def strip_swift(source: str) -> str:
                 out.append(" " * (len(close) - 1) + '"')
                 stack.pop()
                 i += len(close)
-            elif c == "\n" and not multi:
+            elif c in "\r\n" and not multi:
                 stack.pop()  # an unterminated string ends at the line
                 out.append(c)
                 i += 1
@@ -242,11 +252,161 @@ def strip_swift(source: str) -> str:
     return "".join(out)
 
 
+SWIFT_SPACE = " \t\r\n\x0b\x0c\x00"  # what Swift's lexer skips as whitespace
+
+
+def swift_code(source: str) -> str | None:
+    """The source as the compiler reads it, without what never changes how it runs: comments are
+    dropped, and every run of whitespace and comments outside a literal becomes one "\\n" when it
+    holds a line break (Swift reads a line break: a new statement, "(" not a call) and one " "
+    otherwise (Swift reads whether an operator has space around it, never how much). String
+    literals (also raw and multi-line ones, with their indentation and the closing delimiter's),
+    extended regex literals #/.../# and `quoted names` stay byte for byte; the code inside an
+    interpolation "\\(...)" is read as code. One pass, character by character.
+
+    None (the caller then takes the bytes) where this reader is not sure: a "/" that is not a
+    comment and not an operator with whitespace on both sides (a bare regex literal /.../ may hold
+    a space or "//"), a literal or comment left open at the end, an unclosed `name`, or "\\ufffd"
+    (bytes that were not UTF-8 and were replaced, so two different files could read the same).
+    So two sources with the same result compile to the same program; only the source
+    locations #line and #column report can differ (indentation moves #column too; XCTFail and
+    print messages carry them, nothing in the tests decides by them).
+    Line breaks are "\n", "\r" and "\r\n", as in Swift's lexer: each ends a // comment and a
+    single-line string, and each makes a run of whitespace a line break."""
+    if "\ufffd" in source:
+        return None
+    out: list[str] = []
+    gap = ""  # the separator owed before the next code ("", " " or "\n")
+    i, n = 0, len(source)
+    # Frames as in strip_swift: ("code", paren depth or None at the top) and
+    # ("string", closing delimiter, hashes, multi-line).
+    stack: list[tuple] = [("code", None)]
+
+    def emit(text: str) -> None:
+        nonlocal gap
+        if gap and out:
+            out.append(gap)
+        gap = ""
+        out.append(text)
+
+    while i < n:
+        frame = stack[-1]
+        c = source[i]
+        if frame[0] == "code":
+            if c in SWIFT_SPACE or source.startswith("//", i) or source.startswith("/*", i):
+                start = i
+                while i < n:
+                    if source[i] in SWIFT_SPACE:
+                        i += 1
+                    elif source.startswith("//", i):
+                        i = line_end(source, i)
+                    elif source.startswith("/*", i):
+                        depth, j = 1, i + 2
+                        while j < n and depth:
+                            if source.startswith("/*", j):
+                                depth, j = depth + 1, j + 2
+                            elif source.startswith("*/", j):
+                                depth, j = depth - 1, j + 2
+                            else:
+                                j += 1
+                        if depth:
+                            return None  # a comment left open
+                        i = j
+                    else:
+                        break
+                if out:  # leading whitespace and comments of the file count for nothing
+                    gap = "\n" if ("\n" in source[start:i] or "\r" in source[start:i]) else " "
+                continue
+            if c == "/":
+                # An operator "/" or "/=" with whitespace on both sides; anything else may be a
+                # bare regex literal, whose text this reader cannot tell from code.
+                end = i + 2 if source.startswith("/=", i) else i + 1
+                before = source[i - 1] if i else " "
+                after = source[end] if end < n else " "
+                if before not in SWIFT_SPACE or after not in SWIFT_SPACE:
+                    return None
+                emit(source[i:end])
+                i = end
+                continue
+            if c == "#" and source[i:].lstrip("#").startswith("/"):
+                hashes = len(source[i:]) - len(source[i:].lstrip("#"))
+                close = "/" + "#" * hashes
+                j = i + hashes + 1
+                while j < n and not source.startswith(close, j):
+                    j += 2 if source[j] == "\\" else 1
+                if j >= n:
+                    return None
+                emit(source[i:j + len(close)])
+                i = j + len(close)
+                continue
+            if c == "`":
+                j = source.find("`", i + 1)
+                if j < 0 or "\n" in source[i:j] or "\r" in source[i:j]:
+                    return None
+                emit(source[i:j + 1])
+                i = j + 1
+                continue
+            if c == '"' or (c == "#" and source[i:].lstrip("#").startswith('"')):
+                hashes = 0
+                while source[i + hashes] == "#":
+                    hashes += 1
+                multi = source.startswith('"""', i + hashes)
+                opening = hashes + (3 if multi else 1)
+                emit(source[i:i + opening])
+                stack.append(("string", ('"""' if multi else '"') + "#" * hashes, hashes, multi))
+                i += opening
+                continue
+            if frame[1] is not None and c == "(":
+                stack[-1] = ("code", frame[1] + 1)
+            elif frame[1] is not None and c == ")":
+                if frame[1] == 1:
+                    stack.pop()  # back into the string
+                else:
+                    stack[-1] = ("code", frame[1] - 1)
+            emit(c)
+            i += 1
+        else:
+            _, close, hashes, multi = frame
+            escape = "\\" + "#" * hashes
+            if source.startswith(escape + "(", i):
+                out.append(escape + "(")
+                stack.append(("code", 1))
+                i += len(escape) + 1
+            elif source.startswith(escape, i) and i + len(escape) < n:
+                out.append(source[i:i + len(escape) + 1])
+                i += len(escape) + 1
+            elif source.startswith(close, i):
+                out.append(close)
+                stack.pop()
+                i += len(close)
+            elif c in "\r\n" and not multi:
+                return None  # a string left open at the end of its line
+            else:
+                out.append(c)
+                i += 1
+    if len(stack) != 1:
+        return None
+    return "".join(out)
+
+
+def swift_code_id(source: str | None, blob: str) -> str:
+    """What stands for a Swift file of the UI tests in a test fingerprint: the digest of its code
+    (swift_code), so a change to comments or indentation leaves the fingerprint, and with it
+    a red result, as it is; its git blob id where the code cannot be read for sure."""
+    code = swift_code(source) if source is not None else None
+    if code is None:
+        return f"blob {blob}"
+    return "code " + hashlib.sha256(code.encode("utf-8", errors="surrogateescape")).hexdigest()
+
+
 class SwiftFile:
     """What one Swift file declares and uses."""
 
-    def __init__(self, path: str, source: str):
+    def __init__(self, path: str, source: str | None):
         self.path = path
+        self.source = source  # None when git could not read it (its fingerprint then takes its bytes)
+        # Swift's line breaks ("\r\n", "\r", "\n") as "\n" for the line-based reader below.
+        source = (source or "").replace("\r\n", "\n").replace("\r", "\n")
         self.classes: dict[str, list[str]] = {}   # top-level class -> inherited names
         self.methods: dict[str, list[str]] = {}   # class or extended type -> test methods declared here
         self.exported: set[str] = set()            # names other files can use
@@ -324,7 +484,7 @@ def ui_files(tree) -> dict[str, SwiftFile]:
     files = {}
     for path in sorted(tree.files()):
         if path.startswith(UI_DIR) and path.endswith(".swift"):
-            files[path] = SwiftFile(path, tree.read(path) or "")
+            files[path] = SwiftFile(path, tree.read(path))
     return files
 
 
@@ -430,6 +590,11 @@ class Groups:
         if self.groups is None:
             raise ValueError(f"{GROUPS_FILE} is missing")
         self.files = ui_files(tree)
+        # A Swift file of the target counts by its code (comments and indentation left out), so a
+        # red result stays red until the test code really changes (owner's rule of 17.11.); every
+        # other file by its bytes.
+        blob_ids = tree.files()
+        self.code_ids = {p: swift_code_id(f.source, blob_ids[p]) for p, f in self.files.items()}
         self.tests = all_tests(self.files)
         self.graph = uses(self.files)
         blobs = tree.files()
@@ -474,7 +639,7 @@ class Groups:
         """The group's test fingerprint; in a quick run always another one."""
         blobs = self.tree.files()
         lines = [json.dumps(definition(self.group(name)), sort_keys=True)]
-        lines += [f"{p}\0{blobs[p]}" for p in self.files_of(name)]
+        lines += [f"{p}\0{self.code_ids.get(p) or blobs[p]}" for p in self.files_of(name)]
         if quick:
             # Every group, not only those whose files read the switch (reads_quick): a switch
             # read where this reader cannot see it must not make a quick result look full.

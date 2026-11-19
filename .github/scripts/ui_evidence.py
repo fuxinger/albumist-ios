@@ -6,10 +6,13 @@ test code (the owner's rule of 17.11.).
       $GITHUB_OUTPUT and a table to the job summary. "auto" runs every group that has no usable
       green result for this app fingerprint and its test fingerprint (ui_groups.py); "all" runs
       every group; names run those groups (also when they have a result).
-  python3 .github/scripts/ui_evidence.py gate [--quick]
+  python3 .github/scripts/ui_evidence.py gate [--quick] [--groups "flow-full contrast"]
       For testflight.yml before the upload (always full) and the "UI verdict" job of ui.yml:
       exits 1 unless every group's evidence holds (below). Writes `text=<one line>` (for the tag
-      message) to $GITHUB_OUTPUT.
+      message) to $GITHUB_OUTPUT. --groups checks only the named groups: the small gate of the
+      daily TestFlight build (testflight.yml, gate small; the owner's decision 10 of 18.11.2026).
+      The rules per group are the same; the groups left out are named in the summary and the
+      text as not checked.
 
 Quick mode (--quick; pull requests): the tests get SORTLY_UI_QUICK=1, and
 DeviceConditionUITests.test11_LargeLibrary (about 25 min) skips itself (XCTSkip). Every group
@@ -582,10 +585,20 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
 
 
 def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = False,
-         now: datetime | None = None) -> int:
+         now: datetime | None = None, only: str = "") -> int:
     tree, groups, app = current(tree)
+    names = groups.names()
+    chosen = only.split()
+    unknown = [w for w in chosen if w not in names]
+    if unknown:
+        print(earlier_attempts.command("error", "UI gate", f"unknown group(s) {' '.join(unknown)}; "
+                                       f"use some of: {' '.join(names)}"))
+        return 1
+    checked = [n for n in names if n in chosen] if chosen else names
+    left_out = [n for n in names if n not in checked]
     verifier = verifier or Verifier()
     mode = "quick" if quick else "full"
+    scope = f"{mode}, only {' '.join(checked)}" if left_out else mode
     call = counted(call or api)
     try:
         info = {}
@@ -601,7 +614,7 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
                                        "re-run this job when the API answers"))
         return 1
     print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
-    decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in groups.names()]
+    decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in checked]
     flaky = flaky_notes(decisions, call)
     cleared = cleared_notes(decisions, groups, verifier)
     parts, blocked = [], False
@@ -624,8 +637,10 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
         print(earlier_attempts.command("warning", "Flaky in a reused UI group", note))
     for note in cleared:
         print(earlier_attempts.command("warning", "UI red cleared by a shared change", note))
-    md = [f"### UI groups for app {app[:ui_groups.SHORT]} ({mode}): {'NOT green' if blocked else 'green'}", "",
+    md = [f"### UI groups for app {app[:ui_groups.SHORT]} ({scope}): {'NOT green' if blocked else 'green'}", "",
           table(decisions)]
+    if left_out:
+        md += [f"Not checked by this gate: {', '.join(left_out)}.", ""]
     if flaky:
         md += ["Flaky tests in reused results (passed only on a repeat; counted, to be fixed):", ""]
         md += [f"- {n}" for n in flaky] + [""]
@@ -636,7 +651,9 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
         md.append(f"**Not green** (no upload, no release): every group needs a green {mode} result for exactly this "
                   "app and its own test code, and none may be red for that pair.")
     append("GITHUB_STEP_SUMMARY", "\n".join(md) + "\n")
-    text = f"UI groups ({mode}): " + "; ".join(parts)
+    text = f"UI groups ({scope}): " + "; ".join(parts)
+    if left_out:
+        text += f"; not checked: {' '.join(left_out)}"
     append("GITHUB_OUTPUT", f"text={' '.join(text.splitlines())[:900]}\n")
     return 1 if blocked else 0
 
@@ -649,11 +666,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quick", action="store_true", help="a quick run (SORTLY_UI_QUICK=1)")
     g = sub.add_parser("gate")
     g.add_argument("--quick", action="store_true", help="the verdict of a quick run; never for an upload")
+    g.add_argument("--groups", default="", help="check only these groups (the small gate of the daily build)")
     args = parser.parse_args(argv)
     if args.command == "plan":
         return plan(args.groups.strip(), quick=args.quick)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
-    return gate(run_id, quick=args.quick)
+    return gate(run_id, quick=args.quick, only=args.groups)
 
 
 if __name__ == "__main__":

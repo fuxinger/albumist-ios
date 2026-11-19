@@ -123,11 +123,23 @@ public struct AlbumMatcher: Sendable {
         self.thresholds = thresholds
     }
 
+    /// The album recorded for a suggestion (`assignments`) is still its album: it shares
+    /// photos with it (`shared`), it is empty (a plan stopped before adding the photos), or the
+    /// user took the suggestion's photos out by hand. Otherwise it was made for other photos
+    /// under the same ID (second review of the place IDs, 18.11.2026).
+    public static func isStillAlbum(_ album: CollectionID, of proposal: AlbumProposal, shared: Int,
+                                    inventory: CollectionInventory, overrides: OverrideSet) -> Bool {
+        shared > 0 || inventory[album]?.assetIDs.isEmpty == true || proposal.assetIDs.contains { overrides.tookOut($0, of: album) }
+    }
+
     /// Version of the matching rules. Stored with the results; results of an older version
     /// are matched again at launch, so a changed rule never waits for the next analysis.
     /// 2: review 16.11. (possible matches never change or count, parts, one album per run).
     /// 3: "Gleicher Name gewinnt" (Fuchs 16.11.): an accepted trip "ergänzen Italien" is reopened.
-    public static let version = 3
+    /// 4: the album recorded for a suggestion stays its album only while it shares photos with it
+    ///    (`isStillAlbum`, second review of the place IDs 18.11.): saved matches that still offer
+    ///    "ergänzen" into an album made for other photos are matched again.
+    public static let version = 4
 
     /// Matches all proposals in one pass using an inverted membership index.
     /// - Parameters:
@@ -331,6 +343,15 @@ public struct AlbumMatcher: Sendable {
             let albums = membership[asset] ?? []
             stats.membershipReads += albums.count
             for album in albums { intersections[album, default: 0] += 1 }
+        }
+        // The album this suggestion was applied to is its album only while it is about the same
+        // photos: it holds some of them, or the user took them out by hand. One that shares no
+        // photo was made for other photos under this ID (a place that had it before, second
+        // review of the place IDs, 18.11.2026): it is not extended with these. An empty album
+        // stays its album: a plan stopped after creating it and before adding the photos, the
+        // next plan fills it (instead of a second album of the same name).
+        let assigned = assigned.flatMap { album -> CollectionID? in
+            Self.isStillAlbum(album, of: proposal, shared: intersections[album] ?? 0, inventory: inventory, overrides: overrides) ? album : nil
         }
         let tracksTrips: Bool
         if case .placeCollection = proposal.kind { tracksTrips = !tripOf.isEmpty } else { tracksTrips = false }

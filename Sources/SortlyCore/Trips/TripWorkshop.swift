@@ -146,4 +146,56 @@ public enum TripWorkshop {
         }
         return (before, after)
     }
+
+    /// What a split, a merge, "Aufheben" and "Reisen wieder automatisch erkennen" wait for. A
+    /// change is applied by an analysis, so none is taken while one runs (it read the changes
+    /// before) or while albums are made (a check follows them); each change starts a check
+    /// itself, so right after one the next waits. The screens grey these controls and say why
+    /// next to them until it ends (UI run 44375768011: right after a split the merge row was
+    /// off, looked tappable and said nothing).
+    public enum Wait: Hashable, Sendable {
+        /// A check works out the trips again: the one a change starts, or one for new photos.
+        /// Soon done.
+        case tripsAgain
+        /// The first analysis, or one that goes on after an interruption: until it is done,
+        /// which can take a while.
+        case analysis
+        /// Albumist makes albums in Photos.
+        case creatingAlbums
+    }
+
+    /// Nil when a change can be made now. `check`: the running analysis is a short check
+    /// (`shortCheck`), not the first or a resumed one, one with work of its own or the refinement.
+    public static func wait(creatingAlbums: Bool, analysing: Bool, check: Bool) -> Wait? {
+        if creatingAlbums { return .creatingAlbums }
+        guard analysing else { return nil }
+        return check ? .tripsAgain : .analysis
+    }
+
+    /// `check` for `wait` and `afterChange`: the run in progress is a short check, the one a
+    /// change starts after a complete analysis or one for a few new photos. Not a check with work
+    /// of its own (`newWork`: labels after "Themen" or "Dokumente" were turned on, many new
+    /// photos), and not the overnight refinement, which runs without a kind of its own and keeps
+    /// the last run's (review of b240899: both said "Gleich wieder möglich").
+    public static func shortCheck(kind isCheck: Bool, newWork: Bool, refinement: Bool) -> Bool {
+        isCheck && !newWork && !refinement
+    }
+
+    /// What the workshop does once a change is stored and its run asked for.
+    public enum AfterChange: Hashable, Sendable {
+        /// A short check applies it: the sheet waits for its end and then says what changed.
+        case waitHere
+        /// A longer run applies it, or none started yet (one waits for a change in "Dein
+        /// Zuhause" or for "Analyse neu aufbauen"): the sheet says the change is saved and is
+        /// applied once the analysis is done, and can be closed.
+        case savedForLater
+    }
+
+    /// A change during a Pause starts the run that goes on with the paused analysis (decision
+    /// 18.11.2026, "Analyse läuft dann weiter"), which can take tens of minutes; the sheet
+    /// waited for it with no way to close (review of 163d656). It waits only where the note
+    /// under the controls would say "Gleich wieder möglich".
+    public static func afterChange(running: Bool, check: Bool) -> AfterChange {
+        wait(creatingAlbums: false, analysing: running, check: check) == .tripsAgain ? .waitHere : .savedForLater
+    }
 }

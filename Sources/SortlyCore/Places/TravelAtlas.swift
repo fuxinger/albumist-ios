@@ -8,6 +8,9 @@ public struct TravelAtlas: Hashable, Sendable {
         public var start: Date
         public var days: Int
         public var photoCount: Int
+        /// The disputed area the trip mostly went to ("Taiwan"), shown in place of a country
+        /// (decision Fuchs 18.11.2026); then `countryCode` is empty.
+        public var areaName: String? = nil
     }
 
     /// ISO country codes with at least `minimumPhotosPerCountry` photos.
@@ -23,8 +26,10 @@ public struct TravelAtlas: Hashable, Sendable {
     }
     /// Most photographed town outside the home area (by trip photos), if any.
     public var favoriteTripCity: String?
-    /// A good photo from the favorite destination for the share image: a real photo (no
-    /// screenshot or video), favorites first, then the largest one.
+    /// A good photo from the favorite destination for the share image: a real photo the image
+    /// analysis has looked at (no screenshot, document, card, video or photo not analysed yet;
+    /// `PreviewRank.photo`: the image leaves the device), favorites first, then the largest
+    /// one. `nil` when there is none: the image is then shared without a photo.
     public var favoriteTripCover: AssetID?
     /// First photo per country, for the "countries light up in order" animation.
     public var firstVisits: [String: Date] = [:]
@@ -67,6 +72,13 @@ public struct TravelAtlas: Hashable, Sendable {
 
     public init() {}
 
+    static let disputedPrefix = "disputed-"
+
+    /// A place's country code, or "disputed-<id>" in a disputed area (no code there).
+    static func countryKey(of place: PlaceComponents) -> String? {
+        place.isoCountryCode ?? place.disputedArea.map { disputedPrefix + $0 }
+    }
+
     public static func compute(facts: [AssetFacts], minimumPhotosPerCountry: Int = 3, calendar: Calendar = .current) -> TravelAtlas {
         var atlas = TravelAtlas()
         var perCountry: [String: Int] = [:]
@@ -74,18 +86,24 @@ public struct TravelAtlas: Hashable, Sendable {
         var tripCities: [String: Int] = [:]
         var tripSpans: [SortlyID: (Date, Date)] = [:]
         var tripPlaces: [SortlyID: [String: Int]] = [:]
+        /// Per trip: photos by country code, or by "disputed-<id>" for a disputed area.
         var tripCountries: [SortlyID: [String: Int]] = [:]
+        var areaNames: [String: String] = [:]
         var tripPhotos: [SortlyID: Int] = [:]
         var firstDate: Date?
         var firstVisit: [String: Date] = [:]
 
         for f in facts {
-            guard let place = f.place, let code = place.isoCountryCode else { continue }
-            perCountry[code, default: 0] += 1
-            if let city = place.locality { cities.insert(code + "|" + city) }
+            // A disputed area (decision Fuchs 18.11.2026) is no country of the atlas, but its
+            // towns and trips count like any other (second review of 752ba07).
+            guard let place = f.place, let key = Self.countryKey(of: place) else { continue }
+            let code = place.isoCountryCode
+            if let code { perCountry[code, default: 0] += 1 }
+            if code == nil, let name = place.country { areaNames[key] = name }
+            if let city = place.locality { cities.insert(key + "|" + city) }
             if let date = f.asset.creationDate {
                 firstDate = min(firstDate ?? date, date)
-                firstVisit[code] = min(firstVisit[code] ?? date, date)
+                if let code { firstVisit[code] = min(firstVisit[code] ?? date, date) }
                 if let trip = f.tripID {
                     let span = tripSpans[trip] ?? (date, date)
                     tripSpans[trip] = (min(span.0, date), max(span.1, date))
@@ -94,8 +112,8 @@ public struct TravelAtlas: Hashable, Sendable {
             if f.tripID != nil, let city = place.locality { tripCities[city, default: 0] += 1 }
             if let trip = f.tripID {
                 tripPhotos[trip, default: 0] += 1
-                tripCountries[trip, default: [:]][code, default: 0] += 1
-                tripPlaces[trip, default: [:]][place.locality ?? place.country ?? code, default: 0] += 1
+                tripCountries[trip, default: [:]][key, default: 0] += 1
+                tripPlaces[trip, default: [:]][place.locality ?? place.country ?? key, default: 0] += 1
             }
         }
 
@@ -109,9 +127,11 @@ public struct TravelAtlas: Hashable, Sendable {
         }.max()
         func top(_ counts: [String: Int]?) -> String? { counts?.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key }
         atlas.trips = tripSpans.compactMap { id, span -> TripSummary? in
-            guard let place = top(tripPlaces[id]), let code = top(tripCountries[id]) else { return nil }
+            guard let place = top(tripPlaces[id]), let key = top(tripCountries[id]) else { return nil }
             let days = (calendar.dateComponents([.day], from: calendar.startOfDay(for: span.0), to: calendar.startOfDay(for: span.1)).day ?? 0) + 1
-            return TripSummary(place: place, countryCode: code, start: span.0, days: days, photoCount: tripPhotos[id] ?? 0)
+            let disputed = key.hasPrefix(Self.disputedPrefix)
+            return TripSummary(place: place, countryCode: disputed ? "" : key, start: span.0, days: days, photoCount: tripPhotos[id] ?? 0,
+                               areaName: disputed ? areaNames[key] : nil)
         }
         .sorted { $0.start < $1.start }
         atlas.favoriteTripCity = tripCities.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key
@@ -121,7 +141,7 @@ public struct TravelAtlas: Hashable, Sendable {
             }
             atlas.favoriteTripCover = facts
                 .lazy
-                .filter { $0.tripID != nil && $0.place?.locality == city && $0.asset.kind == .image && !$0.asset.isScreenshotLike }
+                .filter { $0.tripID != nil && $0.place?.locality == city && $0.asset.kind == .image && PreviewRank($0) == .photo }
                 .map(\.asset)
                 .max { rank($0) < rank($1) }?
                 .id
@@ -142,11 +162,12 @@ public struct TravelAtlas: Hashable, Sendable {
         return atlas
     }
 
-    /// Years with photos from at least one country, newest first (for the year picker).
+    /// Years with photos from at least one country or disputed area, newest first (for the
+    /// year picker).
     public static func years(facts: [AssetFacts], minimumPhotosPerCountry: Int = 3, calendar: Calendar = .current) -> [Int] {
         var counts: [Int: [String: Int]] = [:]
         for f in facts {
-            guard let code = f.place?.isoCountryCode, let date = f.asset.creationDate else { continue }
+            guard let code = f.place.flatMap(countryKey), let date = f.asset.creationDate else { continue }
             counts[calendar.component(.year, from: date), default: [:]][code, default: 0] += 1
         }
         return counts.filter { $0.value.values.contains { $0 >= minimumPhotosPerCountry } }.keys.sorted(by: >)

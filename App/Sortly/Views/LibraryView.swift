@@ -237,9 +237,14 @@ struct LibraryView: View {
 
     private var emptyDescription: LocalizedStringKey {
         switch bucket {
-        case .unorganized: "Alle Fotos liegen in deinen Hauptbereichen."
-        case .ignored: "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen."
-        default: "In diesem Bereich gibt es gerade nichts."
+        case .unorganized:
+            // "Nur 2026": the list holds what the ring counts, the photos of that year.
+            if case .year(let year) = model.analysisScope {
+                return "Alle Fotos aus \(String(year)) liegen in deinen Hauptbereichen."
+            }
+            return "Alle Fotos liegen in deinen Hauptbereichen."
+        case .ignored: return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen."
+        default: return "In diesem Bereich gibt es gerade nichts."
         }
     }
 }
@@ -337,7 +342,7 @@ struct AssetDetailView: View {
                         LabeledContent("Ort", value: place)
                     }
                     if let state = model.states[facts.id] {
-                        LabeledContent("Status") { Text(model.resolver.overall(state).label) }
+                        LabeledContent("Status") { Text(statusLabel(state)) }
                     }
                 }
                 Section {
@@ -416,6 +421,16 @@ struct AssetDetailView: View {
         }
     }
 
+    /// A photo the ring does not count (no main area applies, or outside the chosen year) is
+    /// not "Sortiert": it is not in that list either (one meaning of sorted, Fuchs 18.11.).
+    private func statusLabel(_ state: AssetOrganizationState) -> LocalizedStringKey {
+        let inScope = model.analysisScope.includes(facts, calendar: .sortlyDefault)
+        switch model.resolver.ringPart(state, inScope: inScope) {
+        case .outsideMainAreas, .outsideScope: return "Nicht mitgezählt"
+        default: return model.resolver.overall(state).label
+        }
+    }
+
     private var isIgnored: Bool {
         model.states[facts.id].map { model.resolver.overall($0) == .ignored } ?? false
     }
@@ -437,6 +452,12 @@ struct AssetDetailView: View {
         case .ignored: return "Du hast dieses Foto ignoriert."
         case .excluded: return "Dieses Foto ist von der Analyse ausgeschlossen, zum Beispiel weil es ausgeblendet ist."
         default:
+            // Outside the chosen year the ring does not count the photo ("Nicht mitgezählt" above).
+            // Only for photos that are not sorted: a sorted photo needs no "Warum nicht sortiert?" (review 18.11.).
+            if case .year(let year) = model.analysisScope,
+               model.resolver.ringPart(state, inScope: model.analysisScope.includes(facts, calendar: .sortlyDefault)) == .outsideScope {
+                return "Albumist zählt gerade nur Fotos aus \(String(year))."
+            }
             let statuses = Set(state.areas.values)
             if statuses.contains(.proposed) || statuses.contains(.pendingConfirmation) {
                 return "Es gibt schon einen Vorschlag dafür. Du findest ihn in der Übersicht."

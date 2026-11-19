@@ -41,7 +41,9 @@ public struct FrequentPlaceDetector: Sendable {
         self.calendar = calendar
     }
 
-    public func detect(in assets: [AssetSnapshot]) -> [FrequentPlace] {
+    /// - Parameter previous: the places of the previous analysis (`analysis.frequentPlaces`):
+    ///   each place keeps the ID of the one it mostly is (`carryOver`).
+    public func detect(in assets: [AssetSnapshot], previous: [FrequentPlace] = []) -> [FrequentPlace] {
         let usable = assets.compactMap { asset -> (AssetSnapshot, GeoCoordinate, Date)? in
             guard let c = asset.usableLocation, let d = asset.creationDate else { return nil }
             return (asset, c, d)
@@ -67,7 +69,7 @@ public struct FrequentPlaceDetector: Sendable {
             let p90 = distances[min(distances.count - 1, Int(Double(distances.count) * 0.9))]
             let ids = members.map(\.0.id).sorted()
             return FrequentPlace(
-                id: .stable("frequent", String(format: "%.3f,%.3f", centroid.latitude, centroid.longitude)),
+                id: Self.cellID(of: centroid),
                 centroid: centroid,
                 radiusMeters: max(p90, 25),
                 assetIDs: ids,
@@ -77,7 +79,87 @@ public struct FrequentPlaceDetector: Sendable {
                 userName: nil
             )
         }
-        return places.sorted { ($0.distinctDays, $0.photoCount) > ($1.distinctDays, $1.photoCount) }
+        return Self.carryOver(places, from: previous).sorted(by: Self.listOrder)
+    }
+
+    /// The order the app lists places in: most days, then most photos (then the first photo,
+    /// so ties do not depend on the order of the input).
+    static func listOrder(_ a: FrequentPlace, _ b: FrequentPlace) -> Bool {
+        if a.distinctDays != b.distinctDays { return a.distinctDays > b.distinctDays }
+        if a.photoCount != b.photoCount { return a.photoCount > b.photoCount }
+        return (a.assetIDs.first?.rawValue ?? "") < (b.assetIDs.first?.rawValue ?? "")
+    }
+
+    /// The ID a new place gets: its centre rounded to three decimals (a cell of about
+    /// 110 m × 75 m in Munich), the identity every place had before 18.11.2026.
+    static func cellID(of centroid: GeoCoordinate) -> SortlyID {
+        .stable("frequent", cellKey(of: centroid))
+    }
+
+    private static func cellKey(of centroid: GeoCoordinate) -> String {
+        String(format: "%.3f,%.3f", centroid.latitude, centroid.longitude)
+    }
+
+    /// Gives each place its ID. Stored names, "Nicht jetzt", decisions and the album Albumist
+    /// made are keyed by it, so a place keeps its ID by its photos, like a trip
+    /// (`TripIdentity.carryOver`), and never takes over the ID of another place (review
+    /// 18.11.2026, G1-04 and P1-01, and the second review of the fix).
+    ///
+    /// - A place keeps the ID of the place of the previous analysis (`previous`, as stored
+    ///   under `analysis.frequentPlaces`, in the app's order) it shares at least half of the
+    ///   smaller one's photos with. The biggest shared part is paired first (ties: the place
+    ///   with the smaller first photo ID, then the earlier previous place); each previous ID
+    ///   goes to one place. After a split, the bigger part keeps it.
+    /// - An ID that several previous places had (two places in one cell before 18.11.) belongs
+    ///   to the first of them: until then every lookup of a shared ID found the first suggestion
+    ///   in this order, so its name, decisions and album are the ones the user saw.
+    /// - Any other place is new: it gets its cell's ID if no place of this or the previous
+    ///   analysis has it (a place alone in its cell gets the ID it had before 18.11.), else an ID
+    ///   from its cell and its first photo. New places take their turn in the app's order.
+    static func carryOver(_ places: [FrequentPlace], from previous: [FrequentPlace]) -> [FrequentPlace] {
+        var owner: [AssetID: Int] = [:]
+        var owned = Set<SortlyID>()
+        for (index, place) in previous.enumerated() where owned.insert(place.id).inserted {
+            for asset in place.assetIDs where owner[asset] == nil { owner[asset] = index }
+        }
+        struct Pair { var shared: Int; var current: Int; var previous: Int }
+        var pairs: [Pair] = []
+        for (c, place) in places.enumerated() {
+            var counts: [Int: Int] = [:]
+            for asset in place.assetIDs {
+                if let p = owner[asset] { counts[p, default: 0] += 1 }
+            }
+            for (p, shared) in counts where shared * 2 >= min(place.photoCount, previous[p].photoCount) {
+                pairs.append(Pair(shared: shared, current: c, previous: p))
+            }
+        }
+        func firstPhoto(_ c: Int) -> String { places[c].assetIDs.first?.rawValue ?? "" }
+        pairs.sort { x, y in
+            if x.shared != y.shared { return x.shared > y.shared }
+            if x.current != y.current { return firstPhoto(x.current) < firstPhoto(y.current) }
+            return x.previous < y.previous
+        }
+        var result = places
+        var carried = Set<Int>(), usedPrevious = Set<Int>()
+        for pair in pairs where !carried.contains(pair.current) && !usedPrevious.contains(pair.previous) {
+            carried.insert(pair.current)
+            usedPrevious.insert(pair.previous)
+            result[pair.current].id = previous[pair.previous].id
+        }
+        var taken = Set(carried.map { result[$0].id }).union(previous.map(\.id))
+        let new = result.indices.filter { !carried.contains($0) }.sorted { listOrder(result[$0], result[$1]) }
+        for index in new {
+            let key = cellKey(of: result[index].centroid), first = result[index].assetIDs.first?.rawValue ?? ""
+            var id = cellID(of: result[index].centroid)
+            var salt = 0
+            while taken.contains(id) {
+                id = salt == 0 ? .stable("frequent", key, first) : .stable("frequent", key, first, String(salt))
+                salt += 1
+            }
+            result[index].id = id
+            taken.insert(id)
+        }
+        return result
     }
 
     private func mergeNearby(_ groups: [[Int]], coordinates: [GeoCoordinate]) -> [[Int]] {

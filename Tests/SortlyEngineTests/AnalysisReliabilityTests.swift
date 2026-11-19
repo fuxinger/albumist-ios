@@ -262,21 +262,6 @@ struct AnalysisReliabilityTests {
 
     static let fivePlaces = [Fixture.Places.munichHome, Fixture.Places.rome, Fixture.Places.florence, Fixture.Places.naples, Fixture.Places.gardaLake]
 
-    @Test func appRunWaitsForTheGeocoderOnlyBriefly() async throws {
-        let time = ManualTime()
-        let geocoder = RefusingGeocoder()
-        let service = PlaceResolutionService(
-            map: Self.map, geocoder: geocoder, cache: MemoryPlaceCache(),
-            policy: PlaceResolutionPolicy(deepestLevel: .locality, onlineAllowed: true, language: .german), time: time.source
-        )
-        let outcome = try await service.resolve(requests(Self.fivePlaces), maxRateLimitWait: .seconds(30)) { _ in }
-        // Asked once, waited once, asked again; then the rest waits for a later run.
-        #expect(geocoder.calls.withLock { $0 } == 2)
-        #expect(time.now.withLock { $0 } <= .seconds(31))
-        #expect(outcome.stoppedBecauseThrottled)
-        #expect(outcome.pendingOnline.count == Self.fivePlaces.count)
-    }
-
     @Test func refusedLookupsStopAfterOneCellAlsoWithoutALimit() async throws {
         let time = ManualTime()
         let geocoder = RefusingGeocoder()
@@ -316,8 +301,117 @@ struct AnalysisReliabilityTests {
         #expect(report.isComplete)
         #expect(report.placesThrottled)
         #expect(report.contentAnalyzed == s.photos.count)
-        #expect(s.time.now.withLock { $0 } <= AnalysisPipeline.foregroundRateLimitWait + .seconds(1))
+        // Device test 18.11. (build 36): not even the 30 s it waited before ("Apple antwortet
+        // gleich" with the count standing still). Asked once, refused, no more asking.
+        #expect(s.time.now.withLock { $0 } == .zero)
+        #expect(geocoder.calls.withLock { $0 } == 1)
         #expect(report.placesPendingOnline > 0)
+    }
+
+    // MARK: A run in the app never waits for the geocoder (device test 18.11., build 36)
+
+    /// Photos in `count` place cells of their own around Munich (one town lookup each).
+    func gridPhotos(_ count: Int, prefix: String = "grid") -> [AssetSnapshot] {
+        (0..<count).map { i in
+            let coordinate = GeoCoordinate(latitude: 47.8 + Double(i / 10) * 0.07, longitude: 11.0 + Double(i % 10) * 0.1)
+            return AssetSnapshot(id: AssetID("\(prefix)\(i)"), kind: .image,
+                                 creationDate: Fixture.date("2026-03-01 10:00").addingTimeInterval(Double(i) * 3_600),
+                                 location: coordinate, pixelWidth: 4032, pixelHeight: 3024)
+        }
+    }
+
+    /// "Apple antwortet gleich" stood for 20–30 s with the count still: Albumist's own limit of
+    /// 40 lookups a minute made a run with an online budget of 60 wait for the window. A run in
+    /// the app asks only what fits without a wait; the rest stays pending, with its country.
+    @Test func runInTheAppNeverWaitsForTheThrottle() async throws {
+        let geocoder = FakeGeocoder()
+        let s = try setup(photos: 0, geocoder: geocoder, foregroundOnlineBudget: 60)
+        let grid = gridPhotos(100)
+        await s.reader.set(assets: grid)
+        let report = try await s.pipeline.run()
+        #expect(report.isComplete)
+        #expect(s.time.now.withLock { $0 } == .zero)
+        #expect(report.onlineRequests == RequestThrottle.apple.maxRequests)
+        #expect(geocoder.calls.count == RequestThrottle.apple.maxRequests)
+        #expect(!report.placesThrottled)
+        let places = try await s.store.places()
+        let towns = grid.filter { places[$0.id]?.components.locality == "München" }
+        #expect(towns.count == RequestThrottle.apple.maxRequests)
+        // The rest waits for a later run: counted as pending, with the country from the map.
+        #expect(report.placesPendingOnline == grid.count - towns.count)
+        #expect(grid.allSatisfy { places[$0.id]?.components.isoCountryCode == "DE" })
+    }
+
+    /// The requests of the run before count for the minute: a run right after it (photos added,
+    /// "Neu prüfen") asks only for what is left of the 40 and does not wait either.
+    @Test func runRightAfterARunCountsItsRequests() async throws {
+        let geocoder = FakeGeocoder()
+        let s = try setup(photos: 0, geocoder: geocoder, foregroundOnlineBudget: 60)
+        await s.reader.set(assets: gridPhotos(30))
+        let first = try await s.pipeline.run()
+        #expect(first.onlineRequests == 30)
+        #expect(first.placesPendingOnline == 0)
+
+        s.clock.advance(20)
+        await s.reader.set(assets: gridPhotos(60))
+        let second = try await s.pipeline.run()
+        #expect(second.onlineRequests == RequestThrottle.apple.maxRequests - 30)
+        #expect(second.placesPendingOnline == 20)
+        #expect(s.time.now.withLock { $0 } == .zero)
+    }
+
+    /// A run that stopped asking because the throttle had no free slot starts the hour, like a
+    /// used-up budget: a run within the hour asks nothing (even once Apple's minute is over),
+    /// a run after it asks again what fits (second review of the no-wait fix, finding SF1).
+    @Test func aRunStoppedByTheThrottleStartsTheHour() async throws {
+        let geocoder = FakeGeocoder()
+        let s = try setup(photos: 0, geocoder: geocoder, foregroundOnlineBudget: 60)
+        await s.reader.set(assets: gridPhotos(100))
+        let first = try await s.pipeline.run()
+        #expect(first.onlineRequests == RequestThrottle.apple.maxRequests)
+        #expect(first.placesPendingOnline == 60)
+
+        // Apple's minute is over (the throttle has free slots again); the hour is not.
+        s.time.now.withLock { $0 += .seconds(120) }
+        s.clock.advance(5 * 60)
+        let second = try await s.pipeline.run()
+        #expect(second.onlineRequests == 0)
+        #expect(geocoder.calls.count == RequestThrottle.apple.maxRequests)
+        #expect(second.placesPendingOnline == 60)
+
+        s.time.now.withLock { $0 += .seconds(AnalysisPipeline.foregroundOnlineCooldown) }
+        s.clock.advance(AnalysisPipeline.foregroundOnlineCooldown)
+        let third = try await s.pipeline.run()
+        #expect(third.onlineRequests == RequestThrottle.apple.maxRequests)
+        #expect(third.placesPendingOnline == 20)
+    }
+
+    /// The overnight refinement may wait: it gets the towns the run in the app left.
+    @Test func refinementStillWaitsForTheThrottle() async throws {
+        let geocoder = FakeGeocoder()
+        let s = try setup(photos: 0, geocoder: geocoder, foregroundOnlineBudget: 60)
+        let grid = gridPhotos(100)
+        await s.reader.set(assets: grid)
+        let first = try await s.pipeline.run()
+        #expect(first.placesPendingOnline > 0)
+        #expect(s.time.now.withLock { $0 } == .zero)
+
+        let refined = try await s.pipeline.run(mode: .refinement)
+        #expect(refined.placesPendingOnline == 0)
+        #expect(s.time.now.withLock { $0 } >= .seconds(60))
+        let places = try await s.store.places()
+        #expect(grid.allSatisfy { places[$0.id]?.components.locality == "München" })
+    }
+
+    /// After a refusal the refinement waits and asks again; a run in the app does not (above).
+    @Test func refinementStillWaitsAfterARefusal() async throws {
+        let geocoder = FakeGeocoder(failures: [.rateLimited(retryAfter: 20)])
+        let s = try setup(photos: 12, geocoder: geocoder, foregroundOnlineBudget: 60)
+        let report = try await s.pipeline.run(mode: .refinement)
+        #expect(report.placesPendingOnline == 0)
+        #expect(!report.placesThrottled)
+        #expect(s.time.now.withLock { $0 } >= .seconds(20))
+        #expect(try await s.store.places()[s.photos[0]]?.components.locality == "München")
     }
 
     /// Device test 15.11.: "es dauert lange, bis die App nach Pause weiterläuft". Fortsetzen

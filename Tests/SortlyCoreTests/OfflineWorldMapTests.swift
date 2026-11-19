@@ -94,12 +94,20 @@ struct OfflineWorldMapTests {
         #expect(r?.region.nameEN.contains("Basel") == true)
     }
 
+    /// 500 lookups stay cheap. Counted, not timed (review of bundle-i, 19.11.2026): the old
+    /// limit of 2 s wall clock failed at 2.09 s in a full parallel run (0.6 s alone). Measured
+    /// on the map of 19.11.: 2,991 regions looked at, 1,234 rings and 1,008,420 points decoded.
+    /// The limits leave about 30 %; reading every ring of a region near the point (no ring
+    /// boxes) or every region (no region boxes) decodes many times more.
     @Test func lookupIsFast() {
-        let clock = ContinuousClock()
-        let elapsed = clock.measure {
-            for i in 0..<500 { _ = at(35 + Double(i % 25), -5 + Double(i % 30)) }
+        var work = OfflineWorldMap.LookupWork()
+        for i in 0..<500 {
+            _ = Self.map.lookup(GeoCoordinate(latitude: 35 + Double(i % 25), longitude: -5 + Double(i % 30)), work: &work)
         }
-        #expect(elapsed < .seconds(2))
+        #expect(work.regions <= 4_000, "\(work)")
+        #expect(work.rings <= 1_600, "\(work)")
+        #expect(work.points <= 1_300_000, "\(work)")
+        #expect(work.points >= 500_000, "the count must see the decoding: \(work)")
     }
 
     @Test func rejectsGarbage() {

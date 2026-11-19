@@ -67,6 +67,7 @@ struct AnalysisProgressCard: View {
         case .waiting(.cooling, _): return String(localized: "Wartet, bis dein iPhone abkühlt")
         case .waiting(.charging, _): return String(localized: "Wartet aufs Laden")
         case .waiting(.photos, _): return String(localized: "Fotos antwortet gerade nicht")
+        case .waiting(.busy, _): return String(localized: "Albumist war gerade ausgelastet")
         case .pausing: return String(localized: "Wird angehalten …")
         case .paused: return String(localized: "Analyse pausiert")
         case .quickCheck: return String(localized: "Sucht neue Fotos")
@@ -88,7 +89,7 @@ struct AnalysisProgressCard: View {
         switch state {
         case .waiting(.cooling, _): "thermometer.medium"
         case .waiting(.charging, _): "battery.25percent"
-        case .waiting(.photos, _): "hourglass"
+        case .waiting(.photos, _), .waiting(.busy, _): "hourglass"
         case .paused: "pause.circle"
         default: nil
         }
@@ -98,7 +99,9 @@ struct AnalysisProgressCard: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             header
             progress
-            if case .running(let p, _, _, _) = state, p?.step == .places {
+            // Not during the overnight refinement: it is the "later" this note speaks of, and
+            // says itself what it waits for.
+            if case .running(let p, _, _, _) = state, p?.step == .places, !model.analysis.refining {
                 Text("Städtenamen kommen von Apple, das braucht etwas Zeit. Was jetzt nicht fertig wird, holt Albumist nach, wenn dein iPhone das nächste Mal lädt.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -158,14 +161,15 @@ struct AnalysisProgressCard: View {
     private var control: some View {
         switch state {
         case .paused:
-            Button { model.startAnalysis(userInitiated: true) } label: { CardTextButton("Fortsetzen") }
+            Button { model.startAnalysis(cause: .tap) } label: { CardTextButton("Fortsetzen") }
                 .accessibilityLabel("Analyse fortsetzen")
                 .accessibilityIdentifier("analysis.resume")
         case .pausing:
             EmptyView()
-        case .waiting(.photos, _) where !model.analysis.isRunning:
-            // The run ended because Photos did not answer; the next try comes by itself, or now.
-            Button { model.startAnalysis(userInitiated: true) } label: { CardTextButton("Jetzt versuchen") }
+        case .waiting(.photos, _) where !model.analysis.isRunning, .waiting(.busy, _) where !model.analysis.isRunning:
+            // The run ended because Photos did not answer, or because Albumist was too busy to
+            // ask it; the next try comes by itself, or now.
+            Button { model.startAnalysis(cause: .tap) } label: { CardTextButton("Jetzt versuchen") }
                 .accessibilityLabel("Analyse jetzt erneut versuchen")
                 .accessibilityIdentifier("analysis.retry")
         default:
@@ -274,19 +278,24 @@ struct AnalysisProgressCard: View {
         .animation(reduceMotion ? nil : .snappy, value: position.step)
     }
 
-    /// Under the count: the finish time, Apple's wait, why it is slower, what waiting means.
+    /// Under the count: the finish time, the wait for Apple's limit, why it is slower, what waiting means.
     @ViewBuilder
     private var statusLines: some View {
         Group {
             switch state {
             case .running(_, let slower, let appleWait, _):
                 if appleWait {
-                    // The wait can last a minute; the spinner says it is alive meanwhile
-                    // (limit: nothing stands still for more than 10 s while work goes on).
+                    // Only the overnight refinement waits for Apple's geocoder (a run in the app
+                    // never does), seen when the app is opened while it runs. It says why, with
+                    // a countdown renewed every 2 s, in minutes above one (a wait after a refusal
+                    // lasts up to 10 min); the spinner moves meanwhile (limit: nothing stands
+                    // still for more than 10 s without saying why; device test 18.11., build 36).
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
                             .accessibilityHidden(true)
-                        Text("Apple antwortet gleich")
+                        Text(AnalysisText.appleWait(model.analysis.appleWaitLeft ?? .zero))
+                            .contentTransition(.numericText(countsDown: true))
+                            .accessibilityIdentifier("analysis.appleWait")
                     }
                 } else if let finish = model.analysisFinish {
                     Text(AnalysisText.finish(finish))
@@ -308,6 +317,8 @@ struct AnalysisProgressCard: View {
                 Text("Unter \(Int(DeviceState.appBatteryFloor * 100)) % Akku. Geht weiter, sobald dein iPhone lädt.")
             case .waiting(.photos, _):
                 Text("Albumist wartet auf die Fotos-App und versucht es sonst gleich noch einmal. Du musst nichts tun.")
+            case .waiting(.busy, _):
+                Text("Geht gleich von selbst weiter. Du musst nichts tun.")
             case .pausing(_, let longer):
                 Text("Macht noch fertig, was gerade läuft.")
                 if longer { Text("Dauert noch einen Moment.") }
@@ -677,7 +688,7 @@ struct AnalysisDetailsSheet: View {
         // Never 100 % before the end (`AnalysisPercent`).
         parts.append(AnalysisPercent.value(model.analysisBar, isComplete: model.analysis.isComplete)
             .formatted(.percent.precision(.fractionLength(0))))
-        if let start = model.analysisStartedAt, model.analysis.isRunning {
+        if let start = model.analysisStartedAt, model.analysis.isRunning, !model.analysis.refining {
             let elapsed = Duration.seconds(max(60, now.timeIntervalSince(start)))
             parts.append(String(localized: "bisher \(elapsed.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))"))
         }
@@ -777,6 +788,7 @@ extension AnalysisCardState {
         case .waiting(.cooling, _): "cooling"
         case .waiting(.charging, _): "charging"
         case .waiting(.photos, _): "photos"
+        case .waiting(.busy, _): "busy"
         case .pausing: "pausing"
         case .paused: "paused"
         case .finished: "finished"

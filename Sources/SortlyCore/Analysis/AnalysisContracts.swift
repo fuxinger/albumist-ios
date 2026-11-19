@@ -162,7 +162,12 @@ public struct ContentAnalysis: Hashable, Sendable, Codable {
     /// Speed-up 5: full text recognition only for screenshots and document-like images.
     public func needsTextRecognition(for asset: AssetSnapshot) -> Bool {
         if asset.kind == .video { return false }
-        if asset.isScreenshotLike { return true }
+        return asset.isScreenshotLike || isDocumentLike
+    }
+
+    /// The image is a document, receipt, card, ticket or other utility picture rather than a
+    /// memorable photo. Its text is read, and it is a poor preview or cover (`PreviewRank`).
+    public var isDocumentLike: Bool {
         if looksLikeDocument { return true }
         // A photographed letter, receipt or whiteboard the labels missed: Vision's utility
         // flag finds documents the label list alone does not.

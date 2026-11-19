@@ -16,8 +16,42 @@
   13 Abfragen auf die Tabelle `assets` in `SortlyStore` und die Anzeige der App bei eingeschränktem Zugriff und ist
   darum nicht im Kern allein zu machen.
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
-  Länder und Regionen kommen immer aus der Offline-Karte.
+  Länder und Regionen kommen immer aus der Offline-Karte. Ein Lauf in der App fragt höchstens
+  40 Ortsnamen pro Minute und wartet nie darauf; was fehlt, kommt mit einem späteren Lauf
+  (frühestens nach einer Stunde) oder der nächtlichen Verfeinerung.
+- Albumists Zähler dieser Ortsabfragen (`RequestLog`, 40 pro Minute) liegt nur im Speicher:
+  Wird die App beendet und innerhalb einer Minute wieder gestartet, kennt er die Abfragen davor
+  nicht, und in dieser Minute können bis zu 80 an Apple gehen. Lehnt Apple dann ab, hört ein
+  Lauf in der App sofort auf; die Verfeinerung wartet. Bewusst nicht gespeichert (Zweitprüfung
+  des Fixes, 18.11.).
+- Die Karte der nächtlichen Verfeinerung (bei geöffneter App) nennt keine Fertig-Uhrzeit, und
+  ihr Titel ist der Name des Schritts, nicht „Verfeinerung“.
 - `CLGeocoder` ist in iOS 26 als veraltet markiert; der Nachfolger in MapKit ist geplant.
+- Umstrittene Gebiete (Entscheidung Fuchs 18.11., `DisputedAreas`): Krim, Westsahara, Kaschmir,
+  Nordzypern, Kosovo, Taiwan, Golanhöhen und Abchasien heißen mit ihrem eigenen Namen statt eines
+  Landes, ihr Vorschlag ist „Unsicher“. Die Umrisse von Westsahara, Golanhöhen und Aksai Chin
+  und die Umrisse auf dem Wasser (um die Krim mit der Straße von Kertsch, um Taiwan, Penghu und
+  die kleinen Inseln, Kästen um Matsu, Pratas, Lieyu, Dadan, Erdan, Wuqiu und Dongding, die Gewässer im
+  Norden Zyperns) sind grob (einige Kilometer). Die winzigen, unbewohnten Inseln Fuxing und
+  Shiyu westlich von Lieyu liegen womöglich außerhalb des Kastens (ihre Lage ist nicht sicher
+  geprüft); dort entscheidet Apples Antwort. An der Grenze
+  (bis etwa 1,5 km), wo die Karte nicht sicher ist und Apple das Nachbarland nennt (etwa
+  Serbien am Kosovo, Republik Zypern an der Pufferzone), gilt das Nachbarland. Orte, die vor dem Update bestimmt wurden, behalten ihr altes Land, bis „Analyse
+  neu aufbauen“ sie neu bestimmt. Eine automatische Nachprüfung gibt es bewusst nicht: Die
+  Entscheidungen, Titel und Alben eines Ortsvorschlags hängen an seinem Schlüssel, und für Krim,
+  Nordzypern, Westsahara und Kaschmir bleibt der alte Länderschlüssel („Russland“) für den Rest
+  des Landes bestehen; eine Entscheidung zu „Russland“ ließe sich nicht sauber auf „Krim“
+  übertragen. Im Reise-Atlas zählen diese Gebiete nicht als Land (ihre Reisen und Orte zählen
+  mit dem Gebietsnamen), und die Atlas-Karte (auch im Teilen-Bild) füllt sie nie mit einem
+  besuchten Land (`AtlasShapes`). Ein Tippen auf ein Gebiet öffnet nichts: Für ein Gebiet gibt es
+  keine eigene Seite, und die Seite eines der Länder ergriffe Partei (`AtlasShapes.tappedCode`).
+  Das Malen der Karte und das Tippen sind bisher nur auf Linux (Regel) und im Code geprüft, noch
+  nicht auf einem Mac (`AtlasRenderingTests`). Die Suche findet sie über den Gebiets- oder Ortsnamen, nicht als
+  Land. Nicht in der Liste: Südossetien, Transnistrien, Somaliland,
+  Westjordanland und Ost-Jerusalem (dort gilt die Karte wie bisher). Noch nicht behandelt, offene
+  Frage an Fuchs: das Shaksgam-Tal (von China verwaltet, von Indien als Teil Kaschmirs beansprucht;
+  die Karte sagt sicher „China“), Arunachal Pradesh (von China beansprucht; die Karte sagt
+  „Indien“) und die südlichen Kurilen (von Japan beansprucht; die Karte sagt „Russland“).
 - Sprache der Albumnamen gewechselt (Prüfbefund P1-12): Länder und Regionen aller
   gespeicherten Orte werden beim nächsten Lauf aus der Offline-Karte neu benannt (der Wechsel
   startet einen Lauf). Städte und Ortsteile kommen von Apples Ortssuche und bleiben in der
@@ -49,6 +83,41 @@
   solchen Tag (nächstes Reisefoto 36 Stunden später) teilt die Reise. Die Reise-Werkstatt
   (Teilen/Zusammenführen) korrigiert beides.
 
+## Häufige Orte
+
+- Ein häufiger Ort behält seine Kennung (und damit Name, „Nicht jetzt“, Entscheidung und Album)
+  über seine Fotos: jede Analyse vergleicht mit den Orten der vorigen (seit der zweiten Prüfung
+  vom 18.11.2026). Offen bleibt:
+  - Ändern sich die Fotos eines Orts zwischen zwei Analysen um mehr als die Hälfte (viele
+    gelöscht, zwei Orte zusammengewachsen oder geteilt), gilt er als neuer Ort.
+  - Fiel ein Ort aus einer Analyse heraus (unter fünf Tage, etwa nach dem Löschen von Fotos),
+    kennt die nächste ihn nicht mehr: kommt er wieder, bekommt er die Kennung seiner Zelle,
+    wenn sie frei ist (meist seine alte). Entsteht später ein neuer Ort in derselben Zelle
+    (Mittelpunkt auf drei Stellen gerundet), bekommt dieser die Kennung, wenn sie frei ist, und
+    damit Name und „Nicht jetzt“ des verschwundenen Orts; ein Album des alten Orts wird mit
+    den neuen Fotos nicht ergänzt (es teilt keine Fotos mit ihm), ein schon angenommenes
+    „ergänzen“ dorthin ist nach der Analyse wieder offen. Ist das Album des alten Orts leer
+    (alle Fotos gelöscht), bleibt es das Album der Kennung und der neue Ort kommt hinein.
+    Selten (ein neuer Ort im selben Feld von etwa 110 m × 75 m); der Name lässt sich ändern.
+  - Ob ein „ergänzen“ vom Vorschlag kam oder über „Anderes Album wählen“, speichert Albumist
+    nicht. Hat der Nutzer selbst das Album gewählt, das für die Kennung eingetragen ist und keine
+    Fotos mit dem Vorschlag teilt, wird seine Wahl deshalb einmal wieder geöffnet (die Übersicht
+    sagt „Vorschläge neu geprüft“); wählt er es erneut, bleibt es. Gemerkt wird das je Vorschlag
+    und Album in `user.reopenedExtensions` (wie alle `user.`-Werte auch in der Sicherheitskopie),
+    bis der Vorschlag weder eine Entscheidung noch ein eingetragenes Album hat.
+  - Nach „Analyse neu aufbauen“ fehlen die vorigen Orte: Kennungen werden neu vergeben, ein Ort
+    allein in seiner Zelle bekommt wieder die alte; von zwei Orten einer Zelle bekommt der in
+    der App zuerst gezeigte die Zellkennung, der andere Zelle und erste Foto-ID, was nicht
+    immer die Kennung von vorher ist (etwa wenn ältere Fotos nachgekommen sind).
+
+- Derselbe Ort als Ort, an dem du öfter bist, und als häufiger Ort (gleich ab der Hälfte der
+  Fotos des größeren): Bleibt der häufige Ort, weil er dir gehört (benannt, gewählt oder mit
+  Album), fällt der Ort, an dem du öfter bist, weg. Fotos, die nur er hatte (bei Fuchs 87 von
+  509 rund um Zwiesel), sind dann in keinem dieser beiden Vorschläge; ohne anderen Vorschlag
+  (etwa das Ortsalbum ihrer Stadt) bleiben sie „Nicht sortiert“, und ihre Reisen kommen nicht
+  zurück, weil du dort öfter bist. Mit Absicht so (Entscheidung vom
+  18.11.2026), damit kein zweites Album für fast dieselben Fotos vorgeschlagen wird.
+
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.
 - Analyse auf Vorschaubildern; kleine Motive werden eventuell nicht erkannt.
@@ -77,8 +146,82 @@
   („4111/1111/…“), damit Telefonnummern wie „04321/12345678“ bleiben; eine Amex-Nummer mit
   Schrägstrichen (4-6-5) bleibt lesbar. Andere Schreibweisen (Buchstaben zwischen den Gruppen,
   stark verlesene Ziffern) können lesbar bleiben.
+- Medizinische Dokumente erkennt Albumist an Wörtern auf Deutsch und Englisch (den Sprachen der
+  Texterkennung), seit Masken-Version 5 (Nebenbefund G2-03, 18.11.) auch englische Arztbriefe
+  („Diagnosis“, „Discharge summary“, „Medication“, ICD-Codes). Ein Brief, der keines dieser
+  Wörter nennt (etwa „Betreff: Depression, stationäre Behandlung“), wird wie ein gewöhnlicher
+  Brief gespeichert (IBAN und Karten maskiert). Ein Schlüsselwort zählt nur am Wortanfang
+  (zweite Prüfung: „Collab report“, „Bau-Bescheinigung“, „Rezeption“, „Libanon“, „bicycle“,
+  „patiently“, „please be patient“ bleiben gewöhnlicher Text), deutsche Wörter auch am Ende
+  einer Zusammensetzung („Laborbefund“, „Facharztbrief“). Englische Zusammensetzungen ohne
+  Leerzeichen („misdiagnosis“) zählen deshalb nicht. Was weiter als medizinisch gilt, obwohl es
+  das nicht ist (der Text wird dann nicht gespeichert und ist nicht per Volltext suchbar): eine
+  Anleitung mit „Fehlerdiagnose“/„Fault diagnosis“, ein Kochrezept („Rezept“), ein Arbeitsvertrag
+  mit „sick leave“, „patient“ als Eigenschaftswort nach anderen Wörtern als be/so/very/more/
+  stay/remain („a patient teacher“). Ein von OCR getrenntes Wort zählt nur, wenn der
+  Bindestrich am Zeilenende steht („Diag-⏎nosis“), nicht mitten in der Zeile.
+- Gelöschter Text wird seit der zweiten Prüfung von G2-03 in der Datenbankdatei mit Nullen
+  überschrieben (`secure_delete`), der Suchindex nach dem Nachmaskieren verdichtet und das
+  Protokoll geleert. Seiten, die eine ältere Version freigegeben hat, können alten Text noch
+  enthalten, bis SQLite sie wiederverwendet oder die App gelöscht wird (kein `VACUUM`).
 - Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
   der Gesundheitskarte. Der Text bleibt auf dem Gerät.
+- Vorschauen und Titelbilder lassen sensible Dokumente weg (`PreviewRank`), erkennen sie aber
+  nur aus dem, was die Analyse gespeichert hat. Im Zweifel wird ausgeblendet: Ein Bild, das die
+  Bildanalyse für ein Dokument hielt, gilt als sensibel, solange sein Text es nicht als harmloses
+  Dokument erklärt (Text noch nicht gelesen, Original nur in iCloud, unlesbar wegen Spiegelung
+  oder Winkel, Kartennummer auf der Rückseite oder verlesen, Ausweis oder Arztbrief ohne
+  erkannte Dokumentart). Ebenso sensibel: jedes Bild mit leerem gelesenem Text ohne
+  Dokument-Einordnung (so speicherten ältere Versionen Ausweis- und Arzt-Screenshots; nichts wird
+  dafür neu gelesen) und ein Bildschirmfoto, dessen Text nicht gelesen ist und das kein
+  Screenshot-Thema erklärt. Was trotzdem durchrutschen kann:
+  - Ein Foto, das die Bildanalyse **nicht** für ein Dokument hielt, wird nie gelesen und gilt als
+    gewöhnliches Foto, auch eine Bankkarte. Welche Bildmerkmale Vision einem Kartenfoto gibt,
+    ist noch nicht auf einem Gerät geprüft (Liste `ContentAnalysis.documentLabels` kennt kein
+    Karten-Merkmal); Idee in `IMPROVEMENTS.md` (Kartenform ID-1).
+  - Sind „Themen“ und „Dokumente“ aus, fragt die Bildanalyse keine Merkmale ab: dann zählt nur
+    Visions Kennzeichen für Gebrauchsbilder. Sind „Screenshots“, „Dokumente“ und „Messenger“ aus,
+    wird kein Text gelesen: dann fehlen alle Bildschirmfotos und alle Bilder, die die Bildanalyse
+    für ein Dokument hielt, in Vorschauen; bei Fotos zählt nur die Bildanalyse.
+  - Fotos, die die Bildanalyse noch nicht angesehen hat (vor allem während der ersten Analyse:
+    frühe Vorschläge, das Mosaik), kommen erst nach allen angesehenen gewöhnlichen Fotos, werden
+    aber gezeigt, wenn es zu wenige angesehene gibt: sie füllen jeden Platz, der übrig bleibt. Ein
+    Kartenfoto darunter ist dann noch nicht erkannt. Das Mosaik der ersten Analyse sieht sich je
+    Abschnitt höchstens 256 Bilder an und nimmt das erste nicht angesehene, wenn darunter kein
+    angesehenes Foto ist. Das Teilen-Bild des Atlas nimmt nie ein solches Foto.
+  - Themen, die vor allem aus Bildern mit Dokument-Anschein bestehen (Whiteboards, technische
+    Dokumentation), zeigen oft „Vorschau ausgeblendet“: ohne erklärenden Text gelten diese Bilder
+    als sensibel. Das Album bekommt trotzdem alle Fotos.
+  - Ein Beleg, der „VISA“ oder „girocard“ nennt, gilt für Vorschauen als sensibel und fehlt dort;
+    im Beleg-Album bleibt er (die Kartenwörter ändern die Dokument-Einordnung nicht). Ein Beleg,
+    der „Kreditkarte“, eine IBAN oder „BIC“ nennt, ist dagegen schon länger als finanziell
+    eingeordnet und fehlt deshalb im Beleg-Album, solange „Sensible Dokumente einbeziehen“ aus ist
+    (Standard); das ist älteres Verhalten und hier nicht geändert.
+  - Eine maskierte Bestell- oder Sendungsnummer, die die Kartenprüfung besteht, macht einen
+    Screenshot zum sensiblen Dokument: er fehlt dann nur in der Vorschau.
+  - Bildschirmaufnahmen (Videos) werden nie gelesen und sind in Vorschauen immer ausgeblendet
+    (entschieden, für den Datenschutz): ein eingeschalteter Vorschlag „Bildschirmaufnahmen“
+    zeigt „Vorschau ausgeblendet“; das Album bekommt trotzdem alle Aufnahmen.
+  - Rezepte: „Rezept“ ist ein medizinisches Wort, ein Rezept-Screenshot wird deshalb ohne
+    gespeicherten Text abgelegt (unverändert). Für Vorschauen zählt ein Bildschirmfoto mit dem
+    Thema „Rezepte“, leerem Text und keiner oder nur einer medizinischen Einordnung ohne
+    Dokumentart als Dokument. Was dabei durchrutschen kann: ein medizinischer Screenshot, den die
+    Themen-Erkennung auch für ein Rezept hält (ein Beipackzettel mit „Teelöffel“ oder
+    „Zubereitung“), und ein Rezept-Screenshot, der zusätzlich eine Karte, IBAN oder
+    Ausweiszeile zeigt (die Einordnung behält dann nur die medizinische Stufe). Ein Rezept-
+    Screenshot mit erkannter Dokumentart bleibt ausgeblendet.
+  - Kartenwörter werden über alle üblichen Leerzeichen (auch schmale und ideografische),
+    neben Satzzeichen (auch chinesischen und japanischen) und in Vollbreite („ＶＩＳＡ“) erkannt;
+    andere Schriften für dieselben Wörter (kyrillische oder griechische Buchstaben, die wie
+    lateinische aussehen) nicht.
+
+## Suche
+- Orte, denen du einen Namen gibst, findet die Suche unter diesem Namen, auch bevor ihr Album
+  angelegt ist (Prüfbefund G1-05). Umbenannte Reisen und andere Vorschläge, die keine Orte
+  sind, findet sie unter dem neuen Namen erst über ihr Album.
+- Ein Name aus mehreren Wörtern wird als Ganzes gefunden, wie bei Städten und Alben: ein Wort
+  daraus allein („Kleingarten“ für „Mein Kleingarten“) findet den Ort nicht. Beim Tippen bietet
+  die Suche den ganzen Namen an.
 
 ## Jahreszeiten
 - Jahreszeiten sind noch nicht als Alben wählbar. Werden sie es, gilt: Frühling und Herbst
@@ -90,6 +233,23 @@
 iOS speichert keine verlässliche Quell-App. Albumist nutzt nur klare Hinweise (Messenger-
 Screenshots, vorhandene Alben, optional Dateinamen-Muster) und markiert alles andere als
 unbekannt.
+
+## Ring und Listen der Mediathek
+- Ring und Liste „Sortiert“ folgen derselben Regel (`OrganizationStatusResolver.ringPart`,
+  Entscheidung Fuchs 18.11.), werden aber zu verschiedenen Zeitpunkten neu gerechnet. Kurz
+  auseinander liegen sie:
+  - direkt nach „Ignorieren“, „Widerrufen“ oder „Nicht mehr ignorieren“: die Listen folgen dem
+    Tippen sofort (`IgnoreChange`), der Ring erst mit der Neuzählung im Hintergrund
+    (gewollt, damit keine Zahl zurückspringt; meist unter einer Sekunde, bei 50.000 Fotos
+    einige Sekunden);
+  - solange der Ring „Wird neu gezählt · Zuletzt X von Y sortiert“ zeigt (`RecountState`, nach
+    „Analyse neu aufbauen“ oder während Fotos ihre Labels für „Themen“/„Dokumente“ nachholen):
+    der Ring hält die alte Zahl, die Listen zeigen schon den neuen Stand;
+  - direkt nach dem Wechsel des Jahres („Nur 2026“): die Listen werden sofort neu gemacht, der
+    Ring zählt einen Augenblick später (`changeScope` stößt die Neuzählung sofort an).
+- Ein Foto, das ignoriert wird, verschwindet beim Ignorieren aus „Sortiert“ oder „Nicht
+  sortiert“; ist es sortiert, werden „x“ und „y“ im Ring je um eins kleiner (der Anteil kann
+  dann leicht sinken). Ignorieren eines offenen Fotos oder eines Fotos von zu Hause senkt ihn nie.
 
 ## Nicht unterstützte Sammlungen
 Smart-Alben, geteilte Alben, iCloud-Shared-Library-Besonderheiten, Alben aus anderen Apps

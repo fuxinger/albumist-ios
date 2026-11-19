@@ -7,8 +7,10 @@ import SortlyCore
 struct TripWorkshopView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var proposal: AlbumProposal
-    /// Called after a change: the suggestion this sheet came from no longer exists.
+    /// Called once a change is stored: the suggestion this sheet came from goes away with the
+    /// run that applies it, however the sheet is closed then.
     var onChanged: () -> Void
 
     private enum Outcome { case split, merged, undone }
@@ -17,6 +19,8 @@ struct TripWorkshopView: View {
     @State private var splitIndex: Int?
     @State private var working: Outcome?
     @State private var done: Outcome?
+    /// The change is saved and a longer run applies it (`TripWorkshop.AfterChange.savedForLater`).
+    @State private var saved = false
     @State private var merging: Side?
     @State private var failed = false
 
@@ -40,19 +44,26 @@ struct TripWorkshopView: View {
                     .padding(.vertical, Theme.Spacing.xs)
                 }
             } else {
+                let around = model.tripNeighbours(of: proposal)
+                let mergeShown = around.before != nil || around.after != nil
                 header(days)
-                changesSection
+                // While the changes wait, why is said once, under the last of these controls.
+                changesSection(saysWhy: !mergeShown)
                 // Merging is one tap and short; the days list can be long, so it comes last.
-                mergeSection
+                if mergeShown { mergeSection(around) }
                 splitSection(days)
             }
         }
         .navigationTitle("Reise anpassen")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // A round close button: the wider "Abbrechen" pushed the title off centre.
+            // A round close button: the wider "Abbrechen" pushed the title off centre. Also while
+            // the sheet waits for the run and once a change is saved: the change is stored, so
+            // closing loses nothing (re-review of 7e8aba3: a long check that started fresh read as
+            // short and held the sheet). Only the applied change's result leads on with
+            // "Zu den Reisen".
             ToolbarItem(placement: .cancellationAction) {
-                if done == nil && working == nil {
+                if done == nil || saved {
                     Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
                 }
             }
@@ -65,7 +76,9 @@ struct TripWorkshopView: View {
                     .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .interactiveDismissDisabled(working != nil)
+        // The controls grey and the note comes while the changes wait, and both go back by
+        // themselves when the run ends (they follow the model).
+        .animation(reduceMotion ? nil : .smooth, value: model.tripChangeWait)
         // The change shows once the analysis that applies it has finished.
         .onChange(of: model.analysis.isRunning) { _, running in
             guard !running, let finished = working else { return }
@@ -81,12 +94,27 @@ struct TripWorkshopView: View {
         }
     }
 
-    private var busy: Bool { model.analysis.isRunning || model.execution.isRunning }
+    /// An analysis runs (each change starts one) or albums are made: the changes wait, and
+    /// `TripChangeWaitNote` says so next to them.
+    private var busy: Bool { model.tripChangeWait != nil }
 
+    /// The sheet waits only for a short check, the run a change starts after a complete
+    /// analysis. A change during a Pause starts the run that goes on with the paused analysis
+    /// (decision 18.11.2026), which can take tens of minutes: the change is saved, the sheet says
+    /// so and can be closed (review of 163d656: it waited with no way to close).
     private func perform(_ outcome: Outcome, _ change: @escaping @MainActor () async -> Bool) {
         Task {
             if await change() {
-                withAnimation(.smooth) { working = outcome }
+                onChanged()
+                switch model.afterTripChange {
+                case .waitHere:
+                    withAnimation(.smooth) { working = outcome }
+                case .savedForLater:
+                    withAnimation(.smooth) {
+                        saved = true
+                        done = outcome
+                    }
+                }
             } else {
                 failed = true
             }
@@ -111,9 +139,10 @@ struct TripWorkshopView: View {
         }
     }
 
-    /// What the user changed at this trip before, each with "Aufheben".
+    /// What the user changed at this trip before, each with "Aufheben". `saysWhy`: no merge
+    /// rows follow, so this footer says why "Aufheben" waits.
     @ViewBuilder
-    private var changesSection: some View {
+    private func changesSection(saysWhy: Bool) -> some View {
         let changes = model.tripChanges(around: proposal)
         if !changes.isEmpty {
             Section {
@@ -135,13 +164,21 @@ struct TripWorkshopView: View {
                         }
                         .buttonStyle(.borderless)
                         .disabled(busy)
+                        .tripChangeWaitHint(model.tripChangeWait)
                         .accessibilityIdentifier("workshop.undoChange")
                     }
                 }
             } header: {
                 Text("Deine Änderungen")
             } footer: {
-                Text("Aufheben lässt Albumist diese Reisen wieder selbst erkennen.")
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    if saysWhy { TripChangeWaitNote() }
+                    Text("Aufheben lässt Albumist diese Reisen wieder selbst erkennen.")
+                    // During a Pause "Aufheben" starts the analysis again (decision 18.11.2026).
+                    if model.analysis.isPausedByUser {
+                        Text("Die pausierte Analyse läuft dann weiter.")
+                    }
+                }
             }
         }
     }
@@ -195,7 +232,16 @@ struct TripWorkshopView: View {
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(busy)
+            .tripChangeWaitHint(model.tripChangeWait)
             .accessibilityIdentifier("workshop.split")
+            // The bar covers the end of the list, so it says itself why the button waits.
+            TripChangeWaitNote(identifier: "workshop.split.busyNote")
+            // During a Pause the split starts the analysis again (decision 18.11.2026).
+            if model.analysis.isPausedByUser {
+                Text("Die pausierte Analyse läuft dann weiter.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(Theme.Spacing.m)
         .floatingPanel()
@@ -203,49 +249,35 @@ struct TripWorkshopView: View {
         .padding(.bottom, Theme.Spacing.s)
     }
 
-    @ViewBuilder
-    private var mergeSection: some View {
-        let around = model.tripNeighbours(of: proposal)
-        if around.before != nil || around.after != nil {
-            Section {
-                if let before = around.before {
-                    mergeButton(before, side: .before)
-                }
-                if let after = around.after {
-                    mergeButton(after, side: .after)
-                }
-            } header: {
-                Text("Zusammenlegen")
-            } footer: {
+    private func mergeSection(_ around: (before: AlbumProposal?, after: AlbumProposal?)) -> some View {
+        Section {
+            if let before = around.before {
+                mergeButton(before, side: .before)
+            }
+            if let after = around.after {
+                mergeButton(after, side: .after)
+            }
+        } header: {
+            Text("Zusammenlegen")
+        } footer: {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                TripChangeWaitNote()
                 Text("Für eine Reise mit Pause, zum Beispiel ein Wochenende zu Hause zwischen zwei Stationen.")
             }
         }
     }
 
     private func mergeButton(_ other: AlbumProposal, side: Side) -> some View {
-        Button {
+        let photos = Text("\(other.assetIDs.count) Fotos")
+        return Button {
             merging = side
         } label: {
-            HStack(spacing: Theme.Spacing.s) {
-                Image(systemName: "arrow.triangle.merge")
-                    .font(.title3)
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 32)
-                    .accessibilityHidden(true)
-                let photos = Text("\(other.assetIDs.count) Fotos")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(side == .before ? "Mit der Reise davor zusammenlegen" : "Mit der Reise danach zusammenlegen")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.accent)
-                    Text("\(title(other)) · \(photos)")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            MergeRowLabel(title: side == .before ? "Mit der Reise davor zusammenlegen" : "Mit der Reise danach zusammenlegen",
+                          detail: Text("\(title(other)) · \(photos)"))
         }
         .buttonStyle(.plain)
         .disabled(busy)
+        .tripChangeWaitHint(model.tripChangeWait)
         .accessibilityIdentifier(side == .before ? "workshop.merge.before" : "workshop.merge.after")
         .confirmationDialog("Zu einer Reise zusammenlegen?", isPresented: Binding(get: { merging == side }, set: { if !$0 { merging = nil } }),
                             titleVisibility: .visible) {
@@ -254,9 +286,15 @@ struct TripWorkshopView: View {
                 perform(.merged) { await model.mergeTrips(first, second) }
             }
         } message: {
-            // The earlier trip first, as in the trip list read from the past.
+            // The earlier trip first, as in the trip list read from the past. During a Pause the
+            // merge starts the analysis again (decision 18.11.2026): said before the tap.
             let (first, second) = side == .before ? (other, proposal) : (proposal, other)
-            Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(other.assetIDs.count + proposal.assetIDs.count) Fotos.")
+            let total = other.assetIDs.count + proposal.assetIDs.count
+            if model.analysis.isPausedByUser {
+                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) Fotos. Die pausierte Analyse läuft dann weiter.")
+            } else {
+                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) Fotos.")
+            }
         }
     }
 
@@ -269,25 +307,33 @@ struct TripWorkshopView: View {
                     .foregroundStyle(Theme.accent)
                     .symbolEffect(.bounce, value: done != nil)
                     .accessibilityHidden(true)
-                Group {
-                    switch outcome {
-                    case .split: Text("Aus einer Reise sind zwei geworden.")
-                    case .merged: Text("Die zwei Reisen sind jetzt eine.")
-                    case .undone: Text("Deine Änderung ist aufgehoben.")
+                if saved {
+                    // Not applied yet: the run that goes on with the analysis does it.
+                    Text("Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist.")
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Group {
+                        switch outcome {
+                        case .split: Text("Aus einer Reise sind zwei geworden.")
+                        case .merged: Text("Die zwei Reisen sind jetzt eine.")
+                        case .undone: Text("Deine Änderung ist aufgehoben.")
+                        }
                     }
-                }
-                .font(.headline)
-                .multilineTextAlignment(.center)
-                Group {
-                    if outcome == .undone {
-                        Text("Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst.")
-                    } else {
-                        Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen.")
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    Group {
+                        if outcome == .undone {
+                            Text("Albumist erkennt diese Reisen wieder selbst. Die Vorschläge sind schon angepasst.")
+                        } else {
+                            Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen.")
+                        }
                     }
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.subheadline).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Spacing.s)
@@ -320,6 +366,50 @@ struct TripWorkshopView: View {
     }
 }
 
+/// Why splitting, merging, "Aufheben" and "Reisen wieder automatisch erkennen" wait, under the
+/// controls it explains: a small spinner and one sentence, only while they wait
+/// (`AppModel.tripChangeWait`). Controls and note follow the model, so both come back by
+/// themselves when the run ends (UI run 44375768011: right after a split the merge row was off,
+/// looked tappable and said nothing).
+struct TripChangeWaitNote: View {
+    @Environment(AppModel.self) private var model
+    var identifier = "workshop.busyNote"
+
+    var body: some View {
+        if let wait = model.tripChangeWait {
+            Label {
+                Text(Self.reason(wait))
+            } icon: {
+                ProgressView()
+                    .controlSize(.mini)
+                    .accessibilityHidden(true) // the text beside it says what runs
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(identifier)
+        }
+    }
+
+    static func reason(_ wait: TripWorkshop.Wait) -> LocalizedStringKey {
+        switch wait {
+        case .tripsAgain: LocalizedStringKey("Albumist rechnet die Reisen gerade neu. Gleich wieder möglich.")
+        // The first analysis or one that goes on can take long: no "gleich".
+        case .analysis: LocalizedStringKey("Albumist analysiert gerade deine Fotos. Danach wieder möglich.")
+        case .creatingAlbums: LocalizedStringKey("Albumist legt gerade Alben an. Danach wieder möglich.")
+        }
+    }
+}
+
+extension View {
+    /// While trip changes wait, VoiceOver says why on the greyed control itself, not only in the
+    /// note under it (the reason of `TripChangeWaitNote`); no hint otherwise.
+    func tripChangeWaitHint(_ wait: TripWorkshop.Wait?) -> some View {
+        accessibilityHint(wait.map { Text(TripChangeWaitNote.reason($0)) } ?? Text(verbatim: ""))
+    }
+}
+
 private extension TripChange {
     var isSplit: Bool {
         if case .split = self { return true }
@@ -327,15 +417,45 @@ private extension TripChange {
     }
 }
 
+/// "Mit der Reise davor/danach zusammenlegen": in the accent while it can be tapped, in the
+/// system's greys while it waits (a plain button keeps the colours it is given).
+private struct MergeRowLabel: View {
+    var title: LocalizedStringKey
+    var detail: Text
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.s) {
+            Image(systemName: "arrow.triangle.merge")
+                .font(.title3)
+                .foregroundStyle(isEnabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
+                .frame(width: 32)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                detail
+                    .font(.subheadline)
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+            }
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+}
+
 /// One day of the trip: first photo, date, number of photos, and the split mark.
 private struct DayRow: View {
+    @Environment(AppModel.self) private var model
     var day: TripWorkshop.Day
     var note: String?
     var selected: Bool
 
     var body: some View {
         HStack(spacing: Theme.Spacing.s) {
-            AssetThumbnail(id: day.assetIDs[0], side: 88)
+            // The day's first photo that suits a cover: not the photographed ticket or bank card.
+            CoverThumbnail(id: PreviewPicker.firstSuited(day.assetIDs, count: 1, ranks: model.previewRanks).first, side: 88)
                 .frame(width: 44, height: 44)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             // The note sits under the date: on the right it pushed "Dienstag, 1. August" onto two lines.

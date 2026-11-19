@@ -17,34 +17,19 @@ final class DeviceConditionUITests: XCTestCase {
     // MARK: Helpers (copied from SortlyFlowUITests, which stays as it is)
 
     private func launch(_ extra: [String] = []) {
+        // Ended first: the stall file holds the app's process id for the Mac (`UITestAppEnd`).
+        UITestAppEnd.end(app)
         UITestStalls.report()
         if !stallsReportedAtEnd {
             stallsReportedAtEnd = true
             addTeardownBlock { UITestStalls.report() }
         }
-        endRunningApp()
         app = XCUIApplication()
         let stalls = UITestStalls.arguments(besides: extra)
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
         launchExtra = extra
         UITestOnboarding.clock("launch")
         app.launch()
-    }
-
-    /// Ends the app of the last launch before the next one, and logs how long that took. Left to
-    /// `launch()`, XCTest ends it on its own: on a busy CI Mac that failed with "Failed to
-    /// terminate app.albumist.ios:20655" although the app stood idle on the overview (test07,
-    /// UI run 44446270757, 6 s after the last tap). `terminate()` here goes through the same
-    /// XCTest call with its own time limit, so it can fail the same way; this does not prevent
-    /// the failure, it shows how long ending takes (and whether ending itself hangs). The extra
-    /// wait only matters when `terminate()` returns with the app still there.
-    private func endRunningApp() {
-        guard app.state != .notRunning else { return }
-        let asked = Date()
-        UITestOnboarding.clock("end the app before the next launch")
-        app.terminate()
-        let gone = app.wait(for: .notRunning, timeout: 60)
-        print("UI_TIMING app ended before the next launch \(Int(Date().timeIntervalSince(asked))) s (\(gone ? "ended" : "still running"))")
     }
 
     /// The test's own arguments of the last launch: the onboarding helpers open the app again
@@ -135,6 +120,73 @@ final class DeviceConditionUITests: XCTestCase {
             start = end
             index += 1
         }
+    }
+
+    /// Sends the app to the background and waits until iOS reports it there, then at least
+    /// `atLeast` seconds in all. A fixed sleep was not enough on a starved Mac: in PR #9's UI run
+    /// 44480215847 (test06, 19.11.) the app was back before it had ever entered the background,
+    /// so the full disk (cleared by didEnterBackground) stayed full and the analysis stood still
+    /// for 2 min with the notice coming back. One more second after the state changed gives the
+    /// app's own didEnterBackground observers their turn.
+    ///
+    /// The Home press itself can be lost on the CI simulator: in UI run 44497741096 (19.11.) the
+    /// app stayed in the foreground (state 4) for 30 s after it in test03 and test06, while
+    /// simctl calls to the same simulator timed out. So a lost press is tried once more, and then
+    /// the Settings app is brought to the front, which sends this app to the background without
+    /// SpringBoard's Home gesture. Each extra try is a counted flaky retry (UI_FLAKY_RETRY), never
+    /// silent; the test fails only when no way reached the background.
+    @discardableResult
+    private func sendToBackground(_ why: String, atLeast: TimeInterval, timeout: TimeInterval = 30) -> Bool {
+        let pressed = Date()
+        UITestOnboarding.clock("wait start app in the background \(why)")
+        func inBackground(within seconds: TimeInterval) -> Bool {
+            let until = Date().addingTimeInterval(seconds)
+            repeat {
+                let state = app.state
+                if state == .runningBackground || state == .runningBackgroundSuspended || state == .notRunning { return true }
+                usleep(250_000)
+            } while Date() < until
+            return false
+        }
+        // Plain values, no closures: XCUIDevice and XCUIApplication belong to the main actor.
+        let ways: [(name: String, wait: TimeInterval)] = [
+            ("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30),
+        ]
+        var reached = false
+        // The time in the background counts from the way that worked: a second press or the
+        // Settings app can be 20-35 s after the first press, and the test still needs its
+        // `atLeast` seconds there (second review, 19.11.: else test03's expiry might not happen).
+        var wayStarted = pressed
+        for (index, way) in ways.enumerated() {
+            wayStarted = Date()
+            if index > 0 {
+                print("UI_FLAKY_RETRY \(testID) app still in the foreground (state \(app.state.rawValue)) \(Int(Date().timeIntervalSince(pressed))) s after the Home press \(why), tried: \(way.name)")
+            }
+            if index < 2 {
+                XCUIDevice.shared.press(.home)
+            } else {
+                XCUIApplication(bundleIdentifier: "com.apple.Preferences").activate()
+            }
+            if inBackground(within: way.wait) {
+                reached = true
+                print("UI_FACT app in the background \(why) by \(way.name)")
+                break
+            }
+        }
+        let took = Date().timeIntervalSince(pressed)
+        print("UI_FACT app in the background \(why): state \(app.state.rawValue) after \(String(format: "%.1f", took)) s")
+        print(reached ? "UI_STEP_OK app in the background \(why)" : "UI_STEP_MISSING app in the background \(why) (Home twice and Settings, \(Int(took)) s)")
+        XCTAssertTrue(reached, "The app did not reach the background \(why)")
+        let wait = reached ? max(atLeast - Date().timeIntervalSince(wayStarted), 1) : 0
+        if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
+        return reached
+    }
+
+    /// "DeviceConditionUITests.test03_…" for UI_FLAKY_RETRY (XCTest's name is "-[Module.Class test]").
+    private var testID: String {
+        let parts = name.trimmingCharacters(in: CharacterSet(charactersIn: "-[]")).split(separator: " ")
+        let type = parts.first.flatMap { $0.split(separator: ".").last }.map(String.init) ?? "DeviceConditionUITests"
+        return "\(type).\(parts.last.map(String.init) ?? "unknown")"
     }
 
     /// Polls until `condition` held on `stableChecks` checks in a row (2 s apart).
@@ -729,8 +781,7 @@ final class DeviceConditionUITests: XCTestCase {
             let waited = Date().timeIntervalSince(left)
             if waited < 5 { usleep(UInt32((5 - waited) * 1_000_000)) }
             let finished = app.buttons["result.receipt"].exists
-            UITestOnboarding.clock("end the app during \(name)")
-            app.terminate()
+            UITestAppEnd.end(app, "during \(name)")
             let closedAfter = Int(Date().timeIntervalSince(tapped))
             print("UI_FACT \(name) running when the app was closed: \(!finished) (preview left, result shown \(finished)), closed \(closedAfter) s after the tap")
             sleep(2)
@@ -877,8 +928,7 @@ final class DeviceConditionUITests: XCTestCase {
         start(["-SortlyUITestSlowAnalysis", "-SortlyUITestExpireInBackground"])
         guard rebuildAnalysis(), waitForImageStep("image step before leaving") else { return }
         record("before leaving")
-        XCUIDevice.shared.press(.home)
-        sleep(6) // the run ends in the background: iOS took the time away
+        sendToBackground("for the background time to run out", atLeast: 6) // the run ends there: iOS took the time away
         app.activate()
         var caughtUp = false
         let goesOn = waitStable("analysis goes on after the background time ran out", timeout: 40, stableChecks: 2) {
@@ -898,7 +948,7 @@ final class DeviceConditionUITests: XCTestCase {
             seen = []
         }
         record("before ending the app")
-        app.terminate()
+        UITestAppEnd.end(app, "during the analysis")
         sleep(2)
         start(["-SortlyUITestSlowAnalysis", "-SortlyUITestLaunchAnalysis"])
         let restarted = waitStable("analysis runs by itself after relaunch", timeout: 60, stableChecks: 1) { analysisRunning || analysisIdle }
@@ -1065,8 +1115,7 @@ final class DeviceConditionUITests: XCTestCase {
         // Space is freed in the Settings app; back in Albumist the analysis goes on by itself
         // (its count moves). That it then ends with every photo is
         // DeviceConditionRunTests.fullDiskDuringTheAnalysisThenSpaceAgainEndsWithEveryPhoto.
-        XCUIDevice.shared.press(.home)
-        sleep(4)
+        sendToBackground("to free space", atLeast: 4)
         app.activate()
         expectAnalysisGoesOn("after the disk had space again", dismissing: true)
         shot("11-after-disk-full-analysis")
@@ -1086,7 +1135,7 @@ final class DeviceConditionUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground, "The app ended with a full disk during the plan")
         XCUIDevice.shared.press(.home)
         sleep(3)
-        app.terminate()
+        UITestAppEnd.end(app, "after the full disk during the plan")
         sleep(2)
         start()
         let card = anything("wurde unterbrochen")
@@ -1383,17 +1432,19 @@ final class DeviceConditionUITests: XCTestCase {
 
     // MARK: 12 Stress: 50 000 photos, iCloud-only, offline
 
-    /// Runs only when the runner sets SORTLY_STRESS_PHOTOS (ui-stress.yml, started by hand;
-    /// xcodebuild hands TEST_RUNNER_SORTLY_STRESS_PHOTOS on as that); the "device conditions"
-    /// group of ui.yml skips it at once. Two phases, so that neither disturbs the other (stress runs
-    /// 43795785359 and 43823462215 mixed them):
+    /// Runs only when the runner sets SORTLY_STRESS_PHOTOS (ui-stress.yml: before each TestFlight
+    /// build, weekly at night, or by hand; xcodebuild hands TEST_RUNNER_SORTLY_STRESS_PHOTOS on
+    /// as that); the "device conditions" group of ui.yml skips it at once. Two phases, so that
+    /// neither disturbs the other (stress runs 43795785359 and 43823462215 mixed them):
     /// 1. Creating: launches with `-SortlyUITestCreateOnly` add that many photos and end the
     ///    app when they are done, writing how far they are into a file of the runner's.
     /// 2. Measuring: a fresh launch sets the database aside (-SortlyUITestRebuildDatabase) and
     ///    analyses everything from the start, originals only in iCloud and no network. Printed:
     ///    speed per step, Pause and Fortsetzen reaction, the longest time the progress line
     ///    stood still, the slowest answer of the app (one snapshot). The workflow samples the
-    ///    app's memory on the Mac and prints crash reports and why iOS ended the app.
+    ///    app's memory on the Mac and prints crash reports and why iOS ended the app. Fails
+    ///    unless photos were counted in the image step and Pause and Fortsetzen were tried
+    ///    (or the whole library was analysed before either could come).
     func test12_StressManyPhotosICloudOnlyOffline() throws {
         guard let count = ProcessInfo.processInfo.environment["SORTLY_STRESS_PHOTOS"].flatMap({ Int($0) }), count > 0 else {
             throw XCTSkip("Stress run only (SORTLY_STRESS_PHOTOS)")
@@ -1434,7 +1485,7 @@ final class DeviceConditionUITests: XCTestCase {
                 sleep(5)
             }
             print("UI_TIMING stress create round \(rounds): \(elapsed(round)) s, last word '\(said)'")
-            if app.state != .notRunning, !app.wait(for: .notRunning, timeout: 30) { app.terminate() }
+            if app.state != .notRunning, !app.wait(for: .notRunning, timeout: 30) { UITestAppEnd.end(app, "after creating photos") }
         }
         print("UI_TIMING stress create \(elapsed(began)) s in \(rounds) launches (done: \(complete))")
         XCTAssertTrue(complete, "Creating \(count) photos did not finish")
@@ -1525,6 +1576,23 @@ final class DeviceConditionUITests: XCTestCase {
         print("UI_FACT stress result \(String(describing: analysedPhotos()))")
         shot("26-stress-done")
         if !finished { print("UI_FACT stress measured \(minutes) min; the analysis was not finished then (simulator speed)") }
+        // The measurement means something only when the analysis got on and Pause was tried
+        // (Prüfer B G5-07: a run that only said "Wartet" for 15 min, or never reached Pause,
+        // was green). Photos counted in the image step while measured; or, for a library small
+        // enough to be done before that, every photo analysed. The image step begins about 3 min
+        // in with 10,000 photos and about 14 min in with 50,000 (stress run 44116350940: 3,419
+        // photos in its last 31 of 45 min), so both passes count photos in it.
+        let allAnalysed = finished && everyPhotoAnalysed
+        let imageStep = stepCounts[4].map { $0.last - $0.first } ?? 0
+        print("UI_FACT stress image step counted \(imageStep) photos while measured (all analysed: \(allAnalysed))")
+        XCTAssertTrue(imageStep > 0 || allAnalysed,
+                      "The analysis did not get on in \(minutes) min: no photo counted in the image step (steps seen: \(stepCounts.keys.sorted()), last line '\(lastLine)')")
+        // Pause comes 200 photos or 2 min into the image step; it can only be missed by a library
+        // whose whole analysis is done before that.
+        if !paused && allAnalysed {
+            print("UI_FACT stress pause not tried: the analysis was done before 200 photos or 2 min of the image step")
+        }
+        XCTAssertTrue(paused || allAnalysed, "Pause and Fortsetzen were never tried: the image step did not run 200 photos or 2 min within \(minutes) min")
         XCTAssertEqual(ended, 0, "The app ended during the analysis")
         let still = recorded.map { (seconds: $0.seconds, line: $0.line) } ?? longestStill
         XCTAssertLessThanOrEqual(still.seconds, 10, "The progress line stood still \(String(format: "%.1f", still.seconds)) s at '\(still.line)'")
@@ -1632,7 +1700,13 @@ final class DeviceConditionUITests: XCTestCase {
     /// "Fortsetzen", but its label is "Analyse fortsetzen": found by its identifier now.
     private func measurePauseAndResume() {
         let pause = app.buttons["analysis.pause"]
-        guard pause.waitForExistence(timeout: 5) else { print("UI_STEP_MISSING stress pause"); return }
+        guard pause.waitForExistence(timeout: 5) else {
+            // The card shows Pause while the analysis runs (AnalysisProgressCard.control), and
+            // this is called only while the image step counts: a missing button is a finding.
+            print("UI_STEP_MISSING stress pause")
+            XCTFail("No Pause button on the analysis card during the image step ('\(progressText() ?? "")')")
+            return
+        }
         let before = analysisCount()?.done ?? 0
         let tapStarted = Date()
         pause.tap()
@@ -1641,8 +1715,12 @@ final class DeviceConditionUITests: XCTestCase {
         var firstLook: (line: String, took: Double)?
         var reacted: Double?
         var resumeShown: Double?
+        // Each look's start and the count in its line (one snapshot: the count read separately
+        // came half a second later and dated a move during the tap after Fortsetzen, TestFlight
+        // run 44461253154; `PauseCountCheck`).
+        var looks: [(at: Date, count: Int?)] = []
         var last = before
-        var lastMove = tapped
+        var lastSeen = tapped
         while Date().timeIntervalSince(tapped) < 60 {
             let looked = Date()
             let line = progressText() ?? ""
@@ -1651,14 +1729,27 @@ final class DeviceConditionUITests: XCTestCase {
                 reacted = looked.timeIntervalSince(tapped)
             }
             if resumeShown == nil, resume.exists { resumeShown = Date().timeIntervalSince(tapped) }
-            let now = analysisCount()?.done ?? last
-            if now != last { last = now; lastMove = Date() }
-            if resumeShown != nil && Date().timeIntervalSince(lastMove) > 5 { break }
+            let now = PauseCountCheck.done(in: line)
+            looks.append((looked, now))
+            if let now, now != last { last = now; lastSeen = Date() }
+            if resumeShown != nil && Date().timeIntervalSince(lastSeen) > 5 { break }
             usleep(100_000)
         }
-        let stopped = max(0, lastMove.timeIntervalSince(tapped))
+        let lookedUntil = Date()
         func s(_ v: Double?) -> String { v.map { String(format: "%.2f", $0) } ?? "never" }
-        print("UI_TIMING stress pause: tap \(s(tapped.timeIntervalSince(tapStarted))) s, first look '\(firstLook?.line ?? "")' (took \(s(firstLook?.took)) s), reacted \(s(reacted)) s, Fortsetzen \(s(resumeShown)) s, counting stopped \(s(stopped)) s (\(last - before) more photos)")
+        // The earliest the count can have moved for the last time, from the test's looks; the
+        // app's record of the line (its own clock) decides when it can be read.
+        let fromLooks = PauseCountCheck.lastMoveFromLooks(before: before, readBefore: tapStarted, looks: looks)
+        var stopped = max(0, (fromLooks ?? tapStarted).timeIntervalSince(tapped))
+        var limit = (resumeShown ?? 0) + 0.5
+        var measure = "test's looks"
+        if let lines = readProgressRecord(from: tapStarted, to: lookedUntil)?.lines,
+           let record = PauseCountCheck.afterPausedInRecord(lines) {
+            stopped = max(0, (record.lastMove ?? record.paused).timeIntervalSince(tapped))
+            limit = max(0, record.paused.timeIntervalSince(tapped)) + 0.5
+            measure = "app record: paused \(s(record.paused.timeIntervalSince(tapped))) s, \(record.more) more photos after it"
+        }
+        print("UI_TIMING stress pause: tap \(s(tapped.timeIntervalSince(tapStarted))) s, first look '\(firstLook?.line ?? "")' (took \(s(firstLook?.took)) s), reacted \(s(reacted)) s, Fortsetzen \(s(resumeShown)) s, counting stopped \(s(stopped)) s (\(measure); \(last - before) more photos than before the tap)")
         let firstShows = firstLook.map { $0.line.hasPrefix("Wird angehalten") || $0.line.hasPrefix("Analyse pausiert") } ?? false
         XCTAssertTrue(firstShows, "The first look after Pause still read '\(firstLook?.line ?? "")'")
         // Pause under 1 s: the app's main thread (which changes the card in the tap's own call)
@@ -1673,7 +1764,7 @@ final class DeviceConditionUITests: XCTestCase {
             XCTAssertLessThan(tapped.timeIntervalSince(tapStarted), 1, "The Pause tap took \(s(tapped.timeIntervalSince(tapStarted))) s")
         }
         XCTAssertLessThan(resumeShown ?? 99, 10, "Fortsetzen came \(s(resumeShown)) s after Pause")
-        XCTAssertLessThanOrEqual(stopped, (resumeShown ?? 0) + 0.5, "The count went on after the analysis showed it was paused")
+        XCTAssertLessThanOrEqual(stopped, limit, "The count went on after the analysis showed it was paused (\(measure))")
         shot("26a-stress-paused")
         guard resumeShown != nil else { print("UI_STEP_MISSING stress continue"); return }
         let resumed = Date()

@@ -7,7 +7,8 @@ import SortlyCore
 /// A run reads each setting it works with once, at its own point
 /// (`AnalysisPipeline.Report.settingsUsed`). At its end that is compared with the settings as
 /// they are then:
-/// - It missed a change (labels, texts, finer places, online lookups, hidden photos): one more
+/// - It missed a change (labels, texts, finer places, online lookups, hidden photos, or a trip
+///   change of the user's stored while it ran, `changeRequested`): one more
 ///   run starts right away (`followUp`), and this end is not the end of the analysis: no
 ///   "Analyse fertig", no 100 %, no notification, the marker stays. Before, the run ended with
 ///   "Analyse fertig" and the next one came about 20 s later, in the background only once the
@@ -52,9 +53,11 @@ public struct AnalysisRunEnd: Sendable, Equatable {
     /// they are now. `pauseTapped`: Pause was tapped during the run (it may have come too late
     /// to stop it). `catchUpRequested`: Photos changed during the run. `mayStart`: a run may
     /// start now (past the introduction, photos readable, no plan claimed or being written, no
-    /// rebuild). `background`: the overnight refinement.
+    /// rebuild). `background`: the overnight refinement. `changeRequested`: a change of the
+    /// user's was stored while this run was going (`AnalysisStartCause.asksForARunAfter`): it
+    /// is treated like a change of the settings the run missed.
     public init(report: AnalysisPipeline.Report?, settings: OrganizationSettings, pauseTapped: Bool,
-                catchUpRequested: Bool, mayStart: Bool, background: Bool = false) {
+                catchUpRequested: Bool, mayStart: Bool, background: Bool = false, changeRequested: Bool = false) {
         self.report = report
         let later: Next = pauseTapped ? .nothing : (catchUpRequested ? .catchUp : (background ? .nothing : .retry))
         pauseHeld = pauseTapped
@@ -75,7 +78,9 @@ public struct AnalysisRunEnd: Sendable, Equatable {
             pauseHeld = pauseTapped
             return
         }
-        let settingsLeft = report.settingsUsed.needsRun(for: settings)
+        // A change of the settings it missed, or a change of the user's that came while it ran
+        // and may not be in it (`changeRequested`): the same, one more run.
+        let settingsLeft = report.settingsUsed.needsRun(for: settings) || changeRequested
         if pauseTapped && (settingsLeft || catchUpRequested) {
             self.report?.pausedBecause = .userPaused
             next = .nothing
@@ -118,6 +123,70 @@ public struct AnalysisRunEnd: Sendable, Equatable {
     public func afterWait(isNewest: Bool) -> (finishMoment: Bool, next: Next) {
         guard isNewest else { return (false, .nothing) }
         return (isFinished, next == .followUp ? .nothing : next)
+    }
+}
+
+/// Why a run is asked for, and what a Pause of the user does to it (`AppModel.startAnalysis`).
+///
+/// A Pause stands until the user goes on (`AnalysisMarker.pausedByUser`, also across launches):
+/// - Nothing that happens by itself starts a run then (`automatic`); "Fortsetzen" reads the
+///   library and the settings anew. A change in the settings has its own rule and waits for
+///   "Fortsetzen" too (`AnalysisPipeline.runAfterSettingsChange`).
+/// - A tap that asks for the analysis starts it and ends the Pause (`tap`).
+/// - A change of the user's that needs a run to apply it starts that run at once and ends the
+///   Pause, like a tap (`userChange`; owner decision 18.11.2026, "Analyse läuft dann weiter").
+///   Before, the change was stored, the run waited for "Fortsetzen", and the trip workshop or the
+///   settings kept the old trips with no word why.
+///
+/// No cause starts a run under a standing Pause: what starts while paused ends it.
+public enum AnalysisStartCause: Sendable, Equatable, CaseIterable {
+    /// Nothing the user did just now: the start at launch, a follow-up, a retry, the end of a
+    /// plan, changes in Photos.
+    case automatic
+    /// A tap that asks for the analysis: "Fortsetzen", "Analyse neu aufbauen", another part of
+    /// the library, a change in the settings that needs a run (only without a Pause).
+    case tap
+    /// A change of the user's that needs a run to apply it: a split, a merge, "Aufheben" in the
+    /// trip workshop, "Reisen wieder automatisch erkennen" in the settings; also an answer in
+    /// "Dein Zuhause" that needs a run (`AppModel.changeRecurringPlaces(rerun: true)`, which no
+    /// caller uses today: "Ja" and the other changes there make the suggestions again without a
+    /// run).
+    case userChange
+
+    /// A run with this cause starts while the Pause stands.
+    public var startsWhilePaused: Bool { self != .automatic }
+    /// Its run ends the Pause.
+    public var endsPause: Bool { self != .automatic }
+
+    /// The start was refused because a run is going: one that slipped in between storing the
+    /// user's change and this start (a change in Photos, a retry) and may have read the old
+    /// state. A user's change then asks for one more run after it (`AnalysisRunEnd`
+    /// `changeRequested`), so the change is always applied (re-review of 7e8aba3). A tap or a
+    /// start by itself needs none: the running run reads everything anew anyway or its own end
+    /// decides.
+    public func asksForARunAfter(running: Bool) -> Bool { self == .userChange && running }
+    /// Started by the user: background time for a long run, the retries count from nothing again.
+    public var isUserInitiated: Bool { self != .automatic }
+
+    /// Whether the run starts now.
+    public func startsRun(pausedByUser: Bool) -> Bool { !pausedByUser || startsWhilePaused }
+
+    /// Whether the Pause still stands once this run has started.
+    public func pausedAfterStart(pausedByUser: Bool) -> Bool { pausedByUser && !endsPause }
+
+    /// Two requests that become one run (asked for while a change in "Dein Zuhause" is applied):
+    /// the one the user asked for wins, so a queued trip change still ends the Pause.
+    public func joined(with other: Self?) -> Self {
+        guard let other else { return self }
+        return other.rank > rank ? other : self
+    }
+
+    private var rank: Int {
+        switch self {
+        case .automatic: 0
+        case .tap: 1
+        case .userChange: 2
+        }
     }
 }
 

@@ -64,6 +64,19 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         try await deadline.runBlocking(what, lane: lane, limit: limit) { beat in try work(beat) }
     }
 
+    /// A read a change makes before its change request (does the album or folder exist):
+    /// without an answer, nothing of the call reached Photos as a change, and the executor
+    /// leaves the step as it was (`PhotosNotResponding.beforeAnyChange`, review of f7439fb,
+    /// SF1). Before, such a step stayed running, and adding to the user's own album was then
+    /// settled as "outcome unclear" although nothing had been sent.
+    static func readBeforeChange<T: Sendable>(_ what: String, _ work: @escaping @Sendable (PhotosDeadline.Heartbeat) throws -> T) async throws -> T {
+        do {
+            return try await read(what, work)
+        } catch let quiet as PhotosNotResponding {
+            throw quiet.beforeAnyChange
+        }
+    }
+
     /// PHAsset is thread-safe but not marked Sendable; a fetched asset is only handed on.
     struct FetchedAssets: @unchecked Sendable {
         let assets: [PHAsset]
@@ -326,7 +339,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func createFolder(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
-        try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
+        try await Self.readBeforeChange("requireFolder") { _ in try Self.requireFolder(parentID) }
         try await Self.change("createFolder", answered: { Self.noteAnswered(created.value) }) {
             // Into its folder or not at all (see `parentRequest`).
             guard let folder = Self.parentRequest(parentID) else { return }
@@ -344,7 +357,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func createAlbum(title: String, parent: CollectionID?, noted: @escaping @Sendable (CollectionID) async -> Void) async throws -> CollectionID {
         let created = LockedBox<String?>(nil)
         let parentID = parent?.rawValue
-        try await Self.read("requireFolder") { _ in try Self.requireFolder(parentID) }
+        try await Self.readBeforeChange("requireFolder") { _ in try Self.requireFolder(parentID) }
         try await Self.change("createAlbum", answered: { Self.noteAnswered(created.value) }) {
             // Into its folder or not at all (see `parentRequest`).
             guard let folder = Self.parentRequest(parentID) else { return }
@@ -389,7 +402,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func addAssets(_ assets: [AssetID], to album: CollectionID) async throws {
         let albumID = album.rawValue
         let ids = assets.map(\.rawValue)
-        let exists = try await Self.read("album") { _ -> Bool in
+        let exists = try await Self.readBeforeChange("album") { _ -> Bool in
             PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: [albumID], options: nil).firstObject != nil
         }
         guard exists else { throw PhotoKitError.collectionNotFound(albumID) }
@@ -469,69 +482,92 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         let allowedRaw: [String: Set<String>] = Dictionary(uniqueKeysWithValues: allowed.map { ($0.key.rawValue, Set($0.value.map(\.rawValue))) })
         var log = DeletionLog.Entry(requested: ids.count)
         defer { DeletionLog.record(log) }
-        var target = try await Self.deletableNow(ids.map(\.rawValue), log: &log)
+        // Before any request: no answer here means nothing of this call reached Photos.
+        var target: DeletionTarget
+        do {
+            target = try await Self.deletableNow(ids.map(\.rawValue), log: &log)
+        } catch let quiet as PhotosNotResponding {
+            log.outcome = quiet.neverBegan ? "not sent (tree read never began)" : "not sent (no answer to the tree read)"
+            throw quiet.beforeAnyChange
+        } catch {
+            log.outcome = "error before the request"
+            throw error
+        }
         guard !target.isEmpty else {
             log.outcome = "nothing deletable"
             return
         }
-        for attempt in 1...2 {
-            log.attempts = attempt
-            let ready = await Self.waitUntilOnScreen()
-            if !ready { log.notOnScreen += 1 }
-            let request = target
-            let started = Date()
-            do {
-                // iOS asks the user first: a long limit, and the wait is not "Fotos antwortet
-                // gerade nicht". Without an answer by then the outcome is not known (the user may
-                // still answer): `PhotosNotResponding`, never "deleted" or "not applied".
-                try await Self.change("deleteCollections", limit: Self.deletionLimit, asksUser: true) {
-                    // Counted again here, in the change itself (as `SamplePhotos.delete` does for
-                    // folders): an album that got a photo it may not hold since it was read
-                    // (the 30 s wait for the screen above, iCloud) stays, and so does every folder
-                    // holding it. Only the time the iOS question is open is left (P2-08).
-                    let going = Self.stillGoing(request, allowed: allowedRaw)
-                    // Deletes only the album/folder containers. PhotoKit keeps the media.
-                    if !going.albums.isEmpty { PHAssetCollectionChangeRequest.deleteAssetCollections(going.albums as NSArray) }
-                    if !going.folders.isEmpty { PHCollectionListChangeRequest.deleteCollectionLists(going.folders as NSArray) }
+        // Once the first request went out, nothing after it in this call is "not sent": the
+        // read-back, the second walk of the tree and a second request report the deletion as
+        // not known (`afterAChangeWasSent`, review of 045f297, M2). Before, a read-back that got
+        // no thread made the executor forget the albums it had deleted, and undo lost them.
+        var sentOnce = false
+        do {
+            for attempt in 1...2 {
+                log.attempts = attempt
+                let ready = await Self.waitUntilOnScreen()
+                if !ready { log.notOnScreen += 1 }
+                let request = target
+                let started = Date()
+                do {
+                    // iOS asks the user first: a long limit, and the wait is not "Fotos antwortet
+                    // gerade nicht". Without an answer by then the outcome is not known (the user may
+                    // still answer): `PhotosNotResponding`, never "deleted" or "not applied".
+                    try await Self.change("deleteCollections", limit: Self.deletionLimit, asksUser: true) {
+                        // Counted again here, in the change itself (as `SamplePhotos.delete` does for
+                        // folders): an album that got a photo it may not hold since it was read
+                        // (the 30 s wait for the screen above, iCloud) stays, and so does every folder
+                        // holding it. Only the time the iOS question is open is left (P2-08).
+                        let going = Self.stillGoing(request, allowed: allowedRaw)
+                        // Deletes only the album/folder containers. PhotoKit keeps the media.
+                        if !going.albums.isEmpty { PHAssetCollectionChangeRequest.deleteAssetCollections(going.albums as NSArray) }
+                        if !going.folders.isEmpty { PHCollectionListChangeRequest.deleteCollectionLists(going.folders as NSArray) }
+                    }
+                } catch let hung as PhotosNotResponding {
+                    log.seconds.append(Date().timeIntervalSince(started))
+                    // Never sent (no thread in time, or an earlier change hangs): not "no answer".
+                    log.outcome = hung.neverBegan ? "not sent (never began)" : hung.notSent ? "not sent" : "no answer"
+                    throw hung
+                } catch {
+                    log.seconds.append(Date().timeIntervalSince(started))
+                    let ns = error as NSError
+                    if ns.domain == PHPhotosErrorDomain, ns.code == PHPhotosError.Code.userCancelled.rawValue {
+                        log.outcome = "declined"
+                        throw LibraryWriteFailure.declinedByUser
+                    }
+                    log.outcome = "error \(ns.domain) \(ns.code)"
+                    throw error
                 }
-            } catch let hung as PhotosNotResponding {
-                log.seconds.append(Date().timeIntervalSince(started))
-                log.outcome = "no answer"
-                throw hung
-            } catch {
-                log.seconds.append(Date().timeIntervalSince(started))
-                let ns = error as NSError
-                if ns.domain == PHPhotosErrorDomain, ns.code == PHPhotosError.Code.userCancelled.rawValue {
-                    log.outcome = "declined"
-                    throw LibraryWriteFailure.declinedByUser
+                sentOnce = true
+                let took = Date().timeIntervalSince(started)
+                log.seconds.append(took)
+                // Photos may need a moment before the deletion shows in a new read.
+                let requested = request.ids
+                var left = try await Self.read("stillThere") { _ in Self.stillThere(requested) }
+                var polls = 0
+                while !left.isEmpty, polls < 8 {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    left = try await Self.read("stillThere") { _ in Self.stillThere(requested) }
+                    polls += 1
                 }
-                log.outcome = "error \(ns.domain) \(ns.code)"
-                throw error
+                if left.isEmpty {
+                    log.outcome = "deleted"
+                    return
+                }
+                log.stillThere = left.count
+                guard attempt == 1, took < Self.fastestAnswer else { break }
+                // Found again from the tree, with the folder check again: only what is still
+                // there, and a folder only if everything in it still goes.
+                var again = DeletionLog.Entry(requested: left.count)
+                target = try await Self.deletableNow(Array(left), log: &again)
+                if target.isEmpty { break }
+                // A question that could not be shown (a dialog was still closing) shows now.
+                try? await Task.sleep(for: .seconds(1))
             }
-            let took = Date().timeIntervalSince(started)
-            log.seconds.append(took)
-            // Photos may need a moment before the deletion shows in a new read.
-            let requested = request.ids
-            var left = try await Self.read("stillThere") { _ in Self.stillThere(requested) }
-            var polls = 0
-            while !left.isEmpty, polls < 8 {
-                try? await Task.sleep(for: .milliseconds(250))
-                left = try await Self.read("stillThere") { _ in Self.stillThere(requested) }
-                polls += 1
-            }
-            if left.isEmpty {
-                log.outcome = "deleted"
-                return
-            }
-            log.stillThere = left.count
-            guard attempt == 1, took < Self.fastestAnswer else { break }
-            // Found again from the tree, with the folder check again: only what is still
-            // there, and a folder only if everything in it still goes.
-            var again = DeletionLog.Entry(requested: left.count)
-            target = try await Self.deletableNow(Array(left), log: &again)
-            if target.isEmpty { break }
-            // A question that could not be shown (a dialog was still closing) shows now.
-            try? await Task.sleep(for: .seconds(1))
+        } catch let quiet as PhotosNotResponding where sentOnce {
+            // A second request has its outcome logged above; a read after a request has not.
+            if quiet.lane != .write { log.outcome = "no answer after the request (\(quiet.what))" }
+            throw quiet.afterAChangeWasSent
         }
         log.outcome = "not applied"
         throw LibraryWriteFailure.notApplied
@@ -687,7 +723,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     func deleteCollection(_ id: CollectionID) async throws {
         let raw = id.rawValue
         // Never delete a folder that still holds something: Photos would delete its contents.
-        let holdsSomething = try await Self.read("folderContents") { _ -> Bool in
+        let holdsSomething = try await Self.readBeforeChange("folderContents") { _ -> Bool in
             guard let list = PHCollectionList.fetchCollectionLists(withLocalIdentifiers: [raw], options: nil).firstObject else { return false }
             return PHCollection.fetchCollections(in: list, options: nil).count > 0
         }

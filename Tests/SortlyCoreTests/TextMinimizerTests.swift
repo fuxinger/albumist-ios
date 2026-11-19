@@ -110,8 +110,8 @@ struct TextMinimizerTests {
 
     /// The masks are newer than texts stored by version 2: they are masked once more.
     @Test func theMaskVersionIsRaised() {
-        // 4: second review of P2-04 (see below).
-        #expect(TextMinimizer.maskVersion == 4)
+        // 4: second review of P2-04 (see below). 5: English medical letters (review G2-03).
+        #expect(TextMinimizer.maskVersion == 5)
     }
 
     /// Second review of P2-04: a space or underscore after the country code and underscores
@@ -163,5 +163,92 @@ struct TextMinimizerTests {
         #expect(info.subject?.contains("0532") == false, "\(info.subject ?? "")")
         let medical = "Arztbrief\nBetreff: Diagnose Bronchitis bei Erika Mustermann\nSehr geehrte Kollegin"
         #expect(try #require(DocumentAnalyzer().analyze(text: medical)).subject == nil)
+    }
+
+    /// Review G2-03 (18.11.2026): a medical letter in English counted as an ordinary letter, as
+    /// "diagnosis" holds no "diagnose"; its text and subject were stored and searchable.
+    @Test func englishMedicalLettersAreMedical() throws {
+        // The reviewers' reproductions (PrueferAReviewTests.g203_englishMedicalLetterIsMedical,
+        // FableBlindTests.claim7). The first one has no letter markers, so no document facts.
+        let report = "Medical report from Dr. Smith\nSubject: Diagnosis MOONLIGHT-123 confirmed\nPlease find the findings attached, hospital visit on Monday."
+        #expect(TextMinimizer.sensitivity(of: report) == .medical)
+        #expect(TextMinimizer.storable(report) == "")
+        let letters = [
+            "Dear Mr Smith,\nSubject: Diagnosis of type 2 diabetes\nDiagnosis: type 2 diabetes mellitus. Medication: Metformin 500 mg.\nSincerely, Dr. Jones, Medical Centre",
+            "Dear Dr Miller,\nRe: Discharge summary, depression and anxiety disorder\nYour client was admitted to our clinic on 3 May 2025. Medical history: major depressive disorder. Treatment: sertraline.\nSincerely, St Mary's Hospital",
+            // A phrase split over two lines by OCR, a typographic apostrophe, an ICD code.
+            "Dear Sir or Madam,\nRe: Discharge\nsummary of Jane Doe\nSincerely, Ward 4",
+            "Doctor\u{2019}s note\nSubject: Absence from work 3-7 March\nDear Sir or Madam, Ms Doe is unfit for work.",
+            "Dear colleague,\nSubject: Referral of Jane Doe\nICD-10 F32.1, sertraline 50 mg\nSincerely",
+        ]
+        for letter in letters {
+            #expect(TextMinimizer.sensitivity(of: letter) == .medical, "\(letter)")
+            #expect(TextMinimizer.storable(letter) == "", "\(letter)")
+            let info = try #require(DocumentAnalyzer().analyze(text: letter), "\(letter)")
+            #expect(info.sensitivity == .medical, "\(letter)")
+            #expect(info.subject == nil, "\(letter)")
+        }
+    }
+
+    /// Review G2-03: German medical papers that named none of the first ten words.
+    @Test func moreGermanMedicalPapersAreMedical() {
+        for text in ["Entlassungsbericht\nAnamnese: seit drei Wochen Husten", "Krankschreibung bis 14.03.", "AU-Bescheinigung für den Arbeitgeber",
+                     "Medikation: Ramipril 5 mg morgens", "ICD-10-GM: J20.9 akute Bronchitis"] {
+            #expect(TextMinimizer.storable(text) == "", "\(text)")
+        }
+    }
+
+    /// The words for medical papers are phrases where a single word would also stand on signs,
+    /// maps, tickets and receipts: such text stays stored and searchable.
+    @Test func everydayTextWithMedicalSoundingWordsStays() {
+        for text in ["Medical Centre car park, pay at machine", "Hospital Road 12, 1st floor", "St Mary's Clinic opening hours Mon-Fri 8-18",
+                     "Battery discharge rate 2C, charge before use", "Thank you for your patience", "Doctor Who season 3 episode 4",
+                     "Test results: 12 of 14 passed", "Dear Anna, see you at the clinic party on Friday! Sincerely, Tom",
+                     "Fault: charging port, see the user manual", "Diagnostic port behind the dashboard"] {
+            #expect(TextMinimizer.sensitivity(of: text) == .normal, "\(text)")
+            #expect(TextMinimizer.storable(text) == text, "\(text)")
+        }
+    }
+
+    /// Second review of G2-03: every keyword starts a word, so words that merely hold one stay
+    /// ordinary text; German compounds keep matching where the keyword ends the compound.
+    @Test func keywordsInsideOtherWordsDoNotCount() {
+        for text in ["Collab report for the team", "Bau-Bescheinigung für das Amt", "Rezeption: Check-in ab 15 Uhr, Buchungsbestätigung",
+                     "Please be patient, your order is on its way", "We waited patiently for the bus", "Don't be impatient",
+                     "New bicycle helmet, 49,99 EUR", "Volume 3 cubic metres", "Urlaub im Libanon 2025", "Outfit notes for Saturday"] {
+            #expect(TextMinimizer.sensitivity(of: text) == .normal, "\(text)")
+            #expect(TextMinimizer.storable(text) == text, "\(text)")
+        }
+    }
+
+    /// The same review: what must still count, also inside German compounds and at the start
+    /// of a line.
+    @Test func keywordsAtWordStartsAndInCompoundsStillCount() {
+        let medical = ["Laborbefund vom 12.03.", "AU-Bescheinigung\nfür den Arbeitgeber", "Facharztbrief Kardiologie", "Privatrezept Ibuprofen 600",
+                       "Patientin: Erika Mustermann", "Patientenakte Nr. 4711", "Outpatient clinic, room 4", "Patient: John Smith",
+                       "Doctors note for school", "Doctor`s letter", "Doctor´s certificate", "Fit note: not fit for work until 3 May",
+                       "Sick leave from 3 to 7 March",
+                       // Compounds the first word-start rule missed (second review of 9f92569).
+                       "Betäubungsmittelrezept Nr. 12", "Arzneimittelrezept", "Wiederholungsrezept", "eRezept-Code",
+                       "Krebspatient seit 2019", "Notfallpatient", "Dialysepatientin", "Schmerzpatienten", "ePrescription",
+                       // An umlaut stored as "u" plus a separate mark.
+                       "Arbeitsunfa\u{0308}higkeitsbescheinigung"]
+        for text in medical {
+            #expect(TextMinimizer.sensitivity(of: text) == .medical, "\(text)")
+            #expect(TextMinimizer.storable(text) == "", "\(text)")
+        }
+        #expect(TextMinimizer.sensitivity(of: "Fu\u{0308}hrerschein Klasse B") == .identity)
+        for text in ["Kontoauszug 3/2025", "IBAN DE89 3704 0044 0532 0130 00", "BIC: COBADEFFXXX", "Einkommensteuerbescheid 2024"] {
+            #expect(TextMinimizer.sensitivity(of: text) == .financial, "\(text)")
+        }
+    }
+
+    /// OCR breaks long words at the end of a line with a hyphen: they count joined, and a real
+    /// hyphen at the end of a line still counts as one.
+    @Test func wordsBrokenOverTwoLinesCount() {
+        for text in ["Dear Sir,\nre: Diag-\nnosis of type 2 diabetes", "Entlassungs-\nbericht vom 3. Mai", "Bitte die AU-\nBescheinigung abgeben"] {
+            #expect(TextMinimizer.sensitivity(of: text) == .medical, "\(text)")
+            #expect(TextMinimizer.storable(text) == "", "\(text)")
+        }
     }
 }

@@ -274,6 +274,10 @@ public struct OverrideSet: Sendable {
     public func mayAdd(_ asset: AssetID, toSource source: SortlyID) -> Bool {
         !neverAddInSource.contains(asset.rawValue + "|" + source.rawValue) && !ignoredAssets.contains(asset) && !excludedAssets.contains(asset)
     }
+    /// The user took the photo out of the album by hand (seen by `ManagedAlbumTracker.reconcile`).
+    public func tookOut(_ asset: AssetID, of album: CollectionID) -> Bool {
+        neverAddInAlbum.contains(asset.rawValue + "|" + album.rawValue)
+    }
     public func isForcedIn(_ asset: AssetID, album: CollectionID) -> Bool {
         alwaysAddInAlbum.contains(asset.rawValue + "|" + album.rawValue)
     }

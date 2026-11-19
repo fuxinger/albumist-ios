@@ -392,6 +392,50 @@ extension ProposalDecision {
         return result
     }
 
+    /// After matching again under "Gleicher Name gewinnt" (`AlbumMatcher.version` 5, decision
+    /// Fuchs 16.11., second review 19.11.): accepted, not yet applied decisions that go against
+    /// it. They go back to open, so the user decides again:
+    /// - a new album for a suggestion that is now recommended to extend (or keep) the user's
+    ///   album of its own name: it would make a second "Italien". Not a new album the user
+    ///   gave another name;
+    /// - a decision about a user album (keep, extend, rename, move) that the suggestion's new
+    ///   match no longer recommends, because the album now goes to another suggestion of the
+    ///   album's name: the trip "Italien · Mai 2019" that kept "Italien" under the old rules.
+    /// `protected` as in `uncertainExtensions`.
+    public static func sameNameConflicts(_ decisions: [SortlyID: ProposalDecision], proposals: [AlbumProposal],
+                                         matches: [SortlyID: MatchResult], protected: Set<SortlyID> = []) -> Set<SortlyID> {
+        // The album the recommendation keeps or extends, when it is the suggestion's album by name.
+        func namedAlbum(of proposal: AlbumProposal) -> CollectionID? {
+            guard let match = matches[proposal.id] else { return nil }
+            let recommended = recommended(for: proposal, match: match)
+            guard let album = recommended.existingAlbum, match.sameNameAlbums.contains(album) else { return nil }
+            return album
+        }
+        let named = Dictionary(proposals.compactMap { p in namedAlbum(of: p).map { ($0, p.id) } }, uniquingKeysWith: { first, _ in first })
+        var result = Set<SortlyID>()
+        for proposal in proposals where !protected.contains(proposal.id) {
+            guard let decision = decisions[proposal.id], decision.isAccepted else { continue }
+            switch decision {
+            case .createNew(let title, _):
+                let ownName = title.map { AlbumTitle.normalized($0) == AlbumTitle.normalized(proposal.title) } ?? true
+                if ownName, namedAlbum(of: proposal) != nil { result.insert(proposal.id) }
+            default:
+                guard let album = decision.existingAlbum, let owner = named[album], owner != proposal.id,
+                      recommended(for: proposal, match: matches[proposal.id]).existingAlbum != album else { continue }
+                result.insert(proposal.id)
+            }
+        }
+        return result
+    }
+
+    /// The user's album a decision keeps, extends, renames or moves.
+    public var existingAlbum: CollectionID? {
+        switch self {
+        case .keepExisting(let id), .extendExisting(let id), .renameExisting(let id, _, _), .moveExisting(let id, _, _): id
+        default: nil
+        }
+    }
+
     /// The suggestions whose accepted decision adds photos to an album recorded for their ID
     /// (`recorded`, from the managed-album records) while that album was made for other photos (`AlbumMatcher.isStillAlbum`):
     /// the ID went to another place (a frequent place that is gone leaves its ID to a new one in

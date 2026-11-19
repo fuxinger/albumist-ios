@@ -62,6 +62,13 @@ stark wächst („2026“ im Januar angelegt): Es wird ergänzt, nie ein zweites
 Entscheidung, die ein Album ergänzen würde, das nach den neuen Regeln nicht mehr sicher passt
 (z. B. „ergänzen“ aus dem Startpaket auf jetzt nur „Ähnliches Album gefunden“), ist danach
 wieder offen. Die Übersicht sagt es: „N Vorschläge neu geprüft: bitte noch einmal ansehen“.
+Wieder offen ist auch, was gegen „Gleicher Name gewinnt“ geht (Version 5, zweite Prüfung
+19.11.2026): ein neues Album für einen Vorschlag, der jetzt das Album seines Namens ergänzt
+(sonst gäbe es ein zweites „Italien“; nicht, wenn der Nutzer dem neuen Album einen anderen
+Namen gegeben hat), und eine Entscheidung über ein Album des Nutzers, das jetzt dem Vorschlag
+seines Namens gehört (die Reise „Italien · Mai 2019“, die „Italien“ behalten oder ergänzen
+sollte). Diese zählen nicht für den Hinweis in der Übersicht, dessen Text („nur noch, wenn
+sie sicher passen“) einen anderen Grund nennt.
 Ausgeführte und angefangene Pläne bleiben unberührt. Neue Ergebnisse mit Versionsstempel,
 die wieder geöffneten Entscheidungen und die Zahl für die Übersicht werden in einem Schritt
 gespeichert: Endet die App mittendrin, ist nichts gespeichert, und der nächste Start

@@ -2050,8 +2050,9 @@ public actor AnalysisPipeline {
         /// Suggestions whose accepted "extend this album" decision was no longer a certain
         /// match under the new rules (`ProposalDecision.uncertainExtensions`), or went into the
         /// album recorded for the ID while that album holds other photos
-        /// (`ProposalDecision.extensionsOfOtherPhotos`), and is open again in the store. The app
-        /// drops them from its decisions in memory too.
+        /// (`ProposalDecision.extensionsOfOtherPhotos`), or went against "Gleicher Name gewinnt"
+        /// (`ProposalDecision.sameNameConflicts`), and is open again in the store. The app drops
+        /// them from its decisions in memory too.
         public var reopened: Set<SortlyID> = []
     }
 
@@ -2062,8 +2063,11 @@ public actor AnalysisPipeline {
     /// At launch: suggestions matched by an older version of the rules are matched again, so
     /// a fixed rule (review 16.11.: possible matches never change albums) holds at once and not
     /// only after the next analysis. Decisions accepted under the old rules that would now
-    /// extend an album without a certain match go back to open (`reopened`); suggestions of a
-    /// plan that already started (not finished) are never among them.
+    /// extend an album without a certain match go back to open (`reopened`), and so do those
+    /// that go against "Gleicher Name gewinnt" (a second "Italien", or the trip keeping the
+    /// album that is now the country's; not counted for the overview's notice, whose text gives
+    /// the other reason); suggestions of a plan that already started (not finished) are never
+    /// among them.
     ///
     /// Every time (the app calls this after each analysis too): an accepted "ergänzen" into the
     /// album recorded for the suggestion's ID while that album was made for other photos goes
@@ -2107,6 +2111,11 @@ public actor AnalysisPipeline {
         let suggested = snapshot.proposals + snapshot.dismissed
         var reopened = outdated ? ProposalDecision.uncertainExtensions(decisions, proposals: suggested, matches: snapshot.matches,
                                                                        protected: started) : []
+        // Against "Gleicher Name gewinnt" (second review 19.11.): open again too, but not for
+        // the reason the overview's notice gives ("nur noch, wenn sie sicher passen"), so they
+        // are not counted for it.
+        let sameName = outdated ? ProposalDecision.sameNameConflicts(decisions, proposals: suggested, matches: snapshot.matches,
+                                                                     protected: started) : []
         if ownAlbum {
             // Once per suggestion and album: an album the user picks again for it ("Anderes
             // Album wählen") is their choice and stays (re-review 18.11.). Which way a decision
@@ -2122,13 +2131,17 @@ public actor AnalysisPipeline {
                 values[Key.reopenedExtensions] = before.union(new.values)
             }
         }
+        let counted = reopened.subtracting(sameName).count
+        reopened.formUnion(sameName)
         guard outdated || !reopened.isEmpty || !values.isEmpty else { return MatchRefresh(snapshot: snapshot) }
         if outdated { values[Key.proposals] = snapshot }
         if !reopened.isEmpty {
             for id in reopened { decisions[id] = nil }
-            let shown = try await store.value(Int.self, forKey: Self.recheckedSuggestionsKey) ?? 0
             values[Key.decisions] = decisions
-            values[Self.recheckedSuggestionsKey] = shown + reopened.count
+            if counted > 0 {
+                let shown = try await store.value(Int.self, forKey: Self.recheckedSuggestionsKey) ?? 0
+                values[Self.recheckedSuggestionsKey] = shown + counted
+            }
         }
         if outdated { proposalsGeneration += 1 }
         try await store.setValues(values, afterEach: afterEachWrite)

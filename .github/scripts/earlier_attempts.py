@@ -46,6 +46,9 @@ MACHINERY_STEPS = {
     # rule main (upload_approval.py) and its four secrets. Set up after a failure there, a re-run
     # is right; it reads the settings anew and hides no test.
     "Upload setup checked", "App Store Connect secrets present",
+    # The tag build-<run number> of an upload of this run (upload_approval.py not-uploaded): it
+    # stays once set, so a re-run fails there again and hides nothing; an API error is no test.
+    "Not uploaded by this run yet",
     # The UI plan (ui.yml) and the UI gate (testflight.yml) decide from the recorded results of
     # the groups alone, every time anew (ui_evidence.py): a red group stays red for them in
     # every attempt, so a re-run of them can hide nothing.

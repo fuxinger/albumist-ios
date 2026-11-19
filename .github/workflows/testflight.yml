@@ -97,6 +97,9 @@ run-name: >-
 #     "Generate Xcode project", needs a new run too. The upload job of an allowed re-run lists
 #     every earlier failure as a warning and in its summary, and the tag message names them.
 #     The UI build products are kept 3 days for this.
+#   - A run that uploaded is never re-run to a second upload: its first job and the start of the
+#     upload job stop when the tag build-<run number> exists ("Not uploaded by this run yet",
+#     upload_approval.py not-uploaded). A new build needs a new run (a new number).
 #   - No input or flag skips a test or the gate: the emergency input that uploaded without any
 #     test is gone (the owner's decision 17.11., review G5-02/G6-02; .github/scripts/tests/
 #     test_workflows.py checks it). An urgent build waits for its tests like any other. The only
@@ -177,6 +180,12 @@ jobs:
           # Pro, Team or Enterprise); a private repository is refused without it.
           UPLOAD_PRIVATE_PLAN_OK: ${{ vars.UPLOAD_PRIVATE_PLAN_OK }}
         run: python3 .github/scripts/upload_approval.py check
+      - name: Not uploaded by this run yet
+        # "Re-run all jobs" on a run that uploaded stops here, before any Mac: its build number
+        # (the run number) is in TestFlight already, and the tag job tagged it build-<number>.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/upload_approval.py not-uploaded
       - name: Choose the gate
         id: gate
         env:
@@ -521,6 +530,12 @@ jobs:
         with:
           # Nothing here pushes; no token stays in .git/config next to the build.
           persist-credentials: false
+      - name: Not uploaded by this run yet
+        # As in the first job, for a re-run of this job alone: the tag build-<run number> means
+        # this run uploaded its build already; stop before the archive.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/upload_approval.py not-uploaded
       - name: Earlier attempts of this run
         # "Re-run failed jobs" is only for a failure of the machinery (top of this file). This
         # step reads every job and step of the earlier attempts of this run: a failure of the

@@ -278,6 +278,66 @@ class CheckTests(unittest.TestCase):
             upload_approval.fetch_public()
 
 
+class NotUploadedTests(unittest.TestCase):
+    """"Re-run all jobs" on a run that uploaded must not upload again (third review of
+    fix/pipeline): the run's build number is its run number, and the tag job gives every uploaded
+    build the tag build-<run number>. Both the first job and the start of the upload job stop
+    when that tag exists."""
+
+    def setUp(self):
+        from unittest import mock
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.summary = os.path.join(folder.name, "summary")
+        environment = mock.patch.dict(os.environ, {"GITHUB_RUN_NUMBER": "41", "GITHUB_STEP_SUMMARY": self.summary})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def run_it(self, answer):
+        asked = []
+
+        def get(path, **_):
+            asked.append(path)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = upload_approval.not_uploaded(get)
+        return code, log.getvalue(), asked
+
+    def test_no_tag_goes_on(self):
+        code, log, asked = self.run_it(None)
+        self.assertEqual(code, 0, log)
+        self.assertEqual(asked, ["git/ref/tags/build-41"])
+        self.assertIn("build-41", log)
+
+    def test_the_tag_of_this_run_stops_it(self):
+        tag = {"ref": "refs/tags/build-41", "object": {"type": "tag", "sha": "f" * 40}}
+        code, log, _ = self.run_it(tag)
+        self.assertEqual(code, 1)
+        self.assertIn("::error title=Already uploaded::", log)
+        for words in ("TestFlight build 41", "build-41", "Run workflow"):
+            self.assertIn(words, log)
+        with open(self.summary, encoding="utf-8") as out:
+            self.assertIn("already uploaded", out.read())
+
+    def test_only_this_exact_tag_counts(self):
+        # GET git/ref is exact; an answer for another ref (a list, as git/refs gives) is not it.
+        code, log, _ = self.run_it([{"ref": "refs/tags/build-410", "object": {"type": "tag", "sha": "f" * 40}}])
+        self.assertEqual(code, 0, log)
+
+    def test_no_answer_is_no_upload(self):
+        code, log, _ = self.run_it(upload_approval.ApiError("down"))
+        self.assertEqual(code, 1)
+        self.assertIn("re-run this job", log)
+
+    def test_the_command_is_there(self):
+        originals = upload_approval.not_uploaded
+        self.addCleanup(setattr, upload_approval, "not_uploaded", originals)
+        upload_approval.not_uploaded = lambda: 7
+        self.assertEqual(upload_approval.main(["not-uploaded"]), 7)
+
+
 APPROVED = upload_approval.review(SET_UP, branches=MAIN)
 HEAD, OLD = "a" * 40, "b" * 40
 APPS = {HEAD: "1" * 64, OLD: "2" * 64, "c" * 40: "1" * 64}

@@ -163,7 +163,10 @@ Actions > **TestFlight feedback** > Run workflow.
   der Nachricht des Tags („attempt 2; earlier attempts: …“). Kann der Upload-Job die früheren
   Versuche nicht lesen (GitHub-API antwortet nicht), lädt er ebenfalls nicht hoch; dann nur ihn
   wiederholen. Die gebauten UI-Tests bleiben für **Re-run failed jobs** 3 Tage liegen; danach
-  einen neuen Lauf starten. Dasselbe gilt über Läufe hinweg: war eine UI-Gruppe für genau diese
+  einen neuen Lauf starten. Hat ein Lauf schon hochgeladen (es gibt den Tag `build-<Nummer>` des
+  Laufs), hält jede Wiederholung im ersten Job und am Anfang des Upload-Jobs an („Not uploaded by
+  this run yet“): dieselbe Build-Nummer nähme App Store Connect nicht noch einmal; ein neuer Build
+  braucht einen neuen Lauf. Dasselbe gilt über Läufe hinweg: war eine UI-Gruppe für genau diese
   App und genau ihren Testcode einmal rot, zählt ein späteres Grün derselben Kombination nicht,
   auch nicht aus einem anderen Lauf. Erst eine Änderung am Test oder an der App (die Korrektur)
   macht sie wieder hochladbar.

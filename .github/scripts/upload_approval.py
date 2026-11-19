@@ -35,7 +35,13 @@ Warnings, no block: a required reviewer is still set (the upload then waits for 
 branch protection), so whoever can push to main can upload ("main ist nicht geschützt"), or
 that could not be read.
 
-When the API does not answer, check fails (no upload without knowing): re-run the job.
+  python3 .github/scripts/upload_approval.py not-uploaded
+      For testflight.yml (first job, and the start of the upload job): exits 1 when the tag
+      build-<GITHUB_RUN_NUMBER> exists, so "Re-run all jobs" (or a re-run of the upload job) on a
+      run that uploaded does not upload again (third review of fix/pipeline).
+
+When the API does not answer, check and not-uploaded fail (no upload without knowing): re-run
+the job.
 
 The file keeps its name (daily_build.py and the tests import it); the job and its texts say
 "setup" since 19.11.
@@ -238,11 +244,38 @@ def check(fetcher=fetch, public=fetch_public, branch_fetcher=fetch_branches, pla
     return 0
 
 
+def not_uploaded(get=None) -> int:
+    """0 when this run has not uploaded its build yet: no tag build-<GITHUB_RUN_NUMBER> (the tag
+    job of testflight.yml gives one to every uploaded build, and the build number is the run
+    number). Otherwise an error: "Re-run all jobs" on a run that uploaded would upload the same
+    build number again (App Store Connect refuses it, after an hour of Macs). 1 also when the API
+    does not answer (no upload without knowing)."""
+    number = os.environ["GITHUB_RUN_NUMBER"]
+    tag = f"build-{number}"
+    try:
+        answer = (get or _get)(f"git/ref/tags/{tag}")
+    except ApiError as error:
+        print(command("error", "Already uploaded", f"whether the tag {tag} exists could not be read ({error}); "
+                      "re-run this job when the API answers"))
+        return 1
+    found = isinstance(answer, dict) and answer.get("ref") == f"refs/tags/{tag}"
+    if not found:
+        print(f"NOT_UPLOADED {tag}: no such tag, this run has not uploaded its build")
+        return 0
+    print(command("error", "Already uploaded", f"TestFlight build {number} was uploaded by this run already (tag "
+                  f"{tag}); a re-run would upload the same build number again, which App Store Connect refuses. "
+                  "For a new build start a new run: Actions > TestFlight > Run workflow"))
+    with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:
+        out.write(f"### No upload: build {number} was already uploaded by this run\n\nThe tag `{tag}` exists. "
+                  "Start a new run for a new build (Actions > TestFlight > Run workflow).\n")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("command", choices=["check"])
-    parser.parse_args(argv)
-    return check()
+    parser.add_argument("command", choices=["check", "not-uploaded"])
+    args = parser.parse_args(argv)
+    return not_uploaded() if args.command == "not-uploaded" else check()
 
 
 if __name__ == "__main__":

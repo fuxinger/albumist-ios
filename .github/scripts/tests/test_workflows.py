@@ -203,6 +203,20 @@ class UploadApprovalTests(unittest.TestCase):
         first = release.split("\n      - ", 2)[1]
         self.assertTrue(first.startswith("name: App Store Connect secrets present"), first[:60])
         self.assertNotRegex(first, r"\$\{\{\s*secrets\.\w+\s*\}\}")
+        # "Re-run all jobs" on a run that uploaded stops in its first job, and a re-run of the
+        # upload job alone stops at its start, before the archive (upload_approval.py
+        # not-uploaded; the tag build-<run number> exists).
+        step = "\n      - name: Not uploaded by this run yet\n"
+        for job, before in (("check", "- name: Choose the gate"), ("release", "- name: Earlier attempts of this run")):
+            with self.subTest(job=job):
+                block = job_blocks(text)[job]
+                self.assertIn(step, "\n" + block)
+                own = block.split(step.strip("\n"), 1)[1].split("\n      - ", 1)[0]
+                self.assertIn("run: python3 .github/scripts/upload_approval.py not-uploaded", own)
+                self.assertIn("GH_TOKEN: ${{ github.token }}", own)
+                self.assertLess(block.index(step.strip("\n")), block.index(before))
+        import earlier_attempts
+        self.assertIn("Not uploaded by this run yet", earlier_attempts.MACHINERY_STEPS)
         # "Was testen" is set in the upload job now: no other job sets it with the key.
         self.assertEqual([job for job, block in job_blocks(text).items() if "testflight_notes.py upload" in block],
                          ["release"])

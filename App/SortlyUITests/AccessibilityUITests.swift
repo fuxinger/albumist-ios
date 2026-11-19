@@ -746,11 +746,22 @@ final class AccessibilityUITests: XCTestCase {
         let bodyLine = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits).lineHeight
         let flagLine = UIFont.preferredFont(forTextStyle: .title2, compatibleWith: traits).lineHeight
         let screen = app.frame
+        let rows = app.buttons.matching(identifier: "atlas.country")
+        // Only rows wholly on screen: a row cut by the edge has no meaningful height.
+        func wholeRows() -> [XCUIElement] {
+            rows.allElementsBoundByIndex.filter { $0.exists && !$0.frame.isEmpty && screen.contains($0.frame) }
+        }
+        // At the largest size on the small iPhone the tiles above the list fill more than two
+        // swipes (UI run 44561127820: no row wholly on screen): scroll on slowly until one is,
+        // and back the same way after, so the walk finds the share button again.
+        var shown = wholeRows()
+        var swipes = 0
+        while shown.isEmpty && swipes < 8 { app.swipeUp(velocity: .slow); swipes += 1; shown = wholeRows() }
+        print("UI_FACT \(tag) atlas rows: \(rows.count) in the tree, \(shown.count) wholly on screen after \(swipes) more swipe(s)")
+        defer { for _ in 0..<swipes { app.swipeDown(velocity: .slow) } }
         var measured = 0
-        for row in app.buttons.matching(identifier: "atlas.country").allElementsBoundByIndex where row.exists {
+        for row in shown {
             let frame = row.frame
-            // Only rows wholly on screen: a row cut by the edge has no meaningful height.
-            guard !frame.isEmpty, screen.contains(frame) else { continue }
             measured += 1
             // "Vereinigte Staaten, 2011": the name is the part before the year.
             let name = row.label.components(separatedBy: ", ").first ?? row.label

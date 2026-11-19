@@ -915,6 +915,16 @@ final class AccessibilityUITests: XCTestCase {
         return false
     }
 
+    /// A point near the top of `element` at least 18 pt above the tab bar (the bar takes taps a
+    /// little above its frame, see `tap`), when the element starts that far above it; else nil.
+    private func topClearOfTabs(_ element: XCUIElement) -> CGFloat? {
+        let tabs = app.tabBars.firstMatch
+        guard tabs.exists else { return nil }
+        let frame = element.frame
+        let y = frame.minY + min(8, frame.height / 4)
+        return y <= tabs.frame.minY - 18 ? y : nil
+    }
+
     /// The part of `element` clear of both bars (top and bottom; empty or negative when none).
     private func clearBand(_ element: XCUIElement) -> (top: CGFloat, bottom: CGFloat) {
         let window = app.windows.firstMatch.frame
@@ -1005,7 +1015,24 @@ final class AccessibilityUITests: XCTestCase {
                 print("UI_STEP_OK \(step)")
                 return true
             }
-            print("UI_FACT tap \(step): under a bar with less than 30 pt clear (\(Int(band.top))-\(Int(band.bottom))), XCTest scrolls it")
+            print("UI_FACT tap \(step): under a bar with less than 30 pt clear (\(Int(band.top))-\(Int(band.bottom)))")
+            // Contrast run 44582675590 (light, small iPhone): after ten swipes the button "open
+            // suggestions" still sat at y 557-607 under the tab bar from 584, `element.tap()` hit
+            // its centre (582) and the bar took it ("Not opened: contrast light suggestions").
+            // Short drags first; if it still has no 30 pt clear, its top part above the bar.
+            if tapClearOfBars(element, step) {
+                print("UI_STEP_OK \(step)")
+                return true
+            }
+            if underTabs(), let top = topClearOfTabs(element) {
+                print("UI_FLAKY_RETRY \(UITestWait.testID(self)) \(step): tapped at y \(Int(top)), the top of the element above the tab bar")
+                UITestOnboarding.clock("tap \(step)")
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+                    .withOffset(CGVector(dx: element.frame.midX, dy: top)).tap()
+                print("UI_STEP_OK \(step)")
+                return true
+            }
+            print("UI_FACT tap \(step): XCTest scrolls it")
         }
         UITestOnboarding.clock("tap \(step)")
         element.tap()

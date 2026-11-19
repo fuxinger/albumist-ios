@@ -34,7 +34,8 @@ commit of a pull request run is the merge commit named in its run-name ("[merge 
 ui.yml). Runs of this app with only older test code of every group are read last, while calls
 are left (RESERVED_CALLS stay for logs and annotations): only the "red with older test code"
 listing needs them. Each invocation may make MAX_CALLS API calls (GITHUB_TOKEN: 1000 per hour
-for the repository); beyond, `plan` runs every group and `gate` fails. That lock-out needs
+for the repository); beyond, `plan` runs every group and `gate` fails and says that a re-run
+ends the same way (review P5-08 d: it said "re-run this job when the API answers"). That lock-out needs
 more than about 200 runs in 90 days whose commit has this app AND the current test code of a
 group (or a commit git cannot find), plus the run listing (100 runs per call): change the app
 or raise MAX_CALLS then. A cache of parsed results (an artifact) would lift it; not done. A durable record of reds outside
@@ -45,8 +46,11 @@ GitHub's run list would need a token that can write from the test runs; not done
     test result that failed: ui_tests.py's last line "UI_RESULT <group> fail" (a hang past the
     pass deadline is one), or without it a failed test case (echoed live as UI_LIVE, so also
     before a cancel) or a failing UI_VERDICT; or the job was cancelled after its full time
-    limit. A log that cannot be read is red: GitHub deletes logs (HTTP 410) with the run or
-    earlier, and such a red then stays until the app or the test changes.
+    limit. A log GitHub no longer has is red: it deletes logs (HTTP 404, 410) with the run or
+    earlier, and such a red then stays until the app or the test changes; the gate names it
+    ("log gone"). A log read that fails otherwise (the API did not answer three times) is no
+    verdict, like an unreadable run list: `plan` runs every group and `gate` fails with "re-run
+    this job", never a red that no test showed (review P5-08 d).
   - no result: the step never started (a simulator that did not boot, a download, the
     toolchain, a run cancelled before it); a job still running; a cancel or a lost runner while
     the tests ran with nothing failed in the log (ui-supersede.yml cancels the waiting or
@@ -115,8 +119,9 @@ RESERVED_CALLS = 60
 # verdict of older logs, or the job's time limit (also ran_out_of_time). A
 # cancel or a lost runner in the middle of the tests with nothing failed yet: no result (since
 # ui-supersede.yml a newer push to a pull request cancels the UI runs of its older commits, also
-# running ones; the result of an outdated commit is then simply missing). An unreadable log (also
-# an expired one, HTTP 410) counts as red, so such a red stays for good.
+# running ones; the result of an outdated commit is then simply missing). A log GitHub no longer
+# has (HTTP 404, 410) counts as red, so such a red stays until the app or the test changes; a log
+# the API did not answer for is no verdict (log_reader).
 RESULT_LINE = re.compile(r"^(?:\ufeff)?(?:\d{4}-\d\d-\d\dT[\d:.]+Z )?UI_RESULT (\S+) (pass|fail|infra)\s*$", re.M)
 RED_IN_LOG = re.compile(r"Test Case '-\[[^\]]+\]' failed|UI_LIVE .*: error: -\[|UI_VERDICT \S+ (?:first|retry): fail|the failed pass stays red"
                         r"|has exceeded the maximum execution time")
@@ -128,6 +133,10 @@ class ApiError(Exception):
 
 class CoverageError(ApiError):
     """The runs that may hold results for this app cannot all be read."""
+
+
+class LogGone(ApiError):
+    """GitHub no longer has a job's log (HTTP 404 or 410): asking again does not help."""
 
 
 def api(path: str, **params):
@@ -147,7 +156,9 @@ def api(path: str, **params):
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             last = error
             if isinstance(error, urllib.error.HTTPError) and error.code in (404, 410):
-                break  # gone (an expired log): no use asking again
+                if path.endswith("/logs"):
+                    raise LogGone(f"GitHub API: {path}: {error}") from error
+                break  # gone: no use asking again
             time.sleep(5 * (attempt + 1))
     raise ApiError(f"GitHub API: {path}: {last}")
 
@@ -186,7 +197,7 @@ def red_in_log(log: str | None, group: str) -> bool:
     """Whether a job log shows a test result that is red. The last UI_RESULT line of ui_tests.py
     for this group decides when there is one (so a testmanagerd crash in every pass is no result,
     though a test case "failed" in it); otherwise the markers of RED_IN_LOG (a failure echoed
-    while the pass ran, UI_LIVE, then a cancel; older logs). An unreadable log is red."""
+    while the pass ran, UI_LIVE, then a cancel; older logs). A log that is gone (None) is red."""
     if log is None:
         return True
     verdicts = [v for g, v in RESULT_LINE.findall(log) if g == group]
@@ -219,13 +230,16 @@ def results(runs_and_jobs, logs=None) -> list[dict]:
             if not match or job.get("id") in seen or (job.get("completed_at") and key in seen):
                 continue
             seen.update({job.get("id"), key})
-            result = classify(job)
-            if (result == "red" and logs is not None and not ran_out_of_time(job)
-                    and not red_in_log(logs(job.get("id")), match.group(1))):
-                result = "none"  # stopped during the tests without a test result (a cancel)
+            result, log_state = classify(job), ""
+            if result == "red" and logs is not None and not ran_out_of_time(job):
+                text = logs(job.get("id"))
+                if text is None:
+                    log_state = "gone"  # red: whether a test failed cannot be checked any more
+                elif not red_in_log(text, match.group(1)):
+                    result = "none"  # stopped during the tests without a test result (a cancel)
             found.append({
                 "group": match.group(1), "app": match.group(2), "tests": match.group(3),
-                "result": result, "conclusion": job.get("conclusion"),
+                "result": result, "conclusion": job.get("conclusion"), "log": log_state,
                 "completed_at": job.get("completed_at") or "", "job_id": job.get("id"),
                 "url": job.get("html_url", ""), "run_id": run.get("id"), "run_number": run.get("run_number"),
                 "attempt": job.get("run_attempt", 1), "workflow": run.get("path", "").rsplit("/", 1)[-1],
@@ -235,13 +249,13 @@ def results(runs_and_jobs, logs=None) -> list[dict]:
 
 
 def log_reader(call):
-    """job id -> its log, None when it cannot be read (then a red stays red)."""
+    """job id -> its log, None when GitHub no longer has it (HTTP 404 or 410; then a red stays
+    red). Any other failure (the API did not answer three times) raises ApiError: no verdict,
+    like an unreadable run list, instead of a red that no test showed (review P5-08 d)."""
     def read(job_id):
         try:
             text = call(f"actions/jobs/{job_id}/logs")
-        except CoverageError:
-            raise
-        except ApiError:
+        except LogGone:
             return None
         return text if isinstance(text, str) else None
     return read
@@ -462,8 +476,18 @@ def cleared_notes(decisions: list[dict], groups, verifier) -> list[str]:
 
 
 def where(entry: dict) -> str:
+    gone = ", log gone" if entry.get("log") == "gone" else ""
     return (f"[run {entry['run_id']} attempt {entry['attempt']}]({entry['url']}) "
-            f"({entry['workflow']}, {entry['event']}, {entry['sha'][:7]})")
+            f"({entry['workflow']}, {entry['event']}, {entry['sha'][:7]}{gone})")
+
+
+def unreadable(error: ApiError) -> str:
+    """What the gate or the plan says when the history could not all be read, and what helps."""
+    if isinstance(error, CoverageError):
+        return (f"earlier results not readable completely ({error}; MAX_CALLS {MAX_CALLS} in "
+                ".github/scripts/ui_evidence.py): more runs of this app and test code than one call budget reads, "
+                "so a re-run ends the same way; change the app or the test code, or raise MAX_CALLS (docs/TESTFLIGHT.md)")
+    return f"earlier results not readable completely ({error}); re-run this job when the API answers"
 
 
 def table(decisions: list[dict], running: set[str] | None = None) -> str:
@@ -550,6 +574,8 @@ def plan(choice: str, call=None, verifier=None, tree=None, quick: bool = False, 
         except (ApiError, KeyError) as error:
             run = names
             note = f"Earlier results not readable completely ({error}): every group runs."
+            if isinstance(error, CoverageError):
+                note += f" More runs of this app and test code than one call budget reads (MAX_CALLS {MAX_CALLS}): the gate will fail the same way."
             print(f"::warning title=UI groups::{note}")
         print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
     elif words == ["all"]:
@@ -612,8 +638,9 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
                                            "by a shared change' may miss them"))
     except (ApiError, KeyError) as error:
         print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
-        print(earlier_attempts.command("error", "UI gate", f"earlier results not readable completely ({error}); "
-                                       "re-run this job when the API answers"))
+        text = unreadable(error) if isinstance(error, ApiError) else \
+            f"earlier results not readable completely ({error}); re-run this job when the API answers"
+        print(earlier_attempts.command("error", "UI gate", text))
         return 1
     print(f"UI_API_CALLS {call.count} (budget {MAX_CALLS})")
     decisions = [decide_mode(n, app, groups, entries, verifier, quick) for n in checked]
@@ -630,8 +657,12 @@ def gate(run_id: int | None, call=None, verifier=None, tree=None, quick: bool = 
                                                f"green for this app and test code in {e['url']}"))
         else:
             blocked = True
+            gone = [e for e in d["reds"] if e.get("log") == "gone"]
             why = ("red for this app and this test code in " + ", ".join(e["url"] for e in d["reds"])
                    + ". A red test is never re-run to green: fix it (the test or the app changes) and start a new run."
+                   + (f" Of these, {', '.join(e['url'] for e in gone)}: its log is gone (GitHub deleted it), so whether "
+                      "a test failed there cannot be checked any more; it counts as red until the app or the test "
+                      "changes." if gone else "")
                    if d["state"] == "red" else f"no green {mode} result for this app and this test code")
             parts.append(f"{d['group']} {d['state']}")
             print(earlier_attempts.command("error", f"UI {d['group']}", why))

@@ -281,7 +281,8 @@ Testcode gibt.
   Läufen in 90 Tagen, deren Commit diese App und den jetzigen Testcode einer Gruppe hat (oder
   die Git nicht kennt), zusätzlich zur Laufliste (100 Läufe je Anfrage). Dann sperrt das Gate
   jeden Upload dieses Stands, bis sich die App ändert oder `MAX_CALLS` in
-  `ui_evidence.py` erhöht wird. Ein Zwischenspeicher der ausgewerteten Läufe (als Artefakt)
+  `ui_evidence.py` erhöht wird, und sagt das so (dass eine Wiederholung gleich endet), statt wie
+  vorher „re-run this job when the API answers“. Ein Zwischenspeicher der ausgewerteten Läufe (als Artefakt)
   würde das aufheben; er ist noch nicht gebaut. Ein dauerhaftes Verzeichnis der roten Ergebnisse außerhalb
   von GitHubs Laufliste gibt es nicht (es bräuchte ein Schreib-Token in den Testläufen;
   Artefakte laufen ab wie die Läufe).
@@ -304,9 +305,12 @@ Testcode gibt.
   mindestens 30 Minuten bis zu dieser Frist bleiben (und nach dem Zurücksetzen noch 10);
   sonst hat die Gruppe kein Ergebnis. Gescheiterte Testfälle und `: error: -[`-Zeilen
   erscheinen schon während des Durchgangs im Log (`UI_LIVE`), sodass auch ein Abbruch danach
-  rot bleibt. Ein Job, der nach seinem vollen Zeitlimit nicht grün endete, ist ebenfalls rot. Ein Log, das sich nicht lesen lässt, zählt
-  als Rot; GitHub löscht Logs spätestens mit dem Lauf (Antwort 410), und ein solches Rot
-  bleibt dann bestehen, bis sich App oder Test ändern. Ein
+  rot bleibt. Ein Job, der nach seinem vollen Zeitlimit nicht grün endete, ist ebenfalls rot. Ein Log, das GitHub nicht mehr hat
+  (Antwort 404 oder 410; GitHub löscht Logs spätestens mit dem Lauf), zählt als Rot, und ein
+  solches Rot bleibt bestehen, bis sich App oder Test ändern; Gate und Tabelle sagen dann „log
+  gone“. Antwortet die API auf ein Log nur nicht (dreimal), gibt es kein Urteil wie bei einer
+  nicht lesbaren Laufliste: der Plan lässt alle Gruppen laufen, das Gate ist rot und sagt „re-run
+  this job“ (Prüfer 5, P5-08 d; vorher wurde daraus ein Rot ohne gescheiterten Test). Ein
   wackelnder Test wird so gezählt und behoben, nie durch Wiederholen versteckt. Die Gruppe darf
   zur Beobachtung noch einmal laufen; ihr Grün steht dann als „red before for this key“ in der
   Tabelle und zählt für TestFlight nicht. Ein Test, der einen Schritt in sich selbst noch

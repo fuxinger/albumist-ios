@@ -85,6 +85,8 @@ enum ContinuedAnalysis {
 
     /// Called whenever the analysis state or its finish time changes (`AppModel`).
     static func publish(_ analysis: AppModel.AnalysisState, finish: FinishEstimate?) {
+        // Every run counts for the battery use, the overnight refinement too.
+        BatteryLog.analysisChanged(analysis)
         // The overnight refinement seen in the app is not the run a task shows: a task of a run
         // in the app that has not seen its end yet must not take over its bar (review of d744b74).
         guard !analysis.refining else { return }
@@ -110,6 +112,7 @@ enum ContinuedAnalysis {
     /// Called with every scene change (`SortlyApp`).
     static func sceneChanged(onScreen: Bool) {
         shared.withLock { $0.onScreen = onScreen }
+        BatteryLog.sceneChanged(onScreen: onScreen)
     }
 
     /// Asks for background time for the running analysis. Only while the app is on screen
@@ -175,6 +178,8 @@ enum ContinuedAnalysis {
     private static func ended(_ how: String, fraction: Double) {
         status = .idle
         lastRequest = nil
+        // iOS may hold the app right after: the battery stretch ends at its last reading.
+        if how == "expired" { BatteryLog.backgroundTimeEnded() }
         let state = BackgroundRunLog.deviceState()
         BackgroundRunLog.update {
             $0.lastEnd = Date()

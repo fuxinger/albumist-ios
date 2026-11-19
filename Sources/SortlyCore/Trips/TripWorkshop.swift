@@ -199,3 +199,81 @@ public enum TripWorkshop {
         wait(creatingAlbums: false, analysing: running, check: check) == .tripsAgain ? .waitHere : .savedForLater
     }
 }
+
+/// Whether the trips on screen include the user's trip changes (`AppModel`), counted in changes.
+///
+/// "No analysis runs" is not the same as "the trips shown include the change": a run shows as
+/// ended before its end has refreshed the overview (`refreshDerived`, seconds with a large
+/// library), and a run that started before the change was stored (a change in Photos, a retry, a
+/// pass of the overnight refinement) read the trips from before. Taking the one for the other,
+/// the workshop said "Die Vorschläge sind schon angepasst" over the old trips, and the trip
+/// controls were free while the old trips were shown. The sheet may be swiped away while it
+/// waits (owner decision 19.11.2026), so the user was back at those trips at once: a merge made
+/// on one of them spans it and drops the split just made (`TripCorrections.merging`), and the old
+/// state came back.
+///
+/// Each change counts once when stored; a run reads the count at its start; its end, when it made
+/// suggestions, writes what it read; a refresh of the overview shows what was written when it read
+/// the store, once it assigns its result. Runs are told apart by `AppModel.analysisGeneration`.
+public struct TripChangeLedger: Sendable, Equatable {
+    public enum State: Hashable, Sendable {
+        /// The trips shown include every change stored.
+        case applied
+        /// A run, or the end of one, is going: the trips shown are about to change.
+        case waiting
+        /// Stored, and no run that read it is going (one ended without suggestions, paused, or
+        /// read the trips from before): it is made by the run that comes, as the workshop says
+        /// ("Gespeichert … sobald die Analyse fertig ist").
+        case savedForLater
+    }
+
+    /// Changes stored so far in this launch.
+    public private(set) var stored = 0
+    /// The newest change in suggestions a run has written to the store.
+    public private(set) var written = 0
+    /// The newest change in the suggestions on screen.
+    public private(set) var shown = 0
+    /// Runs going: the changes stored when each started.
+    private var reading: [Int: Int] = [:]
+    /// Runs that ended and whose end has not refreshed the overview yet.
+    private var ending: Set<Int> = []
+
+    public init() {}
+
+    /// A split, a merge, "Aufheben" or the reset in the settings is stored (before its run starts).
+    public mutating func changeStored() { stored += 1 }
+
+    /// Run `run` starts: it reads the changes stored until now.
+    public mutating func runStarted(_ run: Int) { reading[run] = stored }
+
+    /// Run `run` ended (before it shows as ended). `madeSuggestions`: it made the suggestions from
+    /// the trips it worked out (its report has the suggestions step); a run that threw, was
+    /// stopped or paused before them made nothing.
+    public mutating func runEnded(_ run: Int, madeSuggestions: Bool) {
+        guard let read = reading.removeValue(forKey: run) else { return }
+        if madeSuggestions { written = max(written, read) }
+        ending.insert(run)
+    }
+
+    /// The end of run `run` has refreshed the overview (or will not: cut off).
+    public mutating func runSettled(_ run: Int) {
+        reading[run] = nil
+        ending.remove(run)
+    }
+
+    /// What a refresh of the overview that reads the store now will show.
+    public var refreshReads: Int { written }
+
+    /// A refresh that read `read` (`refreshReads`) assigned its result. A refresh that read
+    /// earlier and lands later never takes it back.
+    public mutating func refreshShown(_ read: Int) { shown = max(shown, read) }
+
+    /// A run or the end of one is going: the trips shown are about to change, so the trip
+    /// controls wait (`TripWorkshop.wait`).
+    public var settling: Bool { !reading.isEmpty || !ending.isEmpty }
+
+    public var state: State {
+        if shown >= stored { return .applied }
+        return settling ? .waiting : .savedForLater
+    }
+}

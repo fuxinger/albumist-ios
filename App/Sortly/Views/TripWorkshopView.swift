@@ -79,11 +79,14 @@ struct TripWorkshopView: View {
         // The controls grey and the note comes while the changes wait, and both go back by
         // themselves when the run ends (they follow the model).
         .animation(reduceMotion ? nil : .smooth, value: model.tripChangeWait)
-        // The change shows once the analysis that applies it has finished.
-        .onChange(of: model.analysis.isRunning) { _, running in
-            guard !running, let finished = working else { return }
+        // The change shows once the trips on screen include it (`TripChangeLedger`), not when
+        // the run ends: its end refreshes the overview after, and a run that slipped in read the
+        // trips from before. Saved when no run that read it is left (paused, ended early).
+        .onChange(of: model.tripChangeState) { _, state in
+            guard state != .waiting, let finished = working else { return }
             withAnimation(.smooth) {
                 working = nil
+                saved = state == .savedForLater
                 done = finished
             }
         }

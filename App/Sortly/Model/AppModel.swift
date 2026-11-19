@@ -499,6 +499,11 @@ final class AppModel {
     }
     /// The user's own trip splits and merges (I07), for the settings.
     private(set) var tripCorrections = TripCorrections()
+    /// Whether the trips on screen include the user's trip changes (`TripChangeLedger`): the trip
+    /// controls wait and the workshop says done only by it, not by the run's end alone.
+    private(set) var tripChangeLedger = TripChangeLedger()
+    /// `TripChangeLedger.State` for the workshop.
+    var tripChangeState: TripChangeLedger.State { tripChangeLedger.state }
     /// The user's answers to "Bist du hier öfter?", for the settings.
     private(set) var recurringPlaces = RecurringPlaceAnswers()
     /// What the latest analysis asks about recurring places, and where each trip mostly was.
@@ -1100,6 +1105,7 @@ final class AppModel {
         }
         analysisGeneration += 1
         let generation = analysisGeneration
+        tripChangeLedger.runStarted(generation)
         let control = AnalysisRunControl()
         analysisControl = control
         startTicks(run: generation)
@@ -1171,6 +1177,8 @@ final class AppModel {
             // Owed before the wait below: a run that starts meanwhile (a trip change, new photos,
             // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
             finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
+            // The trips it made are on screen only once its end has refreshed the overview.
+            tripChangeLedger.runEnded(generation, madeSuggestions: finished?.completedStages.contains(.proposals) == true)
             analysis.stoppedAt = analysis.position
             analysis.needsResume = end.needsResume
             analysis.isRunning = false
@@ -1199,6 +1207,7 @@ final class AppModel {
                 access = await library.access()
             }
             await refreshDerived()
+            tripChangeLedger.runSettled(generation)
             // Trip identities (names and corrections stay with their trip) are kept in the copy.
             saveSafetyBackup()
             // Another run started while this end waited (the follow-up, a change of the settings,
@@ -1761,6 +1770,7 @@ final class AppModel {
         // `beginCard` cancels it; `tickNow` only skips a tick that is not the newest run's.
         analysisGeneration += 1
         let generation = analysisGeneration
+        tripChangeLedger.runStarted(generation)
         let control = AnalysisRunControl()
         analysisControl = control
         startTicks(run: generation)
@@ -1808,6 +1818,8 @@ final class AppModel {
             tickTask?.cancel()
             tickTask = nil
         }
+        // The trips it made are on screen only once its end has refreshed the overview.
+        tripChangeLedger.runEnded(generation, madeSuggestions: report?.completedStages.contains(.proposals) == true)
         analysis.isRunning = false
         analysis.pausing = false
         pausingSince = nil
@@ -1823,8 +1835,12 @@ final class AppModel {
         analysis.waiting = nil
         analysisBar = barBefore
         updateCard()
-        guard let ran = report else { return (false, end.next, generation) }
+        guard let ran = report else {
+            tripChangeLedger.runSettled(generation)
+            return (false, end.next, generation)
+        }
         await refreshDerived()
+        tripChangeLedger.runSettled(generation)
         saveSafetyBackup(immediately: true)
         return (ran.pausedBecause == nil, end.next, generation)
     }
@@ -1860,6 +1876,8 @@ final class AppModel {
     func refreshDerived() async {
         guard let store, let pipeline else { return }
         let call = derivedCalls.begin()
+        // The trip changes in the suggestions the store holds now (`TripChangeLedger`).
+        let tripsRead = tripChangeLedger.refreshReads
         await reconcileManagedAlbums(quiet: true)
         do {
             // Everything is read first and assigned together, only by the newest call: an older
@@ -1928,6 +1946,7 @@ final class AppModel {
             undonePlans = undone
             removedFromProposals = removed
             MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot, call: call) }
+            tripChangeLedger.refreshShown(tripsRead)
         } catch {
             message = .failure(error.localizedDescription)
         }
@@ -2191,7 +2210,8 @@ final class AppModel {
     /// be made. `changeTrips` refuses exactly then; the workshop and the settings grey these
     /// controls and say why next to them (`TripChangeWaitNote`).
     var tripChangeWait: TripWorkshop.Wait? {
-        TripWorkshop.wait(creatingAlbums: execution.isRunning, analysing: analysis.isRunning, check: runIsShortCheck)
+        TripWorkshop.wait(creatingAlbums: execution.isRunning, analysing: analysis.isRunning || tripChangeLedger.settling,
+                          check: runIsShortCheck)
     }
 
     /// What the workshop does once `changeTrips` stored a change and asked for its run: wait for
@@ -2221,6 +2241,7 @@ final class AppModel {
             let updated = change(try await pipeline.tripCorrections())
             try await pipeline.setTripCorrections(updated)
             tripCorrections = updated
+            tripChangeLedger.changeStored()
             saveSafetyBackup()
             startAnalysis(cause: .userChange)
             return true

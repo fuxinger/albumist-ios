@@ -80,11 +80,25 @@
   Wo die Uhren früher anders gingen (Indiana bis 2007, North Dakota bis 2010, Teile Russlands),
   kann ein älteres Foto nahe einer solchen Grenze offline eine Stunde daneben liegen. Kaschmir,
   die Golanhöhen und Abchasien haben offline keine Zone (dort gilt die Heimatzone).
-- Fotos ohne Ort (auch mit einem Ort nur aus dem Bildinhalt) zählen in der Heimatzone: der
-  Zeitzone des iPhones bei der ersten Analyse (bei einer Datenbank von vorher: bei der ersten
-  Analyse nach dem Update). Sie bleibt auf Reisen und nach „Analyse neu aufbauen“, die Sicherung
-  nimmt sie mit. Wer bei dieser ersten Analyse verreist ist, bekommt die Zone der Reise; wer in
-  ein Land mit anderer Zeit umzieht, behält die alte. Ändern lässt sie sich noch nicht.
+- Fotos ohne Ort (auch mit einem Ort nur aus dem Bildinhalt) zählen außerhalb von Reisen in der
+  Heimatzone, der Zeitzone des Zuhauses: des in „Dein Zuhause“ gewählten, sonst des gefundenen,
+  auch bei einem Update unterwegs (zweite Prüfung von P1-15). Nur solange kein Zuhause bekannt
+  ist, ist es die Zeitzone des iPhones bei der ersten Analyse. Die Heimatzone wird gespeichert,
+  bleibt auf Reisen und nach „Analyse neu aufbauen“, die Sicherung nimmt sie mit; nach einem
+  Umzug in ein Land mit anderer Zeit folgt sie dem neuen Zuhause, sobald Albumist es findet oder
+  es gewählt wird. Es gibt nur eine Heimatzone, keine je früherem Zuhause: Fotos ohne Ort aus der
+  Zeit vor dem Umzug zählen dann in der neuen. Zwei Zuhause mit etwa gleich vielen Tagen, einen
+  halben Tag auseinander (München und Auckland), behalten die Zone, die sie haben: in der Zeit
+  des einen hat das andere die meisten Tage, die Zone wechselte sonst mit jeder Analyse. Eine
+  gespeicherte Zone, die das System nicht kennt (aus der Sicherung eines neueren iPhones), bleibt
+  gespeichert; solange gilt die des iPhones.
+- Ein Foto ohne Ort, das eine Reise über seine Zeit hält (aus einer Kamera ohne GPS, ein im
+  Messenger empfangenes Bild), zählt in der Zone des Reiseziels: der häufigsten unter den Fotos
+  der Reise, auch wenn sie über mehrere Zonen ging. Außerhalb einer Reise gilt für ein Foto ohne
+  Ort die Heimatzone, auch wenn es woanders entstand.
+- „Nur 2026“ sieht sich die Fotos an, die nach ihrer Uhr in 2026 liegen, so weit ihre Orte bei
+  der Analyse bekannt sind. Bekommt ein Foto erst später einen Ort mit einer anderen Zone (online,
+  nahe einer Zonengrenze) und rückt dadurch ins Jahr, kommt es mit der nächsten Analyse dazu.
 - Weiter in der Zeitzone des iPhones: Reise-Atlas, Länderseiten und Foto-Geschichte (ihre Jahre
   und Tage), der Vorschlag für „Seit wann wohnst du dort?“ und die Tage in der Reise-Werkstatt.
   Ein Foto der Silvesternacht in New York steht also im Album „Dezember 2026“, im Reise-Atlas

@@ -312,11 +312,13 @@ public struct ProgressEstimator: Sendable {
     public mutating func setWorkload(_ workload: AnalysisWorkload) { self.workload = workload }
 
     /// A progress report of the run. `appleWait`: the report says the run waits for Apple's
-    /// geocoder (`Progress.waitLeft`). That time says nothing about the speed per item (the
-    /// limit is Apple's, and after its online budget the step resolves the rest offline in
-    /// seconds): it is not measured, and the speed settles again afterwards, but a time already
-    /// shown stays. Measured in the simulated run with a refusing geocoder: counted, the waits
-    /// put the finish time more than 5 min too late.
+    /// geocoder (`Progress.waitLeft`). Since 18.11. (device test, build 36) only the overnight
+    /// refinement waits; a run in the app never does, so its finish time never sees one. That
+    /// time says nothing about the speed per item (the limit is Apple's, and after its online
+    /// budget the step resolves the rest offline in seconds): it is not measured, and the speed
+    /// settles again afterwards, but a time already shown stays (the card shows the wait's
+    /// countdown meanwhile, not the time). Measured in the simulated run with a refusing
+    /// geocoder: counted, the waits put the finish time more than 5 min too late.
     public mutating func record(step: AnalysisStep, completed: Int, total: Int, at now: Instant, appleWait: Bool = false) {
         guard var r = running, r.step == step else {
             if let r = running { keepMeasured(r) }
@@ -975,6 +977,8 @@ public enum AnalysisCardState: Sendable, Equatable {
         public var catchingUpTo: Int?
         public var waiting: PauseReason?
         public var slower: SlowReason?
+        /// The places step waits for Apple's geocoder (the overnight refinement only): the card
+        /// shows the wait's countdown instead of the finish time.
         public var appleWait = false
         /// Photos has not answered for a while (`PhotosDeadline.slowFor`), or the last run ended
         /// on it and the next try is due (`AppModel`): said instead of a count standing still.
@@ -1146,5 +1150,108 @@ public final class ProgressMailbox: Sendable {
             $0.earlyProposals = false
             return taken
         }
+    }
+}
+
+// MARK: The overnight refinement on the card
+
+/// The countdown of a wait for Apple's geocoder ("weiter in 25 s", "weiter in 2 Minuten"): whole
+/// seconds up to a minute, whole minutes above (a wait after a refusal can last up to 10 min),
+/// always rounded up, so it never says less than is left and never 0 while it still waits.
+public enum AppleWaitCountdown: Sendable, Equatable {
+    case seconds(Int)
+    case minutes(Int)
+
+    public init(_ left: Duration) {
+        let seconds = max(1, Int(left.seconds.rounded(.up)))
+        self = seconds <= 60 ? .seconds(seconds) : .minutes((seconds + 59) / 60)
+    }
+}
+
+/// The card while the overnight refinement runs and the app is opened (second review of the
+/// no-wait fix for the geocoder, device test 18.11., build 36). Before, the refinement's
+/// reports reached no one: the card stood on the last run's position without a word, and the
+/// countdown of its wait for Apple never showed. The refinement is shown as a run of its own:
+/// its step and count, the countdown while it waits for Apple's limit, a wait for the device,
+/// and a bar that moves with it from its own start. Nothing of the analysis before it is
+/// touched (the marker a later run goes on from, its bar and widths, its finish time:
+/// `AppModel.refinePass` gives them back when the refinement ends). Fed like a run in the app:
+/// the pipeline's reports into a `ProgressMailbox`, taken by a tick every 250 ms.
+public struct RefinementCard: Sendable {
+    public typealias Instant = ContinuousClock.Instant
+
+    public struct Shown: Sendable, Equatable {
+        public var stage: AnalysisPipeline.Stage?
+        public var completed = 0
+        public var total = 0
+        /// The places step's pass over the offline map.
+        public var mapPass: AnalysisPipeline.MapPass?
+        /// The refinement waits for Apple's geocoder: about how long still, as the pipeline
+        /// said it last (every 2 s); `nil` once the lookups go on.
+        public var waitLeft: Duration?
+        /// The device asked for a break (heat, battery).
+        public var waiting: PauseReason?
+        /// The bar's segments for the refinement (from its own workload, once said).
+        public var widths: StepWidths = .standard
+        /// The bar (0…0.99): gliding between reports while the refinement works.
+        public var bar = 0.0
+
+        public var position: AnalysisCardState.Position? {
+            stage.map { AnalysisCardState.Position(step: AnalysisStep($0), completed: completed, total: total) }
+        }
+        public var countdown: AppleWaitCountdown? { waitLeft.map(AppleWaitCountdown.init) }
+        public init() {}
+    }
+
+    public private(set) var shown = Shown()
+    private var estimator = ProgressEstimator()
+    private var glide = BarGlide()
+    private var widthsFixed = false
+
+    public init() {}
+
+    /// One tick: what the mailbox held since the last one. `gliding`: on screen, without
+    /// Reduce Motion, not pausing (the bar then shows the real value only).
+    @discardableResult
+    public mutating func take(_ taken: ProgressMailbox.Taken, at now: Instant, gliding: Bool) -> Shown {
+        shown.waiting = taken.waiting
+        if let workload = taken.workload {
+            estimator.setWorkload(workload)
+            if !widthsFixed {
+                // As a run in the app: the widths from the workload, continued from the bar
+                // drawn so far, so the bar neither falls nor stands until the real value passes it.
+                var widths = StepWidths(workload: workload)
+                if let stage = shown.stage,
+                   let continued = widths.continuing(held: shown.bar, step: AnalysisStep(stage),
+                                                     completed: shown.completed, total: shown.total) {
+                    widths = continued
+                }
+                shown.widths = widths
+                widthsFixed = true
+                glide.reset(keeping: shown.bar)
+            }
+        }
+        if let p = taken.progress, accepts(p) {
+            shown.stage = p.stage
+            shown.completed = p.completed
+            shown.total = p.total
+            shown.mapPass = p.stage == .places ? p.mapPass : nil
+            shown.waitLeft = p.waitLeft
+            let step = AnalysisStep(p.stage)
+            estimator.record(step: step, completed: p.completed, total: p.total, at: now, appleWait: p.waitLeft != nil)
+            glide.update(real: shown.widths.overall(step: step, completed: p.completed, total: p.total), at: now,
+                         step: step, widths: shown.widths, itemsPerSecond: estimator.rate, total: p.total)
+        }
+        let working = shown.waiting == nil && shown.waitLeft == nil
+        if !working { estimator.idle() }
+        shown.bar = glide.value(at: now, gliding: gliding && working)
+        return shown
+    }
+
+    /// A step never goes back, nor a count within its step (a late report of the same run).
+    private func accepts(_ p: AnalysisPipeline.Progress) -> Bool {
+        guard let stage = shown.stage else { return true }
+        if p.stage.number < stage.number { return false }
+        return !(p.stage == stage && p.completed < shown.completed)
     }
 }

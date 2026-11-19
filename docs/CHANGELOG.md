@@ -85,6 +85,19 @@
   scheitert, wenn die Analyse nicht vorankommt oder Pause und Fortsetzen nie versucht wurden
   (G5-07). Der Kauf-Test scheitert, wenn die Freischalt-Karte fehlt, obwohl der Plan mehr Alben
   braucht als frei sind (G5-09).
+- Gerätetest 18.11. (Build 36): Während der Analyse stand „Apple antwortet gleich“ 20–30 s lang
+  mit stehender Zahl. Apple war nicht langsam, Albumist bremste sich selbst (höchstens 40
+  Ortsabfragen pro Minute, im Lauf aber 60 erlaubt; nach einer Ablehnung bis zu 30 s Warten).
+  Kein Lauf außer der nächtlichen Verfeinerung wartet jetzt auf Apple (auch nicht im
+  Hintergrund): Er fragt nur so oft, wie es ohne Warten geht (Abfragen eines Laufs kurz davor
+  zählen mit), und hört an der Grenze oder bei der ersten Ablehnung sofort auf; dann fragt ein
+  Lauf in der App eine Stunde lang nicht wieder. Die übrigen Ortsnamen kommen mit einem späteren
+  Lauf oder der nächtlichen Verfeinerung. Wird die App während der Verfeinerung geöffnet, zeigt
+  die Karte sie jetzt als eigenen Lauf (Schritt, Zahl, Balken; vorher stand dort ohne ein Wort
+  der Stand des letzten Laufs), und wartet sie auf Apple, sagt sie warum, mit Countdown:
+  „Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in 25 s“, über einer Minute
+  „weiter in 2 Minuten“. Nach einer Wartezeit nimmt eine Abfrage ihren Platz in Albumists Grenze
+  neu, statt sich nur einzutragen.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

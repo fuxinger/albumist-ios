@@ -76,8 +76,15 @@ final class AppModel {
         var widths: StepWidths = .standard
         /// Where the last run stood when it ended (the paused card: "Bei 2.433 von 5.683 Fotos").
         var stoppedAt: AnalysisCardState.Position?
-        /// Apple's geocoder makes the places step wait ("Apple antwortet gleich").
-        var appleWait = false
+        /// The places step waits for Apple's geocoder (only the overnight refinement does: a run
+        /// in the app never waits for it): about how long still, for the card's countdown
+        /// ("Ortsnamen: Apple erlaubt nur einige Abfragen pro Minute · weiter in 25 s").
+        var appleWaitLeft: Duration?
+        var appleWait: Bool { appleWaitLeft != nil }
+        /// The run is the overnight refinement (`refinePass`): the card shows it as a run of its
+        /// own (`RefinementCard`), not as the analysis going on: no catching up, no phase of its
+        /// own, no quick check, the bar from the refinement's own start.
+        var refining = false
 
         var fraction: Double { total == 0 ? 0 : min(1, Double(completed) / Double(total)) }
         /// The step the card shows (six steps; the pipeline's groups belong to the last one).
@@ -91,10 +98,10 @@ final class AppModel {
         }
         /// Still on the quick first steps of a run that goes on from further ahead.
         var isCatchingUp: Bool {
-            resumed?.isCatchingUp(running: isRunning, at: stage?.number) ?? false
+            !refining && (resumed?.isCatchingUp(running: isRunning, at: stage?.number) ?? false)
         }
         /// The value is held until the run passes where the run before stopped (`ResumedRun`).
-        var isHolding: Bool { resumed?.holds(running: isRunning) ?? false }
+        var isHolding: Bool { !refining && (resumed?.holds(running: isRunning) ?? false) }
         /// The last run finished the whole analysis: only then does the card say 100 %.
         var isComplete: Bool { outcome.isComplete(running: isRunning) }
         /// The label of a phase of its own ("Neue Fotos werden analysiert", "Analyse nach
@@ -104,6 +111,7 @@ final class AppModel {
         /// finding 7: right after "Alle 5.683 Fotos analysiert" it said "Bildinhalte werden
         /// erkannt · 0 von 5.683").
         var newWork: ResumedRun.NewWork? {
+            if refining { return nil }
             if let newWork = resumed?.newWork { return newWork }
             return kind == .check && workload?.isMostlyLabels == true ? .newAreas : nil
         }
@@ -112,6 +120,7 @@ final class AppModel {
         /// paused card said "0 %" or the value the run started from, stress run 43833158673).
         /// Never 100 % before the analysis is complete (`AnalysisPercent`).
         var shownOverall: Double {
+            if refining, isRunning { return AnalysisPercent.value(overall, isComplete: false) }
             let stopped = isRunning ? nil : stoppedAt.map { widths.overall(step: $0.step, completed: $0.completed, total: $0.total) }
             let value = resumed.map { $0.shown(running: isRunning, catchingUp: isCatchingUp, overall: overall, stopped: stopped) }
                 ?? stopped ?? overall
@@ -219,6 +228,8 @@ final class AppModel {
     }
 
     @ObservationIgnored private var progressMailbox = ProgressMailbox()
+    /// What the card shows of the overnight refinement (`refinePass`, `refinementTick`).
+    @ObservationIgnored private var refinementCard = RefinementCard()
     @ObservationIgnored private var estimator = ProgressEstimator()
     @ObservationIgnored private var glide = BarGlide()
     @ObservationIgnored private var tickTask: Task<Void, Never>?
@@ -985,7 +996,7 @@ final class AppModel {
         analysis.completed = 0
         analysis.total = 0
         analysis.waiting = nil
-        analysis.appleWait = false
+        analysis.appleWaitLeft = nil
         analysis.stoppedAt = nil
         analysis.resumeFrom = AnalysisMarker.unfinished
         analysis.resumed = analysis.resumeFrom.map {
@@ -1090,7 +1101,7 @@ final class AppModel {
             analysis.pausing = false
             analysis.stage = nil
             analysis.waiting = nil
-            analysis.appleWait = false
+            analysis.appleWaitLeft = nil
             endCard()
             if end.isFinished {
                 AnalysisMarker.finished()
@@ -1204,7 +1215,7 @@ final class AppModel {
         // Not cleared here: a report sent just before a wait for the device began can be taken
         // after it (the tick runs every 250 ms); the wait comes and goes with the pipeline's
         // own word, taken in order from the mailbox (`tick`).
-        analysis.appleWait = progress.waitLeft != nil
+        analysis.appleWaitLeft = progress.waitLeft
         analysis.mapPass = progress.stage == .places ? progress.mapPass : nil
         let step = AnalysisStep(progress.stage)
         if !analysis.pausing {
@@ -1318,6 +1329,10 @@ final class AppModel {
     private func tickNow(run: Int) {
         guard run == analysisGeneration, analysis.isRunning else { return }
         let now = ContinuousClock.now
+        if analysis.refining {
+            refinementTick(at: now)
+            return
+        }
         let taken = progressMailbox.take()
         let previousTick = lastTickClock?.0
         lastTickClock = (now, Date())
@@ -1437,6 +1452,26 @@ final class AppModel {
         updateCard(now: now)
     }
 
+    /// The tick of the overnight refinement: its count, its waits (Apple's limit with the
+    /// countdown, the device) and its bar, from `RefinementCard`. Nothing a run in the app does
+    /// at its tick: no marker for a run that goes on, no finish time, no "Schon fertig", no
+    /// request for background time (the refinement has its own task).
+    private func refinementTick(at now: ContinuousClock.Instant) {
+        let gliding = !analysis.pausing && isOnScreen && !UIAccessibility.isReduceMotionEnabled
+        let shown = refinementCard.take(progressMailbox.take(), at: now, gliding: gliding)
+        var next = analysis
+        next.stage = shown.stage
+        next.completed = shown.completed
+        next.total = shown.total
+        next.mapPass = shown.mapPass
+        next.appleWaitLeft = shown.waitLeft
+        next.waiting = shown.waiting
+        next.widths = shown.widths
+        if next != analysis { analysis = next }
+        if abs(shown.bar - analysisBar) > 0.000_05 { analysisBar = shown.bar }
+        updateCard(now: now)
+    }
+
     /// Decides the card's state from the model (pure rules in `AnalysisCardState`).
     func updateCard(now: ContinuousClock.Instant = .now) {
         var i = AnalysisCardState.Inputs()
@@ -1484,7 +1519,7 @@ final class AppModel {
     /// A check for new photos after everything was analysed once: no step numbers and no bar
     /// that starts at zero again, only "Sucht neue Fotos", unless there is real work to show.
     var isQuickCheck: Bool {
-        guard analysis.kind == .check else { return false }
+        guard analysis.kind == .check, !analysis.refining else { return false }
         if let stage = analysis.stage, [.content, .text].contains(stage), analysis.remaining >= 50 { return false }
         return true
     }
@@ -1518,7 +1553,9 @@ final class AppModel {
         // missing as "remaining" although a run in the app looks up at most a few, so every
         // quick check asked iOS for background time (device test 15.11. 23:16: the Lock Screen
         // and the Dynamic Island showed the analysis every few seconds).
-        guard analysis.isRunning, let stage = analysis.stage,
+        // Never for the overnight refinement seen in the app: the user did not start it, and its
+        // end must not read "Analyse wartet auf dich" on the Lock Screen (review of d744b74).
+        guard analysis.isRunning, !analysis.refining, let stage = analysis.stage,
               [.content, .text].contains(stage), analysis.remaining >= 100 else { return }
         ContinuedAnalysis.begin()
     }
@@ -1616,16 +1653,46 @@ final class AppModel {
         if let previous, analysisGeneration != previous { return nil }
         guard let pipeline, !analysis.isRunning, !analysisResetting, access.canRead, !refinementHeldByPause,
               !Task.isCancelled else { return nil }
+        // Seen in the app, the card shows the refinement as a run of its own, fed and ticked like
+        // a run in the app (`RefinementCard`): its count and the countdown while it waits for
+        // Apple's limit (heat or a low battery stop it, they never make it wait). Before, its reports reached no one and the card stood on
+        // the last run's position without a word (second review of the no-wait fix, device test
+        // 18.11., build 36). What the card showed of the analysis comes back when it ends.
+        let shownBefore = analysis
+        let barBefore = analysisBar
         analysis.isRunning = true
-        updateCard()
-        // Late progress of the run before must not show up during this one.
+        analysis.refining = true
+        analysis.stage = nil
+        analysis.completed = 0
+        analysis.total = 0
+        analysis.mapPass = nil
+        analysis.appleWaitLeft = nil
+        analysis.waiting = nil
+        analysisFinish = nil
+        analysisStepRemaining = nil
+        analysisRecent = []
+        analysisBar = 0
+        refinementCard = RefinementCard()
+        progressMailbox = ProgressMailbox()
+        // Late progress of the run before must not show up during this one. The tick of this
+        // refinement ends with it (its end below), or when a newer run's `startTicks` or
+        // `beginCard` cancels it; `tickNow` only skips a tick that is not the newest run's.
         analysisGeneration += 1
         let generation = analysisGeneration
         let control = AnalysisRunControl()
         analysisControl = control
+        startTicks(run: generation)
+        updateCard()
         // Held like a foreground run, so "Analyse neu aufbauen" can wait until this run has
         // really ended before it clears the tables (audit 2, 4.1).
-        let run = Task { try await pipeline.run(mode: .refinement, control: control) }
+        let mailbox = progressMailbox
+        let run = Task {
+            try await pipeline.run(mode: .refinement, control: control, onProgress: { progress in
+                mailbox.post(progress)
+            }, onWaiting: { reason in
+                mailbox.wait(reason)
+            })
+        }
         analysisTask = Task { await withTaskCancellationHandler { _ = try? await run.value } onCancel: { run.cancel() } }
         // `nil`: cut off (iOS ended the background time); what was analysed stays analysed.
         let report = try? await withTaskCancellationHandler { try await run.value } onCancel: { run.cancel() }
@@ -1652,8 +1719,26 @@ final class AppModel {
         // settings it missed: not done (the next pass, or the app when opened); cut off or
         // stopped by the device: as it was.
         analysis.needsResume = end.needsResume(afterRefinement: analysis.needsResume)
+        // The card's tick for this refinement ends with it, also when it was cut off or stopped
+        // (a newer run's tick is left alone).
+        if analysisGeneration == generation {
+            tickTask?.cancel()
+            tickTask = nil
+        }
         analysis.isRunning = false
         analysis.pausing = false
+        pausingSince = nil
+        // The refinement's own step, count, waits and bar go; the card shows the analysis as
+        // before (a wait for Apple's limit ends with the refinement, also one cut off).
+        analysis.refining = false
+        analysis.stage = shownBefore.stage
+        analysis.completed = shownBefore.completed
+        analysis.total = shownBefore.total
+        analysis.mapPass = shownBefore.mapPass
+        analysis.widths = shownBefore.widths
+        analysis.appleWaitLeft = nil
+        analysis.waiting = nil
+        analysisBar = barBefore
         updateCard()
         guard let ran = report else { return (false, end.next, generation) }
         await refreshDerived()

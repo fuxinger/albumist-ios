@@ -203,10 +203,6 @@ public actor AnalysisPipeline {
     /// Analyzer errors in a row after which a run stops instead of going through every photo:
     /// when Vision itself fails, each further photo would fail the same way.
     static let analyzerFailureLimit = 5
-    /// How long a run in the app waits for Apple's geocoder after it refused (once), before the
-    /// remaining town names are left for a later run. Without a limit, four growing waits per
-    /// place cell could hold step 3 for hours while the bar did not move.
-    static let foregroundRateLimitWait: Duration = .seconds(30)
 
     enum Key {
         static let trips = "analysis.trips"
@@ -287,9 +283,17 @@ public actor AnalysisPipeline {
     /// Online place lookups per normal run; the rest waits for the overnight refinement run.
     /// Keeps the first analysis from spending up to an hour on town names before photos are
     /// looked at (the geocoder allows about 40 requests a minute). `nil` = no limit.
+    /// A run in the app never waits for the geocoder either (device test 18.11., build 36: the
+    /// card said "Apple antwortet gleich" and the count stood for 20–30 s): it asks only while
+    /// Albumist's own throttle has a free slot (`RequestThrottle.apple`, the requests of the runs
+    /// before within its minute count, `geocoderRequests`) and stops at Apple's first refusal.
+    /// Either way the towns left come with a later run or the overnight refinement, which may wait.
     private let foregroundOnlineBudget: Int?
+    /// Every request to the geocoder of this pipeline's runs, for the throttle's window.
+    private let geocoderRequests = RequestLog()
     /// When a run in the app last asked Apple for town names and was left with towns still
-    /// waiting because asking stopped early (Apple refused, the run's budget ran out, or a Pause).
+    /// waiting because asking stopped early (Apple refused, the run's budget or the throttle's
+    /// free slots ran out, or a Pause).
     /// A one-off error, being offline or a border cell whose answer is from the other country do
     /// not count, so photos near a border do not hold back new towns. A run within the hour after it
     /// (Fortsetzen after a Pause, a restart) does not ask again: the lookups and Apple's waits
@@ -1125,7 +1129,8 @@ public actor AnalysisPipeline {
                          hasTown: stored?.precisionMeters != nil, hasCountry: stored != nil && stored?.precisionMeters == nil)
         }
         guard !requests.isEmpty else { return .init() }
-        let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time)
+        let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time,
+                                             requestLog: geocoderRequests)
         let store = self.store
         // Counted over every photo with a location, not only this run's requests: a run that
         // starts again after a pause goes on from the real state instead of from zero.
@@ -1138,7 +1143,7 @@ public actor AnalysisPipeline {
         let shown = Mutex(before)
         let control = activeControl
         let outcome = try await service.resolve(requests, refining: refining, maxOnlineRequests: budget,
-                                         maxRateLimitWait: refining ? nil : Self.foregroundRateLimitWait,
+                                         mayWait: refining,
                                          shouldStop: { [weak self] in await self?.stopRequested() ?? true },
                                          onlineAllowed: { [weak self] in await self?.settings.privacy.allowOnlineGeocoding ?? false },
                                          progress: { processed in
@@ -1158,7 +1163,8 @@ public actor AnalysisPipeline {
             let keyed = try await self?.keyedRegions(batch) ?? [:]
             try await store.setPlaces(batch.merging(keyed) { $1 })
         }
-        // Only a refusal, a used-up lookup limit or a Pause in the middle of asking starts the hour.
+        // Only a refusal, a used-up lookup limit (the budget, or the throttle's free slots: a run
+        // in the app does not wait for them) or a Pause in the middle of asking starts the hour.
         // A one-off error, being offline or towns that stay open after an answer (a border cell)
         // do not: photos added later get their towns at once.
         if !refining, outcome.onlineRequests > 0,

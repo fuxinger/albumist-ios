@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Online reverse geocoding (MapKit on iOS). Implementations throw `GeocodingError`.
 public protocol ReverseGeocoding: Sendable {
@@ -66,6 +67,32 @@ public struct RequestThrottle: Sendable, Hashable {
     }
 }
 
+/// When the geocoder was asked, shared by every lookup of one pipeline: a run that starts
+/// within a minute of the run before knows the requests that run made, so a run in the app
+/// never asks more often than the throttle allows without waiting (device test 18.11., build 36).
+public final class RequestLog: Sendable {
+    private let times = Mutex<[Duration]>([])
+    public init() {}
+
+    /// Takes a slot at `now` when one is free (fewer than `maxRequests` in the window).
+    /// Otherwise how long until the oldest request leaves the window.
+    func take(at now: Duration, _ throttle: RequestThrottle) -> Duration? {
+        times.withLock { times in
+            times.removeAll { now - $0 >= throttle.window }
+            if times.count >= throttle.maxRequests, let oldest = times.first {
+                return throttle.window - (now - oldest)
+            }
+            times.append(now)
+            return nil
+        }
+    }
+
+    /// Requests made within the window before `now`.
+    public func count(at now: Duration, _ throttle: RequestThrottle) -> Int {
+        times.withLock { times in times.filter { now - $0 < throttle.window }.count }
+    }
+}
+
 /// Resolves photo coordinates to places: offline world map first, online geocoder only
 /// where needed, one request per raster cell, cached, throttled and prioritized.
 public actor PlaceResolutionService {
@@ -116,9 +143,7 @@ public actor PlaceResolutionService {
     private let throttle: RequestThrottle
     private let time: TimeSource
     private let now: @Sendable () -> Date
-    private var requestTimes: [Duration] = []
-    /// Time spent in this `resolve` waiting for the geocoder after it refused.
-    private var rateLimitWaited: Duration = .zero
+    private let requestLog: RequestLog
     /// Told how long a wait for the geocoder still takes, and `nil` when it is over (see `resolve`).
     private var onWait: (@Sendable (Duration?) async -> Void)?
     /// Longest single sleep between two checks of `shouldStop`: Pause, heat or the end of the
@@ -135,8 +160,10 @@ public actor PlaceResolutionService {
         policy: PlaceResolutionPolicy,
         throttle: RequestThrottle = .apple,
         time: TimeSource = .live(),
+        requestLog: RequestLog = RequestLog(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.requestLog = requestLog
         self.map = map
         self.geocoder = geocoder
         self.cache = cache
@@ -150,20 +177,26 @@ public actor PlaceResolutionService {
     /// paused or killed run keeps everything finished so far. Cancellation stops early and
     /// reports the rest as pending.
     ///
-    /// `maxRateLimitWait`: how long this call may wait in total after the geocoder refused
-    /// (rate limit). Once that is used up, or the geocoder still refuses after its retries, no
-    /// more online lookups are made in this call and the rest is reported as pending.
+    /// After a refusal (rate limit) a call that may wait asks again up to three times, with
+    /// growing waits; still refused, no more online lookups are made in this call and the rest
+    /// is reported as pending.
     ///
     /// `progress`: how many requests are final (resolved, or not resolvable). Requests left
     /// for a later call (budget, refusal, offline, Pause) are not counted.
     ///
     /// `waiting`: called every 2 s while this call waits for the geocoder (its limit of about
     /// 40 lookups a minute, or a refusal) with the time left, and with `nil` when it goes on.
+    ///
+    /// `mayWait`: false for a run in the app, which never waits for the geocoder (device test
+    /// 18.11., build 36: "Apple antwortet gleich" with the count standing for 20–30 s). It asks
+    /// only while the throttle has a free slot (the requests of earlier calls on the same
+    /// `RequestLog` count) and stops at the first refusal; the rest is reported as pending
+    /// (`stoppedAtRequestLimit`, `stoppedBecauseThrottled`).
     public func resolve(
         _ requests: [Request],
         refining: Bool = false,
         maxOnlineRequests: Int? = nil,
-        maxRateLimitWait: Duration? = nil,
+        mayWait: Bool = true,
         shouldStop: (@Sendable () async -> Bool)? = nil,
         onlineAllowed: (@Sendable () async -> Bool)? = nil,
         progress: (@Sendable (Int) async -> Void)? = nil,
@@ -173,7 +206,6 @@ public actor PlaceResolutionService {
         sink: Sink
     ) async throws -> Outcome {
         var outcome = Outcome()
-        rateLimitWaited = .zero
         onWait = waiting
         defer { onWait = nil }
         // How many requests are final (resolved, or not resolvable). A country known early from
@@ -270,7 +302,7 @@ public actor PlaceResolutionService {
                 outcome.cacheHits += 1
             } else if !onlineDisabled, maxOnlineRequests.map({ outcome.onlineRequests < $0 }) ?? true, let geocoder {
                 let representative = Self.representative(of: members.map(\.coordinate))
-                switch await request(geocoder, representative, patience: maxRateLimitWait, shouldStop: shouldStop) {
+                switch await request(geocoder, representative, mayWait: mayWait, shouldStop: shouldStop) {
                 case .found(let components):
                     outcome.onlineRequests += 1
                     // "Nothing here" (open sea, a lake, wilderness) is remembered as an empty
@@ -290,6 +322,11 @@ public actor PlaceResolutionService {
                 case .stopped:
                     onlineDisabled = true
                     outcome.stoppedAsking = true
+                case .noSlot:
+                    // A run in the app does not wait for the throttle: the rest of the towns
+                    // come with a later run, as when the run's lookup limit is used up.
+                    onlineDisabled = true
+                    outcome.stoppedAtRequestLimit = true
                 case .failed:
                     outcome.onlineRequests += 1
                 }
@@ -388,31 +425,36 @@ public actor PlaceResolutionService {
     enum Lookup: Equatable {
         case found(PlaceComponents?)
         case offline
-        /// Still refused after the retries, or the patience for this call is used up.
+        /// Still refused after the retries (or at once, for a call that may not wait).
         case throttled
         /// Pause, heat or the end of the app's time while waiting.
         case stopped
+        /// The throttle has no free slot and the call may not wait for one (`mayWait`).
+        case noSlot
         case failed
     }
 
     private func request(
         _ geocoder: any ReverseGeocoding, _ coordinate: GeoCoordinate,
-        patience: Duration?, shouldStop: (@Sendable () async -> Bool)?
+        mayWait: Bool, shouldStop: (@Sendable () async -> Bool)?
     ) async -> Lookup {
         var backoff: Duration = .seconds(30)
         let attempts = 4
         for attempt in 1...attempts {
-            guard await waitForSlot(shouldStop) else { return .stopped }
+            switch await waitForSlot(mayWait: mayWait, shouldStop) {
+            case .taken: break
+            case .stopped: return .stopped
+            case .full: return .noSlot
+            }
             do {
                 return .found(try await geocoder.reverseGeocode(coordinate))
             } catch let error as GeocodingError {
                 switch error {
                 case .rateLimited(let retryAfter):
-                    if attempt == attempts { return .throttled }
+                    // Refused: a run in the app stops asking at once instead of waiting.
+                    if attempt == attempts || !mayWait { return .throttled }
                     let wait = retryAfter.map { Duration.milliseconds(Int64($0 * 1000)) } ?? backoff
                     backoff = min(backoff * 2, .seconds(600))
-                    if let patience, rateLimitWaited + wait > patience { return .throttled }
-                    rateLimitWaited += wait
                     guard await pause(for: wait, shouldStop) else { return .stopped }
                 case .offline:
                     return .offline
@@ -445,16 +487,17 @@ public actor PlaceResolutionService {
         return !stopped && !Task.isCancelled
     }
 
-    private func waitForSlot(_ shouldStop: (@Sendable () async -> Bool)?) async -> Bool {
-        var current = time.elapsed()
-        requestTimes.removeAll { current - $0 >= throttle.window }
-        if requestTimes.count >= throttle.maxRequests, let oldest = requestTimes.first {
-            guard await pause(for: throttle.window - (current - oldest), shouldStop) else { return false }
-            current = time.elapsed()
-            requestTimes.removeAll { current - $0 >= throttle.window }
+    enum Slot { case taken, stopped, full }
+
+    /// Takes a slot of the throttle, waiting for one when all are used and `mayWait`. After a
+    /// wait the slot is taken anew, not just written down: one that another caller took
+    /// meanwhile is waited for again (second review of the no-wait fix, SF5).
+    private func waitForSlot(mayWait: Bool, _ shouldStop: (@Sendable () async -> Bool)?) async -> Slot {
+        while true {
+            guard let wait = requestLog.take(at: time.elapsed(), throttle) else { return .taken }
+            guard mayWait else { return .full }
+            guard await pause(for: wait, shouldStop) else { return .stopped }
         }
-        requestTimes.append(current)
-        return true
     }
 }
 

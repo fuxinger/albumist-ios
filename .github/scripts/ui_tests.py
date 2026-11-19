@@ -27,8 +27,9 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       test about to launch the app again prints "UI_HOST_TERMINATE_APP <epoch second>", and the
       running app is ended with `simctl terminate` instead of XCTest's terminate, which failed
       on an idle app in UI run 44446270757 (test07). The test only reads the app's state
-      meanwhile and ends it through XCTest itself after 60 s; a request older than 30 s is not
-      answered any more (`terminate_app`), so a late end never hits the next launch.
+      meanwhile and ends it through XCTest itself after 60 s; a request older than 30 s (or
+      without its second) is not answered any more, and a call that timed out is not repeated
+      (`terminate_app`), so the Mac's end does not land on the next launch.
   settle --udid U [--limit S]
       Waits like every pass does before its first test (`settle`, below) and always exits 0;
       ci.yml's "Fresh simulator" step uses it after its boot.
@@ -885,8 +886,9 @@ NOTHING_TO_TERMINATE = re.compile(r"found nothing to terminate", re.I)
 def terminate_app(udid: str, asked: float | None, run=sh, clock=time.time, tries: int = TERMINATE_TRIES,
                   timeout: float = TERMINATE_TIMEOUT) -> bool:
     """`simctl terminate U app.albumist.ios` for a test that asked (UI_HOST_TERMINATE_APP at the
-    epoch second `asked`), tried again once when it fails, never for a request older than
-    TERMINATE_FRESH s. True when the app is gone (also when it was gone already).
+    epoch second `asked`), tried again once when simctl refuses (not after a timeout: that call
+    may still end the app, and a second one would then hit the test's next launch), never for a
+    request older than TERMINATE_FRESH s or without its second. True when the app is gone (also when it was gone already).
 
     Why: in UI run 44446270757 (test07) XCTest's own terminate inside `launch()` failed with
     "Failed to terminate app.albumist.ios:20655" although the app stood idle; simctl ends the app
@@ -895,7 +897,8 @@ def terminate_app(udid: str, asked: float | None, run=sh, clock=time.time, tries
     try is in the log ("UI_HOST ... attempt N of M"); when the app is not gone the test ends it
     through XCTest as before."""
     for attempt in range(1, tries + 1):
-        age = clock() - asked if asked is not None else 0.0
+        # Without its second a request cannot be dated: not answered (it might be old).
+        age = clock() - asked if asked is not None else float("inf")
         if age >= TERMINATE_FRESH:
             print(f"UI_HOST app end request from {age:.0f} s ago skipped (attempt {attempt} of {tries}): "
                   "the test ends the app itself after its wait", flush=True)
@@ -912,6 +915,13 @@ def terminate_app(udid: str, asked: float | None, run=sh, clock=time.time, tries
             return True
         print(f"UI_HOST app end failed (exit {code}, {took:.0f} s, attempt {attempt} of {tries})"
               + (f": {detail}" if detail else ""), flush=True)
+        if code == 124:
+            # A timed-out simctl may still end the app later (CoreSimulator goes on without its
+            # client). The test then sees the app gone and launches it again at once; a second
+            # call would end that new launch. So no second call after a timeout.
+            print("UI_HOST app end not tried again after a timeout: the test ends the app through XCTest "
+                  "if it is still there", flush=True)
+            return False
     print(f"UI_HOST app NOT ended after {tries} attempts; the test ends it through XCTest", flush=True)
     return False
 

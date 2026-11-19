@@ -963,13 +963,28 @@ class HostTerminateTests(unittest.TestCase):
         self.assertIn("UI_HOST app ended (", out)
         self.assertIn("attempt 1 of 2", out)
 
-    def test_a_hung_end_is_tried_once_more_and_said(self):
-        ended, calls, out = self.run_terminate([(124, "timed out after 20 s: xcrun simctl terminate"), (0, "")])
+    def test_a_refused_end_is_tried_once_more_and_said(self):
+        ended, calls, out = self.run_terminate([(1, "Unable to terminate"), (0, "")])
         self.assertTrue(ended)
         self.assertEqual(len(calls), 2)
-        self.assertIn("UI_HOST app end failed (exit 124", out)
+        self.assertIn("UI_HOST app end failed (exit 1", out)
         self.assertIn("UI_HOST app ended (", out)
         self.assertIn("attempt 2 of 2", out)
+
+    def test_a_hung_end_is_not_tried_again(self):
+        # The timed-out call may still end the app; the test then launches it again at once, and a
+        # second call would end that new launch.
+        ended, calls, out = self.run_terminate([(124, "timed out after 20 s: xcrun simctl terminate"), (0, "")])
+        self.assertFalse(ended)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("UI_HOST app end failed (exit 124", out)
+        self.assertIn("not tried again after a timeout", out)
+
+    def test_a_request_without_its_second_is_not_answered(self):
+        ended, calls, out = self.run_terminate([(0, "")], asked=None)
+        self.assertFalse(ended)
+        self.assertEqual(calls, [])
+        self.assertIn("skipped", out)
 
     def test_an_app_that_is_already_gone_is_not_ended_twice(self):
         ended, calls, out = self.run_terminate([(164, "An error was encountered processing the command "
@@ -980,7 +995,7 @@ class HostTerminateTests(unittest.TestCase):
         self.assertIn("UI_HOST app ended before the Mac asked", out)
 
     def test_two_failures_are_said_and_left_to_the_test(self):
-        ended, calls, out = self.run_terminate([(124, "timed out"), (1, "Unable to terminate")])
+        ended, calls, out = self.run_terminate([(1, "Unable to terminate"), (1, "Unable to terminate")])
         self.assertFalse(ended)
         self.assertEqual(len(calls), 2)
         self.assertIn("UI_HOST app NOT ended after 2 attempts", out)
@@ -1003,7 +1018,7 @@ class HostTerminateTests(unittest.TestCase):
 
         def fake(command, timeout, quiet):
             now[0] += ui_tests.TERMINATE_FRESH
-            return 124, "timed out"
+            return 1, "Unable to terminate"
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertFalse(ui_tests.terminate_app("U", 1000.0, run=fake, clock=clock))
         self.assertEqual(now[0], 1000.0 + ui_tests.TERMINATE_FRESH)  # one call only

@@ -504,6 +504,22 @@ class ReleaseSmokeTests(unittest.TestCase):
         self.assertIn("name: ui-flaky-release-smoke-attempt-${{ github.run_attempt }}", smoke)
         self.assertIn("release-smoke", [n.strip() for n in job_field(text, "flaky", "needs").split(",")])
 
+    def test_a_testflight_run_never_needs_more_than_five_macs(self):
+        # Second review of C7: the account runs five Macs at once. After CI (its Mac job ends
+        # before anything else starts), a TestFlight run has the UI groups (max-parallel in
+        # release mode), the stress pass and the smoke test at the same time; the UI build job runs
+        # before the groups.
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        found = re.search(r"\n      max-parallel: \$\{\{ inputs\.release && (\d) \|\| (\d) \}\}\n", ui)
+        self.assertIsNotNone(found, "ui.yml: max-parallel ${{ inputs.release && N || 4 }}")
+        in_release, otherwise = int(found.group(1)), int(found.group(2))
+        self.assertEqual(otherwise, 4)
+        tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        beside = [job for job in ("stress", "release-smoke")
+                  if [n.strip() for n in job_field(tf, job, "needs").split(",")] == ["tests"]]
+        self.assertEqual(beside, ["stress", "release-smoke"])
+        self.assertLessEqual(in_release + len(beside), 5)
+
     def test_the_smoke_test_runs_only_there_and_as_a_user_would(self):
         path = os.path.join(ROOT, "App", "SortlyUITests", "ReleaseSmokeUITests.swift")
         swift = read(path)

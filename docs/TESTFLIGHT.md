@@ -132,9 +132,14 @@ Actions > **TestFlight feedback** > Run workflow.
   Analyse, empfohlene Vorschläge, ein Plan in den Gratis-Alben, in Fotos angelegt, ohne
   Test-Schalter wie bei einem neuen Nutzer. Bei beiden Toren, neben UI-Tests und Härtetest (rund
   25–35 Minuten, kürzer als der Härtetest), und er muss grün sein, sonst wird nicht hochgeladen; ein
-  übersprungener Test zählt als Fehler. Beim großen Tor ist er der sechste Mac-Job: eine kurze
-  UI-Gruppe wartet dann unter Umständen auf einen Mac, bis er fertig ist. **Ungeprüft bis zum
-  ersten Lauf auf einem Mac.**
+  übersprungener Test zählt als Fehler. Nie mehr als fünf Macs zugleich: im TestFlight-Lauf laufen
+  höchstens drei UI-Gruppen gleichzeitig, die längste (Gerätebedingungen) zuerst; die zwei kurzen
+  warten auf einen Mac und sind trotzdem vor ihr fertig, der Lauf dauert also nicht länger.
+  Ein roter Release-Kurztest gilt wie ein roter Härtetest nur für seinen Lauf: „Re-run failed
+  jobs“ macht ihn nicht grün, ein neuer Lauf auf derselben App startet ihn aber neu (anders als
+  eine UI-Gruppe, deren Rot das UI-Tor für diese App und diesen Testcode behält). Der tägliche
+  Build startet keinen neuen Lauf auf einem Commit, der schon in einem TestFlight-Lauf war (oder
+  nur Doku dazu bringt); von Hand erst die Ursache beheben. **Ungeprüft bis zum ersten Lauf auf einem Mac.**
 - Kein Push und kein Merge in `main` startet einen Build (16.11.: das Zusammenführen der
   Webseite startete sonst einen Build mit altem App-Stand). Von selbst startet nur der tägliche
   Build mit kleinem Tor (`daily-build.yml`, Abschnitt „Zwei Tore“), und auch er lädt erst nach

@@ -40,8 +40,9 @@ run-name: >-
 #      TestFlight build), with either gate, and the Release smoke test (job release-smoke: the
 #      UI test target built with -configuration Release, one test that onboards, analyses and
 #      applies a plan as a new user would; review P5-03: no test ever started the configuration
-#      that is uploaded). Six Mac jobs at the peak (small gate: four), so in the big gate one
-#      short UI group may wait for a Mac until the smoke test ends (~25-35 min). The big
+#      that is uploaded). Five Mac jobs at the peak (small gate: four): the UI flow runs at most
+#      three groups at a time when called from here (ui.yml max-parallel), the longest first, so
+#      the two short groups wait for a Mac and still end before it. The big
 #      gate runs the UI flow with groups "auto" (input ui_groups): only the groups that have no
 #      green result yet for exactly this app and their own test code (the owner's rule 17.11.: a
 #      test-only change reruns only the groups it touches, any app change everything; ui.yml "UI
@@ -235,8 +236,19 @@ jobs:
     # Photos. Both gates; the upload needs it green.
     # Beside the UI flow and the stress pass (it needs the tests only), so the upload waits no
     # longer: ~10-20 min Release build (the simulator boots meanwhile) and ~10-15 min test,
-    # less than the stress pass (~45 min) or the longest UI group. In the big gate it is a sixth
-    # Mac job: one short UI group may wait for a Mac until this one ends.
+    # less than the stress pass (~45 min) or the longest UI group. Never more than five Macs
+    # (the account's limit; second review of C7): with this job and the stress pass beside it,
+    # the UI flow runs at most three groups at a time here (ui.yml max-parallel in release), the
+    # longest (device conditions, 62 min) first; the short groups that wait end before it, so
+    # the run takes no longer (TestFlight run 44461253154). Not after the stress pass or the UI
+    # flow: that would add the whole ~30 min of this job to the run.
+    # A red here is not remembered across runs, the rule of the stress pass (second review of
+    # C7, decided so): within a run "Re-run failed jobs" cannot turn it green (earlier_attempts.py:
+    # its build and test steps block), but a NEW run on the same app runs it again, unlike a UI
+    # group, whose red the UI gate keeps for that app and test code (ui_evidence.py). The daily
+    # build never starts a new run on a commit that already was in a TestFlight run, or that adds
+    # only docs to one (daily_build.py); by hand, fix the cause first. Keeping it like a UI group would need this
+    # job's own fingerprints in its name and a check in the UI gate; not done.
     # Unverified until a Mac run.
     name: Release build smoke test (UI)
     needs: tests

@@ -938,7 +938,8 @@ class GroupTests(unittest.TestCase):
     def test_at_most_four_groups_at_a_time(self):
         # With CI's one macOS job, five macOS jobs at the peak; contrast (the shortest) waits.
         import re
-        self.assertRegex(self.workflow(), r"\n      max-parallel: 4\n")
+        # Three when TestFlight calls it (test_workflows.py ReleaseSmokeTests: five Macs at most).
+        self.assertRegex(self.workflow(), r"\n      max-parallel: \$\{\{ inputs\.release && 3 \|\| 4 \}\}\n")
         self.assertEqual(list(self.groups())[-1], "contrast")
 
     def test_other_flows_skip_exactly_what_the_others_run(self):

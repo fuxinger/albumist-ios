@@ -229,7 +229,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     }
 
     /// Bounded like every read; every change in the history is a sign of progress.
-    func changes(since mark: LibraryChangeMark) async throws -> LibraryChanges? {
+    func changes(since mark: LibraryChangeMark, limit: Int) async throws -> LibraryChanges? {
         let data = mark.data
         return try await Self.read("libraryChanges") { beat -> LibraryChanges? in
             guard let token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: PHPersistentChangeToken.self, from: data),
@@ -262,6 +262,12 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                     out.deleted.formUnion(deleted)
                     out.deleted.subtract(changed)
                     out.assets.formUnion(changed)
+                    if out.assets.count + out.deleted.count > limit {
+                        // More than the caller reads one by one: stop here, without holding the rest.
+                        out = LibraryChanges(mark: out.mark, tooMany: true)
+                        stop.pointee = true
+                        return
+                    }
                     var named = !changed.isEmpty || !deleted.isEmpty
                     for type in [PHObjectType.assetCollection, .collectionList] {
                         let details = try change.changeDetails(for: type)
@@ -272,6 +278,9 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                         }
                     }
                     // A change that names nothing of these: something changed all the same.
+                    // How often Photos writes such changes (iCloud, its own housekeeping) is
+                    // not measured: if a quiet library always has some, the albums are walked
+                    // every run (as before this change). To measure on a device (TEST_PLAN 📱).
                     if !named { out.other = true }
                 } catch {
                     known = false
@@ -302,7 +311,10 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                         stop.pointee = true
                         return
                     }
-                    guard includeHidden || !asset.isHidden, Self.librarySources.contains(asset.sourceType) else { return }
+                    // A burst counts once in a whole read (its representative frame): the
+                    // other frames are left out here too.
+                    guard includeHidden || !asset.isHidden, Self.librarySources.contains(asset.sourceType),
+                          asset.burstIdentifier == nil || asset.representsBurst else { return }
                     autoreleasepool {
                         let needsResources = knownDetails[AssetID(asset.localIdentifier)].map { known in
                             !AssetSnapshot.sameModification(known, asset.modificationDate)

@@ -55,6 +55,9 @@ public actor ResultCollector {
 }
 
 
+/// `InMemoryLibraryReader.changes(since:)` set to fail.
+public struct ChangesUnanswered: Error {}
+
 /// Photo library reader backed by fixtures.
 ///
 /// Keeps a change history like PhotoKit's (`changes(since:)`): every `set` notes what it
@@ -78,17 +81,40 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
     /// Tells this library's marks from another one's.
     private let libraryID = UUID()
     private var history: [LibraryChanges] = []
-    /// Marks before this are gone (`expireHistory`).
-    private var historyStart = 0
+    /// Marks of an earlier epoch are gone (`expireHistory`).
+    private var epoch = 0
+
+    /// `progressEvery`: the whole read says how far it is every this many photos, at its
+    /// start and at its end, and stops at a Pause, like PhotoKit's (every 250 there). `nil`:
+    /// it says nothing (most tests count the progress reports).
+    private let progressEvery: Int?
 
     public init(assets: [AssetSnapshot], inventory: CollectionInventory = CollectionInventory(), access: LibraryAccess = .full,
-                hidden: Set<AssetID> = [], history: Bool = true) {
+                hidden: Set<AssetID> = [], history: Bool = true, progressEvery: Int? = nil) {
         self.assets = assets
         self.inventory = inventory
         self.accessLevel = access
         self.hidden = hidden
         self.hasHistory = history
+        self.progressEvery = progressEvery
     }
+
+    /// The marks `changes(since:)` was asked for, in order.
+    public private(set) var changesAsked: [LibraryChangeMark] = []
+    /// `changes(since:)` throws (Photos does not answer).
+    private var changesFail = false
+    public func set(changesFail: Bool) { self.changesFail = changesFail }
+    /// Photos a fetch by identifier does not return although they are in the library (a
+    /// reader that gets it wrong): only the count says so.
+    private var missingFromFetchByID: Set<AssetID> = []
+    public func set(missingFromFetchByID ids: Set<AssetID>) { missingFromFetchByID = ids }
+    /// Added to the library while the next whole read reads (after it took its list).
+    private var arrivingDuringWholeRead: [AssetSnapshot] = []
+    public func set(arrivingDuringWholeRead new: [AssetSnapshot]) { arrivingDuringWholeRead = new }
+    /// Called at each progress report of a whole read with the photos read so far (a test
+    /// pauses there).
+    private var onWholeReadProgress: (@Sendable (Int) -> Void)?
+    public func set(onWholeReadProgress hook: (@Sendable (Int) -> Void)?) { onWholeReadProgress = hook }
 
     public func set(assets new: [AssetSnapshot]) {
         let old = Dictionary(assets.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -110,7 +136,7 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
     }
     /// The history before now is gone: a mark from before gets no answer (PhotoKit's
     /// `persistentChangeTokenExpired`).
-    public func expireHistory() { historyStart = history.count }
+    public func expireHistory() { epoch += 1 }
 
     private func note(assets changed: Set<AssetID> = [], deleted: Set<AssetID> = [], other: Bool = false) {
         guard !changed.isEmpty || !deleted.isEmpty || other else { return }
@@ -118,7 +144,7 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
     }
 
     private func mark(_ position: Int) -> LibraryChangeMark {
-        LibraryChangeMark(Data("\(libraryID.uuidString)|\(position)".utf8))
+        LibraryChangeMark(Data("\(libraryID.uuidString)|\(epoch)|\(position)".utf8))
     }
 
     private func readable(_ asset: AssetSnapshot, includeHidden: Bool) -> Bool {
@@ -139,8 +165,29 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
 
     public func access() async -> LibraryAccess { accessLevel }
     public func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date]) async throws -> [AssetSnapshot] {
+        try await fetchAssets(includeHidden: includeHidden, knownDetails: knownDetails) { _, _ in true }
+    }
+    public func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
+                            progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot] {
         wholeReads += 1
-        return assets.filter { readable($0, includeHidden: includeHidden) }.map { read($0, knownDetails: knownDetails) }
+        let visible = assets.filter { readable($0, includeHidden: includeHidden) }
+        if !arrivingDuringWholeRead.isEmpty {
+            set(assets: assets + arrivingDuringWholeRead)
+            arrivingDuringWholeRead = []
+        }
+        guard let every = progressEvery else { return visible.map { self.read($0, knownDetails: knownDetails) } }
+        var done: [AssetSnapshot] = []
+        onWholeReadProgress?(0)
+        if !progress(0, visible.count) { throw LibraryReadPaused(read: []) }
+        for asset in visible {
+            done.append(self.read(asset, knownDetails: knownDetails))
+            if done.count % every == 0 {
+                onWholeReadProgress?(done.count)
+                if !progress(done.count, visible.count) { throw LibraryReadPaused(read: done) }
+            }
+        }
+        _ = progress(done.count, visible.count)
+        return done
     }
     public func currentInventory() async throws -> CollectionInventory {
         inventoryReads += 1
@@ -151,11 +198,13 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
         hasHistory ? mark(history.count) : nil
     }
 
-    public func changes(since mark: LibraryChangeMark) async throws -> LibraryChanges? {
+    public func changes(since mark: LibraryChangeMark, limit: Int) async throws -> LibraryChanges? {
+        changesAsked.append(mark)
+        if changesFail { throw ChangesUnanswered() }
         guard hasHistory else { return nil }
         let parts = String(decoding: mark.data, as: UTF8.self).split(separator: "|")
-        guard parts.count == 2, parts[0] == Substring(libraryID.uuidString), let position = Int(parts[1]),
-              position >= historyStart, position <= history.count else { return nil }
+        guard parts.count == 3, parts[0] == Substring(libraryID.uuidString), Int(parts[1]) == epoch, let position = Int(parts[2]),
+              position <= history.count else { return nil }
         var out = LibraryChanges(mark: self.mark(history.count))
         for change in history[position...] {
             // A photo deleted and back (or added after it was deleted) is read again; one
@@ -165,6 +214,9 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
             out.deleted.subtract(change.assets)
             out.assets.formUnion(change.assets)
             out.other = out.other || change.other
+            if out.assets.count + out.deleted.count > limit {
+                return LibraryChanges(mark: out.mark, tooMany: true)
+            }
         }
         return out
     }
@@ -173,7 +225,7 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
                             progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> ChangedAssets {
         let visible = assets.filter { readable($0, includeHidden: includeHidden) }
         var read: [AssetSnapshot] = []
-        for asset in visible where ids.contains(asset.id) {
+        for asset in visible where ids.contains(asset.id) && !missingFromFetchByID.contains(asset.id) {
             read.append(self.read(asset, knownDetails: knownDetails))
             onChangedRead?(asset.id)
             if !progress(read.count, ids.count) { throw LibraryReadPaused(read: read) }

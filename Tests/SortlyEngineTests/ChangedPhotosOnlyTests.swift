@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SortlyEngine
 import SortlyCore
@@ -19,6 +20,14 @@ struct ChangedPhotosOnlyTests {
         var store: SortlyStore
         var reader: InMemoryLibraryReader
         var pipeline: AnalysisPipeline
+        var analyzer: FakeContentAnalyzer
+        /// The pipeline's clock (`now`), moved on by tests.
+        var clock: Clock
+    }
+
+    /// A clock tests move on.
+    final class Clock: Sendable {
+        let now = Mutex(ChangedPhotosOnlyTests.clock)
     }
 
     /// Munich everyday life, a Rome trip, a few screenshots, and one album of the trip.
@@ -34,19 +43,23 @@ struct ChangedPhotosOnlyTests {
         return (lib.assets, CollectionInventory([folder, inside]), rome, home)
     }
 
-    static func world(history: Bool = true, hidden: Set<AssetID> = [], settings configure: (inout OrganizationSettings) -> Void = { _ in }) throws -> World {
+    static func world(history: Bool = true, hidden: Set<AssetID> = [], progressEvery: Int? = nil,
+                      settings configure: (inout OrganizationSettings) -> Void = { _ in }) throws -> World {
         let lib = library()
         var settings = OrganizationSettings()
         settings.titleLanguage = .german
         configure(&settings)
         let store = try SortlyStore(url: nil)
-        let reader = InMemoryLibraryReader(assets: lib.assets, inventory: lib.inventory, hidden: hidden, history: history)
+        let reader = InMemoryLibraryReader(assets: lib.assets, inventory: lib.inventory, hidden: hidden, history: history,
+                                           progressEvery: progressEvery)
+        let analyzer = FakeContentAnalyzer()
+        let clock = Clock()
         let pipeline = AnalysisPipeline(
-            store: store, reader: reader, analyzer: FakeContentAnalyzer(), geocoder: FakeGeocoder(), map: Self.map,
+            store: store, reader: reader, analyzer: analyzer, geocoder: FakeGeocoder(), map: Self.map,
             conditions: FakeConditions(), settings: settings, calendar: Fixture.calendar, time: ManualTime().source,
-            now: { Self.clock }, earlyGraceOnStop: .seconds(60)
+            now: { clock.now.withLock { $0 } }, earlyGraceOnStop: .seconds(60)
         )
-        return World(store: store, reader: reader, pipeline: pipeline)
+        return World(store: store, reader: reader, pipeline: pipeline, analyzer: analyzer, clock: clock)
     }
 
     struct Work: Equatable, CustomStringConvertible {
@@ -381,6 +394,162 @@ struct ChangedPhotosOnlyTests {
         #expect(try await store.loadInventory() == (await base.inventory))
     }
 
+    // MARK: - Second review
+
+    /// A photo the fetch by identifier misses (a reader that gets it wrong) is not deleted with
+    /// its results before the count shows that something is wrong: the count is checked before
+    /// anything is written, and the whole read follows. Red before: the photo was deleted with
+    /// its analysis, put back by the whole read and analysed again.
+    @Test func aPhotoTheFetchMissesKeepsItsResults() async throws {
+        let w = try Self.world()
+        _ = try await Self.run(w)
+        let photo = Self.library().home[4]
+        let analysed = w.analyzer.counts.withLock { $0.content }
+        // Made a favourite: a change in the library that changes nothing stored.
+        await w.reader.set(assets: await w.reader.assets.map { asset in
+            var asset = asset
+            if asset.id == photo { asset.isFavorite = true }
+            return asset
+        })
+        await w.reader.set(missingFromFetchByID: [photo])
+        let writesBefore = await w.store.libraryRowWrites
+        let (report, work) = try await Self.run(w)
+        #expect(work.wholeReads == 1)
+        #expect(report.removed == 0)
+        #expect(report.contentAnalyzed == 0)
+        #expect(w.analyzer.counts.withLock { $0.content } == analysed)
+        #expect(await w.store.libraryRowWrites == writesBefore)
+    }
+
+    /// What every stored mark has.
+    struct StoredMark: Codable {
+        var mark: LibraryChangeMark
+        var includeHidden: Bool
+    }
+
+    /// The mark as another version of the reader stored it.
+    struct MarkOfAnotherReader: Codable {
+        var mark: LibraryChangeMark
+        var includeHidden: Bool
+        var changeReads: Int
+        var readerVersion: Int
+        var wholeReadAt: Date
+    }
+
+    /// A mark of another version of the reader (an update that reads more of each photo): the
+    /// whole library is read, so photos that did not change get what it reads now. Red before.
+    @Test func markOfAnotherReaderVersionReadsTheWholeLibrary() async throws {
+        let w = try Self.world()
+        _ = try await Self.run(w)
+        let key = AnalysisPipeline.Key.libraryMark
+        let stored = try #require(try await w.store.value(StoredMark.self, forKey: key))
+        let older = MarkOfAnotherReader(mark: stored.mark, includeHidden: stored.includeHidden, changeReads: 0,
+                                        readerVersion: 0, wholeReadAt: Self.clock)
+        try await w.store.setValue(older, forKey: key)
+        let (_, work) = try await Self.run(w)
+        #expect(work.wholeReads == 1)
+        #expect(try await w.store.value(MarkOfAnotherReader.self, forKey: key)?.readerVersion ?? 0 > 0)
+    }
+
+    /// A stored mark that cannot be read (an older form, a broken value) does not fail the run:
+    /// the whole library is read and a new mark stored. Red before: the run ended with an error.
+    @Test func markThatCannotBeReadReadsTheWholeLibrary() async throws {
+        let w = try Self.world()
+        _ = try await Self.run(w)
+        let key = AnalysisPipeline.Key.libraryMark
+        try await w.store.setValue("not a mark", forKey: key)
+        let (_, work) = try await Self.run(w)
+        #expect(work.wholeReads == 1)
+        #expect(try await w.store.value(StoredMark.self, forKey: key) != nil)
+        let (_, again) = try await Self.run(w)
+        #expect(again.wholeReads == 0)
+    }
+
+    /// A library without changes is read whole once a week anyway: what the history may miss
+    /// (albums, details of a photo) is put right. Red before: never again.
+    @Test func quietLibraryIsReadWholeAfterAWeek() async throws {
+        let w = try Self.world()
+        _ = try await Self.run(w)
+        w.clock.now.withLock { $0 = Self.clock.addingTimeInterval(6 * 86_400) }
+        let (_, sixDays) = try await Self.run(w)
+        #expect(sixDays.wholeReads == 0)
+        w.clock.now.withLock { $0 = Self.clock.addingTimeInterval(8 * 86_400) }
+        let (_, eightDays) = try await Self.run(w)
+        #expect(eightDays.wholeReads == 1)
+        // Counted from that read on.
+        w.clock.now.withLock { $0 = Self.clock.addingTimeInterval(9 * 86_400) }
+        let (_, nineDays) = try await Self.run(w)
+        #expect(nineDays.wholeReads == 0)
+    }
+
+    /// A history that does not answer (Photos throws) does not end the run: the whole library
+    /// is read. Red before: the run ended with the error.
+    @Test func historyThatThrowsReadsTheWholeLibrary() async throws {
+        let w = try Self.world()
+        _ = try await Self.run(w)
+        await w.reader.set(changesFail: true)
+        let (_, work) = try await Self.run(w)
+        #expect(work.wholeReads == 1)
+    }
+
+    /// A whole read paused half way leaves no mark: the next run reads the whole library
+    /// again instead of taking the photos stored until the Pause for the library.
+    @Test func pausedWholeReadLeavesNoMark() async throws {
+        let w = try Self.world(progressEvery: 50)
+        _ = try await Self.run(w)
+        let key = AnalysisPipeline.Key.libraryMark
+        #expect(try await w.store.value(StoredMark.self, forKey: key) != nil)
+        // Forces the next run to a whole read, then pauses it at 100 photos.
+        await w.reader.expireHistory()
+        let control = AnalysisRunControl()
+        await w.reader.set(onWholeReadProgress: { read in if read >= 100 { control.pause() } })
+        let paused = try await w.pipeline.run(control: control)
+        #expect(paused.pausedBecause == .userPaused)
+        #expect(try await w.store.value(StoredMark.self, forKey: key) == nil)
+        await w.reader.set(onWholeReadProgress: nil)
+        let (_, work) = try await Self.run(w)
+        #expect(work.wholeReads == 1)
+        let (_, again) = try await Self.run(w)
+        #expect(again.wholeReads == 0)
+    }
+
+    /// Switching "Ausgeblendete Fotos" reads the whole library without asking the history
+    /// from the mark read with the other setting.
+    @Test func hiddenSettingSwitchedNeverAsksTheHistory() async throws {
+        let home = Self.library().home
+        let w = try Self.world(hidden: [home[3]])
+        _ = try await Self.run(w)
+        let key = AnalysisPipeline.Key.libraryMark
+        let before = try #require(try await w.store.value(StoredMark.self, forKey: key)).mark
+        let asked = await w.reader.changesAsked.filter { $0 == before }.count
+        // A change too, so the next mark is another one.
+        await w.reader.set(assets: await w.reader.assets.filter { $0.id != home[9] })
+        var settings = await w.pipeline.settings
+        settings.privacy.includeHiddenAssets = true
+        await w.pipeline.update(settings: settings)
+        let (_, work) = try await Self.run(w)
+        #expect(work.wholeReads == 1)
+        #expect(await w.reader.changesAsked.filter { $0 == before }.count == asked)
+        #expect(try await w.store.assetCount() == Self.library().assets.count - 1)
+    }
+
+    /// A photo added while the whole library is read is read by the next run: the mark is
+    /// taken before the whole read.
+    @Test func photoAddedDuringAWholeReadIsReadNext() async throws {
+        let w = try Self.world()
+        let late = AssetSnapshot(id: AssetID("during-the-read"), kind: .image, creationDate: Fixture.date("2026-06-29 10:00"),
+                                 location: Fixture.Places.munichHome, pixelWidth: 4032, pixelHeight: 3024)
+        await w.reader.set(arrivingDuringWholeRead: [late])
+        _ = try await Self.run(w)
+        let photos = Self.library().assets.count
+        #expect(try await w.store.assetCount() == photos)
+        let (report, work) = try await Self.run(w)
+        #expect(work.wholeReads == 0)
+        #expect(work.photosRead == 1)
+        #expect(report.newOrChanged == 1)
+        #expect(try await w.store.assetCount() == photos + 1)
+    }
+
     /// Adds `made` to the library right after the first walk over the albums.
     actor AlbumMadeAfterFirstWalk: PhotoLibraryReading {
         let base: InMemoryLibraryReader
@@ -403,7 +572,9 @@ struct ChangedPhotosOnlyTests {
             return inventory
         }
         func changeMark() async -> LibraryChangeMark? { await base.changeMark() }
-        func changes(since mark: LibraryChangeMark) async throws -> LibraryChanges? { try await base.changes(since: mark) }
+        func changes(since mark: LibraryChangeMark, limit: Int) async throws -> LibraryChanges? {
+            try await base.changes(since: mark, limit: limit)
+        }
         func fetchAssets(_ ids: Set<AssetID>, includeHidden: Bool, knownDetails: [AssetID: Date],
                          progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> ChangedAssets {
             try await base.fetchAssets(ids, includeHidden: includeHidden, knownDetails: knownDetails, progress: progress)

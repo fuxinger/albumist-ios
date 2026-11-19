@@ -169,6 +169,13 @@ public actor SortlyStore: PlanJournal {
         return removed
     }
 
+    /// Which of these assets are stored.
+    public func storedAssets(among ids: Set<AssetID>) throws -> Set<AssetID> {
+        Set(try ids.filter { id in
+            try db.query("SELECT 1 AS x FROM assets WHERE id = ?", [.text(id.rawValue)]).isEmpty == false
+        })
+    }
+
     /// `assetsWithFileDetails` for these assets only (a read of the photos that changed).
     public func fileDetails(for ids: Set<AssetID>) throws -> [AssetID: Date] {
         var out: [AssetID: Date] = [:]

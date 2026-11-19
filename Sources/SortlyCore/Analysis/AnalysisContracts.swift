@@ -43,13 +43,15 @@ public protocol PhotoLibraryReading: Sendable {
     func changeMark() async -> LibraryChangeMark?
     /// What changed since `mark`, or `nil` when that cannot be told for sure (the history is
     /// gone or too old, the mark belongs to another library, any error): then the whole
-    /// library is read.
-    func changes(since mark: LibraryChangeMark) async throws -> LibraryChanges?
+    /// library is read. More than `limit` photos named: the reader stops there and says
+    /// `tooMany` (the whole read is cheaper than holding them all).
+    func changes(since mark: LibraryChangeMark, limit: Int) async throws -> LibraryChanges?
     /// Snapshots of those of `ids` that a whole read with `includeHidden` would return (a
     /// photo deleted, hidden or not of the user's own library is left out), with file details
     /// as `fetchAssets` reads them, and how many photos the whole read would return now.
-    /// `progress(read, total)` as for `fetchAssets`: `false` ends the read with
-    /// `LibraryReadPaused`. Empty `ids`: only the count.
+    /// `progress(read, total)` as for `fetchAssets`, asked at least every 50 photos (PhotoKit:
+    /// every 50 readable photos, so a Pause waits for at most that many): `false` ends the read
+    /// with `LibraryReadPaused`. Empty `ids`: only the count.
     func fetchAssets(_ ids: Set<AssetID>, includeHidden: Bool, knownDetails: [AssetID: Date],
                      progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> ChangedAssets
 }
@@ -73,16 +75,20 @@ public struct LibraryChanges: Hashable, Sendable {
     /// Where the next read goes on from. Taken before the changes were read: a change made
     /// while they were read is read again next time, never missed.
     public var mark: LibraryChangeMark
+    /// More photos changed than the caller's limit: `assets` and `deleted` are only a part.
+    public var tooMany: Bool
 
-    public init(assets: Set<AssetID> = [], deleted: Set<AssetID> = [], other: Bool = false, mark: LibraryChangeMark) {
+    public init(assets: Set<AssetID> = [], deleted: Set<AssetID> = [], other: Bool = false, mark: LibraryChangeMark,
+                tooMany: Bool = false) {
         self.assets = assets
         self.deleted = deleted
         self.other = other
         self.mark = mark
+        self.tooMany = tooMany
     }
 
     /// Nothing at all changed: the photos and the albums are as they were at the mark.
-    public var isEmpty: Bool { assets.isEmpty && deleted.isEmpty && !other }
+    public var isEmpty: Bool { assets.isEmpty && deleted.isEmpty && !other && !tooMany }
 }
 
 /// The photos read by `PhotoLibraryReading.fetchAssets(_:includeHidden:knownDetails:progress:)`.
@@ -110,7 +116,7 @@ public extension PhotoLibraryReading {
 
     /// No change history: every run reads the whole library.
     func changeMark() async -> LibraryChangeMark? { nil }
-    func changes(since mark: LibraryChangeMark) async throws -> LibraryChanges? { nil }
+    func changes(since mark: LibraryChangeMark, limit: Int) async throws -> LibraryChanges? { nil }
     /// Over a whole read (only reached by a reader that has a history but not this).
     func fetchAssets(_ ids: Set<AssetID>, includeHidden: Bool, knownDetails: [AssetID: Date],
                      progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> ChangedAssets {

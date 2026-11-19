@@ -34,12 +34,13 @@ public enum HomeCandidates {
     /// A place needs photos on this many days to be offered.
     public static let minimumDays = 2
 
-    /// Towns (or regions where no town is known) by photo days, most first.
+    /// Towns (or regions where no town is known) by photo days, most first: the days of the
+    /// clocks where the photos were taken (review P1-15); `calendar`'s zone for facts without one.
     public static func make(facts: [AssetFacts], calendar: Calendar = .sortlyDefault) -> [HomeCandidate] {
         struct Group {
             var components: PlaceComponents
             var coordinates: [GeoCoordinate] = []
-            var days = Set<Date>()
+            var days = Set<Int>()
             var first: Date?
             var last: Date?
         }
@@ -53,8 +54,8 @@ public enum HomeCandidates {
                 locality: key.level == .locality ? place.locality : nil, administrativeAreaKey: place.administrativeAreaKey,
                 disputedArea: place.disputedArea))
             group.coordinates.append(c)
-            if let date = f.asset.creationDate {
-                group.days.insert(calendar.startOfDay(for: date))
+            if let date = f.asset.creationDate, let wall = f.wallClock(or: calendar.timeZone) {
+                group.days.insert(LocalTime.day(wall))
                 group.first = min(group.first ?? date, date)
                 group.last = max(group.last ?? date, date)
             }

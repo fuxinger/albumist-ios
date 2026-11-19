@@ -35,9 +35,13 @@ public struct SearchIndex: Sendable {
     public let calendar: Calendar
     public let count: Int
     let ids: [AssetID]
-    /// Seconds since the reference date, descending; undated photos come last.
-    let dates: [Double]
+    /// Photos with a capture date (they come first, newest first; undated photos come last).
     let datedCount: Int
+    /// The dated photos' positions in the order of their own clocks (`LocalTime.wallClock`,
+    /// review P1-15), and those clocks: "Januar 2026" or "gestern" are the days on the clock where
+    /// each photo was taken, also when the iPhone is set to another time zone.
+    let wallOrder: [Int32]
+    let walls: [Double]
     let years: [Int16]
     let months: [UInt8]
     let days: [UInt8]
@@ -90,26 +94,31 @@ public struct SearchIndex: Sendable {
         ids = sorted.map(\.id)
 
         // Calendar fields once per day instead of once per photo: Calendar is slow and
-        // photos come in bursts.
-        var dates = [Double](repeating: .nan, count: sorted.count)
+        // photos come in bursts. The fields of a photo's own clock (review P1-15).
         var years = [Int16](repeating: 0, count: sorted.count), months = [UInt8](repeating: 0, count: sorted.count)
         var days = [UInt8](repeating: 0, count: sorted.count), weekdays = [UInt8](repeating: 0, count: sorted.count)
-        var currentDay: DateInterval?
+        var walls: [(position: Int32, wall: Double)] = []
+        walls.reserveCapacity(sorted.count)
+        let wallCalendar = LocalTime.wallCalendar(calendar)
+        var currentDay: Int?
         var fields: (Int16, UInt8, UInt8, UInt8) = (0, 0, 0, 0)
         var datedCount = 0
         for (i, f) in sorted.enumerated() {
-            guard let date = f.asset.creationDate else { continue }
+            guard let wall = f.wallClock(or: calendar.timeZone) else { continue }
             datedCount = i + 1
-            dates[i] = date.timeIntervalSinceReferenceDate
-            if currentDay?.contains(date) != true || currentDay?.end == date {
-                currentDay = calendar.dateInterval(of: .day, for: date)
-                let c = calendar.dateComponents([.year, .month, .day, .weekday], from: date)
+            walls.append((Int32(i), wall.timeIntervalSinceReferenceDate))
+            let day = LocalTime.day(wall)
+            if currentDay != day {
+                currentDay = day
+                let c = wallCalendar.dateComponents([.year, .month, .day, .weekday], from: wall)
                 fields = (Int16(c.year ?? 0), UInt8(c.month ?? 0), UInt8(c.day ?? 0), UInt8(c.weekday ?? 0))
             }
             (years[i], months[i], days[i], weekdays[i]) = fields
         }
-        self.dates = dates
+        walls.sort { $0.wall != $1.wall ? $0.wall < $1.wall : $0.position < $1.position }
         self.datedCount = datedCount
+        wallOrder = walls.map(\.position)
+        self.walls = walls.map(\.wall)
         self.years = years
         self.months = months
         self.days = days
@@ -416,19 +425,23 @@ public struct SearchIndex: Sendable {
             return b
         }
 
-        /// Positions of photos taken within `interval` (the index is sorted newest first).
-        func range(_ interval: DateInterval) -> Range<Int> {
-            let start = interval.start.timeIntervalSinceReferenceDate, end = interval.end.timeIntervalSinceReferenceDate
-            func firstIndex(before value: Double) -> Int {   // first position with date < value
-                var low = 0, high = index.datedCount
+        /// Photos taken within the days of `interval` (instants in the index calendar's zone) on
+        /// their own clocks (review P1-15).
+        func photos(within interval: DateInterval) -> Bitset {
+            let wall = LocalTime.wallClock(interval, in: index.calendar.timeZone)
+            let start = wall.start.timeIntervalSinceReferenceDate, end = wall.end.timeIntervalSinceReferenceDate
+            func firstIndex(notBefore value: Double) -> Int {   // first clock >= value
+                var low = 0, high = index.walls.count
                 while low < high {
                     let mid = (low + high) / 2
-                    if index.dates[mid] >= value { low = mid + 1 } else { high = mid }
+                    if index.walls[mid] < value { low = mid + 1 } else { high = mid }
                 }
                 return low
             }
-            let from = firstIndex(before: end), to = firstIndex(before: start)
-            return from..<max(from, to)
+            let from = firstIndex(notBefore: start), to = firstIndex(notBefore: end)
+            var b = Bitset(count: index.count)
+            for i in from..<max(from, to) { b.insert(Int(index.wallOrder[i])) }
+            return b
         }
 
         func clause(_ clause: SearchClause) -> (all: Bitset, strong: Bitset) {
@@ -456,14 +469,12 @@ public struct SearchIndex: Sendable {
             case .monthDay(let m, let d): return same(scan { Int(index.months[$0]) == m && Int(index.days[$0]) == d })
             case .weekday(let w): return same(scan { Int(index.weekdays[$0]) == w })
             case .dateRange(let interval):
-                var b = Bitset(count: index.count)
-                b.insert(range: range(interval))
-                return same(b)
+                return same(photos(within: interval))
             case .holiday(let holiday, let years):
                 var b = Bitset(count: index.count)
                 let span = years.isEmpty ? (index.yearRange.map { Array(($0.lowerBound - 1)...$0.upperBound) } ?? []) : years.sorted()
                 for y in span {
-                    if let window = holiday.window(year: y, calendar: index.calendar) { b.insert(range: range(window)) }
+                    if let window = holiday.window(year: y, calendar: index.calendar) { b.formUnion(photos(within: window)) }
                 }
                 for label in holiday.labels {
                     for p in index.postings[.label(label)] ?? [] where years.isEmpty || years.contains(Int(index.years[Int(p)])) {

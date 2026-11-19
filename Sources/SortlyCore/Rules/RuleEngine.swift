@@ -90,10 +90,16 @@ public struct OrganizationRule: Hashable, Sendable, Codable, Identifiable {
 }
 
 public struct RuleEvaluator: Sendable {
-    public var calendar: Calendar
+    /// Its zone counts only for facts made without zones: a year or month is that of the photo's
+    /// own clock (review P1-15, `LocalTime`).
+    public var calendar: Calendar {
+        didSet { wallCalendar = LocalTime.wallCalendar(calendar) }
+    }
+    private var wallCalendar: Calendar
 
     public init(calendar: Calendar = .sortlyDefault) {
         self.calendar = calendar
+        wallCalendar = LocalTime.wallCalendar(calendar)
     }
 
     public func evaluate(_ condition: RuleCondition, _ facts: AssetFacts) -> Bool {
@@ -122,11 +128,11 @@ public struct RuleEvaluator: Sendable {
             guard let d = f.asset.creationDate else { return false }
             return d >= start && d <= end
         case .year(let y):
-            guard let d = f.asset.creationDate else { return false }
-            return calendar.component(.year, from: d) == y
+            guard let d = f.wallClock(or: calendar.timeZone) else { return false }
+            return wallCalendar.component(.year, from: d) == y
         case .month(let m):
-            guard let d = f.asset.creationDate else { return false }
-            return calendar.component(.month, from: d) == m
+            guard let d = f.wallClock(or: calendar.timeZone) else { return false }
+            return wallCalendar.component(.month, from: d) == m
         case .mediaKind(let k): return f.asset.kind == k
         case .subtype(let raw): return f.asset.subtypes.contains(MediaSubtypes(rawValue: raw))
         case .imageCategory(let id, let minimum): return f.hasCategory(id, minimum: minimum)

@@ -29,7 +29,9 @@ Koordinaten, Bildinhalte), keine Bilder. Sie verlässt das Gerät nur mit dem Ba
 Es werden **keine Bildkopien** gespeichert. Wenige Werte liegen in `UserDefaults`
 (Onboarding erledigt, Zahl der verbrauchten Gratis-Alben mit den Kennungen der bekannten
 Kauf-Transaktionen, Stand einer unterbrochenen Analyse, Stand der Bewertungsfrage,
-Diagnose-Zähler für den Diagnosebericht ohne Foto- oder Albumnamen und die Kennungen der von
+Diagnose-Zähler für den Diagnosebericht ohne Foto- oder Albumnamen, die Akku-Abschnitte der
+Analyse (Akkustand, Anzahl Fotos, Dauer, Wärme, Stromsparmodus) und die Zahlen aus Apples
+MetricKit der letzten 7 Tage (CPU- und GPU-Zeit, Hänger mit Dauer, keine Aufrufstapel) sowie die Kennungen der von
 Albumist angelegten Beispielfotos, damit „Beispielfotos wieder entfernen“ genau diese findet).
 Für Spotlight und Siri legt Albumist im lokalen Spotlight-Index des iPhones nur Ländernamen mit
 Fotoanzahl und die Titel offener Vorschläge ab (kein erkannter Text, keine Bilder, keine
@@ -124,7 +126,7 @@ abschaltbar). Das gerenderte Bild hat keine EXIF- oder GPS-Daten.
 | Bereich | Ergebnis |
 |---|---|
 | Netzwerk | Kein eigener Netzwerkcode (`URLSession` o. ä. kommt nicht vor). Nur Apple-Dienste: Geocoder (abschaltbar), iCloud-Fotos (Zustimmung), StoreKit. |
-| Diagnose | Nur auf Wunsch über das Teilen-Menü: App- und iOS-Version, Gerätemodell, Fotozugriff, Zahlen und Zustände der letzten Pläne mit Fehlercodes. Keine Fotos, Album- oder Ortsnamen, keine Foto-Kennungen. |
+| Diagnose | Nur auf Wunsch über das Teilen-Menü: App- und iOS-Version, Gerätemodell, Fotozugriff, Zahlen und Zustände der letzten Pläne mit Fehlercodes, Akkuverbrauch der Analyse (Akkustände, Fotoanzahl, Dauer, Wärme) und MetricKit-Zahlen (CPU-/GPU-Zeit, Hänger, Beendigungen; die MetricKit-Zahlen gibt iOS der App auf dem Gerät, Albumist sendet nichts). Keine Fotos, Album- oder Ortsnamen, keine Foto-Kennungen. |
 | Speicherung | Datenbank verschlüsselt (Dateischutz), nicht im Backup, keine Bildkopien, sensible Texte nicht gespeichert, Kontonummern maskiert. Nur die Entscheidungen liegen als kleine Kopie im Geräte-Backup. |
 | SQL | Nur gebundene Parameter, keine zusammengesetzten SQL-Texte aus Nutzereingaben. |
 | Käufe | Nur von Apple signierte Transaktionen (`.verified`) schalten frei; Test-Freischaltung existiert nur in Debug-Builds. |

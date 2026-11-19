@@ -12722,6 +12722,66 @@
           }
         }
       }
+    },
+    "%@ %%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@%%"
+          }
+        }
+      }
+    },
+    "noch zu wenig gemessen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "not enough measured yet"
+          }
+        }
+      }
+    },
+    "Akku: noch zu wenig gemessen (Fotos: %@, verbraucht: %@ %%)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Battery: not enough measured yet (photos: %1$@, used: %2$@%%)"
+          }
+        }
+      }
+    },
+    "Vordergrund %@, Hintergrund %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "foreground %1$@, background %2$@"
+          }
+        }
+      }
+    },
+    "Akku: %@ pro 1.000 Fotos (%@; %@ Fotos gemessen)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Battery: %1$@ per 1,000 photos (%2$@; %3$@ photos measured)"
+          }
+        }
+      }
+    },
+    "etwa höchstens %@ %%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "about at most %@%%"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

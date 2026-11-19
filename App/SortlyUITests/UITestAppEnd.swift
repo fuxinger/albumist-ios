@@ -28,11 +28,15 @@ enum UITestAppEnd {
     /// process id (adds `-SortlyUITestWatchMainLog` when the arguments name no file) and notes the
     /// launch (`UITestLaunchRecord`). So the next `end` names the process to the Mac also when it
     /// is given a new `XCUIApplication` without arguments: the first launch of every test ended
-    /// the app of the test before that way, with `simctl terminate` by bundle id.
-    static func launch(_ app: XCUIApplication) {
+    /// the app of the test before that way, with `simctl terminate` by bundle id. Callers do
+    /// not end the app themselves before: a second end would wait again for an app still
+    /// running. `justBefore`: runs after the end, right before the launch (the device tests'
+    /// "UI_FACT clock … launch", which `ui_tests.py` compares with the process start).
+    static func launch(_ app: XCUIApplication, justBefore: () -> Void = {}) {
         end(app)
         app.launchArguments += UITestStalls.arguments(besides: app.launchArguments)
         UITestLaunchRecord.shared.launching(app.launchArguments)
+        justBefore()
         app.launch()
     }
 

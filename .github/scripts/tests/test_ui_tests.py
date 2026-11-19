@@ -17,6 +17,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import ui_tests  # noqa: E402
+import ui_groups  # noqa: E402
 
 # Job 133263283907 (contrast pass): the runner never came up.
 AX_TIMEOUT = """\
@@ -206,6 +207,19 @@ class DecideTests(unittest.TestCase):
         # same group passed a test (the repeat runs only what did not pass there).
         self.assertEqual(ui_tests.decide(0, SKIPPED_ONLY, earlier=PASSED_ONE), ("pass", []))
         self.assertEqual(ui_tests.decide(0, SKIPPED_ONLY, earlier=AX_TIMEOUT)[0], "fail")
+
+    def test_classify_takes_the_first_pass_of_a_repeat(self):
+        # The manual `classify` decides like `run`: a repeat is judged with its first pass.
+        with tempfile.TemporaryDirectory() as folder:
+            first, repeat = os.path.join(folder, "first.log"), os.path.join(folder, "retry.log")
+            for path, text in ((first, PASSED_ONE + SERVICE_INTERRUPTED), (repeat, SKIPPED_ONLY)):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+            for extra, verdict in (([], "fail"), (["--earlier", first], "pass")):
+                with self.subTest(extra=extra):
+                    with contextlib.redirect_stdout(io.StringIO()) as out:
+                        self.assertEqual(ui_tests.main(["classify", repeat, "--status", "0"] + extra), 0)
+                    self.assertTrue(out.getvalue().startswith(verdict + ":"), out.getvalue())
 
     def test_assertion_is_not_retried(self):
         self.assertEqual(ui_tests.decide(65, FLOW_ASSERTION)[0], "fail")
@@ -686,9 +700,16 @@ class SweepStrictTests(unittest.TestCase):
         with open(os.path.join(self.ROOT, "App", "SortlyUITests", "SortlyFlowUITests.swift"), encoding="utf-8") as f:
             return f.read()
 
+    @staticmethod
+    def lenient(source: str) -> list[int]:
+        """Lines whose code (comments and string literals left out) names a `strict` switch."""
+        code = ui_groups.strip_swift(source)
+        return [i + 1 for i, line in enumerate(code.splitlines()) if re.search(r"\bstrict\b", line)]
+
     def test_no_list_is_walked_leniently(self):
-        lenient = [line.strip() for line in self.swift().splitlines() if re.search(r"\bstrict\b", line)]
-        self.assertEqual(lenient, [])
+        self.assertEqual(self.lenient("// strict in every list\nlet s = \"strict\"\n"), [])
+        self.assertEqual(self.lenient("func sweep(depth: Int, strict: Bool = false) {}\n"), [1])
+        self.assertEqual(self.lenient(self.swift()), [])
 
     def test_every_dead_row_fails_the_test(self):
         lines = self.swift().splitlines()
@@ -1197,7 +1218,16 @@ class HostTerminateTests(unittest.TestCase):
                 swift = open(os.path.join(folder, name), encoding="utf-8").read()
                 self.assertNotIn(".terminate()", swift)
                 if "app = XCUIApplication()" in swift:
-                    self.assertIn("UITestAppEnd.end(app", swift)
+                    # UITestAppEnd.launch ends the app first (since the first launch of a test
+                    # goes through it as well).
+                    self.assertRegex(swift, r"UITestAppEnd\.(end|launch)\(app")
+
+    @staticmethod
+    def launch_calls(source: str) -> list[int]:
+        """Line numbers of `.launch()` calls (any spacing) in Swift code, comments and string
+        literals left out."""
+        code = ui_groups.strip_swift(source)
+        return [code.count("\n", 0, m.start()) + 1 for m in re.finditer(r"\.\s*launch\s*\(\s*\)", code)]
 
     def test_every_launch_goes_through_the_helper_that_records_the_process_id(self):
         # The first launch of each test ended the app of the test before through a new
@@ -1209,13 +1239,21 @@ class HostTerminateTests(unittest.TestCase):
         # lack it and notes the launch (UITestLaunchRecord), so the next end knows the process
         # from any XCUIApplication. No UI test file launches the app itself.
         folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        for sample, found in (("app.launch()", 1), ("app.launch( )", 1), ("app\n  .launch ()", 1),
+                              ("// app.launch()", 0), ('print("app.launch()")', 0), ("UITestAppEnd.launch(app)", 0)):
+            with self.subTest(sample=sample):
+                self.assertEqual(len(self.launch_calls(sample)), found)
         for name in sorted(os.listdir(folder)):
             if not name.endswith(".swift") or name == "UITestAppEnd.swift":
                 continue
             with self.subTest(name):
                 with open(os.path.join(folder, name), encoding="utf-8") as f:
-                    launches = [line.strip() for line in f if re.search(r"\.launch\(\)", line)]
-                self.assertEqual(launches, [], "launch through UITestAppEnd.launch(app)")
+                    source = f.read()
+                self.assertEqual(self.launch_calls(source), [], "launch through UITestAppEnd.launch(app)")
+                # The helper ends the app before every launch; a plain end "before the next
+                # launch" in front of it would wait a second time for an app still running
+                # (60 s for the Mac, then XCTest). Ends with their own reason stay.
+                self.assertEqual(ui_groups.strip_swift(source).count("UITestAppEnd.end(app)"), 0)
         with open(os.path.join(folder, "UITestAppEnd.swift"), encoding="utf-8") as f:
             helper = f.read()
         body = helper[helper.index("static func launch(_ app: XCUIApplication"):]
@@ -1224,6 +1262,12 @@ class HostTerminateTests(unittest.TestCase):
         order = [body.index(s) for s in ("end(app", "UITestStalls.arguments(besides: app.launchArguments)",
                                          "UITestLaunchRecord.shared.launching(app.launchArguments)", "app.launch()")]
         self.assertEqual(order, sorted(order), "end, watch file, record, then launch")
+        # The device tests' launch clock (compared with the app's process start by
+        # lost_app_at_launch) is taken after that end, right before the launch.
+        with open(os.path.join(folder, "DeviceConditionUITests.swift"), encoding="utf-8") as f:
+            self.assertIn('UITestAppEnd.launch(app, justBefore: { UITestOnboarding.clock("launch") })', f.read())
+        self.assertLess(body.index("justBefore()"), body.index("app.launch()"))
+        self.assertLess(body.index("end(app"), body.index("justBefore()"))
         # The end reads the process of the last launch, and the stall report keeps it when it
         # removes the file (DeviceConditionUITests and AccessibilityUITests report in teardown).
         self.assertIn("UITestLaunchRecord.shared.processID(", helper)

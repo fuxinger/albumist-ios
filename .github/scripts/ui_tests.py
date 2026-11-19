@@ -34,9 +34,10 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
   settle --udid U [--limit S]
       Waits like every pass does before its first test (`settle`, below) and always exits 0;
       ci.yml's "Fresh simulator" step uses it after its boot.
-  classify LOG [--status N] [--crash-report F]... [--bundle-json F]
+  classify LOG [--status N] [--crash-report F]... [--bundle-json F] [--earlier FIRST_LOG]
       Prints what `run` would decide for a finished pass (for trying the rules on a log;
-      without --bundle-json the result bundle counts as clean).
+      without --bundle-json the result bundle counts as clean). For a repeat, --earlier names
+      the log of the group's first pass, as `run` passes it (a test that passed there counts).
 
 The retry rule (`decide`): a pass that failed is repeated ONCE, on a simulator that is shut
 down, ERASED (app, photos, the runner's marker files) and booted and prepared again like a
@@ -1475,6 +1476,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--status", type=int, default=65)
     c.add_argument("--crash-report", action="append", default=[])
     c.add_argument("--bundle-json", help="output of `xcrun xcresulttool get test-results tests` for the pass")
+    c.add_argument("--earlier", help="for a repeat: the log of the group's first pass")
     args = parser.parse_args(argv)
     # Space-separated lists are allowed too (matrix values in ui.yml).
     for key in ("only", "skip"):
@@ -1539,7 +1541,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.bundle_json:
             with open(args.bundle_json, encoding="utf-8") as tests:
                 bundle = parse_bundle(tests.read())
-        verdict, reasons = decide(args.status, text, args.crash_report, bundle=bundle)
+        earlier = ""
+        if args.earlier:
+            with open(args.earlier, encoding="utf-8", errors="replace") as first:
+                earlier = first.read()
+        verdict, reasons = decide(args.status, text, args.crash_report, bundle=bundle, earlier=earlier)
         print(f"{verdict}: {'; '.join(reasons)}")
         return 0
     return command_run(args)

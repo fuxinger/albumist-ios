@@ -728,8 +728,8 @@ final class AccessibilityUITests: XCTestCase {
     private func launch(english: Bool = false, textSize: String? = nil, dark: Bool = false) {
         // The app's stalls and stacks of each launch (UITestStalls; the contrast run's long
         // stalls before "close settings" had no stack, UI run 44012530107).
-        // Ended first: the stall file holds the app's process id for the Mac (`UITestAppEnd`).
-        UITestAppEnd.end(app)
+        // The app of the last launch is ended in UITestAppEnd.launch (its process id stays known
+        // when the report removes the stall file, `UITestLaunchRecord`).
         UITestStalls.report()
         if !stallsReportedAtEnd {
             stallsReportedAtEnd = true

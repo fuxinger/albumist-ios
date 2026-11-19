@@ -217,7 +217,7 @@ final class SortlyLockedUITests: XCTestCase {
             sleep(2)
         }
         print(streak >= 3 ? "UI_STEP_OK prepared (locked)" : "UI_STEP_MISSING prepared (locked)")
-        UITestAppEnd.end(app)
+        // The next launch (UITestAppEnd.launch) ends this app first.
         app = XCUIApplication()
     }
 

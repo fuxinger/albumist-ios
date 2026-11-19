@@ -21,8 +21,6 @@ public struct BatteryStretch: Codable, Sendable, Equatable {
         case charging
         /// UIDevice said -1 (simulator, monitoring not ready).
         case levelUnknown
-        /// No photo of the image step finished (reading the library, places, a short moment).
-        case noPhotos
         /// The level went up without power being seen: plugged in and out between two readings,
         /// or iOS corrected the level. The drop cannot be known.
         case levelRose
@@ -31,7 +29,6 @@ public struct BatteryStretch: Codable, Sendable, Equatable {
             switch self {
             case .charging: "charging"
             case .levelUnknown: "level unknown"
-            case .noPhotos: "no photos"
             case .levelRose: "level rose"
             }
         }
@@ -45,9 +42,10 @@ public struct BatteryStretch: Codable, Sendable, Equatable {
     public var endLevel: Double?
     /// On power (charging or full) during the stretch.
     public var charging: Bool
-    /// Photos the image step (`AnalysisPipeline.Stage.content`) finished in the stretch. Its
-    /// energy goes to these photos: the image step is most of the analysis' work, and a photo
-    /// whose image labels alone were added counts as one, as on the card.
+    /// Photos the image step (`AnalysisPipeline.Stage.content`) finished in the stretch: the
+    /// image step is most of the analysis' work, and a photo whose image labels alone were added
+    /// counts as one, as on the card. A stretch without any (reading the library, places,
+    /// texts) still counts its battery: that is part of what analysing the photos costs.
     public var photos: Int
     /// The highest heat level seen (`DeviceState.Thermal.rawValue`).
     public var hottest: Int
@@ -77,7 +75,6 @@ public struct BatteryStretch: Codable, Sendable, Equatable {
     public var exclusion: Exclusion? {
         if charging { return .charging }
         guard let startLevel, let endLevel else { return .levelUnknown }
-        if photos <= 0 { return .noPhotos }
         if Self.points(endLevel) > Self.points(startLevel) { return .levelRose }
         return nil
     }
@@ -98,7 +95,7 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
     /// The analysis says something at least every few seconds while it works.
     public static let maxSilence: TimeInterval = 120
     /// A stretch this short without a photo is not kept (a moment "inactive", Control Center):
-    /// it would not count anyway and only fill the list.
+    /// unless its level moved, it holds nothing and would only fill the list.
     public static let minKept: TimeInterval = 10
 
     public struct Observation: Sendable {
@@ -171,7 +168,7 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
     }
 
     private static func isKept(_ stretch: BatteryStretch) -> Bool {
-        stretch.photos > 0 || stretch.duration >= minKept
+        stretch.photos > 0 || stretch.duration >= minKept || stretch.startLevel != stretch.endLevel
     }
 
     private static func advance(_ current: inout Open, with seen: Observation) {

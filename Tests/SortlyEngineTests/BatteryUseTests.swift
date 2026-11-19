@@ -137,6 +137,14 @@ struct BatteryUseTests {
         #expect(tracker.observe(Self.seen(3, onScreen: true, completed: 10, Self.device(0.7))).isEmpty)
     }
 
+    /// A short stretch whose level moved is kept: its point belongs to the analysis' cost.
+    @Test func aShortStretchWhoseLevelMovedIsKept() {
+        var tracker = BatteryStretchTracker()
+        _ = tracker.observe(Self.seen(0, completed: 10, Self.device(0.71)))
+        let closed = tracker.observe(Self.seen(4, onScreen: false, completed: 10, Self.device(0.70)))
+        #expect(closed.map(\.endLevel) == [0.70])
+    }
+
     @Test func theTrackerSurvivesARelaunch() throws {
         var tracker = BatteryStretchTracker()
         _ = tracker.observe(Self.seen(0, onScreen: false, completed: 0, Self.device(0.7)))
@@ -176,9 +184,24 @@ struct BatteryUseTests {
             Self.stretch(from: 0.21, to: 0.26, photos: 700),
         ])
         #expect(use.all.photos == 1_000)
-        #expect(use.all.stretches == 1)
-        #expect(use.all.estimate == .perThousand(5))
-        #expect(use.notCounted == [.charging: 1, .levelUnknown: 2, .noPhotos: 1, .levelRose: 1])
+        // The stretch without photos is work of the analysis too (below).
+        #expect(use.all.stretches == 2)
+        #expect(use.all.estimate == .perThousand(15))
+        #expect(use.notCounted == [.charging: 1, .levelUnknown: 2, .levelRose: 1])
+    }
+
+    /// Reading the library, the places and the texts are part of what analysing costs: their
+    /// battery counts, spread over the photos of the image step.
+    @Test func workWithoutImagePhotosStillCosts() {
+        let use = BatteryUse([
+            Self.stretch(from: 0.93, to: 0.92, photos: 0),
+            Self.stretch(from: 0.92, to: 0.88, photos: 1_000),
+            Self.stretch(from: 0.88, to: 0.87, photos: 0),
+        ])
+        #expect(use.all.estimate == .perThousand(6))
+        #expect(use.all.stretches == 3)
+        // Without any photo there is still no number.
+        #expect(BatteryUse([Self.stretch(from: 0.93, to: 0.83, photos: 0)]).all.estimate == .tooLittle)
     }
 
     @Test func aStretchWithoutDropCountsItsPhotos() {

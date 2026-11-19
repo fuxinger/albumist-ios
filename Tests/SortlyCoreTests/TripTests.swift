@@ -161,6 +161,31 @@ struct TripTests {
         let (lib, _) = romeLibrary()
         #expect(detector.detect(in: lib.assets).map(\.id) == detector.detect(in: lib.assets.reversed()).map(\.id))
     }
+
+    /// A week in one place on Taveuni (Fiji), which the 180th meridian crosses: the evenings
+    /// are a few hundred metres on either side of it. It is one stop, as anywhere else, not two
+    /// (the cells of 179.99° and −179.99° were at opposite ends of the grid).
+    @Test func aStayOnTheDateLineIsOneStop() {
+        let east = GeoCoordinate(latitude: -16.80, longitude: 179.997)
+        let west = GeoCoordinate(latitude: -16.80, longitude: -179.997)
+        #expect(GeoMath.distance(east, west) < 1_000)
+        var dates: [Date] = [], coordinates: [GeoCoordinate] = []
+        for day in 0..<7 {
+            for (hour, place) in [(10, east), (20, west), (21, east)] {
+                dates.append(Fixture.date("2026-08-0\(day + 1) \(hour):00"))
+                coordinates.append(place)
+            }
+        }
+        let classified = TripDetector.classify(dates: dates, coordinates: coordinates, calendar: Fixture.calendar)
+        #expect(classified.stops == 1)
+        #expect(classified.kind == .vacation)
+        // Three places on the islands a day's drive apart, all on the west side and one across:
+        // still three stops.
+        let stops = [GeoCoordinate(latitude: -17.75, longitude: 177.45), GeoCoordinate(latitude: -16.45, longitude: 179.35), west]
+        let tour = TripDetector.classify(dates: (0..<6).map { Fixture.date("2026-08-0\($0 + 1) 20:00") },
+                                         coordinates: (0..<6).map { stops[$0 / 2] }, calendar: Fixture.calendar)
+        #expect(tour.stops == 3)
+    }
 }
 
 @Suite("Frequent places")

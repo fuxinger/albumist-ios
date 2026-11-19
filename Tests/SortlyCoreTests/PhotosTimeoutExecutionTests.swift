@@ -66,13 +66,43 @@ struct PhotosTimeoutExecutionTests {
         func hasUnansweredWrites() async -> Bool { pending != nil }
         func createAnswered(_ id: CollectionID) async -> Bool { answered.contains(id) }
 
+        /// The next write of this kind is given up before it began (no thread in time): never
+        /// sent, nothing hangs (`PhotosNotResponding.neverBegan`).
+        var neverBegins: String?
+
         private func lane(_ what: String) throws {
             if pending != nil { throw PhotosNotResponding(lane: .write, what: what, notSent: true) }
+            if let before = quietBefore, before.what == what {
+                quietBefore = nil
+                throw before.error
+            }
+            if neverBegins == what {
+                neverBegins = nil
+                throw PhotosNotResponding(lane: .write, what: what, notSent: true, neverBegan: true)
+            }
             sentWrites += 1
         }
 
+        func neverBegins(_ what: String) { neverBegins = what }
+
+        /// The next write of this kind reports `error` before it sends anything (a read the
+        /// library call makes first got no answer or no thread).
+        private var quietBefore: (what: String, error: PhotosNotResponding)?
+        func quietBeforeSending(_ what: String, _ error: PhotosNotResponding) { quietBefore = (what, error) }
+
+        /// The next write of this kind goes through, and the same library call then reports
+        /// `error` (a read-back after the change got no thread in time, as in
+        /// `PhotoKitLibrary.deleteCollections`).
+        private var quietAfter: (what: String, error: PhotosNotResponding)?
+        func quietAfterSending(_ what: String, _ error: PhotosNotResponding) { quietAfter = (what, error) }
+
         private func stall<T>(_ what: String, _ write: () async throws -> T) async throws -> T {
             try lane(what)
+            if let after = quietAfter, after.what == what {
+                quietAfter = nil
+                _ = try await write()
+                throw after.error
+            }
             guard stalls == what else { return try await write() }
             stalls = nil
             if lands { _ = try await write() }
@@ -408,6 +438,197 @@ struct PhotosTimeoutExecutionTests {
         #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
         #expect(try await albums(lib, titled: "Reise").count == 1)
         #expect(resumed.record?.adoptedKeys.isEmpty == true)
+    }
+
+    /// A change request given up before it began (Albumist kept every thread busy) never
+    /// reached Photos: the step is as it was, nothing is left to settle, and "Fortsetzen" makes
+    /// the album once (second review of 6c45378, P1: the executor relies on `notSent` for this).
+    @Test func writeThatNeverBeganLeavesTheStepAsItWas() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: nil, lands: false)
+        await photos.neverBegins("createAlbum")
+        await #expect(throws: PhotosNotResponding(lane: .write, what: "createAlbum", notSent: true, neverBegan: true)) {
+            try await ChangeExecutor(library: photos, store: store).execute(plan)
+        }
+        let journal = try #require(await store.latest)
+        let key = try albumKey(journal)
+        let albumStep = try #require(journal.steps.firstIndex { if case .createAlbum = $0.operation { true } else { false } })
+        #expect(journal.steps[albumStep].state == .pending)
+        #expect(!journal.steps.contains { running($0.state) })
+        #expect(journal.record?.maybeCreated[key] == nil)
+        #expect(try await albums(lib, titled: "Reise").isEmpty)
+        let resumed = try await ChangeExecutor(library: photos, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").map(\.assetIDs) == [["x", "y"]])
+        #expect(resumed.record?.adoptedKeys.isEmpty == true)
+    }
+
+    /// Adding photos, or the batch deletion of an undo, given up before it began: nothing
+    /// reached Photos, the steps are as they were (nothing written down for them is kept), and
+    /// "Fortsetzen" carries them out once (second review of 6c45378, P1; review of 045f297, S4).
+    @Test func addThatNeverBeganIsPendingAgain() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: nil, lands: false)
+        await photos.neverBegins("addAssets")
+        await #expect(throws: PhotosNotResponding(lane: .write, what: "addAssets", notSent: true, neverBegan: true)) {
+            try await ChangeExecutor(library: photos, store: store).execute(plan)
+        }
+        let journal = try #require(await store.latest)
+        let add = try #require(journal.steps.firstIndex { if case .addAssets = $0.operation { true } else { false } })
+        #expect(journal.steps[add].state == .pending)
+        #expect(journal.record?.media[journal.steps[add].id] == nil)
+        #expect(journal.appliedAssets.isEmpty)
+        #expect(try await albums(lib, titled: "Reise").map(\.assetIDs) == [[]])
+        let resumed = try await ChangeExecutor(library: photos, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await albums(lib, titled: "Reise").map(\.assetIDs) == [["x", "y"]])
+        #expect(resumed.appliedAssets == ["x", "y"])
+    }
+
+    @Test func batchDeletionThatNeverBeganIsPendingAgain() async throws {
+        let (lib, plan) = try await setup()
+        let applied = try await ChangeExecutor(library: lib, store: InMemoryPlanStore()).execute(plan)
+        let reise = try #require(applied.resolvedKeys[try albumKey(applied)])
+        let undo = confirmed(UndoPlanner().undoPlan(for: applied, current: try await lib.currentInventory()))
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: nil, lands: false)
+        await photos.neverBegins("delete")
+        await #expect(throws: PhotosNotResponding(lane: .write, what: "delete", notSent: true, neverBegan: true)) {
+            try await ChangeExecutor(library: photos, store: store).execute(undo)
+        }
+        let journal = try #require(await store.latest)
+        let delete = try #require(journal.steps.firstIndex { if case .deleteCollection = $0.operation { true } else { false } })
+        #expect(journal.steps[delete].state == .pending)
+        #expect(journal.record?.deletedAlbums[reise] == nil)
+        #expect(try await lib.currentInventory()[reise] != nil)
+        let resumed = try await ChangeExecutor(library: photos, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await lib.currentInventory()[reise] == nil)
+        #expect(resumed.record?.deletedAlbums[reise] != nil)
+    }
+
+    /// Adding to the user's own album: the library's check that the album is there (a read
+    /// before its change) never got a thread. Nothing of the call reached Photos, so the step is
+    /// as it was, and "Fortsetzen" adds the photos; before, the step stayed running and was
+    /// settled as "outcome unclear" although nothing had been sent (review of f7439fb, SF1).
+    @Test(arguments: [
+        PhotosNotResponding(lane: .read, what: "album", notSent: true, neverBegan: true),
+        PhotosNotResponding(lane: .read, what: "album", notSent: false),
+    ])
+    func addIntoAUsersAlbumWhoseCheckGotNoAnswerIsPendingAgain(_ check: PhotosNotResponding) async throws {
+        let lib = InMemoryPhotoLibrary(assets: ["x", "y", "o"],
+                                       collections: [CollectionSnapshot(id: "sommer", title: "Sommer", assetIDs: ["o"])])
+        let proposals = [ConfirmedProposal(
+            proposal: AlbumProposal(id: SortlyID("sommer"), kind: .trip, title: "Sommer", folderPath: [], assetIDs: ["x", "y"]),
+            decision: .extendExisting("sommer"))]
+        let plan = confirmed(OrganizationPlanner().makePlan(from: proposals, inventory: try await lib.currentInventory()))
+        let add = try #require(plan.steps.firstIndex { if case .addAssets = $0.operation { true } else { false } },
+                               "\(plan.steps.map(\.operation))")
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: nil, lands: false)
+        await photos.quietBeforeSending("addAssets", check.beforeAnyChange)
+        await #expect(throws: PhotosNotResponding.self) { try await ChangeExecutor(library: photos, store: store).execute(plan) }
+        let journal = try #require(await store.latest)
+        #expect(journal.steps[add].state == .pending)
+        #expect(journal.record?.media[journal.steps[add].id] == nil)
+        let resumed = try await ChangeExecutor(library: photos, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(try await lib.currentInventory()[CollectionID("sommer")]?.assetIDs.sorted() == ["o", "x", "y"])
+        #expect(resumed.record?.unclear.isEmpty != false)
+    }
+
+    /// The check after a create got no answer: the album was made, so what the user reads is a
+    /// change whose outcome is not known ("weder erledigt noch zurückgenommen … Fortsetzen"),
+    /// not the text of a read (review of f7439fb, SF2).
+    @Test func aReadAfterASentChangeIsReportedAsTheChange() async throws {
+        let (lib, plan) = try await setup()
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: nil, lands: false, stallRead: ("Reise", 1))
+        await #expect(throws: PhotosNotResponding(lane: .write, what: "collection", notSent: false)) {
+            try await ChangeExecutor(library: photos, store: store).execute(plan)
+        }
+        let journal = try #require(await store.latest)
+        #expect(journal.steps.contains { running($0.state) })
+    }
+
+    /// The protocol's own deletion, one album at a time: once one is gone, a later one that is
+    /// not sent does not make the call "not sent" (nit of the review of f7439fb).
+    @Test func oneByOneDeletionAfterTheFirstIsNeverNotSent() async throws {
+        let lib = InMemoryPhotoLibrary(assets: [], collections: [CollectionSnapshot(id: "a", title: "A"),
+                                                                  CollectionSnapshot(id: "b", title: "B")])
+        let second = OneByOne(lib, quietAt: 2)
+        await #expect(throws: PhotosNotResponding(lane: .write, what: "deleteCollection", notSent: false)) {
+            try await second.deleteCollections(["a", "b"])
+        }
+        let first = OneByOne(lib, quietAt: 1)
+        await #expect(throws: PhotosNotResponding(lane: .write, what: "deleteCollection", notSent: true, neverBegan: true)) {
+            try await first.deleteCollections(["b"])
+        }
+    }
+
+    /// A library with the protocol's own `deleteCollections`; the `quietAt`-th deletion is
+    /// given up before it began.
+    actor OneByOne: PhotoLibraryWriting {
+        let base: InMemoryPhotoLibrary
+        let quietAt: Int
+        private var deletions = 0
+        init(_ base: InMemoryPhotoLibrary, quietAt: Int) { self.base = base; self.quietAt = quietAt }
+        func canWrite() async -> Bool { await base.canWrite() }
+        func currentInventory() async throws -> CollectionInventory { try await base.currentInventory() }
+        func availableAssets(_ ids: [AssetID]) async throws -> Set<AssetID> { try await base.availableAssets(ids) }
+        func createFolder(title: String, parent: CollectionID?) async throws -> CollectionID { try await base.createFolder(title: title, parent: parent) }
+        func createAlbum(title: String, parent: CollectionID?) async throws -> CollectionID { try await base.createAlbum(title: title, parent: parent) }
+        func addAssets(_ assets: [AssetID], to album: CollectionID) async throws { try await base.addAssets(assets, to: album) }
+        func removeAssets(_ assets: [AssetID], from album: CollectionID) async throws { try await base.removeAssets(assets, from: album) }
+        func renameCollection(_ id: CollectionID, to title: String) async throws { try await base.renameCollection(id, to: title) }
+        func moveCollection(_ id: CollectionID, from oldParent: CollectionID?, to newParent: CollectionID?) async throws {
+            try await base.moveCollection(id, from: oldParent, to: newParent)
+        }
+        func deleteCollection(_ id: CollectionID) async throws {
+            deletions += 1
+            if deletions == quietAt { throw PhotosNotResponding(lane: .write, what: "deleteCollection", notSent: true, neverBegan: true) }
+            try await base.deleteCollection(id)
+        }
+    }
+
+    /// The deletion went out and Photos carried it out; a read of the same library call after
+    /// it (the read-back) never got a thread and says "not sent". That says nothing about the
+    /// deletion: the step stays running with what goes written down, so the album can still be
+    /// brought back, and "Fortsetzen" settles it from the library. Before, the executor took the
+    /// read's `notSent` for the whole call: the steps went back to pending and the record of
+    /// the deleted album was dropped (review of 045f297, M2).
+    @Test(arguments: [
+        PhotosNotResponding(lane: .read, what: "stillThere", notSent: true, neverBegan: true),
+        PhotosNotResponding(lane: .read, what: "deletable", notSent: true),
+        // As `PhotoKitLibrary.deleteCollections` reports a second request that never began.
+        PhotosNotResponding(lane: .write, what: "deleteCollections", notSent: true, asksUser: true, neverBegan: true)
+            .afterAChangeWasSent,
+    ])
+    func aReadAfterTheDeletionWentOutKeepsItsRecord(_ quiet: PhotosNotResponding) async throws {
+        let (lib, plan) = try await setup()
+        let applied = try await ChangeExecutor(library: lib, store: InMemoryPlanStore()).execute(plan)
+        #expect(applied.status == .completed)
+        let reise = try #require(applied.resolvedKeys[try albumKey(applied)])
+        let undo = confirmed(UndoPlanner().undoPlan(for: applied, current: try await lib.currentInventory()))
+        let store = InMemoryPlanStore()
+        let photos = SlowPhotos(lib, stalls: nil, lands: false)
+        await photos.quietAfterSending("delete", quiet)
+        // What the user reads: a change whose outcome is not known, not "nicht gefragt" (SF2).
+        await #expect(throws: PhotosNotResponding(lane: .write, what: quiet.what, notSent: false)) {
+            try await ChangeExecutor(library: photos, store: store).execute(undo)
+        }
+        #expect(try await lib.currentInventory()[reise] == nil)
+        let journal = try #require(await store.latest)
+        let delete = try #require(journal.steps.firstIndex { if case .deleteCollection = $0.operation { true } else { false } })
+        #expect(running(journal.steps[delete].state), "\(journal.steps[delete].state)")
+        #expect(journal.record?.deletedAlbums[reise] != nil)
+
+        let resumed = try await ChangeExecutor(library: lib, store: store).execute(journal)
+        #expect(resumed.status == .completed, "\(resumed.steps.map(\.state))")
+        #expect(succeeded(resumed.steps[delete].state))
+        #expect(resumed.record?.deletedAlbums[reise] != nil)
     }
 
     /// Taking a plan back: a deletion Photos did not answer is not "rückgängig gemacht". What

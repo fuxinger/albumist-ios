@@ -944,6 +944,10 @@ public enum AnalysisCardState: Sendable, Equatable {
         /// more, or the run ended on one and goes on by itself a little later (app-speed,
         /// `PhotosDeadline`).
         case photos
+        /// "Albumist war gerade ausgelastet": the run ended because a call into Photos never
+        /// got a thread (Albumist's own work kept them all busy; Photos was not asked), and it
+        /// goes on by itself a little later (review of f7439fb, MF1).
+        case busy
     }
 
     public struct Position: Sendable, Equatable {
@@ -983,6 +987,9 @@ public enum AnalysisCardState: Sendable, Equatable {
         /// Photos has not answered for a while (`PhotosDeadline.slowFor`), or the last run ended
         /// on it and the next try is due (`AppModel`): said instead of a count standing still.
         public var photosNotResponding = false
+        /// The last run ended because a call into Photos never got a thread (`UnattendedRetry
+        /// .Cause.busy`), and the next try is due.
+        public var albumistBusy = false
         /// Pause was tapped this long ago (the run is finishing the photos in work).
         public var pausingFor: Duration?
         /// The last run ended because the user paused it, at this position.
@@ -1023,6 +1030,9 @@ public enum AnalysisCardState: Sendable, Equatable {
         // The run ended because Photos did not answer; the next try comes by itself. Never
         // "fertig" meanwhile.
         if i.photosNotResponding { return .waiting(.photos, i.pausedAt) }
+        // The run ended because Albumist's own work kept every thread busy; the next try comes
+        // by itself. Said, never the card of an earlier finished run (review of f7439fb, MF1).
+        if i.albumistBusy { return .waiting(.busy, i.pausedAt) }
         if let finished = i.finished { return .finished(photos: finished.photos, proposals: finished.proposals) }
         return nil
     }

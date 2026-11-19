@@ -67,6 +67,7 @@ struct AnalysisProgressCard: View {
         case .waiting(.cooling, _): return String(localized: "Wartet, bis dein iPhone abkühlt")
         case .waiting(.charging, _): return String(localized: "Wartet aufs Laden")
         case .waiting(.photos, _): return String(localized: "Fotos antwortet gerade nicht")
+        case .waiting(.busy, _): return String(localized: "Albumist war gerade ausgelastet")
         case .pausing: return String(localized: "Wird angehalten …")
         case .paused: return String(localized: "Analyse pausiert")
         case .quickCheck: return String(localized: "Sucht neue Fotos")
@@ -88,7 +89,7 @@ struct AnalysisProgressCard: View {
         switch state {
         case .waiting(.cooling, _): "thermometer.medium"
         case .waiting(.charging, _): "battery.25percent"
-        case .waiting(.photos, _): "hourglass"
+        case .waiting(.photos, _), .waiting(.busy, _): "hourglass"
         case .paused: "pause.circle"
         default: nil
         }
@@ -165,8 +166,9 @@ struct AnalysisProgressCard: View {
                 .accessibilityIdentifier("analysis.resume")
         case .pausing:
             EmptyView()
-        case .waiting(.photos, _) where !model.analysis.isRunning:
-            // The run ended because Photos did not answer; the next try comes by itself, or now.
+        case .waiting(.photos, _) where !model.analysis.isRunning, .waiting(.busy, _) where !model.analysis.isRunning:
+            // The run ended because Photos did not answer, or because Albumist was too busy to
+            // ask it; the next try comes by itself, or now.
             Button { model.startAnalysis(userInitiated: true) } label: { CardTextButton("Jetzt versuchen") }
                 .accessibilityLabel("Analyse jetzt erneut versuchen")
                 .accessibilityIdentifier("analysis.retry")
@@ -315,6 +317,8 @@ struct AnalysisProgressCard: View {
                 Text("Unter \(Int(DeviceState.appBatteryFloor * 100)) % Akku. Geht weiter, sobald dein iPhone lädt.")
             case .waiting(.photos, _):
                 Text("Albumist wartet auf die Fotos-App und versucht es sonst gleich noch einmal. Du musst nichts tun.")
+            case .waiting(.busy, _):
+                Text("Geht gleich von selbst weiter. Du musst nichts tun.")
             case .pausing(_, let longer):
                 Text("Macht noch fertig, was gerade läuft.")
                 if longer { Text("Dauert noch einen Moment.") }
@@ -784,6 +788,7 @@ extension AnalysisCardState {
         case .waiting(.cooling, _): "cooling"
         case .waiting(.charging, _): "charging"
         case .waiting(.photos, _): "photos"
+        case .waiting(.busy, _): "busy"
         case .pausing: "pausing"
         case .paused: "paused"
         case .finished: "finished"

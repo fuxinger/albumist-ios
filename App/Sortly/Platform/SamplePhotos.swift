@@ -197,7 +197,8 @@ final class SamplePhotos {
             }
         } catch let quiet as PhotosNotResponding where quiet.lane == .write {
             // Not known whether they go: the question iOS asks may still be on screen, or an
-            // earlier change still has no answer (second review of the PhotoKit limits, 7).
+            // earlier change still has no answer (second review of the PhotoKit limits, 7). A
+            // request that never began was not sent at all: its own text says nothing changed.
             model.message = .failure(quiet.asksUser && !quiet.notSent
                 ? String(localized: "Ob die Beispielfotos entfernt werden, steht noch nicht fest: Die Rückfrage von iOS ist vielleicht noch offen. Schau in Fotos nach und versuche es danach noch einmal.")
                 : quiet.localizedDescription)

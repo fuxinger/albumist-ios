@@ -11,11 +11,15 @@ same repository, event pull_request), are still waiting or running, and test ano
 Never cancelled: runs of other branches, a run started by hand (workflow_dispatch), and the
 UI flow of a TestFlight run (it runs inside testflight.yml, not as a run of ui.yml).
 
-When the job of an older push runs late, after a newer push, its commit is no longer the head of
-the pull request; it then cancels nothing (the job of the newer push does the work).
+A newer push must never lose its run to the job of an older push (second review, 19.11.): only
+runs created before this job's own run are cancelled (a run of a newer push is always created
+after it), and the job stops when its commit is no longer the head of the pull request, read
+before and again after the listing (the job of the newer push does the work then). A re-run of
+an older commit's run is a pull request run too and is cancelled like it: it tests an outdated
+commit. Never on the default branch's own runs (HEAD_REF main is refused).
 
-Environment: GH_TOKEN (actions: write), GITHUB_REPOSITORY, GITHUB_API_URL, PR_NUMBER, HEAD_SHA,
-HEAD_REF, GITHUB_STEP_SUMMARY (optional).
+Environment: GH_TOKEN (actions: write), GITHUB_REPOSITORY, GITHUB_API_URL, GITHUB_RUN_ID, PR_NUMBER,
+HEAD_SHA, HEAD_REF, GITHUB_STEP_SUMMARY (optional).
 """
 from __future__ import annotations
 
@@ -60,15 +64,17 @@ def api(path: str, method: str = "GET", **params):
     raise ApiError(f"{path}: {last}")
 
 
-def older_runs(runs: list[dict], repo: str, branch: str, head_sha: str) -> list[int]:
-    """Ids of the runs of ui.yml for this pull request that have not ended and test another
-    commit than `head_sha`."""
+def older_runs(runs: list[dict], repo: str, branch: str, head_sha: str, before: str) -> list[int]:
+    """Ids of the runs of ui.yml for this pull request that have not ended, test another commit
+    than `head_sha` and were created before `before` (ISO time of this job's own run)."""
     ids = []
     for run in runs:
         source = (run.get("head_repository") or {}).get("full_name")
+        created = run.get("created_at") or ""
         if (run.get("path") == WORKFLOW and run.get("event") == "pull_request"
                 and run.get("head_branch") == branch and source == repo
-                and run.get("status") in ACTIVE and run.get("head_sha") != head_sha):
+                and run.get("status") in ACTIVE and run.get("head_sha") != head_sha
+                and created and created < before):
             ids.append(run["id"])
     return ids
 
@@ -77,14 +83,25 @@ def main(call=api, env=os.environ) -> int:
     repo, number = env["GITHUB_REPOSITORY"], env["PR_NUMBER"]
     head_sha, branch = env["HEAD_SHA"], env["HEAD_REF"]
     lines = []
-    current = call(f"pulls/{number}")["head"]["sha"]
-    if current != head_sha:
-        lines.append(f"A newer commit ({current[:7]}) is the head of the pull request now; its own "
+
+    def moved() -> str | None:
+        current = call(f"pulls/{number}")["head"]["sha"]
+        return None if current == head_sha else current
+
+    if branch in ("main", env.get("DEFAULT_BRANCH", "main")):
+        lines.append(f"Head branch {branch} is the default branch: nothing is cancelled there.")
+    elif newer := moved():
+        lines.append(f"A newer commit ({newer[:7]}) is the head of the pull request now; its own "
                      f"job cancels the older UI runs. Nothing cancelled for {head_sha[:7]}.")
     else:
+        before = call(f"actions/runs/{env['GITHUB_RUN_ID']}")["created_at"]
         runs = call("actions/workflows/ui.yml/runs", branch=branch, event="pull_request",
                     per_page=100)["workflow_runs"]
-        ids = older_runs(runs, repo, branch, head_sha)
+        ids = older_runs(runs, repo, branch, head_sha, before)
+        if ids and (newer := moved()):
+            lines.append(f"A newer commit ({newer[:7]}) was pushed meanwhile; its own job cancels "
+                         f"the older UI runs. Nothing cancelled for {head_sha[:7]}.")
+            ids = []
         shas = {run["id"]: run["head_sha"] for run in runs}
         for run_id in ids:
             try:
@@ -92,10 +109,11 @@ def main(call=api, env=os.environ) -> int:
                 lines.append(f"Cancelled UI run {run_id} (commit {shas[run_id][:7]}): "
                              f"{head_sha[:7]} is newer.")
             except ApiError as error:
-                # 409: the run ended between the listing and the cancel.
-                lines.append(f"UI run {run_id} not cancelled ({error}); it has probably ended.")
-        if not ids:
-            lines.append(f"Nothing to cancel: no UI run of an older commit is waiting or running.")
+                ended = "409" in str(error)
+                lines.append(f"UI run {run_id} not cancelled ({error})"
+                             + ("; it ended meanwhile." if ended else "."))
+        if not ids and not lines:
+            lines.append("Nothing to cancel: no UI run of an older commit is waiting or running.")
     text = "\n".join(lines)
     print(text)
     summary = env.get("GITHUB_STEP_SUMMARY")

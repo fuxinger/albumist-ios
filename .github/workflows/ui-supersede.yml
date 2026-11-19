@@ -7,8 +7,9 @@ name: UI supersede
 # Same trigger as ui.yml's pull request runs, so it acts exactly when a newer UI run comes.
 # Not in "mac-queue": there it would wait behind the very run it has to cancel. One job per
 # pull request at a time; a newer push cancels the job of the older one.
-# Never touched: other branches, runs started by hand, and TestFlight (its UI flow runs inside
-# testflight.yml and is not a run of ui.yml; main has no pull request runs).
+# Never touched: other branches, runs started by hand, runs created after this job's own run (a
+# newer push), and TestFlight (its UI flow runs inside testflight.yml and is not a run of ui.yml;
+# a head branch main is refused). A re-run of an older commit's run is cancelled like it.
 on:
   pull_request:
     paths-ignore: ['**.md']
@@ -22,8 +23,9 @@ concurrency:
 jobs:
   supersede:
     name: Cancel the UI runs of older commits
-    # A pull request from a fork gets no write token; its runs are in the group "ui-fork".
-    if: ${{ !github.event.pull_request.head.repo.fork }}
+    # Only pull requests from this repository: a fork's (or a deleted fork's) pull request gets no
+    # write token, and its runs are in the group "ui-fork".
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

@@ -1543,4 +1543,116 @@ final class SortlyFlowUITests: XCTestCase {
             }
         }
     }
+
+    // MARK: Personal places
+
+    /// Seventh run (owner's device test 18.11., dark mode): in "Häufiger Ort in Zwiesel" nothing
+    /// showed where the name goes, and the button only said "Erst einen Namen eingeben",
+    /// disabled. A place only the user can name has a field of its own with a label and
+    /// examples; "Namen eingeben" opens the keyboard there, Return only closes it, and with a
+    /// name the button becomes "Album anlegen". "Anpassen" shows the typed name under "Titel",
+    /// and a name changed there is in the field after "Abbrechen" (the owner's "Dahoam" was
+    /// missing there). The test goes back before creating anything: nothing is stored.
+    func test7_PersonalPlaceAsksForName() {
+        continueAfterFailure = true
+        completeOnboardingIfCutOff("test7")
+        prepare()
+        guard tap(reviewSuggestionsButton(), "open suggestions for a personal place", timeout: 30) else { return }
+        sleep(1)
+        // The demo library's second frequent place (`DemoLibrary.grandma`) has no name. Its
+        // section comes after the countries and trips, and the list only makes the rows on
+        // screen, so the list is scrolled until the row is there.
+        let row = app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "Häufiger Ort")).firstMatch
+        var swipes = 0
+        while !(row.exists && row.isHittable) && swipes < 12 {
+            app.swipeUp(); sleep(1)
+            swipes += 1
+        }
+        guard tap(row, "open personal place suggestion", timeout: 5) else { return }
+        let opened = app.navigationBars["Vorschlag"].waitForExistence(timeout: 5)
+        print(opened ? "UI_STEP_OK personal place detail opened" : "UI_STEP_MISSING personal place detail opened")
+        XCTAssertTrue(opened, "Tapping the personal place did not open its detail")
+        sleep(1)
+
+        // The field is there to see and to tap, with its own label and examples for VoiceOver.
+        let field = app.textFields["proposal.nameField"]
+        if field.waitForExistence(timeout: 5) && !field.isHittable { app.swipeUp(); sleep(1) }
+        let visible = field.exists && field.isHittable
+        print(visible ? "UI_STEP_OK name field visible" : "UI_STEP_MISSING name field visible")
+        XCTAssertTrue(visible, "The suggestion of a personal place shows no name field to tap")
+        shot("70-personal-place-name-field")
+        guard visible else { return }
+        let prompt = field.placeholderValue ?? ""
+        print("UI_FACT name field label '\(field.label)' prompt '\(prompt)' value '\(field.value as? String ?? "-")'")
+        let described = field.label == "Name für das Album" && prompt.contains("Bei Oma")
+        print(described ? "UI_STEP_OK name field has label and examples" : "UI_STEP_MISSING name field has label and examples")
+        XCTAssertTrue(described, "The name field does not say what it is for: label '\(field.label)', prompt '\(prompt)'")
+
+        // "Namen eingeben" is a working button: it puts the keyboard in the field.
+        guard tap(app.buttons["Namen eingeben"], "tap Namen eingeben", timeout: 5) else { return }
+        let focused = waitStable("keyboard in the name field", timeout: 10, stableChecks: 1) {
+            (field.value(forKey: "hasKeyboardFocus") as? Bool) == true || app.keyboards.count > 0
+        }
+        print(focused ? "UI_STEP_OK keyboard in the name field" : "UI_STEP_MISSING keyboard in the name field")
+        XCTAssertTrue(focused, "\"Namen eingeben\" did not put the keyboard in the name field")
+        guard focused else { return }
+        field.typeText("Bei Oma")
+        let create = app.buttons["Album anlegen"]
+        let ready = create.waitForExistence(timeout: 5) && create.isEnabled
+        print(ready ? "UI_STEP_OK named place offers Album anlegen" : "UI_STEP_MISSING named place offers Album anlegen")
+        XCTAssertTrue(ready, "With a name the suggestion does not offer an enabled \"Album anlegen\"")
+        XCTAssertFalse(app.buttons["Namen eingeben"].exists, "\"Namen eingeben\" stayed although a name was typed")
+        shot("71-personal-place-named")
+
+        // Return only closes the keyboard: no preview opens, nothing is created.
+        field.typeText("\n")
+        sleep(2)
+        let stayed = app.navigationBars["Vorschlag"].exists && !app.navigationBars["Vorschau"].exists
+        print(stayed ? "UI_STEP_OK return creates nothing" : "UI_STEP_MISSING return creates nothing")
+        XCTAssertTrue(stayed, "Return in the name field left the suggestion")
+
+        // "Anpassen" has the same name under "Titel", and a name changed there is in the field
+        // afterwards, also when "Abbrechen" closes it (owner's device test 18.11.: "Dahoam"
+        // typed in the suggestion, "Titel" in "Anpassen" was empty).
+        let typed = field.value as? String ?? ""
+        if tap(app.buttons["Anpassen"], "open Anpassen with the typed name", timeout: 5) {
+            let title = app.textFields["adjust.titleField"]
+            let there = title.waitForExistence(timeout: 5) ? (title.value as? String ?? "") : "-"
+            print("UI_FACT name in the suggestion '\(typed)', in Anpassen '\(there)'")
+            let carried = typed.lowercased() == "bei oma" && there == typed
+            print(carried ? "UI_STEP_OK Anpassen shows the typed name" : "UI_STEP_MISSING Anpassen shows the typed name")
+            XCTAssertTrue(carried, "\"Anpassen\" does not show the name typed in the suggestion: '\(there)' instead of '\(typed)'")
+            if title.exists {
+                title.tap()
+                title.typeText(" und Opa")
+            }
+            let changed = title.exists ? (title.value as? String ?? "") : ""
+            print("UI_FACT name changed in Anpassen to '\(changed)'")
+            XCTAssertEqual(changed.lowercased(), "bei oma und opa", "The name could not be changed in \"Anpassen\"")
+            shot("72-adjust-with-name")
+            tap(app.buttons["Abbrechen"], "close Anpassen without choosing")
+            XCTAssertTrue(waitGone(title, timeout: 5), "\"Abbrechen\" did not close \"Anpassen\"")
+            sleep(1)
+            let afterwards = field.value as? String ?? ""
+            print("UI_FACT name in the suggestion after Anpassen '\(afterwards)'")
+            let synced = !changed.isEmpty && afterwards == changed
+            print(synced ? "UI_STEP_OK name from Anpassen in the field" : "UI_STEP_MISSING name from Anpassen in the field")
+            XCTAssertTrue(synced, "The name changed in \"Anpassen\" is not in the suggestion's field: '\(afterwards)' instead of '\(changed)'")
+            XCTAssertFalse(app.navigationBars["Vorschau"].exists, "Closing \"Anpassen\" opened a preview")
+            shot("73-name-back-from-adjust")
+        }
+
+        // Back without creating: the row still waits for its name and is not selected.
+        back(); sleep(1)
+        let list = app.navigationBars["Vorschläge"].waitForExistence(timeout: 5)
+        print(list ? "UI_STEP_OK back to suggestions without creating" : "UI_STEP_MISSING back to suggestions without creating")
+        XCTAssertTrue(list, "Back from the personal place did not return to the list")
+        func rowSays(_ text: String) -> Bool {
+            row.label.contains(text)
+                || row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
+        }
+        let untouched = row.waitForExistence(timeout: 5) && rowSays("Name fehlt") && !rowSays("Ausgewählt")
+        print(untouched ? "UI_STEP_OK personal place untouched" : "UI_STEP_MISSING personal place untouched")
+        XCTAssertTrue(untouched, "Going back from the named place stored the name or selected the suggestion")
+    }
 }

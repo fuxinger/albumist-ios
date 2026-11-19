@@ -178,7 +178,7 @@ Je Test: Lauf, Ursache, Behebung. Branch `claude/test-speed`, 18.11.2026.
 | 💡 | Fertig-Bildschirm mit Collage der neuen Alben statt nur Zahlen. | M | B |
 | 💡 | Länderseite im Atlas mit kleiner Karte der Orte. | M | B |
 | 💡 | Teilen-Karte im Atlas: standardmäßig mit Foto statt nur Karte. | S | B |
-| 💡 | Namensfeld bei Orten ohne Namen deutlicher als Eingabefeld zeigen. | S | B |
+| ✅ | Namensfeld bei Orten ohne Namen deutlicher als Eingabefeld zeigen. Jetzt: Ort als Titel, darunter „Name für das Album“ als Formularzeile mit Beispielen und Hinweis; „Namen eingeben“ öffnet die Tastatur im Feld (UI test7). | S | B, Gerätetest 18.11. (dunkler Modus) |
 | ✅ | Filter-Chips (Mediathek, Atlas-Jahre) liefen bei größter Schrift aus dem Bild. Bei den größten Schriftstufen jetzt ein Menü. | S | B |
 | ✅ | Übernommen nur als kleines Häkchen. Zeilen sagen jetzt „Übernommen“ oder „Nicht jetzt“ in Worten. | S | B |
 | 💡 | Atlas-Kacheln wachsen bei größter Schrift nicht ganz mit (Zahlen und Untertitel). | S | B |

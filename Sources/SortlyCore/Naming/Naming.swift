@@ -284,3 +284,13 @@ public enum AlbumTitle {
         Set(normalized(title).split(separator: "-").map(String.init).filter { $0.count > 1 })
     }
 }
+
+/// A name the user typed for a suggestion ("Dahoam" for a personal place). Blank input is no
+/// name: saving it would show an empty title and drop the "Name fehlt" note (review of the
+/// name field, 18.11.); the outer spaces are not part of the name.
+public enum UserTitle {
+    public static func stored(_ typed: String) -> String? {
+        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}

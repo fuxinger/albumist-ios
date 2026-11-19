@@ -1281,6 +1281,26 @@
         }
       }
     },
+    "Albumist benennt Personen und Tiere nie selbst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist never names people or animals on its own."
+          }
+        }
+      }
+    },
+    "Albumist benennt persönliche Orte nie selbst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist never names personal places on its own."
+          }
+        }
+      }
+    },
     "Albumist ergänzt deine eigenen Alben jetzt nur noch, wenn sie sicher passen. Diese Vorschläge sind wieder offen; an deinen Alben hat sich nichts geändert." : {
       "localizations" : {
         "en" : {
@@ -2351,16 +2371,6 @@
         }
       }
     },
-    "Erst einen Namen eingeben" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enter a name first"
-          }
-        }
-      }
-    },
     "Erzähl meine Geschichte" : {
       "localizations" : {
         "en" : {
@@ -2607,16 +2617,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Only what Albumist verified in your library afterwards is counted."
-          }
-        }
-      }
-    },
-    "Gib diesem Ort oder dieser Gruppe einen Namen. Albumist benennt persönliche Orte nie selbst." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Give this place or group a name. Albumist never names personal places on its own."
           }
         }
       }
@@ -2987,6 +2987,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Name of the new album"
+          }
+        }
+      }
+    },
+    "Name für das Album" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Album name"
+          }
+        }
+      }
+    },
+    "Namen eingeben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter a name"
           }
         }
       }
@@ -4271,6 +4291,16 @@
         }
       }
     },
+    "z. B. Bei Oma, Garten, Ferienhaus" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "e.g. At Grandma’s, Garden, Holiday Home"
+          }
+        }
+      }
+    },
     "z. B. Grillen bei Oma letzten Sommer" : {
       "localizations" : {
         "en" : {
@@ -4287,6 +4317,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "e.g. dogs Italy 2023"
+          }
+        }
+      }
+    },
+    "z. B. Oma, Bello, Minka" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "e.g. Grandma, Buddy, Luna"
           }
         }
       }

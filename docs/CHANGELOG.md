@@ -151,6 +151,17 @@
   gemacht“ erscheint erst, wenn die Zählung geschrieben ist (vorher erst nach der langsamen
   Abfrage bei Fotos). Gesperrte UI-Läufe starten mit einer festen Zahl, die kein Rückgängig
   eines früheren Laufs mehr erhöht (auch nicht nach einem Neustart mitten im Abschluss).
+- Gerätetest 18.11. (dunkler Modus): Bei einem Ort, den nur du benennen kannst („Häufiger Ort in
+  Zwiesel“), sah man nicht, wo der Name hingehört. Das Feld mit dem Ortsnamen als grauem
+  Platzhalter wirkte wie ein Titel, sein Rand verschwand im Dunkeln, und der Knopf sagte nur
+  ausgegraut „Erst einen Namen eingeben“. Jetzt bleibt der Ort der Titel; darunter steht „Name
+  für das Album“ als Formularzeile wie in den Einstellungen von iOS, mit Beispielen („z. B. Bei
+  Oma, Garten, Ferienhaus“) und dem Hinweis „Albumist benennt persönliche Orte nie selbst.“ Der
+  Knopf „Namen eingeben“ öffnet die Tastatur im Feld, mit Namen wird er zu „Album anlegen“. Die
+  Eingabetaste schließt nur die Tastatur; angelegt wird nur über den Knopf. Der getippte Name
+  steht auch unter „Anpassen“ bei „Titel“ (dort war „Dahoam“ verschwunden), eine Änderung dort
+  steht danach wieder im Feld, und er bleibt, wenn man zwischendurch alle Fotos ansieht.
+  Gespeichert wird er erst, wenn du ein Album wählst oder anlegst. UI-Test test7.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

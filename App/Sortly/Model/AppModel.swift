@@ -2392,8 +2392,9 @@ final class AppModel {
         persistDecisions()
     }
 
+    /// A blank title removes the name (the suggestion says "Name fehlt" again).
     func setUserTitle(_ title: String, for proposal: AlbumProposal) {
-        userTitles[proposal.id] = title
+        userTitles[proposal.id] = UserTitle.stored(title)
         Task { [userTitles] in
             try? await store?.setValue(userTitles, forKey: Key.titles)
             saveSafetyBackup()

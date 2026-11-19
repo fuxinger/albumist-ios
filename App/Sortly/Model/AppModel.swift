@@ -1178,7 +1178,7 @@ final class AppModel {
             // "Neu prüfen") no longer drops "Analyse fertig" (`FinishMoment`).
             finishMoment.runEnded(finished: end.isFinished, celebrates: celebrate)
             // The trips it made are on screen only once its end has refreshed the overview.
-            tripChangeLedger.runEnded(generation, madeSuggestions: finished?.completedStages.contains(.proposals) == true)
+            tripChangeLedger.runEnded(generation, madeSuggestions: finished.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)
             analysis.stoppedAt = analysis.position
             analysis.needsResume = end.needsResume
             analysis.isRunning = false
@@ -1819,7 +1819,7 @@ final class AppModel {
             tickTask = nil
         }
         // The trips it made are on screen only once its end has refreshed the overview.
-        tripChangeLedger.runEnded(generation, madeSuggestions: report?.completedStages.contains(.proposals) == true)
+        tripChangeLedger.runEnded(generation, madeSuggestions: report.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)
         analysis.isRunning = false
         analysis.pausing = false
         pausingSince = nil

@@ -279,6 +279,16 @@ struct TripChangeLedgerTests {
         #expect(ledger.state == .applied)
     }
 
+    /// A run paused in the image step after it saved its early suggestions (trips and places
+    /// from the trips it worked out) made the change (third review, NIT-1).
+    @Test func earlySuggestionsCountAsMadeSuggestions() throws {
+        let model = AppSource.code(try AppSource.read("App/Sortly/Model/AppModel.swift"))
+        let app = model.contains("madeSuggestions: finished.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true")
+        let refinement = model.contains("madeSuggestions: report.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true")
+        #expect(app, "a run in the app paused after its early suggestions never shows the change as made")
+        #expect(refinement, "a refinement pass paused after its early suggestions never shows the change as made")
+    }
+
     /// Refreshes that read nothing new keep nothing waiting (they run every few seconds during
     /// an analysis).
     @Test func refreshesWithoutAChangeDoNotHoldTheControls() {
@@ -320,7 +330,7 @@ struct TripChangeLedgerTests {
         let start = try code("func startAnalysisNow(")
         let startRead = start.contains("tripChangeLedger.runStarted(generation)")
         #expect(startRead, "a run in the app does not say which trip changes it read")
-        let appEnd = order("tripChangeLedger.runEnded(generation, madeSuggestions: finished?.completedStages.contains(.proposals) == true)",
+        let appEnd = order("tripChangeLedger.runEnded(generation, madeSuggestions: finished.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)",
                            "analysis.isRunning = false", in: start)
         #expect(appEnd, "the end of a run in the app is not told before it shows as ended")
         let appSettled = order("await refreshDerived()", "tripChangeLedger.runSettled(generation)", in: start)
@@ -328,7 +338,7 @@ struct TripChangeLedgerTests {
         let refine = try code("func refinePass(")
         let refineRead = refine.contains("tripChangeLedger.runStarted(generation)")
         #expect(refineRead, "a refinement pass does not say which trip changes it read")
-        let refineEnd = order("tripChangeLedger.runEnded(generation, madeSuggestions: report?.completedStages.contains(.proposals) == true)",
+        let refineEnd = order("tripChangeLedger.runEnded(generation, madeSuggestions: report.map { $0.earlyProposals || $0.completedStages.contains(.proposals) } == true)",
                               "analysis.isRunning = false", in: refine)
         #expect(refineEnd, "the end of a refinement pass is not told before it shows as ended")
         // Both ways out of the pass settle it: cut off (no report) and after the refresh.

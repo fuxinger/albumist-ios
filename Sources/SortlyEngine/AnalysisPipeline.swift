@@ -31,6 +31,10 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
     /// `AlbumMatcher.version` of `matches`. Results of an older version (0: stored before the
     /// stamp) are matched again at launch (`refreshMatchesIfOutdated`).
     public var matcherVersion: Int
+    /// Photos the suggestions were made with although their date is later than `generatedAt`
+    /// (a camera with its clock set wrong, "2031"). They count like every photo the suggestions
+    /// saw, not as taken afterwards (`LibraryStatus`, review P1-03). Usually none.
+    public var datedAfterwards: Set<AssetID> = []
 
     public init(generatedAt: Date, scope: OrganizationScope, proposals: [AlbumProposal], matches: [SortlyID: MatchResult],
                 dismissed: [AlbumProposal] = [], standIns: [StandIn] = [], isEarly: Bool = false,
@@ -45,7 +49,7 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         self.matcherVersion = matcherVersion
     }
 
-    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly, matcherVersion }
+    enum CodingKeys: String, CodingKey { case generatedAt, scope, proposals, matches, dismissed, standIns, isEarly, matcherVersion, datedAfterwards }
 
     /// Snapshots stored before dismissed suggestions and stand-ins were kept still load.
     public init(from decoder: any Decoder) throws {
@@ -58,6 +62,7 @@ public struct ProposalSnapshot: Sendable, Codable, Hashable {
         standIns = try c.decodeIfPresent([StandIn].self, forKey: .standIns) ?? []
         isEarly = try c.decodeIfPresent(Bool.self, forKey: .isEarly) ?? false
         matcherVersion = try c.decodeIfPresent(Int.self, forKey: .matcherVersion) ?? 0
+        datedAfterwards = try c.decodeIfPresent(Set<AssetID>.self, forKey: .datedAfterwards) ?? []
     }
 }
 
@@ -166,8 +171,12 @@ public actor AnalysisPipeline {
         /// Of `contentAnalyzed`: the photos looked at in full, without those that only got
         /// their labels ("Themen" or "Dokumente" turned on later). The overview calls only these
         /// new photos (review of the labels fix, M2: "Beim Prüfen 5.683 neue Fotos analysiert"
-        /// after "Themen" was turned on, with no new photo at all).
-        public var newPhotosAnalyzed: Int { max(0, contentAnalyzed - labelsAdded) }
+        /// after "Themen" was turned on, with no new photo at all), and without photos given up
+        /// as unreadable and read again a week later (`givenUpReadAgain`, second review of P1-08).
+        public var newPhotosAnalyzed: Int { max(0, contentAnalyzed - labelsAdded - givenUpReadAgain) }
+        /// Of `contentAnalyzed`: photos given up as unreadable that were read in their weekly
+        /// further try (`reopenGivenUpPhotos`), not counted in `labelsAdded`.
+        public var givenUpReadAgain = 0
         public var textRecognized = 0
         public var textWaitingForOriginal = 0
         /// How long reading the texts took in this run (diagnostic report: photos per minute).
@@ -236,6 +245,12 @@ public actor AnalysisPipeline {
         /// Where 638ff85 stored the table; moved to `regionKeys` once.
         static let regionKeysBefore = "analysis.regionKeys"
         static let proposals = "analysis.proposals"
+        /// Photos whose country cannot be found (`PlaceResolutionService.Outcome.withoutCountry`,
+        /// review P1-09): they count like photos without a location.
+        static let placesWithoutCountry = "analysis.placesWithoutCountry"
+        /// When the image step last looked for photos given up as unreadable that are due for
+        /// another read (`reopenGivenUpPhotos`).
+        static let givenUpChecked = "analysis.givenUpChecked"
         /// Photos taken where the user lives (`TripAnalysis.atHome`), from the last analysis.
         static let home = "analysis.home"
         /// What the user set in "Dein Zuhause" (part of the decisions copy in the backup, kept
@@ -700,6 +715,8 @@ public actor AnalysisPipeline {
             detectAnimals: settings.people.petGroupingEnabled && settings.enabledAreas.contains(.peopleAndPets),
             featurePrint: true
         )
+        // Photos given up as unreadable a week ago or longer get one more read (review P1-08).
+        try await reopenGivenUpPhotos(all, within: range, labels: labels)
         // With labels wanted, also the photos analysed while they were not: only their labels
         // are asked for (`labelsOnly` below). Each counts as one photo, like a full look.
         let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range)
@@ -767,6 +784,14 @@ public actor AnalysisPipeline {
             let stored = contentTotal > 0
                 ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion, within: range)
                 : [:]
+            // Photos given up before and read once more (`reopenGivenUpPhotos`): whatever goes
+            // wrong with that read, the photo is given up again for another week. An analyzer
+            // error kept it open without a time of its last try, read in every run after, and
+            // five of them ended every run as "Analyse nicht verfügbar" (second review of P1-08).
+            // Not when the run is stopped, Photos does not answer or the access was taken away.
+            let triedAgain = Set(stored.compactMap { id, previous in
+                (previous.failedAttempts ?? 0) >= ContentAnalysis.maxFailedAttempts ? id : nil
+            })
             var contentDone = 0
             var cursor: AssetSnapshot?
             // Photos that are not read in this run: they could not be read (tried again in a later
@@ -895,7 +920,11 @@ public actor AnalysisPipeline {
                             results.append((asset.id, result))
                             finished.append(asset.id)
                             analyzed += 1
-                            if labelsOnly[asset.id] != nil || analysedBefore[asset.id] != nil { report.labelsAdded += 1 }
+                            if labelsOnly[asset.id] != nil || analysedBefore[asset.id] != nil {
+                                report.labelsAdded += 1
+                            } else if triedAgain.contains(asset.id) {
+                                report.givenUpReadAgain += 1
+                            }
                             // "Gerade angesehen" shows no screenshot, and no document, receipt or
                             // card either (second review of the build 36 fix): this result
                             // says whether the picture is one, before any text is read.
@@ -915,7 +944,7 @@ public actor AnalysisPipeline {
                                 cancelled = true
                             } else if let quiet = error as? PhotosNotResponding {
                                 if photosQuiet == nil { photosQuiet = quiet }
-                            } else if !(error is AnalysisError) {
+                            } else if !(error is AnalysisError), !triedAgain.contains(asset.id) {
                                 suspects.append(asset.id)
                                 if suspects.count >= Self.analyzerFailureLimit, stopped == nil {
                                     // Vision itself fails: going through every photo would mark all
@@ -1088,6 +1117,30 @@ public actor AnalysisPipeline {
         )
     }
 
+    /// Photos given up as unreadable (`ContentAnalysis.maxFailedAttempts`) were never read
+    /// again, while the overview says "Albumist versucht es später noch einmal" and the count
+    /// stayed at "29 von 30 analysiert" also once the photo could be read (review P1-08). A week
+    /// after its last try such a photo is marked for the image step again: it gets one read,
+    /// and still unreadable it is given up again at once (`recordContentFailure`), for another
+    /// week. Looked for at most once a day (it reads every photo's result) and only in the
+    /// part of the library the run works on. Not a photo this run reads anyway for its labels
+    /// ("Themen" turned on later: one more full look for a photo given up, `labels`).
+    private func reopenGivenUpPhotos(_ all: [AssetSnapshot], within range: Range<Date>?, labels: Int?) async throws {
+        let now = now()
+        if let checked = try await store.value(Date.self, forKey: Key.givenUpChecked),
+           (0..<86_400).contains(now.timeIntervalSince(checked)) { return }
+        let contents = try await store.results(ContentAnalysis.self, kind: "content", minimumVersion: Self.contentVersion)
+        var due = Set(contents.compactMap { $0.value.isGivenUpAndDueAgain(now: now) ? $0.key : nil })
+        if let labels, !due.isEmpty {
+            due.subtract(try await store.unlabelledAssets(version: Self.contentVersion, labelsVersion: labels))
+        }
+        let reopen = all.filter { asset in
+            due.contains(asset.id) && (range.map { r in asset.creationDate.map(r.contains) ?? false } ?? true)
+        }.map(\.id)
+        if !reopen.isEmpty { try await store.markAnalyzed(reopen, version: 0) }
+        try await store.setValue(now, forKey: Key.givenUpChecked)
+    }
+
     /// Counts a failed read against a photo. Returns true when the photo is done with: read
     /// before (the image is unchanged, its earlier labels stay valid) or given up.
     private func recordContentFailure(_ id: AssetID) async throws -> Bool {
@@ -1140,7 +1193,10 @@ public actor AnalysisPipeline {
             return .init(assetID: asset.id, coordinate: coordinate, priority: priority,
                          hasTown: stored?.precisionMeters != nil, hasCountry: stored != nil && stored?.precisionMeters == nil)
         }
-        guard !requests.isEmpty else { return .init() }
+        guard !requests.isEmpty else {
+            try await saveWithoutCountry(.init())
+            return .init()
+        }
         let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time,
                                              requestLog: geocoderRequests)
         let store = self.store
@@ -1183,7 +1239,19 @@ public actor AnalysisPipeline {
            outcome.stoppedBecauseThrottled || outcome.stoppedAtRequestLimit || outcome.stoppedAsking {
             lastForegroundOnlineLookup = now()
         }
+        try await saveWithoutCountry(outcome)
         return outcome
+    }
+
+    /// Photos whose country cannot be found, for the status (`currentFacts`). A call that looked
+    /// at every photo without a place replaces them; one cut short by a Pause adds to them (the
+    /// photos it did not reach keep what the call before found). A photo that has a place since
+    /// does not count (`LibraryStatus`); the next complete call drops it.
+    private func saveWithoutCountry(_ outcome: PlaceResolutionService.Outcome) async throws {
+        let before = try await store.value(Set<AssetID>.self, forKey: Key.placesWithoutCountry) ?? []
+        let now = outcome.reachedAll ? outcome.withoutCountry : before.union(outcome.withoutCountry)
+        guard now != before else { return }
+        try await store.setValue(now, forKey: Key.placesWithoutCountry)
     }
 
     /// After the language of album names changed, the countries and regions of the places
@@ -1650,10 +1718,12 @@ public actor AnalysisPipeline {
             }
         }
         let tripSets = trips.map { Set($0.allAssetIDs) }
+        let unlocated = Set(all.filter { $0.usableLocation == nil }.map(\.id))
         let found = suggestions, albums = inventory
         let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albums)
         var matches = await offActor {
-            Self.match(found.open, dismissed: found.dismissed, against: albums, overrides: overrides, assignments: assignments, trips: tripSets)
+            Self.match(found.open, dismissed: found.dismissed, against: albums, overrides: overrides, assignments: assignments, trips: tripSets,
+                       unlocated: unlocated)
         }
         if generation != albumGeneration {
             // A plan was applied while this ran: match against the albums as they are now, or
@@ -1662,12 +1732,13 @@ public actor AnalysisPipeline {
             let assignmentsNow = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albumsNow)
             matches = await offActor {
                 Self.match(found.open, dismissed: found.dismissed, against: albumsNow, overrides: overridesNow, assignments: assignmentsNow,
-                           trips: tripSets)
+                           trips: tripSets, unlocated: unlocated)
             }
         }
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
-        let snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
+        var snapshot = ProposalSnapshot(generatedAt: now(), scope: scope, proposals: suggestions.open, matches: matches,
                                         dismissed: suggestions.dismissed, standIns: suggestions.standIns, isEarly: early)
+        snapshot.datedAfterwards = Set(facts.filter { ($0.asset.creationDate ?? .distantPast) > snapshot.generatedAt }.map(\.id))
         var values: [String: any Encodable & Sendable] = [Key.proposals: snapshot, Key.heldSuggestions: held]
         var removing: Set<String> = []
         if let pending {
@@ -1704,16 +1775,18 @@ public actor AnalysisPipeline {
     /// no shown suggestion extends it (review 16.11., A10).
     static func match(_ open: [AlbumProposal], dismissed: [AlbumProposal], against inventory: CollectionInventory,
                       overrides: OverrideSet, assignments: [SortlyID: CollectionID],
-                      trips: [Set<AssetID>] = []) -> [SortlyID: MatchResult] {
+                      trips: [Set<AssetID>] = [], unlocated: Set<AssetID> = []) -> [SortlyID: MatchResult] {
         guard !dismissed.isEmpty else {
-            return AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
+            return AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments, trips: trips,
+                                        unlocated: unlocated)
         }
-        let all = AlbumMatcher().match(open + dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
+        let all = AlbumMatcher().match(open + dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips,
+                                       unlocated: unlocated)
         let reserved = Set(dismissed.compactMap { p in
             all[p.id].flatMap { $0.status == .alreadyComplete && $0.best?.isEditable == true ? $0.best?.albumID : nil }
         })
         var matches = AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments,
-                                           reserved: reserved, trips: trips)
+                                           reserved: reserved, trips: trips, unlocated: unlocated)
         for p in dismissed { matches[p.id] = all[p.id] }
         return matches
     }
@@ -1886,9 +1959,11 @@ public actor AnalysisPipeline {
         let contents = analysed ? try await store.results(ContentAnalysis.self, kind: "content") : [:]
         let texts = analysed ? try await store.results(TextResult.self, kind: "text") : [:]
         let home = try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
+        let withoutCountry = try await store.value(Set<AssetID>.self, forKey: Key.placesWithoutCountry) ?? []
         return await offActor {
             FactsAssembler.assemble(assets: all, places: places, contents: contents, texts: texts, trips: trips,
-                                    frequentPlaces: frequent, groups: groups, inventory: inventory, home: home)
+                                    frequentPlaces: frequent, groups: groups, inventory: inventory, home: home,
+                                    withoutCountry: withoutCountry)
         }
     }
 
@@ -1957,13 +2032,32 @@ public actor AnalysisPipeline {
         let inventory = try await store.loadInventory()
         let overrides = OverrideSet(try await store.overrides())
         let trips = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map { Set($0.allAssetIDs) }
+        let unlocated = try await unlocatedInPlaceAlbums(snapshot.proposals + snapshot.dismissed, inventory: inventory)
         let found = snapshot
         let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.proposals + found.dismissed, inventory: inventory)
         snapshot.matches = await offActor {
-            Self.match(found.proposals, dismissed: found.dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
+            Self.match(found.proposals, dismissed: found.dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips,
+                       unlocated: unlocated)
         }
         snapshot.matcherVersion = AlbumMatcher.version
         return snapshot
+    }
+
+    /// The photos without a location that matching needs: only those in an album named exactly
+    /// like a place suggestion count apart (`AlbumMatcher.match(unlocated:)`). The photos are
+    /// read only when there is such an album, not at every re-match (third review 19.11.).
+    private func unlocatedInPlaceAlbums(_ proposals: [AlbumProposal], inventory: CollectionInventory) async throws -> Set<AssetID> {
+        let places = Set(proposals.compactMap { proposal -> String? in
+            switch proposal.kind {
+            case .placeCollection, .frequentPlace: AlbumTitle.normalized(proposal.title)
+            default: nil
+            }
+        })
+        let members = inventory.albums.reduce(into: Set<AssetID>()) { members, album in
+            if places.contains(AlbumTitle.normalized(album.title)) { members.formUnion(album.assetIDs) }
+        }
+        guard !members.isEmpty else { return [] }
+        return Set(try await store.allAssets().filter { members.contains($0.id) && $0.usableLocation == nil }.map(\.id))
     }
 
     /// What `refreshMatchesIfOutdated` did.
@@ -1973,8 +2067,9 @@ public actor AnalysisPipeline {
         /// Suggestions whose accepted "extend this album" decision was no longer a certain
         /// match under the new rules (`ProposalDecision.uncertainExtensions`), or went into the
         /// album recorded for the ID while that album holds other photos
-        /// (`ProposalDecision.extensionsOfOtherPhotos`), and is open again in the store. The app
-        /// drops them from its decisions in memory too.
+        /// (`ProposalDecision.extensionsOfOtherPhotos`), or went against "Gleicher Name gewinnt"
+        /// (`ProposalDecision.sameNameConflicts`), and is open again in the store. The app drops
+        /// them from its decisions in memory too.
         public var reopened: Set<SortlyID> = []
     }
 
@@ -1985,8 +2080,11 @@ public actor AnalysisPipeline {
     /// At launch: suggestions matched by an older version of the rules are matched again, so
     /// a fixed rule (review 16.11.: possible matches never change albums) holds at once and not
     /// only after the next analysis. Decisions accepted under the old rules that would now
-    /// extend an album without a certain match go back to open (`reopened`); suggestions of a
-    /// plan that already started (not finished) are never among them.
+    /// extend an album without a certain match go back to open (`reopened`), and so do those
+    /// that go against "Gleicher Name gewinnt" (a second "Italien", or the trip keeping the
+    /// album that is now the country's; not counted for the overview's notice, whose text gives
+    /// the other reason); suggestions of a plan that already started (not finished) are never
+    /// among them.
     ///
     /// Every time (the app calls this after each analysis too): an accepted "ergänzen" into the
     /// album recorded for the suggestion's ID while that album was made for other photos goes
@@ -2006,6 +2104,9 @@ public actor AnalysisPipeline {
     func refreshMatchesIfOutdated(afterEachWrite: (@Sendable (String) throws -> Void)?) async throws -> MatchRefresh {
         guard var snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
         let outdated = snapshot.matcherVersion < AlbumMatcher.version
+        // Decisions made before "Gleicher Name gewinnt" held whatever the album holds; a choice
+        // made under that rule is the user's and stays at every later re-match (S5, 19.11.).
+        let beforeSameNameRule = snapshot.matcherVersion < AlbumMatcher.sameNameWhateverItHoldsVersion
         if outdated {
             guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
             snapshot = rematched
@@ -2030,6 +2131,12 @@ public actor AnalysisPipeline {
         let suggested = snapshot.proposals + snapshot.dismissed
         var reopened = outdated ? ProposalDecision.uncertainExtensions(decisions, proposals: suggested, matches: snapshot.matches,
                                                                        protected: started) : []
+        // Against "Gleicher Name gewinnt" (second review 19.11.): open again too, but not for
+        // the reason the overview's notice gives ("nur noch, wenn sie sicher passen"), so they
+        // are not counted for it.
+        let sameName = outdated && beforeSameNameRule
+            ? ProposalDecision.sameNameConflicts(decisions, proposals: suggested, matches: snapshot.matches, protected: started)
+            : []
         if ownAlbum {
             // Once per suggestion and album: an album the user picks again for it ("Anderes
             // Album wählen") is their choice and stays (re-review 18.11.). Which way a decision
@@ -2045,13 +2152,17 @@ public actor AnalysisPipeline {
                 values[Key.reopenedExtensions] = before.union(new.values)
             }
         }
+        let counted = reopened.subtracting(sameName).count
+        reopened.formUnion(sameName)
         guard outdated || !reopened.isEmpty || !values.isEmpty else { return MatchRefresh(snapshot: snapshot) }
         if outdated { values[Key.proposals] = snapshot }
         if !reopened.isEmpty {
             for id in reopened { decisions[id] = nil }
-            let shown = try await store.value(Int.self, forKey: Self.recheckedSuggestionsKey) ?? 0
             values[Key.decisions] = decisions
-            values[Self.recheckedSuggestionsKey] = shown + reopened.count
+            if counted > 0 {
+                let shown = try await store.value(Int.self, forKey: Self.recheckedSuggestionsKey) ?? 0
+                values[Self.recheckedSuggestionsKey] = shown + counted
+            }
         }
         if outdated { proposalsGeneration += 1 }
         try await store.setValues(values, afterEach: afterEachWrite)

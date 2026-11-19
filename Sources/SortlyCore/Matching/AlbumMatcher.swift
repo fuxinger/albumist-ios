@@ -139,7 +139,18 @@ public struct AlbumMatcher: Sendable {
     /// 4: the album recorded for a suggestion stays its album only while it shares photos with it
     ///    (`isStillAlbum`, second review of the place IDs 18.11.): saved matches that still offer
     ///    "ergänzen" into an album made for other photos are matched again.
-    public static let version = 4
+    /// 5: "Gleicher Name gewinnt" whatever the album holds (review P1-02), and photos without a
+    ///    location do not count against a place: saved matches that offer a second "Italien"
+    ///    next to the user's are matched again.
+    /// 6: another album that holds the whole suggestion stays its album over the album of the
+    ///    name, and photos without a location are left out only for the album of the name
+    ///    (third review 19.11., M3 and S6): saved matches of version 5 are matched again.
+    public static let version = 6
+
+    /// The version since which the album named exactly like a suggestion is its album whatever it
+    /// holds (P1-02). Decisions accepted under older rules that go against it are reopened once
+    /// (`ProposalDecision.sameNameConflicts`); never a choice the user made under these rules.
+    public static let sameNameWhateverItHoldsVersion = 5
 
     /// Matches all proposals in one pass using an inverted membership index.
     /// - Parameters:
@@ -155,13 +166,18 @@ public struct AlbumMatcher: Sendable {
     ///     run (a dismissed one). No suggestion of this run extends them.
     ///   - trips: the photos of every detected trip. A place album that holds photos of one
     ///     trip only is a part of the place (`isPart`), whatever its name.
+    ///   - unlocated: photos without a usable location. For places (countries, regions, towns,
+    ///     frequent places) they do not count against the user's album named exactly like the
+    ///     place: they cannot be in a place. For every other album they count as usual.
     ///
     /// Within one run an album of the user is changed for one suggestion at most (review 16.11.,
     /// A5 and A10):
     /// - an album named exactly like a suggestion (normalised: "Italien" for the country
     ///   Italien) belongs to that suggestion when it would extend it, even if a trip of the run
     ///   wants it or already is complete in it (decision Fuchs 16.11.). That trip gets an album
-    ///   of its own and sees this one only under "Anpassen";
+    ///   of its own and sees this one only under "Anpassen". The suggestion extends the user's
+    ///   album of its name whatever else that album holds, however little of it it holds yet,
+    ///   and never makes a second one (review P1-02, see the rule in `match` below);
     /// - otherwise an album that already holds all of one suggestion ("schon vollständig",
     ///   whether or not the user tapped "Album so lassen") is that suggestion's album, and no
     ///   other suggestion extends it;
@@ -172,10 +188,11 @@ public struct AlbumMatcher: Sendable {
                       overrides: OverrideSet = OverrideSet(),
                       assignments: [SortlyID: CollectionID] = [:],
                       reserved: Set<CollectionID> = [],
-                      trips: [Set<AssetID>] = []) -> [SortlyID: MatchResult] {
+                      trips: [Set<AssetID>] = [],
+                      unlocated: Set<AssetID> = []) -> [SortlyID: MatchResult] {
         var stats = Stats()
         return match(proposals, against: inventory, overrides: overrides, assignments: assignments,
-                     reserved: reserved, trips: trips, stats: &stats)
+                     reserved: reserved, trips: trips, unlocated: unlocated, stats: &stats)
     }
 
     /// Work counted during one run, for tests that must not depend on the clock.
@@ -195,7 +212,8 @@ public struct AlbumMatcher: Sendable {
 
     func match(_ proposals: [AlbumProposal], against inventory: CollectionInventory,
                overrides: OverrideSet, assignments: [SortlyID: CollectionID],
-               reserved: Set<CollectionID>, trips: [Set<AssetID>], stats: inout Stats) -> [SortlyID: MatchResult] {
+               reserved: Set<CollectionID>, trips: [Set<AssetID>], unlocated: Set<AssetID> = [],
+               stats: inout Stats) -> [SortlyID: MatchResult] {
         let membership = inventory.albumMembershipIndex()
         // Detected trips (also those too small for a suggestion), for parts of a place.
         var tripOf: [AssetID: Int] = [:]
@@ -230,6 +248,8 @@ public struct AlbumMatcher: Sendable {
         var siblingCounts: [String: [CollectionID: [SortlyID: Int]]] = [:]
         // Per album, once per run: the one trip all its photos lie in (inner nil: none).
         var albumTrips: [CollectionID: Int?] = [:]
+        // Per album, once per run: its photos without a location (`unlocated`).
+        var albumUnlocated: [CollectionID: Int] = [:]
         var taken: [SortlyID: Set<CollectionID>] = [:]
         // Albums a suggestion gave up to the suggestion named exactly like the album: never its
         // album in this run, not even as complete (offered under "Anpassen" only).
@@ -249,6 +269,8 @@ public struct AlbumMatcher: Sendable {
                 tripOf: tripOf,
                 trips: trips,
                 albumTrips: &albumTrips,
+                unlocated: unlocated,
+                albumUnlocated: &albumUnlocated,
                 stats: &stats,
                 membership: membership,
                 siblings: siblingOf[family] ?? [:],
@@ -331,6 +353,8 @@ public struct AlbumMatcher: Sendable {
         tripOf: [AssetID: Int],
         trips: [Set<AssetID>],
         albumTrips: inout [CollectionID: Int?],
+        unlocated: Set<AssetID>,
+        albumUnlocated: inout [CollectionID: Int],
         stats: inout Stats,
         membership: [AssetID: [CollectionID]],
         siblings: [AssetID: SortlyID],
@@ -391,11 +415,32 @@ public struct AlbumMatcher: Sendable {
         // Smaller albums inside a place collection ("Rom 2024" inside Italien): the user may
         // still pick one under "Anpassen", but Albumist never recommends growing them.
         var parts: [MatchCandidate] = []
+        // A place has only photos with a location: in the user's album named exactly like it,
+        // photos without one (camera roll, messenger) can never be in it and do not count
+        // against it (review P1-02). Only there: an album of another name that holds the place
+        // among many such photos ("Alle Fotos", "iPhone-Export") is judged by all its photos
+        // and stays no album of the place (third review 19.11., S6; review 16.11., A1 and A3).
+        let placeOnly: Bool
+        switch proposal.kind {
+        case .placeCollection, .frequentPlace: placeOnly = !unlocated.isEmpty
+        default: placeOnly = false
+        }
+        let ownName = AlbumTitle.normalized(proposal.title)
+        func overlap(_ album: CollectionSnapshot, shared: Int) -> OverlapMetrics {
+            var count = album.assetIDs.count
+            if placeOnly, AlbumTitle.normalized(album.title) == ownName {
+                if albumUnlocated[album.id] == nil {
+                    albumUnlocated[album.id] = album.assetIDs.reduce(0) { $0 + (unlocated.contains($1) && !proposal.assetIDs.contains($1) ? 1 : 0) }
+                }
+                count -= albumUnlocated[album.id] ?? 0
+            }
+            return OverlapMetrics(proposalCount: proposal.assetIDs.count, albumCount: max(count, shared), intersection: shared)
+        }
 
         for (albumID, shared) in intersections {
             guard let album = inventory[albumID], shared >= min(thresholds.minimumSharedItems, proposal.assetIDs.count),
                   !overrides.isRejectedMatch(albumID, for: proposal.id) else { continue }
-            let metrics = OverlapMetrics(proposalCount: proposal.assetIDs.count, albumCount: album.assetIDs.count, intersection: shared)
+            let metrics = overlap(album, shared: shared)
 
             // Broader collection: a substantial part of the album belongs to other siblings
             // (only asked for event-like suggestions).
@@ -476,8 +521,7 @@ public struct AlbumMatcher: Sendable {
         if let assigned, let album = inventory[assigned], album.isEditableAlbum, !overrides.isRejectedMatch(assigned, for: proposal.id) {
             candidates.removeAll { $0.albumID == assigned }
             weak.removeAll { $0.albumID == assigned }
-            let metrics = OverlapMetrics(proposalCount: proposal.assetIDs.count, albumCount: album.assetIDs.count,
-                                         intersection: intersections[assigned] ?? 0)
+            let metrics = overlap(album, shared: intersections[assigned] ?? 0)
             candidates.append(MatchCandidate(albumID: assigned, albumTitle: album.title, metrics: metrics, relation: .partOfProposal,
                                              nameSimilarity: Self.tokenSimilarity(proposalTokens, AlbumTitle.tokens(album.title)),
                                              score: 2, isEditable: true))
@@ -490,6 +534,76 @@ public struct AlbumMatcher: Sendable {
 
         let sameName = (titleIndex[AlbumTitle.normalized(proposal.title)] ?? []).sorted()
         var reasons: [MatchReason] = []
+
+        // Gleicher Name gewinnt (decision Fuchs 16.11., ENTWURF-BEDIENUNG point 8; review P1-02):
+        // the user's album named exactly like the suggestion is its album, whatever else it holds
+        // and however little of it: it is extended, never a second album of that name made. Two
+        // such albums: the content picks one (the most of the suggestion's photos, then the
+        // score); when they fit exactly alike, the user picks. Not an album the user said does
+        // not fit, another suggestion's album, one given up to another suggestion in this run,
+        // or when Albumist already made or extended an album for this suggestion (`assigned`).
+        let named = assigned != nil ? [] : sameName.filter { id in
+            inventory[id]?.isEditableAlbum == true && !overrides.isRejectedMatch(id, for: proposal.id)
+                && !claimedByOthers.contains(id) && !taken.contains(id) && !ceded.contains(id)
+        }
+        // Another album of the user already holds the whole suggestion ("Italia" with every
+        // photo of Italien, "Urlaub Italien"): it stays its album, complete, and the photos stay
+        // sorted. The album of the name gets nothing unless it is complete itself (third review
+        // 19.11., M3: the ring fell back by 298 photos at launch, with no step of the user).
+        func missesNothing(_ id: CollectionID) -> Bool {
+            guard let members = inventory[id]?.assetIDs, !members.isDisjoint(with: proposal.assetIDs) else { return false }
+            return !proposal.assetIDs.contains {
+                !members.contains($0) && overrides.mayAdd($0, toAlbum: id) && overrides.mayAdd($0, toSource: proposal.id)
+            }
+        }
+        let wholeElsewhere = named.isEmpty || named.contains(where: missesNothing) ? nil : candidates.first {
+            $0.isEditable && ($0.relation == .equivalent || $0.relation == .partOfProposal) && missesNothing($0.albumID)
+        }
+        if let whole = wholeElsewhere {
+            reasons.append(.albumContains(album: whole.albumTitle, contained: whole.metrics.intersection, total: whole.metrics.proposalCount))
+            if whole.metrics.extra > 0 { reasons.append(.albumHasOtherItems(album: whole.albumTitle, count: whole.metrics.extra)) }
+            return MatchResult(proposalID: proposal.id, status: .alreadyComplete, best: whole,
+                               alternatives: (candidates + weak + parts).filter { $0.albumID != whole.albumID },
+                               sameNameAlbums: sameName, reasons: reasons)
+        }
+        if !named.isEmpty {
+            let known = Dictionary((candidates + weak + parts).map { ($0.albumID, $0) }, uniquingKeysWith: { first, _ in first })
+            let options = named.compactMap { id -> MatchCandidate? in
+                if let candidate = known[id] { return candidate }
+                guard let album = inventory[id] else { return nil }
+                let metrics = overlap(album, shared: intersections[id] ?? 0)
+                let nameSimilarity = Self.tokenSimilarity(proposalTokens, AlbumTitle.tokens(album.title))
+                let weights = Self.weights(for: proposal.kind)
+                return MatchCandidate(albumID: id, albumTitle: album.title, metrics: metrics,
+                                      relation: metrics.purity >= thresholds.extendablePurity ? .partOfProposal : .partialOverlap,
+                                      nameSimilarity: nameSimilarity,
+                                      score: weights.purity * metrics.purity + weights.coverage * metrics.coverage + weights.name * nameSimilarity,
+                                      isEditable: true)
+            }.sorted { ($0.metrics.intersection, $0.score, $1.albumID.rawValue) > ($1.metrics.intersection, $1.score, $0.albumID.rawValue) }
+            if let best = options.first {
+                let alternatives = Array(options.dropFirst()) + (candidates + weak + parts).filter { !named.contains($0.albumID) }
+                if let second = options.dropFirst().first,
+                   (second.metrics.intersection, second.score) == (best.metrics.intersection, best.score) {
+                    let tied = options.filter { ($0.metrics.intersection, $0.score) == (best.metrics.intersection, best.score) }
+                    for c in tied {
+                        reasons.append(.albumContains(album: c.albumTitle, contained: c.metrics.intersection, total: c.metrics.proposalCount))
+                    }
+                    reasons.append(.severalAlbumsMatch(count: tied.count))
+                    return MatchResult(proposalID: proposal.id, status: .multipleMatches, best: best, alternatives: alternatives,
+                                       sameNameAlbums: sameName, reasons: reasons)
+                }
+                let members = inventory[best.albumID]?.assetIDs ?? []
+                let addable = proposal.assetIDs.filter {
+                    !members.contains($0) && overrides.mayAdd($0, toAlbum: best.albumID) && overrides.mayAdd($0, toSource: proposal.id)
+                }.count
+                let status: MatchStatus = addable == 0 && best.metrics.intersection > 0 ? .alreadyComplete : .extendable
+                reasons.append(.albumContains(album: best.albumTitle, contained: best.metrics.intersection, total: best.metrics.proposalCount))
+                if addable > 0 && status == .extendable { reasons.append(.missingItems(count: addable)) }
+                if best.metrics.extra > 0 { reasons.append(.albumHasOtherItems(album: best.albumTitle, count: best.metrics.extra)) }
+                return MatchResult(proposalID: proposal.id, status: status, best: best, alternatives: alternatives,
+                                   sameNameAlbums: sameName, reasons: reasons)
+            }
+        }
 
         // Prefer editable albums; a read-only smart album must not block a real album.
         let editable = candidates.filter(\.isEditable)
@@ -655,8 +769,41 @@ public struct AlbumMatcher: Sendable {
     /// album already holds most of it. "Bello" for Hunde, "Italien 2019" for the year 2019 or
     /// "Italien, Mai 2024" for the month Mai 2024 stay possible matches (review 16.11.).
     func isCertain(_ candidate: MatchCandidate, for proposal: AlbumProposal) -> Bool {
-        if proposal.kind.isEventLike || candidate.metrics.coverage >= thresholds.unnamedCollectionCoverage { return true }
-        return Self.nameSaysCollection(album: candidate.albumTitle, proposal: proposal.title)
+        isCertain(candidate, kind: proposal.kind, title: proposal.title)
+    }
+
+    func isCertain(_ candidate: MatchCandidate, kind: ProposalKind, title: String?) -> Bool {
+        if kind.isEventLike || candidate.metrics.coverage >= thresholds.unnamedCollectionCoverage { return true }
+        return title.map { Self.nameSaysCollection(album: candidate.albumTitle, proposal: $0) } ?? false
+    }
+
+    /// An album that would make the suggestion's photos count as sorted by its content alone,
+    /// as before "Gleicher Name gewinnt" whatever the album holds: editable, mostly this
+    /// suggestion (purity ≥ `extendablePurity`), no part, and either complete or extendable by
+    /// the content rules (`status`), or one of several matching albums (`multipleMatches`):
+    /// within `multipleMatchScoreGap` of the best album by content while another such album
+    /// is too (`closeToBest`, final check 19.11.: "Urlaub in Italien" with 70 of 300 photos next
+    /// to "Italien" with 5 counted 70 before the rule).
+    func fitsByContent(_ candidate: MatchCandidate, kind: ProposalKind, title: String?, closeToBest: Set<CollectionID> = []) -> Bool {
+        guard candidate.isEditable, candidate.relation == .equivalent || candidate.relation == .partOfProposal,
+              candidate.metrics.purity >= thresholds.extendablePurity, !isPart(candidate, kind: kind, title: title) else { return false }
+        return candidate.relation == .equivalent || candidate.metrics.missing == 0 || closeToBest.contains(candidate.albumID)
+            || candidate.metrics.coverage >= thresholds.extendableCoverage && isCertain(candidate, kind: kind, title: title)
+    }
+
+    /// The albums of a result that would have been several matching albums by content alone
+    /// (`multipleMatches` before "Gleicher Name gewinnt"): among the editable albums that are
+    /// candidates by content (no larger collection, no part), those mostly this suggestion and
+    /// within `multipleMatchScoreGap` of the best one, when at least one besides the best is.
+    func closeToBestByContent(_ result: MatchResult, kind: ProposalKind, title: String?) -> Set<CollectionID> {
+        let pool = ([result.best].compactMap { $0 } + result.alternatives).filter {
+            $0.isEditable && $0.relation != .broaderCollection && $0.metrics.purity >= thresholds.candidatePurity
+                && !isPart($0, kind: kind, title: title)
+        }
+        guard let top = pool.max(by: { ($0.score, $1.albumID.rawValue) < ($1.score, $0.albumID.rawValue) }) else { return [] }
+        let close = pool.filter { $0.metrics.purity >= thresholds.extendablePurity && top.score - $0.score < thresholds.multipleMatchScoreGap }
+        guard close.contains(where: { $0.albumID != top.albumID }) else { return [] }
+        return Set(close.map(\.albumID))
     }
 
     static func nameSaysCollection(album: String, proposal: String) -> Bool {
@@ -691,18 +838,32 @@ public struct AlbumMatcher: Sendable {
     /// default). With several matching albums only those that are mostly this suggestion
     /// (purity ≥ `extendablePurity`): the best one and the ones tied with it. A possible match
     /// and a read-only album never count (review 16.11.).
+    ///
+    /// When the album named like the suggestion is its album by the name alone ("Gleicher Name
+    /// gewinnt"), every other album that fits it by content (`fitsByContent`, "Urlaub in
+    /// Italien" with 250 of 300 photos) keeps sorting its photos: the rule chooses which album
+    /// is extended, and never lowers the sorted count (final check 19.11., N1: the ring fell
+    /// from 250 to 10 at launch).
     public func sortingAlbums(_ result: MatchResult?, kind: ProposalKind, title: String? = nil) -> Set<CollectionID> {
         guard let result, let best = result.best, best.isEditable else { return [] }
+        var albums: Set<CollectionID>
         switch result.status {
         case .alreadyComplete, .extendable:
-            return [best.albumID]
+            albums = [best.albumID]
         case .multipleMatches:
-            var albums = Set(tiedWithBest(result, kind: kind, title: title).map(\.albumID))
+            albums = Set(tiedWithBest(result, kind: kind, title: title).map(\.albumID))
             if best.metrics.purity >= thresholds.extendablePurity { albums.insert(best.albumID) }
-            return albums
         default:
             return []
         }
+        if result.sameNameAlbums.contains(best.albumID) {
+            let close = closeToBestByContent(result, kind: kind, title: title)
+            for c in result.alternatives where !result.sameNameAlbums.contains(c.albumID)
+                && fitsByContent(c, kind: kind, title: title, closeToBest: close) {
+                albums.insert(c.albumID)
+            }
+        }
+        return albums
     }
 
     struct Weights { var purity: Double; var coverage: Double; var name: Double }

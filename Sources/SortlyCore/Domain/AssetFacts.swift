@@ -36,6 +36,11 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
     /// ordinary photo for previews and covers (`PreviewRank.unknown`) and is never the photo of
     /// the shared atlas image. `false` unless stated: only the analysis says it.
     public var contentKnown: Bool
+    /// It has a location, but no country can be found for it (review P1-09): the lookup
+    /// answered "nothing here" (open sea), or the country needs the online lookup the user
+    /// switched off (a border, a small island). Its place counts like a photo without a
+    /// location (`analysisImpossible`), not as waiting for good.
+    public var countryOutOfReach: Bool
 
     public init(
         asset: AssetSnapshot,
@@ -53,7 +58,8 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         keywords: Set<String> = [],
         atHome: Bool = false,
         looksLikeDocument: Bool = false,
-        contentKnown: Bool = false
+        contentKnown: Bool = false,
+        countryOutOfReach: Bool = false
     ) {
         self.asset = asset
         self.place = place
@@ -70,6 +76,7 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         self.keywords = keywords
         self.atHome = atHome
         self.looksLikeDocument = looksLikeDocument
+        self.countryOutOfReach = countryOutOfReach
         self.contentKnown = contentKnown
         textLooksSensitive = recognizedText.map(TextMinimizer.looksSensitive) ?? false
     }

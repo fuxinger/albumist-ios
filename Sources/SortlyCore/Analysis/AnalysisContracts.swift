@@ -120,6 +120,19 @@ public struct ContentAnalysis: Hashable, Sendable, Codable {
         return now.timeIntervalSince(lastAttempt) >= Self.retrySpacing
     }
 
+    /// Time between two reads of a photo given up as unreadable (`maxFailedAttempts`): the
+    /// overview says "Albumist versucht es später noch einmal", and a photo kept only in iCloud
+    /// often becomes readable days later (review P1-08). One read each time; still unreadable,
+    /// it is given up again at once.
+    public static let givenUpRetrySpacing: TimeInterval = 7 * 86_400
+
+    /// A photo given up as unreadable whose last try is `givenUpRetrySpacing` ago (or unknown).
+    public func isGivenUpAndDueAgain(now: Date) -> Bool {
+        guard let failedAttempts, failedAttempts >= Self.maxFailedAttempts else { return false }
+        guard let lastAttempt else { return true }
+        return now.timeIntervalSince(lastAttempt) >= Self.givenUpRetrySpacing
+    }
+
     public init(
         labels: [LabelScore] = [],
         faces: [VisualObservation] = [],

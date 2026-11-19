@@ -3,10 +3,13 @@
 Quelle: `Sources/SortlyCore/Matching/AlbumMatcher.swift`, Tests: `Tests/SortlyCoreTests/MatchingTests.swift`.
 
 ## Verfahren
-Für jeden Vorschlag P wird jedes vorhandene Album A über die **Inhalte** verglichen, nicht über
-den Namen. Ein invertierter Index (Foto → Alben) macht das auch bei großen Mediatheken in
-einem Durchgang möglich. Namen dienen nur als Gleichstand-Entscheider und zum Erkennen von
-Namenskonflikten.
+Für jeden Vorschlag P wird jedes vorhandene Album A über die **Inhalte** verglichen. Ein
+invertierter Index (Foto → Alben) macht das auch bei großen Mediatheken in einem Durchgang
+möglich. Der Name entscheidet in einem Fall allein: Ein bearbeitbares Album des Nutzers mit
+genau dem Namen des Vorschlags ist dessen Album, was es auch enthält („Gleicher Name gewinnt“,
+siehe „Ein Album pro Lauf für einen Vorschlag“), außer ein anderes Album enthält den Vorschlag schon ganz.
+Sonst dienen Namen als Gleichstand-Entscheider, zum Erkennen von Teilen („Italien 2019“) und
+von Namenskonflikten.
 
 ## Metriken
 | Metrik | Formel | Bedeutung |
@@ -36,7 +39,7 @@ weniger als 0,15 Punkte auseinander, gilt „mehrere passende Alben“.
 | Vorhandenes Album wird ergänzt | fehlende Fotos hinzufügen |
 | Ähnliches Album gefunden (passt vermutlich) | **neues Album**; das vorhandene bleibt unverändert und wird unter „Anpassen“ angeboten; zählt nicht als sortiert, nicht im Startpaket |
 | Mehrere passende Alben | Nutzer wählt unter „Anpassen“ |
-| Gleicher Name, anderer Inhalt | neues Album, Konflikt wird angezeigt |
+| Gleicher Name, anderer Inhalt | nur noch, wenn das Album des Namens nicht in Frage kommt (nicht bearbeitbar, vom Nutzer unter „Anpassen“ abgelehnt, Album eines anderen Vorschlags): neues Album, Konflikt wird angezeigt. Sonst wird das Album des Namens ergänzt |
 | Neues Album | anlegen im Ordner unter dem Hauptordner |
 | Nicht eindeutig | Nutzer entscheidet |
 | Album nicht bearbeitbar | (z. B. geteiltes Album) neues Album |
@@ -62,6 +65,14 @@ stark wächst („2026“ im Januar angelegt): Es wird ergänzt, nie ein zweites
 Entscheidung, die ein Album ergänzen würde, das nach den neuen Regeln nicht mehr sicher passt
 (z. B. „ergänzen“ aus dem Startpaket auf jetzt nur „Ähnliches Album gefunden“), ist danach
 wieder offen. Die Übersicht sagt es: „N Vorschläge neu geprüft: bitte noch einmal ansehen“.
+Wieder offen ist auch, was gegen „Gleicher Name gewinnt“ geht, einmal beim ersten Abgleich
+nach Ergebnissen älter als Version 5 (zweite Prüfung 19.11.2026; nie bei späteren Versionen,
+dann ist es die Wahl des Nutzers unter dieser Regel): ein neues Album für einen Vorschlag, der jetzt das Album seines Namens ergänzt
+(sonst gäbe es ein zweites „Italien“; nicht, wenn der Nutzer dem neuen Album einen anderen
+Namen gegeben hat), und eine Entscheidung über ein Album des Nutzers, das jetzt dem Vorschlag
+seines Namens gehört (die Reise „Italien · Mai 2019“, die „Italien“ behalten oder ergänzen
+sollte). Diese zählen nicht für den Hinweis in der Übersicht, dessen Text („nur noch, wenn
+sie sicher passen“) einen anderen Grund nennt.
 Ausgeführte und angefangene Pläne bleiben unberührt. Neue Ergebnisse mit Versionsstempel,
 die wieder geöffneten Entscheidungen und die Zahl für die Übersicht werden in einem Schritt
 gespeichert: Endet die App mittendrin, ist nichts gespeichert, und der nächste Start
@@ -120,12 +131,39 @@ auf einer einzigen Reise besucht hat).
 ### Ein Album pro Lauf für einen Vorschlag (Prüfung 16.11.2026, A5/A10)
 In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen Vorschlag:
 - **Gleicher Name gewinnt** (Entscheidung Fuchs 16.11.2026): Heißt das Album genau wie ein
-  Vorschlag (ohne Groß-/Kleinschreibung und Akzente, z. B. „Italien“ für das Land Italien)
-  und würde dieser Vorschlag es ergänzen, gehört es ihm – auch wenn eine Reise im selben Lauf
+  Vorschlag (ohne Groß-/Kleinschreibung und Akzente, z. B. „Italien“ für das Land Italien),
+  gehört es ihm – auch wenn eine Reise im selben Lauf
   es ergänzen will oder schon ganz darin steckt, und auch gegenüber zurückgestellten
   Vorschlägen. Das Land ergänzt dann „Italien“ (in der Vorschau unter „Ergänzt“, rückgängig
   zu machen); die Reise „Italien · Mai 2019“ bekommt ein eigenes Album und sieht „Italien“
-  nur unter „Anpassen“. Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
+  nur unter „Anpassen“. Das gilt unabhängig vom Inhalt (Prüfungen 18. und 19.11.2026,
+  P1-02; vorher erst ab 25 % des Vorschlags und 80 % des Albums, sonst kam ein zweites
+  „Italien“): Gibt es genau ein bearbeitbares Album mit genau dem Namen des Vorschlags,
+  empfiehlt Albumist, es zu ergänzen, auch wenn es wenig davon (17 % des Landes nach fünf
+  Reisen), andere Fotos dazu oder noch gar keins davon enthält; nie ein zweites Album
+  gleichen Namens. Enthält es schon alles, heißt es „Album so lassen“. Fotos ohne Ort zählen
+  bei Ländern, Orten und Reisezielen nicht gegen die Reinheit dieses Albums (150 Fotos aus
+  Italien und 160 ohne Ort sind ein reines Italien-Album); nur bei ihm, nicht bei Alben
+  anderen Namens („Alle Fotos“, „iPhone-Export“ mit dem ganzen Land bleiben nach A1/A3 kein
+  Album des Landes, dritte Prüfung 19.11.2026, S6). Enthält das Album auch andere
+  Fotos mit Ort, oder fehlen ihm Fotos des Vorschlags ganz, wählt „Empfohlene auswählen“ es
+  nicht von selbst aus; die Empfehlung bleibt „ergänzen“. Bei zwei bearbeitbaren Alben
+  dieses Namens wählt der Inhalt eines davon (das mit mehr Fotos des Vorschlags), nie ein
+  drittes; enthalten beide gleich viel, wählt der Nutzer unter „Anpassen“. Hat der Nutzer
+  die Zuordnung unter „Anpassen“ abgelehnt, gilt die Regel für dieses Album nicht mehr.
+  Enthält ein anderes bearbeitbares Album des Nutzers schon den ganzen Vorschlag („Italia“
+  oder „Urlaub Italien“ mit allen Italien-Fotos), bleibt es dessen Album („Album so lassen“,
+  die Fotos zählen weiter als sortiert), und das Album mit dem Namen bekommt nichts, außer es
+  enthält selbst schon alles (dritte Prüfung 19.11.2026, M3: Zahlen gehen ohne Zutun des
+  Nutzers nie zurück). Gibt die Regel „Italien“ den Vorschlag, zählen die Fotos in einem
+  anderen bearbeitbaren Album, das nach dem Inhalt allein sicher passt („Urlaub in Italien“
+  mit 250 der 300 Fotos: ergänzbar oder vollständig nach den Schwellen oben, kein Teil;
+  oder eines von mehreren passenden Alben, also zu ≥ 80 % Fotos des Vorschlags und weniger
+  als 0,15 Punkte hinter dem besten Album nach Inhalt, wie „Urlaub in Italien“ mit 70 neben
+  „Italien“ mit 5),
+  weiter als sortiert, und eine gewählte Entscheidung „Urlaub in Italien ergänzen“ bleibt
+  bestehen. Die Regel bestimmt, welches Album ergänzt wird; die Zahl der sortierten Fotos
+  senkt sie nie (letzte Prüfung 19.11.2026, N1). Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
   die Reise. Ausnahmen: Albumist hat das Album schon für einen anderen Vorschlag angelegt
   oder ergänzt („Alben anderer Vorschläge“), oder ein Vorschlag mit genau diesem Namen ist
   schon vollständig darin.

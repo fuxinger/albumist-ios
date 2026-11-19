@@ -111,11 +111,19 @@ struct MatchingTests {
         #expect(r.status == .alreadyComplete)
     }
 
-    @Test func sameNameDifferentContentIsNameConflict() throws {
+    /// "Gleicher Name gewinnt" (Fuchs 16.11., review P1-02): the user's "Rom" is extended, whatever
+    /// it holds, not a second "Rom" made. Only once the user said it does not fit is it a name
+    /// conflict (a new album).
+    @Test func sameNameDifferentContentIsExtendedNotMadeTwice() throws {
         let p = tripProposal("p", ids("t", 0..<100), title: "Rom")
-        let r = try #require(matcher.match([p], against: CollectionInventory([CollectionSnapshot(id: "x", title: "Rom", assetIDs: ids("other", 0..<80))]))[p.id])
-        #expect(r.status == .nameConflict)
+        let inventory = CollectionInventory([CollectionSnapshot(id: "x", title: "Rom", assetIDs: ids("other", 0..<80))])
+        let r = try #require(matcher.match([p], against: inventory)[p.id])
+        #expect(r.status == .extendable)
+        #expect(r.best?.albumID == "x")
         #expect(r.sameNameAlbums == ["x"])
+        let rejected = OverrideSet([UserOverride(scope: .albumForSource("x", p.id), decision: .notMatchingAlbum)])
+        let n = try #require(matcher.match([p], against: inventory, overrides: rejected)[p.id])
+        #expect(n.status == .nameConflict)
     }
 
     @Test func noAlbumMeansNewAlbum() throws {

@@ -147,9 +147,12 @@ public enum LibraryStatus {
             // With suggestions made for this photo's part of the library, a photo without an album
             // in places or trips has none on purpose. Not a photo taken after the suggestions were
             // made: back from a trip, its photos count as unsorted until the next analysis has
-            // made their suggestions, instead of leaving the ring.
+            // made their suggestions, instead of leaving the ring. A photo dated later that the
+            // suggestions were made with (a camera clock set wrong) is no such photo: it counted
+            // as unsorted for good (review P1-03).
             let suggested = snapshot.map { snapshot in
-                snapshot.scope.includes(f, calendar: calendar) && (f.asset.creationDate ?? .distantPast) <= snapshot.generatedAt
+                snapshot.scope.includes(f, calendar: calendar)
+                    && ((f.asset.creationDate ?? .distantPast) <= snapshot.generatedAt || snapshot.datedAfterwards.contains(f.id))
             } ?? false
             var areas: [OrganizationArea: AreaFacts] = [:]
             for area in settings.enabledAreas {
@@ -160,7 +163,9 @@ public enum LibraryStatus {
                 switch area {
                 case .places:
                     a.applicable = !f.asset.isScreenshotLike
-                    a.analysisImpossible = f.asset.usableLocation == nil
+                    // No location, or no country to be found for it (open sea; a border with the
+                    // online lookup off): never "offen" for good (review P1-09).
+                    a.analysisImpossible = f.asset.usableLocation == nil || (f.gpsPlace == nil && f.countryOutOfReach)
                     a.analyzed = f.asset.usableLocation == nil || f.gpsPlace != nil
                     if a.applicable && !a.analysisImpossible && !hasAlbum {
                         if f.atHome {

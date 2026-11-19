@@ -22,34 +22,53 @@ public struct GeoSpatialIndex<Element: Sendable>: Sendable {
     }
 
     /// All entries within `radius` metres of `center` (radius must be ≤ cellSize).
+    ///
+    /// Every cell the circle can touch is read: per latitude band, the cells over the circle's
+    /// widest longitude span (both sides of the antimeridian, all longitudes when the circle
+    /// holds a pole). Sample points inside the circle missed cells far in the north and at the
+    /// antimeridian, where a cell's span in degrees changes from band to band and a cell can be
+    /// cut by ±180° (G1-01, review 18.11.2026).
     public func query(near center: GeoCoordinate, radius: Double) -> [Entry] {
         precondition(radius <= cellSize + 1e-6, "radius must not exceed the index cell size")
-        let latStep = radius / GeoMath.metersPerDegreeLatitude
-        let lonStep = latStep / max(cos(center.latitude * .pi / 180), 0.01)
-        var visited = Set<GeoCell>()
+        // The circle on the sphere `GeoMath.distance` measures on, in degrees (a little more,
+        // against rounding): every point within `radius` is at most this far in latitude.
+        let reach = radius / GeoMath.earthRadiusMeters * 180 / .pi * (1 + 1e-9) + 1e-9
+        let south = max(-90, center.latitude - reach), north = min(90, center.latitude + reach)
+        // Widest longitude span of the circle; all longitudes when it holds a pole.
+        let halfSpan: Double
+        let cosLat = cos(center.latitude * .pi / 180)
+        let sinReach = sin(radius / GeoMath.earthRadiusMeters)
+        if north >= 90 || south <= -90 || sinReach >= cosLat {
+            halfSpan = 180
+        } else {
+            halfSpan = min(180, asin(sinReach / cosLat) * 180 / .pi * (1 + 1e-9) + 1e-9)
+        }
+        let ranges = Self.longitudeRanges(from: center.longitude - halfSpan, to: center.longitude + halfSpan)
+        let latStep = cellSize / GeoMath.metersPerDegreeLatitude
         var result: [Entry] = []
-        let factors: [Double] = [-1, -0.5, 0, 0.5, 1]
-        for fy in factors {
-            for fx in factors {
-                let sample = GeoCoordinate(
-                    latitude: max(-90, min(90, center.latitude + fy * latStep)),
-                    longitude: normalizeLongitude(center.longitude + fx * lonStep)
-                )
-                let cell = GeoCell(sample, sizeMeters: cellSize)
-                guard visited.insert(cell).inserted, let indices = cells[cell] else { continue }
-                for i in indices where GeoMath.distance(entries[i].coordinate, center) <= radius {
-                    result.append(entries[i])
+        for y in Int((south / latStep).rounded(.down))...Int((north / latStep).rounded(.down)) {
+            // As `GeoCell` does: the longitude step of the band's middle.
+            let bandLat = (Double(y) + 0.5) * latStep
+            let lonStep = latStep / max(cos(bandLat * .pi / 180), 0.01)
+            var visited = Set<Int>()
+            for range in ranges {
+                for x in Int((range.lowerBound / lonStep).rounded(.down))...Int((range.upperBound / lonStep).rounded(.down)) {
+                    guard visited.insert(x).inserted, let indices = cells[GeoCell(x: x, y: y, sizeMeters: cellSize)] else { continue }
+                    for i in indices where GeoMath.distance(entries[i].coordinate, center) <= radius {
+                        result.append(entries[i])
+                    }
                 }
             }
         }
         return result
     }
 
-    private func normalizeLongitude(_ lon: Double) -> Double {
-        var l = lon
-        while l > 180 { l -= 360 }
-        while l < -180 { l += 360 }
-        return l
+    /// `from...to` in longitudes as stored (-180...180): split in two at the antimeridian.
+    static func longitudeRanges(from: Double, to: Double) -> [ClosedRange<Double>] {
+        if to - from >= 360 { return [-180...180] }
+        if from < -180 { return [(from + 360)...180, -180...to] }
+        if to > 180 { return [from...180, -180...(to - 360)] }
+        return [from...to]
     }
 }
 

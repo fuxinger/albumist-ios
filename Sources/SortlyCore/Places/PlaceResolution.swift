@@ -120,7 +120,8 @@ public actor PlaceResolutionService {
 
     public struct Outcome: Sendable, Hashable {
         public var resolved = 0
-        /// Assets that still need an online lookup (offline, disabled, rate limit, budget).
+        /// Assets that still need an online lookup (offline, disabled, rate limit, budget). Not
+        /// those in `withoutCountry`.
         public var pendingOnline: Set<AssetID> = []
         public var onlineRequests = 0
         public var cacheHits = 0
@@ -131,6 +132,14 @@ public actor PlaceResolutionService {
         public var stoppedAtRequestLimit = false
         /// Asking stopped early because the run was paused (or got too hot, or the battery ran low).
         public var stoppedAsking = false
+        /// Photos without a country that cannot get one (review P1-09): the lookup answered
+        /// "nothing here" (open sea) and the map knows no country there, or their country needs
+        /// the online lookup and the user has switched it off. Not photos that only wait for it
+        /// (offline, refused, the run's limit, Pause): those are in `pendingOnline`.
+        public var withoutCountry: Set<AssetID> = []
+        /// Every request was looked at (no Pause or cancellation before the end):
+        /// `withoutCountry` is then complete for these requests.
+        public var reachedAll = true
         public init() {}
     }
 
@@ -250,6 +259,7 @@ public actor PlaceResolutionService {
                 if paused?() == true || Task.isCancelled {
                     outcome.pendingOnline.formUnion(toCheck[index...].map(\.assetID))
                     outcome.pendingOnline.formUnion(needsOnline.map(\.assetID))
+                    outcome.reachedAll = false
                     return outcome
                 }
             }
@@ -289,14 +299,20 @@ public actor PlaceResolutionService {
             }
 
         var onlineDisabled = !policy.onlineAllowed || geocoder == nil
+        // The user switched the online lookup off (not offline, refused or paused).
+        var switchedOff = !policy.onlineAllowed
+        /// Has no country and gets none in this call.
+        func hasNoCountry(_ member: Request) -> Bool {
+            !member.hasTown && !member.hasCountry && !savedFromMap.contains(member.assetID)
+        }
         for (cell, members) in groups {
             let pendingBefore = outcome.pendingOnline.count
-            if Task.isCancelled { outcome.pendingOnline.formUnion(members.map(\.assetID)); continue }
+            if Task.isCancelled { outcome.pendingOnline.formUnion(members.map(\.assetID)); outcome.reachedAll = false; continue }
             // Pause, heat or low battery: no more online lookups; cached cells still count.
             if !onlineDisabled, let shouldStop, await shouldStop() { onlineDisabled = true; outcome.stoppedAsking = true }
             // The user's consent is read again before every online lookup: switching it off in
             // the settings stops the next request, not only the next run (audit 2, 5.2).
-            if !onlineDisabled, let onlineAllowed, !(await onlineAllowed()) { onlineDisabled = true }
+            if !onlineDisabled, let onlineAllowed, !(await onlineAllowed()) { onlineDisabled = true; switchedOff = true }
             // The cell's answer is for this photo of it (also when it comes from the cache: the
             // members of a cell hardly move): a town from across a disputed line is not taken.
             let representative = Self.representative(of: members.map(\.coordinate))
@@ -337,7 +353,11 @@ public actor PlaceResolutionService {
                 outcome.stoppedAtRequestLimit = true
             }
             guard let online else {
-                outcome.pendingOnline.formUnion(members.map(\.assetID))
+                // Without a country and with the lookup switched off they wait for nothing: not
+                // "später genauer bestimmt" (second review of P1-09). Turned on, they are asked.
+                let outOfReach = switchedOff ? Set(members.filter(hasNoCountry).map(\.assetID)) : []
+                outcome.withoutCountry.formUnion(outOfReach)
+                outcome.pendingOnline.formUnion(members.map(\.assetID).filter { !outOfReach.contains($0) })
                 continue
             }
             var batch: [AssetID: ResolvedPlace] = [:]
@@ -346,7 +366,11 @@ public actor PlaceResolutionService {
                 let match = offlineMatch(member.coordinate, memo: &offlineCache)
                 guard let merged = merge(online: online, offline: match, at: member.coordinate, sample: sample) else {
                     // An empty answer will not get better by asking again.
-                    if online != PlaceComponents() { outcome.pendingOnline.insert(member.assetID) }
+                    if online != PlaceComponents() {
+                        outcome.pendingOnline.insert(member.assetID)
+                    } else if hasNoCountry(member) {
+                        outcome.withoutCountry.insert(member.assetID)
+                    }
                     continue
                 }
                 if member.hasTown, !merged.townIsValid {

@@ -14,9 +14,10 @@ import SortlyEngine
 /// `BatteryUse` (SortlyEngine, tested on Linux).
 @MainActor
 enum BatteryLog {
-    private static let stretchesKey = "diagnostics.batteryStretches"
+    private static let recordKey = "diagnostics.batteryRecord"
     private static let trackerKey = "diagnostics.batteryTracker"
-    /// Weeks of use; the oldest go first.
+    /// Stretches kept in detail (weeks of use); those that leave the list stay in the totals
+    /// (`BatteryRecord`), so the figure never loses what counted.
     static let kept = 200
     /// The stretch in progress is written at most this often, so one that ends because iOS
     /// quits the app in the background still counts up to that reading.
@@ -65,7 +66,7 @@ enum BatteryLog {
     /// Two lines for the diagnostic report: the number in the user's language, the details for
     /// support in English.
     static var summary: [String] {
-        let use = BatteryUse(stretches)
+        let use = BatteryUse(record)
         return [line(use, locale: .current), use.detail]
     }
 
@@ -122,10 +123,12 @@ enum BatteryLog {
         )
     }
 
-    private static var stretches: [BatteryStretch] { load(stretchesKey) ?? [] }
+    private static var record: BatteryRecord { load(recordKey) ?? BatteryRecord() }
 
     private static func append(_ ended: [BatteryStretch]) {
-        save(BatteryStretch.capped(stretches + ended, at: kept), stretchesKey)
+        var updated = record
+        updated.append(ended, keeping: kept)
+        save(updated, recordKey)
     }
 
     private static func load<T: Decodable>(_ key: String) -> T? {

@@ -212,15 +212,54 @@ struct BatteryUseTests {
         #expect(!BatteryStretchTracker.isAnalysing(running: false, waitingForDevice: false, waitingForApple: false))
     }
 
-    /// Second review: at the cap, stretches without photos of the image step go first (short
-    /// stretches of checks without new photos never push out the ones with photos).
-    @Test func theCapDropsStretchesWithoutPhotosFirst() {
-        let withPhotos = (0..<3).map { Self.stretch(from: 0.9, to: 0.89, photos: 100 + $0) }
-        let without = (0..<3).map { _ in Self.stretch(from: 0.9, to: 0.9, photos: 0) }
-        let list = [without[0], withPhotos[0], without[1], withPhotos[1], without[2], withPhotos[2]]
-        #expect(BatteryStretch.capped(list, at: 4) == [withPhotos[0], withPhotos[1], without[2], withPhotos[2]])
-        #expect(BatteryStretch.capped(list, at: 2) == [withPhotos[1], withPhotos[2]])
-        #expect(BatteryStretch.capped(list, at: 10) == list)
+    /// Third review: the list keeps 200 stretches, but nothing that counts is ever lost. An
+    /// analysis split into stretches (library and places without photos, then the image step),
+    /// then many short checks without new photos push it past 200: the figure stays the same.
+    @Test func stretchesLeavingTheListStillCount() throws {
+        var record = BatteryRecord()
+        record.append([
+            Self.stretch(from: 0.96, to: 0.94, photos: 0),
+            Self.stretch(from: 0.94, to: 0.93, photos: 0),
+            Self.stretch(from: 0.93, to: 0.87, photos: 2_000),
+            Self.stretch(.background, from: 0.87, to: 0.84, photos: 1_500),
+        ], keeping: 200)
+        let before = BatteryUse(record)
+        #expect(before.all.estimate == .perThousand(12 * 1_000 / 3_500.0))
+        for _ in 0..<250 {
+            record.append([Self.stretch(from: 0.84, to: 0.84, photos: 0, minutes: 1)], keeping: 200)
+        }
+        #expect(record.stretches.count == 200)
+        let after = BatteryUse(record)
+        #expect(after.all.estimate == before.all.estimate)
+        #expect(after.foreground.estimate == before.foreground.estimate)
+        #expect(after.background.estimate == before.background.estimate)
+        #expect(after.all.photos == 3_500 && after.all.drop == 12)
+        #expect(!after.coarseSteps)
+        // Kept on the phone between launches.
+        let data = try JSONEncoder().encode(record)
+        #expect(try JSONDecoder().decode(BatteryRecord.self, from: data) == record)
+    }
+
+    /// Stretches that never count (charging, level unknown or rising) leave the list first; they
+    /// stay in the "not counted" numbers. Then the oldest go, into the totals.
+    @Test func stretchesThatNeverCountLeaveTheListFirst() {
+        let charging = Self.stretch(from: 0.50, to: 0.60, photos: 900, charging: true)
+        let a = Self.stretch(from: 0.91, to: 0.89, photos: 400)
+        let b = Self.stretch(from: 0.89, to: 0.88, photos: 300)
+        let c = Self.stretch(.background, from: 0.88, to: 0.86, photos: 300)
+        let d = Self.stretch(from: 0.86, to: 0.84, photos: 200)
+        var record = BatteryRecord()
+        record.append([charging, a, b], keeping: 3)
+        record.append([c], keeping: 3)
+        #expect(record.stretches == [a, b, c])
+        record.append([d], keeping: 3)
+        #expect(record.stretches == [b, c, d])
+        let use = BatteryUse(record), all = BatteryUse([charging, a, b, c, d])
+        #expect(use.all.estimate == all.all.estimate)
+        #expect(use.foreground.estimate == all.foreground.estimate)
+        #expect(use.all.stretches == 4)
+        #expect(use.notCounted == [.charging: 1])
+        #expect(use.detail.hasPrefix("battery stretches 3 (2 earlier), counted 4 (foreground 3, background 1), not counted: charging 1"))
     }
 
     // MARK: The number

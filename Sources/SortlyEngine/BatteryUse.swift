@@ -67,19 +67,6 @@ public struct BatteryStretch: Codable, Sendable, Equatable {
 
     public var duration: TimeInterval { end.timeIntervalSince(start) }
 
-    /// At most `limit` stretches, in order. Over it, the oldest without photos of the image step
-    /// go first (second review: short stretches of checks without new photos never push out the
-    /// ones with photos), then the oldest.
-    public static func capped(_ stretches: [BatteryStretch], at limit: Int) -> [BatteryStretch] {
-        var excess = stretches.count - limit
-        guard excess > 0 else { return stretches }
-        var kept: [BatteryStretch] = []
-        for stretch in stretches {
-            if excess > 0, stretch.photos == 0 { excess -= 1 } else { kept.append(stretch) }
-        }
-        return Array(kept.suffix(limit))
-    }
-
     /// A level in percentage points, to a tenth: UIDevice gives a `Float` (0.85 arrives as
     /// 0.8500000238…), and the steps are whole points anyway.
     static func points(_ level: Double) -> Double { (level * 1_000).rounded() / 10 }
@@ -224,6 +211,90 @@ public struct BatteryStretchTracker: Codable, Sendable, Equatable {
     }
 }
 
+/// What the app keeps for the report: the last stretches in detail, and the totals of the ones
+/// that left the list. Nothing that counts is ever lost (third review: dropping old stretches
+/// without photos lost the battery of reading the library, places and texts, and the figure
+/// drifted low over time); the limit only bounds the detailed list.
+public struct BatteryRecord: Codable, Sendable, Equatable {
+    /// What stretches that left the list added up to, per place.
+    public struct Totals: Codable, Sendable, Equatable {
+        public var photos = 0
+        /// Percentage points.
+        public var drop = 0.0
+        public var stretches = 0
+        public var seconds = 0.0
+    }
+
+    /// Oldest first.
+    public private(set) var stretches: [BatteryStretch] = []
+    public private(set) var earlierForeground = Totals()
+    public private(set) var earlierBackground = Totals()
+    public private(set) var earlierNotCounted: [BatteryStretch.Exclusion: Int] = [:]
+    /// How many stretches left the list.
+    public private(set) var earlier = 0
+    /// Their levels, for the 5-point rule: some level was read, some was off the 5-point marks.
+    public private(set) var earlierLevelRead = false
+    public private(set) var earlierFineLevel = false
+
+    public init() {}
+
+    /// Adds ended stretches and keeps at most `limit` in the list: stretches that never count
+    /// (charging, level unknown or rising) leave first, then the oldest; each goes into the totals.
+    public mutating func append(_ ended: [BatteryStretch], keeping limit: Int) {
+        stretches += ended
+        var excess = stretches.count - limit
+        guard excess > 0 else { return }
+        var kept: [BatteryStretch] = []
+        for stretch in stretches {
+            if excess > 0, stretch.exclusion != nil {
+                fold(stretch)
+                excess -= 1
+            } else {
+                kept.append(stretch)
+            }
+        }
+        while excess > 0, !kept.isEmpty {
+            fold(kept.removeFirst())
+            excess -= 1
+        }
+        stretches = kept
+    }
+
+    private mutating func fold(_ stretch: BatteryStretch) {
+        earlier += 1
+        for level in stretch.levelsForSteps {
+            earlierLevelRead = true
+            if !BatteryStretch.onFivePointMark(level) { earlierFineLevel = true }
+        }
+        if let drop = stretch.drop {
+            switch stretch.place {
+            case .foreground: earlierForeground.add(stretch, drop: drop)
+            case .background: earlierBackground.add(stretch, drop: drop)
+            }
+        } else if let reason = stretch.exclusion {
+            earlierNotCounted[reason, default: 0] += 1
+        }
+    }
+}
+
+extension BatteryRecord.Totals {
+    mutating func add(_ stretch: BatteryStretch, drop: Double) {
+        photos += stretch.photos
+        self.drop += drop
+        stretches += 1
+        seconds += stretch.duration
+    }
+}
+
+extension BatteryStretch {
+    /// The levels that tell the phone's steps: those read without power, in points.
+    var levelsForSteps: [Double] {
+        charging ? [] : [startLevel, endLevel].compactMap { $0 }.map(Self.points)
+    }
+
+    static func onFivePointMark(_ points: Double) -> Bool { points.truncatingRemainder(dividingBy: 5) == 0 }
+}
+
 /// The number for the report, from the recorded stretches.
 ///
 /// Rule for "enough measured" (a battery level moves in whole points, on some iPhones in five):
@@ -258,10 +329,14 @@ public struct BatteryUse: Sendable, Equatable {
         public var estimate = Estimate.tooLittle
 
         mutating func add(_ stretch: BatteryStretch, drop: Double) {
-            photos += stretch.photos
-            self.drop += drop
-            stretches += 1
-            seconds += stretch.duration
+            add(BatteryRecord.Totals(photos: stretch.photos, drop: drop, stretches: 1, seconds: stretch.duration))
+        }
+
+        mutating func add(_ totals: BatteryRecord.Totals) {
+            photos += totals.photos
+            drop += totals.drop
+            stretches += totals.stretches
+            seconds += totals.seconds
         }
 
         mutating func judge(minDrop: Double) {
@@ -285,12 +360,31 @@ public struct BatteryUse: Sendable, Equatable {
     public var notCounted: [BatteryStretch.Exclusion: Int] = [:]
     /// The stretches as given, for the detail line.
     private var recorded: [BatteryStretch] = []
+    /// Stretches that left the list (`BatteryRecord`).
+    private var earlier = 0
 
     public init(_ stretches: [BatteryStretch]) {
-        recorded = stretches
-        var levels: [Double] = []
-        for stretch in stretches {
-            if !stretch.charging { levels += [stretch.startLevel, stretch.endLevel].compactMap { $0 }.map(BatteryStretch.points) }
+        var record = BatteryRecord()
+        record.append(stretches, keeping: .max)
+        self.init(record)
+    }
+
+    /// The kept stretches and the totals of those that left the list.
+    public init(_ record: BatteryRecord) {
+        recorded = record.stretches
+        earlier = record.earlier
+        foreground.add(record.earlierForeground)
+        background.add(record.earlierBackground)
+        all.add(record.earlierForeground)
+        all.add(record.earlierBackground)
+        notCounted = record.earlierNotCounted
+        var levelRead = record.earlierLevelRead
+        var fineLevel = record.earlierFineLevel
+        for stretch in record.stretches {
+            for level in stretch.levelsForSteps {
+                levelRead = true
+                if !BatteryStretch.onFivePointMark(level) { fineLevel = true }
+            }
             guard let drop = stretch.drop else {
                 if let reason = stretch.exclusion { notCounted[reason, default: 0] += 1 }
                 continue
@@ -301,7 +395,7 @@ public struct BatteryUse: Sendable, Equatable {
             case .background: background.add(stretch, drop: drop)
             }
         }
-        coarseSteps = !levels.isEmpty && levels.allSatisfy { $0.truncatingRemainder(dividingBy: 5) == 0 }
+        coarseSteps = levelRead && !fineLevel
         let minDrop = coarseSteps ? Self.minDropCoarse : Self.minDrop
         foreground.judge(minDrop: minDrop)
         background.judge(minDrop: minDrop)
@@ -321,16 +415,16 @@ public struct BatteryUse: Sendable, Equatable {
     /// One line for support, in English like the rest of the report: the counts, the steps and
     /// the last three stretches.
     public var detail: String {
-        guard !recorded.isEmpty else { return "battery stretches 0" }
+        guard !recorded.isEmpty || earlier > 0 else { return "battery stretches 0" }
         let reasons = BatteryStretch.Exclusion.allCases.compactMap { reason in
             notCounted[reason].map { "\(reason.label) \($0)" }
         }
-        var line = "battery stretches \(recorded.count), counted \(all.stretches) (foreground \(foreground.stretches), "
+        var line = "battery stretches \(recorded.count)\(earlier > 0 ? " (\(earlier) earlier)" : ""), counted \(all.stretches) (foreground \(foreground.stretches), "
             + "background \(background.stretches)), not counted: \(reasons.isEmpty ? "none" : reasons.joined(separator: ", "))"
         line += ", steps \(coarseSteps ? "5 points" : "1 point")"
         line += ", minutes counted foreground \(Int((foreground.seconds / 60).rounded())), background \(Int((background.seconds / 60).rounded()))"
         let last = recorded.suffix(3).map(Self.describe)
-        line += "; last: " + last.joined(separator: "; ")
+        if !last.isEmpty { line += "; last: " + last.joined(separator: "; ") }
         return line
     }
 

@@ -117,16 +117,13 @@ public struct DocumentAnalyzer: Sendable {
     }
 
     /// `sensitivityKeywords` as plain words for `SensitiveWords`, which scans stored texts
-    /// (`TextMinimizer.looksSensitive`): the marks `*` and `$` dropped, a `/pattern` by its
-    /// letters without its look-arounds ("/rezept(?!ion)" → "rezept"). Short words still count
-    /// only as whole words there; a long one is also found inside a word, so this errs on the
-    /// side of keeping a picture out of previews.
-    static let plainSensitivityWords: [String] = sensitivityKeywords.flatMap(\.1).map { word in
-        guard word.hasPrefix("/") else {
-            return word.replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "$", with: "")
-        }
-        return String(word.dropFirst()).replacingOccurrences(of: #"\(\?<?[!=][^)]*\)"#, with: "", options: .regularExpression)
-    }
+    /// (`TextMinimizer.looksSensitive`): the marks `*` and `$` dropped. A `/pattern` is left out:
+    /// its bare word would find what the pattern excludes ("Rezeption", "please be patient"),
+    /// and a text it matches is medical and never stored (`TextMinimizer.storable`). Short words
+    /// still count only as whole words there; a long one is also found inside a word.
+    static let plainSensitivityWords: [String] = sensitivityKeywords.flatMap(\.1)
+        .filter { !$0.hasPrefix("/") }
+        .map { $0.replacingOccurrences(of: "*", with: "").replacingOccurrences(of: "$", with: "") }
 
     /// Words printed on a bank card or naming one ("Visa Debit", "girocard", "VALID THRU").
     /// They do not make a document sensitive where it has a type (a receipt paid by girocard

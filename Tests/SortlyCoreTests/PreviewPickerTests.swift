@@ -452,8 +452,13 @@ struct PreviewSecondReviewTests {
         for word in DocumentAnalyzer.plainSensitivityWords {
             #expect(!word.contains(where: { "*$/()?<!".contains($0) }), "\(word)")
         }
-        #expect(DocumentAnalyzer.plainSensitivityWords.contains("rezept"))
-        #expect(DocumentAnalyzer.plainSensitivityWords.contains("patient"))
+        // A pattern's word is not scanned for: it would find what the pattern leaves out, and a
+        // text the pattern matches is medical and never stored (second review of the merge).
+        #expect(!DocumentAnalyzer.plainSensitivityWords.contains("rezept"))
+        #expect(!DocumentAnalyzer.plainSensitivityWords.contains("patient"))
+        for text in ["Rezeption geöffnet 7-22 Uhr", "Please be patient, loading"] {
+            #expect(!TextMinimizer.looksSensitive(TextMinimizer.storable(text)), "\(text)")
+        }
         for text in ["Laborbefund vom 3.4.", "Facharztbrief", "Einkommensteuerbescheid 2025", "BIC BYLADEM1001"] {
             #expect(TextMinimizer.looksSensitive(text), "\(text)")
         }

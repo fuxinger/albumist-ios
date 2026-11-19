@@ -257,9 +257,9 @@ final class SortlyLockedUITests: XCTestCase {
                 // card. A new launch starts the count at 1 again: the locked run's purchase
                 // defaults are emptied at every launch (UITestSupport.lockedPurchaseDefaults) and
                 // set to -SortlyUITestFreeAlbumsLeft 1; the suggestions are in the database.
-                // Not taken for granted: an undo whose finalization had not been stored yet (it
-                // runs after the receipt shows) is finalized at the launch and gives back again,
-                // so the count is read in Settings below.
+                // Since the album ledger (bundle j) a set start (FreeAlbumLedger(startingWithUsed:))
+                // is never given back, so one free album should be left; not taken for granted
+                // all the same: the count is read in Settings below.
                 relaunch()
                 _ = selectRecommended("open suggestions after taking back (locked)")
             }

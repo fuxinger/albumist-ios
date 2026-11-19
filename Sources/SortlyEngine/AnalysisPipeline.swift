@@ -282,7 +282,7 @@ public actor AnalysisPipeline {
         static let homeTimeZone = "user.homeTimeZone"
     }
 
-    private let store: SortlyStore
+    let store: SortlyStore
     private let reader: any PhotoLibraryReading
     private let analyzer: any ContentAnalyzing
     private let geocoder: (any ReverseGeocoding)?
@@ -645,10 +645,16 @@ public actor AnalysisPipeline {
     /// (only a run writes the photos, and the two take turns); otherwise they are read here.
     /// While no place is known (a first run before its places step) no photo is read: a read of
     /// 50,000 photos made the trips step stand silent for longer than it may.
-    private func placeTimeZones(library: [AssetSnapshot]? = nil) async throws -> [AssetID: TimeZone] {
-        let revision = await store.placesRevision
+    /// `read`: the places and the photos a caller read itself, after it took the state of the
+    /// places (`revision`): used instead of reading them again (the overview's facts, P4-02); a
+    /// write after `revision` keeps them from being kept for others, as below.
+    private func placeTimeZones(library: [AssetSnapshot]? = nil,
+                                read: (revision: Int, places: [AssetID: ResolvedPlace])? = nil) async throws -> [AssetID: TimeZone] {
+        let revision: Int
+        if let read { revision = read.revision } else { revision = await store.placesRevision }
         if let cached = placeZones, cached.revision == revision { return cached.zones }
-        let places = try await store.places()
+        let places: [AssetID: ResolvedPlace]
+        if let read { places = read.places } else { places = try await store.places() }
         var zones: [AssetID: TimeZone] = [:]
         if !places.isEmpty {
             zoneProbe?()
@@ -2181,24 +2187,60 @@ public actor AnalysisPipeline {
         )
     }
 
+    /// The facts, with the album list and the image results read for them: the overview needs
+    /// both too, and read them a second time next to the facts (review P4-02: the image results
+    /// of 50,000 photos are about a second to read). Each input is read once; the photos and the
+    /// places also serve the zones of the places when they are not known for this state of the
+    /// places yet (the first refresh after a launch read both twice).
+    func factsForOverview() async throws -> (facts: [AssetFacts], inventory: CollectionInventory, contents: [AssetID: ContentAnalysis]) {
+        // Before the photos and the places are read: a write meanwhile keeps the zones made
+        // from them from being kept (`placeTimeZones`).
+        let revision = await store.placesRevision
+        let all = try await store.allAssets()
+        let inventory = try await store.loadInventory()
+        let read = try await assembledFacts(
+            all: all, inventory: inventory,
+            trips: try await store.value([Trip].self, forKey: Key.trips) ?? [],
+            frequent: try await store.value([FrequentPlace].self, forKey: Key.frequentPlaces) ?? [],
+            groups: try await store.value([ObservationGroup].self, forKey: Key.groups) ?? [],
+            analysed: true, placesRevision: revision)
+        return (read.facts, inventory, read.contents)
+    }
+
     /// Assembled off this actor (`offActor`): the overview asks for the facts while a run goes
     /// on (`refreshDerived` after the early suggestions), and over 50,000 photos assembling
     /// them held the run's image step for about a second on Linux.
     /// `analysed` false: without the labels and texts read so far (an early set, `makeProposals`).
     private func currentFacts(all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace], groups: [ObservationGroup],
                               analysed: Bool = true) async throws -> [AssetFacts] {
+        try await assembledFacts(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups,
+                                 analysed: analysed, placesRevision: nil).facts
+    }
+
+    /// `currentFacts`, with the image results it read. `placesRevision`: the state of the places
+    /// taken before `all` was read; the zones of the places are then made from `all` and the
+    /// places read here (`factsForOverview`), not read again.
+    private func assembledFacts(all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
+                                groups: [ObservationGroup], analysed: Bool,
+                                placesRevision: Int?) async throws -> (facts: [AssetFacts], contents: [AssetID: ContentAnalysis]) {
         let places = try await store.places()
         let contents = analysed ? try await store.results(ContentAnalysis.self, kind: "content") : [:]
         let texts = analysed ? try await store.results(TextResult.self, kind: "text") : [:]
         let home = try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
         let withoutCountry = try await store.value(Set<AssetID>.self, forKey: Key.placesWithoutCountry) ?? []
         let homeZone = try await homeTimeZone()
-        let placeZones = try await placeTimeZones()
-        return await offActor {
+        let placeZones: [AssetID: TimeZone]
+        if let placesRevision {
+            placeZones = try await placeTimeZones(library: all, read: (placesRevision, places))
+        } else {
+            placeZones = try await placeTimeZones()
+        }
+        let facts = await offActor {
             FactsAssembler.assemble(assets: all, places: places, contents: contents, texts: texts, trips: trips,
                                     frequentPlaces: frequent, groups: groups, inventory: inventory, home: home,
                                     withoutCountry: withoutCountry, homeTimeZone: homeZone, placeZones: placeZones)
         }
+        return (facts, contents)
     }
 
     /// The remembered identities, updated with this run's trips. Identities of trips that are

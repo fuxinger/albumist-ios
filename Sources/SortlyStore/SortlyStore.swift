@@ -12,6 +12,11 @@ public actor SortlyStore: PlanJournal {
     /// `upsertAssets`, `removeAssets`, `resetAnalysis`): what is worked out from the places of
     /// all photos holds as long as it stays the same (their time zones, second review of P1-15).
     public private(set) var placesRevision = 0
+    /// How often each read that goes over every photo (or every album or override) ran:
+    /// `allAssets`, `places`, `results` of each kind, `loadInventory`, `overrides`. Tests count
+    /// with it that a refresh of the overview reads each of them once (review P4-02).
+    public private(set) var wholeLibraryReads: [String: Int] = [:]
+    private func counted(_ read: String) { wholeLibraryReads[read, default: 0] += 1 }
 
     /// - Parameter url: database file; `nil` creates an in-memory store (tests, previews).
     public init(url: URL?) throws {
@@ -158,7 +163,8 @@ public actor SortlyStore: PlanJournal {
     }
 
     public func allAssets() throws -> [AssetSnapshot] {
-        try db.query("SELECT * FROM assets ORDER BY creation_date, id").map(Self.asset)
+        counted("allAssets")
+        return try db.query("SELECT * FROM assets ORDER BY creation_date, id").map(Self.asset)
     }
 
     public func asset(_ id: AssetID) throws -> AssetSnapshot? {
@@ -375,6 +381,7 @@ public actor SortlyStore: PlanJournal {
     }
 
     public func loadInventory() throws -> CollectionInventory {
+        counted("loadInventory")
         var members: [String: Set<AssetID>] = [:]
         for row in try db.query("SELECT collection_id, asset_id FROM collection_members") {
             if let c = row["collection_id"]?.string, let a = row["asset_id"]?.string { members[c, default: []].insert(AssetID(a)) }
@@ -432,6 +439,7 @@ public actor SortlyStore: PlanJournal {
     }
 
     public func places() throws -> [AssetID: ResolvedPlace] {
+        counted("places")
         var result: [AssetID: ResolvedPlace] = [:]
         for r in try db.query("SELECT * FROM asset_places") {
             guard let id = r["asset_id"]?.string, let c = try decode(PlaceComponents.self, r["components"]),
@@ -454,6 +462,7 @@ public actor SortlyStore: PlanJournal {
     }
 
     public func results<T: Decodable>(_ type: T.Type, kind: String, minimumVersion: Int = 0) throws -> [AssetID: T] {
+        counted("results." + kind)
         var out: [AssetID: T] = [:]
         for r in try db.query("SELECT asset_id, payload FROM analysis_results WHERE kind = ? AND version >= ?", [.text(kind), .integer(Int64(minimumVersion))]) {
             if let id = r["asset_id"]?.string, let v = try decode(T.self, r["payload"]) { out[AssetID(id)] = v }
@@ -651,7 +660,8 @@ public actor SortlyStore: PlanJournal {
     }
 
     public func overrides() throws -> [UserOverride] {
-        try db.query("SELECT payload FROM overrides ORDER BY created_at").compactMap { try decode(UserOverride.self, $0["payload"]) }
+        counted("overrides")
+        return try db.query("SELECT payload FROM overrides ORDER BY created_at").compactMap { try decode(UserOverride.self, $0["payload"]) }
     }
 
     /// Saves a rule as a new version. Older versions stay for traceability.

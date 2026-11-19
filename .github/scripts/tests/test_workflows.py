@@ -407,5 +407,65 @@ class TestFlightWiringTests(unittest.TestCase):
                 self.assertIn(step, names)
 
 
+def job_steps(text, job):
+    """[(name, if, run)] of a job's steps, read by indentation (comments left out). A folded
+    "if: >-" is joined into one line."""
+    steps = []
+    for chunk in re.split(r"\n      - ", "\n" + job_blocks(text)[job])[1:]:
+        lines = chunk.splitlines()
+        fields, i = {}, 0
+        keyed = [(lines[0], 0)] + [(line[8:], n) for n, line in enumerate(lines[1:], 1)
+                                   if line.startswith("        ") and not line.startswith("         ")]
+        for line, n in keyed:
+            found = re.match(r"([a-z-]+):(?: (.*))?$", line)
+            if not found or found.group(1) in fields:
+                continue
+            value = (found.group(2) or "").strip()
+            if value in (">-", ">", "|"):
+                more = []
+                for later in lines[n + 1:]:
+                    if not later.startswith("          "):
+                        break
+                    more.append(later.strip())
+                value = (" " if value.startswith(">") else "\n").join(more)
+            fields[found.group(1)] = value
+        steps.append((fields.get("name", ""), " ".join(fields.get("if", "").split()), fields.get("run", "")))
+    return steps
+
+
+class ReleaseSkipTests(unittest.TestCase):
+    """In a TestFlight run (release) CI's Mac job leaves out a step only when ui.yml, called in
+    the same run right after it, builds the same thing itself (coordinator's rule for C4: no
+    step whose product nobody else makes is dropped)."""
+
+    def test_a_step_left_out_in_release_is_built_by_the_ui_flow(self):
+        ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        build = "\n".join(run for _, _, run in job_steps(ui, "build"))
+        left_out = [(name, run) for name, rule, run in job_steps(ci, "ios") if "!inputs.release" in rule.replace(" ", "")]
+        self.assertEqual([name for name, _ in left_out], ["Build UI tests"])
+        for name, run in left_out:
+            with self.subTest(step=name):
+                actions = re.findall(r"xcodebuild\s+(?:\\\s*)?([a-z-]+)", run)
+                schemes = re.findall(r"-scheme\s+(\S+)", run)
+                self.assertTrue(actions and schemes, "the step builds something with xcodebuild")
+                for action in actions:
+                    self.assertRegex(build, rf"xcodebuild\s+(?:\\\s*)?{action}\b")
+                for scheme in schemes:
+                    self.assertRegex(build, rf"-scheme\s+{re.escape(scheme)}\b")
+        # ui.yml's build runs in release mode (Linux core tests skipped there) and the TestFlight
+        # run calls the UI flow after CI.
+        self.assertIn("(inputs.release && needs.core-linux.result == 'skipped')", job_field(ui, "build", "if"))
+        tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        self.assertIn("tests", [need.strip() for need in job_field(tf, "ui", "needs").split(",")])
+        self.assertIn("release: true", job_blocks(tf)["ui"])
+
+    def test_the_step_reader(self):
+        text = ("on: push\njobs:\n  a:\n    steps:\n      - name: One\n        if: x && !inputs.release\n        run: |\n"
+                "          xcodebuild build-for-testing -scheme S\n      - uses: actions/checkout@v1\n      - name: Two\n"
+                "        run: echo\n")
+        self.assertEqual([(n, r) for n, r, _ in job_steps(text, "a")], [("One", "x && !inputs.release"), ("", ""), ("Two", "")])
+
+
 if __name__ == "__main__":
     unittest.main()

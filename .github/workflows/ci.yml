@@ -255,8 +255,13 @@ jobs:
           fi
       - name: Build UI tests
         # The UI tests run in their own workflow (ui.yml); building them here finds a compile
-        # error in them within this run instead of after the long simulator setup there.
-        if: steps.sim.outputs.udid != ''
+        # error in them within this run instead of after the long simulator setup there. Not in
+        # a TestFlight run (release): there ui.yml's "UI build" builds exactly this (scheme
+        # SortlyUI, build-for-testing) right after this job, in the same run, and a compile error
+        # stops the upload there (about 1 min of this Mac, TestFlight run 44461253154).
+        # test_workflows.py ReleaseSkipTests: a step left out in release mode is one whose
+        # build ui.yml really does itself.
+        if: steps.sim.outputs.udid != '' && !inputs.release
         run: |
           cd App
           xcodebuild build-for-testing \

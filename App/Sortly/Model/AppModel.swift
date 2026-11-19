@@ -1875,7 +1875,11 @@ final class AppModel {
 
     /// `afterFailure`: the one more refresh after a failed one (`TripChangeLedger.refreshFailed`).
     func refreshDerived(afterFailure: Bool = false) async {
-        guard let store, let pipeline else { return }
+        guard let store, let pipeline else {
+            // A refresh asked for after a failure must not leave the trip controls waiting.
+            tripChangeLedger.refreshCouldNotStart()
+            return
+        }
         let call = derivedCalls.begin()
         // The trip changes in the suggestions the store holds now (`TripChangeLedger`), until
         // this call is over, whichever way it ends.

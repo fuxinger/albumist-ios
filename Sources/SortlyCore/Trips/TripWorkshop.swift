@@ -299,6 +299,12 @@ public struct TripChangeLedger: Sendable, Equatable {
         return true
     }
 
+    /// A refresh could not start (no store or pipeline): the one more asked for by
+    /// `refreshFailed` is not coming, so the controls must not wait for it.
+    public mutating func refreshCouldNotStart() {
+        oneMoreComing = false
+    }
+
     /// Refresh `call` is over, shown or not.
     public mutating func refreshEnded(_ call: Int) {
         if refreshes[call] != nil { refreshes[call] = nil }

@@ -255,6 +255,24 @@ struct TripChangeLedgerTests {
         #expect(ledger.state == .applied)
     }
 
+    /// The one more refresh after a failure could not start (no store or pipeline any more): the
+    /// controls must not stay grey waiting for it.
+    @Test func aRefreshThatCannotStartFreesTheControls() {
+        var ledger = TripChangeLedger()
+        ledger.changeStored()
+        ledger.runStarted(1)
+        ledger.runEnded(1, madeSuggestions: true)
+        ledger.refreshBegan(10)
+        let asked = ledger.refreshFailed(10, newest: true, retry: false)
+        ledger.refreshEnded(10)
+        ledger.runSettled(1)
+        #expect(asked)
+        #expect(ledger.settling)
+        ledger.refreshCouldNotStart()
+        #expect(!ledger.settling, "the trip controls stayed grey for a refresh that never came")
+        #expect(ledger.state == .savedForLater)
+    }
+
     /// No extra refresh where none is needed: an older call failed (the newest one is still
     /// going and shows the change), or nothing written waits to be shown.
     @Test func onlyTheNewestFailureWithAChangeLeftAsksAgain() {

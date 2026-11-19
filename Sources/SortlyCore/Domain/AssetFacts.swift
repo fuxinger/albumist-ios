@@ -41,6 +41,11 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
     /// switched off (a border, a small island). Its place counts like a photo without a
     /// location (`analysisImpossible`), not as waiting for good.
     public var countryOutOfReach: Bool
+    /// The time zone of the clock where it was taken (review P1-15, `LocalTime`): its place's own
+    /// zone, else its country's zone there, else the home time zone. Its days, months and years
+    /// are those of that clock. Set where the facts are assembled (`FactsAssembler`); `nil` in
+    /// facts made without it: the calendar's zone counts.
+    public var timeZone: TimeZone?
 
     public init(
         asset: AssetSnapshot,
@@ -59,7 +64,8 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         atHome: Bool = false,
         looksLikeDocument: Bool = false,
         contentKnown: Bool = false,
-        countryOutOfReach: Bool = false
+        countryOutOfReach: Bool = false,
+        timeZone: TimeZone? = nil
     ) {
         self.asset = asset
         self.place = place
@@ -78,6 +84,7 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         self.looksLikeDocument = looksLikeDocument
         self.countryOutOfReach = countryOutOfReach
         self.contentKnown = contentKnown
+        self.timeZone = timeZone
         textLooksSensitive = recognizedText.map(TextMinimizer.looksSensitive) ?? false
     }
 

@@ -11,7 +11,7 @@
   python3 testflight_notes.py upload --notes ... --build 28 --sha ... --bundle-id app.albumist.ios [--gate small]
       Waits (bounded) until App Store Connect knows the build, then writes the text into the
       build's German beta localization (creates it if missing). Same API key as the upload, in
-      the upload job of testflight.yml (the only job that gets it, after the owner's approval):
+      the upload job of testflight.yml (the only job that gets it):
       KEY_ID, ISSUER_ID and KEY_PATH (the .p8 file) in the environment. Exit 0 also on failure,
       with a warning: the build itself is uploaded already and stays usable.
 

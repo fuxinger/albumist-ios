@@ -1,14 +1,14 @@
 name: TestFlight
-# The daily build (gate small; daily-build.yml starts it) says so in the run list and in the
-# approval request; every other run keeps the workflow's name (an empty run-name falls back to it).
+# The daily build (gate small; daily-build.yml starts it) says so in the run list; every other
+# run keeps the workflow's name (an empty run-name falls back to it).
 run-name: >-
   ${{ inputs.gate == 'small' && 'TestFlight daily build (small gate, only for the owner)' || '' }}
 
 # Builds a signed App Store build and uploads it to TestFlight, so Albumist can be installed on
 # a real iPhone (docs/TESTFLIGHT.md). One run does it all for one commit (Profi-Analyse 16.11.,
 # Top 10 / G8, decided 17.11.): it tests exactly that commit itself and, only when every test of
-# its gate is green and the owner has approved the upload, archives, uploads and tags it. No job
-# waits for or looks at other workflow runs.
+# its gate is green, archives, uploads and tags it, by itself (the owner's decision of 19.11.2026,
+# which replaced the click of decision 5 of 18.11.). No job waits for or looks at other runs.
 #
 # Two gates (input "gate"; the owner's decision 10 of 18.11.2026, docs/TESTFLIGHT.md "Zwei Tore"):
 #   - big (the default; every build for testers and the App Store): CI, the UI flow with every
@@ -19,20 +19,23 @@ run-name: >-
 #     two groups. No other UI group. The run name, the tag message and "Was testen" say "small
 #     gate"; such a build is not given to testers.
 #   The stress pass belongs to both gates: the owner's rule 17.11. and his decision 4 want it
-#   before every upload, and the daily build can upload (after his click).
-# Either way the upload waits for the owner (the owner's decision 5 of 18.11.2026): the upload job
-# runs in the GitHub environment "testflight-upload", whose required reviewer is the owner, and
-# the four App Store Connect secrets are environment secrets there, so only that job can read
-# them, and only after the owner's click (docs/launch/FREIGABE_EINRICHTEN.md). No other job of
-# any workflow names them (.github/scripts/tests/test_workflows.py).
+#   before every upload, and the daily build uploads too (an internal build for the owner).
+# Either way the upload follows the gates, without a click (the owner's decision of 19.11.2026):
+# the upload job runs only from main and only when every gate below is green, in the GitHub
+# environment "testflight-upload", which only the branch main may use, and the four App Store
+# Connect secrets are environment secrets there, so only that job can read them
+# (docs/launch/FREIGABE_EINRICHTEN.md). No other job of any workflow names them
+# (.github/scripts/tests/test_workflows.py).
 #
-#   1. Upload approval (Linux, a minute): only on main, and only when the repository is public
-#      and the environment testflight-upload asks a required reviewer first and may be used
-#      from the branch main only (GitHub enforces the reviewer in a private repository only with
-#      Enterprise; .github/scripts/upload_approval.py);
-#      otherwise the run stops here, before any macOS minute, and names the setup steps. GitHub
-#      would create a missing environment without any rule as soon as the upload job names it, so
-#      this check is what keeps an upload from starting without the owner. It reads no secret.
+#   1. Upload setup (Linux, a minute): only on main, and only when the environment
+#      testflight-upload exists and may be used from the branch main only (a custom rule for
+#      exactly main; .github/scripts/upload_approval.py). In a private repository that needs
+#      GitHub Pro, Team or Enterprise (on GitHub Free there are no environments in private
+#      repositories): without a branch rule the API shows, the run stops; on Free the secrets
+#      would not reach the job either. Otherwise the run stops here, before any macOS minute, and
+#      names the setup steps. GitHub would create a missing environment without any rule as
+#      soon as the upload job names it, so this check is what keeps the upload job from ever
+#      starting without the fence. It reads no secret.
 #   2. Tests: CI (ci.yml) with the app rules, the Linux core tests and then, on one Mac, the
 #      iOS build, core and app tests. Its iOS job always runs here.
 #   3. Then side by side: the UI flow (ui.yml, at most four Macs) and the small stress pass
@@ -52,9 +55,9 @@ run-name: >-
 #      fingerprint and its own test fingerprint, from this run or an earlier one, and none may be
 #      red for that pair (a red is fixed, never re-run to green; .github/scripts/ui_evidence.py
 #      gate). It names the reused results and their flaky tests.
-#   4. Archive and upload, one Mac job, only when 2, 3 and 3b are green and the owner has
-#      approved it (the run page: "Review deployments" > "Approve and deploy"). Until then the job
-#      waits without a runner; a run nobody approves ends after 30 days (GitHub). Then it archives
+#   4. Archive and upload, one Mac job, only when 1, 2, 3 and 3b are green (no click since
+#      19.11.2026). Before the archive it reads the earlier attempts of this run (a red test is
+#      never re-run to green, earlier_attempts.py). Then it archives
 #      exactly this commit with the pinned Xcode and this run's number as the build number,
 #      checks the app's Info.plist (commit, build number, Xcode build), signs it for the App
 #      Store during the export, uploads it and sets "Was testen" from docs/TESTFLIGHT_NOTES.md as
@@ -62,10 +65,10 @@ run-name: >-
 #      key). Archive and export happen in the same job: nothing is handed between machines, so
 #      the app that is uploaded is the one built from the tested commit.
 #   5. The commit gets the annotated git tag build-<number>; its message names the gate.
-# Big gate: two to two and a half hours until the approval when every UI group runs (CI ~20 min,
+# Big gate: two to two and a half hours until the upload starts when every UI group runs (CI ~20 min,
 # UI flow 75-100 min observed); after a test-only change only the touched groups run, and the
 # stress pass (~45 min) sets the time. Small gate: about 70 min (CI ~20, then the stress pass
-# ~45 sets the time; its two UI groups, ~20 with their build, run beside it). After the click:
+# ~45 sets the time; its two UI groups, ~20 with their build, run beside it). Then:
 # archive and upload ~15-20 min, "Was testen" mostly a few minutes more (at most 20).
 #
 # Every part tests this run's commit (github.sha); only a UI group may instead be covered by an
@@ -92,19 +95,19 @@ run-name: >-
 #     the middle of a test step (e.g. "Run UI tests"), or a hiccup in "Select pinned Xcode" or
 #     "Generate Xcode project", needs a new run too. The upload job of an allowed re-run lists
 #     every earlier failure as a warning and in its summary, and the tag message names them.
-#     The UI build products are kept 3 days for this. An upload the owner rejected ends its job
-#     before any step: "Re-run failed jobs" asks him again (the tests are not run again).
+#     The UI build products are kept 3 days for this.
 #   - No input or flag skips a test or the gate: the emergency input that uploaded without any
 #     test is gone (the owner's decision 17.11., review G5-02/G6-02; .github/scripts/tests/
 #     test_workflows.py checks it). An urgent build waits for its tests like any other. The only
 #     choice is the gate (big or small, both above, both decided by the owner), and every upload
-#     waits for the owner's approval.
+#     follows every gate of its run (CI and its gate, the UI flow and the UI gate, the stress pass,
+#     the Release smoke test, the earlier attempts).
 #
 # Started by hand: Actions > TestFlight > Run workflow on main (gh workflow run testflight.yml
 # --ref main; -f gate=small for an internal build), and with the small gate by daily-build.yml
 # once a day when the app changed (it starts no run while one runs or waits). No push or merge
-# starts a build, and nothing uploads without the owner's click. On another branch the first job
-# is skipped and with it the whole run (the environment is set to allow main only, too). The old
+# starts a build. On another branch the first job is skipped and with it the whole run, and the
+# environment may be used from main only, too. The old
 # release branch claude/sortly-app uploads nothing any more: since 1358f7f (the owner's decision
 # 18.11., branch kept) its testflight.yml can only be started by hand and stops at once, with no
 # secret, no Mac and no push trigger.
@@ -131,9 +134,8 @@ env:
 
 # One TestFlight run at a time and none is cancelled: a second run waits (a third one would
 # replace the waiting second), so builds reach App Store Connect in the order of their numbers.
-# The group is held until the last job of the run ends: also while the upload job waits for the
-# owner's approval (approve or reject it the same day; daily-build.yml starts no run then), and
-# until "Was testen" is set in the upload job. A workflow's group cannot be let go earlier; job
+# The group is held until the last job of the run ends, until "Was testen" is set in the upload
+# job (daily-build.yml starts no run while one runs or waits). A workflow's group cannot be let go earlier; job
 # groups instead would let two runs test at the same time (ten Macs).
 concurrency:
   group: testflight
@@ -141,11 +143,11 @@ concurrency:
 
 jobs:
   check:
-    # Step 1 (top of this file): only main, and only when the upload asks the owner first. No
-    # secret is read here: the App Store Connect secrets are environment secrets of
-    # testflight-upload, for the upload job alone. Also turns the gate into the UI groups to run
-    # and to check.
-    name: Upload approval
+    # Step 1 (top of this file): only main, and only when the environment testflight-upload
+    # exists and only main may use it. No secret is read here: the App Store Connect secrets are
+    # environment secrets of testflight-upload, for the upload job alone. Also turns the gate
+    # into the UI groups to run and to check. daily_build.py reads this job's name.
+    name: Upload setup
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -154,7 +156,7 @@ jobs:
       contents: read
       actions: read
     outputs:
-      ready: ${{ steps.approval.outputs.ready }}
+      ready: ${{ steps.setup.outputs.ready }}
       gate: ${{ steps.gate.outputs.gate }}
       ui_groups: ${{ steps.gate.outputs.ui_groups }}
       gate_groups: ${{ steps.gate.outputs.gate_groups }}
@@ -163,8 +165,8 @@ jobs:
         with:
           sparse-checkout: .github/scripts
           persist-credentials: false
-      - name: Upload approval set up
-        id: approval
+      - name: Upload setup checked
+        id: setup
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/upload_approval.py check
@@ -217,7 +219,7 @@ jobs:
   stress:
     name: Stress pass
     # Both gates (the owner's rule 17.11. and decision 4: before every upload, the daily build
-    # included, as it can upload after his click).
+    # included, as it uploads too).
     needs: tests
     uses: ./.github/workflows/ui-stress.yml
     with:
@@ -473,10 +475,12 @@ jobs:
       ${{ !cancelled() && needs.check.outputs.ready == 'true' && needs.tests.result == 'success'
       && needs.ui.result == 'success' && needs.stress.result == 'success'
       && needs.release-smoke.result == 'success' && needs.ui-gate.result == 'success' }}
-    # The owner's approval (decision 5 of 18.11.2026): the job waits until the environment's
-    # required reviewer approves it, and only then gets its secrets (the four App Store Connect
-    # secrets are environment secrets there, docs/launch/FREIGABE_EINRICHTEN.md). The only job of
-    # any workflow that names this environment or these secrets (test_workflows.py).
+    # No click since the owner's decision of 19.11.2026 (it replaced decision 5 of 18.11.): the job
+    # starts when every gate above is green, in the environment testflight-upload, which only
+    # the branch main may use (job check made sure it exists with that rule, so this job never
+    # creates an environment without it), and only there gets its secrets (the four App Store
+    # Connect secrets are environment secrets, docs/launch/FREIGABE_EINRICHTEN.md). The only job
+    # of any workflow that names this environment or these secrets (test_workflows.py).
     environment: testflight-upload
     runs-on: xcode-27
     # Archive ~10-20 min, export and upload ~3-5 min, "Was testen" mostly a few minutes (at most 20).
@@ -498,7 +502,7 @@ jobs:
     # step only learns whether the four secrets are set, never their values.
     steps:
       - name: App Store Connect secrets present
-        # Right after the approval, so a missing secret stops the job before the archive. An
+        # First, so a missing secret stops the job before the archive. An
         # expression that yields true or false: no secret value is in this step.
         env:
           PRESENT: >-
@@ -619,7 +623,7 @@ jobs:
       - name: Set "Was testen" for this build
         # From docs/TESTFLIGHT_NOTES.md, once App Store Connect knows the build (usually a few
         # minutes after the upload, before Apple has processed it). Here and not in a Linux job
-        # of its own, because only this job gets the key (one approval, not two). At most 20 min
+        # of its own, because only this job gets the key. At most 20 min
         # on this Mac. A failure never touches the upload, which is done already: the script
         # warns and exits 0, and continue-on-error keeps the job green.
         continue-on-error: true

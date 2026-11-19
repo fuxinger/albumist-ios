@@ -1,143 +1,79 @@
-# Freigabe vor dem Hochladen einrichten (einmalig, etwa 10 Minuten)
+# Upload zu TestFlight einrichten (einmalig, etwa 5 Minuten)
 
-Ab jetzt lädt GitHub einen Build erst zu TestFlight hoch, wenn **du** ihn freigibst (deine
-Entscheidung vom 18.11.2026). Dafür kommt der Apple-Schlüssel in einen geschützten Bereich von
-GitHub, eine „Umgebung“. Nur der Upload-Schritt kommt an ihn heran, und erst nach deinem Klick.
+Seit deiner Entscheidung vom 19.11.2026 lädt GitHub einen Build **ohne Klick** zu TestFlight
+hoch: nur vom Zweig `main` und nur, wenn jedes Tor des Laufs grün ist (CI, UI-Tests und UI-Tor,
+Härtetest, Release-Kurztest, frühere Versuche des Laufs). Das ersetzt den Klick aus der
+Entscheidung vom 18.11. Der Apple-Schlüssel liegt in einem geschützten Bereich von GitHub, der
+„Umgebung“ `testflight-upload`. Nur der Upload-Schritt kommt an ihn heran, und nur von `main`.
+Diese Regel ist jetzt der einzige Zaun; darum prüft der erste Job jedes Laufs sie genau.
 
-**Bis du das eingerichtet hast, lädt TestFlight nichts hoch.** Ein Lauf hält dann gleich im
-ersten Schritt („Upload approval“) an und verweist auf diese Seite. Auch der tägliche Build
-startet erst danach.
+**Bis das eingerichtet ist, lädt TestFlight nichts hoch.** Ein Lauf hält dann gleich im ersten
+Job („Upload setup“) an und verweist auf diese Seite. Auch der tägliche Build startet erst danach.
 
-**Wichtig, bevor das Repository privat wird:** Den Prüfer für eine Umgebung setzt GitHub ohne
-Enterprise-Abo nur in öffentlichen Repositorys durch (auch GitHub Pro oder Team reichen nicht).
-Darum hält der erste Job jeden TestFlight-Lauf an, sobald das Repository nicht mehr öffentlich
-ist, und es wird nichts mehr hochgeladen. Bevor du es auf privat stellst, bitte zuerst einen
-Agenten fragen: die Freigabe braucht dann einen anderen Weg.
+**Privates Repository:** Mit dem kostenlosen GitHub-Abo (GitHub Free) gibt es Umgebungen, ihre
+Secrets und ihre Zweig-Regel nur in öffentlichen Repositorys. Privat geht es nur mit GitHub Pro,
+Team oder Enterprise. Mit GitHub Free und privatem Repository hält der erste Job an (oder der
+Upload findet die Secrets nicht); hochgeladen wird dann nichts.
 
-Am besten am Windows-PC im Browser (wegen der Datei in Schritt 4). Der Rest geht auch auf dem
-iPhone im Browser. Die Knöpfe bei GitHub sind englisch; sie stehen unten **fett**.
+Die Knöpfe bei GitHub sind englisch; sie stehen unten **fett**.
 
-## Was du brauchst
+## Die Schritte
 
-Die vier Werte, die du schon einmal bei GitHub eingetragen hast (`docs/TESTFLIGHT.md`,
-Abschnitt 3):
+1. https://github.com/fuxinger/sortly-ios/settings/environments öffnen. Gibt es
+   `testflight-upload` noch nicht: **New environment**, Name genau so, **Configure environment**.
+   Sonst `testflight-upload` antippen.
+2. Unter „Deployment protection rules“ den Haken bei **Required reviewers** entfernen, dann
+   **Save protection rules**. (Bleibt er, wartet jeder Upload weiter auf deinen Klick.)
+3. Unter „Deployment branches and tags“ **Selected branches and tags** wählen. Es muss genau eine
+   Regel geben: `main` (sonst **Add deployment branch or tag rule**, Name `main`, **Add rule**;
+   jede andere Regel löschen).
+4. Weiter unten, „Environment secrets“: diese vier müssen dort stehen (sonst **Add environment
+   secret**; Namen genau so):
 
-- **Schlüssel-ID** und **Issuer-ID**: App Store Connect > Benutzer und Zugriff > Integrationen >
-  App Store Connect API > Team-Schlüssel (die Issuer-ID steht über der Tabelle),
-- die Datei **`AuthKey_….p8`**,
-- die **Team-ID**: https://developer.apple.com/account > Mitgliedschaft.
+   | Name | Inhalt |
+   |---|---|
+   | `ASC_KEY_ID` | Schlüssel-ID (App Store Connect > Benutzer und Zugriff > Integrationen > App Store Connect API > Team-Schlüssel) |
+   | `ASC_ISSUER_ID` | Issuer-ID (steht dort über der Tabelle) |
+   | `ASC_KEY_P8` | ganzer Inhalt der Datei `AuthKey_….p8`, mit den Zeilen BEGIN und END |
+   | `APPLE_TEAM_ID` | Team-ID (https://developer.apple.com/account > Mitgliedschaft) |
 
-GitHub zeigt gespeicherte Secrets nie wieder an. Findest du die `.p8`-Datei nicht mehr: in App
-Store Connect einen neuen Team-Schlüssel erzeugen (Name `GitHub`, Zugriff **Admin**), die Datei
-laden und den alten Schlüssel widerrufen.
+5. https://github.com/fuxinger/sortly-ios/settings/secrets/actions öffnen und unter **Repository
+   secrets** dieselben vier Namen löschen, falls sie dort noch stehen. Alle anderen bleiben
+   (zum Beispiel `APPETIZE_TOKEN`). Solange einer dort steht, kann ihn jeder Workflow lesen.
+6. Prüfen: **Actions** > **TestFlight** > **Run workflow**, Zweig `main`, „Gate“ `small`. Der
+   erste Job „Upload setup“ wird grün. Rund 70 Minuten später lädt der Lauf hoch, wenn alles grün
+   ist.
 
-## Schritt 1: Umgebung anlegen
+Ist die `.p8`-Datei weg: in App Store Connect einen neuen Team-Schlüssel erzeugen (Name `GitHub`,
+Zugriff **Admin**), die Datei laden, den alten widerrufen. GitHub zeigt gespeicherte Secrets nie
+wieder an.
 
-1. https://github.com/fuxinger/sortly-ios/settings/environments öffnen.
-2. **New environment**, Name genau so: `testflight-upload`
-3. **Configure environment**.
+## Wenn etwas nicht klappt
 
-## Schritt 2: Dich als Prüfer eintragen
+- „No upload: the upload environment is not set up“ im ersten Job: Schritt 1 oder 3 fehlt, oder
+  die Zweig-Regel ist nicht genau `main`. Mit privatem Repository nennt die Meldung GitHub Free:
+  siehe oben.
+- Der Upload bricht gleich mit „App Store Connect secrets“ ab: in Schritt 4 fehlt ein Name oder
+  er ist anders geschrieben. Ergänzen, dann im Lauf **Re-run failed jobs**.
+- Der Upload wartet auf einen Klick („Review deployments“): Schritt 2 fehlt.
 
-1. Unter „Deployment protection rules“ **Required reviewers** ankreuzen.
-2. Im Suchfeld deinen GitHub-Namen eingeben (`fuxinger`) und antippen.
-3. **Prevent self-review** *nicht* ankreuzen. Sonst kannst du Läufe, die du selbst startest,
-   nicht freigeben.
-4. **Save protection rules**.
-
-## Schritt 3: Nur der Zweig `main`
-
-Pflicht: ohne genau diese eine Regel hält jeder TestFlight-Lauf im ersten Job an.
-
-1. Unter „Deployment branches and tags“ statt „No restriction“ **Selected branches and tags**
-   wählen.
-2. **Add deployment branch or tag rule**, Name `main`, **Add rule**.
-
-## Schritt 4: Die vier Secrets in die Umgebung
-
-Weiter unten auf derselben Seite, „Environment secrets“: viermal **Add environment secret**.
-
-| Name | Inhalt |
-|---|---|
-| `ASC_KEY_ID` | Schlüssel-ID |
-| `ASC_ISSUER_ID` | Issuer-ID |
-| `ASC_KEY_P8` | ganzer Inhalt der `.p8`-Datei (mit dem Editor öffnen, alles kopieren, auch die Zeilen BEGIN und END) |
-| `APPLE_TEAM_ID` | Team-ID |
-
-Die Namen genau so schreiben, Groß- und Kleinschreibung zählt.
-
-## Schritt 5: Die alten Secrets löschen
-
-Erst jetzt, nach Schritt 4:
-
-1. https://github.com/fuxinger/sortly-ios/settings/secrets/actions öffnen.
-2. Unter **Repository secrets** diese vier löschen (Papierkorb, dann bestätigen):
-   `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `APPLE_TEAM_ID`.
-3. Alle anderen bleiben, zum Beispiel `APPETIZE_TOKEN`.
-
-Erst damit ist der Schlüssel geschützt: Solange er noch als Repository-Secret dort steht, kann
-ihn jeder Workflow lesen. **Kontrolle:** Auf dieser Seite stehen die vier Namen danach nur noch
-unter **Environment secrets** (bei `testflight-upload`), nicht mehr unter **Repository secrets**.
-
-## Schritt 6 (freiwillig, etwa 3 Minuten): Schlüssel nur für Feedback
-
-Die tägliche Abfrage von Feedback und Abstürzen (Workflow „TestFlight feedback“) bekommt den
-Upload-Schlüssel nicht mehr. Ohne eigenen Schlüssel pausiert sie; ihr Lauf meldet dann nur
-„Skipped“. Feedback und Abstürze siehst du weiter direkt in App Store Connect > Albumist >
-TestFlight.
-
-Wenn du die tägliche Zählung behalten willst:
-
-1. App Store Connect > Benutzer und Zugriff > Integrationen > App Store Connect API >
-   Team-Schlüssel > **+**. Name `GitHub Feedback`, Zugriff **Developer** (nicht Admin).
-   Schlüssel laden, Schlüssel-ID notieren.
-2. https://github.com/fuxinger/sortly-ios/settings/secrets/actions > **New repository secret**,
-   dreimal:
-
-| Name | Inhalt |
-|---|---|
-| `ASC_FEEDBACK_KEY_ID` | Schlüssel-ID des neuen Schlüssels |
-| `ASC_FEEDBACK_ISSUER_ID` | Issuer-ID (dieselbe wie oben) |
-| `ASC_FEEDBACK_KEY_P8` | Inhalt der neuen `.p8`-Datei |
-
-Hier nie den Admin-Schlüssel eintragen: dann läge er wieder ungeschützt im Repository.
-
-## So sieht die Freigabe aus
-
-Wenn ein Build hochgeladen werden will:
-
-1. GitHub meldet dir meist, dass ein Lauf auf deine Prüfung wartet (E-Mail oder GitHub-App).
-   Sicher findest du ihn so: **Actions** > **TestFlight** > der Lauf mit der gelben Uhr
-   („Waiting“).
-2. Oben im Lauf steht, dass `testflight-upload` auf eine Prüfung wartet, daneben der Knopf
-   **Review deployments**.
-3. Antippen, Häkchen bei `testflight-upload` setzen, dann **Approve and deploy**.
-   Willst du diesen Build nicht: **Reject**.
-4. Danach dauert es etwa 15 bis 20 Minuten bis zum Hochladen und meist noch 5 bis 30 Minuten, bis
-   Apple den Build verarbeitet hat und er in der TestFlight-App erscheint.
-
-Gut zu wissen:
+## Gut zu wissen
 
 - **Welches Tor?** Heißt der Lauf „TestFlight daily build (small gate, only for the owner)“, ist
-  es der tägliche Build mit kleinem Tor: nur für dich, nicht an Tester weitergeben. Auch die
-  letzte Zeile von „Was testen“ sagt das dann. Heißt er nur „TestFlight“, hatte er das große Tor
-  (für Tester und App Store). Was die beiden Tore prüfen: `docs/TESTFLIGHT.md`, „Zwei Tore“.
-- **Bitte am selben Tag entscheiden** (freigeben oder ablehnen). Solange ein Lauf wartet, startet
-  kein anderer TestFlight-Lauf, auch kein täglicher Build. Nach 30 Tagen bricht GitHub ihn selbst
-  ab.
-- Der tägliche Build wartet morgens ab etwa 6 Uhr (im Sommer 7 Uhr) auf dich, aber nur an
-  Tagen, an denen sich die App geändert hat.
-- **Die Freigabe gibst nur du.** Kein Agent gibt sie für dich.
-- Aus Versehen abgelehnt? Im Lauf **Re-run failed jobs**: GitHub fragt dich noch einmal, die Tests
-  laufen nicht neu.
+  es der tägliche Build mit kleinem Tor: ein interner Build nur für dich, nicht an Tester
+  weitergeben (auch die letzte Zeile von „Was testen“ sagt das). Er lädt jetzt an jedem Tag hoch,
+  an dem sich die App geändert hat und alles grün ist. Heißt der Lauf nur „TestFlight“, hatte er
+  das große Tor (für Tester und App Store). Was die Tore prüfen: `docs/TESTFLIGHT.md`, „Zwei Tore“.
+- Solange ein TestFlight-Lauf läuft oder wartet, startet kein anderer, auch kein täglicher Build.
+- Nach dem Hochladen dauert es meist 5 bis 30 Minuten, bis Apple den Build verarbeitet hat und er
+  in der TestFlight-App erscheint.
 
-## Prüfen, ob alles stimmt
+## Freiwillig: Schlüssel nur für Feedback (etwa 3 Minuten)
 
-Entweder auf den nächsten täglichen Build warten, oder: **Actions** > **TestFlight** > **Run
-workflow**, Zweig `main`, im Feld „Gate“ `small` wählen (das geht am schnellsten). Der erste Job
-„Upload approval“ wird grün und nennt dich als Prüfer. Rund 70 Minuten später wartet der Lauf auf
-deine Freigabe.
-
-Steht im ersten Job stattdessen „No upload: the approval is not set up“, fehlt Schritt 1 oder 2.
-Bricht der Upload nach deiner Freigabe gleich mit „App Store Connect secrets“ ab, fehlt in
-Schritt 4 ein Name oder er ist anders geschrieben: ergänzen, dann im Lauf **Re-run failed jobs**.
+Die tägliche Abfrage von Feedback und Abstürzen (Workflow „TestFlight feedback“) bekommt den
+Upload-Schlüssel nicht. Ohne eigenen Schlüssel pausiert sie („Skipped“); Feedback siehst du weiter
+in App Store Connect > Albumist > TestFlight. Für die tägliche Zählung: in App Store Connect einen
+Team-Schlüssel `GitHub Feedback` mit Zugriff **Developer** (nicht Admin) anlegen und bei
+https://github.com/fuxinger/sortly-ios/settings/secrets/actions als **Repository secrets**
+`ASC_FEEDBACK_KEY_ID`, `ASC_FEEDBACK_ISSUER_ID` und `ASC_FEEDBACK_KEY_P8` eintragen. Hier nie den
+Admin-Schlüssel eintragen.

@@ -136,9 +136,10 @@ APPLE_SECRET = re.compile(r"secrets\.(%s)\b" % "|".join(APPLE_SECRETS))
 
 
 class UploadApprovalTests(unittest.TestCase):
-    """The owner's decision 5 of 18.11.2026: an upload only with his approval. The upload job runs in
-    the environment testflight-upload, whose required reviewer is the owner; the four App Store
-    Connect secrets are environment secrets there; nothing else can read them."""
+    """The upload job runs in the environment testflight-upload, which only the branch main may
+    use; the four App Store Connect secrets are environment secrets there; nothing else can read
+    them. Since the owner's decision of 19.11.2026 (it replaced decision 5 of 18.11.) the upload
+    runs without a click once every gate is green."""
 
     def test_the_upload_job_runs_in_the_protected_environment(self):
         import sys
@@ -150,8 +151,8 @@ class UploadApprovalTests(unittest.TestCase):
         self.assertIn(f"\n    environment: {upload_approval.ENVIRONMENT}\n", release + "\n")
         if yaml is not None:
             self.assertEqual(yaml.safe_load(text)["jobs"]["release"]["environment"], upload_approval.ENVIRONMENT)
-        # No other job of any workflow names this environment: no second door to its secrets,
-        # and one approval per upload (pages.yml has its own, github-pages).
+        # No other job of any workflow names this environment: no second door to its secrets
+        # (pages.yml has its own, github-pages).
         for path in WORKFLOWS:
             for job, block in job_blocks(read(path)).items():
                 if (os.path.basename(path), job) != ("testflight.yml", "release"):
@@ -179,7 +180,7 @@ class UploadApprovalTests(unittest.TestCase):
         text = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         self.assertIn("run: python3 .github/scripts/upload_approval.py check", job_blocks(text)["check"])
 
-    def test_the_first_job_is_the_approval_check_the_daily_build_reads(self):
+    def test_the_first_job_is_the_setup_check_the_daily_build_reads(self):
         import sys
         sys.path.insert(0, os.path.join(ROOT, ".github", "scripts"))
         import daily_build
@@ -187,8 +188,11 @@ class UploadApprovalTests(unittest.TestCase):
         check = job_blocks(text)["check"]
         self.assertIn(f"\n    name: {daily_build.CHECK_JOB}\n", "\n" + check + "\n")
         self.assertIn("\n    if: github.ref == 'refs/heads/main'\n", "\n" + check + "\n")
-        self.assertIn("ready: ${{ steps.approval.outputs.ready }}", check)
-        # The secrets' presence is checked after the approval without their values in a step.
+        self.assertIn("ready: ${{ steps.setup.outputs.ready }}", check)
+        self.assertIn("\n      - name: Upload setup checked\n        id: setup\n", "\n" + check)
+        # Runs of before 19.11. named the job "Upload approval"; the daily build reads both.
+        self.assertEqual(daily_build.CHECK_JOBS, (daily_build.CHECK_JOB, "Upload approval"))
+        # The secrets' presence is checked first in the upload job, without their values in a step.
         release = job_blocks(text)["release"]
         first = release.split("\n      - ", 2)[1]
         self.assertTrue(first.startswith("name: App Store Connect secrets present"), first[:60])

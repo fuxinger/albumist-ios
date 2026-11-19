@@ -4,17 +4,18 @@ name: Daily build
 # a daily build with the small gate; the big gate stays for testers and the App Store). Once a
 # morning this starts TestFlight (testflight.yml) on main with the input gate=small, but only when
 # there is something new and nothing in the way (.github/scripts/daily_build.py):
-#   - the upload asks the owner first (environment testflight-upload with a required reviewer,
-#     docs/launch/FREIGABE_EINRICHTEN.md); until that is set up, nothing starts;
-#   - no TestFlight run runs or waits for the owner's approval (a new run would only wait behind
-#     it and replace one that waits there);
+#   - the upload is fenced in (environment testflight-upload, which only the branch main may
+#     use, docs/launch/FREIGABE_EINRICHTEN.md); until that is set up, nothing starts;
+#   - no TestFlight run runs or waits (a new run would only wait behind it and replace one that
+#     waits there);
 #   - the app changed since the last uploaded build (app fingerprint, ui_groups.py; docs, tests
 #     and the pipeline do not count), and no TestFlight run tested this commit yet, nor an
 #     earlier commit with the same app from which only docs changed (no re-run until green).
 # The TestFlight run then tests main with the small gate (CI, the UI groups flow-full and
 # contrast and the small stress pass, about 70 min; the stress pass runs before every upload,
-# the owner's rule 17.11. and decision 4) and its upload job waits for the owner's click like
-# every upload: the daily build never uploads by itself. This job reads no secret, runs on Linux
+# the owner's rule 17.11. and decision 4), and when every gate is green its upload job uploads
+# by itself (the owner's decision of 19.11.2026, which replaced the click of decision 5): each
+# day the app changed, an internal build for the owner, never for testers. This job reads no secret, runs on Linux
 # (a minute) and only starts the run; testflight.yml does everything else, so build numbers, tags
 # and the one TestFlight run at a time stay as they are.
 #
@@ -29,8 +30,8 @@ name: Daily build
 on:
   schedule:
     # 03:30 UTC = 04:30 in Berlin in winter (05:30 in summer): after the nightly runs (01:00 and
-    # 01:30 UTC, and the weekly full stress pass on Sundays from 00:40), so the build waits for
-    # the owner's approval when he gets up.
+    # 01:30 UTC, and the weekly full stress pass on Sundays from 00:40), so the build is in
+    # TestFlight when the owner gets up.
     - cron: '30 3 * * *'
   workflow_dispatch:
 
@@ -69,4 +70,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run testflight.yml --repo "$GITHUB_REPOSITORY" --ref main -f gate=small
-          echo "Started: Actions > TestFlight, the run \"TestFlight daily build (small gate, only for the owner)\"; its upload waits for the owner's approval." >> "$GITHUB_STEP_SUMMARY"
+          echo "Started: Actions > TestFlight, the run \"TestFlight daily build (small gate, only for the owner)\"; it uploads by itself when every gate is green." >> "$GITHUB_STEP_SUMMARY"

@@ -1,5 +1,6 @@
-"""Unit tests for .github/scripts/upload_approval.py and daily_build.py (the upload waits for the
-owner's approval; the daily build starts only when there is something new). No API call: the
+"""Unit tests for .github/scripts/upload_approval.py and daily_build.py (the upload runs only in the
+environment testflight-upload, which only the branch main may use; since the owner's decision of
+19.11.2026 without a click; the daily build starts only when there is something new). No API call: the
 answers are written here the way GitHub's REST API gives them.
 
 Run: python3 -m unittest discover -s .github/scripts/tests -v
@@ -16,12 +17,14 @@ import daily_build  # noqa: E402
 import upload_approval  # noqa: E402
 
 OWNER = {"type": "User", "reviewer": {"login": "owner", "id": 1}}
-# GET /repos/{repo}/environments/testflight-upload as set up in docs/launch/FREIGABE_EINRICHTEN.md.
+# GET /repos/{repo}/environments/testflight-upload as set up in docs/launch/FREIGABE_EINRICHTEN.md
+# since 19.11.2026: no required reviewer, only the branch rule.
 SET_UP = {"name": "testflight-upload",
-          "protection_rules": [{"id": 1, "type": "required_reviewers", "prevent_self_review": False,
-                                "reviewers": [OWNER]},
-                               {"id": 2, "type": "branch_policy"}],
+          "protection_rules": [{"id": 2, "type": "branch_policy"}],
           "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
+# The set-up of 18.11. (decision 5): the owner as required reviewer as well.
+WITH_REVIEWER = dict(SET_UP, protection_rules=[{"id": 1, "type": "required_reviewers", "prevent_self_review": False,
+                                                "reviewers": [OWNER]}, {"id": 2, "type": "branch_policy"}])
 # What GitHub creates when a job names an environment that does not exist: no rule at all.
 # GET .../environments/testflight-upload/deployment-branch-policies as set up there (step 3).
 MAIN = [{"id": 3, "name": "main", "type": "branch"}]
@@ -29,23 +32,38 @@ CREATED_BY_A_JOB = {"name": "testflight-upload", "protection_rules": [], "deploy
 
 
 class ReviewTests(unittest.TestCase):
-    def test_only_a_required_reviewer_lets_the_upload_through(self):
-        self.assertEqual(upload_approval.review(SET_UP, branches=MAIN), ([], [], ["owner"]))
-        for environment, why in ((None, "does not exist"), (CREATED_BY_A_JOB, "no required reviewer"),
-                                 ({"protection_rules": [{"type": "wait_timer", "wait_timer": 5}]}, "no required reviewer"),
-                                 ({"protection_rules": [{"type": "required_reviewers", "reviewers": []}]},
-                                  "no required reviewer")):
-            with self.subTest(why=why, environment=environment):
-                problems, _, _ = upload_approval.review(environment)
+    def test_no_reviewer_is_needed(self):
+        # The owner's decision of 19.11.2026: the upload runs without a click once every gate is
+        # green; the environment's branch rule (main only) is the fence.
+        self.assertEqual(upload_approval.review(SET_UP, branches=MAIN)[0], [])
+
+    def test_a_missing_or_unfenced_environment_is_refused(self):
+        # GitHub creates an environment a job names without any rule; the check stops the run
+        # before the upload job could do that.
+        for environment, why in ((None, "does not exist"), (CREATED_BY_A_JOB, "other branches than main")):
+            with self.subTest(why=why):
+                problems, _, _ = upload_approval.review(environment, branches=None)
                 self.assertEqual(len(problems), 1)
                 self.assertIn(why, problems[0])
 
-    def test_a_private_repository_stops_the_upload_even_with_a_reviewer(self):
-        # GitHub Free, Pro and Team enforce required reviewers in public repositories only; the rule
-        # may still be listed after a switch to private. No upload then until another way is set up.
-        problems, warnings, reviewers = upload_approval.review(SET_UP, public=False)
-        self.assertEqual(problems, [upload_approval.NOT_PUBLIC])
-        self.assertEqual((warnings, reviewers), ([], []))
+    def test_a_private_repository_needs_a_working_branch_rule(self):
+        # GitHub Free has no environments, environment secrets or branch rules in a private
+        # repository (GitHub Pro, Team or Enterprise has). Without a rule the API shows, refused,
+        # and the message says why; with one, a warning names the plan it needs.
+        for environment, branches in ((None, None), (CREATED_BY_A_JOB, None), (dict(SET_UP, deployment_branch_policy=None), MAIN)):
+            with self.subTest(environment=environment):
+                problems, _, _ = upload_approval.review(environment, public=False, branches=branches)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("private", problems[0])
+                self.assertIn("GitHub Free", problems[0])
+        problems, warnings, _ = upload_approval.review(SET_UP, public=False, branches=MAIN)
+        self.assertEqual(problems, [])
+        self.assertTrue(any("GitHub Pro, Team or Enterprise" in w for w in warnings), warnings)
+
+    def test_a_reviewer_left_in_place_is_a_warning(self):
+        problems, warnings, _ = upload_approval.review(WITH_REVIEWER, branches=MAIN)
+        self.assertEqual(problems, [])
+        self.assertIn("required reviewer", warnings[0])
 
     def test_only_the_branch_main_may_use_the_environment(self):
         # Second review of bundle-p: a changed testflight.yml from another branch must not reach
@@ -80,12 +98,6 @@ class ReviewTests(unittest.TestCase):
         self.assertIsNone(upload_approval.fetch_branches())
         self.assertIsNone(upload_approval.branches_of(CREATED_BY_A_JOB, lambda: MAIN))
         self.assertEqual(upload_approval.branches_of(SET_UP, lambda: MAIN), MAIN)
-
-    def test_self_review_is_a_warning(self):
-        strict = dict(SET_UP, protection_rules=[dict(SET_UP["protection_rules"][0], prevent_self_review=True)])
-        problems, warnings, _ = upload_approval.review(strict, branches=MAIN)
-        self.assertEqual(problems, [])
-        self.assertIn("Prevent self-review", warnings[0])
 
 
 class CheckTests(unittest.TestCase):
@@ -122,16 +134,17 @@ class CheckTests(unittest.TestCase):
         code, log = self.check(SET_UP)
         self.assertEqual(code, 0, log)
         self.assertEqual(self.read(self.output), "ready=true\n")
-        self.assertIn("waits until owner approves it", self.read(self.summary))
+        self.assertIn("runs by itself once every gate is green", self.read(self.summary))
+        self.assertNotIn("approv", self.read(self.summary).lower())
 
     def test_not_set_up_stops_the_run_and_says_where_the_steps_are(self):
         for answer in (None, CREATED_BY_A_JOB):
             with self.subTest(answer=answer):
                 code, log = self.check(answer)
                 self.assertEqual(code, 1)
-                self.assertIn("::error title=Upload approval::", log)
+                self.assertIn("::error title=Upload setup::", log)
                 self.assertIn(upload_approval.SETUP, log)
-                self.assertIn("No upload: the approval is not set up", self.read(self.summary))
+                self.assertIn("No upload: the upload environment is not set up", self.read(self.summary))
                 self.assertEqual(self.read(self.output), "")
 
     def test_no_answer_is_no_upload(self):
@@ -142,11 +155,14 @@ class CheckTests(unittest.TestCase):
                 self.assertIn("re-run this job", log)
                 self.assertEqual(self.read(self.output), "")
 
-    def test_a_private_repository_stops_the_run(self):
+    def test_a_private_repository_goes_on_only_with_the_branch_rule(self):
         code, log = self.check(SET_UP, public=False)
+        self.assertEqual(code, 0, log)
+        self.assertIn("GitHub Pro, Team or Enterprise", log)
+        code, log = self.check(dict(SET_UP, deployment_branch_policy=None), public=False, branches=None)
         self.assertEqual(code, 1)
-        self.assertIn("not public", log)
-        self.assertEqual(self.read(self.output), "")
+        self.assertIn("GitHub Free", log)
+        self.assertEqual(self.read(self.output), "ready=true\n")  # from the first check only
 
     def test_visibility_is_read_from_the_repository(self):
         originals = upload_approval._get
@@ -183,14 +199,16 @@ class DailyBuildTests(unittest.TestCase):
         self.assertIn("small gate", why)
 
     def test_never_before_the_approval_is_set_up(self):
-        for approval in (upload_approval.review(None), upload_approval.review(SET_UP, public=False)):
+        for approval in (upload_approval.review(None), upload_approval.review(CREATED_BY_A_JOB),
+                         upload_approval.review(dict(SET_UP, deployment_branch_policy=None), public=False)):
             with self.subTest(approval=approval):
                 start, why = self.decide(approval=approval)
                 self.assertFalse(start)
                 self.assertIn(upload_approval.SETUP, why)
 
-    def test_never_behind_a_run_that_runs_or_waits_for_the_owner(self):
-        for status in ("queued", "in_progress", "waiting"):
+    def test_never_while_another_run_runs_or_waits(self):
+        # Since 19.11.2026 a daily build uploads by itself; never a second run beside or behind one.
+        for status in ("queued", "in_progress", "waiting", "pending", "requested"):
             with self.subTest(status=status):
                 start, why = self.decide([run(41, OLD, status=status, conclusion=None)])
                 self.assertFalse(start)
@@ -323,6 +341,9 @@ class DailyBuildTests(unittest.TestCase):
         self.assertTrue(daily_build.got_past_the_check(lambda path, **params: jobs, run(42, HEAD)))
         jobs["jobs"][0]["conclusion"] = "failure"
         self.assertFalse(daily_build.got_past_the_check(lambda path, **params: jobs, run(42, HEAD)))
+        # Runs of before 19.11. named it "Upload approval".
+        old = {"jobs": [{"name": "Upload approval", "conclusion": "success"}]}
+        self.assertTrue(daily_build.got_past_the_check(lambda path, **params: old, run(43, HEAD)))
 
 
 if __name__ == "__main__":

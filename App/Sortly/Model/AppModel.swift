@@ -3138,7 +3138,7 @@ final class AppModel {
         if let failure = execution.failure { lines.append("last execution failure: \(PlanDiagnostics.reasonCode(failure))") }
         if let deletion = DeletionLog.last { lines.append("last deletion \(deletion)") }
         lines += BackgroundRunLog.summary
-        lines += BatteryLog.summary
+        lines += BatteryLog.summary + EnergyMetricsSubscriber.summary
         return lines.joined(separator: "\n")
     }
 

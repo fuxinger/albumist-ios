@@ -17,6 +17,8 @@ struct SortlyApp: App {
         UITestSupport.prepareLaunch()
         // Before launch ends, so the tap on "Analyse fertig" that opened the app arrives.
         NotificationRouter.register()
+        // MetricKit's daily numbers and hang reports, for the diagnostic report.
+        EnergyMetricsSubscriber.start()
         // UI runs only: says in the log when the main thread or the whole app stood still.
         MainThreadWatch.shared.start()
     }

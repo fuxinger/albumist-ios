@@ -21,6 +21,11 @@ struct SortlyApp: App {
         EnergyMetricsSubscriber.start()
         // UI runs only: says in the log when the main thread or the whole app stood still.
         MainThreadWatch.shared.start()
+        // iOS warns that memory runs low: the caches go before iOS has to end the app, also
+        // while the analysis goes on in the background (P4-06).
+        _ = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { AppModel.shared.memoryWarning() }
+        }
     }
 
     var body: some Scene {

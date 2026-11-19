@@ -15,6 +15,11 @@ import UIKit
 final class AppModel {
     static let shared = AppModel()
 
+    init() {
+        // The copies made from the facts go when iOS warns that memory runs low (P4-06).
+        MemoryPressure.shared.register("library caches", owner: self) { $0.dropCaches() }
+    }
+
     enum Phase: Equatable {
         case loading
         case onboarding
@@ -353,6 +358,33 @@ final class AppModel {
         let ranks = MainThreadWatch.shared.section("preview ranks") { PreviewRank.ranks(of: facts) }
         previewRanksCache = ranks
         return ranks
+    }
+
+    /// iOS warned that memory runs low (review 18.11., P4-06): every registered cache is emptied
+    /// (`MemoryPressure`), and the warning is written for the diagnostic report at once, so the
+    /// report has it even when iOS ends the app right after.
+    func memoryWarning() {
+        let emptied = MemoryPressure.shared.warning()
+        BackgroundRunLog.memoryWarning(MemoryPressure.line(at: Date(), analysisRunning: analysis.isRunning, onScreen: isOnScreen,
+                                                           availableMB: BackgroundRunLog.availableMemoryMB, emptied: emptied))
+    }
+
+    /// The copies made from the facts that are made again at their next use: the search index
+    /// (off the main thread, at the next search), the facts by id, the capture dates, the atlas
+    /// and its countries, and the library tab's areas while the tab is not on screen (made again
+    /// when it comes back). Never the facts, states, suggestions or decisions. A search index or
+    /// library pass still being made is left to finish: a search or the grid waits for it. The
+    /// preview ranks stay: small, and made off the main thread only when the facts are refreshed.
+    private func dropCaches() {
+        searchIndexCache = nil
+        factsIndex = nil
+        datesCache = nil
+        atlasCache = [:]
+        countryCache = [:]
+        if !libraryBucketsShown && libraryBucketsTask == nil {
+            libraryBuckets = nil
+            libraryBucketsMadeFor = -1
+        }
     }
 
     /// Photos the user took out of a suggestion ("Aus Vorschlag entfernen").

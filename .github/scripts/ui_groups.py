@@ -30,19 +30,22 @@ without the "_" comments), the files that hold its tests, every file those use (
 a Swift file uses another when it names a type, function or extension member that file declares
 for the others; private declarations are not seen from outside), every file of App/SortlyUITests
 that is not Swift (Info.plist and the like) or declares an XCTestObservation, every Swift file of
-the target that no group's tests reach (fails closed), and the harness: every file under
-.github/scripts/ (but its tests/) and .github/workflows/. A Swift file of the target goes in by
+the target that no group's tests reach (fails closed), and the harness: the UI workflows
+(ui.yml, ui-stress.yml) and every script and .github/ file they name or import, transitively
+(harness_files; every script and workflow when unsure). A Swift file of the target goes in by
 its code (swift_code: comments left out, whitespace outside literals reduced to "line break or
 not", literals byte for byte), so editing a comment or the indentation of a test leaves its
 fingerprint, and a red result under it stays red (Prüfer B G5-04, 18.11.); a Swift file the reader
 cannot read for sure, and every other file, by its git blob id. In a quick run (SORTLY_UI_QUICK=1) a
 line "mode quick" is added for every group. So a change to a shared helper
 (UITestOnboarding.swift) changes the fingerprint of every group whose tests use it, and only of
-those; a change to any script or workflow changes every group's.
+those; a change to the harness changes every group's, a change to another workflow or script
+(testflight.yml, ci_gate.py) none.
 """
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -53,17 +56,92 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 GROUPS_FILE = ".github/ui-groups.json"
 UI_DIR = "App/SortlyUITests/"
-# Everything that builds, starts, names or judges the groups: every script (the runner, the
-# matrix generator ui_groups.py, ui_evidence.py, ...) and every workflow. A branch that changes
-# any of them gets other fingerprints for every group, so its results never count for the
-# unchanged ones (and the reverse). Only the scripts' own unit tests are left out: they never
-# run in a UI job.
+# The harness: what builds, starts, names or judges the groups. It starts at the two workflows
+# that run UI tests (HARNESS_ROOTS) and takes every file under .github/ they name (scripts,
+# workflows, JSON), then every script those scripts import or name in their code (not in a
+# comment or docstring), and so on (harness_files).
+# So the UI runner, its helpers, the matrix generator and the evidence reader count, and a change
+# to a workflow or script no UI job runs (testflight.yml, ci.yml, ci_gate.py, ...) leaves every
+# group's green standing (review P5-08 (c): any script change made every green result worthless,
+# and a fix to the pipeline cost a full UI run). When unsure it fails toward "harness changed":
+# a root that is missing or names no UI runner makes every script and workflow harness again
+# (HARNESS_PREFIXES, the rule before). The scripts' own unit tests are left out: they never run
+# in a UI job.
+HARNESS_ROOTS = (".github/workflows/ui.yml", ".github/workflows/ui-stress.yml")
+HARNESS_RUNNER = ".github/scripts/ui_tests.py"
 HARNESS_PREFIXES = (".github/scripts/", ".github/workflows/")
 HARNESS_EXCLUDED = (".github/scripts/tests/",)
+SCRIPTS_DIR = ".github/scripts/"
+NAMED_PATH = re.compile(r"(?<![\w/])\.?/?(\.github/[A-Za-z0-9_.+/-]+)")
+NAMED_SCRIPT = re.compile(r"(?<![\w/.-])([A-Za-z_][A-Za-z0-9_-]*\.py)\b")
 
 
 def is_harness(path: str) -> bool:
+    """The broad rule: every script (not its tests) and every workflow."""
     return path.startswith(HARNESS_PREFIXES) and not path.startswith(HARNESS_EXCLUDED)
+
+
+def workflow_names(text: str) -> set[str]:
+    """The .github/ paths a workflow names outside its whole-line comments (a trailing comment
+    stays in: one name too many is harmless)."""
+    code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    return {m.rstrip(".") for m in NAMED_PATH.findall(code)}
+
+
+def script_names(text: str) -> set[str] | None:
+    """The scripts a Python script imports or names in a string that is not a docstring (a path
+    it runs or loads, "x.py"); None when it cannot be parsed (the caller then counts everything).
+    Comments and docstrings name scripts for the reader only."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                docstrings.add(id(first.value))
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found |= {f"{SCRIPTS_DIR}{alias.name.split('.')[0]}.py" for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            found.add(f"{SCRIPTS_DIR}{node.module.split('.')[0]}.py")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
+            found |= {SCRIPTS_DIR + m for m in NAMED_SCRIPT.findall(node.value)}
+            found |= {m.rstrip(".") for m in NAMED_PATH.findall(node.value)}
+    return found
+
+
+def harness_files(tree) -> set[str]:
+    """The harness of a tree (see HARNESS_ROOTS): the UI workflows, every file under .github/
+    they name, and transitively every script a harness script imports or names in its code
+    (script_names). Fails toward "changed": without both roots, with a script that cannot be
+    parsed, or when the UI workflows do not reach the runner, every script and workflow counts."""
+    blobs = tree.files()
+    everything = {p for p in blobs if is_harness(p)}
+    if any(root not in blobs for root in HARNESS_ROOTS):
+        return everything
+    found, todo = set(), list(HARNESS_ROOTS)
+    while todo:
+        path = todo.pop()
+        if path in found:
+            continue
+        found.add(path)
+        text = tree.read(path) or ""
+        if path.endswith(".py"):
+            named = script_names(text)
+            if named is None:
+                return everything
+        elif path.endswith((".yml", ".yaml")):
+            named = workflow_names(text)
+        else:
+            named = set()
+        todo += [p for p in named if p in blobs and p not in found and not p.startswith(HARNESS_EXCLUDED)]
+    if HARNESS_RUNNER not in found:
+        return everything
+    return found
 
 
 NOT_APP_PREFIXES = ("App/SortlyUITests/", "App/SortlyTests/", "Tests/", "docs/", ".github/", "scripts/", "tools/",
@@ -606,7 +684,7 @@ class Groups:
         blobs = tree.files()
         shared = ({p for p in blobs if p.startswith(UI_DIR) and not p.endswith(".swift")}
                   | {p for p, f in self.files.items() if f.observer}
-                  | {p for p in blobs if is_harness(p)})
+                  | harness_files(tree))
         # Fails closed: a Swift file of the target that no group's tests reach (a helper whose use
         # this reader missed, a test class it could not see) counts for every group.
         reached = set()

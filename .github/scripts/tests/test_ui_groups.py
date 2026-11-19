@@ -4,6 +4,7 @@ Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -87,10 +88,15 @@ def repo(**changes):
         "Sources/SortlyCore/Core.swift": "public struct Core {}",
         "Package.swift": "// swift-tools-version: 6.0",
         ".github/toolchain.json": '{"xcode": "27.2"}',
-        ".github/workflows/ui.yml": "name: UI flow",
-        ".github/scripts/ui_tests.py": "# runner",
+        ".github/workflows/ui.yml": "name: UI flow\n  run: python3 .github/scripts/toolchain.py xcode\n"
+                                    "  run: python3 .github/scripts/ui_tests.py run",
+        ".github/workflows/ui-stress.yml": "name: UI stress\n  run: python3 .github/scripts/ui_tests.py run",
+        ".github/workflows/testflight.yml": "name: TestFlight\n  run: python3 .github/scripts/ci_gate.py",
+        ".github/scripts/ui_tests.py": "# runner (ci_gate.py is no harness)\nfrom pick_simulator import pins\n\n\n"
+                                       "def run():\n    \"\"\"Not other.py either.\"\"\"\n",
         ".github/scripts/pick_simulator.py": "# pick",
         ".github/scripts/toolchain.py": "# toolchain",
+        ".github/scripts/ci_gate.py": "# release gate, no UI job runs it",
         ".github/scripts/other.py": "# not the harness",
         ".github/ui-groups.json": json.dumps(GROUPS),
         "App/SortlyUITests/FlowUITests.swift": FLOW,
@@ -241,10 +247,10 @@ class GroupTests(unittest.TestCase):
         self.assertEqual(groups.selected_tests("other"), ["FlowUITests/test2_Other", "FlowUITests/test3_Search",
                                                           "SearchUITests/testSearch"])
         self.assertEqual(groups.file_map(), {
-            ".github/scripts/other.py": ["device", "full", "other", "small"],
             ".github/scripts/pick_simulator.py": ["device", "full", "other", "small"],
             ".github/scripts/toolchain.py": ["device", "full", "other", "small"],
             ".github/scripts/ui_tests.py": ["device", "full", "other", "small"],
+            ".github/workflows/ui-stress.yml": ["device", "full", "other", "small"],
             ".github/workflows/ui.yml": ["device", "full", "other", "small"],
             "App/SortlyUITests/DeviceUITests.swift": ["device"],
             "App/SortlyUITests/FlowUITests.swift": ["full", "other", "small"],
@@ -376,15 +382,77 @@ class FingerprintTests(unittest.TestCase):
         self.assertEqual(self.changed(**{"App__SortlyUITests__Info.plist": "<plist/>"}), everyone)
         observer = "final class Observer: NSObject, XCTestObservation {}\n"
         self.assertEqual(self.changed(**{"App__SortlyUITests__Observer.swift": observer}), everyone)
-        self.assertEqual(self.changed(**{".github__workflows__ui.yml": "name: UI flow changed"}), everyone)
-        self.assertEqual(self.changed(**{".github__workflows__testflight.yml": "name: TestFlight"}), everyone)
-        # Every script and workflow (the matrix generator and the evidence reader too), not their tests.
-        for path in (".github/scripts/ui_groups.py", ".github/scripts/ui_evidence.py", ".github/workflows/ci.yml"):
-            with self.subTest(path=path):
-                self.assertEqual(self.changed(**{path.replace("/", "__"): "# new"}), everyone)
+        self.assertEqual(self.changed(**{".github__workflows__ui.yml": "name: UI flow changed\n"
+                                         "  run: python3 .github/scripts/ui_tests.py run"}), everyone)
+        self.assertEqual(self.changed(**{".github__workflows__ui-stress.yml": "name: UI stress\n"
+                                         "  run: python3 .github/scripts/ui_tests.py run --only x"}), everyone)
+        # The harness reaches what the UI workflows name, and what those scripts import.
+        self.assertEqual(self.changed(**{".github__scripts__pick_simulator.py": "# changed"}), everyone)
+        self.assertEqual(self.changed(**{".github__scripts__toolchain.py": "# changed"}), everyone)
         self.assertEqual(self.changed(**{".github__scripts__tests__test_x.py": "# new"}), (False, []))
         # Fails closed: a file no group's tests reach (here a helper nobody uses yet) counts for all.
         self.assertEqual(self.changed(**{"App__SortlyUITests__Unused.swift": "enum Unused {}\n"}), everyone)
+
+    def test_a_script_or_workflow_no_ui_job_runs_leaves_every_green(self):
+        # Review P5-08 (c): every script and workflow counted for every group, so a fix to the
+        # release gate or the TestFlight workflow made every green UI result worthless and cost a
+        # full UI run (the rule before this test said: testflight.yml and ci.yml change everyone).
+        nothing = (False, [])
+        for path in (".github/workflows/testflight.yml", ".github/workflows/ci.yml", ".github/scripts/ci_gate.py",
+                     ".github/scripts/other.py", ".github/scripts/new_tool.py"):
+            with self.subTest(path=path):
+                self.assertEqual(self.changed(**{path.replace("/", "__"): "# new"}), nothing)
+        # Once a UI workflow names it, it is harness.
+        everyone = (False, ["device", "full", "other", "small"])
+        named = repo(**{".github__workflows__ui.yml": "name: UI flow\n  run: python3 .github/scripts/ui_tests.py run\n"
+                                                    "  run: python3 .github/scripts/toolchain.py xcode\n"
+                                                    "  run: python3 .github/scripts/other.py"})
+        before = ui_groups.fingerprints(named)["groups"]
+        after = ui_groups.fingerprints(ui_groups.DictTree(dict(named.contents, **{".github/scripts/other.py": "# x"})))["groups"]
+        self.assertEqual(sorted(g for g in before if before[g] != after[g]), everyone[1])
+
+    def test_names_in_comments_and_docstrings_are_no_use(self):
+        names = ui_groups.script_names('"""Uses x_doc.py."""\nimport a_mod\nfrom b_mod import c\n# d_comment.py\n'
+                                       'def f():\n    """e_doc.py"""\n    return os.path.join(HERE, "f_run.py"), ".github/g.json"\n')
+        self.assertEqual(names, {".github/scripts/a_mod.py", ".github/scripts/b_mod.py", ".github/scripts/f_run.py",
+                                 ".github/g.json"})
+        self.assertIsNone(ui_groups.script_names("def broken(:\n"))
+        self.assertEqual(ui_groups.workflow_names("# .github/scripts/ci_gate.py\n  run: python3 .github/scripts/x.py # y\n"),
+                         {".github/scripts/x.py"})
+
+    def test_unsure_counts_every_script_and_workflow(self):
+        # Fails toward "harness changed": without a UI workflow, or one that reaches no runner,
+        # every script and workflow is harness again.
+        everyone = (False, ["device", "full", "other", "small"])
+        for changes in ({".github__workflows__ui-stress.yml": None},
+                        {".github__scripts__ui_tests.py": "def broken(:\n"},
+                        {".github__workflows__ui.yml": "name: UI flow\n  run: ./run-the-tests.sh",
+                         ".github__workflows__ui-stress.yml": "name: UI stress"}):
+            with self.subTest(changes=sorted(changes)):
+                base = repo(**changes)
+                after = repo(**dict(changes, **{".github__scripts__ci_gate.py": "# changed"}))
+                before_fp, after_fp = ui_groups.fingerprints(base)["groups"], ui_groups.fingerprints(after)["groups"]
+                self.assertEqual(sorted(g for g in before_fp if before_fp[g] != after_fp[g]), everyone[1])
+
+    def test_the_real_harness_is_what_the_ui_workflows_and_runner_name(self):
+        # Read from the files themselves, no list kept by hand: every script ui.yml, ui-stress.yml
+        # and ui_tests.py call or import is harness; the release-only scripts are not.
+        tree = ui_groups.GitTree("HEAD")
+        harness = ui_groups.harness_files(tree)
+        root = ui_groups.ROOT
+        named = set()
+        for path in (".github/workflows/ui.yml", ".github/workflows/ui-stress.yml", ".github/scripts/ui_tests.py"):
+            with open(os.path.join(root, path), encoding="utf-8") as f:
+                text = f.read()
+            named |= {".github/scripts/" + m for m in re.findall(r"\.github/scripts/([A-Za-z0-9_]+\.py)", text)}
+            named |= {f".github/scripts/{m}.py" for m in re.findall(r"^\s*(?:from|import)\s+(\w+)", text, re.M)
+                      if os.path.exists(os.path.join(root, ".github", "scripts", f"{m}.py"))}
+        self.assertIn(".github/scripts/ui_tests.py", named)
+        self.assertIn(".github/scripts/pick_simulator.py", named)  # imported by ui_tests.py
+        self.assertEqual(sorted(named - harness), [])
+        for path in (".github/workflows/testflight.yml", ".github/workflows/ci.yml", ".github/scripts/ci_gate.py",
+                     ".github/scripts/archive_check.py"):
+            self.assertNotIn(path, harness)
 
     def test_group_definitions(self):
         groups = json.loads(json.dumps(GROUPS))

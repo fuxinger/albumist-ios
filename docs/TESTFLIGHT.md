@@ -210,9 +210,14 @@ Testcode gibt.
   Byte für Byte dieselben Dateien.
 - **Fingerabdruck einer Gruppe**: ihre Testdateien, alle Hilfsdateien, die diese benutzen (zum
   Beispiel `UITestOnboarding.swift`), ihre Zeile in `.github/ui-groups.json` und alles, über
-  das jede Gruppe läuft: jedes Skript unter `.github/scripts/` (außer dessen Unit-Tests in
-  `tests/`) und jeder Workflow unter `.github/workflows/` (eine Änderung daran lässt also alle
-  Gruppen laufen).
+  das jede Gruppe läuft: die beiden UI-Workflows (`ui.yml`, `ui-stress.yml`) und jede Datei
+  unter `.github/`, die sie nennen, und jedes Skript, das ein solches Skript nennt oder
+  importiert (`ui_tests.py`, `pick_simulator.py`, `toolchain.py`, `ui_evidence.py`, ...; ohne
+  die Unit-Tests in `tests/`). Eine Änderung daran lässt alle Gruppen laufen; eine Änderung an
+  einem Workflow oder Skript, das kein UI-Job ausführt (`testflight.yml`, `ci.yml`,
+  `ci_gate.py`, ...), lässt jedes grüne Ergebnis stehen (Prüfer 5, P5-08 c). Im Zweifel (ein
+  UI-Workflow fehlt oder erreicht `ui_tests.py` nicht) zählt wie früher jedes Skript und jeder
+  Workflow.
   Swift-Dateien der UI-Tests zählen mit ihrem Code, nicht Byte für Byte: Kommentare,
   Einrückung und Leerzeilen zählen nicht, Zeichenketten und Regex-Literale schon (Zeichen für
   Zeichen). Ein geänderter Kommentar ist also keine Änderung des Tests: ein rotes Ergebnis

@@ -53,6 +53,8 @@
 - UI-Tests: jede Gruppe wartet vor ihrem ersten Test (und vor einer Wiederholung) bis zu 5 Min.,
   bis der Simulator nach seinem Start wieder schnell antwortet (`SIM_SETTLE`);
   vorher verlor XCTest dabei die App beim ersten Start (UI-Lauf 44437759848, test05).
+- UI-Gerätetests: vor einem Neustart beendet in CI der Mac die laufende App (`simctl terminate`),
+  nicht XCTest, dessen Beenden bei einer ruhenden App scheiterte (UI-Lauf 44446270757, test07).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

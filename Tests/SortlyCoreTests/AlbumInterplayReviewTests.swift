@@ -708,6 +708,40 @@ struct SameNameWinsTests {
         #expect(d.best.map { $0.metrics.purity < 0.5 } ?? true)
     }
 
+    /// Third review 19.11. (M3): another album of the user already holds the whole country
+    /// ("Italia" with all 300 photos, or "Urlaub Italien"). It stays the country's album, as
+    /// complete, and keeps the photos counted as sorted; the album named "Italien" (a few of the
+    /// photos and others, one trip, or empty) gets nothing. Before, the name won and the ring
+    /// fell back by 298 photos at launch without the user doing anything.
+    @Test func anAlbumHoldingTheWholeSuggestionWinsOverTheName() throws {
+        let italy = set("it", 0..<300)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let full = CollectionSnapshot(id: "full", title: "Italia", assetIDs: italy)
+        let strays: [Set<AssetID>] = [set("it", 0..<2).union(set("food", 0..<20)), set("food", 0..<20), [], set("it", 0..<100)]
+        for stray in strays {
+            let named = CollectionSnapshot(id: "named", title: "Italien", assetIDs: stray)
+            let m = try #require(matcher.match([country], against: CollectionInventory([full, named]))[country.id])
+            #expect(m.status == .alreadyComplete && m.best?.albumID == "full", "\(stray.count): \(m.status) \(String(describing: m.best?.albumID))")
+            #expect(ProposalDecision.recommended(for: country, match: m) == .keepExisting("full"))
+            #expect(matcher.sortingAlbums(m, kind: country.kind, title: country.title).contains("full"))
+        }
+        // Both hold everything: the album of the name stays it, complete.
+        let both = CollectionSnapshot(id: "named", title: "Italien", assetIDs: italy.union(set("food", 0..<20)))
+        let b = try #require(matcher.match([country], against: CollectionInventory([full, both]))[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: b) == .keepExisting("named"), "\(b.status)")
+        // "Urlaub Italien" holds every trip, "Italien" the first one (matched with the trips).
+        let trips = [set("it", 0..<100), set("it", 100..<200), set("it", 200..<300)]
+        let holiday = CollectionSnapshot(id: "holiday", title: "Urlaub Italien", assetIDs: italy)
+        let first = CollectionSnapshot(id: "named", title: "Italien", assetIDs: trips[0])
+        let m = try #require(matcher.match([country], against: CollectionInventory([holiday, first]), trips: trips)[country.id])
+        #expect(m.status == .alreadyComplete && m.best?.albumID == "holiday", "\(m.status) \(String(describing: m.best?.albumID))")
+        #expect(ProposalDecision.recommended(for: country, match: m) == .keepExisting("holiday"))
+        // Without such an album the name still wins.
+        let alone = try #require(matcher.match([country], against: CollectionInventory([first]), trips: trips)[country.id])
+        #expect(ProposalDecision.recommended(for: country, match: alone) == .extendExisting("named"))
+    }
+
     /// P1-02: with two albums of that name the content picks between them; a third "Italien" is
     /// never made. When they fit exactly as well, the user picks (nothing is decided for them).
     @Test func withTwoAlbumsOfTheNameTheContentPicksOne() throws {

@@ -145,7 +145,11 @@ In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen V
   dieses Namens wählt der Inhalt eines davon (das mit mehr Fotos des Vorschlags), nie ein
   drittes; enthalten beide gleich viel, wählt der Nutzer unter „Anpassen“. Hat der Nutzer
   die Zuordnung unter „Anpassen“ abgelehnt, gilt die Regel für dieses Album nicht mehr.
-  Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
+  Enthält ein anderes bearbeitbares Album des Nutzers schon den ganzen Vorschlag („Italia“
+  oder „Urlaub Italien“ mit allen Italien-Fotos), bleibt es dessen Album („Album so lassen“,
+  die Fotos zählen weiter als sortiert), und das Album mit dem Namen bekommt nichts, außer es
+  enthält selbst schon alles (dritte Prüfung 19.11.2026, M3: Zahlen gehen ohne Zutun des
+  Nutzers nie zurück). Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
   die Reise. Ausnahmen: Albumist hat das Album schon für einen anderen Vorschlag angelegt
   oder ergänzt („Alben anderer Vorschläge“), oder ein Vorschlag mit genau diesem Namen ist
   schon vollständig darin.

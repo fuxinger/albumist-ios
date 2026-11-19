@@ -533,6 +533,26 @@ public struct AlbumMatcher: Sendable {
             inventory[id]?.isEditableAlbum == true && !overrides.isRejectedMatch(id, for: proposal.id)
                 && !claimedByOthers.contains(id) && !taken.contains(id) && !ceded.contains(id)
         }
+        // Another album of the user already holds the whole suggestion ("Italia" with every
+        // photo of Italien, "Urlaub Italien"): it stays its album, complete, and the photos stay
+        // sorted. The album of the name gets nothing unless it is complete itself (third review
+        // 19.11., M3: the ring fell back by 298 photos at launch, with no step of the user).
+        func missesNothing(_ id: CollectionID) -> Bool {
+            guard let members = inventory[id]?.assetIDs, !members.isDisjoint(with: proposal.assetIDs) else { return false }
+            return !proposal.assetIDs.contains {
+                !members.contains($0) && overrides.mayAdd($0, toAlbum: id) && overrides.mayAdd($0, toSource: proposal.id)
+            }
+        }
+        let wholeElsewhere = named.isEmpty || named.contains(where: missesNothing) ? nil : candidates.first {
+            $0.isEditable && ($0.relation == .equivalent || $0.relation == .partOfProposal) && missesNothing($0.albumID)
+        }
+        if let whole = wholeElsewhere {
+            reasons.append(.albumContains(album: whole.albumTitle, contained: whole.metrics.intersection, total: whole.metrics.proposalCount))
+            if whole.metrics.extra > 0 { reasons.append(.albumHasOtherItems(album: whole.albumTitle, count: whole.metrics.extra)) }
+            return MatchResult(proposalID: proposal.id, status: .alreadyComplete, best: whole,
+                               alternatives: (candidates + weak + parts).filter { $0.albumID != whole.albumID },
+                               sameNameAlbums: sameName, reasons: reasons)
+        }
         if !named.isEmpty {
             let known = Dictionary((candidates + weak + parts).map { ($0.albumID, $0) }, uniquingKeysWith: { first, _ in first })
             let options = named.compactMap { id -> MatchCandidate? in

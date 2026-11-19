@@ -74,7 +74,7 @@
   (kein Rand in der Farbe des Landes), und ein Tippen darauf öffnet kein Land mehr (vorher
   öffnete die Krim „Russland“). Ein Tippen neben ein kleines besuchtes Land misst jetzt bis
   zu seiner Küste oder Grenze, nicht bis zu der eines umstrittenen Gebiets darin (vorher öffnete etwa ein Tippen auf Paris „Russland“, wenn nur
-  Russland besucht war). Der Text der Fotozugriffs-Frage
+  Russland besucht war). Auch ein Streifen zwischen Sewastopol und der übrigen Krim, Ränder vor Jewpatorija und bei Perekop blieben in der Farbe Russlands, weil die Karte Russland und die Regionen der Krim jedes für sich vereinfachte; Länder mit umstrittenen Regionen und diese Regionen behalten jetzt jeden Punkt. Der Text der Fotozugriffs-Frage
   sagt „Kein Foto wird hochgeladen“ wie alle anderen Texte. Eine Stadt aus Apples Antwort gilt nur, wenn das
   gefragte Foto auf derselben Seite der Linie liegt wie das Foto, um das es geht. Im Reise-Atlas
   zählt ein Gebiet nicht als Land, seine Reisen und Orte zählen aber und tragen den

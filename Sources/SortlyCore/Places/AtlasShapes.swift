@@ -42,9 +42,23 @@ public struct AtlasShape: Sendable, Hashable {
 
     public var isNeutral: Bool { !neutralOver.isEmpty }
 
-    /// Even-odd containment over all rings, like the map draws them.
+    /// Even-odd containment over all rings, like the map draws them (the test of
+    /// `DisputedArea.contains`, without copying the ring: the map's Russia has 26,000 points).
+    /// A ring whose box does not hold the point cannot hold it.
     public func contains(_ c: GeoCoordinate) -> Bool {
-        rings.reduce(false) { $0 != DisputedArea.contains($1.map { ($0.latitude, $0.longitude) }, c.latitude, c.longitude) }
+        var inside = false
+        for (ring, box) in zip(rings, boxes) where box.distance(to: c) == 0 {
+            var j = ring.count - 1
+            for i in ring.indices {
+                let a = ring[i], b = ring[j]
+                if (a.latitude > c.latitude) != (b.latitude > c.latitude),
+                   c.longitude < (b.longitude - a.longitude) * (c.latitude - a.latitude) / (b.latitude - a.latitude) + a.longitude {
+                    inside.toggle()
+                }
+                j = i
+            }
+        }
+        return inside
     }
 
     /// Distance in degrees (as the flat map draws them) to the nearest coast or border of the
@@ -78,17 +92,29 @@ public enum AtlasShapes {
     /// Pakistan, Abkhazia in Georgia) and the outlines drawn over land (Western Sahara over
     /// Morocco, Aksai Chin over China and India, the Golan over Israel). Outlines over the sea
     /// only (the waters of Crimea) are left out: they would draw land on the sea.
+    ///
+    /// A country with disputed regions in it (Russia, India, Pakistan, Georgia) and those regions
+    /// keep every point of the map: simplified each on its own, their shared coasts and borders
+    /// no longer met, and the visited fill showed in the gaps (review of b376999: a strip
+    /// between Sevastopol and the rest of the Crimea, slivers off Yevpatoria and at Perekop).
     public static func make(from map: OfflineWorldMap, minimumStepDegrees: Double = 0.3) -> [AtlasShape] {
         func area(_ region: OfflineWorldMap.Region) -> String? { DisputedAreas.area(mapCountry: region.nameEN, mapRegion: nil)?.id }
         func code(_ region: OfflineWorldMap.Region) -> String {
             DisputedAreas.area(mapCountry: region.nameEN, mapRegion: nil) == nil ? String(region.isoCode.prefix(2)).uppercased() : ""
         }
         let countries = map.regions.filter { $0.level == .country && $0.isoCode != "AQ" }
-        var shapes = countries.map { AtlasShape(code: code($0), rings: map.outline(of: $0, minimumStepDegrees: minimumStepDegrees), disputedArea: area($0)) }
+        let disputedRegions = map.regions.filter { region in
+            region.level == .region && DisputedAreas.all.contains { $0.mapRegions.contains(region.isoCode) }
+        }
+        let cut = Set(disputedRegions.compactMap { $0.parent.map { code(map.regions[$0]) } })
+        var shapes = countries.map { country in
+            AtlasShape(code: code(country), rings: map.outline(of: country, minimumStepDegrees: cut.contains(code(country)) ? 0 : minimumStepDegrees),
+                       disputedArea: area(country))
+        }
         for area in DisputedAreas.all {
-            for region in map.regions where region.level == .region && area.mapRegions.contains(region.isoCode) {
+            for region in disputedRegions where area.mapRegions.contains(region.isoCode) {
                 guard let parent = region.parent.map({ code(map.regions[$0]) }), !parent.isEmpty else { continue }
-                let rings = map.outline(of: region, minimumStepDegrees: minimumStepDegrees)
+                let rings = map.outline(of: region)
                 if !rings.isEmpty { shapes.append(AtlasShape(code: "", rings: rings, neutralOver: [parent], disputedArea: area.id)) }
             }
             let over = Set(countries.filter { area.outlineCountries.contains($0.nameEN) }.map(code).filter { !$0.isEmpty })

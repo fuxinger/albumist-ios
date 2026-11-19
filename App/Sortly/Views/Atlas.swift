@@ -68,6 +68,8 @@ final class AtlasPathCache: @unchecked Sendable {
     static let shared = AtlasPathCache()
     private let lock = NSLock()
     private var bySize: [String: [AtlasCountryPath]] = [:]
+    /// The keys, oldest first: at the seventh size the oldest goes, not all of them.
+    private var order: [String] = []
 
     func paths(for outlines: [AtlasOutlines.Country], size: CGSize, make: (AtlasOutlines.Country) -> Path) -> [AtlasCountryPath] {
         // The outlines are loaded once and never change; their count tells "not loaded yet".
@@ -75,8 +77,9 @@ final class AtlasPathCache: @unchecked Sendable {
         if let known = lock.withLock({ bySize[key] }) { return known }
         let made = Self.countries(outlines, paths: outlines.map(make))
         lock.withLock {
-            if bySize.count >= 6 { bySize.removeAll() }
+            if bySize[key] == nil { order.append(key) }
             bySize[key] = made
+            while order.count > 6 { bySize[order.removeFirst()] = nil }
         }
         return made
     }

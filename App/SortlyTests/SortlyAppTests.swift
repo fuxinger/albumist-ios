@@ -167,32 +167,54 @@ struct AtlasRenderingTests {
     }
 
     /// A disputed area is never filled with a visited country (decision Fuchs 18.11.2026;
-    /// second review of bundle-i): with Russia visited, Simferopol on the Crimea shows the
-    /// land colour and Moscow the visited colour, in light and dark, on screen and in the share
-    /// picture (both draw `AtlasMap`).
+    /// second review of bundle-i), not even its edge: with Russia visited, every pixel of the
+    /// Crimea and the sea round it is land, background or a blend of the two, in light and dark.
+    /// Painting land over the visited fill (before b376999) left a line of the visited colour
+    /// round the coast, where both fills only partly cover a pixel; the map's simplified Russia
+    /// and Crimea regions left strips of it (review of b376999). Moscow is the control. The box
+    /// keeps out Taman (east of 36.2° E) and mainland Ukraine (north of 45.6° N). Unverified
+    /// until it runs on a Mac.
     @Test(arguments: [ColorScheme.light, .dark])
     func crimeaStaysLandWithRussiaVisited(scheme: ColorScheme) async throws {
         let outlines = await AtlasOutlines.shared.load(from: nil)
         let width = 1440.0, height = width * 139 / 360
         let renderer = ImageRenderer(content: AtlasMap(outlines: outlines, highlighted: ["RU"])
             .frame(width: width, height: height)
+            .background(Color(uiColor: .systemBackground))
             .environment(\.colorScheme, scheme))
-        renderer.scale = 1
+        renderer.scale = 3
         let image = try #require(renderer.cgImage)
         let traits = UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)
         let land = Self.rgb(UIColor.systemGray5.resolvedColor(with: traits))
+        let background = Self.rgb(UIColor.systemBackground.resolvedColor(with: traits))
         let visited = Self.rgb(try #require(UIColor(named: "AccentColor")).resolvedColor(with: traits))
-        func pixel(_ lat: Double, _ lon: Double) -> [Double] {
-            let x = Int((lon + 180) / 360 * Double(image.width)), y = Int((83 - lat) / 139 * Double(image.height))
-            var data = [UInt8](repeating: 0, count: 4)
-            let context = CGContext(data: &data, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-            context?.draw(image, in: CGRect(x: -x, y: y - image.height + 1, width: image.width, height: image.height))
-            return data.prefix(3).map { Double($0) / 255 }
+        let w = image.width, h = image.height
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        let drawn = data.withUnsafeMutableBytes { bytes -> Bool in
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(data: bytes.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                          space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
         }
-        func distance(_ a: [Double], _ b: [Double]) -> Double { zip(a, b).map { ($0 - $1) * ($0 - $1) }.reduce(0, +) }
-        let simferopol = pixel(44.9521, 34.1024), moscow = pixel(55.7558, 37.6173)
-        #expect(distance(simferopol, land) < distance(simferopol, visited), "Simferopol \(simferopol)")
+        try #require(drawn)
+        func x(_ lon: Double) -> Int { Int((lon + 180) / 360 * Double(w)) }
+        func y(_ lat: Double) -> Int { Int((83 - lat) / 139 * Double(h)) }
+        func pixel(_ x: Int, _ y: Int) -> [Double] { (0..<3).map { Double(data[(y * w + x) * 4 + $0]) / 255 } }
+        func distance(_ a: [Double], _ b: [Double]) -> Double { sqrt(zip(a, b).map { ($0 - $1) * ($0 - $1) }.reduce(0, +)) }
+        /// How far a colour is from every blend of land and background.
+        func offBlend(_ p: [Double]) -> Double {
+            let ab = zip(land, background).map { $1 - $0 }, ap = zip(p, background).map { $0 - $1 }
+            let t = max(0, min(1, zip(ab, ap).map { -$0 * $1 }.reduce(0, +) / ab.map { $0 * $0 }.reduce(0, +)))
+            return distance(p, zip(background, land).map { $0 + t * ($1 - $0) })
+        }
+        var tinted: [String] = []
+        for py in y(45.6)...y(44.3) {
+            for px in x(32.4)...x(36.2) where offBlend(pixel(px, py)) > 0.08 { tinted.append("\(px),\(py) \(pixel(px, py))") }
+        }
+        #expect(tinted.isEmpty, "\(tinted.count) pixels: \(tinted.prefix(5))")
+        let simferopol = pixel(x(34.1024), y(44.9521)), moscow = pixel(x(37.6173), y(55.7558))
+        #expect(distance(simferopol, land) < min(distance(simferopol, background), distance(simferopol, visited)), "Simferopol \(simferopol)")
         #expect(distance(moscow, visited) < distance(moscow, land), "Moskau \(moscow)")
     }
 

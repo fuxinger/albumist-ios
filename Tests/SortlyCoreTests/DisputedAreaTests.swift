@@ -175,7 +175,8 @@ struct DisputedAreaTests {
     /// A tap on the atlas map opens the visited country there, or the nearest one within a
     /// few points (small countries); in a disputed area it opens nothing: the area is never a
     /// side's country and has no screen of its own (second review of bundle-i: a tap on the
-    /// grey Crimea opened "Russland"). 12° is the app's 12 points on a phone-wide map.
+    /// grey Crimea opened "Russland"). 12° is about the app's 12 points on a phone (a map about
+    /// 330 points wide: 13°).
     @Test(arguments: [
         ("Simferopol", 44.9521, 34.1024), ("Srinagar", 34.0837, 74.7973), ("Leh", 34.1526, 77.5771),
         ("Gilgit", 35.9208, 74.3089), ("Muzaffarabad", 34.3700, 73.4711), ("Aksai Chin", 35.2, 79.5),
@@ -221,6 +222,27 @@ struct DisputedAreaTests {
         #expect(tap(21.0, -15.0, ["MA"], 2) == nil) // Mauritania, 0.3° off Western Sahara
         #expect(tap(44.5, 37.7, ["RU"], 1) == "RU") // the sea off Novorossiysk
         #expect(tap(30.4, -10.5, ["MA"], 1) == "MA") // the Atlantic off Agadir
+    }
+
+    /// With Russia visited, nothing of the Crimea and its coast is filled at the app's 0.3°
+    /// steps (review of b376999): simplified each on its own, the map's Russia and its Crimea
+    /// regions no longer met, and the visited colour showed in a strip between Sevastopol and
+    /// the rest of the Crimea, off Yevpatoria and at Perekop. The box reaches past Perekop and
+    /// keeps out Taman (east of 36.2° E).
+    @Test func atlasFillsNoSliverOfRussiaRoundTheCrimea() {
+        let app = AtlasShapes.make(from: Self.map, minimumStepDegrees: 0.3)
+        var filled: [String] = []
+        for lat in stride(from: 44.30, through: 46.20, by: 0.02) {
+            for lon in stride(from: 32.40, through: 36.20, by: 0.02)
+            where AtlasShapes.filledCode(at: GeoCoordinate(latitude: lat, longitude: lon), in: app, visited: ["RU"]) != nil {
+                filled.append(String(format: "%.2f,%.2f", lat, lon))
+            }
+        }
+        // One point off Foros, where the map's Russia and its region differ by a few metres at
+        // full detail, far under a pixel. Before: 140 of these points.
+        #expect(filled.count <= 1, "\(filled.count) points, \(filled.prefix(5))")
+        // Russia on the other side of the Kerch Strait is filled.
+        #expect(AtlasShapes.filledCode(at: GeoCoordinate(latitude: 45.25, longitude: 36.95), in: app, visited: ["RU"]) == "RU")
     }
 
     @Test func atlasShapesForTheApp() {

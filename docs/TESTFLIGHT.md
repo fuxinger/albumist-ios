@@ -238,7 +238,10 @@ Testcode gibt.
   Ergebnis stehen (Prüfer 5, P5-08 c). Im Zweifel zählt jede Datei unter `.github/`: wenn ein
   UI-Workflow fehlt oder `ui_tests.py` nicht erreicht, ein Skript nicht lesbar ist oder ein
   Name sich nicht auflösen lässt (ein Skript- oder Pfadname aus einer Variablen, ein Pfad, den
-  es nicht gibt).
+  es nicht gibt), und wenn ein Skript Code startet, den der Leser nicht sieht: ein zur Laufzeit
+  gebauter Shell-Befehl (`shell=True`, `os.system`, `bash -c`, `python -c`), `exec`, `eval`,
+  `compile`, oder ein Ordner unter `.github/`, den es auflistet (`glob`, `listdir`, `walk`).
+  Datendateien zählen mit jeder Endung.
   Swift-Dateien der UI-Tests zählen mit ihrem Code, nicht Byte für Byte: Kommentare,
   Einrückung und Leerzeilen zählen nicht, Zeichenketten und Regex-Literale schon (Zeichen für
   Zeichen). Ein geänderter Kommentar ist also keine Änderung des Tests: ein rotes Ergebnis

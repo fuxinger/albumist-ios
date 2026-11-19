@@ -476,6 +476,76 @@ class FingerprintTests(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(changed_groups(changes, gate), everyone)
 
+    def test_code_run_or_listed_in_ways_the_reader_cannot_follow_counts_everything(self):
+        # Third review of C6: a shell string built at run time, exec/eval/compile, a folder of
+        # .github/ listed (glob, listdir, walk) and a data file with another extension were left
+        # out of the harness. Each now counts everything, or the file it names.
+        everyone = ["device", "full", "other", "small"]
+        runner = "  run: python3 .github/scripts/ui_tests.py run\n"
+        ui = {".github__workflows__ui.yml": "name: UI\n" + runner}
+
+        def changed_groups(script, edit, extra=None):
+            changes = dict(ui, **{".github__scripts__ui_tests.py": script}, **(extra or {}))
+            before_fp = ui_groups.fingerprints(repo(**changes))["groups"]
+            after_fp = ui_groups.fingerprints(repo(**dict(changes, **edit)))["groups"]
+            return sorted(g for g in before_fp if before_fp[g] != after_fp[g])
+
+        gate = {".github__scripts__ci_gate.py": "# changed"}
+        here = "import os, glob, pathlib, subprocess, sys\nHERE = os.path.dirname(os.path.abspath(__file__))\n" \
+               "ROOT = os.path.join(HERE, '..', '..')\n"
+        for name, script in {
+            "shell=True, built": "import subprocess\nsubprocess.run(f'python3 {SCRIPT}', shell=True)\n",
+            "shell=True, a name": "import subprocess\nsubprocess.check_call(COMMAND, shell=True)\n",
+            "os.system": "import os\nos.system(COMMAND)\n",
+            "os.popen": "import os\nos.popen('python3 ' + NAME)\n",
+            "getoutput": "import subprocess\nsubprocess.getoutput(COMMAND)\n",
+            "bash -c": "import subprocess\nsubprocess.run(['bash', '-c', COMMAND])\n",
+            "/bin/sh -c": "import subprocess\nsubprocess.run(['/bin/sh', '-c', 'python3 ' + NAME])\n",
+            "env bash script": "import subprocess\nsubprocess.run(['/usr/bin/env', 'bash', SCRIPT])\n",
+            "python -c": "import subprocess, sys\nsubprocess.run([sys.executable, '-c', CODE])\n",
+            "exec": "exec(open(PATH).read())\n",
+            "exec, constant": "exec('import other')\n",
+            "eval": "eval(SOURCE)\n",
+            "compile": "code = compile(SOURCE, 'x', 'exec')\n",
+            "builtins.exec": "import builtins\nbuiltins.exec(SOURCE)\n",
+            "glob next to the script": here + "for s in glob.glob(os.path.join(HERE, '*.py')): pass\n",
+            "glob of .github": "import glob\nglob.glob('.github/scripts/*.py')\n",
+            "listdir of .github": "import os\nos.listdir('.github/scripts')\n",
+            "scandir of the folder": "import os\nos.scandir(os.path.dirname(__file__))\n",
+            "walk of the repository": here + "for top, dirs, files in os.walk(ROOT): pass\n",
+            "Path.glob": "import pathlib\npathlib.Path(__file__).parent.glob('*.py')\n",
+            "Path.iterdir": "from pathlib import Path\nfor p in (Path(__file__).parent / '..' / 'actions').iterdir(): pass\n",
+            "listdir of a folder from __file__ it cannot follow": "import os\nos.listdir(helper(__file__))\n",
+        }.items():
+            with self.subTest(name):
+                self.assertEqual(changed_groups(script, gate), everyone)
+        # What it can follow names the script, and nothing more: a shell string that is constant,
+        # folders outside .github/ (the tests' Swift files, a folder handed in), re.compile.
+        other = {".github__scripts__other.py": "# changed"}
+        for name, script in {
+            "shell=True, constant": "import subprocess\nsubprocess.run('python3 .github/scripts/other.py', shell=True)\n",
+            "os.system, constant": "import os\nos.system('python3 .github/scripts/other.py')\n",
+            "bash -c, constant": "import subprocess\nsubprocess.run(['bash', '-c', 'python3 .github/scripts/other.py'])\n",
+        }.items():
+            with self.subTest(name):
+                self.assertEqual(changed_groups(script, other), everyone)
+                self.assertEqual(changed_groups(script, gate), [])
+        for name, script in {
+            "glob of the Swift tests": here + "glob.glob(f'{ROOT}/App/SortlyUITests/**/*.swift', recursive=True)\n",
+            "glob of a folder handed in": "import glob, os\ndef f(folder):\n    return glob.glob(os.path.join(folder, '**', 'x'))\n",
+            "glob of /Applications": "import glob\nglob.glob('/Applications/Xcode*.app')\n",
+            "re.compile": "import re\nPATTERN = re.compile(r'x')\n",
+        }.items():
+            with self.subTest(name):
+                self.assertEqual(changed_groups(script, gate), [])
+        # A data file with any extension, named through os.path.join parts.
+        for extension in ("csv", "plist", "xml", "ini", "conf", "jsonl"):
+            with self.subTest(extension=extension):
+                data = {f".github__data__pins.{extension}": "a"}
+                script = f"import os\nPINS = os.path.join(HERE, '..', 'data', 'pins.{extension}')\n"
+                self.assertEqual(changed_groups(script, {f".github__data__pins.{extension}": "b"}, data), everyone)
+                self.assertEqual(changed_groups(script, gate, data), [])
+
     def test_the_group_file_is_no_harness(self):
         # Second review of C6: ui-groups.json was harness (the real ui_groups.py names it), so a
         # budget_min or _comment edit ran all groups again. Each group's own definition counts.

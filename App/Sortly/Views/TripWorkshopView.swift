@@ -83,6 +83,12 @@ struct TripWorkshopView: View {
         // the run ends: its end refreshes the overview after, and a run that slipped in read the
         // trips from before. Saved when no run that read it is left (paused, ended early).
         .onChange(of: model.tripChangeState) { _, state in
+            // Saved, and the trips shown include it now (a refresh landed after all, or the run
+            // that applies it ended while the sheet was open): said as made.
+            if state == .applied, saved, done != nil {
+                withAnimation(.smooth) { saved = false }
+                return
+            }
             guard state != .waiting, let finished = working else { return }
             withAnimation(.smooth) {
                 working = nil

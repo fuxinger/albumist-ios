@@ -166,10 +166,14 @@ public enum TripWorkshop {
 
     /// Nil when a change can be made now. `check`: the running analysis is a short check
     /// (`shortCheck`), not the first or a resumed one, one with work of its own or the refinement.
-    public static func wait(creatingAlbums: Bool, analysing: Bool, check: Bool) -> Wait? {
+    /// `settling`: no run is going, but the end of one, or a refresh with the trips it made, is
+    /// still going (`TripChangeLedger.settling`): soon done, whatever the run was ("Gleich
+    /// wieder möglich"; second review of 194971b, S2: the end of a first analysis said "Danach
+    /// wieder möglich" for the seconds after its card said it ended).
+    public static func wait(creatingAlbums: Bool, analysing: Bool, settling: Bool = false, check: Bool) -> Wait? {
         if creatingAlbums { return .creatingAlbums }
-        guard analysing else { return nil }
-        return check ? .tripsAgain : .analysis
+        if analysing { return check ? .tripsAgain : .analysis }
+        return settling ? .tripsAgain : nil
     }
 
     /// `check` for `wait` and `afterChange`: the run in progress is a short check, the one a
@@ -261,16 +265,35 @@ public struct TripChangeLedger: Sendable, Equatable {
         ending.remove(run)
     }
 
-    /// What a refresh of the overview that reads the store now will show.
-    public var refreshReads: Int { written }
+    /// Refreshes of the overview going (`LatestCall` numbers): what each read when it began.
+    /// Only those that read changes not shown yet are kept.
+    private var refreshes: [Int: Int] = [:]
 
-    /// A refresh that read `read` (`refreshReads`) assigned its result. A refresh that read
-    /// earlier and lands later never takes it back.
-    public mutating func refreshShown(_ read: Int) { shown = max(shown, read) }
+    /// Refresh `call` begins reading the store: it will show what was written until now. Ended
+    /// by `refreshEnded` on every way out (`defer`), also when a newer call replaced it or it
+    /// threw.
+    public mutating func refreshBegan(_ call: Int) {
+        if written > shown { refreshes[call] = written }
+    }
 
-    /// A run or the end of one is going: the trips shown are about to change, so the trip
-    /// controls wait (`TripWorkshop.wait`).
-    public var settling: Bool { !reading.isEmpty || !ending.isEmpty }
+    /// Refresh `call` assigned its result (it was the newest). A refresh that read earlier and
+    /// lands later never takes it back.
+    public mutating func refreshShown(_ call: Int) {
+        if let read = refreshes[call] { shown = max(shown, read) }
+    }
+
+    /// Refresh `call` is over, shown or not.
+    public mutating func refreshEnded(_ call: Int) {
+        if refreshes[call] != nil { refreshes[call] = nil }
+    }
+
+    /// A run, the end of one, or a refresh that read changes not shown yet is going: the trips
+    /// shown are about to change, so the trip controls wait (`TripWorkshop.wait`). The end's own
+    /// refresh can be replaced by a newer one (pull to refresh, an ignore tap, a settings save)
+    /// that lands after the end is settled (second review of 194971b, M1).
+    public var settling: Bool {
+        !reading.isEmpty || !ending.isEmpty || refreshes.values.contains { $0 > shown }
+    }
 
     public var state: State {
         if shown >= stored { return .applied }

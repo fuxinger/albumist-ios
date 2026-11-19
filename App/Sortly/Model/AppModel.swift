@@ -1876,8 +1876,10 @@ final class AppModel {
     func refreshDerived() async {
         guard let store, let pipeline else { return }
         let call = derivedCalls.begin()
-        // The trip changes in the suggestions the store holds now (`TripChangeLedger`).
-        let tripsRead = tripChangeLedger.refreshReads
+        // The trip changes in the suggestions the store holds now (`TripChangeLedger`), until
+        // this call is over, whichever way it ends.
+        tripChangeLedger.refreshBegan(call)
+        defer { tripChangeLedger.refreshEnded(call) }
         await reconcileManagedAlbums(quiet: true)
         do {
             // Everything is read first and assigned together, only by the newest call: an older
@@ -1946,7 +1948,7 @@ final class AppModel {
             undonePlans = undone
             removedFromProposals = removed
             MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot, call: call) }
-            tripChangeLedger.refreshShown(tripsRead)
+            tripChangeLedger.refreshShown(call)
         } catch {
             message = .failure(error.localizedDescription)
         }
@@ -2210,8 +2212,8 @@ final class AppModel {
     /// be made. `changeTrips` refuses exactly then; the workshop and the settings grey these
     /// controls and say why next to them (`TripChangeWaitNote`).
     var tripChangeWait: TripWorkshop.Wait? {
-        TripWorkshop.wait(creatingAlbums: execution.isRunning, analysing: analysis.isRunning || tripChangeLedger.settling,
-                          check: runIsShortCheck)
+        TripWorkshop.wait(creatingAlbums: execution.isRunning,
+                          analysing: analysis.isRunning, settling: tripChangeLedger.settling, check: runIsShortCheck)
     }
 
     /// What the workshop does once `changeTrips` stored a change and asked for its run: wait for

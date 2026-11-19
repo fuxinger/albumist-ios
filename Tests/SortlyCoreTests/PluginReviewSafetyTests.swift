@@ -125,7 +125,7 @@ struct PluginReviewSafetyTests {
         #expect(taking.cancelsPlan(after: undone))
         ledger.giveBack(plan: taking.kept.id, albums: taking.kept.freeAlbumUse(applied: true))
         #expect(ledger.used == 3)
-        #expect(ledger.legacyUsed == 3)
+        #expect(ledger.legacyLeft == 3)
         let inv = try await library.currentInventory()
         #expect(inv.collections.count == 1)
         #expect(inv["sommer"]?.assetIDs == Self.ownPhotos)

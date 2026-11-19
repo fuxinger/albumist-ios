@@ -13,11 +13,13 @@ import UIKit
 final class Purchases {
     static let shared: Purchases = {
         // UI runs with `-SortlyUITestLocked` count free albums in a domain of their own that
-        // starts empty at every launch, so the count never reaches the next run.
+        // starts empty at every launch, so the count never reaches the next run. The set
+        // start is used by no plan: taking back a plan of an earlier run (never counted here)
+        // gives nothing back, also when its undo is finalized again after a relaunch.
         if let defaults = UITestSupport.lockedPurchaseDefaults() {
             let purchases = Purchases(defaults: defaults)
             if let left = UITestSupport.freeAlbumsLeft {
-                purchases.ledger = FreeAlbumLedger(legacyUsed: max(0, Purchases.freeAlbumLimit - left))
+                purchases.ledger = FreeAlbumLedger(startingWithUsed: max(0, Purchases.freeAlbumLimit - left))
             }
             return purchases
         }

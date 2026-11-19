@@ -2542,8 +2542,14 @@ final class AppModel {
                 }
             }
             ended = result
+            let finished = result.status == .completed || result.status == .completedWithErrors
+            // The free albums first: the result (an undo's "Rückgängig gemacht") shows only once
+            // the count is written, not after the slow part of `finalize` (Photos may take
+            // seconds to answer). `finalize` does it again, which changes nothing; a store that
+            // cannot be read now leaves it to `finalize`.
+            if finished { try? await settleFreeAlbums(result) }
             execution.finished = result
-            if result.status == .completed || result.status == .completedWithErrors {
+            if finished {
                 resultsStored = await finalize(result)
             }
         } catch {
@@ -2623,6 +2629,10 @@ final class AppModel {
         var undone: SortlyID?
         var stored = false
         do {
+            // Counted, or given back after a completed undo, before the store write and before
+            // Photos is asked: counting twice or giving back twice is impossible (per plan id,
+            // written as one value), and a crash in between is completed at the next launch.
+            try await settleFreeAlbums(result)
             let after = try await library.currentInventory()
             try await store.saveInventory(after)
             inventory = after
@@ -2635,14 +2645,8 @@ final class AppModel {
                     newDecisions[id] = nil
                     previewOnly[id] = nil
                 }
-                // Counted before the store write: counting twice is impossible (per plan id),
-                // and a crash in between is completed at the next launch.
-                Purchases.shared.recordUsage(plan: result.id, albums: result.freeAlbumUse(applied: true))
             } else if let original = result.reverts, result.status == .completed, let executed = try await store.plan(original) {
-                // A completed undo: part of the same recoverable finalization, so a crash right
-                // after the undo still gives the free albums back (audit 2, 6.3). Both are
-                // idempotent when the finalization runs again.
-                Purchases.shared.returnUsage(plan: executed.id, albums: executed.freeAlbumUse(applied: true))
+                // A completed undo (its free albums came back above, audit 2, 6.3).
                 // A removal that is taken back lets its suggestions come back as well.
                 let sources = executed.removalSources
                 if !sources.isEmpty {
@@ -2678,6 +2682,18 @@ final class AppModel {
             message = .failure(error.localizedDescription)
         }
         return stored
+    }
+
+    /// The free albums of a finished plan: counted from what it really changed, or, after a
+    /// completed undo, given back for the plan it took back (audit 2, 6.3). Part of the
+    /// recoverable finalization: idempotent per plan id (`FreeAlbumLedger`), so running it
+    /// again after a crash, at launch or from `finalize` changes nothing.
+    private func settleFreeAlbums(_ result: ChangePlan) async throws {
+        if result.reverts == nil {
+            Purchases.shared.recordUsage(plan: result.id, albums: result.freeAlbumUse(applied: true))
+        } else if let original = result.reverts, result.status == .completed, let executed = try await store?.plan(original) {
+            Purchases.shared.returnUsage(plan: executed.id, albums: executed.freeAlbumUse(applied: true))
+        }
     }
 
     private func setPendingFinalization(adding id: SortlyID? = nil, removing gone: Set<SortlyID> = []) async throws {

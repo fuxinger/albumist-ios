@@ -364,6 +364,7 @@ struct AtlasContent: View {
     /// A country tapped on the map or in the list opens its photos, pushed onto the stack's
     /// path (`AppScreen`), not with `navigationDestination(item:)`.
     @Environment(Navigator.self) private var navigator: Navigator?
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .largeTitle) private var numberSize: CGFloat = 56
 
     var body: some View {
@@ -420,28 +421,13 @@ struct AtlasContent: View {
                     ForEach(Array(shown.enumerated()), id: \.element) { index, code in
                         // Pushed by value: the country may push its suggestion (`AppScreen`).
                         PushLink(.country(code: code, year: atlas.year), chevron: false) {
-                            HStack(spacing: Theme.Spacing.m) {
-                                Text(TravelAtlas.flag(code)).font(.title2).accessibilityHidden(true)
-                                Text(AtlasStyle.countryName(code))
-                                Spacer()
-                                if atlas.newCountryCodes.contains(code) {
-                                    Text("Neu").font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 8).padding(.vertical, 3)
-                                        .background(Theme.accent.opacity(0.15), in: Capsule())
-                                        .foregroundStyle(Theme.accent)
-                                } else if let date = atlas.firstVisits[code] {
-                                    Text(verbatim: String(Calendar.current.component(.year, from: date)))
-                                        .monospacedDigit().foregroundStyle(.secondary)
-                                }
-                                Image(systemName: "chevron.right")
-                                    .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-                                    .accessibilityHidden(true)
-                            }
-                            .padding(.vertical, 10)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
+                            countryRow(code)
+                                .padding(.vertical, 10)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("atlas.country")
                         .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
                         if index < shown.count - 1 { Divider() }
                     }
@@ -449,6 +435,55 @@ struct AtlasContent: View {
                 .padding(.horizontal, Theme.Spacing.l)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
             }
+        }
+    }
+
+    /// Flag, name, year (or "Neu") and arrow in one line. At the accessibility text sizes the
+    /// name gets the whole width under flag and arrow, and the year its own line, as the areas
+    /// of the overview do: in one line the name broke mid-word over six lines and the year
+    /// into "20" and "11" (review P3-11 / G3-01). VoiceOver reads name, then year, either way.
+    @ViewBuilder
+    private func countryRow(_ code: String) -> some View {
+        let flag = Text(TravelAtlas.flag(code)).font(.title2).accessibilityHidden(true)
+        let name = Text(AtlasStyle.countryName(code))
+        let chevron = Image(systemName: "chevron.right")
+            .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                HStack {
+                    flag
+                    Spacer()
+                    chevron
+                }
+                name
+                firstVisit(code)
+            }
+        } else {
+            HStack(spacing: Theme.Spacing.m) {
+                flag
+                name
+                Spacer()
+                firstVisit(code)
+                chevron
+            }
+        }
+    }
+
+    /// "Neu" for a country first seen this year, otherwise the year of the first visit; never
+    /// broken over two lines.
+    @ViewBuilder
+    private func firstVisit(_ code: String) -> some View {
+        if atlas.newCountryCodes.contains(code) {
+            Text("Neu").font(.caption.weight(.semibold))
+                .lineLimit(1).fixedSize()
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Theme.accent.opacity(0.15), in: Capsule())
+                .foregroundStyle(Theme.accent)
+        } else if let date = atlas.firstVisits[code] {
+            Text(verbatim: String(Calendar.current.component(.year, from: date)))
+                .monospacedDigit().foregroundStyle(.secondary)
+                .lineLimit(1).fixedSize()
         }
     }
 

@@ -81,6 +81,9 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 19.11.: Größte Schrift: Die Länderliste im Reise-Atlas wird nicht mehr zerhackt (P3-11).
+  Flagge und Pfeil stehen oben, der Name darunter in voller Breite, das Jahr in einer eigenen
+  Zeile und nie umbrochen, wie die Bereiche der Übersicht.
 - 19.11.: Einstellungen: „Ordner für neue Alben“ ist nicht mehr abgeschnitten (P3-17). Die
   Beschriftung bekommt die Breite, die sie braucht, das Feld den Rest; bei den größten
   Schriftgrößen steht das Feld unter der Beschriftung.

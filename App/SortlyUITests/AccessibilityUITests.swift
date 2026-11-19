@@ -20,8 +20,9 @@ import UIKit
 /// - a visible format placeholder ("%lld", "%@") and, in the English run, German words
 ///   left in the interface (untranslated strings)
 /// - text that runs off the side of the screen
-/// - the folder label in the settings cut on one line at any size (review P3-17,
-///   `checkFullyShown`)
+/// - a country row of the atlas at the largest text size taller than its words need (a name
+///   or year broken mid-word, review P3-11, `checkAtlasRows`), and the folder label in the
+///   settings cut on one line at any size (P3-17, `checkFullyShown`)
 ///
 /// Also failing: an audit that does not complete in two attempts ("Audit failed to complete in
 /// time", each attempt printed as `A11Y_AUDIT_ERROR`): the screen would otherwise pass unchecked.
@@ -340,6 +341,7 @@ final class AccessibilityUITests: XCTestCase {
             if !short {
                 app.swipeUp(); app.swipeUp(); sleep(1)
                 check("\(tag) atlas lower", english: english)
+                if accessibilitySize { checkAtlasRows(tag) }
                 // A country: its photo colours sit behind the title and caption.
                 let country = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", w.country)).firstMatch
                 // Its screen is called by the country's name.
@@ -730,6 +732,42 @@ final class AccessibilityUITests: XCTestCase {
     }
 
     // MARK: Layout checks the audit does not make
+
+    /// Largest text: a country row of the atlas holds its name in whole words and the year in
+    /// one line (review P3-11 / G3-01: "Ver-ei-nig-te Sta-a-ten" over six lines, the year as
+    /// "20" over "11", and the audit passed: wrapped text is not "clipped"). The row is one
+    /// VoiceOver element, so its height is measured: at most the line of flag and arrow, one
+    /// line per word of the name and one more (a single word wider than the screen of the
+    /// small iPhone may still break once), the year's line and the padding. A name broken into
+    /// syllables needs more lines than that: the six lines of "Vereinigte Staaten" are about
+    /// 400 pt on the small iPhone, two words are allowed about 355 pt.
+    private func checkAtlasRows(_ tag: String) {
+        let traits = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
+        let bodyLine = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits).lineHeight
+        let flagLine = UIFont.preferredFont(forTextStyle: .title2, compatibleWith: traits).lineHeight
+        let screen = app.frame
+        var measured = 0
+        for row in app.buttons.matching(identifier: "atlas.country").allElementsBoundByIndex where row.exists {
+            let frame = row.frame
+            // Only rows wholly on screen: a row cut by the edge has no meaningful height.
+            guard !frame.isEmpty, screen.contains(frame) else { continue }
+            measured += 1
+            // "Vereinigte Staaten, 2011": the name is the part before the year.
+            let name = row.label.components(separatedBy: ", ").first ?? row.label
+            let words = max(1, name.split(whereSeparator: { $0 == " " || $0 == "-" }).count)
+            let allowed = flagLine + CGFloat(words + 2) * bodyLine + 2 * 10 + 2 * 4 + 8
+            if frame.height > allowed {
+                print("A11Y_FAIL \(tag) atlas lower | country row broken mid-word | label '\(row.label)' | height \(Int(frame.height)) > \(Int(allowed)) for \(words) word(s)")
+                XCTFail("\(tag) atlas: the row '\(row.label)' is \(Int(frame.height)) pt tall, more than \(Int(allowed)) pt for \(words) word(s) and the year: the name or the year breaks mid-word")
+            }
+        }
+        if measured > 0 {
+            print("UI_STEP_OK \(tag) atlas rows measured \(measured)")
+        } else {
+            print("UI_STEP_MISSING \(tag) atlas rows measured (no country row wholly on screen)")
+            XCTFail("\(tag) atlas: no country row wholly on screen to measure")
+        }
+    }
 
     /// A label shown in full, not ending in "…" (review P3-17 / G3-08: "Ordner für neue Al…"
     /// in the settings at the default text size; the audit leaves clipped text at standard

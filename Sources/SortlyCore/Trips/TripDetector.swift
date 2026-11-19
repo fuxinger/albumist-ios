@@ -462,9 +462,7 @@ public struct TripDetector: Sendable {
     /// common one among their photos' places), where that differs from `calendar`'s.
     public static func inDestinationTime(_ trips: [Trip], assets: [AssetID: AssetSnapshot], timeZones: [AssetID: String], calendar: Calendar) -> [Trip] {
         trips.map { trip in
-            var counts: [String: Int] = [:]
-            for id in trip.geotaggedAssetIDs { if let zone = timeZones[id] { counts[zone, default: 0] += 1 } }
-            guard let identifier = counts.max(by: { ($0.value, $1.key) < ($1.value, $0.key) })?.key,
+            guard let identifier = trip.destinationZone({ timeZones[$0] }),
                   let zone = TimeZone(identifier: identifier), zone.identifier != calendar.timeZone.identifier else { return trip }
             var local = calendar
             local.timeZone = zone
@@ -479,6 +477,18 @@ public struct TripDetector: Sendable {
             (result.kind, result.distinctStops) = classify(dates: members.map(\.0), coordinates: members.map(\.1), calendar: local)
             return result
         }
+    }
+}
+
+extension Trip {
+    /// The time zone of the trip's destination: the most common one among its photos' places
+    /// (`zone`: a photo's zone, nil where its place tells none), of two as common the first by
+    /// name. Its days are counted in it (`TripDetector.inDestinationTime`), and its photos
+    /// without a place are read on it (`PhotoClocks`).
+    public func destinationZone(_ zone: (AssetID) -> String?) -> String? {
+        var counts: [String: Int] = [:]
+        for id in geotaggedAssetIDs { if let z = zone(id) { counts[z, default: 0] += 1 } }
+        return counts.max(by: { ($0.value, $1.key) < ($1.value, $0.key) })?.key
     }
 }
 

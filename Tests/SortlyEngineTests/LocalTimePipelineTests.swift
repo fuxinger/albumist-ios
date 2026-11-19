@@ -556,6 +556,58 @@ struct LocalTimePipelineTests {
         #expect(thirdRun <= 2)
     }
 
+    /// Second review: a picture without a location saved on a trip to New York (received in a
+    /// messenger, or from a camera without GPS) at 23:00 on 31 January belongs to the trip by its
+    /// time, and so to January on the trip's clock, also in the month album, though the home is
+    /// in Munich and the iPhone on German time (05:00 on 1 February there).
+    @Test func aPictureWithoutALocationOnATripIsReadOnTheTripsClock() async throws {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2025-12-01", to: "2026-03-31", at: Fixture.Places.munichHome, perDay: 1, skipping: [("2026-01-27", "2026-02-03")])
+        for day in ["2026-01-28", "2026-01-29", "2026-01-30", "2026-01-31", "2026-02-01", "2026-02-02"] {
+            for time in ["10:00", "15:00", "20:00"] { _ = lib.photo(at: Self.local("\(day) \(time)", "America/New_York"), Self.newYork, jitterMeters: 30) }
+        }
+        let received = lib.photo(at: Self.local("2026-01-31 23:00", "America/New_York"), nil)
+        let store = try SortlyStore(url: nil)
+        let pipeline = Self.pipeline(store: store, reader: InMemoryLibraryReader(assets: lib.assets), geocoder: nil, deviceZone: "Europe/Berlin")
+        #expect(try await pipeline.run().isComplete)
+        let trips = try await store.value([Trip].self, forKey: AnalysisPipeline.Key.trips) ?? []
+        let zone = try await pipeline.currentFacts().first { $0.id == received }?.timeZone?.identifier
+        let months = try await Self.months(pipeline)
+        print("P1-15-TRIP-CLOCK picture without a location of 31.1. 23:00 New York, in the trip: "
+              + "\(trips.contains { $0.inferredAssetIDs.contains(received) }), on \(zone ?? "none"), in \(months.filter { $0.value.contains(received) }.map(\.key))")
+        #expect(trips.contains { $0.inferredAssetIDs.contains(received) })
+        #expect(zone == "America/New_York")
+        #expect(months["Januar 2026"]?.contains(received) == true, "\(Self.describe(months))")
+    }
+
+    /// The assembler: a photo without a place that a trip holds by its time gets the zone of the
+    /// trip's destination, the most common one among the trip's photos (New York before
+    /// Chicago). A place of its own still wins (one the user chose), and a photo without a place
+    /// outside every trip keeps the home time zone.
+    @Test func theAssemblerGivesAPhotoOfATripWithoutAPlaceTheClockOfTheTrip() {
+        let date = Self.local("2026-01-31 23:00", "America/New_York")
+        func asset(_ id: AssetID, _ offset: TimeInterval, _ location: GeoCoordinate?) -> AssetSnapshot {
+            AssetSnapshot(id: id, creationDate: date.addingTimeInterval(offset), location: location)
+        }
+        let chicago = GeoCoordinate(latitude: 41.8781, longitude: -87.6298)
+        let assets = [asset("ny1", -7_200, Self.newYork), asset("ny2", 7_200, Self.newYork), asset("chicago", 10_800, chicago),
+                      asset("received", 0, nil), asset("assigned", 600, nil), asset("atHome", -20 * 86_400, nil)]
+        let newYork = ResolvedPlace(components: .init(isoCountryCode: "US", timeZoneIdentifier: "America/New_York"), source: .gpsReverseGeocoded)
+        let places: [AssetID: ResolvedPlace] = [
+            "ny1": newYork, "ny2": newYork,
+            "chicago": ResolvedPlace(components: .init(isoCountryCode: "US", timeZoneIdentifier: "America/Chicago"), source: .gpsReverseGeocoded),
+            "assigned": ResolvedPlace(components: .init(isoCountryCode: "JP"), source: .userAssigned),
+        ]
+        let trip = Trip(id: .stable("trip", "ny1"), start: date.addingTimeInterval(-7_200), end: date.addingTimeInterval(10_800),
+                        geotaggedAssetIDs: ["ny1", "ny2", "chicago"], inferredAssetIDs: ["received", "assigned"], centroid: Self.newYork,
+                        maxDistanceFromHomeMeters: 6_500_000, distinctStops: 1, kind: .shortTrip)
+        let facts = FactsAssembler.assemble(assets: assets, places: places, contents: [:], texts: [:], trips: [trip], frequentPlaces: [],
+                                            groups: [], inventory: CollectionInventory([]), homeTimeZone: TimeZone(identifier: "Europe/Berlin"))
+        let zones = Dictionary(uniqueKeysWithValues: facts.map { ($0.id, $0.timeZone?.identifier ?? "none") })
+        #expect(zones == ["ny1": "America/New_York", "ny2": "America/New_York", "chicago": "America/Chicago",
+                          "received": "America/New_York", "assigned": "Asia/Tokyo", "atHome": "Europe/Berlin"])
+    }
+
     /// The assembler gives each photo the clock of its place: the zone the online lookup named
     /// (it wins over the country's), else the zone of its country there (Denver, Perth offline),
     /// else the home time zone (no location, a place guessed from the content). Without a home

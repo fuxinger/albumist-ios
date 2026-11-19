@@ -108,6 +108,30 @@ extension LocalTime {
     }
 }
 
+/// The clock each photo is read on (`AssetFacts.timeZone`, review P1-15): the zone its place
+/// tells (`LocalTime.placeZones`); for a photo without one that a trip holds by its time (from
+/// a camera without GPS, a picture received in a messenger: `Trip.inferredAssetIDs`), the zone
+/// of the trip's destination (second review); else the home time zone.
+public struct PhotoClocks: Sendable {
+    public let places: [AssetID: TimeZone]
+    public let home: TimeZone
+    private var trips: [AssetID: TimeZone] = [:]
+
+    /// A photo in the time window of two trips gets the first one's zone.
+    public init(places: [AssetID: TimeZone], trips: [Trip], home: TimeZone) {
+        self.places = places
+        self.home = home
+        for trip in trips where !trip.inferredAssetIDs.isEmpty {
+            guard let zone = trip.destinationZone({ places[$0]?.identifier }).flatMap(TimeZone.init(identifier:)) else { continue }
+            for id in trip.inferredAssetIDs where self.trips[id] == nil { self.trips[id] = zone }
+        }
+    }
+
+    public func zone(of id: AssetID) -> TimeZone {
+        places[id] ?? trips[id] ?? home
+    }
+}
+
 extension AssetFacts {
     /// The capture date on the photo's own clock (`LocalTime.wallClock`): in its time zone, or in
     /// `fallback` (the calendar's zone) for facts made without zones.

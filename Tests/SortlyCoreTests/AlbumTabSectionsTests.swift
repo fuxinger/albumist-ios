@@ -31,6 +31,22 @@ struct AlbumTabSectionsTests {
         #expect(Self.listedOnce(sections))
     }
 
+    /// UI run 44570945716 (PR #11, flow-other): with every album Albumist's, "Deine Alben"
+    /// said "Noch keine Alben" right under the list of albums above. A library with albums never
+    /// says it has none: the section is left out then, and the note shows only for a library
+    /// without any album.
+    @Test func aLibraryWithOnlyAlbumistsAlbumsNeverSaysItHasNone() {
+        let done = CollectionSnapshot(id: "a1", title: "Testalbum Vollendet", assetIDs: Self.photos)
+        let onlyAlbumist = AlbumTabSections(inventory: CollectionInventory([done]), managed: [Self.state(done)])
+        #expect(!onlyAlbumist.showsYourAlbums)
+        #expect(!onlyAlbumist.saysNoAlbums)
+        let empty = AlbumTabSections(inventory: CollectionInventory([]), managed: [])
+        #expect(empty.showsYourAlbums && empty.saysNoAlbums)
+        let mine = CollectionSnapshot(id: "u1", title: "Italien", assetIDs: Self.photos)
+        let both = AlbumTabSections(inventory: CollectionInventory([done, mine]), managed: [Self.state(done)])
+        #expect(both.showsYourAlbums && !both.saysNoAlbums)
+    }
+
     @Test func aUsersAlbumAlbumistExtendedStandsOnce() {
         let mine = CollectionSnapshot(id: "u1", title: "Italien", assetIDs: Self.photos)
         let other = CollectionSnapshot(id: "u2", title: "Garten", assetIDs: [AssetID("p3")])

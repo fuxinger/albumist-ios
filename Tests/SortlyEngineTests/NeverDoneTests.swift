@@ -169,4 +169,86 @@ struct NeverDoneTests {
         #expect(d.analyzed == 30 && d.unreadable == 0, "\(d.analyzed) of \(d.photos) analysed, \(d.unreadable) unreadable")
         #expect(try await w.store.result(ContentAnalysis.self, kind: "content", asset: late)?.failedAttempts == nil)
     }
+
+    // MARK: P1-09 photos whose country cannot be found
+
+    /// Apple's lookup on open sea: no country, no town.
+    final class SeaGeocoder: ReverseGeocoding, @unchecked Sendable {
+        let inner = FakeGeocoder()
+        let sea: GeoCoordinate
+        let calls = Mutex(0)
+        init(sea: GeoCoordinate) { self.sea = sea }
+        func reverseGeocode(_ coordinate: GeoCoordinate) async throws -> PlaceComponents? {
+            calls.withLock { $0 += 1 }
+            if GeoMath.distance(coordinate, sea) < 40_000 { return nil }
+            return try await inner.reverseGeocode(coordinate)
+        }
+    }
+
+    /// Everyday life in Munich, and three photos from a ferry in the middle of the Adriatic
+    /// (60 km off the coast). The lookup answers "nothing here" and the answer is kept: the photos
+    /// can never get a country. They count like photos without a location (not "offen" for good).
+    @Test func photosTakenAtSeaAreNotOpenForGood() async throws {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2026-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1)
+        let adriatic = GeoCoordinate(latitude: 43.0, longitude: 15.0)
+        let sea = (0..<3).map { lib.photo(at: Fixture.date("2026-04-0\($0 + 1) 12:00"), adriatic, jitterMeters: 300) }
+        #expect(Self.map.lookup(adriatic).country == nil)
+        let geocoder = SeaGeocoder(sea: adriatic)
+        let w = try Self.world(lib.assets, geocoder: geocoder)
+        var asked: [Int] = []
+        for run in 1...2 {
+            #expect(try await w.pipeline.run().isComplete)
+            let d = try await w.derived()
+            #expect(w.places(d, sea) == Array(repeating: AreaStatus.analysisImpossible.rawValue, count: 3), "run \(run)")
+            #expect(d.progress.pending == 0, "run \(run): \(d.progress.pending) photos open for good")
+            #expect(d.progress.total == 0, "run \(run): the ring counts photos no suggestion can ever be made for")
+            asked.append(geocoder.calls.withLock { $0 })
+        }
+        // The answer "nothing here" is kept: not asked again.
+        #expect(asked[0] > 0 && asked[1] == asked[0], "\(asked)")
+    }
+
+    /// "Orte online genauer bestimmen" is off. Three photos from Konstanz, a few hundred metres
+    /// from the Swiss border: the map on the device names no country there. Without the online
+    /// lookup they can never get one: they count like photos without a location. Turned on, the
+    /// next run finds their country.
+    @Test func photosNearABorderWithoutTheOnlineLookupAreNotOpenForGood() async throws {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2026-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1)
+        let konstanz = GeoCoordinate(latitude: 47.6588, longitude: 9.1750)
+        let border = (0..<3).map { lib.photo(at: Fixture.date("2026-04-0\($0 + 1) 12:00"), konstanz, jitterMeters: 100) }
+        #expect(!Self.map.lookup(konstanz).countryIsCertain)
+        let w = try Self.world(lib.assets, configure: { $0.privacy.allowOnlineGeocoding = false })
+        for run in 1...2 {
+            #expect(try await w.pipeline.run().isComplete)
+            let d = try await w.derived()
+            #expect(w.places(d, border) == Array(repeating: AreaStatus.analysisImpossible.rawValue, count: 3), "run \(run)")
+            #expect(d.progress.pending == 0, "run \(run): \(d.progress.pending) photos open for good")
+        }
+        // Turned on: the country is found, and they count as usual.
+        var settings = w.settings
+        settings.privacy.allowOnlineGeocoding = true
+        await w.pipeline.update(settings: settings)
+        #expect(try await w.pipeline.run().isComplete)
+        let facts = Dictionary(uniqueKeysWithValues: try await w.pipeline.currentFacts().map { ($0.id, $0) })
+        #expect(border.allSatisfy { facts[$0]?.gpsPlace?.isoCountryCode != nil })
+        let on = World(store: w.store, reader: w.reader, pipeline: w.pipeline, settings: settings)
+        let d = try await on.derived()
+        #expect(!w.places(d, border).contains(AreaStatus.analysisImpossible.rawValue))
+    }
+
+    /// Online lookup on, but Apple cannot be reached right now: the photos at the border wait for
+    /// it ("offen"), as before; only a lookup that is switched off or has answered "nothing here"
+    /// makes a place impossible.
+    @Test func photosWaitingForAnOnlineLookupStayOpen() async throws {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2026-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1)
+        let konstanz = GeoCoordinate(latitude: 47.6588, longitude: 9.1750)
+        let border = (0..<3).map { lib.photo(at: Fixture.date("2026-04-0\($0 + 1) 12:00"), konstanz, jitterMeters: 100) }
+        let w = try Self.world(lib.assets, geocoder: FakeGeocoder(failures: Array(repeating: .offline, count: 50)))
+        _ = try await w.pipeline.run()
+        let d = try await w.derived()
+        #expect(w.places(d, border) == Array(repeating: AreaStatus.analysisPending.rawValue, count: 3))
+    }
 }

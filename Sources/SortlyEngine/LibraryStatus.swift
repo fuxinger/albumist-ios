@@ -163,7 +163,9 @@ public enum LibraryStatus {
                 switch area {
                 case .places:
                     a.applicable = !f.asset.isScreenshotLike
-                    a.analysisImpossible = f.asset.usableLocation == nil
+                    // No location, or no country to be found for it (open sea; a border with the
+                    // online lookup off): never "offen" for good (review P1-09).
+                    a.analysisImpossible = f.asset.usableLocation == nil || (f.gpsPlace == nil && f.countryOutOfReach)
                     a.analyzed = f.asset.usableLocation == nil || f.gpsPlace != nil
                     if a.applicable && !a.analysisImpossible && !hasAlbum {
                         if f.atHome {

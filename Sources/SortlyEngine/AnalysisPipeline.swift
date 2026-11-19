@@ -241,6 +241,9 @@ public actor AnalysisPipeline {
         /// Where 638ff85 stored the table; moved to `regionKeys` once.
         static let regionKeysBefore = "analysis.regionKeys"
         static let proposals = "analysis.proposals"
+        /// Photos whose country cannot be found (`PlaceResolutionService.Outcome.withoutCountry`,
+        /// review P1-09): they count like photos without a location.
+        static let placesWithoutCountry = "analysis.placesWithoutCountry"
         /// When the image step last looked for photos given up as unreadable that are due for
         /// another read (`reopenGivenUpPhotos`).
         static let givenUpChecked = "analysis.givenUpChecked"
@@ -1174,7 +1177,10 @@ public actor AnalysisPipeline {
             return .init(assetID: asset.id, coordinate: coordinate, priority: priority,
                          hasTown: stored?.precisionMeters != nil, hasCountry: stored != nil && stored?.precisionMeters == nil)
         }
-        guard !requests.isEmpty else { return .init() }
+        guard !requests.isEmpty else {
+            try await saveWithoutCountry(.init())
+            return .init()
+        }
         let service = PlaceResolutionService(map: map, geocoder: geocoder, cache: store, policy: policy, time: time,
                                              requestLog: geocoderRequests)
         let store = self.store
@@ -1217,7 +1223,19 @@ public actor AnalysisPipeline {
            outcome.stoppedBecauseThrottled || outcome.stoppedAtRequestLimit || outcome.stoppedAsking {
             lastForegroundOnlineLookup = now()
         }
+        try await saveWithoutCountry(outcome)
         return outcome
+    }
+
+    /// Photos whose country cannot be found, for the status (`currentFacts`). A call that looked
+    /// at every photo without a place replaces them; one cut short by a Pause adds to them (the
+    /// photos it did not reach keep what the call before found). A photo that has a place since
+    /// does not count (`LibraryStatus`); the next complete call drops it.
+    private func saveWithoutCountry(_ outcome: PlaceResolutionService.Outcome) async throws {
+        let before = try await store.value(Set<AssetID>.self, forKey: Key.placesWithoutCountry) ?? []
+        let now = outcome.reachedAll ? outcome.withoutCountry : before.union(outcome.withoutCountry)
+        guard now != before else { return }
+        try await store.setValue(now, forKey: Key.placesWithoutCountry)
     }
 
     /// After the language of album names changed, the countries and regions of the places
@@ -1921,9 +1939,11 @@ public actor AnalysisPipeline {
         let contents = analysed ? try await store.results(ContentAnalysis.self, kind: "content") : [:]
         let texts = analysed ? try await store.results(TextResult.self, kind: "text") : [:]
         let home = try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
+        let withoutCountry = try await store.value(Set<AssetID>.self, forKey: Key.placesWithoutCountry) ?? []
         return await offActor {
             FactsAssembler.assemble(assets: all, places: places, contents: contents, texts: texts, trips: trips,
-                                    frequentPlaces: frequent, groups: groups, inventory: inventory, home: home)
+                                    frequentPlaces: frequent, groups: groups, inventory: inventory, home: home,
+                                    withoutCountry: withoutCountry)
         }
     }
 

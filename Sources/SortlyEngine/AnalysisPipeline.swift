@@ -909,9 +909,21 @@ public actor AnalysisPipeline {
               let stored = await storedLibraryMark(),
               stored.readerVersion == Self.currentReaderVersion,
               stored.includeHidden == includeHidden, stored.changeReads < Self.wholeReadEvery,
-              abs(now().timeIntervalSince(stored.wholeReadAt)) < Self.wholeReadAfter,
-              // An error of the history is no reason to end the run: the whole read follows.
-              let changes = try? await reader.changes(since: stored.mark, limit: Self.largestChangeRead),
+              abs(now().timeIntervalSince(stored.wholeReadAt)) < Self.wholeReadAfter else { return nil }
+        let answer: LibraryChanges?
+        do {
+            answer = try await reader.changes(since: stored.mark, limit: Self.largestChangeRead)
+        } catch let error as CancellationError {
+            // The run is ended, or Photos does not answer: the run ends as with any read that
+            // gets no answer, and the mark stays for the next run.
+            throw error
+        } catch let error as PhotosNotResponding {
+            throw error
+        } catch {
+            // Any other error of the history is no reason to end the run: the whole read follows.
+            answer = nil
+        }
+        guard let changes = answer,
               !changes.tooMany,
               changes.assets.count + changes.deleted.count <= Self.largestChangeRead else { return nil }
         // The deleted ones too: what is readable now stays, whatever order the history named

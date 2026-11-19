@@ -206,6 +206,9 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         let options = PHFetchOptions()
         options.includeHiddenAssets = includeHidden
         options.includeAssetSourceTypes = librarySources
+        // A burst as the whole read sees it, also when fetched by identifier (Photos' default,
+        // set here so both reads say so).
+        options.includeAllBurstAssets = false
         return options
     }
 
@@ -293,9 +296,9 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         }
     }
 
-    /// Fetched by identifier, then held to the rules of the whole read (`libraryOptions`):
-    /// whether a fetch by identifier leaves out hidden photos or other sources is not taken on
-    /// trust. Bounded like `fetchAssets`, every photo a sign of progress.
+    /// Fetched by identifier with the whole read's options (`libraryOptions`, also for bursts),
+    /// then held to its rules by hand as well: whether a fetch by identifier leaves out hidden
+    /// photos or other sources is not taken on trust. Bounded like `fetchAssets`, every photo a sign of progress.
     func fetchAssets(_ ids: Set<AssetID>, includeHidden: Bool, knownDetails: [AssetID: Date],
                      progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> ChangedAssets {
         let wanted = ids.map(\.rawValue).sorted()
@@ -311,10 +314,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                         stop.pointee = true
                         return
                     }
-                    // A burst counts once in a whole read (its representative frame): the
-                    // other frames are left out here too.
-                    guard includeHidden || !asset.isHidden, Self.librarySources.contains(asset.sourceType),
-                          asset.burstIdentifier == nil || asset.representsBurst else { return }
+                    guard includeHidden || !asset.isHidden, Self.librarySources.contains(asset.sourceType) else { return }
                     autoreleasepool {
                         let needsResources = knownDetails[AssetID(asset.localIdentifier)].map { known in
                             !AssetSnapshot.sameModification(known, asset.modificationDate)

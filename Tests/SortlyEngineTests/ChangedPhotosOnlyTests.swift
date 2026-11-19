@@ -550,6 +550,93 @@ struct ChangedPhotosOnlyTests {
         #expect(try await w.store.assetCount() == photos + 1)
     }
 
+    // MARK: - Third review
+
+    /// More changed photos than are read one by one, with as many photos deleted as added: the
+    /// count alone would fit. The history says "too many" and the whole library is read, so
+    /// no deletion and no new photo is lost.
+    @Test func manyChangesWhoseCountFitsReadTheWholeLibrary() async throws {
+        let w = try Self.world()
+        _ = try await Self.run(w)
+        var lib = LibraryBuilder()
+        for _ in 0..<1_100 { _ = lib.photo(at: Fixture.date("2026-06-25 10:00"), nil) }
+        let imported = lib.assets.enumerated().map { index, asset -> AssetSnapshot in
+            var asset = asset
+            asset.id = AssetID(String(format: "import-%04d", index))
+            return asset
+        }
+        let before = await w.reader.assets
+        let deleted = Set(before.prefix(150).map(\.id))
+        let kept = Array(before.dropFirst(150))
+        // 150 deleted and 150 added (the count stays), and 950 more added and deleted again:
+        // 1,250 photos named.
+        await w.reader.set(assets: kept + imported.prefix(150))
+        await w.reader.set(assets: kept + imported)
+        await w.reader.set(assets: kept + imported.prefix(150))
+        let (_, work) = try await Self.run(w)
+        #expect(work.wholeReads == 1)
+        let stored = Set(try await w.store.allAssets().map(\.id))
+        #expect(stored.isDisjoint(with: deleted))
+        #expect(stored.isSuperset(of: imported.prefix(150).map(\.id)))
+        #expect(stored.count == before.count)
+    }
+
+    /// A history that does not answer in time (`PhotosNotResponding`) or a run that is ended
+    /// (`CancellationError`) is not "a history that cannot tell": the run ends as with any
+    /// read Photos does not answer, and the mark stays (no whole read, nothing removed).
+    /// Red before: the error was taken for "cannot tell", the mark removed and the whole
+    /// library read.
+    @Test(arguments: [false, true])
+    func historyThatHangsOrIsCancelledKeepsTheMark(cancelled: Bool) async throws {
+        let w = try Self.world()
+        _ = try await Self.run(w)
+        let key = AnalysisPipeline.Key.libraryMark
+        let before = try #require(try await w.store.value(StoredMark.self, forKey: key)).mark
+        let error: any Error & Sendable = cancelled
+            ? CancellationError() : PhotosNotResponding(lane: .read, what: "libraryChanges", notSent: false)
+        await w.reader.set(changesThrow: error)
+        let wholeBefore = await w.reader.wholeReads
+        await #expect(throws: (any Error).self) { _ = try await w.pipeline.run() }
+        #expect(await w.reader.wholeReads == wholeBefore)
+        #expect(try await w.store.value(StoredMark.self, forKey: key)?.mark == before)
+        // Photos answers again: the changes are read from the same mark.
+        await w.reader.set(changesThrow: nil)
+        let (_, work) = try await Self.run(w)
+        #expect(work.wholeReads == 0)
+    }
+
+    /// A photo the history names as deleted that the store never had (added and deleted
+    /// between two runs) is no reason for a whole read.
+    @Test func deletedPhotoNeverStoredReadsNoWholeLibrary() async throws {
+        let w = try Self.world()
+        _ = try await Self.run(w)
+        let photos = Self.library().assets
+        let brief = AssetSnapshot(id: AssetID("brief"), kind: .image, creationDate: Fixture.date("2026-06-28 10:00"),
+                                  location: nil, pixelWidth: 4032, pixelHeight: 3024)
+        await w.reader.set(assets: photos + [brief])
+        await w.reader.set(assets: photos)
+        let (report, work) = try await Self.run(w)
+        #expect(work.wholeReads == 0)
+        #expect(report.removed == 0)
+        #expect(try await w.store.assetCount() == photos.count)
+    }
+
+    /// A read of changes keeps the time of the last whole read: the weekly whole read counts
+    /// from it, not from the last change.
+    @Test func changeReadKeepsTheTimeOfTheWholeRead() async throws {
+        let w = try Self.world()
+        _ = try await Self.run(w)
+        let key = AnalysisPipeline.Key.libraryMark
+        #expect(try await w.store.value(AnalysisPipeline.LibraryReadMark.self, forKey: key)?.wholeReadAt == Self.clock)
+        w.clock.now.withLock { $0 = Self.clock.addingTimeInterval(2 * 86_400) }
+        await w.reader.set(assets: await w.reader.assets.filter { $0.id != Self.library().home[11] })
+        let (_, work) = try await Self.run(w)
+        #expect(work.wholeReads == 0)
+        let mark = try #require(try await w.store.value(AnalysisPipeline.LibraryReadMark.self, forKey: key))
+        #expect(mark.wholeReadAt == Self.clock)
+        #expect(mark.changeReads == 1)
+    }
+
     /// Adds `made` to the library right after the first walk over the albums.
     actor AlbumMadeAfterFirstWalk: PhotoLibraryReading {
         let base: InMemoryLibraryReader

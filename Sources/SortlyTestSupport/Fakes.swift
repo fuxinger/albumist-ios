@@ -102,8 +102,10 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
     /// The marks `changes(since:)` was asked for, in order.
     public private(set) var changesAsked: [LibraryChangeMark] = []
     /// `changes(since:)` throws (Photos does not answer).
-    private var changesFail = false
-    public func set(changesFail: Bool) { self.changesFail = changesFail }
+    private var changesError: (any Error & Sendable)?
+    public func set(changesFail: Bool) { changesError = changesFail ? ChangesUnanswered() : nil }
+    /// `changes(since:)` throws this (`PhotosNotResponding`, `CancellationError`, ...).
+    public func set(changesThrow error: (any Error & Sendable)?) { changesError = error }
     /// Photos a fetch by identifier does not return although they are in the library (a
     /// reader that gets it wrong): only the count says so.
     private var missingFromFetchByID: Set<AssetID> = []
@@ -200,7 +202,7 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
 
     public func changes(since mark: LibraryChangeMark, limit: Int) async throws -> LibraryChanges? {
         changesAsked.append(mark)
-        if changesFail { throw ChangesUnanswered() }
+        if let changesError { throw changesError }
         guard hasHistory else { return nil }
         let parts = String(decoding: mark.data, as: UTF8.self).split(separator: "|")
         guard parts.count == 3, parts[0] == Substring(libraryID.uuidString), Int(parts[1]) == epoch, let position = Int(parts[2]),

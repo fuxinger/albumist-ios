@@ -1528,8 +1528,7 @@ final class SortlyFlowUITests: XCTestCase {
         // Leave the app (on the simulator iOS holds it right away) and come back: in the
         // background for at least the old 8 s, counted once iOS has it there.
         UITestWait.toBackground(app, "during the analysis", atLeast: 8, in: self)
-        app.activate()
-        UITestWait.until("app in the foreground again", timeout: 30) { app.state == .runningForeground }
+        UITestWait.toForeground(app, "after the background during the analysis", in: self)
         // Running or done, polled (no 10 s extra when it is already done), and for at least the
         // old 3 s no "Fortsetzen": a pause that comes a moment after the return is seen too
         // (second review of C2).

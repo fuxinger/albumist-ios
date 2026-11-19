@@ -780,6 +780,14 @@ public actor AnalysisPipeline {
             let stored = contentTotal > 0
                 ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion, within: range)
                 : [:]
+            // Photos given up before and read once more (`reopenGivenUpPhotos`): whatever goes
+            // wrong with that read, the photo is given up again for another week. An analyzer
+            // error kept it open without a time of its last try, read in every run after, and
+            // five of them ended every run as "Analyse nicht verfügbar" (second review of P1-08).
+            // Not when the run is stopped, Photos does not answer or the access was taken away.
+            let triedAgain = Set(stored.compactMap { id, previous in
+                (previous.failedAttempts ?? 0) >= ContentAnalysis.maxFailedAttempts ? id : nil
+            })
             var contentDone = 0
             var cursor: AssetSnapshot?
             // Photos that are not read in this run: they could not be read (tried again in a later
@@ -928,7 +936,7 @@ public actor AnalysisPipeline {
                                 cancelled = true
                             } else if let quiet = error as? PhotosNotResponding {
                                 if photosQuiet == nil { photosQuiet = quiet }
-                            } else if !(error is AnalysisError) {
+                            } else if !(error is AnalysisError), !triedAgain.contains(asset.id) {
                                 suspects.append(asset.id)
                                 if suspects.count >= Self.analyzerFailureLimit, stopped == nil {
                                     // Vision itself fails: going through every photo would mark all

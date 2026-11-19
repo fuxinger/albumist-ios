@@ -170,6 +170,92 @@ struct NeverDoneTests {
         #expect(try await w.store.result(ContentAnalysis.self, kind: "content", asset: late)?.failedAttempts == nil)
     }
 
+    /// Reads a photo that is not readable (`AnalysisError.unreadable`) a few times, and after
+    /// that fails with an error of the analyzer itself (Vision), as on a device where Vision
+    /// stops working for a photo it could not read before.
+    final class FailingAnalyzer: ContentAnalyzing, @unchecked Sendable {
+        struct VisionFailed: Error {}
+        let unreadable: Set<AssetID>
+        let unreadableReads: Int
+        let calls = Mutex<[AssetID: Int]>([:])
+        init(unreadable: Set<AssetID>, unreadableReads: Int) {
+            self.unreadable = unreadable
+            self.unreadableReads = unreadableReads
+        }
+        func analyzeContent(_ asset: AssetSnapshot, request: ContentAnalysisRequest) async throws -> ContentAnalysis {
+            let n = calls.withLock { calls -> Int in
+                calls[asset.id, default: 0] += 1
+                return calls[asset.id]!
+            }
+            guard unreadable.contains(asset.id) else { return ContentAnalysis(labels: [], source: .localPreview) }
+            if n <= unreadableReads { throw AnalysisError.unreadable }
+            throw VisionFailed()
+        }
+        func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {
+            TextAnalysis(text: "", source: .original)
+        }
+        func reads(_ id: AssetID) -> Int { calls.withLock { $0[id] ?? 0 } }
+    }
+
+    /// A photo given up and read again a week later fails this time with an error of the
+    /// analyzer, not of the photo. It stayed open without a time of its last try and was read
+    /// again in every run after. It is given up again at once: one read a week.
+    @Test func aPhotoTriedAgainIsReadAtMostOnceAWeekWhateverTheError() async throws {
+        var lib = LibraryBuilder()
+        let ids = lib.daily(from: "2026-05-01", to: "2026-05-30", at: Fixture.Places.munichHome, perDay: 1)
+        let photo = ids[7]
+        let analyzer = FailingAnalyzer(unreadable: [photo], unreadableReads: ContentAnalysis.maxFailedAttempts)
+        let clock = Clock()
+        let w = try Self.world(lib.assets, analyzer: analyzer, now: { clock.now })
+        for _ in 0..<ContentAnalysis.maxFailedAttempts {
+            #expect(try await w.pipeline.run().isComplete)
+            clock.advance(ContentAnalysis.retrySpacing)
+        }
+        #expect(analyzer.reads(photo) == ContentAnalysis.maxFailedAttempts)
+        // Eight days later: four runs two hours apart read it once.
+        clock.advance(8 * 86_400)
+        for run in 1...4 {
+            let report = try await w.pipeline.run()
+            #expect(report.isComplete && !report.analyzerUnavailable, "run \(run)")
+            clock.advance(2 * 3_600)
+        }
+        #expect(analyzer.reads(photo) == ContentAnalysis.maxFailedAttempts + 1, "read in every run")
+        #expect(try await w.store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 0)
+        let d = try await w.derived()
+        #expect(d.analyzed == 29 && d.unreadable == 1)
+        // A week after that try: one more read.
+        clock.advance(7 * 86_400)
+        #expect(try await w.pipeline.run().isComplete)
+        clock.advance(2 * 3_600)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(analyzer.reads(photo) == ContentAnalysis.maxFailedAttempts + 2)
+    }
+
+    /// Five photos given up, read again a week later, all failing with an error of the analyzer:
+    /// five such errors in a row end the run as "Analyse nicht verfügbar", in every run after,
+    /// and the analysis never got done. Photos given up before do not stop the run.
+    @Test func photosTriedAgainNeverKeepTheAnalysisFromFinishing() async throws {
+        var lib = LibraryBuilder()
+        let ids = lib.daily(from: "2026-05-01", to: "2026-05-30", at: Fixture.Places.munichHome, perDay: 1)
+        let photos = Set(ids[10..<15])
+        let analyzer = FailingAnalyzer(unreadable: photos, unreadableReads: ContentAnalysis.maxFailedAttempts)
+        let clock = Clock()
+        let w = try Self.world(lib.assets, analyzer: analyzer, now: { clock.now })
+        for _ in 0..<ContentAnalysis.maxFailedAttempts {
+            #expect(try await w.pipeline.run().isComplete)
+            clock.advance(ContentAnalysis.retrySpacing)
+        }
+        clock.advance(8 * 86_400)
+        for run in 1...4 {
+            let report = try await w.pipeline.run()
+            #expect(report.isComplete, "run \(run) ended with \(String(describing: report.pausedBecause))")
+            #expect(!report.analyzerUnavailable, "run \(run)")
+            clock.advance(2 * 3_600)
+        }
+        #expect(photos.map(analyzer.reads).allSatisfy { $0 == ContentAnalysis.maxFailedAttempts + 1 })
+        #expect(try await w.store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 0)
+    }
+
     // MARK: P1-09 photos whose country cannot be found
 
     /// Apple's lookup on open sea: no country, no town.

@@ -1368,6 +1368,7 @@ final class SortlyFlowUITests: XCTestCase {
         let tapped = Date()
         let left = waitGone(app.buttons["plan.apply"], timeout: 30)
         print("UI_FACT plan left its preview: \(left) after \(Int(Date().timeIntervalSince(tapped))) s")
+        // pacing: the plan runs 5 s before the app is closed (the test's design); its start is checked above
         sleep(5)
         // Read by identifier: the running card's title ("Alben werden angelegt") is covered by
         // the sorting show, and a query over every element during the show took long on a slow
@@ -1499,6 +1500,7 @@ final class SortlyFlowUITests: XCTestCase {
 
         // Switch tabs while it runs, then back to the overview.
         for name in ["Mediathek", "Alben"] {
+            // pacing: a while on each tab during the analysis (the test's design); the tap is checked
             if tap(tabButton(name), "tab \(name) during analysis") { sleep(3) }
         }
         tap(tabButton("Übersicht"), "back to overview during analysis")
@@ -1509,6 +1511,7 @@ final class SortlyFlowUITests: XCTestCase {
         // It goes on and ends with every photo analysed.
         var checks = 0
         while !analysisIdle && checks < 300 {
+            // pacing: the poll's interval
             sleep(3)
             if checks % 5 == 0 { record("while running") }
             checks += 1

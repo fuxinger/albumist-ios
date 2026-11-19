@@ -1467,5 +1467,102 @@ class SettleCommandTests(unittest.TestCase):
         self.assertIn("UI_BOOT_TIMING wait for the simulator", out.getvalue())
 
 
+class SleepRuleTests(unittest.TestCase):
+    """Fixed sleeps in the UI tests (review P5-05 of 18.11.: 249 of them). A fixed sleep that
+    stands in for a state the app has to reach (a screen, the background, a running plan) turns
+    red on a starved Mac: device test06 waited a fixed 4 s for the background and failed (UI run
+    44480215847, fixed in d8f863f with a wait for the state). New waits wait for a condition
+    with a deadline; a sleep that is only pacing (an animation before a screenshot, the interval
+    of a poll) says so."""
+
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+    FOLDER = os.path.join(ROOT, "App", "SortlyUITests")
+    SLEEP = re.compile(r"\b(u?sleep)\(")
+    # Calls of sleep()/usleep() per file (code only). The count may only go down; lower it here
+    # when a sleep becomes a condition wait.
+    CEILING = {
+        "AccessibilityUITests.swift": 49,
+        "DeviceConditionUITests.swift": 48,
+        "SearchUITests.swift": 4,
+        "SortlyFlowUITests.swift": 134,
+        "SortlyLockedUITests.swift": 18,
+        "UITestOnboarding.swift": 3,
+    }
+    # Long sleeps (3 s or more, or a computed length) without a "// pacing:" note, per file:
+    # the ones still standing in for a state (a plan or share screen, the background, the app
+    # after a launch, search results). Only goes down, to none.
+    STATE_SLEEPS_LEFT: dict[str, int] = {
+        "AccessibilityUITests.swift": 2,
+        "DeviceConditionUITests.swift": 1,
+        "SortlyFlowUITests.swift": 13,
+        "SortlyLockedUITests.swift": 3,
+    }
+
+    @classmethod
+    def sleeps(cls, source: str) -> list[tuple[int, str]]:
+        """(line number, argument text) of every sleep()/usleep() call in Swift code; comments
+        and string literals left out."""
+        code = ui_groups.strip_swift(source)
+        found = []
+        for m in cls.SLEEP.finditer(code):
+            depth, j = 1, m.end()
+            while j < len(code) and depth:
+                depth += {"(": 1, ")": -1}.get(code[j], 0)
+                j += 1
+            found.append((code.count("\n", 0, m.start()) + 1, m.group(1) + ":" + code[m.end():j - 1].strip()))
+        return found
+
+    @staticmethod
+    def is_long(call: str) -> bool:
+        """3 s or more, or a length the code computes (it can be anything)."""
+        kind, argument = call.split(":", 1)
+        literal = argument.replace("_", "")
+        if not literal.isdigit():
+            return True
+        return int(literal) >= (3 if kind == "sleep" else 3_000_000)
+
+    @staticmethod
+    def has_pacing_note(lines: list[str], number: int) -> bool:
+        return any("// pacing:" in lines[n - 1] for n in (number, number - 1) if n >= 1)
+
+    def files(self):
+        for name in sorted(os.listdir(self.FOLDER)):
+            if name.endswith(".swift"):
+                with open(os.path.join(self.FOLDER, name), encoding="utf-8") as f:
+                    yield name, f.read()
+
+    def test_the_finder_reads_code_only(self):
+        sample = 'sleep(1)\n// sleep(9)\nprint("sleep(9)")\nusleep(UInt32(wait * 1_000_000))\n  usleep(250_000); x()\n'
+        self.assertEqual(self.sleeps(sample), [(1, "sleep:1"), (4, "usleep:UInt32(wait * 1_000_000)"), (5, "usleep:250_000")])
+        self.assertEqual([self.is_long(c) for _, c in self.sleeps(sample)], [False, True, False])
+        self.assertTrue(self.is_long("sleep:3"))
+        self.assertTrue(self.is_long("usleep:3_000_000"))
+        self.assertFalse(self.is_long("usleep:2_900_000"))
+        self.assertTrue(self.has_pacing_note(["// pacing: the poll's interval", "sleep(interval)"], 2))
+        self.assertTrue(self.has_pacing_note(["sleep(3) // pacing: the show's animation"], 1))
+        self.assertFalse(self.has_pacing_note(["sleep(3)"], 1))
+
+    def test_the_number_of_fixed_sleeps_only_goes_down(self):
+        counts = {name: len(self.sleeps(source)) for name, source in self.files()}
+        for name, count in counts.items():
+            with self.subTest(name):
+                ceiling = self.CEILING.get(name, 0)
+                self.assertLessEqual(count, ceiling, f"{name}: {count} fixed sleeps, at most {ceiling}: wait for a "
+                                     "condition (an element, a state) with a deadline instead")
+                self.assertEqual(count, ceiling, f"{name}: {count} fixed sleeps now; lower CEILING to {count}")
+        self.assertEqual(set(self.CEILING) - set(counts), set(), "CEILING names a file that is gone")
+
+    def test_a_long_sleep_is_pacing_and_says_so(self):
+        for name, source in self.files():
+            lines = source.split("\n")
+            unmarked = [f"{name}:{n} {call}" for n, call in self.sleeps(source)
+                        if self.is_long(call) and not self.has_pacing_note(lines, n)]
+            with self.subTest(name):
+                self.assertEqual(len(unmarked), self.STATE_SLEEPS_LEFT.get(name, 0),
+                                 "a sleep of 3 s or more stands in for a state: wait for it with a deadline "
+                                 "(UI_STEP_MISSING and a failure when it runs out), or note "
+                                 "\"// pacing: <why>\" when it is only pacing:\n" + "\n".join(unmarked))
+
+
 if __name__ == "__main__":
     unittest.main()

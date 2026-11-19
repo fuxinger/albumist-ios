@@ -326,6 +326,7 @@ final class AccessibilityUITests: XCTestCase {
 
         // Travel atlas and the share image
         if tap(button(w.atlas), "\(tag) open atlas", timeout: 20), opened(app.navigationBars[w.atlas], "\(tag) atlas") {
+            // pacing: the map draws before the audit; opened() checked the atlas screen
             sleep(3)
             check("\(tag) atlas", english: english)
             if !short {

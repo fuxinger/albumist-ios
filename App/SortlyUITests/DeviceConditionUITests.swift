@@ -146,6 +146,7 @@ final class DeviceConditionUITests: XCTestCase {
         print(reached ? "UI_STEP_OK app in the background \(why)" : "UI_STEP_MISSING app in the background \(why) (timeout \(Int(timeout)) s)")
         XCTAssertTrue(reached, "The app did not reach the background \(why)")
         let wait = max(atLeast - took, reached ? 1 : 0)
+        // pacing: the minimum time in the background, counted after iOS reported it
         if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
         return reached
     }
@@ -412,6 +413,7 @@ final class DeviceConditionUITests: XCTestCase {
             print("UI_FACT app \(app.state == .notRunning ? "ended" : "still running") \(Int(Date().timeIntervalSince(start))) s after the grant request")
         }
         for attempt in 1...12 {
+            // pacing: the gap between launch attempts; the grant's end of the app is awaited above
             sleep(5)
             if let extra { launch(extra) } else { start() }
             let shown = waitStable("first screen after the grant", timeout: 30, stableChecks: 1) {
@@ -740,6 +742,7 @@ final class DeviceConditionUITests: XCTestCase {
             // from the moment the preview left (the plan started), not from the tap: a slow tap
             // while the sorting show starts would leave "Erledigt: 0 von N" (review of a26e8bc).
             let waited = Date().timeIntervalSince(left)
+            // pacing: the plan's first 5 s (the test's design); its start is checked above
             if waited < 5 { usleep(UInt32((5 - waited) * 1_000_000)) }
             let finished = app.buttons["result.receipt"].exists
             UITestAppEnd.end(app, "during \(name)")
@@ -923,6 +926,7 @@ final class DeviceConditionUITests: XCTestCase {
         // DeviceConditionRunTests.backgroundTimeOverThenRelaunchEndsWithEveryPhoto.
         expectAnalysisGoesOn("after the relaunch")
         for _ in 0..<2 where !analysisIdle {
+            // pacing: two readings 6 s apart while the analysis runs
             sleep(6)
             record("after relaunch, running")
         }
@@ -1443,6 +1447,7 @@ final class DeviceConditionUITests: XCTestCase {
                     print("UI_FACT stress create: no word from the app in our file after 120 s, watching the app state only")
                 }
                 if app.state == .notRunning { break }
+                // pacing: the poll's interval; each round reads the app's word and state
                 sleep(5)
             }
             print("UI_TIMING stress create round \(rounds): \(elapsed(round)) s, last word '\(said)'")

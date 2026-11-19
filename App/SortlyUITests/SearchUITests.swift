@@ -15,6 +15,7 @@ final class SortlySearchUITests: XCTestCase {
     // MARK: Helpers (as in SortlyFlowUITests)
 
     private func launch(_ extra: [String] = []) {
+        UITestAppEnd.end(app)
         app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + extra
         app.launch()

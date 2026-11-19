@@ -733,6 +733,7 @@ final class AccessibilityUITests: XCTestCase {
             stallsReportedAtEnd = true
             addTeardownBlock { UITestStalls.report() }
         }
+        UITestAppEnd.end(app)
         app = XCUIApplication()
         var arguments = ["-SortlyUITestUnlocked"] + UITestStalls.arguments(besides: [])
         arguments += english ? ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"] : ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE"]

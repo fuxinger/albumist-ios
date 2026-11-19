@@ -140,7 +140,7 @@ final class SortlyLockedUITests: XCTestCase {
 
     /// Ends the app and starts it again with the same arguments, then waits for the overview.
     private func relaunch() {
-        app.terminate()
+        UITestAppEnd.end(app)
         app.launch()
         let idle = anything("Fotos analysiert").waitForExistence(timeout: 120) || anything("Analyse aktuell").exists
         print(idle ? "UI_STEP_OK locked overview after relaunch" : "UI_STEP_MISSING locked overview after relaunch")
@@ -215,7 +215,7 @@ final class SortlyLockedUITests: XCTestCase {
             sleep(2)
         }
         print(streak >= 3 ? "UI_STEP_OK prepared (locked)" : "UI_STEP_MISSING prepared (locked)")
-        app.terminate()
+        UITestAppEnd.end(app)
         app = XCUIApplication()
     }
 

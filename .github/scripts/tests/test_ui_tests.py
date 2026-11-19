@@ -917,7 +917,7 @@ class HostGrantTests(unittest.TestCase):
 
 class HostTerminateTests(unittest.TestCase):
     """A device test asks the Mac to end the app before its next launch (UI_HOST_TERMINATE_APP,
-    DeviceConditionUITests.endRunningApp): XCTest's own terminate failed in UI run 44446270757
+    UITestAppEnd.end): XCTest's own terminate failed in UI run 44446270757
     ("Failed to terminate app.albumist.ios:20655", test07, app idle)."""
 
     ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
@@ -1027,7 +1027,7 @@ class HostTerminateTests(unittest.TestCase):
     def test_the_last_end_comes_well_before_the_test_stops_waiting(self):
         # Last possible start of a call, plus its timeout and the watcher's read interval.
         self.assertLess(ui_tests.TERMINATE_FRESH + ui_tests.TERMINATE_TIMEOUT + 2, ui_tests.TERMINATE_WAIT)
-        swift = open(os.path.join(self.ROOT, "App", "SortlyUITests", "DeviceConditionUITests.swift"), encoding="utf-8").read()
+        swift = open(os.path.join(self.ROOT, "App", "SortlyUITests", "UITestAppEnd.swift"), encoding="utf-8").read()
         self.assertIn(f"app.wait(for: .notRunning, timeout: {ui_tests.TERMINATE_WAIT})", swift)
 
     def test_the_tests_know_the_helper_from_the_runner_environment(self):
@@ -1035,11 +1035,26 @@ class HostTerminateTests(unittest.TestCase):
         self.assertEqual(env["TEST_RUNNER_SORTLY_HOST_HELPER"], "1")
         self.assertEqual(env["TEST_RUNNER_SORTLY_UI_QUICK"], "1")
         self.assertEqual(env["PATH"], "/usr/bin")
-        swift = open(os.path.join(self.ROOT, "App", "SortlyUITests", "DeviceConditionUITests.swift"), encoding="utf-8").read()
+        swift = open(os.path.join(self.ROOT, "App", "SortlyUITests", "UITestAppEnd.swift"), encoding="utf-8").read()
         # xcodebuild hands TEST_RUNNER_X to the tests as X.
         self.assertIn('environment["SORTLY_HOST_HELPER"] == "1"', swift)
         self.assertIn('print("UI_HOST_TERMINATE_APP \\(', swift)
         self.assertTrue(ui_tests.HOST_TERMINATE.search("UI_HOST_TERMINATE_APP 1763500000"))
+
+    def test_every_ui_test_ends_the_app_through_the_shared_helper(self):
+        # XCTest's own end failed with "Failed to terminate" in device test07 (UI run
+        # 44446270757) and in accessibility test2 (TestFlight run 44461253154, job
+        # 135366070532, at the relaunch inside launch()). Every UI test file ends the app with
+        # UITestAppEnd.end before it makes a new XCUIApplication or calls launch() again.
+        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".swift") or name == "UITestAppEnd.swift":
+                continue
+            with self.subTest(name):
+                swift = open(os.path.join(folder, name), encoding="utf-8").read()
+                self.assertNotIn(".terminate()", swift)
+                if "app = XCUIApplication()" in swift:
+                    self.assertIn("UITestAppEnd.end(app", swift)
 
     def test_the_test_lines_about_the_end_are_no_finding(self):
         log = ("UI_FACT clock 10:00:00.0 end the app before the next launch\nUI_HOST_TERMINATE_APP 1763500000\n"

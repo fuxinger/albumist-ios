@@ -823,7 +823,7 @@ class Recorder(threading.Thread):
 
 
 HOST_GRANT = re.compile(r"(?:^|\s)UI_HOST_GRANT_PHOTOS\s*$")
-# DeviceConditionUITests.endRunningApp: "UI_HOST_TERMINATE_APP <epoch second of the request>".
+# UITestAppEnd.end: "UI_HOST_TERMINATE_APP <epoch second of the request>".
 HOST_TERMINATE = re.compile(r"(?:^|\s)UI_HOST_TERMINATE_APP(?: (\d+))?\s*$")
 
 
@@ -931,7 +931,7 @@ class HostGrants(threading.Thread):
     photo access back (UI_HOST_GRANT_PHOTOS, DeviceConditionUITests.grantFromHost; the CI
     simulator shows no iOS question after an access reset, and Settings opens on its first page,
     not on Albumist's) and ends the app before the next launch (UI_HOST_TERMINATE_APP,
-    DeviceConditionUITests.endRunningApp; `terminate_app`)."""
+    UITestAppEnd.end; `terminate_app`)."""
 
     def __init__(self, udid: str, log_path: str, interval: float = 2, grant=None, terminate=None):
         super().__init__(daemon=True)

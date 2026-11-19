@@ -16,6 +16,7 @@ final class SortlyFlowUITests: XCTestCase {
     // MARK: Helpers
 
     private func launch(_ extra: [String] = []) {
+        UITestAppEnd.end(app)
         app = XCUIApplication()
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + extra
         app.launch()
@@ -1368,7 +1369,7 @@ final class SortlyFlowUITests: XCTestCase {
         // simulator (device test 07, UI run 44202318875).
         print("UI_FACT plan running when the app was closed: \(left && !app.buttons["result.receipt"].exists)")
         shot("49-plan-before-close")
-        app.terminate()
+        UITestAppEnd.end(app, "during the plan")
         sleep(2)
         launch()
         let card = anything("Anlegen wurde unterbrochen")

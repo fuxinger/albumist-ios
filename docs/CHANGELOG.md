@@ -53,6 +53,32 @@
 - UI-Tests: jede Gruppe wartet vor ihrem ersten Test (und vor einer Wiederholung) bis zu 5 Min.,
   bis der Simulator nach seinem Start wieder schnell antwortet (`SIM_SETTLE`);
   vorher verlor XCTest dabei die App beim ersten Start (UI-Lauf 44437759848, test05).
+- Prüfung 18.11. (Zuhause): Albumist erkennt das Zuhause jetzt an den Fotos des ganzen Tages,
+  nicht nur an den ersten 15. Wer morgens regelmäßig woanders fotografiert (etwa bei der Arbeit),
+  bekommt den Alltag zu Hause nicht mehr als Reise vorgeschlagen; ebenso beim Ort eines
+  Urlaubsziels, an das du öfter fährst.
+- Prüfung 18.11. (häufige Orte): Zwei häufige Orte dicht beieinander (etwa Haus und Garten
+  gegenüber) hatten eine gemeinsame Kennung, ein Name oder „Nicht jetzt“ galt für beide. Jetzt
+  hat jeder Ort seine eigene und behält sie über seine Fotos, auch wenn Fotos dazukommen oder
+  wegfallen. Name, „Nicht jetzt“ und Album bleiben bei dem der beiden Orte, den Albumist bisher
+  gezeigt hat; der andere erscheint als neuer Vorschlag und braucht wieder einen Namen.
+  Ein Album, das Albumist für einen Vorschlag angelegt hat, wird nur noch mit dessen Fotos
+  ergänzt; ein angenommenes „ergänzen“ in das Album eines früheren Orts ist nach der Analyse
+  einmal wieder offen („Vorschläge neu geprüft“); wählst du dasselbe Album wieder, bleibt es. Ein leeres Album nach einem abgebrochenen Plan füllt
+  der nächste Plan, statt ein zweites gleichen Namens anzulegen.
+- iPhone-Test Build 36: Ein Ort, an dem du öfter bist, heißt jetzt nach seiner Stadt (etwa
+  „Dorfen“), nicht mehr nach dem Bundesland („Bayern“).
+- iPhone-Test Build 36: Derselbe Ort kam zweimal, als Ort, an dem du öfter bist („Bayern“), und
+  als häufiger Ort („Häufiger Ort in Zwiesel“). Jetzt einmal, als Ort, an dem du öfter bist.
+  Hast du dem häufigen Ort in der App einen Namen gegeben, ihn zum Erstellen ausgewählt oder
+  hat er schon sein Album, bleibt er; ebenso ein Ort, an dem du öfter bist, den du ausgewählt
+  hast oder der sein Album hat. Sagst du zu einem der beiden „Nicht jetzt“, bleibt der andere.
+  Ein kleiner Lieblingsort in einer großen Urlaubsgegend bleibt ein eigener Vorschlag. Bleibt
+  der häufige Ort, sind Fotos, die nur der Ort hatte, an dem du öfter bist, in keinem dieser
+  beiden Vorschläge; ohne anderen Vorschlag (etwa das Album ihrer Stadt) bleiben sie „Nicht
+  sortiert“. Ein in der App benannter häufiger Ort zählt
+  nicht zu den höchstens fünf unbenannten und bleibt auch neben einem fast gleichen Ort mit
+  Album.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

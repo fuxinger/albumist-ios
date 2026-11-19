@@ -22,6 +22,8 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | ✅ | Ausgeblendete Fotos in Alben mitzählen, damit Rückgängig nichts Fremdes löscht. | S | E1 Technik |
 | ✅ | Beschädigte Datenbank: „Neu aufbauen“-Knopf statt Sackgasse. | S | E1 Technik |
 | ✅ | StoreKit: nicht geprüfte Käufe sauber abschließen und Fehlermeldung zeigen; wartende Käufe (Familienfreigabe) erklären. | S | E1 Technik |
+| ✅ | Zwei häufige Orte in einer Rundungszelle des Mittelpunkts (bis etwa 150 m auseinander) teilten eine Kennung, damit Name, „Nicht jetzt“ und Entscheidung. Jetzt eigene Kennungen, über die Fotos von Analyse zu Analyse weitergegeben (`FrequentPlaceDetector.carryOver`, DECISIONS.md); kein Ort übernimmt die Kennung eines anderen, auch nicht beim Wandern über eine Zellkante. | M | Prüfung 18.11.2026 (G1-04, P1-01, zweite Prüfung) |
+| 💡 | Häufige Orte: Kennungen von Orten, die aus einer Analyse herausgefallen sind, eine Weile merken (wie `analysis.tripIdentities` bei Reisen), damit ein später neuer Ort in derselben Zelle nicht ihren Namen bekommt (`KNOWN_LIMITATIONS.md`). | S | Prüfung 18.11.2026 (zweite Prüfung) |
 
 ## Aus den Testläufen (T)
 

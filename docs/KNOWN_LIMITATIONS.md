@@ -49,6 +49,41 @@
   solchen Tag (nächstes Reisefoto 36 Stunden später) teilt die Reise. Die Reise-Werkstatt
   (Teilen/Zusammenführen) korrigiert beides.
 
+## Häufige Orte
+
+- Ein häufiger Ort behält seine Kennung (und damit Name, „Nicht jetzt“, Entscheidung und Album)
+  über seine Fotos: jede Analyse vergleicht mit den Orten der vorigen (seit der zweiten Prüfung
+  vom 18.11.2026). Offen bleibt:
+  - Ändern sich die Fotos eines Orts zwischen zwei Analysen um mehr als die Hälfte (viele
+    gelöscht, zwei Orte zusammengewachsen oder geteilt), gilt er als neuer Ort.
+  - Fiel ein Ort aus einer Analyse heraus (unter fünf Tage, etwa nach dem Löschen von Fotos),
+    kennt die nächste ihn nicht mehr: kommt er wieder, bekommt er die Kennung seiner Zelle,
+    wenn sie frei ist (meist seine alte). Entsteht später ein neuer Ort in derselben Zelle
+    (Mittelpunkt auf drei Stellen gerundet), bekommt dieser die Kennung, wenn sie frei ist, und
+    damit Name und „Nicht jetzt“ des verschwundenen Orts; ein Album des alten Orts wird mit
+    den neuen Fotos nicht ergänzt (es teilt keine Fotos mit ihm), ein schon angenommenes
+    „ergänzen“ dorthin ist nach der Analyse wieder offen. Ist das Album des alten Orts leer
+    (alle Fotos gelöscht), bleibt es das Album der Kennung und der neue Ort kommt hinein.
+    Selten (ein neuer Ort im selben Feld von etwa 110 m × 75 m); der Name lässt sich ändern.
+  - Ob ein „ergänzen“ vom Vorschlag kam oder über „Anderes Album wählen“, speichert Albumist
+    nicht. Hat der Nutzer selbst das Album gewählt, das für die Kennung eingetragen ist und keine
+    Fotos mit dem Vorschlag teilt, wird seine Wahl deshalb einmal wieder geöffnet (die Übersicht
+    sagt „Vorschläge neu geprüft“); wählt er es erneut, bleibt es. Gemerkt wird das je Vorschlag
+    und Album in `user.reopenedExtensions` (wie alle `user.`-Werte auch in der Sicherheitskopie),
+    bis der Vorschlag weder eine Entscheidung noch ein eingetragenes Album hat.
+  - Nach „Analyse neu aufbauen“ fehlen die vorigen Orte: Kennungen werden neu vergeben, ein Ort
+    allein in seiner Zelle bekommt wieder die alte; von zwei Orten einer Zelle bekommt der in
+    der App zuerst gezeigte die Zellkennung, der andere Zelle und erste Foto-ID, was nicht
+    immer die Kennung von vorher ist (etwa wenn ältere Fotos nachgekommen sind).
+
+- Derselbe Ort als Ort, an dem du öfter bist, und als häufiger Ort (gleich ab der Hälfte der
+  Fotos des größeren): Bleibt der häufige Ort, weil er dir gehört (benannt, gewählt oder mit
+  Album), fällt der Ort, an dem du öfter bist, weg. Fotos, die nur er hatte (bei Fuchs 87 von
+  509 rund um Zwiesel), sind dann in keinem dieser beiden Vorschläge; ohne anderen Vorschlag
+  (etwa das Ortsalbum ihrer Stadt) bleiben sie „Nicht sortiert“, und ihre Reisen kommen nicht
+  zurück, weil du dort öfter bist. Mit Absicht so (Entscheidung vom
+  18.11.2026), damit kein zweites Album für fast dieselben Fotos vorgeschlagen wird.
+
 ## Bilderkennung
 - Begriffe statt Bedeutung, mögliche Fehlzuordnungen; deshalb Schwellen und Bestätigung.
 - Analyse auf Vorschaubildern; kleine Motive werden eventuell nicht erkannt.

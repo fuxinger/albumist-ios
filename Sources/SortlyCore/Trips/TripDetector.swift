@@ -513,6 +513,9 @@ struct HabitualArea: Sendable {
     /// How far before and after a stay the place the user came from and went back to is looked for.
     static let returnHorizon: TimeInterval = 365 * 86_400
 
+    /// - Precondition: `assets` are in time order (`TripDetector.analyse` sorts them by date and
+    ///   id). The point of a day with more than `GeoMath.daySample` photos is taken from photos
+    ///   spread over the day in this order; out of order, the sample would not cover the day.
     init(assets: [AssetSnapshot], calendar: Calendar, windowDays: Int, homeRadius: Double = 30_000, extraHomes: [GeoCoordinate] = []) {
         self.calendar = calendar
         self.windowDays = windowDays
@@ -523,14 +526,12 @@ struct HabitualArea: Sendable {
             guard let c = asset.usableLocation, let d = asset.creationDate else { continue }
             perDay[calendar.startOfDay(for: d), default: []].append(c)
         }
-        // One representative point per day: the coordinate minimizing total distance (medoid
-        // of a small sample) – robust against a single far-away photo that day.
+        // One representative point per day (`GeoMath.dayPoint`): of up to 15 photos spread over
+        // the whole day in time order, the one with the most others within 1 km, the most
+        // central among equals. The place of most of the day's photos wins, not the first 15
+        // (review 18.11.2026, G1-02).
         let dayPoints = perDay.map { day, coordinates -> (Date, GeoCoordinate) in
-            let sample = Array(coordinates.prefix(15))
-            let medoid = sample.min { a, b in
-                sample.reduce(0) { $0 + GeoMath.distance($1, a) } < sample.reduce(0) { $0 + GeoMath.distance($1, b) }
-            } ?? coordinates[0]
-            return (day, medoid)
+            (day, GeoMath.dayPoint(coordinates) ?? coordinates[0])
         }.sorted { $0.0 < $1.0 }
 
         let clusterer = GeoClusterer(epsilonMeters: 15_000, minPoints: 3)

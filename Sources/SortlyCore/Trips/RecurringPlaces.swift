@@ -302,19 +302,22 @@ public enum RecurringPlaces {
         return false
     }
 
-    /// Where a stay mostly was: one point per day (the day's most central photo), then the
-    /// centre of the day points that have the most other days within `radius`. A day trip from
-    /// the holiday flat does not move the place; a road trip gets its longest stop.
+    /// Where a stay mostly was: one point per day (`GeoMath.dayPoint`: where most of the day's
+    /// photos were), then the centre of the day points that have the most other days within
+    /// `radius`. A day trip from the holiday flat does not move the place; a road trip gets its
+    /// longest stop.
     public static func mainPlace(of photos: [(date: Date, coordinate: GeoCoordinate)], calendar: Calendar,
                                  radius: Double = RecurringPlaceAnswers.matchRadiusMeters) -> GeoCoordinate? {
         guard !photos.isEmpty else { return nil }
-        var perDay: [Date: [GeoCoordinate]] = [:]
-        for photo in photos { perDay[calendar.startOfDay(for: photo.date), default: []].append(photo.coordinate) }
+        var perDay: [Date: [(date: Date, coordinate: GeoCoordinate)]] = [:]
+        for photo in photos { perDay[calendar.startOfDay(for: photo.date), default: []].append(photo) }
+        // The day's point as in the home detection (`GeoMath.dayPoint`): a sample over the whole
+        // day in time order, not its first 15 photos (review 18.11.2026, G1-02).
         let points = perDay.keys.sorted().map { day -> GeoCoordinate in
-            let sample = Array(perDay[day]!.prefix(15))
-            return sample.min { a, b in
-                sample.reduce(0) { $0 + GeoMath.distance($1, a) } < sample.reduce(0) { $0 + GeoMath.distance($1, b) }
-            } ?? sample[0]
+            let inTimeOrder = perDay[day]!.sorted {
+                ($0.date, $0.coordinate.latitude, $0.coordinate.longitude) < ($1.date, $1.coordinate.latitude, $1.coordinate.longitude)
+            }.map(\.coordinate)
+            return GeoMath.dayPoint(inTimeOrder) ?? inTimeOrder[0]
         }
         // Long journeys have a few hundred days at most: the square is cheap.
         var best: [GeoCoordinate] = []
@@ -327,6 +330,18 @@ public enum RecurringPlaces {
 }
 
 extension ProposalEngine {
+    /// The name of a place the user is often at: one place, so a town (Fuchs, iPhone test of
+    /// build 36, 18.11.2026: "Bayern ist aber ein Bundesland in Deutschland und nenne Stadt").
+    /// The trip rule (`primaryPlaceName`, kind vacation) where it names a town or a lake;
+    /// otherwise the town with the most photos (ties: the first one in `places`), never the
+    /// state or country while any town is known. Without any town, the trip rule's name.
+    static func recurringPlaceName(_ places: [PlaceComponents], labels: Labels) -> (String?, PlaceKey?) {
+        let (name, key, _) = primaryPlaceName(places, kind: .vacation, labels: labels)
+        if let key, key.level == .locality || key.level == .pointOfInterest { return (name, key) }
+        if let town = rankedTowns(places).first { return (town.name, town.key) }
+        return (name, key)
+    }
+
     /// One album per place the user is often at, instead of a trip per stay. Named after the
     /// place (the town most photos were taken in), never after what the place is to the user.
     /// Personal like a frequent place: never chosen automatically.
@@ -339,7 +354,7 @@ extension ProposalEngine {
             let members = place.assetIDs.filter { byID[$0] != nil }
             guard members.count >= settings.trips.minPhotos else { return nil }
             let gps = members.compactMap { byID[$0]?.gpsPlace }
-            let (geoName, key, _) = Self.primaryPlaceName(gps, kind: .vacation, labels: labels)
+            let (geoName, key) = Self.recurringPlaceName(gps, labels: labels)
             let title = geoName ?? place.name ?? labels.unknownPlace
             let dates = members.compactMap { byID[$0]?.asset.creationDate }
             let days = Set(dates.map { calendar.startOfDay(for: $0) }).count

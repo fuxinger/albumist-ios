@@ -243,6 +243,12 @@ public actor AnalysisPipeline {
         /// The user's decisions on suggestions (written by the app; here only to set decisions
         /// back to open after a rule update, together with the new matches).
         static let decisions = "user.decisions"
+        /// The names the user typed for suggestions in the app (written by the app; read here so
+        /// a named suggestion is kept, `AnalysisSnapshot.chosen`).
+        static let titles = "user.titles"
+        /// "suggestion|album" of each "ergänzen" set back to open because the album recorded for
+        /// the suggestion holds other photos (`refreshMatchesIfOutdated`): never twice.
+        static let reopenedExtensions = "user.reopenedExtensions"
         /// Suggestions the user chose before a change in "Dein Zuhause" would have changed or
         /// dropped them: kept as chosen (`HeldSuggestions`).
         static let heldSuggestions = "user.heldSuggestions"
@@ -1004,7 +1010,11 @@ public actor AnalysisPipeline {
         let trips = TripIdentity.carryOver(detected, from: known)
         try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
         try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
-        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar).detect(in: all)
+        // Places keep their IDs by their photos, from the places the last analysis stored (names,
+        // "Nicht jetzt", decisions and albums are bound to them). An unreadable list counts as none.
+        let previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
+        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar)
+            .detect(in: all, previous: previousPlaces ?? [])
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
@@ -1574,7 +1584,7 @@ public actor AnalysisPipeline {
         let overrides = OverrideSet(try await store.overrides())
         let scopedIDs = Set(facts.map(\.id))
         let oftenHere = try await recurringPlaceReport()?.places ?? []
-        let analysis = AnalysisSnapshot(
+        var analysis = AnalysisSnapshot(
             facts: facts,
             trips: scope == .all ? trips : trips.filter { !scopedIDs.isDisjoint(with: $0.geotaggedAssetIDs) },
             frequentPlaces: scope == .all ? frequent : [],
@@ -1583,8 +1593,11 @@ public actor AnalysisPipeline {
             recurringPlaces: scope == .all ? oftenHere : oftenHere.filter { !scopedIDs.isDisjoint(with: $0.assetIDs) },
             home: try await homeSettings()
         )
+        analysis.applied = Set(Self.assignments(try await store.managedAlbums()).keys)
+        analysis.chosen = try await chosenSuggestions()
         let engine = ProposalEngine(settings: settings, calendar: calendar)
-        var suggestions = await offActor { engine.suggestions(for: analysis, overrides: overrides) }
+        let input = analysis
+        var suggestions = await offActor { engine.suggestions(for: input, overrides: overrides) }
         if abandonable { try Task.checkCancellation() }
         // Chosen before a change in "Dein Zuhause": stays as the user chose it, in this and
         // every later run, until it is created or deselected.
@@ -1605,7 +1618,8 @@ public actor AnalysisPipeline {
             }
         }
         let tripSets = trips.map { Set($0.allAssetIDs) }
-        let found = suggestions, assignments = Self.assignments(try await store.managedAlbums()), albums = inventory
+        let found = suggestions, albums = inventory
+        let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albums)
         var matches = await offActor {
             Self.match(found.open, dismissed: found.dismissed, against: albums, overrides: overrides, assignments: assignments, trips: tripSets)
         }
@@ -1613,7 +1627,7 @@ public actor AnalysisPipeline {
             // A plan was applied while this ran: match against the albums as they are now, or
             // the suggestions would offer albums that were just created.
             let albumsNow = try await store.loadInventory(), overridesNow = OverrideSet(try await store.overrides())
-            let assignmentsNow = Self.assignments(try await store.managedAlbums())
+            let assignmentsNow = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albumsNow)
             matches = await offActor {
                 Self.match(found.open, dismissed: found.dismissed, against: albumsNow, overrides: overridesNow, assignments: assignmentsNow,
                            trips: tripSets)
@@ -1639,6 +1653,16 @@ public actor AnalysisPipeline {
         proposalsGeneration += 1
         try await store.setValues(values, removing: removing)
         return snapshot
+    }
+
+    /// The suggestions the user named in the app (`user.titles`, a name typed for it) or chose
+    /// to create (an accepted decision): the same place as another suggestion keeps them
+    /// (`ProposalEngine.suggestEachPlaceOnce`). Values this build cannot read count as none.
+    func chosenSuggestions() async throws -> Set<SortlyID> {
+        let titles = try await readable { try await store.value([SortlyID: String].self, forKey: Key.titles) } ?? [:]
+        let decisions = try await readable { try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) } ?? [:]
+        return Set(titles.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.keys)
+            .union(decisions.filter { $0.value.isAccepted }.keys)
     }
 
     /// The shown suggestions are matched on their own, as always. The dismissed ones are
@@ -1846,9 +1870,32 @@ public actor AnalysisPipeline {
         }
     }
 
-    /// Suggestion → the album it was applied to, from the managed-album records.
-    static func assignments(_ states: [ManagedAlbumState]) -> [SortlyID: CollectionID] {
-        Dictionary(states.flatMap { state in state.allSourceIDs.map { ($0, state.albumID) } }, uniquingKeysWith: { first, _ in first })
+    /// Suggestion → the album it was applied to, from the managed-album records. Two albums
+    /// can be recorded for one ID (the album of a place that had the ID before, and the one made
+    /// for the place that has it now, second review of the place IDs 18.11.): the one sharing
+    /// the most photos with the suggestion (`proposals`; its photos as in `inventory`, else as
+    /// last recorded) is its album; with none shared, the first record, as before.
+    static func assignments(_ states: [ManagedAlbumState], proposals: [AlbumProposal] = [],
+                            inventory: CollectionInventory? = nil) -> [SortlyID: CollectionID] {
+        let recorded = recordedAlbums(states)
+        var result = Dictionary(states.flatMap { state in state.allSourceIDs.map { ($0, state.albumID) } }, uniquingKeysWith: { first, _ in first })
+        let members = Dictionary(states.map { ($0.albumID, $0.lastKnownMembers) }, uniquingKeysWith: { first, _ in first })
+        for proposal in proposals {
+            guard let albums = recorded[proposal.id], albums.count > 1, let first = result[proposal.id] else { continue }
+            func shared(_ album: CollectionID) -> Int {
+                (inventory?[album]?.assetIDs ?? members[album] ?? []).intersection(proposal.assetIDs).count
+            }
+            let best = albums.sorted { $0.rawValue < $1.rawValue }.max { shared($0) < shared($1) }
+            if let best, shared(best) > shared(first) { result[proposal.id] = best }
+        }
+        return result
+    }
+
+    /// Suggestion → every album recorded for it.
+    static func recordedAlbums(_ states: [ManagedAlbumState]) -> [SortlyID: Set<CollectionID>] {
+        states.reduce(into: [:]) { result, state in
+            for id in state.allSourceIDs { result[id, default: []].insert(state.albumID) }
+        }
     }
 
     public func latestProposals() async throws -> ProposalSnapshot? {
@@ -1878,7 +1925,8 @@ public actor AnalysisPipeline {
         let inventory = try await store.loadInventory()
         let overrides = OverrideSet(try await store.overrides())
         let trips = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map { Set($0.allAssetIDs) }
-        let assignments = Self.assignments(try await store.managedAlbums()), found = snapshot
+        let found = snapshot
+        let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.proposals + found.dismissed, inventory: inventory)
         snapshot.matches = await offActor {
             Self.match(found.proposals, dismissed: found.dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips)
         }
@@ -1891,8 +1939,10 @@ public actor AnalysisPipeline {
         /// The suggestions with their matches (nil: there are none).
         public var snapshot: ProposalSnapshot?
         /// Suggestions whose accepted "extend this album" decision was no longer a certain
-        /// match under the new rules (`ProposalDecision.uncertainExtensions`) and is open again
-        /// in the store. The app drops them from its decisions in memory too.
+        /// match under the new rules (`ProposalDecision.uncertainExtensions`), or went into the
+        /// album recorded for the ID while that album holds other photos
+        /// (`ProposalDecision.extensionsOfOtherPhotos`), and is open again in the store. The app
+        /// drops them from its decisions in memory too.
         public var reopened: Set<SortlyID> = []
     }
 
@@ -1906,6 +1956,11 @@ public actor AnalysisPipeline {
     /// extend an album without a certain match go back to open (`reopened`); suggestions of a
     /// plan that already started (not finished) are never among them.
     ///
+    /// Every time (the app calls this after each analysis too): an accepted "ergänzen" into the
+    /// album recorded for the suggestion's ID while that album was made for other photos goes
+    /// back to open (`ProposalDecision.extensionsOfOtherPhotos`, second review of the place IDs
+    /// 18.11.: a frequent place's ID can go to a new place).
+    ///
     /// The new matches with their version stamp, the decisions without the reopened ones and
     /// the count for the overview are written in one transaction (final check 16.11.): if the
     /// app is ended in between, nothing is written and the next launch does it again. Before,
@@ -1917,22 +1972,57 @@ public actor AnalysisPipeline {
     /// `afterEachWrite`: for tests, runs inside the transaction after each value (see
     /// `SortlyStore.setValues`); throwing there is the app ending half way.
     func refreshMatchesIfOutdated(afterEachWrite: (@Sendable (String) throws -> Void)?) async throws -> MatchRefresh {
-        guard let snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
-        guard snapshot.matcherVersion < AlbumMatcher.version else { return MatchRefresh(snapshot: snapshot) }
-        guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
+        guard var snapshot = try await latestProposals() else { return MatchRefresh(snapshot: nil) }
+        let outdated = snapshot.matcherVersion < AlbumMatcher.version
+        if outdated {
+            guard let rematched = try await rematched() else { return MatchRefresh(snapshot: nil) }
+            snapshot = rematched
+        }
         var decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
+        let recorded = Self.recordedAlbums(try await store.managedAlbums())
+        // Most refreshes have no "ergänzen" into an album recorded for the same suggestion.
+        let ownAlbum = decisions.contains { id, decision in
+            decision.isAccepted && decision.extendedAlbum.map { recorded[id]?.contains($0) == true } == true
+        }
+        // Remembered reopenings (below) of suggestions with neither a decision nor a recorded
+        // album any more are dropped.
+        let remembered = try await readable { try await store.value(Set<String>.self, forKey: Key.reopenedExtensions) } ?? []
+        let before = remembered.filter { entry in
+            let id = SortlyID(String(entry.prefix { $0 != "|" }))
+            return decisions[id] != nil || recorded[id] != nil
+        }
+        guard outdated || ownAlbum || before != remembered else { return MatchRefresh(snapshot: snapshot) }
+        var values: [String: any Encodable & Sendable] = [:]
+        if before != remembered { values[Key.reopenedExtensions] = before }
         let started = Set(try await store.unfinishedPlans().flatMap { $0.steps.compactMap(\.sourceID) })
-        let reopened = ProposalDecision.uncertainExtensions(decisions, proposals: rematched.proposals + rematched.dismissed,
-                                                            matches: rematched.matches, protected: started)
-        var values: [String: any Encodable & Sendable] = [Key.proposals: rematched]
+        let suggested = snapshot.proposals + snapshot.dismissed
+        var reopened = outdated ? ProposalDecision.uncertainExtensions(decisions, proposals: suggested, matches: snapshot.matches,
+                                                                       protected: started) : []
+        if ownAlbum {
+            // Once per suggestion and album: an album the user picks again for it ("Anderes
+            // Album wählen") is their choice and stays (re-review 18.11.). Which way a decision
+            // was made is not stored, so the first time cannot be told apart.
+            let found = ProposalDecision.extensionsOfOtherPhotos(
+                decisions, proposals: suggested, inventory: try await store.loadInventory(), recorded: recorded,
+                overrides: OverrideSet(try await store.overrides()), protected: started)
+            let pairs = Dictionary(found.compactMap { id in decisions[id]?.extendedAlbum.map { (id, id.rawValue + "|" + $0.rawValue) } },
+                                   uniquingKeysWith: { first, _ in first })
+            let new = pairs.filter { !before.contains($0.value) }
+            if !new.isEmpty {
+                reopened.formUnion(new.keys)
+                values[Key.reopenedExtensions] = before.union(new.values)
+            }
+        }
+        guard outdated || !reopened.isEmpty || !values.isEmpty else { return MatchRefresh(snapshot: snapshot) }
+        if outdated { values[Key.proposals] = snapshot }
         if !reopened.isEmpty {
             for id in reopened { decisions[id] = nil }
             let shown = try await store.value(Int.self, forKey: Self.recheckedSuggestionsKey) ?? 0
             values[Key.decisions] = decisions
             values[Self.recheckedSuggestionsKey] = shown + reopened.count
         }
-        proposalsGeneration += 1
+        if outdated { proposalsGeneration += 1 }
         try await store.setValues(values, afterEach: afterEachWrite)
-        return MatchRefresh(snapshot: rematched, reopened: reopened)
+        return MatchRefresh(snapshot: snapshot, reopened: reopened)
     }
 }

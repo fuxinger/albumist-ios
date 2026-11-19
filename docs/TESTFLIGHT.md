@@ -338,6 +338,17 @@ Testcode gibt.
   `timeout` oder eine Wartezeit verlängert, nennt im Commit die Messung (Lauf und gemessene
   Sekunden), so wie 4bb7fdd („say how long it took“). Eine reine Verlängerung ohne Messung ist
   keine Korrektur.
+- **Eine Zeitgrenze wird nur mit Eintrag gelockert** (Regel 19.11., Prüfer 5, P5-13: Build 36
+  kam aus 4bb7fdd, das nur eine Wartezeit von 5 auf 20 s verlängerte; die langsame App war damit
+  leiser): wer in einem Test (`App/SortlyUITests`, `App/SortlyTests`, `Tests`) ein `timeout:`,
+  ein `limit:` von `timed(...)`, eine Obergrenze `< .seconds(…)` oder ein `.timeLimit` erhöht,
+  oder in einem Workflow ein `timeout-minutes`, legt im selben Pull Request oder Push eine Zeile
+  in `docs/IMPROVEMENTS.md` an, die „Zeitgrenze gelockert“ sagt und die Datei nennt: warum, die
+  Messung (Lauf, Sekunden), der alte Wert und was die Grenze wieder enger macht. Sie steht als
+  offener Punkt (🔜), bis die Ursache behoben ist. CI prüft das im Job „App rules and strings“
+  (`.github/scripts/time_limit_rule.py`, Schritt „Time limits only loosened with an entry“) und
+  zählt die Einträge (`TIME_LIMIT_ENTRIES`, davon offen). Eine neue oder kürzere Grenze braucht
+  nichts. Nicht gesehen werden eine ganz gelöschte Grenze und eine aus Variablen berechnete.
 - **TestFlight**: der Lauf ruft die UI-Tests mit „auto“ auf (kleines Tor: nur `flow-full` und
   `contrast`, Abschnitt „Zwei Tore“). Vor dem Hochladen prüft der Job
   **UI gate** auf Linux, dass jede Gruppe des Tors für genau diese App und ihren Testcode grün

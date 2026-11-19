@@ -95,6 +95,10 @@
   „test run“, „Alles zurücknehmen“ heißt „Undo Everything“, alle Knöpfe groß geschrieben
   („Create Album“, „Not Now“, „Restore Purchase“ …). `check_strings.py` prüft das mit
   `english_rule.py`.
+- 19.11.: Im Tab „Alben“ steht jedes Album nur noch einmal: „Deine Alben“ lässt die Alben weg,
+  die schon unter „Von Albumist angelegt oder ergänzt“ stehen (P3-16 = G3-02).
+- 19.11.: Die Foto-Großansicht baut nur noch die Seiten um das gezeigte Foto (50 davor und
+  danach) statt aller geladenen Fotos und schiebt sie beim Blättern nach (P4-11).
 - 19.11.: Fotos mit einem Datum in der Zukunft bleiben nicht mehr für immer unsortiert (P1-03);
   ein als unlesbar aufgegebenes Foto wird eine Woche später noch einmal versucht (P1-08); Fotos,
   deren Land sich nicht finden lässt, gelten nicht mehr für immer als offen (P1-09); die

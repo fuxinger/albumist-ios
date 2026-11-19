@@ -502,6 +502,37 @@ struct DecisionLifecycleTests {
         #expect(try await store.value([SortlyID: ProposalDecision].self, forKey: AnalysisPipeline.Key.decisions) == named)
     }
 
+    /// The launch re-match judges the user's "Italien" like the analysis: its photos without a
+    /// location (messenger pictures) do not count against the country, so it stays the
+    /// country's clean album. The re-match reads the photos only for such albums.
+    @Test func theRematchLeavesOutPhotosWithoutALocationLikeTheAnalysis() async throws {
+        var lib = LibraryBuilder()
+        let trips = [("2019-05-10", "2019-05-17", Fixture.Places.rome), ("2021-09-03", "2021-09-10", Fixture.Places.florence),
+                     ("2023-06-01", "2023-06-08", Fixture.Places.naples)]
+        lib.daily(from: "2019-01-01", to: "2024-06-30", at: Fixture.Places.munichHome, perDay: 1, skipping: trips.map { ($0.0, $0.1) })
+        let away = trips.map { lib.daily(from: $0.0, to: $0.1, at: $0.2, perDay: 4, hour: 10) }
+        let messenger = (0..<60).map { lib.photo(at: Fixture.date("2020-02-01 12:00").addingTimeInterval(Double($0) * 3_600), nil) }
+        let mine = CollectionSnapshot(id: "it", title: "Italien", assetIDs: Set(away[0]).union(messenger))
+        var settings = OrganizationSettings()
+        settings.titleLanguage = .german
+        let store = try SortlyStore(url: nil)
+        let pipeline = AnalysisPipeline(
+            store: store, reader: InMemoryLibraryReader(assets: lib.assets, inventory: CollectionInventory([mine])),
+            analyzer: FakeContentAnalyzer(), geocoder: FakeGeocoder(), map: Self.map,
+            conditions: FakeConditions(pauseAfterChecks: nil), settings: settings, calendar: Fixture.calendar,
+            time: ManualTime().source, batchSize: 50)
+        _ = try await pipeline.run()
+        var stored = try #require(try await pipeline.latestProposals())
+        let country = try #require(stored.proposals.first { $0.title == "Italien" })
+        let analysed = try #require(stored.matches[country.id])
+        #expect(analysed.best?.albumID == "it" && analysed.best?.metrics.purity == 1)
+        stored.matcherVersion = AlbumMatcher.version - 1
+        try await store.setValue(stored, forKey: AnalysisPipeline.Key.proposals)
+        let rematched = try #require(try await pipeline.refreshMatchesIfOutdated().snapshot?.matches[country.id])
+        #expect(rematched.best?.albumID == "it" && rematched.best?.metrics == analysed.best?.metrics)
+        #expect(ProposalDecision.recommended(for: country, match: rematched) == ProposalDecision.recommended(for: country, match: analysed))
+    }
+
     /// Review 16.11. (A10): the user dismissed the trip ("Nicht jetzt"), whose own album
     /// "Italien" already holds it completely. The shown country must not extend that album with
     /// the photos of other years.

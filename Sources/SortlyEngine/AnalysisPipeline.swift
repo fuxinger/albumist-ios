@@ -2032,7 +2032,7 @@ public actor AnalysisPipeline {
         let inventory = try await store.loadInventory()
         let overrides = OverrideSet(try await store.overrides())
         let trips = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map { Set($0.allAssetIDs) }
-        let unlocated = Set(try await store.allAssets().filter { $0.usableLocation == nil }.map(\.id))
+        let unlocated = try await unlocatedInPlaceAlbums(snapshot.proposals + snapshot.dismissed, inventory: inventory)
         let found = snapshot
         let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.proposals + found.dismissed, inventory: inventory)
         snapshot.matches = await offActor {
@@ -2041,6 +2041,23 @@ public actor AnalysisPipeline {
         }
         snapshot.matcherVersion = AlbumMatcher.version
         return snapshot
+    }
+
+    /// The photos without a location that matching needs: only those in an album named exactly
+    /// like a place suggestion count apart (`AlbumMatcher.match(unlocated:)`). The photos are
+    /// read only when there is such an album, not at every re-match (third review 19.11.).
+    private func unlocatedInPlaceAlbums(_ proposals: [AlbumProposal], inventory: CollectionInventory) async throws -> Set<AssetID> {
+        let places = Set(proposals.compactMap { proposal -> String? in
+            switch proposal.kind {
+            case .placeCollection, .frequentPlace: AlbumTitle.normalized(proposal.title)
+            default: nil
+            }
+        })
+        let members = inventory.albums.reduce(into: Set<AssetID>()) { members, album in
+            if places.contains(AlbumTitle.normalized(album.title)) { members.formUnion(album.assetIDs) }
+        }
+        guard !members.isEmpty else { return [] }
+        return Set(try await store.allAssets().filter { members.contains($0.id) && $0.usableLocation == nil }.map(\.id))
     }
 
     /// What `refreshMatchesIfOutdated` did.

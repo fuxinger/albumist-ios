@@ -3,10 +3,13 @@
 Quelle: `Sources/SortlyCore/Matching/AlbumMatcher.swift`, Tests: `Tests/SortlyCoreTests/MatchingTests.swift`.
 
 ## Verfahren
-Für jeden Vorschlag P wird jedes vorhandene Album A über die **Inhalte** verglichen, nicht über
-den Namen. Ein invertierter Index (Foto → Alben) macht das auch bei großen Mediatheken in
-einem Durchgang möglich. Namen dienen nur als Gleichstand-Entscheider und zum Erkennen von
-Namenskonflikten.
+Für jeden Vorschlag P wird jedes vorhandene Album A über die **Inhalte** verglichen. Ein
+invertierter Index (Foto → Alben) macht das auch bei großen Mediatheken in einem Durchgang
+möglich. Der Name entscheidet in einem Fall allein: Ein bearbeitbares Album des Nutzers mit
+genau dem Namen des Vorschlags ist dessen Album, was es auch enthält („Gleicher Name gewinnt“,
+siehe „Ein Album pro Lauf für einen Vorschlag“), außer ein anderes Album enthält den Vorschlag schon ganz.
+Sonst dienen Namen als Gleichstand-Entscheider, zum Erkennen von Teilen („Italien 2019“) und
+von Namenskonflikten.
 
 ## Metriken
 | Metrik | Formel | Bedeutung |
@@ -36,7 +39,7 @@ weniger als 0,15 Punkte auseinander, gilt „mehrere passende Alben“.
 | Vorhandenes Album wird ergänzt | fehlende Fotos hinzufügen |
 | Ähnliches Album gefunden (passt vermutlich) | **neues Album**; das vorhandene bleibt unverändert und wird unter „Anpassen“ angeboten; zählt nicht als sortiert, nicht im Startpaket |
 | Mehrere passende Alben | Nutzer wählt unter „Anpassen“ |
-| Gleicher Name, anderer Inhalt | neues Album, Konflikt wird angezeigt |
+| Gleicher Name, anderer Inhalt | nur noch, wenn das Album des Namens nicht in Frage kommt (nicht bearbeitbar, vom Nutzer unter „Anpassen“ abgelehnt, Album eines anderen Vorschlags): neues Album, Konflikt wird angezeigt. Sonst wird das Album des Namens ergänzt |
 | Neues Album | anlegen im Ordner unter dem Hauptordner |
 | Nicht eindeutig | Nutzer entscheidet |
 | Album nicht bearbeitbar | (z. B. geteiltes Album) neues Album |
@@ -128,8 +131,8 @@ auf einer einzigen Reise besucht hat).
 ### Ein Album pro Lauf für einen Vorschlag (Prüfung 16.11.2026, A5/A10)
 In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen Vorschlag:
 - **Gleicher Name gewinnt** (Entscheidung Fuchs 16.11.2026): Heißt das Album genau wie ein
-  Vorschlag (ohne Groß-/Kleinschreibung und Akzente, z. B. „Italien“ für das Land Italien)
-  und würde dieser Vorschlag es ergänzen, gehört es ihm – auch wenn eine Reise im selben Lauf
+  Vorschlag (ohne Groß-/Kleinschreibung und Akzente, z. B. „Italien“ für das Land Italien),
+  gehört es ihm – auch wenn eine Reise im selben Lauf
   es ergänzen will oder schon ganz darin steckt, und auch gegenüber zurückgestellten
   Vorschlägen. Das Land ergänzt dann „Italien“ (in der Vorschau unter „Ergänzt“, rückgängig
   zu machen); die Reise „Italien · Mai 2019“ bekommt ein eigenes Album und sieht „Italien“

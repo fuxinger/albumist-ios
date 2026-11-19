@@ -2071,7 +2071,11 @@ public actor AnalysisPipeline {
         watcher?.cancel()
         guard !stopped else {
             task.cancel()
-            abandonedWork.append { _ = await task.value }
+            // A task of its own that waits for the work and drops its value, so a partial
+            // result (up to a whole set of facts) is freed when the work ends, not only at
+            // the next run, which may be hours later while paused (re-review N2).
+            let ending = Task.detached(priority: .utility) { _ = await task.value }
+            abandonedWork.append { await ending.value }
             throw CancellationError()
         }
         return await task.value

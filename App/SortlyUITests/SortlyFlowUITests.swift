@@ -860,7 +860,9 @@ final class SortlyFlowUITests: XCTestCase {
             print("UI_TIMING ignore note \(Int(Date().timeIntervalSince(asked) * 1000)) ms, shown \(shown)")
             print(shown ? "UI_STEP_OK ignore note" : "UI_STEP_MISSING ignore note")
             XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring")
-            shot("16a-ignore-note")
+            // "Widerrufen" right away; the picture of the note is taken in 2. On a slow Mac the
+            // picture before the tap took so long that the note had gone by itself (UI run
+            // 44592357899: "Missing: undo ignore", the same test green an hour earlier).
             if tap(app.buttons["ignore.undo"], "undo ignore") {
                 XCTAssertTrue(waitGone(note, timeout: 5), "The ignore note stayed after Widerrufen")
                 tap(app.buttons["Ignoriert"], "ignored area after undo")
@@ -881,6 +883,7 @@ final class SortlyFlowUITests: XCTestCase {
             print(shown ? "UI_STEP_OK ignore note again" : "UI_STEP_MISSING ignore note again")
             XCTAssertTrue(shown, "No \"2 Fotos ignoriert\" note after ignoring again")
             if shown {
+                shot("16a-ignore-note")
                 audit("ignore note")
                 let expired = waitGone(note, timeout: 30)
                 print(expired ? "UI_STEP_OK ignore note went away by itself" : "UI_STEP_MISSING ignore note went away by itself")
@@ -1026,8 +1029,18 @@ final class SortlyFlowUITests: XCTestCase {
         // The question may take a moment on a busy Mac; it is awaited, not looked for once.
         var confirm: XCUIElement?
         let asked = Date()
-        while confirm == nil && Date().timeIntervalSince(asked) < 10 {
+        var tappedAgain = false
+        // UI run 44592357899 (slow Mac, the same test green an hour earlier): no question within
+        // 10 s. After 10 s the row is tapped once more if it is still there and enabled (a tap
+        // the busy simulator lost), with a counted retry line; the question then gets 30 s in all.
+        while confirm == nil && Date().timeIntervalSince(asked) < 30 {
             confirm = app.buttons.matching(identifier: "Zusammenlegen").allElementsBoundByIndex.first(where: \.isHittable)
+            if confirm == nil, !tappedAgain, Date().timeIntervalSince(asked) >= 10,
+               mergeRow.exists, mergeRow.isEnabled, mergeRow.isHittable {
+                tappedAgain = true
+                print("UI_FLAKY_RETRY \(UITestWait.testID(self)) no merge question 10 s after the tap, row tapped again")
+                mergeRow.tap()
+            }
             if confirm == nil { usleep(250_000) }
         }
         print("UI_FACT merge question shown \(confirm != nil) after \(String(format: "%.1f", Date().timeIntervalSince(asked))) s")

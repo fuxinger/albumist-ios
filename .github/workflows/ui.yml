@@ -248,7 +248,7 @@ jobs:
       # Four groups + CI's macOS job = five macOS jobs at the peak (see the top of this file).
       max-parallel: 4
       # The groups of .github/ui-groups.json that run (UI plan): group, title, device, only,
-      # skip, video, reduce_motion, increase_contrast, app, tests.
+      # skip, video, reduce_motion, increase_contrast, budget_min, app, tests.
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       GROUP: ${{ matrix.group }}
@@ -258,6 +258,8 @@ jobs:
       INCREASE_CONTRAST: ${{ matrix.increase_contrast }}
       REDUCE_MOTION: ${{ matrix.reduce_motion }}
       VIDEO: ${{ matrix.video }}
+      # Minutes; over it the group gets a warning, never red (ui_tests.py budget_check).
+      BUDGET_MIN: ${{ matrix.budget_min }}
       # Quick mode (SORTLY_UI_QUICK=1 in the tests; xcodebuild hands TEST_RUNNER_* variables to
       # the test runner without the prefix): every group of a quick run (matrix.quick).
       TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}
@@ -318,7 +320,8 @@ jobs:
           [ "$INCREASE_CONTRAST" = "true" ] && flags+=(--increase-contrast)
           [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
-            --only "$ONLY" --skip "$SKIP" --deadline "$((UI_JOB_START + (150 - 12) * 60))" "${flags[@]}"
+            --only "$ONLY" --skip "$SKIP" --deadline "$((UI_JOB_START + (150 - 12) * 60))" \
+            --budget-min "${BUDGET_MIN:-0}" "${flags[@]}"
           status=$?
           # 75: every pass failed on the simulator or XCTest alone, no test result
           # (build/no-test-result); the next step fails the job, not this one.

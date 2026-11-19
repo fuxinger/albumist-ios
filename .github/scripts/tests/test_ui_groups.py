@@ -280,7 +280,31 @@ class GroupTests(unittest.TestCase):
         entry = groups.matrix_entry("small", "a" * 64)
         self.assertEqual(entry, {"group": "small", "title": "small iPhone", "device": "se", "only": "FlowUITests/test2_Other",
                                  "skip": "", "video": False, "reduce_motion": True, "increase_contrast": False, "quick": False,
-                                 "app": "a" * 12, "tests": groups.fingerprint("small")[:12]})
+                                 "budget_min": 0, "app": "a" * 12, "tests": groups.fingerprint("small")[:12]})
+
+    def test_a_time_budget_reports_and_runs_nothing_again(self):
+        # budget_min only reports (ui_tests.py budget_check): a new budget is in the matrix but
+        # changes no test fingerprint, so no group runs again for it.
+        budgeted = {"groups": [dict(g, budget_min=25) for g in GROUPS["groups"]]}
+        before = ui_groups.Groups(repo())
+        after = ui_groups.Groups(repo(**{".github__ui-groups.json": json.dumps(budgeted)}))
+        for name in before.names():
+            with self.subTest(name):
+                self.assertEqual(after.fingerprint(name), before.fingerprint(name))
+                self.assertEqual(after.matrix_entry(name, "a" * 64)["budget_min"], 25)
+        self.assertEqual(ui_groups.REPORT_ONLY, ("budget_min",))
+
+    def test_every_real_group_has_a_time_budget(self):
+        with open(os.path.join(ui_groups.ROOT, ".github", "ui-groups.json"), encoding="utf-8") as f:
+            groups = json.load(f)["groups"]
+        for g in groups:
+            with self.subTest(g["group"]):
+                self.assertIsInstance(g.get("budget_min"), int)
+                self.assertGreater(g["budget_min"], 0)
+        with open(os.path.join(ui_groups.ROOT, ".github", "workflows", "ui.yml"), encoding="utf-8") as f:
+            ui = f.read()
+        self.assertIn("BUDGET_MIN: ${{ matrix.budget_min }}", ui)
+        self.assertIn('--budget-min "${BUDGET_MIN:-0}"', ui)
 
 
 class FingerprintTests(unittest.TestCase):

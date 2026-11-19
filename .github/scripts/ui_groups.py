@@ -577,8 +577,14 @@ def load_groups(tree) -> list[dict] | None:
     return groups
 
 
+# Keys of a group that only report and never change what runs: left out of the test
+# fingerprint, so a new budget does not run a group again.
+REPORT_ONLY = ("budget_min",)
+
+
 def definition(group: dict) -> dict:
-    return {k: v for k, v in group.items() if not k.startswith("_")}
+    """What a group runs: its keys without the comments ("_...") and the report-only keys."""
+    return {k: v for k, v in group.items() if not k.startswith("_") and k not in REPORT_ONLY}
 
 
 class Groups:
@@ -667,6 +673,8 @@ class Groups:
         entry = {k: g.get(k, "") for k in ("group", "title", "device", "only", "skip")}
         for flag in ("video", "reduce_motion", "increase_contrast"):
             entry[flag] = bool(g.get(flag, False))
+        # The group's time budget in minutes (0: none), checked by ui_tests.py --budget-min.
+        entry["budget_min"] = int(self.group(name).get("budget_min", 0) or 0)
         if quick:
             entry["title"] += " (quick)"
         entry["quick"] = quick

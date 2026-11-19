@@ -1571,5 +1571,47 @@ class SleepRuleTests(unittest.TestCase):
                                  "\"// pacing: <why>\" when it is only pacing:\n" + "\n".join(unmarked))
 
 
+class BudgetTests(unittest.TestCase):
+    """A group's time against its budget (review P5-05; ui-groups.json budget_min)."""
+
+    def check(self, seconds, budget):
+        with tempfile.NamedTemporaryFile("r", suffix=".md") as summary, \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": summary.name}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            within = ui_tests.budget_check("device", seconds, budget)
+            with open(summary.name, encoding="utf-8") as f:
+                return within, out.getvalue(), f.read()
+
+    def test_within_the_budget_is_one_line(self):
+        within, out, summary = self.check(50 * 60, 70)
+        self.assertTrue(within)
+        self.assertEqual(out, "UI_BUDGET device 50.0 min (budget 70 min)\n")
+        self.assertEqual(summary, "")
+
+    def test_over_the_budget_warns_and_says_so_in_the_summary(self):
+        within, out, summary = self.check(75.5 * 60, 70)
+        self.assertFalse(within)
+        self.assertIn("UI_BUDGET device 75.5 min (budget 70 min) OVER", out)
+        self.assertIn("::warning title=UI device over its time budget::device took 76 min, over its budget of 70 min", out)
+        self.assertIn("**Time budget:** device took 76 min", summary)
+
+    def test_no_budget_never_warns(self):
+        within, out, _ = self.check(500 * 60, 0)
+        self.assertTrue(within)
+        self.assertIn("(no budget)", out)
+
+    def test_the_run_reports_its_time_also_when_it_fails(self):
+        args = argparse.Namespace(name="flow-full", budget_min=1)
+        with mock.patch.object(ui_tests, "run_group", side_effect=RuntimeError("boom")), \
+                mock.patch.object(ui_tests, "budget_check") as check, self.assertRaises(RuntimeError):
+            ui_tests.command_run(args)
+        self.assertEqual(check.call_args[0][0], "flow-full")
+        self.assertEqual(check.call_args[0][2], 1)
+        seen = []
+        with mock.patch.object(ui_tests, "command_run", lambda a: seen.append(a.budget_min) or 0):
+            self.assertEqual(ui_tests.main(["run", "--udid", "U", "--name", "n", "--budget-min", "70"]), 0)
+        self.assertEqual(seen, [70])
+
+
 if __name__ == "__main__":
     unittest.main()

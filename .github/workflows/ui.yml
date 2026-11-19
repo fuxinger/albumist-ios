@@ -6,8 +6,9 @@ run-name: >-
   ${{ github.event_name == 'pull_request' && format('[merge {0}] {1}', github.sha, github.event.pull_request.title) || '' }}
 
 # End-to-end UI tests on the simulator. Separate from CI, in the repository's one Mac queue
-# (see "concurrency" below): one UI run or stress pass at a time across all branches; a new
-# push does not cancel a running UI run, the newest waiting run goes next.
+# (see "concurrency" below): one UI run or stress pass at a time across all branches, the newest
+# waiting run goes next; a new push to a pull request cancels the UI runs of its older commits
+# (ui-supersede.yml).
 #
 #   1. Core tests (Linux): the core library's tests on a free Linux runner. No macOS runner
 #      starts for a commit whose core tests fail (fast first, then expensive).
@@ -101,7 +102,7 @@ env:
 # The Mac queue (Profi-Analyse 16.11., Top 3, decided 17.11.: only one Mac-heavy strand at a
 # time). Every UI run and every stress pass (ui-stress.yml) of every branch shares the group
 # "mac-queue", and GitHub keeps such a group like this:
-#   - one run at a time; a running run is never cancelled (cancel-in-progress: false);
+#   - one run at a time; the queue never cancels a running run (cancel-in-progress: false);
 #   - at most ONE run waits. A run that joins while another one waits takes its place: GitHub
 #     cancels the waiting one ("Canceling since a higher priority waiting request for
 #     'mac-queue' exists"). So the newest waiting run always goes next, also across branches
@@ -122,9 +123,10 @@ env:
 #     group it would wait behind the UI run of its own commit (about an hour), and while it
 #     waits the next run to join, e.g. the UI run of the next push, would cancel it.
 #   - the Mac jobs of nightly.yml and codeql.yml (one Mac each).
-# Not done: cancelling the older run of the same branch when a newer one starts (also in the
-# analysis). With one group for all branches, cancel-in-progress would cancel whatever runs,
-# another branch's run too.
+# The older run of the same pull request: cancel-in-progress cannot do it here (with one group
+# for all branches it would cancel whatever runs, another branch's run too), so a newer push
+# cancels the waiting or running UI runs of the older commits of its pull request in a
+# workflow of its own, outside the queue: ui-supersede.yml (since 19.11.2026).
 concurrency:
   group: >-
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ui-{0}', github.run_id)

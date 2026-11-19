@@ -140,8 +140,7 @@ final class SortlyLockedUITests: XCTestCase {
 
     /// Ends the app and starts it again with the same arguments, then waits for the overview.
     private func relaunch() {
-        UITestAppEnd.end(app)
-        app.launch()
+        UITestAppEnd.launch(app)  // ends it first
         let idle = anything("Fotos analysiert").waitForExistence(timeout: 120) || anything("Analyse aktuell").exists
         print(idle ? "UI_STEP_OK locked overview after relaunch" : "UI_STEP_MISSING locked overview after relaunch")
     }
@@ -207,7 +206,8 @@ final class SortlyLockedUITests: XCTestCase {
         // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked", "-SortlyUITestFastStart"]
             + UITestStalls.arguments(besides: [])
-        app.launch()
+        // Through the helper: the app of the test before is ended by its process id first.
+        UITestAppEnd.launch(app)
         let deadline = Date().addingTimeInterval(900)
         var streak = 0
         while Date() < deadline && streak < 3 {
@@ -226,7 +226,7 @@ final class SortlyLockedUITests: XCTestCase {
         prepareLibrary()
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked",
                                "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "1"] + UITestStalls.arguments(besides: [])
-        app.launch()
+        UITestAppEnd.launch(app)
         // A cut-off test 1 left the app at its welcome screen (run 43816787321).
         if !UITestOnboarding.fullFlowReachedItsEnd { UITestOnboarding.completeIfNeeded(app, in: "test7") }
         // The overview is idle (the earlier runs analysed the demo library).

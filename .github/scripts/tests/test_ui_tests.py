@@ -1199,6 +1199,37 @@ class HostTerminateTests(unittest.TestCase):
                 if "app = XCUIApplication()" in swift:
                     self.assertIn("UITestAppEnd.end(app", swift)
 
+    def test_every_launch_goes_through_the_helper_that_records_the_process_id(self):
+        # The first launch of each test ended the app of the test before through a new
+        # XCUIApplication without launch arguments, so `UITestAppEnd.processID` found no watch
+        # file and the Mac fell back to `simctl terminate` by bundle id: the race of 945446e (a
+        # late end hits the NEW launch) and simctl's hangs (device test08 of job 135412549414:
+        # 114 s, "by XCTest after the Mac"). Every launch now goes through UITestAppEnd.launch,
+        # which ends the last launch's app, adds -SortlyUITestWatchMainLog when the arguments
+        # lack it and notes the launch (UITestLaunchRecord), so the next end knows the process
+        # from any XCUIApplication. No UI test file launches the app itself.
+        folder = os.path.join(self.ROOT, "App", "SortlyUITests")
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".swift") or name == "UITestAppEnd.swift":
+                continue
+            with self.subTest(name):
+                with open(os.path.join(folder, name), encoding="utf-8") as f:
+                    launches = [line.strip() for line in f if re.search(r"\.launch\(\)", line)]
+                self.assertEqual(launches, [], "launch through UITestAppEnd.launch(app)")
+        with open(os.path.join(folder, "UITestAppEnd.swift"), encoding="utf-8") as f:
+            helper = f.read()
+        body = helper[helper.index("static func launch(_ app: XCUIApplication"):]
+        body = body[:body.index("\n    }\n")]
+        self.assertEqual(body.count("app.launch()"), 1)
+        order = [body.index(s) for s in ("end(app", "UITestStalls.arguments(besides: app.launchArguments)",
+                                         "UITestLaunchRecord.shared.launching(app.launchArguments)", "app.launch()")]
+        self.assertEqual(order, sorted(order), "end, watch file, record, then launch")
+        # The end reads the process of the last launch, and the stall report keeps it when it
+        # removes the file (DeviceConditionUITests and AccessibilityUITests report in teardown).
+        self.assertIn("UITestLaunchRecord.shared.processID(", helper)
+        with open(os.path.join(folder, "UITestStalls.swift"), encoding="utf-8") as f:
+            self.assertIn("UITestLaunchRecord.shared.read(", f.read())
+
     def test_the_test_lines_about_the_end_are_no_finding(self):
         log = ("UI_FACT clock 10:00:00.0 end the app before the next launch\nUI_HOST_TERMINATE_APP 1763500000\n"
                "UI_FACT app still running 60 s after asking the Mac to end it: XCTest ends it\n"

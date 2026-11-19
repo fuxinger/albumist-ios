@@ -742,7 +742,7 @@ final class AccessibilityUITests: XCTestCase {
         accessibilitySize = textSize?.contains("Accessibility") ?? false
         if dark { arguments.append("-SortlyUITestDark") }
         app.launchArguments = arguments
-        app.launch()
+        UITestAppEnd.launch(app)
     }
 
     private var stallsReportedAtEnd = false

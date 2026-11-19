@@ -19,9 +19,23 @@ import XCTest
 /// the system does, which leaves no crash report, so XCTest has no crash to record either.
 /// Only if the app is still there after the wait does XCTest end it. Without the helper (a run
 /// in Xcode) XCTest ends it as before. Every UI test file uses this (shared since 19.11.; it was
-/// `DeviceConditionUITests.endRunningApp`).
+/// `DeviceConditionUITests.endRunningApp`), and every launch goes through `launch` below.
 @MainActor
 enum UITestAppEnd {
+    /// Every launch of the app goes through here (rule test in .github/scripts/tests/
+    /// test_ui_tests.py): ends the app of the last launch first (`end`; without this a launch
+    /// left that to XCTest, as `SortlyLockedUITests.prepareLibrary` did), makes the app write its
+    /// process id (adds `-SortlyUITestWatchMainLog` when the arguments name no file) and notes the
+    /// launch (`UITestLaunchRecord`). So the next `end` names the process to the Mac also when it
+    /// is given a new `XCUIApplication` without arguments: the first launch of every test ended
+    /// the app of the test before that way, with `simctl terminate` by bundle id.
+    static func launch(_ app: XCUIApplication) {
+        end(app)
+        app.launchArguments += UITestStalls.arguments(besides: app.launchArguments)
+        UITestLaunchRecord.shared.launching(app.launchArguments)
+        app.launch()
+    }
+
     /// `when`: what the log lines say ("before the next launch", "during the plan").
     static func end(_ app: XCUIApplication, _ when: String = "before the next launch") {
         guard app.state != .notRunning else { return }
@@ -47,15 +61,13 @@ enum UITestAppEnd {
         print("UI_TIMING app ended \(when) \(Int(Date().timeIntervalSince(asked))) s (\(way), \(gone ? "ended" : "still running"))")
     }
 
-    /// The process id the app of this launch wrote first thing ("@ <pid> <start> <now>") into
-    /// the file of `-SortlyUITestWatchMainLog` (`UITestStalls`); nil without the file or before
-    /// the app got that far.
+    /// The process id the app of the last launch wrote first thing ("@ <pid> <start> <now>")
+    /// into the file of `-SortlyUITestWatchMainLog` (`UITestStalls`), whichever `XCUIApplication`
+    /// is ended (`UITestLaunchRecord`); nil before the app got that far. Without a launch known
+    /// to this test runner (a new runner after a crash), the file of `app`'s arguments or the
+    /// default one.
     static func processID(of app: XCUIApplication) -> Int32? {
-        let arguments = app.launchArguments
-        guard let flag = arguments.firstIndex(of: "-SortlyUITestWatchMainLog"), flag + 1 < arguments.count,
-              let text = try? String(contentsOfFile: arguments[flag + 1], encoding: .utf8) else { return nil }
-        let line = text.split(separator: "\n").last { $0.hasPrefix("@ ") }
-        let parts = line?.split(separator: " ") ?? []
-        return parts.count >= 2 ? Int32(parts[1]) : nil
+        let fallback = UITestLaunchRecord.watchFile(in: app.launchArguments) ?? UITestStalls.path
+        return UITestLaunchRecord.shared.processID(fallback: fallback) { try? String(contentsOfFile: $0, encoding: .utf8) }
     }
 }

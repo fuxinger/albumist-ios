@@ -21,7 +21,7 @@ final class SortlyFlowUITests: XCTestCase {
         // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"]
             + UITestStalls.arguments(besides: extra) + extra
-        app.launch()
+        UITestAppEnd.launch(app)
     }
 
     /// The first suggestion row of a list ("57 Fotos" is in every row, never in a button).

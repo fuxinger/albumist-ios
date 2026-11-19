@@ -29,7 +29,7 @@ final class DeviceConditionUITests: XCTestCase {
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
         launchExtra = extra
         UITestOnboarding.clock("launch")
-        app.launch()
+        UITestAppEnd.launch(app)
     }
 
     /// The test's own arguments of the last launch: the onboarding helpers open the app again

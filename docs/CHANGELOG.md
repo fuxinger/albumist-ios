@@ -89,6 +89,7 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 19.11.: Speicherwarnung von iOS: Albumist leert Suchindex, Vorschaubilder und die aus den Fotodaten gebauten Zwischenspeicher und baut sie bei Bedarf neu; Fotodaten, Vorschläge und Entscheidungen bleiben, der Diagnosebericht nennt die Warnungen (P4-06).
 - 19.11.: Featuring-Check nennt kein iPad mehr; die App gibt es nur fürs iPhone (G7-02).
 - 19.11.: Größte Schrift: Die Länderliste im Reise-Atlas wird nicht mehr zerhackt (P3-11).
   Flagge und Pfeil stehen oben, der Name darunter in voller Breite, das Jahr in einer eigenen

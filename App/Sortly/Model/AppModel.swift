@@ -441,6 +441,12 @@ final class AppModel {
     /// run may have read the old state, so its end starts one more (`AnalysisStartCause
     /// .asksForARunAfter`, `AnalysisRunEnd` `changeRequested`; re-review of 7e8aba3).
     @ObservationIgnored private var changeAfterRun = false
+    /// Reads and clears the request in one step, so no end of a run can forget the clear (an
+    /// uncleared request would start a follow-up after every later run; third review of d7da886).
+    private func takeChangeRequest() -> Bool {
+        defer { changeAfterRun = false }
+        return changeAfterRun
+    }
     /// The user's own trip splits and merges (I07), for the settings.
     private(set) var tripCorrections = TripCorrections()
     /// The user's answers to "Bist du hier öfter?", for the settings.
@@ -1079,9 +1085,8 @@ final class AppModel {
             // request for that pass is taken here, whatever follows.
             let end = AnalysisRunEnd(report: finished, settings: settings, pauseTapped: control.isPaused,
                                      catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow,
-                                     changeRequested: changeAfterRun)
+                                     changeRequested: takeChangeRequest())
             catchUpAfterRun = false
-            changeAfterRun = false
             // Also a Pause tapped before the run ended unfinished for another reason (an error,
             // the heat, Photos) stays (`AnalysisRunEnd.pauseHeld`).
             setPausedByUser(end.keepsPause)
@@ -1656,9 +1661,8 @@ final class AppModel {
         if analysisControl === control { analysisControl = nil }
         let end = AnalysisRunEnd(report: report, settings: settings, pauseTapped: control.isPaused,
                                  catchUpRequested: catchUpAfterRun, mayStart: runMayStartNow, background: true,
-                                 changeRequested: changeAfterRun)
+                                 changeRequested: takeChangeRequest())
         catchUpAfterRun = false
-        changeAfterRun = false
         setPausedByUser(end.keepsPause)
         if let ended = end.report {
             analysis.lastReport = ended

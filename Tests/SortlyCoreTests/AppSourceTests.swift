@@ -17,6 +17,10 @@ struct AppSourceTests {
                 multiline }
                 """
             let raw = #"raw } with \(not interpolated) and "quotes" }"#
+            let lone = #"xylo " }"#
+            let inner = """
+                say "zebra" }
+                """
             let says = "with \(name(of: "inner }")) interpolated"
             // startAnalysis(cause: .tap)
             startAnalysis()
@@ -48,7 +52,7 @@ struct AppSourceTests {
         #expect(code.split(separator: "\n", omittingEmptySubsequences: false).count
                 == Self.sample.split(separator: "\n", omittingEmptySubsequences: false).count)
         let leftInText = code.contains("brace") || code.contains("multiline") || code.contains("quotes") || code.contains("cause: .userChange")
-            || code.contains("// startAnalysis")
+            || code.contains("// startAnalysis") || code.contains("xylo") || code.contains("zebra")
         #expect(!leftInText, "a comment or a string was left in the code")
         // The code inside an interpolation stays code.
         #expect(code.contains("name(of:"))

@@ -421,11 +421,18 @@ struct AnalysisStartCauseTests {
         }
         let ownGate = start.contains("cause == .") || start.contains("cause != .") || start.contains("pausedByUser && !")
         #expect(!ownGate, "startAnalysisNow has a Pause rule of its own")
-        // The run's end and the refinement's take the request for one more run.
+        // The run's end and the refinement's take the request for one more run, and taking it
+        // clears it: else every later run would start one more (third review of d7da886).
         for declaration in ["func startAnalysisNow(", "func refinePass("] {
-            let takesIt = try code(declaration).contains("changeRequested: changeAfterRun")
+            let takesIt = try code(declaration).contains("changeRequested: takeChangeRequest()")
             #expect(takesIt, "\(declaration): the end of the run does not take a trip change that came during it")
         }
+        let take = Set(try code("func takeChangeRequest(").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) })
+        #expect(take.contains("defer { changeAfterRun = false }") && take.contains("return changeAfterRun"),
+                "takeChangeRequest does not clear the request it hands out")
+        let modelCode = AppSource.code(model)
+        let uses = modelCode.components(separatedBy: "changeAfterRun").count - 1
+        #expect(uses == 4, "changeAfterRun is used outside its declaration, the start rule and takeChangeRequest (\(uses) uses)")
 
         // Every start in the App: only where the user asks for the analysis (a tap, the user's
         // own change, the queued start after a change in "Dein Zuhause") may a cause other than
@@ -468,8 +475,8 @@ struct AnalysisStartCauseTests {
             }
         }
         // Today: 13 automatic starts and 18 the user asks for.
-        #expect(automatic == 13)
-        #expect(asked == 18)
+        #expect(automatic == 13, "an automatic start was added or removed: check that it may not end a Pause, then update the count")
+        #expect(asked == 18, "a start the user asks for was added or removed: check that it may end a Pause, then update the count")
     }
 
     /// A run slipped in between storing the user's change and its start (a change in Photos, a

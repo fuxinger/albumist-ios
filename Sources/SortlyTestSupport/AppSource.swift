@@ -5,7 +5,8 @@ import Synchronization
 /// does not build on Linux, so these tests read its code (`AnalysisStartCauseTests`,
 /// `TripWorkshopTests`). Comments and string literals are told apart from code (`code`), so a
 /// line left only in a comment or a string never passes for code, and braces in them never
-/// end a body early (`AppSourceTests`).
+/// end a body early (`AppSourceTests`). Regex literals (`/…/`, `#/…/#`) are not told apart:
+/// none of the App code these tests read has one today (UI tests do, and are not read here).
 public enum AppSource {
     /// The repository root.
     public static let root = URL(fileURLWithPath: #filePath)

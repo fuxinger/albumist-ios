@@ -49,6 +49,18 @@
   mit Vorschau der zwei Reisen, Zusammenlegen mit der Reise davor oder danach (bis 14 Tage
   Abstand). Albumist hält sich daran bei jeder späteren Analyse. „Aufheben“ an der Reise nimmt
   eine Änderung zurück, „Reisen wieder automatisch erkennen“ in den Einstellungen alle. Nur solange das Reise-Album noch nicht angelegt ist.
+### Geändert
+- 18.11. (Entscheidungen Fuchs 1 und 2, Fable P1-05/P1-06): Eine Bedeutung für „sortiert“.
+  Ignorierte Fotos zählen im Ring nicht mehr mit (weder sortiert noch offen); der Ring erreicht
+  100 %, sobald alles nicht Ignorierte sortiert ist, und „Ignorieren“ vergrößert nie die Zahl
+  hinter „von“. Die Übersicht nennt sie unter „Außerdem nicht mitgezählt: … 10 ignorierte Fotos“. Die
+  Liste „Sortiert“ in der Mediathek zeigt genau die Zahl des Rings, „Nicht sortiert“ den Rest
+  seiner Gesamtzahl (eine Funktion für beide: `OrganizationStatusResolver.ringPart`). Fotos, die
+  der Ring nicht zählt (kein Hauptbereich, etwa zu Hause, oder außerhalb von „Nur 2026“), stehen
+  nur noch unter „Alle“; ihr Status in den Foto-Infos heißt „Nicht mitgezählt“ (bei einem
+  anderen Jahr mit dem Grund „Albumist zählt gerade nur Fotos aus 2026.“). Der Ring zeigt „100 %“
+  erst, wenn alles sortiert ist (vorher rundete 199 von 200 auf 100 %); nach dem Wechsel des
+  Jahres zählt er sofort neu; die Suche „nicht sortiert“ findet genau die Liste „Nicht sortiert“.
 ### Korrigiert
 - UI-Tests: jede Gruppe wartet vor ihrem ersten Test (und vor einer Wiederholung) bis zu 5 Min.,
   bis der Simulator nach seinem Start wieder schnell antwortet (`SIM_SETTLE`);

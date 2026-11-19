@@ -153,6 +153,23 @@ iOS speichert keine verlässliche Quell-App. Albumist nutzt nur klare Hinweise (
 Screenshots, vorhandene Alben, optional Dateinamen-Muster) und markiert alles andere als
 unbekannt.
 
+## Ring und Listen der Mediathek
+- Ring und Liste „Sortiert“ folgen derselben Regel (`OrganizationStatusResolver.ringPart`,
+  Entscheidung Fuchs 18.11.), werden aber zu verschiedenen Zeitpunkten neu gerechnet. Kurz
+  auseinander liegen sie:
+  - direkt nach „Ignorieren“, „Widerrufen“ oder „Nicht mehr ignorieren“: die Listen folgen dem
+    Tippen sofort (`IgnoreChange`), der Ring erst mit der Neuzählung im Hintergrund
+    (gewollt, damit keine Zahl zurückspringt; meist unter einer Sekunde, bei 50.000 Fotos
+    einige Sekunden);
+  - solange der Ring „Wird neu gezählt · Zuletzt X von Y sortiert“ zeigt (`RecountState`, nach
+    „Analyse neu aufbauen“ oder während Fotos ihre Labels für „Themen“/„Dokumente“ nachholen):
+    der Ring hält die alte Zahl, die Listen zeigen schon den neuen Stand;
+  - direkt nach dem Wechsel des Jahres („Nur 2026“): die Listen werden sofort neu gemacht, der
+    Ring zählt einen Augenblick später (`changeScope` stößt die Neuzählung sofort an).
+- Ein Foto, das ignoriert wird, verschwindet beim Ignorieren aus „Sortiert“ oder „Nicht
+  sortiert“; ist es sortiert, werden „x“ und „y“ im Ring je um eins kleiner (der Anteil kann
+  dann leicht sinken). Ignorieren eines offenen Fotos oder eines Fotos von zu Hause senkt ihn nie.
+
 ## Nicht unterstützte Sammlungen
 Smart-Alben, geteilte Alben, iCloud-Shared-Library-Besonderheiten, Alben aus anderen Apps
 mit eingeschränkten Rechten: nur lesend.

@@ -438,8 +438,9 @@ final class AppModel {
     }
     var analysisCounts = AnalysisCounts()
     /// The part of the library Albumist works on: everything, or the trial year chosen at
-    /// the start (kept for every later run).
-    var analysisScope: OrganizationScope = .all
+    /// the start (kept for every later run). The library tab's "Sortiert" and "Nicht sortiert"
+    /// follow it like the ring (`LibraryBuckets.make(…scope:)`).
+    var analysisScope: OrganizationScope = .all { didSet { if oldValue != analysisScope { libraryInputsChanged() } } }
     /// Photos changed while a run was busy (`LibraryChangeWatcher`): one more pass follows when
     /// it ends, unless the user paused it. Taken by the end of every run, in the app and the
     /// overnight refinement (`AnalysisRunEnd`). A change of the settings needs no request: the
@@ -905,6 +906,10 @@ final class AppModel {
     func changeScope(_ scope: OrganizationScope) {
         guard scope != analysisScope else { return }
         analysisScope = scope
+        // The ring counts the new part at once, over what is analysed already, like the lists
+        // (`analysisScope` makes them anew): "Sortiert" and "x von y" agree right away, not only
+        // once the run for the new part has ended (second review 18.11.).
+        Task { await refreshDerived() }
         Task {
             // Stored first: whichever run starts next (this one, a catch-up, the next launch)
             // works on the new part, also if another run slips in before ours.
@@ -2979,7 +2984,7 @@ final class AppModel {
         var lines = ["Albumist diagnostic report", "created \(iso.string(from: Date()))", ""]
         lines.append("app \(AppInfo.version), \(system), \(device), language \(Locale.current.language.languageCode?.identifier ?? "?")")
         lines.append("photo access \(access.rawValue), onboarding done \(onboardingDone)")
-        lines.append("photos \(progress.total), fully sorted \(progress.fully), partly \(progress.partially), unsorted \(progress.unorganized), pending \(progress.pending)")
+        lines.append("photos \(progress.total), fully sorted \(progress.fully), partly \(progress.partially), unsorted \(progress.unorganized), pending \(progress.pending), ignored \(progress.ignored), excluded \(progress.excluded)")
         // Where the sorted count comes from, per main area (device test 15.11.: 811 sorted before
         // "Analyse neu aufbauen", 141 after it).
         var areaLines: [String] = []
@@ -3127,12 +3132,13 @@ final class AppModel {
     private func makeLibraryBuckets() {
         guard libraryBucketsTask == nil else { return }
         let inputs = libraryInputs
-        let facts = facts, states = states, resolver = resolver
+        let facts = facts, states = states, resolver = resolver, scope = analysisScope
         libraryTapsDuringPass = []
         libraryTapInputs = 0
         libraryBucketsTask = Task { [weak self] in
             let made = await Task.detached(priority: .userInitiated) {
-                LibraryBuckets.make(facts: facts, states: states, resolver: resolver)
+                // The ring's part of the library: "Sortiert" shows the ring's number (Fuchs 18.11.).
+                LibraryBuckets.make(facts: facts, states: states, resolver: resolver, scope: scope)
             }.value
             guard let self else { return }
             self.libraryBucketsTask = nil
@@ -3356,9 +3362,17 @@ final class AppModel {
         // Reading the query compares unknown words with every word on screenshots (typos);
         // off the main thread, so typing stays smooth in a large library.
         let parsed = await Task.detached(priority: .userInitiated) { index.parse(query) }.value
-        // The organization state of every photo only when the query asks for it ("nicht sortiert").
-        let statuses = parsed.usesStatus ? states.mapValues { resolver.overall($0) } : [:]
-        return await Task.detached(priority: .userInitiated) { SearchEngine().run(parsed, in: index, statuses: statuses) }.value
+        // The organization state of every photo only when the query asks for it ("nicht sortiert"),
+        // by the ring's rule over the chosen part of the library: the search finds exactly the
+        // photos of the list "Nicht sortiert" (`LibraryStatus.searchStatuses`, Fuchs 18.11.).
+        let wantsStatus = parsed.usesStatus
+        let facts = wantsStatus ? self.facts : [], states = wantsStatus ? self.states : [:]
+        let resolver = self.resolver, scope = analysisScope
+        return await Task.detached(priority: .userInitiated) {
+            let statuses = wantsStatus
+                ? LibraryStatus.searchStatuses(facts: facts, states: states, resolver: resolver, scope: scope) : [:]
+            return SearchEngine().run(parsed, in: index, statuses: statuses)
+        }.value
     }
 
     /// Completions for the word being typed, from the user's own places, topics and albums.

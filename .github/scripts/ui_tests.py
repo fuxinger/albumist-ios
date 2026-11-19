@@ -1252,6 +1252,36 @@ def print_crash_reports(paths: list[str], label: str) -> None:
 
 
 def command_run(args) -> int:
+    began = time.time()
+    try:
+        return run_group(args)
+    finally:
+        try:
+            budget_check(args.name, time.time() - began, getattr(args, "budget_min", 0) or 0)
+        except Exception as error:  # a report: never in place of the run's exit code or error
+            print(f"UI_BUDGET {args.name}: not checked ({type(error).__name__}: {error})", flush=True)
+
+
+def budget_check(name: str, seconds: float, budget_min: float) -> bool:
+    """The group's time against its budget (review P5-05: one verdict took 84 min, nobody saw
+    which group grew). Prints UI_BUDGET; over the budget a warning on the run page and a line in
+    the job summary. Never red: a slow Mac is no test result. True when within the budget."""
+    minutes = seconds / 60
+    within = not budget_min or minutes <= budget_min
+    budget = f"budget {budget_min:g} min" if budget_min else "no budget"
+    print(f"UI_BUDGET {name} {minutes:.1f} min ({budget}){'' if within else ' OVER'}", flush=True)
+    if not within:
+        text = (f"{name} took {minutes:.0f} min, over its budget of {budget_min:g} min "
+                "(.github/ui-groups.json, budget_min): a slow Mac or a test that grew; see UI_PASS_TIME and UI_TIMING")
+        print(f"::warning title=UI {name} over its time budget::{text}", flush=True)
+        path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if path:
+            with open(path, "a", encoding="utf-8") as out:
+                out.write(f"\n**Time budget:** {text}\n")
+    return within
+
+
+def run_group(args) -> int:
     os.makedirs(args.out, exist_ok=True)
     chosen = selection(args.only, args.skip)
     if args.increase_contrast:
@@ -1465,6 +1495,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--increase-contrast", action="store_true")
     r.add_argument("--video")
     r.add_argument("--a11y-summary", action="store_true")
+    r.add_argument("--budget-min", type=float, default=0,
+                   help="the group's time budget in minutes (.github/ui-groups.json); over it: a warning, not red")
     r.add_argument("--out", default="build")
     r.add_argument("--deadline", type=float, default=0,
                    help="epoch second by which a pass must end (the job's limit minus a margin); 0: none")

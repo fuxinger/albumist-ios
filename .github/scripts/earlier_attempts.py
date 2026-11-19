@@ -42,10 +42,13 @@ MACHINERY_STEPS = {
     # This check itself: it fails on what it finds in an earlier attempt (found again from
     # there) or when the API does not answer (then a re-run of the upload job is right).
     "Earlier attempts of this run",
-    # Settings, not tests (testflight.yml): the owner's approval in the environment
-    # testflight-upload (upload_approval.py) and its four secrets. Set up after a failure there,
-    # a re-run is right; it reads the settings anew and hides no test.
-    "Upload approval set up", "App Store Connect secrets present",
+    # Settings, not tests (testflight.yml): the environment testflight-upload with its branch
+    # rule main (upload_approval.py) and its four secrets. Set up after a failure there, a re-run
+    # is right; it reads the settings anew and hides no test.
+    "Upload setup checked", "App Store Connect secrets present",
+    # The tag build-<run number> of an upload of this run (upload_approval.py not-uploaded): it
+    # stays once set, so a re-run fails there again and hides nothing; an API error is no test.
+    "Not uploaded by this run yet",
     # The UI plan (ui.yml) and the UI gate (testflight.yml) decide from the recorded results of
     # the groups alone, every time anew (ui_evidence.py): a red group stays red for them in
     # every attempt, so a re-run of them can hide nothing.
@@ -54,6 +57,9 @@ MACHINERY_STEPS = {
     # a group whose every pass failed on the simulator or XCTest alone (ui_tests.py exit 75):
     # there is no test result, so a re-run hides none.
     "Note when the job started", "Built tests present", "No test result (simulator or XCTest failed in every pass)",
+    # ui.yml and testflight.yml: a report over the last days' runs (flaky_history.py); it has
+    # continue-on-error and decides nothing, so a re-run of it hides no test.
+    "UI history of the last 7 days",
 }
 MACHINERY_PREFIXES = ("Upload ", "Download ", "Post ", "Run actions/checkout@")
 NOT_PASSED = ("failure", "timed_out", "cancelled")

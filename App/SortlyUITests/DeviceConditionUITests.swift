@@ -121,71 +121,17 @@ final class DeviceConditionUITests: XCTestCase {
         }
     }
 
-    /// Sends the app to the background and waits until iOS reports it there, then at least
-    /// `atLeast` seconds in all. A fixed sleep was not enough on a starved Mac: in PR #9's UI run
+    /// Sends the app to the background and waits until iOS reports it there, then keeps it there
+    /// at least `atLeast` seconds, counted from that report. A fixed sleep was not enough on a starved Mac: in PR #9's UI run
     /// 44480215847 (test06, 19.11.) the app was back before it had ever entered the background,
     /// so the full disk (cleared by didEnterBackground) stayed full and the analysis stood still
-    /// for 2 min with the notice coming back. One more second after the state changed gives the
-    /// app's own didEnterBackground observers their turn.
-    ///
-    /// The Home press itself can be lost on the CI simulator: in UI run 44497741096 (19.11.) the
-    /// app stayed in the foreground (state 4) for 30 s after it in test03 and test06, while
-    /// simctl calls to the same simulator timed out. So a lost press is tried once more, and then
-    /// the Settings app is brought to the front, which sends this app to the background without
-    /// SpringBoard's Home gesture. Each extra try is a counted flaky retry (UI_FLAKY_RETRY), never
-    /// silent; the test fails only when no way reached the background.
+    /// for 2 min with the notice coming back. A lost Home press is tried again, then the Settings
+    /// app is brought to the front (UI run 44497741096): see `UITestWait.toBackground`.
     @discardableResult
-    private func sendToBackground(_ why: String, atLeast: TimeInterval, timeout: TimeInterval = 30) -> Bool {
-        let pressed = Date()
-        UITestOnboarding.clock("wait start app in the background \(why)")
-        func inBackground(within seconds: TimeInterval) -> Bool {
-            let until = Date().addingTimeInterval(seconds)
-            repeat {
-                let state = app.state
-                if state == .runningBackground || state == .runningBackgroundSuspended || state == .notRunning { return true }
-                usleep(250_000)
-            } while Date() < until
-            return false
-        }
-        // Plain values, no closures: XCUIDevice and XCUIApplication belong to the main actor.
-        let ways: [(name: String, wait: TimeInterval)] = [
-            ("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30),
-        ]
-        var reached = false
-        // The time in the background counts from the way that worked: a second press or the
-        // Settings app can be 20-35 s after the first press, and the test still needs its
-        // `atLeast` seconds there (second review, 19.11.: else test03's expiry might not happen).
-        var wayStarted = pressed
-        for (index, way) in ways.enumerated() {
-            wayStarted = Date()
-            if index > 0 {
-                print("UI_FLAKY_RETRY \(testID) app still in the foreground (state \(app.state.rawValue)) \(Int(Date().timeIntervalSince(pressed))) s after the Home press \(why), tried: \(way.name)")
-            }
-            if index < 2 {
-                XCUIDevice.shared.press(.home)
-            } else {
-                XCUIApplication(bundleIdentifier: "com.apple.Preferences").activate()
-            }
-            if inBackground(within: way.wait) {
-                reached = true
-                print("UI_FACT app in the background \(why) by \(way.name)")
-                break
-            }
-        }
-        let took = Date().timeIntervalSince(pressed)
-        print("UI_FACT app in the background \(why): state \(app.state.rawValue) after \(String(format: "%.1f", took)) s")
-        print(reached ? "UI_STEP_OK app in the background \(why)" : "UI_STEP_MISSING app in the background \(why) (Home twice and Settings, \(Int(took)) s)")
-        XCTAssertTrue(reached, "The app did not reach the background \(why)")
-        let wait = reached ? max(atLeast - Date().timeIntervalSince(wayStarted), 1) : 0
-        if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
-        return reached
-    }
-
-    /// "DeviceConditionUITests.test03_…" for UI_FLAKY_RETRY (XCTest's name is "-[Module.Class test]").
-    private var testID: String {
-        let parts = name.trimmingCharacters(in: CharacterSet(charactersIn: "-[]")).split(separator: " ")
-        let type = parts.first.flatMap { $0.split(separator: ".").last }.map(String.init) ?? "DeviceConditionUITests"
-        return "\(type).\(parts.last.map(String.init) ?? "unknown")"
+    private func sendToBackground(_ why: String, atLeast: TimeInterval, timeout: TimeInterval = 30,
+                                  file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        // The caller's file and line, so a failure points at the test, not at this helper.
+        UITestWait.toBackground(app, why, atLeast: atLeast, in: self, timeout: timeout, file: file, line: line)
     }
 
     /// Polls until `condition` held on `stableChecks` checks in a row (2 s apart).
@@ -450,6 +396,7 @@ final class DeviceConditionUITests: XCTestCase {
             print("UI_FACT app \(app.state == .notRunning ? "ended" : "still running") \(Int(Date().timeIntervalSince(start))) s after the grant request")
         }
         for attempt in 1...12 {
+            // pacing: the gap between launch attempts; the grant's end of the app is awaited above
             sleep(5)
             if let extra { launch(extra) } else { start() }
             let shown = waitStable("first screen after the grant", timeout: 30, stableChecks: 1) {
@@ -778,6 +725,7 @@ final class DeviceConditionUITests: XCTestCase {
             // from the moment the preview left (the plan started), not from the tap: a slow tap
             // while the sorting show starts would leave "Erledigt: 0 von N" (review of a26e8bc).
             let waited = Date().timeIntervalSince(left)
+            // pacing: the plan's first 5 s (the test's design); its start is checked above
             if waited < 5 { usleep(UInt32((5 - waited) * 1_000_000)) }
             let finished = app.buttons["result.receipt"].exists
             UITestAppEnd.end(app, "during \(name)")
@@ -961,6 +909,7 @@ final class DeviceConditionUITests: XCTestCase {
         // DeviceConditionRunTests.backgroundTimeOverThenRelaunchEndsWithEveryPhoto.
         expectAnalysisGoesOn("after the relaunch")
         for _ in 0..<2 where !analysisIdle {
+            // pacing: two readings 6 s apart while the analysis runs
             sleep(6)
             record("after relaunch, running")
         }
@@ -1132,8 +1081,7 @@ final class DeviceConditionUITests: XCTestCase {
         print("UI_FACT plan failure card shown: \(anything("Nicht alles hat geklappt").exists)")
         dismissNotices()
         XCTAssertEqual(app.state, .runningForeground, "The app ended with a full disk during the plan")
-        XCUIDevice.shared.press(.home)
-        sleep(3)
+        sendToBackground("before it is ended after the full disk during the plan", atLeast: 3)
         UITestAppEnd.end(app, "after the full disk during the plan")
         sleep(2)
         start()
@@ -1481,6 +1429,7 @@ final class DeviceConditionUITests: XCTestCase {
                     print("UI_FACT stress create: no word from the app in our file after 120 s, watching the app state only")
                 }
                 if app.state == .notRunning { break }
+                // pacing: the poll's interval; each round reads the app's word and state
                 sleep(5)
             }
             print("UI_TIMING stress create round \(rounds): \(elapsed(round)) s, last word '\(said)'")

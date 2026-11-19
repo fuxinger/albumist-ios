@@ -4,8 +4,7 @@ name: TestFlight feedback
 # their crash logs (.github/scripts/asc_feedback.py, App Store Connect API). Daily at 06:00 UTC
 # (schedules only run from the default branch) and by hand. Its own App Store Connect key, not the
 # upload's: the upload key (Admin) is an environment secret of testflight-upload that only the
-# upload job of testflight.yml gets, after the owner's approval (the owner's decision 5 of
-# 18.11.2026; test_workflows.py checks that no other job names it). This key needs the role
+# upload job of testflight.yml gets (test_workflows.py checks that no other job names it). This key needs the role
 # Developer (Admin or App Manager would work too, but can do more than reading feedback) and is
 # kept as three repository secrets ASC_FEEDBACK_KEY_ID, ASC_FEEDBACK_ISSUER_ID and
 # ASC_FEEDBACK_KEY_P8 (docs/launch/FREIGABE_EINRICHTEN.md, optional step). Without them the run

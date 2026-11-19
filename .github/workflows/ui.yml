@@ -14,7 +14,8 @@ run-name: >-
 #      starts for a commit whose core tests fail (fast first, then expensive).
 #   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
 #   3. The test groups (.github/ui-groups.json), each on its own runner and freshly booted
-#      simulator (test-without-building), at most four at a time (max-parallel), so the slowest
+#      simulator (test-without-building), at most four at a time (max-parallel; three when
+#      TestFlight calls it, beside its stress pass and Release smoke test), so the slowest
 #      group sets the wall time, not the sum. Measured times per group: docs/TESTFLIGHT.md
 #      ("Messung"). "other flows" is defined as "everything the other groups do not run", so a
 #      new test class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests
@@ -246,9 +247,15 @@ jobs:
     strategy:
       fail-fast: false
       # Four groups + CI's macOS job = five macOS jobs at the peak (see the top of this file).
-      max-parallel: 4
+      # Called by TestFlight (release): three, as the stress pass and the Release smoke test run
+      # beside the groups there (CI's Mac job has ended), so five Macs at most, the account's
+      # limit. The group order (.github/ui-groups.json) starts the longest, device conditions,
+      # first; the two short ones wait for a free Mac and still end before it (TestFlight run
+      # 44461253154: device 62 min, flow-full 12, contrast 15 at the end), so the run takes no
+      # longer (second review of C7; test_workflows.py ReleaseSmokeTests).
+      max-parallel: ${{ inputs.release && 3 || 4 }}
       # The groups of .github/ui-groups.json that run (UI plan): group, title, device, only,
-      # skip, video, reduce_motion, increase_contrast, app, tests.
+      # skip, video, reduce_motion, increase_contrast, budget_min, app, tests.
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       GROUP: ${{ matrix.group }}
@@ -258,6 +265,8 @@ jobs:
       INCREASE_CONTRAST: ${{ matrix.increase_contrast }}
       REDUCE_MOTION: ${{ matrix.reduce_motion }}
       VIDEO: ${{ matrix.video }}
+      # Minutes; over it the group gets a warning, never red (ui_tests.py budget_check).
+      BUDGET_MIN: ${{ matrix.budget_min }}
       # Quick mode (SORTLY_UI_QUICK=1 in the tests; xcodebuild hands TEST_RUNNER_* variables to
       # the test runner without the prefix): every group of a quick run (matrix.quick).
       TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}
@@ -318,7 +327,8 @@ jobs:
           [ "$INCREASE_CONTRAST" = "true" ] && flags+=(--increase-contrast)
           [ "$VIDEO" = "true" ] && flags+=(--video build/sorting-show.mp4)
           python3 .github/scripts/ui_tests.py run --udid "$UDID" --name "$GROUP" --xctestrun "$XCTESTRUN" \
-            --only "$ONLY" --skip "$SKIP" --deadline "$((UI_JOB_START + (150 - 12) * 60))" "${flags[@]}"
+            --only "$ONLY" --skip "$SKIP" --deadline "$((UI_JOB_START + (150 - 12) * 60))" \
+            --budget-min "${BUDGET_MIN:-0}" "${flags[@]}"
           status=$?
           # 75: every pass failed on the simulator or XCTest alone, no test result
           # (build/no-test-result); the next step fails the job, not this one.
@@ -432,6 +442,10 @@ jobs:
     if: ${{ always() && needs.ui.result != 'skipped' && !inputs.release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # actions: read for the runs, jobs and retry records of the last days (UI history).
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -448,3 +462,15 @@ jobs:
         run: |
           mapfile -t records < <(find flaky -name 'flaky-*.json' 2>/dev/null | sort)
           python3 .github/scripts/ui_tests.py flaky-summary "${records[@]}" >> "$GITHUB_STEP_SUMMARY"
+      - name: UI history of the last 7 days
+        # Every UI run's group jobs by result (test red, no result, machinery, cancelled; also
+        # earlier attempts) and their repeats and flaky tests, across runs (review P5-06: 8 of 15
+        # red runs were no app bug, and nobody counted them). .github/scripts/flaky_history.py;
+        # it stops early so the UI plan and gate keep their API calls, and after 2 minutes. Never
+        # fails the run: continue-on-error, its own time limit, and earlier_attempts.py counts it
+        # as machinery (a re-run of it hides no test).
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/flaky_history.py --days 7 >> "$GITHUB_STEP_SUMMARY"

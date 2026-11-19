@@ -66,6 +66,23 @@ struct UITestPhotoLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         return try await base.currentInventory()
     }
 
+    /// No history for the empty library: every run reads it whole (and finds nothing).
+    func changeMark() async -> LibraryChangeMark? {
+        if UITestSupport.emptyLibrary { return nil }
+        return await base.changeMark()
+    }
+
+    func changes(since mark: LibraryChangeMark, limit: Int) async throws -> LibraryChanges? {
+        if UITestSupport.emptyLibrary { return nil }
+        return try await base.changes(since: mark, limit: limit)
+    }
+
+    func fetchAssets(_ ids: Set<AssetID>, includeHidden: Bool, knownDetails: [AssetID: Date],
+                     progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> ChangedAssets {
+        if UITestSupport.emptyLibrary { return ChangedAssets(assets: [], libraryCount: 0) }
+        return try await base.fetchAssets(ids, includeHidden: includeHidden, knownDetails: knownDetails, progress: progress)
+    }
+
     func collection(_ id: CollectionID) async throws -> CollectionSnapshot? {
         try await base.collection(id)
     }

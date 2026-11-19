@@ -241,6 +241,9 @@ public actor AnalysisPipeline {
         /// Where 638ff85 stored the table; moved to `regionKeys` once.
         static let regionKeysBefore = "analysis.regionKeys"
         static let proposals = "analysis.proposals"
+        /// When the image step last looked for photos given up as unreadable that are due for
+        /// another read (`reopenGivenUpPhotos`).
+        static let givenUpChecked = "analysis.givenUpChecked"
         /// Photos taken where the user lives (`TripAnalysis.atHome`), from the last analysis.
         static let home = "analysis.home"
         /// What the user set in "Dein Zuhause" (part of the decisions copy in the backup, kept
@@ -705,6 +708,8 @@ public actor AnalysisPipeline {
             detectAnimals: settings.people.petGroupingEnabled && settings.enabledAreas.contains(.peopleAndPets),
             featurePrint: true
         )
+        // Photos given up as unreadable a week ago or longer get one more read (review P1-08).
+        try await reopenGivenUpPhotos(all, within: range, labels: labels)
         // With labels wanted, also the photos analysed while they were not: only their labels
         // are asked for (`labelsOnly` below). Each counts as one photo, like a full look.
         let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range)
@@ -1091,6 +1096,30 @@ public actor AnalysisPipeline {
             placesLeft: placesLeft,
             labelsLeft: labelsLeft
         )
+    }
+
+    /// Photos given up as unreadable (`ContentAnalysis.maxFailedAttempts`) were never read
+    /// again, while the overview says "Albumist versucht es später noch einmal" and the count
+    /// stayed at "29 von 30 analysiert" also once the photo could be read (review P1-08). A week
+    /// after its last try such a photo is marked for the image step again: it gets one read,
+    /// and still unreadable it is given up again at once (`recordContentFailure`), for another
+    /// week. Looked for at most once a day (it reads every photo's result) and only in the
+    /// part of the library the run works on. Not a photo this run reads anyway for its labels
+    /// ("Themen" turned on later: one more full look for a photo given up, `labels`).
+    private func reopenGivenUpPhotos(_ all: [AssetSnapshot], within range: Range<Date>?, labels: Int?) async throws {
+        let now = now()
+        if let checked = try await store.value(Date.self, forKey: Key.givenUpChecked),
+           (0..<86_400).contains(now.timeIntervalSince(checked)) { return }
+        let contents = try await store.results(ContentAnalysis.self, kind: "content", minimumVersion: Self.contentVersion)
+        var due = Set(contents.compactMap { $0.value.isGivenUpAndDueAgain(now: now) ? $0.key : nil })
+        if let labels, !due.isEmpty {
+            due.subtract(try await store.unlabelledAssets(version: Self.contentVersion, labelsVersion: labels))
+        }
+        let reopen = all.filter { asset in
+            due.contains(asset.id) && (range.map { r in asset.creationDate.map(r.contains) ?? false } ?? true)
+        }.map(\.id)
+        if !reopen.isEmpty { try await store.markAnalyzed(reopen, version: 0) }
+        try await store.setValue(now, forKey: Key.givenUpChecked)
     }
 
     /// Counts a failed read against a photo. Returns true when the photo is done with: read

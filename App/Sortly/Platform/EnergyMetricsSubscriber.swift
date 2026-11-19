@@ -51,7 +51,7 @@ final class EnergyMetricsSubscriber: NSObject, MXMetricManagerSubscriber, Sendab
         day.gpuSeconds = payload.gpuMetrics.map { seconds($0.cumulativeGPUTime) }
         day.foregroundSeconds = payload.applicationTimeMetrics.map { seconds($0.cumulativeForegroundTime) }
         day.backgroundSeconds = payload.applicationTimeMetrics.map { seconds($0.cumulativeBackgroundTime) }
-        day.hangCount = payload.applicationResponsivenessMetrics?.histogrammedApplicationHangTime.totalBucketCount
+        day.hangBuckets = payload.applicationResponsivenessMetrics.map { hangBuckets($0.histogrammedApplicationHangTime) }
         if let exits = payload.applicationExitMetrics?.backgroundExitData {
             day.backgroundExits = [
                 "task timeout": exits.cumulativeBackgroundTaskAssertionTimeoutExitCount,
@@ -62,6 +62,17 @@ final class EnergyMetricsSubscriber: NSObject, MXMetricManagerSubscriber, Sendab
             ].filter { $0.value > 0 }
         }
         return day
+    }
+
+    /// The histogram's buckets with their counts (`totalBucketCount` is the number of buckets,
+    /// not of hangs: second review).
+    static func hangBuckets(_ histogram: MXHistogram<UnitDuration>) -> [EnergyMetricsLog.HangBucket] {
+        var buckets: [EnergyMetricsLog.HangBucket] = []
+        let enumerator = histogram.bucketEnumerator
+        while let bucket = enumerator.nextObject() as? MXHistogramBucket<UnitDuration> {
+            buckets.append(.init(upTo: seconds(bucket.bucketEnd), count: bucket.bucketCount))
+        }
+        return buckets
     }
 
     static func diagnostics(_ payload: MXDiagnosticPayload) -> EnergyMetricsLog.Diagnostics {

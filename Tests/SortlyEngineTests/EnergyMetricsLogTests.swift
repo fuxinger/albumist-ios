@@ -18,7 +18,7 @@ struct EnergyMetricsLogTests {
         day.gpuSeconds = gpu
         day.foregroundSeconds = 1_800
         day.backgroundSeconds = 900
-        day.hangCount = hangs
+        day.hangBuckets = hangs.map { [EnergyMetricsLog.HangBucket(upTo: 1, count: $0)] }
         day.backgroundExits = exits
         return day
     }
@@ -40,6 +40,36 @@ struct EnergyMetricsLogTests {
         #expect(log.days.first?.begin == Self.day(2).begin)
         #expect(log.days.last?.begin == Self.day(8).begin)
         #expect(log.days.last?.cpuSeconds == 700)
+    }
+
+    /// Second review: iOS can send several payloads for the same day; a field one of them lacks
+    /// never wipes what another said.
+    @Test func aSecondPayloadOfTheSameDayKeepsWhatTheFirstSaid() {
+        var log = EnergyMetricsLog()
+        log.add(Self.day(0, cpu: 600, gpu: 30, hangs: 1, exits: ["watchdog": 1]))
+        var later = Self.day(0, cpu: 700, gpu: nil, hangs: nil, exits: [:])
+        later.build = nil
+        later.foregroundSeconds = nil
+        log.add(later)
+        #expect(log.days.count == 1)
+        let day = log.days[0]
+        #expect(day.cpuSeconds == 700)
+        #expect(day.gpuSeconds == 30)
+        #expect(day.hangCount == 1)
+        #expect(day.build == "37")
+        #expect(day.foregroundSeconds == 1_800)
+        #expect(day.backgroundExits == ["watchdog": 1])
+    }
+
+    /// Second review: the hang count is the sum of the histogram's counts, not its number of
+    /// buckets.
+    @Test func hangsAreTheSumOfTheBucketCounts() {
+        var day = Self.day(0)
+        day.hangBuckets = [.init(upTo: 0.5, count: 3), .init(upTo: 2, count: 2)]
+        #expect(day.hangCount == 5)
+        var log = EnergyMetricsLog()
+        log.add(day)
+        #expect(log.reportLines[0].contains("hangs 5 (longest up to 2.0 s)"))
     }
 
     @Test func keepsTheNewestSevenDiagnosticsOnceEach() {

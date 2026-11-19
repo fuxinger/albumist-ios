@@ -26,8 +26,13 @@ public struct EnergyMetricsLog: Codable, Sendable, Equatable {
         /// `MXAppRunTimeMetric`.
         public var foregroundSeconds: Double?
         public var backgroundSeconds: Double?
-        /// Hangs counted by `MXAppResponsivenessMetric`.
-        public var hangCount: Int?
+        /// `MXAppResponsivenessMetric.histogrammedApplicationHangTime`, bucket by bucket.
+        public var hangBuckets: [HangBucket]?
+        /// The hangs of the day: the sum of the buckets' counts (second review: the number of
+        /// buckets is not the number of hangs).
+        public var hangCount: Int? { hangBuckets.map { $0.reduce(0) { $0 + $1.count } } }
+        /// The upper end of the longest bucket with a hang.
+        public var longestHang: Double? { hangBuckets?.filter { $0.count > 0 }.map(\.upTo).max() }
         /// Times iOS ended the app in the background, by reason ("task timeout", "cpu limit",
         /// "watchdog", "memory limit"); only reasons that happened.
         public var backgroundExits: [String: Int] = [:]
@@ -36,6 +41,13 @@ public struct EnergyMetricsLog: Codable, Sendable, Equatable {
             self.begin = begin
             self.end = end
         }
+    }
+
+    /// One bucket of the hang histogram: hangs up to `upTo` seconds long, and how many.
+    public struct HangBucket: Codable, Sendable, Equatable {
+        public var upTo: Double
+        public var count: Int
+        public init(upTo: Double, count: Int) { self.upTo = upTo; self.count = count }
     }
 
     /// One `MXDiagnosticPayload`: the durations of its hangs and CPU exceptions, the number of
@@ -66,10 +78,23 @@ public struct EnergyMetricsLog: Codable, Sendable, Equatable {
 
     public init() {}
 
-    /// A day delivered again (`pastPayloads` at launch) replaces the one kept.
+    /// A day delivered again (`pastPayloads` at launch), or a second payload of the same day
+    /// (iOS can send several), is merged into the one kept: what it says replaces, what it lacks
+    /// never wipes a value (second review).
     public mutating func add(_ day: Day) {
-        days.removeAll { $0.begin == day.begin }
-        days.append(day)
+        var merged = day
+        if let index = days.firstIndex(where: { $0.begin == day.begin }) {
+            let kept = days.remove(at: index)
+            merged.end = max(day.end, kept.end)
+            merged.build = day.build ?? kept.build
+            merged.cpuSeconds = day.cpuSeconds ?? kept.cpuSeconds
+            merged.gpuSeconds = day.gpuSeconds ?? kept.gpuSeconds
+            merged.foregroundSeconds = day.foregroundSeconds ?? kept.foregroundSeconds
+            merged.backgroundSeconds = day.backgroundSeconds ?? kept.backgroundSeconds
+            merged.hangBuckets = day.hangBuckets ?? kept.hangBuckets
+            merged.backgroundExits = kept.backgroundExits.merging(day.backgroundExits) { max($0, $1) }
+        }
+        days.append(merged)
         days.sort { $0.begin < $1.begin }
         days = Array(days.suffix(Self.kept))
     }
@@ -92,7 +117,7 @@ public struct EnergyMetricsLog: Codable, Sendable, Equatable {
             lines.append("metrickit \(days.count) days \(Self.date(first.begin)) – \(Self.date(last.end)), build \(builds.isEmpty ? "?" : builds.joined(separator: ", ")): "
                 + "cpu \(Self.minutes(Self.sum(days.map(\.cpuSeconds)))), gpu \(Self.minutes(Self.sum(days.map(\.gpuSeconds)))), "
                 + "on screen \(Self.hours(Self.sum(days.map(\.foregroundSeconds)))), background \(Self.hours(Self.sum(days.map(\.backgroundSeconds)))), "
-                + "hangs \(Self.sum(days.map { $0.hangCount.map(Double.init) }).map { String(Int($0)) } ?? "-"), "
+                + "hangs \(Self.hangs(days)), "
                 + "background exits \(exitText.isEmpty ? "none" : exitText.joined(separator: ", ")); "
                 + "last day cpu \(Self.minutes(last.cpuSeconds)), gpu \(Self.minutes(last.gpuSeconds)), hangs \(last.hangCount.map(String.init) ?? "-")")
         }
@@ -109,6 +134,15 @@ public struct EnergyMetricsLog: Codable, Sendable, Equatable {
             lines.append(line)
         }
         return lines.isEmpty ? ["metrickit no data yet (iOS sends it at most once a day)"] : lines
+    }
+
+    /// "5 (longest up to 2.0 s)"; "-" when no day said.
+    private static func hangs(_ days: [Day]) -> String {
+        let counts = days.compactMap(\.hangCount)
+        guard !counts.isEmpty else { return "-" }
+        let total = counts.reduce(0, +)
+        guard let longest = days.compactMap(\.longestHang).max(), total > 0 else { return "\(total)" }
+        return "\(total) (longest up to \(oneDecimal(longest)) s)"
     }
 
     /// The sum of the values given; `nil` when none was given.

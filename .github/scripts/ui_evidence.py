@@ -195,15 +195,15 @@ def red_in_log(log: str | None, group: str) -> bool:
     return bool(RED_IN_LOG.search(log))
 
 
-def ran_out_of_time(job: dict) -> bool:
-    """A job that did not succeed after running GROUP_TIMEOUT_MINUTES: GitHub's time limit
-    stopped it (the log says only "The operation was canceled")."""
+def ran_out_of_time(job: dict, minutes: int = GROUP_TIMEOUT_MINUTES) -> bool:
+    """A job that did not succeed after running `minutes` (its timeout-minutes; a group job's by
+    default): GitHub's time limit stopped it (the log says only "The operation was canceled")."""
     try:
         start = datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))
         end = datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00"))
     except (KeyError, AttributeError, TypeError, ValueError):
         return False
-    return job.get("conclusion") != "success" and end - start >= timedelta(minutes=GROUP_TIMEOUT_MINUTES - 1)
+    return job.get("conclusion") != "success" and end - start >= timedelta(minutes=minutes - 1)
 
 
 def results(runs_and_jobs, logs=None) -> list[dict]:

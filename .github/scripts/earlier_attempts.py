@@ -54,6 +54,9 @@ MACHINERY_STEPS = {
     # a group whose every pass failed on the simulator or XCTest alone (ui_tests.py exit 75):
     # there is no test result, so a re-run hides none.
     "Note when the job started", "Built tests present", "No test result (simulator or XCTest failed in every pass)",
+    # ui.yml and testflight.yml: a report over the last days' runs (flaky_history.py); it has
+    # continue-on-error and decides nothing, so a re-run of it hides no test.
+    "UI history of the last 7 days",
 }
 MACHINERY_PREFIXES = ("Upload ", "Download ", "Post ", "Run actions/checkout@")
 NOT_PASSED = ("failure", "timed_out", "cancelled")

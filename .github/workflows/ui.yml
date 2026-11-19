@@ -459,8 +459,11 @@ jobs:
         # Every UI run's group jobs by result (test red, no result, machinery, cancelled; also
         # earlier attempts) and their repeats and flaky tests, across runs (review P5-06: 8 of 15
         # red runs were no app bug, and nobody counted them). .github/scripts/flaky_history.py;
-        # it stops early so the UI plan and gate keep their API calls. Never fails the run.
+        # it stops early so the UI plan and gate keep their API calls, and after 2 minutes. Never
+        # fails the run: continue-on-error, its own time limit, and earlier_attempts.py counts it
+        # as machinery (a re-run of it hides no test).
         continue-on-error: true
+        timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/flaky_history.py --days 7 >> "$GITHUB_STEP_SUMMARY"

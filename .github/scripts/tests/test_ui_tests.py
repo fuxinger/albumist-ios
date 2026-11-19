@@ -8,6 +8,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -671,6 +672,33 @@ class FlakyTests(unittest.TestCase):
             with open(path, "w") as f:
                 json.dump(ui_tests.flaky_record("accessibility", RESTART, ["simulator not booted"], self.RETRY_LOG, "pass"), f)
             self.assertEqual(ui_tests.main(["flaky-summary", path, os.path.join(folder, "missing.json")]), 0)
+
+
+class SweepStrictTests(unittest.TestCase):
+    """G5-10 (review of 18.11.2026): the tap-through sweep (SortlyFlowUITests test3) checked rows
+    strictly only in "Vorschläge"; on "Übersicht", "Mediathek", "Alben" and every screen one level
+    down a row that did nothing was only a UI_SWEEP_NOOP line in the log. Every list it walks is
+    strict now: each NOOP line is followed by a failure, or by `return 0`, which check() fails."""
+
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+
+    def swift(self):
+        with open(os.path.join(self.ROOT, "App", "SortlyUITests", "SortlyFlowUITests.swift"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_no_list_is_walked_leniently(self):
+        lenient = [line.strip() for line in self.swift().splitlines() if re.search(r"\bstrict\b", line)]
+        self.assertEqual(lenient, [])
+
+    def test_every_dead_row_fails_the_test(self):
+        lines = self.swift().splitlines()
+        noops = [i for i, line in enumerate(lines) if "UI_SWEEP_NOOP" in line and "print(" in line]
+        self.assertGreaterEqual(len(noops), 4)  # the sweep's rows, and the search's three
+        for i in noops:
+            with self.subTest(line=i + 1, text=lines[i].strip()[:80]):
+                self.assertRegex(lines[i + 1], r"^\s*(XCTFail\(|XCTAssert\w*\(|return 0\s*$)")
+        # A screen whose sweep reached nothing (the search's `return 0`) fails in check().
+        self.assertRegex(self.swift(), r"if reached == 0 \{ XCTFail\(")
 
 
 class SweepSkipTests(unittest.TestCase):

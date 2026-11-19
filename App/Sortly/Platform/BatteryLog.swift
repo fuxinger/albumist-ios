@@ -33,7 +33,10 @@ enum BatteryLog {
     private static var analysing = false
     private static var stage: AnalysisPipeline.Stage?
     private static var completed = 0
-    private static var onScreen = true
+    /// From the last scene change; before the first one (iOS launched the app in the background
+    /// for the overnight refinement) from the app's state.
+    private static var sceneOnScreen: Bool?
+    private static var onScreen: Bool { sceneOnScreen ?? (UIApplication.shared.applicationState == .active) }
 
     /// Every change of the analysis. Works while a run is busy and does not wait for the device.
     static func analysisChanged(_ analysis: AppModel.AnalysisState) {
@@ -47,7 +50,7 @@ enum BatteryLog {
         // Early (the first scene change comes at launch): right after it is turned on, UIDevice
         // may still say -1, and a stretch starting then would not count.
         enableMonitoring()
-        self.onScreen = onScreen
+        sceneOnScreen = onScreen
         observe()
     }
 

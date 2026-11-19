@@ -124,6 +124,15 @@ env:
 #     group it would wait behind the UI run of its own commit (about an hour), and while it
 #     waits the next run to join, e.g. the UI run of the next push, would cancel it.
 #   - the Mac jobs of nightly.yml and codeql.yml (one Mac each).
+#   - runs on main (by hand or after a merge): a queue of their own, "mac-queue-main", since
+#     19.11.2026. That day the stress pass dispatched on main after PR #9 waited in "mac-queue",
+#     Dependabot rebased its pull request, and that UI run replaced the waiting pass. No pull
+#     request can replace a run on main now; a run on main may run beside a pull request's run
+#     (its jobs then wait for a free Mac, nothing is cancelled). Inside "mac-queue-main" a newer
+#     run on main replaces a waiting older one, as before.
+#   - Dependabot pull requests: group "ui-dependabot", and no job runs for them (plan below), so
+#     a version bump uses no Mac and can never replace a waiting run. Before merging one, start
+#     "UI flow" by hand on its branch (Run workflow); that run is in "mac-queue" like any other.
 # The older run of the same pull request: cancel-in-progress cannot do it here (with one group
 # for all branches it would cancel whatever runs, another branch's run too), so a newer push
 # cancels the waiting or running UI runs of the older commits of its pull request in a
@@ -131,7 +140,9 @@ env:
 concurrency:
   group: >-
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ui-{0}', github.run_id)
-    || (github.event.pull_request.head.repo.fork && 'ui-fork' || 'mac-queue') }}
+    || (github.event.pull_request.head.repo.fork && 'ui-fork')
+    || (github.event.pull_request.user.login == 'dependabot[bot]' && 'ui-dependabot')
+    || (github.ref == 'refs/heads/main' && 'mac-queue-main' || 'mac-queue') }}
   cancel-in-progress: false
 
 jobs:
@@ -139,6 +150,9 @@ jobs:
     # Which groups run (top of this file). Reads the earlier group jobs of ui.yml and
     # testflight.yml through the API (actions: read); when it cannot, every group runs.
     name: UI plan (which groups run)
+    # Not for a Dependabot pull request (see "concurrency"): every later job needs this one, so
+    # nothing runs and no Mac starts. The job "Dependabot: UI by hand" says so on the run page.
+    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -159,6 +173,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           UI_GROUPS: ${{ inputs.groups || 'auto' }}
         run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick}
+
+  dependabot-note:
+    name: 'Dependabot: UI by hand'
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: No Mac for a version bump until someone starts the UI run
+        run: |
+          {
+            echo "### UI flow: not started for a Dependabot pull request"
+            echo "A version bump uses no Mac by itself, so it can never replace a waiting run on main"
+            echo "(19.11.2026). Before the merge: Actions > UI flow > Run workflow on this branch."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::UI flow for Dependabot runs by hand before the merge (Run workflow on this branch)."
 
   core-linux:
     # Same tests as CI's "Core tests (Linux)" (CI runs them for this commit too, but a manual

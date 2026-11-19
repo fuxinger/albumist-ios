@@ -574,3 +574,135 @@ class ReleaseSmokeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def gh_expr(expr, ctx):
+    """Evaluates the small part of GitHub's expression language the concurrency groups and job
+    conditions use: names with dots (missing = None), 'strings', format(), ==, !=, !, &&, ||,
+    parentheses. && and || return an operand, as in GitHub."""
+    tokens = re.findall(r"'(?:[^']|'')*'|&&|\|\||==|!=|!|\(|\)|,|[A-Za-z_][\w.\-\[\]']*|\d+", expr)
+    pos = [0]
+
+    def peek():
+        return tokens[pos[0]] if pos[0] < len(tokens) else None
+
+    def take():
+        pos[0] += 1
+        return tokens[pos[0] - 1]
+
+    def primary():
+        tok = take()
+        if tok == "(":
+            value = either()
+            assert take() == ")"
+            return value
+        if tok == "!":
+            return not primary()
+        if tok.startswith("'"):
+            return tok[1:-1].replace("''", "'")
+        if tok in ("true", "false"):
+            return tok == "true"
+        if tok == "format":
+            assert take() == "("
+            args = [either()]
+            while peek() == ",":
+                take()
+                args.append(either())
+            assert take() == ")"
+            return args[0].format(*args[1:])
+        value = ctx
+        for part in tok.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+        return value
+
+    def compare():
+        left = primary()
+        while peek() in ("==", "!="):
+            op, right = take(), primary()
+            left = (left == right) if op == "==" else (left != right)
+        return left
+
+    def both():
+        left = compare()
+        while peek() == "&&":
+            take()
+            right = compare()
+            left = right if left else left
+        return left
+
+    def either():
+        left = both()
+        while peek() == "||":
+            take()
+            right = both()
+            left = left if left else right
+        return left
+
+    return either()
+
+
+def concurrency_group(text):
+    found = re.search(r"\nconcurrency:\n  group: >-\n((?:    .*\n)+)", text)
+    return " ".join(strip_comment(line) for line in found.group(1).split("\n")).replace("${{", "").replace("}}", "")
+
+
+def pr_context(user="someone", fork=False):
+    return {"github": {"event_name": "pull_request", "workflow": "UI flow", "run_id": 7,
+                       "ref": "refs/pull/8/merge",
+                       "event": {"pull_request": {"user": {"login": user}, "head": {"repo": {"fork": fork}}}}},
+            "inputs": {}}
+
+
+def dispatch_context(ref, workflow="UI flow", release=False, event="workflow_dispatch"):
+    return {"github": {"event_name": event, "workflow": workflow, "run_id": 7, "ref": ref, "event": {}},
+            "inputs": {"release": release} if release else {}}
+
+
+class MacQueueTests(unittest.TestCase):
+    """19.11.2026: the stress pass dispatched on main after PR #9 waited in "mac-queue"; Dependabot
+    rebased PR #8 and its UI run joined the queue and replaced the waiting pass (GitHub keeps one
+    waiting run per group). Runs on main have a queue of their own now, and a Dependabot pull
+    request uses no Mac until someone starts its UI run by hand before the merge."""
+
+    def setUp(self):
+        self.ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        self.stress = read(os.path.join(ROOT, ".github", "workflows", "ui-stress.yml"))
+        self.ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+
+    def test_main_has_its_own_queue(self):
+        for name, text in (("ui", self.ui), ("ui-stress", self.stress)):
+            group = concurrency_group(text)
+            with self.subTest(workflow=name):
+                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main")), "mac-queue-main")
+                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/feature")), "mac-queue")
+
+    def test_no_pull_request_joins_the_queue_of_main(self):
+        group = concurrency_group(self.ui)
+        self.assertEqual(gh_expr(group, pr_context()), "mac-queue")
+        self.assertEqual(gh_expr(group, pr_context(fork=True)), "ui-fork")
+        self.assertEqual(gh_expr(group, pr_context(user="dependabot[bot]")), "ui-dependabot")
+
+    def test_testflight_and_the_weekly_pass_keep_their_own_groups(self):
+        self.assertEqual(gh_expr(concurrency_group(self.ui), dispatch_context("refs/heads/main", "TestFlight", True, "workflow_call")),
+                         "testflight-ui-7")
+        group = concurrency_group(self.stress)
+        self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main", "TestFlight", True, "workflow_call")),
+                         "testflight-stress-7")
+        self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main", "UI stress", event="schedule")), "stress-weekly")
+
+    def test_a_dependabot_pull_request_starts_no_mac(self):
+        bot, person = pr_context(user="dependabot[bot]"), pr_context()
+        plan_if = job_field(self.ui, "plan", "if")
+        self.assertTrue(plan_if, "the UI plan needs a condition for Dependabot")
+        self.assertFalse(gh_expr(plan_if.replace("${{", "").replace("}}", ""), bot))
+        self.assertTrue(gh_expr(plan_if.replace("${{", "").replace("}}", ""), person))
+        self.assertTrue(gh_expr(plan_if.replace("${{", "").replace("}}", ""), dispatch_context("refs/heads/dependabot/x")))
+        for job in ("core-linux", "build", "ui", "verdict"):
+            with self.subTest(job=job):
+                self.assertIn("plan", job_field(self.ui, job, "needs"))
+        self.assertIn("github.event.pull_request.user.login != 'dependabot[bot]'", job_field(self.ci, "ios", "if"))
+
+    def test_the_evaluator(self):
+        self.assertEqual(gh_expr("a.b == 'x' && 'yes' || 'no'", {"a": {"b": "x"}}), "yes")
+        self.assertEqual(gh_expr("a.b == 'x' && 'yes' || 'no'", {"a": {"b": "y"}}), "no")
+        self.assertEqual(gh_expr("!a && format('q-{0}', n)", {"n": 3}), "q-3")

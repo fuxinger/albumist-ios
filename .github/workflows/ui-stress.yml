@@ -104,10 +104,14 @@ env:
 #     called workflow (a second guard).
 #   - the weekly full pass (schedule): "stress-weekly". A run joining the queue at night can
 #     no longer cancel it while it waits; it may run beside a UI run then (one Mac more).
+#   - a pass on main (by hand, e.g. after a merge): "mac-queue-main", with the UI runs on main,
+#     so that no pull request run replaces it while it waits (19.11.2026: a rebased Dependabot
+#     pull request did). A newer run on main still replaces a waiting one.
 concurrency:
   group: >-
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-stress-{0}', github.run_id)
-    || (github.event_name == 'schedule' && 'stress-weekly' || 'mac-queue') }}
+    || (github.event_name == 'schedule' && 'stress-weekly')
+    || (github.ref == 'refs/heads/main' && 'mac-queue-main' || 'mac-queue') }}
   cancel-in-progress: false
 
 jobs:

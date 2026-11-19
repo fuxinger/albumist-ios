@@ -123,7 +123,9 @@ jobs:
     # (about an hour), and since GitHub keeps only one waiting run per group, the next run to
     # join would cancel it. Per branch only the newest CI run goes on (concurrency above).
     needs: [changes, lint, core-linux]
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' }}
+    # Not for a Dependabot pull request: a version bump uses no Mac by itself; its UI run by hand
+    # before the merge builds and tests the app (ui.yml, "concurrency").
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: xcode-27
     timeout-minutes: 45
     steps:

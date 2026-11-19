@@ -131,6 +131,9 @@ struct DisputedAreaTests {
         ("Xiamen, Ostküste", 24.45, 118.18), ("Gulangyu", 24.447, 118.067), ("Dadeng", 24.56, 118.32),
         ("vor Larnaka", 34.88, 33.70), ("vor Limassol", 34.62, 33.08), ("vor Paphos", 34.74, 32.35),
         ("vor Protaras", 35.04, 34.11), ("Bucht von Polis", 35.08, 32.40), ("vor Kato Pyrgos und Kokkina", 35.21, 32.65),
+        // North-east of Protaras and off Kapparis the Republic's coast is nearer than Varosha
+        // (second review of bundle-i: the outline's corner on 35.075° N took these waters).
+        ("vor Kapparis, 3 km", 35.077, 34.035), ("nordöstlich von Protaras", 35.08, 34.08), ("vor Pernera, 8 km", 35.10, 34.10),
     ])
     func seaAndIslandsNextToTheOutlinesTakeNoArea(name: String, lat: Double, lon: Double) {
         let m = at(lat, lon)

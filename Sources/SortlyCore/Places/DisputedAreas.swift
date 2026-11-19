@@ -95,11 +95,14 @@ public enum DisputedAreas {
         DisputedArea(id: "northern-cyprus", nameDE: "Nordzypern", nameEN: "Northern Cyprus", continent: .europe,
                      mapCountries: ["Turkish Republic of Northern Cyprus"], mapRegions: [],
                      // The waters of the north, about 20 km out: from Limnitis (east of Kato
-                     // Pyrgos and Kokkina) round Cape Apostolos Andreas to Varosha, ending
-                     // north of Deryneia and Protaras; the line back crosses the island. Only
-                     // the sea (review of bundle-i: 3 km off Kyrenia was "Republik Zypern").
+                     // Pyrgos and Kokkina) round Cape Apostolos Andreas to Varosha, ending at
+                     // the line of control north of Deryneia; off Famagusta Bay the edge runs
+                     // between Varosha and the Republic's coast at Kapparis and Protaras (second
+                     // review of bundle-i: a corner on 35.075° N took their waters). The line
+                     // back crosses the island. Only the sea (review of bundle-i: 3 km off
+                     // Kyrenia was "Republik Zypern").
                      outlines: [[(35.17, 32.72), (35.45, 32.72), (35.55, 33.40), (35.60, 33.90), (35.80, 34.40), (35.80, 34.75),
-                                 (35.55, 34.75), (35.30, 34.30), (35.075, 34.20), (35.075, 33.97)]],
+                                 (35.55, 34.75), (35.30, 34.30), (35.18, 34.20), (35.10, 34.05), (35.075, 33.97)]],
                      outlineCountries: []),
         DisputedArea(id: "kosovo", nameDE: "Kosovo", nameEN: "Kosovo", continent: .europe,
                      mapCountries: ["Kosovo"], mapRegions: [], outlines: []),

@@ -215,3 +215,98 @@ struct AnalysisRecentThumbnailTests {
         #expect(recent.allSatisfy { $0.rawValue.hasPrefix("photo") }, "\(recent)")
     }
 }
+
+/// Fourth review: what the screenshot step stores for a recipe, a screen recording and an ID
+/// back, run through the facts as on the device (the pipeline's text step, `FactsAssembler`).
+@Suite("Preview ranks: recipes, screen recordings, ID backs")
+struct PreviewRankFourthReviewTests {
+    static let date = Date(timeIntervalSince1970: 1_750_000_000)
+
+    /// A screenshot read as the pipeline reads it: document facts and screenshot categories from
+    /// the whole text, only the minimized text stored. `document: .some(nil)`: as an older
+    /// version stored it, without document facts.
+    func screenshot(_ raw: String, document: DocumentInfo?? = nil) -> AssetFacts {
+        let asset = AssetSnapshot(id: "x", subtypes: .screenshot, creationDate: Self.date)
+        var read = TextAnalysis(text: raw, source: .original)
+        read.text = TextMinimizer.storable(raw)
+        let categories = ScreenshotClassifier().classify(text: raw).categories
+            .filter { $0.value >= .plausible }.map(\.key.rawValue).sorted()
+        let result = TextResult(text: read, document: document ?? DocumentAnalyzer().analyze(text: raw),
+                                screenshotCategories: categories)
+        return FactsAssembler.assemble(assets: [asset], places: [:], contents: ["x": ContentAnalysis(isUtility: false)],
+                                       texts: ["x": result], trips: [], frequentPlaces: [], groups: [],
+                                       inventory: CollectionInventory([]))[0]
+    }
+
+    /// "Rezept" is a medical word: a recipe screenshot was an `.other` medical paper with no
+    /// stored text, so the "Rezepte" suggestion showed "Vorschau ausgeblendet". Its recipe
+    /// category explains it for the preview; what is stored of its text does not change.
+    @Test func aRecipeScreenshotShowsAsADocument() {
+        let raw = "Rezept: Apfelkuchen\nZutaten: 4 Äpfel, 200 g Mehl, 2 Esslöffel Zucker\nZubereitung: Backofen auf 180 Grad vorheizen"
+        let recipe = screenshot(raw)
+        #expect(recipe.textCategories.contains("recipe"))
+        #expect(recipe.document?.type == .other && recipe.document?.sensitivity == .medical)
+        #expect(recipe.recognizedText == "")
+        #expect(PreviewRank(recipe) == .document)
+        // Read by an older version: no document facts, empty text, the recipe category.
+        #expect(PreviewRank(screenshot(raw, document: .some(nil))) == .document)
+        // The "Rezepte" suggestion shows it again.
+        let ranks = PreviewRank.ranks(of: [recipe])
+        #expect(PreviewPicker.pick(["x"], dates: ["x": Self.date], cover: nil, count: 4, ranks: ranks) == ["x"])
+    }
+
+    @Test func aMedicalScreenshotStaysHiddenWithoutTheRecipeCategory() {
+        let eRezept = "E-Rezept\nIhr Rezept ist bereit\nIbuprofen 600 mg\nIn der Apotheke einlösen"
+        let letter = "Arztbrief\nPatient: Max Mustermann\nDiagnose: Bronchitis"
+        for raw in [eRezept, letter] {
+            let facts = screenshot(raw)
+            #expect(!facts.textCategories.contains("recipe"), "\(raw)")
+            #expect(PreviewRank(facts) == .sensitive, "\(raw)")
+            #expect(PreviewRank(screenshot(raw, document: .some(nil))) == .sensitive, "\(raw)")
+        }
+    }
+
+    /// Only an `.other` medical paper: a recipe category does not explain an ID, a card or a
+    /// statement, nor a medical paper whose document type was recognised.
+    @Test func theRecipeCategoryExplainsNothingButTheWordRezept() {
+        let base = screenshot("Rezept: Apfelkuchen\nZutaten: 4 Äpfel\nZubereitung: Backofen vorheizen")
+        #expect(base.textCategories.contains("recipe"))
+        var other = base
+        for level in [DocumentSensitivity.identity, .financial] {
+            other.document = DocumentInfo(type: .other, typeReliability: .uncertain, keywords: [], sensitivity: level)
+            #expect(PreviewRank(other) == .sensitive, "\(level)")
+        }
+        var typed = base
+        typed.document = DocumentInfo(type: .letter, typeReliability: .plausible, keywords: [], sensitivity: .medical)
+        #expect(PreviewRank(typed) == .sensitive)
+        // A stored text with a card word, and a photo (no screenshot) with the same facts.
+        var card = base
+        card.recognizedText = "Zutaten\nVisa Debit"
+        #expect(PreviewRank(card) == .sensitive)
+        var photo = base
+        photo.asset.subtypes = []
+        photo.looksLikeDocument = true
+        #expect(PreviewRank(photo) == .sensitive)
+    }
+
+    /// Decided (fourth review): screen recordings stay hidden. Their text is never read (videos
+    /// are not), so nothing says what they show; an opted-in "Bildschirmaufnahmen" suggestion
+    /// shows "Vorschau ausgeblendet".
+    @Test func aScreenRecordingIsAlwaysHidden() {
+        let recording = AssetSnapshot(id: "r", kind: .video, subtypes: .screenRecording, creationDate: Self.date)
+        #expect(!ContentAnalysis(isUtility: false).needsTextRecognition(for: recording))
+        for contents in [[:], ["r": ContentAnalysis(isUtility: false)]] as [[AssetID: ContentAnalysis]] {
+            let facts = FactsAssembler.assemble(assets: [recording], places: [:], contents: contents, texts: [:],
+                                                trips: [], frequentPlaces: [], groups: [], inventory: CollectionInventory([]))
+            #expect(PreviewRank(facts[0]) == .sensitive)
+            #expect(PreviewPicker.pick(["r"], dates: ["r": Self.date], cover: nil, count: 4, ranks: PreviewRank.ranks(of: facts)).isEmpty)
+        }
+    }
+
+    /// The machine-readable zone alone (the back of an ID card) makes an `.other` ID.
+    @Test func theMachineReadableZoneMakesAnOtherIdentityDocument() throws {
+        let idBack = "IDD<<T220001293<<<<<<<<<<<<<<<\n6408125<2010315D<<<<<<<<<<<<<4\nMUSTERMANN<<ERIKA<<<<<<<<<<<<<"
+        let info = try #require(DocumentAnalyzer().analyze(text: idBack))
+        #expect(info.type == .other && info.sensitivity == .identity)
+    }
+}

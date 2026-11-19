@@ -58,7 +58,10 @@
   Text nicht erklärt. Noch nicht angesehene Fotos kommen nach den angesehenen. Bildschirmfotos
   und Dokumente füllen nur Plätze, für die es zu wenige gewöhnliche Fotos gibt; sonst zeigt die
   Vorschau weniger Kacheln, „+N“ zählt weiter alle Fotos, und nichts wird aus Vorschlägen oder
-  Alben genommen.
+  Alben genommen. Vierte Prüfung: der Vorschlag „Rezepte“ zeigt seine Rezept-Screenshots wieder
+  („Rezept“ machte sie zu medizinischen Papieren); Bildschirmaufnahmen bleiben bewusst
+  ausgeblendet; Kartenwörter auch mit schmalen und ideografischen Leerzeichen, neben
+  chinesischen und japanischen Satzzeichen und in Vollbreite („ＶＩＳＡ“).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

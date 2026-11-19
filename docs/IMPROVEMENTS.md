@@ -23,6 +23,7 @@ Quellen: **E1** Expertenrunde 14.11.2026 (Tempo, Oberfläche, Technik, Produkt) 
 | ✅ | Beschädigte Datenbank: „Neu aufbauen“-Knopf statt Sackgasse. | S | E1 Technik |
 | ✅ | StoreKit: nicht geprüfte Käufe sauber abschließen und Fehlermeldung zeigen; wartende Käufe (Familienfreigabe) erklären. | S | E1 Technik |
 | 💡 | Bankkarten und Ausweise an ihrer Form erkennen: Vision-Rechteckerkennung (`VNDetectRectanglesRequest`) mit dem Seitenverhältnis des Formats ID-1 (85,6 × 54 mm, etwa 1,586), wenn das Rechteck einen großen Teil des Bildes füllt. Ein solches Foto gälte für Vorschauen als sensibel und würde gelesen, auch wenn Vision es nicht für ein Dokument hält. Eigene Versionsmarke wie die Bildmerkmale (`labelsOnly`), damit nicht die ganze Mediathek neu angesehen wird. Vorher auf einem Gerät prüfen, welche Merkmale Vision einem Kartenfoto gibt. | M | zweite Prüfung Build-36-Fix |
+| 💡 | Rezept-Screenshots genauer: `DocumentAnalyzer` meldet bei `.other` nur eine Stufe, und medizinisch geht vor finanziell und gleichauf mit Ausweis. Ein Rezept-Screenshot, der auch eine Karte, IBAN oder Ausweiszeile zeigt, zählt deshalb für Vorschauen als Dokument. Besser: bei `.other` alle Stufen merken (oder „nur das Wort Rezept“) und die Zuverlässigkeit des Themas „Rezepte“ speichern, damit ein Beipackzettel mit „Teelöffel“ nicht als Rezept gilt; dafür müssten die Texte neu gelesen werden (Text-Version). | S | vierte Prüfung Build-36-Fix |
 
 ## Aus den Testläufen (T)
 

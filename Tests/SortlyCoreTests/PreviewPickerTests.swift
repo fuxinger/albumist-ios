@@ -411,6 +411,7 @@ struct PreviewSecondReviewTests {
         for text in ["VALID\nTHRU 12/28", "VALID  THRU 12/28", "GOOD THRU 12/28", "Card No. 1234", "Kartennr. 1234", "V PAY",
                      "UnionPay", "Diners Club International",
                      "„VISA“", "VISA®", "©VISA", "VISA–Karte", "»IBAN«", "BIC\u{00A0}BYLADEM1001", "💳VISA",
+                     "VALID\u{00A0}THRU 12/28",
                      // Upper-case umlauts are lowered too: a driving licence prints them so.
                      "FÜHRERSCHEIN Klasse B", "NATIONALITÄT DEUTSCH"] {
             #expect(TextMinimizer.looksSensitive(text), "\(text)")
@@ -418,6 +419,23 @@ struct PreviewSecondReviewTests {
         for text in ["Card not accepted", "Revisaa", "Visage", "Bicycle tour"] {
             #expect(!TextMinimizer.looksSensitive(text), "\(text)")
         }
+    }
+
+    /// Fourth review: the other spaces Vision and apps print (thin, narrow no-break, ideographic),
+    /// CJK punctuation as a word boundary, and fullwidth letters ("ＶＩＳＡ") as plain ones.
+    @Test func cardWordsAcrossUnicodeSpacesAndInFullwidthLetters() {
+        for text in ["VALID\u{2009}THRU 12/28", "VALID\u{2000}THRU", "VALID\u{200A}THRU", "VALID\u{202F}THRU",
+                     "VALID\u{3000}THRU", "VALID \u{2009} THRU", "Credit\u{202F}Card",
+                     "「VISA」", "、VISA。", "BIC\u{3002}BYLADEM1001", "〔IBAN〕",
+                     "ＶＩＳＡ", "ｖｉｓａ", "Ｖｉｓａ Ｄｅｂｉｔ", "ＩＢＡＮ ＤＥ", "ＶＡＬＩＤ ＴＨＲＵ", "「ＶＩＳＡ」"] {
+            #expect(TextMinimizer.looksSensitive(text), "\(text)")
+        }
+        // Fullwidth letters are letters: no card word inside a longer word, as with ASCII ones.
+        for text in ["ＶＩＳＡＧＥ", "ＲｅｖｉｓａＡ", "ＸＶＩＳＡ", "Ｂｉｃｙｃｌｅ"] {
+            #expect(!TextMinimizer.looksSensitive(text), "\(text)")
+        }
+        // Japanese letters right next to a word still count as letters.
+        #expect(!TextMinimizer.looksSensitive("あvisaい"))
     }
 
     /// Third review: "bic" inside "Arabic" or "cubic" made a plain text an `.other` document.

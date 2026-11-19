@@ -57,8 +57,16 @@ das Foto im teilbaren Reise-Atlas-Bild.
   einer Bankkarte oder eines Kontoauszugs steht („Visa Debit“, „girocard“, „Kontostand“); und
   jedes Foto, das die Bildanalyse für ein Dokument hielt, dessen Text es aber nicht als
   harmloses Dokument erklärt (Text noch nicht gelesen, unlesbar, keine Dokumentart erkannt).
-- **Dokument** (Bildschirmfoto, oder ein Dokument, das sein Text erklärt: Brief, Ticket, Beleg)
-  füllt nur die Plätze, für die es zu wenige gewöhnliche Fotos gibt.
+  Ebenso sensibel: jedes Bild, dessen gelesener Text leer ist und das keine Dokument-Einordnung
+  hat, und jedes Bildschirmfoto, dessen Text nicht gelesen ist (noch nicht, oder nie, weil das
+  Lesen aus ist) und das kein Screenshot-Thema erklärt. **Bildschirmaufnahmen** (Videos) werden
+  nie gelesen und sind deshalb immer ausgeblendet (entschieden): ein eingeschalteter Vorschlag
+  „Bildschirmaufnahmen“ zeigt „Vorschau ausgeblendet“.
+- **Dokument** (ein Bildschirmfoto, dessen gelesener Text es erklärt, oder ein Dokument, das sein
+  Text erklärt: Brief, Ticket, Beleg) füllt nur die Plätze, für die es zu wenige gewöhnliche
+  Fotos gibt. Ein Rezept-Screenshot (Thema „Rezepte“) zählt als Dokument, auch wenn das Wort
+  „Rezept“ ihn zum medizinischen Papier ohne gespeicherten Text machte; ein Bildschirmfoto mit
+  Ausweis, Karte, Kontoauszug oder erkannter Dokumentart bleibt sensibel.
 - **Noch nicht angesehen**: Fotos, die die Bildanalyse noch nicht angesehen hat, kommen erst nach
   allen angesehenen gewöhnlichen Fotos. Das Teilen-Bild des Atlas (es verlässt das Gerät) zeigt
   nur ein angesehenes gewöhnliches Foto, sonst keines.

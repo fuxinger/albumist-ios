@@ -112,6 +112,21 @@
     (Standard); das ist älteres Verhalten und hier nicht geändert.
   - Eine maskierte Bestell- oder Sendungsnummer, die die Kartenprüfung besteht, macht einen
     Screenshot zum sensiblen Dokument: er fehlt dann nur in der Vorschau.
+  - Bildschirmaufnahmen (Videos) werden nie gelesen und sind in Vorschauen immer ausgeblendet
+    (entschieden, für den Datenschutz): ein eingeschalteter Vorschlag „Bildschirmaufnahmen“
+    zeigt „Vorschau ausgeblendet“; das Album bekommt trotzdem alle Aufnahmen.
+  - Rezepte: „Rezept“ ist ein medizinisches Wort, ein Rezept-Screenshot wird deshalb ohne
+    gespeicherten Text abgelegt (unverändert). Für Vorschauen zählt ein Bildschirmfoto mit dem
+    Thema „Rezepte“, leerem Text und keiner oder nur einer medizinischen Einordnung ohne
+    Dokumentart als Dokument. Was dabei durchrutschen kann: ein medizinischer Screenshot, den die
+    Themen-Erkennung auch für ein Rezept hält (ein Beipackzettel mit „Teelöffel“ oder
+    „Zubereitung“), und ein Rezept-Screenshot, der zusätzlich eine Karte, IBAN oder
+    Ausweiszeile zeigt (die Einordnung behält dann nur die medizinische Stufe). Ein Rezept-
+    Screenshot mit erkannter Dokumentart bleibt ausgeblendet.
+  - Kartenwörter werden über alle üblichen Leerzeichen (auch schmale und ideografische),
+    neben Satzzeichen (auch chinesischen und japanischen) und in Vollbreite („ＶＩＳＡ“) erkannt;
+    andere Schriften für dieselben Wörter (kyrillische oder griechische Buchstaben, die wie
+    lateinische aussehen) nicht.
 
 ## Jahreszeiten
 - Jahreszeiten sind noch nicht als Alben wählbar. Werden sie es, gilt: Frühling und Herbst

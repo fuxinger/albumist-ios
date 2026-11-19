@@ -33,12 +33,17 @@ public enum PreviewRank: Int, Comparable, Sendable {
     ///   any picture whose read text is empty without document facts (third review: an ID or
     ///   medical screenshot read by an older version was stored so), and a screenshot whose
     ///   text is not read yet or never (text reading off) and that nothing else explains.
-    /// - document: screenshots, and documents their text explains.
+    /// - document: screenshots, and documents their text explains; and a recipe screenshot
+    ///   (`isRecipeScreenshot`), which "Rezept" made a medical paper without stored text.
     /// - unknown: not looked at by the image analysis yet.
+    /// Screen recordings stay hidden (decided, fourth review): videos are never read, so nothing
+    /// says what they show.
     /// Cheap: no text is read here, so a whole library is ranked in no noticeable time.
     public init(_ facts: AssetFacts) {
         let explained = facts.document != nil || !facts.textCategories.isEmpty
-        if (facts.document?.sensitivity ?? .normal) >= .financial || facts.textLooksSensitive {
+        if Self.isRecipeScreenshot(facts) {
+            self = .document
+        } else if (facts.document?.sensitivity ?? .normal) >= .financial || facts.textLooksSensitive {
             self = .sensitive
         } else if facts.document == nil && facts.recognizedText?.isEmpty == true {
             self = .sensitive
@@ -58,6 +63,19 @@ public enum PreviewRank: Int, Comparable, Sendable {
 
     /// The ranks a preview takes from, best first: sensitive documents never.
     static let shown: [PreviewRank] = [.photo, .unknown, .document]
+
+    /// A screenshot the text step put in "Rezepte" whose only sensitive sign is a medical word
+    /// (fourth review: "Rezept" is one, so recipe screenshots were `.other` medical papers with
+    /// no stored text, and the "Rezepte" suggestion showed "Vorschau ausgeblendet"). Preview
+    /// only: what is stored of the text and its masks does not change. Not for a medical paper
+    /// with a document type, an ID, a card or a statement, nor for a text that is stored (its
+    /// own words decide), nor for photos.
+    static func isRecipeScreenshot(_ facts: AssetFacts) -> Bool {
+        guard facts.asset.isScreenshotLike, facts.recognizedText?.isEmpty == true,
+              facts.textCategories.contains(ScreenshotCategory.recipe.rawValue) else { return false }
+        guard let document = facts.document else { return true }
+        return document.type == .other && document.sensitivity == .medical
+    }
 
     /// The rank of every photo of `facts` that is not an ordinary photo. A photo missing from
     /// the result ranks `.photo`, so most analysed libraries keep this small.

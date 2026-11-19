@@ -219,45 +219,70 @@ struct SensitiveWords: Sendable {
         levels.filter { $0.1.occurs(in: text) }.map(\.0).max() ?? .normal
     }
 
-    /// Lower case (ASCII and Latin-1 upper-case letters) and every run of white space as one space.
+    /// Lower case (ASCII and Latin-1 upper-case letters), fullwidth letters ("ＶＩＳＡ", U+FF21–
+    /// FF3A and U+FF41–FF5A) as ASCII ones, and every run of white space as one space: ASCII
+    /// white space, the no-break space, the spaces U+2000–U+200A, the line and paragraph
+    /// separators, the narrow no-break space U+202F, U+205F and the ideographic space U+3000.
     static func normalized(_ input: [UInt8]) -> [UInt8] {
         var out: [UInt8] = []
         out.reserveCapacity(input.count)
+        let n = input.count
         var i = 0
-        while i < input.count {
+        while i < n {
             let b = input[i]
-            let next: UInt8? = i + 1 < input.count ? input[i + 1] : nil
-            if (b >= 0x09 && b <= 0x0D) || b == 0x20 || (b == 0xC2 && next == 0xA0) {
-                if out.last != 0x20 { out.append(0x20) }
-                i += b == 0xC2 ? 2 : 1
+            if b < 0x80 {
+                if (b >= 0x09 && b <= 0x0D) || b == 0x20 {
+                    if out.last != 0x20 { out.append(0x20) }
+                } else {
+                    out.append(b >= 0x41 && b <= 0x5A ? b + 0x20 : b)
+                }
+                i += 1
                 continue
             }
-            if b >= 0x41 && b <= 0x5A {
-                out.append(b + 0x20)
-            } else if b == 0xC3, let next, next >= 0x80, next <= 0x9E, next != 0x97 {
+            let b1: UInt8 = i + 1 < n ? input[i + 1] : 0
+            let b2: UInt8 = i + 2 < n ? input[i + 2] : 0
+            var space = false
+            var width = 1
+            switch b {
+            case 0xC2 where b1 == 0xA0:
+                space = true; width = 2
+            case 0xC3 where b1 >= 0x80 && b1 <= 0x9E && b1 != 0x97:
                 // À–Þ (not ×) to à–þ: "Ü" C3 9C → "ü" C3 BC.
-                out.append(b)
-                out.append(next + 0x20)
-                i += 2
-                continue
+                out.append(b); out.append(b1 + 0x20); i += 2; continue
+            case 0xE2 where b1 == 0x80 && ((b2 >= 0x80 && b2 <= 0x8A) || b2 == 0xA8 || b2 == 0xA9 || b2 == 0xAF),
+                 0xE2 where b1 == 0x81 && b2 == 0x9F,
+                 0xE3 where b1 == 0x80 && b2 == 0x80:
+                space = true; width = 3
+            case 0xEF where b1 == 0xBC && b2 >= 0xA1 && b2 <= 0xBA:
+                out.append(b2 - 0xA1 + 0x61); i += 3; continue
+            case 0xEF where b1 == 0xBD && b2 >= 0x81 && b2 <= 0x9A:
+                out.append(b2 - 0x81 + 0x61); i += 3; continue
+            default:
+                break
+            }
+            if space {
+                if out.last != 0x20 { out.append(0x20) }
             } else {
                 out.append(b)
             }
-            i += 1
+            i += width
         }
         return out
     }
 
     /// Whether the character whose first byte is `lead` (followed by `next`) is a letter:
-    /// ASCII letters (the text is lower-cased) and the letters of other scripts. Not letters:
-    /// ASCII digits and punctuation; 0xC2 (non-breaking space, ©, ®, «, »); × and ÷; 0xE2
-    /// (general punctuation „ “ – •, ™, arrows); private use and specials; emoji (4 bytes).
+    /// ASCII letters (the text is lower-cased, fullwidth letters are folded to them) and the
+    /// letters of other scripts. Not letters: ASCII digits and punctuation; 0xC2 (non-breaking
+    /// space, ©, ®, «, »); × and ÷; 0xE2 (general punctuation „ “ – •, ™, arrows); CJK symbols
+    /// and punctuation U+3000–U+303F (E3 80: 「」、。); 0xEE–0xEF (private use, fullwidth
+    /// punctuation and digits, specials); emoji (4 bytes).
     static func isLetter(lead: UInt8, next: UInt8?) -> Bool {
         switch lead {
         case 0x61...0x7A: true
         case 0xC3: next != 0x97 && next != 0xB7
         case 0xC4...0xDF: true
-        case 0xE0, 0xE1, 0xE3...0xED: true
+        case 0xE3: next != 0x80
+        case 0xE0, 0xE1, 0xE4...0xED: true
         default: false
         }
     }

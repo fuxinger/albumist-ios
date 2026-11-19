@@ -198,6 +198,25 @@ class UploadApprovalTests(unittest.TestCase):
                          ["release"])
 
 
+class FreshSimulatorTests(unittest.TestCase):
+    """ci.yml's "Fresh simulator" waits like a UI pass: until the simulator answers quickly
+    (ui_tests.py settle). Its old criterion, a 1-minute load under 3.5, never held on the hosted
+    Macs (200-850 after the boot), so the step always waited its whole 5 min."""
+
+    def step(self):
+        text = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        return text.split("- name: Fresh simulator (erased and booted)\n", 1)[1].split("\n      - name: ", 1)[0]
+
+    def test_it_waits_for_a_quick_simulator_not_for_the_load(self):
+        step = self.step().split("        run: |\n", 1)[1]
+        self.assertIn('python3 .github/scripts/ui_tests.py settle --udid "$UDID"', step)
+        self.assertNotIn("3.5", step)
+        self.assertNotIn("vm.loadavg", step)
+        # The StoreKit log starts after the wait, as before.
+        self.assertLess(step.index("ui_tests.py settle"), step.index("> storekit-live.log"))
+        self.assertLess(step.index("bootstatus"), step.index("ui_tests.py settle"))
+
+
 class TestFlightWiringTests(unittest.TestCase):
     """The upload waits for the UI gate (ui_evidence.py), which reads the group jobs' names."""
 

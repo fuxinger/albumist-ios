@@ -915,6 +915,145 @@ class HostGrantTests(unittest.TestCase):
         self.assertEqual(len(granted), 2)
 
 
+class HostTerminateTests(unittest.TestCase):
+    """A device test asks the Mac to end the app before its next launch (UI_HOST_TERMINATE_APP,
+    DeviceConditionUITests.endRunningApp): XCTest's own terminate failed in UI run 44446270757
+    ("Failed to terminate app.albumist.ios:20655", test07, app idle)."""
+
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+
+    def test_requests_are_read_in_order_with_their_time(self):
+        log = ("UI_HOST_TERMINATE_APP 1700000000\nUI_HOST_GRANT_PHOTOS\n"
+               "UI_HOST app ended (1 s, attempt 1 of 2)\nUI_HOST_TERMINATE_APP_X 1\nUI_HOST_TERMINATE_APP\n")
+        self.assertEqual(ui_tests.host_requests(log), [("terminate", 1700000000.0), ("grant", None), ("terminate", None)])
+        self.assertEqual(ui_tests.host_grant_requests(log), 1)
+
+    def test_the_watcher_ends_the_app_once_per_request_in_log_order(self):
+        done = []
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "log.txt")
+            with open(path, "w") as log:
+                log.write("UI_HOST_TERMINATE_APP 1700000000\nUI_HOST_GRANT_PHOTOS\nUI_HOST_TERMINATE_APP 17000")
+            watcher = ui_tests.HostGrants("U", path, interval=0.01, grant=lambda: done.append("grant"),
+                                          terminate=lambda asked: done.append(("terminate", asked)))
+            watcher.check()
+            with open(path, "a") as log:
+                log.write("00009\n")
+            watcher.check()
+            watcher.check()
+        self.assertEqual(done, [("terminate", 1700000000.0), "grant", ("terminate", 1700000009.0)])
+
+    def run_terminate(self, answers, asked=1000.0, clock=None):
+        calls, now = [], [1000.0]
+
+        def fake(command, timeout, quiet):
+            calls.append((command, timeout))
+            now[0] += 3
+            return answers[len(calls) - 1]
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            ended = ui_tests.terminate_app("U", asked, run=fake, clock=clock or (lambda: now[0]))
+        return ended, calls, out.getvalue()
+
+    def test_a_working_end_is_one_call(self):
+        ended, calls, out = self.run_terminate([(0, "")])
+        self.assertTrue(ended)
+        self.assertEqual(calls, [(["xcrun", "simctl", "terminate", "U", ui_tests.BUNDLE_ID], ui_tests.TERMINATE_TIMEOUT)])
+        self.assertIn("UI_HOST app ended (", out)
+        self.assertIn("attempt 1 of 2", out)
+
+    def test_a_refused_end_is_tried_once_more_and_said(self):
+        ended, calls, out = self.run_terminate([(1, "Unable to terminate"), (0, "")])
+        self.assertTrue(ended)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("UI_HOST app end failed (exit 1", out)
+        self.assertIn("UI_HOST app ended (", out)
+        self.assertIn("attempt 2 of 2", out)
+
+    def test_a_hung_end_is_not_tried_again(self):
+        # The timed-out call may still end the app; the test then launches it again at once, and a
+        # second call would end that new launch.
+        ended, calls, out = self.run_terminate([(124, "timed out after 20 s: xcrun simctl terminate"), (0, "")])
+        self.assertFalse(ended)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("UI_HOST app end failed (exit 124", out)
+        self.assertIn("not tried again after a timeout", out)
+
+    def test_a_request_without_its_second_is_not_answered(self):
+        ended, calls, out = self.run_terminate([(0, "")], asked=None)
+        self.assertFalse(ended)
+        self.assertEqual(calls, [])
+        self.assertIn("skipped", out)
+
+    def test_an_app_that_is_already_gone_is_not_ended_twice(self):
+        ended, calls, out = self.run_terminate([(164, "An error was encountered processing the command "
+                                                       "(domain=com.apple.CoreSimulator.SimError, code=164):\n"
+                                                       "found nothing to terminate")])
+        self.assertTrue(ended)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("UI_HOST app ended before the Mac asked", out)
+
+    def test_two_failures_are_said_and_left_to_the_test(self):
+        ended, calls, out = self.run_terminate([(1, "Unable to terminate"), (1, "Unable to terminate")])
+        self.assertFalse(ended)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("UI_HOST app NOT ended after 2 attempts", out)
+
+    def test_an_old_request_is_not_answered(self):
+        # The test waits TERMINATE_WAIT s for the app to end, then ends it itself and launches it
+        # again: an end that came later would hit that new launch (as the late grant did in UI
+        # run 44355110562, test 09).
+        ended, calls, out = self.run_terminate([(0, "")], asked=1000.0 - ui_tests.TERMINATE_FRESH - 1)
+        self.assertFalse(ended)
+        self.assertEqual(calls, [])
+        self.assertIn("UI_HOST app end request", out)
+        self.assertIn("skipped", out)
+
+    def test_no_retry_once_the_request_is_too_old(self):
+        now = [1000.0]
+
+        def clock():
+            return now[0]
+
+        def fake(command, timeout, quiet):
+            now[0] += ui_tests.TERMINATE_FRESH
+            return 1, "Unable to terminate"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertFalse(ui_tests.terminate_app("U", 1000.0, run=fake, clock=clock))
+        self.assertEqual(now[0], 1000.0 + ui_tests.TERMINATE_FRESH)  # one call only
+        self.assertIn("skipped", out.getvalue())
+
+    def test_the_last_end_comes_well_before_the_test_stops_waiting(self):
+        # Last possible start of a call, plus its timeout and the watcher's read interval.
+        self.assertLess(ui_tests.TERMINATE_FRESH + ui_tests.TERMINATE_TIMEOUT + 2, ui_tests.TERMINATE_WAIT)
+        swift = open(os.path.join(self.ROOT, "App", "SortlyUITests", "DeviceConditionUITests.swift"), encoding="utf-8").read()
+        self.assertIn(f"app.wait(for: .notRunning, timeout: {ui_tests.TERMINATE_WAIT})", swift)
+
+    def test_the_tests_know_the_helper_from_the_runner_environment(self):
+        env = ui_tests.runner_env({"PATH": "/usr/bin", "TEST_RUNNER_SORTLY_UI_QUICK": "1"})
+        self.assertEqual(env["TEST_RUNNER_SORTLY_HOST_HELPER"], "1")
+        self.assertEqual(env["TEST_RUNNER_SORTLY_UI_QUICK"], "1")
+        self.assertEqual(env["PATH"], "/usr/bin")
+        swift = open(os.path.join(self.ROOT, "App", "SortlyUITests", "DeviceConditionUITests.swift"), encoding="utf-8").read()
+        # xcodebuild hands TEST_RUNNER_X to the tests as X.
+        self.assertIn('environment["SORTLY_HOST_HELPER"] == "1"', swift)
+        self.assertIn('print("UI_HOST_TERMINATE_APP \\(', swift)
+        self.assertTrue(ui_tests.HOST_TERMINATE.search("UI_HOST_TERMINATE_APP 1763500000"))
+
+    def test_the_test_lines_about_the_end_are_no_finding(self):
+        log = ("UI_FACT clock 10:00:00.0 end the app before the next launch\nUI_HOST_TERMINATE_APP 1763500000\n"
+               "UI_FACT app still running 60 s after asking the Mac to end it: XCTest ends it\n"
+               "UI_TIMING app ended before the next launch 61 s (by XCTest after the Mac, ended)\n")
+        self.assertEqual(ui_tests.scan(log), ([], []))
+        self.assertEqual(ui_tests.lost_app_at_launch(log), [])
+
+    def test_every_pass_gives_xcodebuild_the_runner_environment(self):
+        source = open(ui_tests.__file__, encoding="utf-8").read()
+        body = source.split("def run_pass(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=runner_env())", body)
+
+
 # Device test 04 of UI run 44066730498: XCTest lost the app at a relaunch (no crash report).
 LOST_APP_LOG = """Test Case '-[SortlyUITests.DeviceConditionUITests test04_UnreadableICloudOfflineComplete]' started.
 UI_FACT app process 30001 started 11:03:22.5 UTC, its code ran from 11:03:23.4 UTC
@@ -1075,6 +1214,24 @@ class SettleTests(unittest.TestCase):
             self.assertFalse(ui_tests.settle(probe, load=lambda: 50.0, sleep=sleep, top=lambda: [], limit=120,
                                              step=10, clock=lambda: now[0]))
         self.assertLessEqual(now[0], 120 + 30)
+
+
+class SettleCommandTests(unittest.TestCase):
+    """`ui_tests.py settle`: ci.yml's "Fresh simulator" waits like a UI pass (CI 44437759869:
+    the load never went under 3.5, so the step always waited its whole 5 min)."""
+
+    def test_it_probes_the_simulator_and_never_fails_the_step(self):
+        seen = []
+
+        def fake_settle(probe, limit=ui_tests.SETTLE_LIMIT, **_):
+            seen.append((probe(), limit))
+            return False
+        with mock.patch.object(ui_tests, "settle", fake_settle), \
+                mock.patch.object(ui_tests, "simulator_probe", lambda udid: {"U": 0.5}[udid]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ui_tests.main(["settle", "--udid", "U"]), 0)
+        self.assertEqual(seen, [(0.5, ui_tests.SETTLE_LIMIT)])
+        self.assertIn("UI_BOOT_TIMING wait for the simulator", out.getvalue())
 
 
 if __name__ == "__main__":

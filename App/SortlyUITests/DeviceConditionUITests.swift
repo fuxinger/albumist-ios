@@ -31,20 +31,41 @@ final class DeviceConditionUITests: XCTestCase {
         app.launch()
     }
 
-    /// Ends the app of the last launch before the next one, and logs how long that took. Left to
-    /// `launch()`, XCTest ends it on its own: on a busy CI Mac that failed with "Failed to
-    /// terminate app.albumist.ios:20655" although the app stood idle on the overview (test07,
-    /// UI run 44446270757, 6 s after the last tap). `terminate()` here goes through the same
-    /// XCTest call with its own time limit, so it can fail the same way; this does not prevent
-    /// the failure, it shows how long ending takes (and whether ending itself hangs). The extra
-    /// wait only matters when `terminate()` returns with the app still there.
+    /// Ends the app of the last launch before the next one, and logs how long that took and
+    /// which way. Left to `launch()`, XCTest ends it on its own: on a busy CI Mac that failed
+    /// with "Failed to terminate app.albumist.ios:20655" although the app stood idle on the
+    /// overview (test07, UI run 44446270757, 6 s after the last tap). XCTest's `terminate()` goes
+    /// through the same call with its own time limit, so it can fail the same way.
+    ///
+    /// With the CI helper (`SORTLY_HOST_HELPER=1`, handed over by ui_tests.py as
+    /// TEST_RUNNER_SORTLY_HOST_HELPER) the test asks the Mac instead: it prints
+    /// `UI_HOST_TERMINATE_APP <epoch second>`, ui_tests.py (HostGrants) runs `simctl terminate`,
+    /// and the test only reads the app's state until it is gone, up to 60 s. Reading the state
+    /// goes to XCTest's daemon, not into the app, so nothing is in flight that the end could
+    /// break ("Lost connection to the application" comes from a query or tap into an app that
+    /// went away; the old `app` gets no query after this, `launch()` makes a new one). simctl
+    /// ends the app the way the system does, which leaves no crash report, so XCTest has no
+    /// crash to record either. The photo grant from the Mac ends the running app the same way
+    /// while the test only reads its state (`grantFromHost`). Only if the app is still there
+    /// after the wait does XCTest end it. Without the helper (a run in Xcode) XCTest ends it as
+    /// before. Not yet seen on a CI Mac.
     private func endRunningApp() {
         guard app.state != .notRunning else { return }
         let asked = Date()
         UITestOnboarding.clock("end the app before the next launch")
+        var way = "XCTest"
+        if ProcessInfo.processInfo.environment["SORTLY_HOST_HELPER"] == "1" {
+            print("UI_HOST_TERMINATE_APP \(Int(asked.timeIntervalSince1970))")
+            if app.wait(for: .notRunning, timeout: 60) {
+                print("UI_TIMING app ended before the next launch \(Int(Date().timeIntervalSince(asked))) s (by the Mac, ended)")
+                return
+            }
+            print("UI_FACT app still running \(Int(Date().timeIntervalSince(asked))) s after asking the Mac to end it: XCTest ends it")
+            way = "by XCTest after the Mac"
+        }
         app.terminate()
         let gone = app.wait(for: .notRunning, timeout: 60)
-        print("UI_TIMING app ended before the next launch \(Int(Date().timeIntervalSince(asked))) s (\(gone ? "ended" : "still running"))")
+        print("UI_TIMING app ended before the next launch \(Int(Date().timeIntervalSince(asked))) s (\(way), \(gone ? "ended" : "still running"))")
     }
 
     /// The test's own arguments of the last launch: the onboarding helpers open the app again

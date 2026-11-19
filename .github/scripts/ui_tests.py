@@ -19,10 +19,20 @@ Every UI job (ui.yml) uses this script, so all of them treat a failure the same 
       (ui_evidence.py reads it) and exits with the result: 0, 1, or 75 when every pass failed
       on the simulator or XCTest alone (no test result; it writes DIR/no-test-result, and
       ui.yml fails the job in "No test result (simulator or XCTest failed in every pass)",
-      which ui_evidence.py counts as no result rather than red). A test that reset
+      which ui_evidence.py counts as no result rather than red). While a pass runs, the Mac
+      answers the tests' request lines in the log (class HostGrants; xcodebuild gets
+      TEST_RUNNER_SORTLY_HOST_HELPER=1, so the tests know someone answers): a test that reset
       the photo access (the CI simulator then answers "denied" without asking) prints
-      UI_HOST_GRANT_PHOTOS; the access is given back from the Mac (`simctl privacy grant`)
-      while the pass runs (class HostGrants).
+      UI_HOST_GRANT_PHOTOS, and the access is given back (`simctl privacy grant`); a device
+      test about to launch the app again prints "UI_HOST_TERMINATE_APP <epoch second>", and the
+      running app is ended with `simctl terminate` instead of XCTest's terminate, which failed
+      on an idle app in UI run 44446270757 (test07). The test only reads the app's state
+      meanwhile and ends it through XCTest itself after 60 s; a request older than 30 s (or
+      without its second) is not answered any more, and a call that timed out is not repeated
+      (`terminate_app`), so the Mac's end does not land on the next launch.
+  settle --udid U [--limit S]
+      Waits like every pass does before its first test (`settle`, below) and always exits 0;
+      ci.yml's "Fresh simulator" step uses it after its boot.
   classify LOG [--status N] [--crash-report F]... [--bundle-json F]
       Prints what `run` would decide for a finished pass (for trying the rules on a log;
       without --bundle-json the result bundle counts as clean).
@@ -612,7 +622,8 @@ def simulator_probe(udid: str) -> float | None:
 
 
 def settle(probe, load=lambda: os.getloadavg()[0], sleep=time.sleep, top=None,
-           limit: float = SETTLE_LIMIT, step: float = SETTLE_STEP, clock=time.monotonic) -> bool:
+           limit: float = SETTLE_LIMIT, step: float = SETTLE_STEP, clock=time.monotonic,
+           going_on: str = "the pass starts anyway") -> bool:
     """Waits until the simulator answers quickly again (SETTLE_CALM probes in a row under
     SETTLE_PROBE s, `simulator_probe`), at most `limit` s, before a pass starts its first test.
     Every probe and the Mac's 1-minute load are a SIM_SETTLE line, what keeps the Mac busy a
@@ -643,7 +654,7 @@ def settle(probe, load=lambda: os.getloadavg()[0], sleep=time.sleep, top=None,
             for line in (top or busiest)():
                 print(f"SIM_TOP {line}", flush=True)
         if waited >= limit:
-            print(f"SIM_SETTLE still slow after {waited:.0f} s; the pass starts anyway", flush=True)
+            print(f"SIM_SETTLE still slow after {waited:.0f} s; {going_on}", flush=True)
             return False
         if calm == 0:
             sleep(min(step, limit - waited))
@@ -812,11 +823,25 @@ class Recorder(threading.Thread):
 
 
 HOST_GRANT = re.compile(r"(?:^|\s)UI_HOST_GRANT_PHOTOS\s*$")
+# DeviceConditionUITests.endRunningApp: "UI_HOST_TERMINATE_APP <epoch second of the request>".
+HOST_TERMINATE = re.compile(r"(?:^|\s)UI_HOST_TERMINATE_APP(?: (\d+))?\s*$")
 
 
 def host_grant_requests(text: str) -> int:
     """How many complete lines of `text` ask the Mac to give the photo access back."""
     return sum(1 for line in text.split("\n") if HOST_GRANT.search(line))
+
+
+def host_requests(text: str) -> list[tuple[str, float | None]]:
+    """The requests to the Mac in the complete lines of `text`, in log order: ("grant", None)
+    for UI_HOST_GRANT_PHOTOS, ("terminate", epoch second or None) for UI_HOST_TERMINATE_APP."""
+    found: list[tuple[str, float | None]] = []
+    for line in text.split("\n"):
+        if HOST_GRANT.search(line):
+            found.append(("grant", None))
+        elif match := HOST_TERMINATE.search(line):
+            found.append(("terminate", float(match.group(1)) if match.group(1) else None))
+    return found
 
 
 GRANT_TRIES = 2
@@ -845,15 +870,74 @@ def grant_photos(udid: str, run=sh, tries: int = GRANT_TRIES, timeout: float = G
     return False
 
 
-class HostGrants(threading.Thread):
-    """Gives the photo access back from the Mac each time a test asks (UI_HOST_GRANT_PHOTOS,
-    DeviceConditionUITests.grantFromHost): the CI simulator shows no iOS question after an
-    access reset, and Settings opens on its first page, not on Albumist's."""
+# Ending the app from the Mac (terminate_app). The test waits TERMINATE_WAIT s for the app to be
+# gone and then ends it through XCTest and launches it again; an end from the Mac after that would
+# hit the new launch (as the late photo grant did in UI run 44355110562, test 09). So a call is
+# only started while the request is younger than TERMINATE_FRESH s, and the last one ends (its
+# timeout) well before the test stops waiting.
+TERMINATE_TRIES = 2
+TERMINATE_TIMEOUT = 20
+TERMINATE_FRESH = 30
+TERMINATE_WAIT = 60
+# simctl's answer when the app is not running (any more): nothing left to end.
+NOTHING_TO_TERMINATE = re.compile(r"found nothing to terminate", re.I)
 
-    def __init__(self, udid: str, log_path: str, interval: float = 2, grant=None):
+
+def terminate_app(udid: str, asked: float | None, run=sh, clock=time.time, tries: int = TERMINATE_TRIES,
+                  timeout: float = TERMINATE_TIMEOUT) -> bool:
+    """`simctl terminate U app.albumist.ios` for a test that asked (UI_HOST_TERMINATE_APP at the
+    epoch second `asked`), tried again once when simctl refuses (not after a timeout: that call
+    may still end the app, and a second one would then hit the test's next launch), never for a
+    request older than TERMINATE_FRESH s or without its second. True when the app is gone (also when it was gone already).
+
+    Why: in UI run 44446270757 (test07) XCTest's own terminate inside `launch()` failed with
+    "Failed to terminate app.albumist.ios:20655" although the app stood idle; simctl ends the app
+    through CoreSimulator instead of XCTest. The test only reads the app's state meanwhile (no
+    tap, no query of the app), so XCTest has nothing in flight that the end could break. Every
+    try is in the log ("UI_HOST ... attempt N of M"); when the app is not gone the test ends it
+    through XCTest as before."""
+    for attempt in range(1, tries + 1):
+        # Without its second a request cannot be dated: not answered (it might be old).
+        age = clock() - asked if asked is not None else float("inf")
+        if age >= TERMINATE_FRESH:
+            print(f"UI_HOST app end request from {age:.0f} s ago skipped (attempt {attempt} of {tries}): "
+                  "the test ends the app itself after its wait", flush=True)
+            return False
+        started = time.monotonic()
+        code, output = run(["xcrun", "simctl", "terminate", udid, BUNDLE_ID], timeout=timeout, quiet=True)
+        took = time.monotonic() - started
+        if code == 0:
+            print(f"UI_HOST app ended ({took:.0f} s, attempt {attempt} of {tries})", flush=True)
+            return True
+        detail = " ".join(output.split())[:200]
+        if code != 124 and NOTHING_TO_TERMINATE.search(output):
+            print(f"UI_HOST app ended before the Mac asked ({took:.0f} s, attempt {attempt} of {tries}): {detail}", flush=True)
+            return True
+        print(f"UI_HOST app end failed (exit {code}, {took:.0f} s, attempt {attempt} of {tries})"
+              + (f": {detail}" if detail else ""), flush=True)
+        if code == 124:
+            # A timed-out simctl may still end the app later (CoreSimulator goes on without its
+            # client). The test then sees the app gone and launches it again at once; a second
+            # call would end that new launch. So no second call after a timeout.
+            print("UI_HOST app end not tried again after a timeout: the test ends the app through XCTest "
+                  "if it is still there", flush=True)
+            return False
+    print(f"UI_HOST app NOT ended after {tries} attempts; the test ends it through XCTest", flush=True)
+    return False
+
+
+class HostGrants(threading.Thread):
+    """Answers the tests' requests to the Mac, in log order, each time a test asks: gives the
+    photo access back (UI_HOST_GRANT_PHOTOS, DeviceConditionUITests.grantFromHost; the CI
+    simulator shows no iOS question after an access reset, and Settings opens on its first page,
+    not on Albumist's) and ends the app before the next launch (UI_HOST_TERMINATE_APP,
+    DeviceConditionUITests.endRunningApp; `terminate_app`)."""
+
+    def __init__(self, udid: str, log_path: str, interval: float = 2, grant=None, terminate=None):
         super().__init__(daemon=True)
         self.udid, self.log_path, self.interval = udid, log_path, interval
         self.grant = grant or self.grant_photos
+        self.terminate = terminate or self.terminate_app
         self.stopped = threading.Event()
         self.offset = 0
         self.tail = ""
@@ -861,8 +945,11 @@ class HostGrants(threading.Thread):
     def grant_photos(self) -> None:
         grant_photos(self.udid)
 
+    def terminate_app(self, asked: float | None) -> None:
+        terminate_app(self.udid, asked)
+
     def check(self) -> None:
-        """Reads what was added to the log since the last call; one grant per complete request line."""
+        """Reads what was added to the log since the last call; one answer per complete request line."""
         try:
             with open(self.log_path, encoding="utf-8", errors="replace") as log:
                 log.seek(self.offset)
@@ -871,8 +958,11 @@ class HostGrants(threading.Thread):
         except OSError:
             chunk = ""
         complete, _, self.tail = (self.tail + chunk).rpartition("\n")
-        for _ in range(host_grant_requests(complete)):
-            self.grant()
+        for kind, asked in host_requests(complete):
+            if kind == "grant":
+                self.grant()
+            else:
+                self.terminate(asked)
         # A failure shows in the job log at once, not only when the pass ends: a run cancelled
         # (or a runner lost) after it is still red for ui_evidence.py.
         for line in complete.splitlines():
@@ -950,6 +1040,18 @@ class Watchdog(threading.Thread):
         self.stopped.set()
 
 
+# Handed to the tests (xcodebuild passes TEST_RUNNER_X on as X): the Mac answers UI_HOST_ lines
+# (HostGrants). Without it (a run in Xcode) the tests do not ask the Mac to end the app.
+HOST_HELPER = "TEST_RUNNER_SORTLY_HOST_HELPER"
+
+
+def runner_env(base: dict | None = None) -> dict:
+    """The environment of xcodebuild for a pass: the job's own plus HOST_HELPER=1."""
+    env = dict(os.environ if base is None else base)
+    env[HOST_HELPER] = "1"
+    return env
+
+
 def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str, str, float, bool]:
     """One xcodebuild run; returns (status, log text, result bundle path, start time, whether
     the watchdog stopped it)."""
@@ -980,7 +1082,7 @@ def run_pass(args, label: str, chosen: list[str], build: bool) -> tuple[int, str
         recorder.start()
     started = time.time()
     with open(log_path, "w") as log:
-        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=runner_env())
         watchdog = Watchdog(args.udid, log_path, process)
         watchdog.start()
         grants = HostGrants(args.udid, log_path)
@@ -1298,6 +1400,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--out", default="build")
     r.add_argument("--deadline", type=float, default=0,
                    help="epoch second by which a pass must end (the job's limit minus a margin); 0: none")
+    w = sub.add_parser("settle")
+    w.add_argument("--udid", required=True)
+    w.add_argument("--limit", type=float, default=SETTLE_LIMIT)
     c = sub.add_parser("classify")
     c.add_argument("log")
     c.add_argument("--status", type=int, default=65)
@@ -1354,6 +1459,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"::notice title=UI sweep::{skipped} row(s) not tapped by the tap-through sweep "
                   "(listed in the run summary)", file=sys.stderr)
         print(markdown)
+        return 0
+    if args.command == "settle":
+        started = time.monotonic()
+        settle(lambda: simulator_probe(args.udid), limit=args.limit, going_on="the next step starts anyway")
+        timing("wait for the simulator", started)
         return 0
     if args.command == "classify":
         with open(args.log, encoding="utf-8", errors="replace") as log:

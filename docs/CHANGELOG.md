@@ -214,6 +214,11 @@
   prüfbar, 1 sperrt (G1: das Zuhause wird zur Reise, ein fester Ort heißt „Bayern“), 39 offen mit
   Grund, warum sie nicht sperren. Neu: „Am iPhone prüfen“ für Fuchs und die Lücken in den Tests
   selbst (G5).
+- CI: der frische Simulator in `ci.yml` wartet wie die UI-Gruppen, bis er schnell antwortet
+  (`ui_tests.py settle`), statt auf eine Last unter 3,5, die die Macs nie erreichen (wartete
+  jedes Mal die vollen 5 Min.).
+- UI-Gerätetests: vor einem Neustart beendet in CI der Mac die laufende App (`simctl terminate`),
+  nicht XCTest, dessen Beenden bei einer ruhenden App scheiterte (UI-Lauf 44446270757, test07).
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

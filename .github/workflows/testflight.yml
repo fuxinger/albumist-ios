@@ -57,21 +57,18 @@ name: TestFlight
 #     "Generate Xcode project", needs a new run too. The upload job of an allowed re-run lists
 #     every earlier failure as a warning and in its summary, and the tag message names them.
 #     The UI build products are kept 3 days for this.
-#   - "force" (emergency) uploads without any test; the build is marked "FORCED – untested" in
-#     the upload job's summary, the tag message and the first line of "Was testen".
+#   - No input or flag skips a test or the gate: the emergency input that uploaded without any
+#     test is gone (the owner's decision 17.11., review G5-02/G6-02; .github/scripts/tests/
+#     test_workflows.py checks it). An urgent build waits for its tests like any other.
 #
 # Started by hand only: Actions > TestFlight > Run workflow on main
 # (gh workflow run testflight.yml --ref main). No push or merge starts a build from a branch
-# with this file. claude/sortly-app still has an older testflight.yml whose push trigger starts
-# an upload for every push there once its CI is green, until that branch gets this file or is
-# retired (Profi-Analyse Top 1); with this file, runs there are by hand too.
+# with this file. The old release branch claude/sortly-app uploads nothing any more: since
+# 1358f7f (the owner's decision 18.11., branch kept) its testflight.yml can only be started by
+# hand and stops at once, with no secret, no Mac and no push trigger.
 on:
   workflow_dispatch:
     inputs:
-      force:
-        description: 'Emergency: upload without running the tests'
-        type: boolean
-        default: false
       ui_groups:
         description: 'UI groups: auto (only those without a green result for this app and their test code) or all'
         type: choice
@@ -121,14 +118,11 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "::notice::TestFlight skipped: the App Store Connect secrets are not set yet (docs/TESTFLIGHT.md)."
           fi
-      - name: Forced upload
-        if: inputs.force && steps.secrets.outputs.ready == 'true'
-        run: echo "::warning title=FORCED – untested::Uploading without running any test (manual run with force)."
 
   tests:
     name: Tests
     needs: check
-    if: needs.check.outputs.ready == 'true' && !inputs.force
+    if: needs.check.outputs.ready == 'true'
     uses: ./.github/workflows/ci.yml
     with:
       release: true
@@ -200,7 +194,7 @@ jobs:
     name: UI gate (every group green for this app and its test code)
     needs: [check, tests, ui, stress]
     if: >-
-      ${{ !cancelled() && needs.check.outputs.ready == 'true' && !inputs.force && needs.tests.result == 'success'
+      ${{ !cancelled() && needs.check.outputs.ready == 'true' && needs.tests.result == 'success'
       && needs.ui.result == 'success' && needs.stress.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -225,13 +219,11 @@ jobs:
   release:
     name: Archive and upload to TestFlight
     needs: [check, tests, ui, stress, ui-gate]
-    # The tests, the UI flow, the stress pass and the UI gate of this run must all be green (or
-    # skipped on purpose by force). !cancelled() instead of the default: with force, skipped jobs
-    # must not skip this one.
+    # The tests, the UI flow, the stress pass and the UI gate of this run must all be green;
+    # nothing skips them.
     if: >-
-      ${{ !cancelled() && needs.check.outputs.ready == 'true' && (inputs.force
-      || (needs.tests.result == 'success' && needs.ui.result == 'success' && needs.stress.result == 'success'
-      && needs.ui-gate.result == 'success')) }}
+      ${{ !cancelled() && needs.check.outputs.ready == 'true' && needs.tests.result == 'success'
+      && needs.ui.result == 'success' && needs.stress.result == 'success' && needs.ui-gate.result == 'success' }}
     runs-on: xcode-27
     # Archive ~10-20 min, export and upload ~3-5 min.
     timeout-minutes: 60
@@ -254,23 +246,17 @@ jobs:
         with:
           # Nothing here pushes; no token stays in .git/config next to the build.
           persist-credentials: false
-      - name: FORCED – untested
-        if: inputs.force
-        run: |
-          echo "::warning title=FORCED – untested::TestFlight build ${{ github.run_number }} is uploaded without running any test (manual run with force)."
-          echo "## FORCED – untested: build ${{ github.run_number }} (${GITHUB_SHA:0:7}) skipped every test (manual run with force)" >> "$GITHUB_STEP_SUMMARY"
       - name: Earlier attempts of this run
         # "Re-run failed jobs" is only for a failure of the machinery (top of this file). This
         # step reads every job and step of the earlier attempts of this run: a failure of the
         # machinery is listed (warning and summary), any other failure (a test, a rule, a build,
-        # the archive) stops the upload: a red test is never re-run to green. A forced run is
-        # listed only. If the API does not answer, this step fails; re-run this job then.
+        # the archive) stops the upload: a red test is never re-run to green. If the API does not
+        # answer, this step fails; re-run this job then.
         id: earlier
         if: github.run_attempt != '1'
         env:
           GH_TOKEN: ${{ github.token }}
           ATTEMPT: ${{ github.run_attempt }}
-          FORCED: ${{ inputs.force }}
         run: |
           answers=()
           for n in $(seq 1 $((ATTEMPT - 1))); do
@@ -280,9 +266,7 @@ jobs:
               || { echo "::error title=Earlier attempts::the jobs of attempt $n could not be read; re-run this job"; exit 1; }
             answers+=("$RUNNER_TEMP/jobs-$n.json")
           done
-          flags=()
-          if [ "$FORCED" = "true" ]; then flags+=(--forced); fi
-          python3 .github/scripts/earlier_attempts.py --attempt "$ATTEMPT" "${flags[@]}" "${answers[@]}"
+          python3 .github/scripts/earlier_attempts.py --attempt "$ATTEMPT" "${answers[@]}"
       - name: Select pinned Xcode
         # The pinned release Xcode (.github/toolchain.json), never a beta: App Store Connect
         # refuses beta builds.
@@ -347,7 +331,6 @@ jobs:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          FORCED: ${{ inputs.force && ' – FORCED – untested' || '' }}
         run: |
           plutil -create xml1 "$EXPORT_OPTIONS"
           plutil -insert method -string app-store-connect "$EXPORT_OPTIONS"
@@ -367,7 +350,7 @@ jobs:
           status=$?
           grep -E "error:|Upload|EXPORT|\*\* " upload-log.txt | head -80
           [ $status -eq 0 ] && echo "TESTFLIGHT_BUILD ${{ github.run_number }} uploaded; it appears in TestFlight after Apple's processing (usually 5 to 30 minutes)."
-          [ $status -eq 0 ] && echo "### TestFlight build ${{ github.run_number }} uploaded (${GITHUB_SHA:0:7})$FORCED" >> "$GITHUB_STEP_SUMMARY"
+          [ $status -eq 0 ] && echo "### TestFlight build ${{ github.run_number }} uploaded (${GITHUB_SHA:0:7})" >> "$GITHUB_STEP_SUMMARY"
           exit $status
       - name: Remove key
         if: always()
@@ -376,13 +359,13 @@ jobs:
   tag:
     # Every uploaded build has an annotated git tag build-<number> on exactly the commit it was
     # built from, so "which code is TestFlight build 41?" is `git show build-41`; its message
-    # says whether the tests ran ("FORCED – untested" when not). The only job of this workflow
+    # names the attempt and what failed before it. The only job of this workflow
     # that may write to the repository, and it can only create a tag: an existing tag is left
     # alone when it is on the same commit (a re-run) and fails the job otherwise.
     name: Tag the TestFlight build
     needs: [release, ui-gate]
-    # always(), not the default success(): that would also look at the tests, which force
-    # skips; and an uploaded build gets its tag even when the run is cancelled after the upload.
+    # always(), not the default success(): an uploaded build gets its tag even when the run is
+    # cancelled after the upload.
     if: ${{ always() && needs.release.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -393,7 +376,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: build-${{ github.run_number }}
-          FORCED: ${{ inputs.force }}
           # The attempt whose upload job uploaded (a re-run of this job alone keeps it) and,
           # from attempt 2 on, what failed before it (earlier_attempts.py).
           ATTEMPT: ${{ needs.release.outputs.attempt }}
@@ -402,11 +384,7 @@ jobs:
           UI_GATE: ${{ needs.ui-gate.outputs.text }}
         run: |
           about="TestFlight build $GITHUB_RUN_NUMBER of $GITHUB_SHA (run $GITHUB_RUN_ID, attempt ${ATTEMPT:-$GITHUB_RUN_ATTEMPT}${EARLIER:+; $EARLIER}${UI_GATE:+; $UI_GATE})"
-          if [ "$FORCED" = "true" ]; then
-            message="FORCED – untested: $about, uploaded without running any test (force)"
-          else
-            message="$about: CI, UI flow and stress pass green"
-          fi
+          message="$about: CI, UI flow and stress pass green"
           if ref=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha' 2>/dev/null); then
             read -r type existing <<< "$ref"
             # An annotated tag points at a tag object, which points at the commit.
@@ -443,17 +421,13 @@ jobs:
           KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          FORCED: ${{ inputs.force }}
         run: |
           export KEY_PATH="$RUNNER_TEMP/asc/AuthKey.p8"
           mkdir -p "$(dirname "$KEY_PATH")"
           printf '%s\n' "$KEY_P8" > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
-          # A forced build starts its text with a warning for the testers ("FORCED – untested").
-          flags=()
-          if [ "$FORCED" = "true" ]; then flags+=(--forced); fi
           python3 .github/scripts/testflight_notes.py upload --notes docs/TESTFLIGHT_NOTES.md \
-            --build "${{ github.run_number }}" --sha "$GITHUB_SHA" --bundle-id app.albumist.ios --wait-minutes 40 "${flags[@]}"
+            --build "${{ github.run_number }}" --sha "$GITHUB_SHA" --bundle-id app.albumist.ios --wait-minutes 40
       - name: Remove key
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc"

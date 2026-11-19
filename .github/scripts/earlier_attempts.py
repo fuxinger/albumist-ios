@@ -10,15 +10,15 @@ pinned toolchain, the project generation. It goes by the step, not by the cause:
 by a cancel or a timeout, or one a lost runner left unfinished, counts like a failed one (a test
 that was stopped did not pass). A job that never ran a step (no runner) counts as machinery.
 
-  python3 .github/scripts/earlier_attempts.py --attempt 3 [--forced] jobs-1.json jobs-2.json
+  python3 .github/scripts/earlier_attempts.py --attempt 3 jobs-1.json jobs-2.json
 
 Each file is the answer of GET /repos/{repo}/actions/runs/{run_id}/attempts/{n}/jobs for one
 earlier attempt, in order (testflight.yml fetches them with curl). Prints a warning for each
 machinery failure and an error for every other one, writes a table to $GITHUB_STEP_SUMMARY and
 `text=<one line>` to $GITHUB_OUTPUT (for the tag message), and exits 1 when an earlier attempt
-failed outside the machinery. With --forced (a build that skips every test) it lists and never
-blocks. A job that a re-run carried over unchanged appears again in every later attempt with the
-same start and end time; it is counted once, and each job is one row. It fails closed: a missing,
+failed outside the machinery; nothing switches that off (the emergency "force" that uploaded
+without tests was removed, the owner's decision 17.11.). A job that a re-run carried over
+unchanged appears again in every later attempt with the same start and end time; it is counted once, and each job is one row. It fails closed: a missing,
 unreadable or partial answer (more jobs than one page of 100) also exits 1.
 """
 from __future__ import annotations
@@ -114,7 +114,7 @@ def one_line(rows: list[dict]) -> str:
     return text if len(text) <= 900 else text[:897] + "..."
 
 
-def report(rows: list[dict], attempt: int, forced: bool) -> tuple[list[str], str, bool]:
+def report(rows: list[dict], attempt: int) -> tuple[list[str], str, bool]:
     """(workflow commands, summary markdown, blocked)."""
     lines, blocked = [], False
     for r in rows:
@@ -122,8 +122,6 @@ def report(rows: list[dict], attempt: int, forced: bool) -> tuple[list[str], str
         when = ", ".join(map(str, r["attempts"]))
         if r["machinery"]:
             lines.append(command("warning", f"Re-run after attempt {when}", f"{what}; machinery, a re-run is allowed"))
-        elif forced:
-            lines.append(command("warning", "FORCED – untested", f"{what} in attempt {when}"))
         else:
             blocked = True
             lines.append(command("error", f"Red in attempt {when}", f"{what}. A red test is never re-run to green: "
@@ -141,15 +139,12 @@ def report(rows: list[dict], attempt: int, forced: bool) -> tuple[list[str], str
     if blocked:
         md += ["", "**Not uploaded**: an earlier attempt failed outside the machinery (a test, a rule, a build "
                    "or the archive). A red test is never re-run to green: fix it and start a new run."]
-    elif forced and any(not r["machinery"] for r in rows):
-        md += ["", "**FORCED – untested**: listed only; a forced build skips every test."]
     return lines, "\n".join(md) + "\n", blocked
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--attempt", type=int, required=True, help="this attempt (github.run_attempt)")
-    parser.add_argument("--forced", action="store_true", help="the run uploads without tests (force)")
     parser.add_argument("answers", nargs="*", help="jobs of attempts 1 to N-1, in order")
     args = parser.parse_args(argv)
     if len(args.answers) != args.attempt - 1:
@@ -172,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
                           "re-run this job once the API answers, or start a new run"))
             return 1
     rows = earlier_failures(attempts)
-    lines, markdown, blocked = report(rows, args.attempt, args.forced)
+    lines, markdown, blocked = report(rows, args.attempt)
     for line in lines:
         print(line, flush=True)
     with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a", encoding="utf-8") as out:

@@ -120,10 +120,9 @@ Actions > **TestFlight feedback** > Run workflow.
   UI-Tests und Härtetest zusammen.
 - Nichts startet von selbst, kein Push und kein Merge in `main` (16.11.: das Zusammenführen der
   Webseite startete sonst einen Build mit altem App-Stand). Das gilt für jeden Zweig mit der
-  neuen `testflight.yml`. `claude/sortly-app` hat noch die alte Fassung mit Push-Auslöser: dort
-  startet jeder Push einen Lauf, der nach grünem CI hochlädt, bis der Zweig die neue Datei
-  bekommt oder stillgelegt ist (Profi-Analyse Top 1). Mit der neuen Datei geht der Lauf auch
-  dort nur von Hand.
+  neuen `testflight.yml`. Der alte Release-Zweig `claude/sortly-app` lädt nichts mehr hoch
+  (Beschluss Fuchs 18.11., Zweig bleibt bestehen): seit 1358f7f lässt sich seine `testflight.yml`
+  nur von Hand starten und bricht sofort ab, ohne Secrets, ohne Mac, ohne Push-Auslöser.
 - Ist ein Test rot: den Fehler beheben und einen **neuen** Lauf starten (wackelnde Tests werden
   gezählt und behoben, nie versteckt). Ein roter Test wird nie per Wiederholung grün: der
   Upload-Job eines späteren Versuchs liest alle Schritte der früheren Versuche und lädt nicht
@@ -142,9 +141,11 @@ Actions > **TestFlight feedback** > Run workflow.
   App und genau ihren Testcode einmal rot, zählt ein späteres Grün derselben Kombination nicht,
   auch nicht aus einem anderen Lauf. Erst eine Änderung am Test oder an der App (die Korrektur)
   macht sie wieder hochladbar.
-- Notfall: **force** lädt ohne Tests hoch. So ein Build ist überall als „FORCED – untested“
-  markiert: in der Zusammenfassung des Upload-Jobs, in der Nachricht des Tags `build-<Nummer>`
-  und als erste Zeile von „Was testen“.
+- Kein Notfall-Weg ohne Tests: den Schalter **force** (lud ohne jeden Test hoch) hat Fuchs am
+  17.11.2026 gestrichen; er ist seit 18.11. auch aus `testflight.yml` und den Skripten entfernt
+  (Prüfbefund G5-02/G6-02). Auch ein eiliger Build wartet auf CI, UI-Tests, Härtetest und das
+  UI-Tor. Ein Test in `.github/scripts/tests/test_workflows.py` schlägt fehl, sobald ein
+  Workflow wieder eine Eingabe oder ein Skript einen Schalter zum Überspringen bekommt.
 - Härtetest (Regel Fuchs, 17.11.2026): vor jedem TestFlight-Build der kleine Durchgang mit
   10.000 Fotos und 15 Minuten Messung (rund 45 Minuten). Er läuft im TestFlight-Lauf neben den
   UI-Tests und muss grün sein, sonst wird nicht hochgeladen; grün heißt, test12 ist
@@ -401,14 +402,14 @@ Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-
 ## Freigabe vor dem Hochladen (geplant, Schritte für den Besitzer)
 
 Noch nicht eingerichtet, und `testflight.yml` nutzt es noch nicht. Ziel: den Schlüssel für App
-Store Connect bekommt nur ein Lauf auf `main` (bis zur Stilllegung auch `claude/sortly-app`), und
+Store Connect bekommt nur ein Lauf auf `main` (`claude/sortly-app` lädt seit 18.11. nicht mehr hoch), und
 erst, wenn du ihn freigegeben hast.
 
 1. https://github.com/fuxinger/sortly-ios/settings/environments > **New environment**, Name
    `testflight`.
 2. **Required reviewers**: dich selbst eintragen. „Prevent self-review“ aus lassen, sonst kannst
    du deine eigenen Läufe nicht freigeben.
-3. **Deployment branches and tags** > Selected branches and tags: `main` und `claude/sortly-app`.
+3. **Deployment branches and tags** > Selected branches and tags: nur `main`.
 4. **Environment secrets**: die vier Secrets aus Abschnitt 4 dort noch einmal anlegen
    (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8`, `APPLE_TEAM_ID`).
 5. Einem Agenten sagen, dass die Umgebung steht. Er trägt `environment: testflight` bei den Jobs

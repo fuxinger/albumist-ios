@@ -692,4 +692,30 @@ struct DataSafetyTests {
         try await s.save(saved)
         #expect(try await s.plan(saved.id) == saved)
     }
+
+    /// Second review of G2-03: text that is removed (a medical letter found by a stricter mask)
+    /// must not stay readable in the database file: not in the deleted row, not in the old
+    /// entries of the search index, not in the write-ahead log.
+    @Test func removedTextIsNotLeftInTheFile() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("sortly.sqlite")
+        let s = try SortlyStore(url: url)
+        #expect(await s.securesDeletes)
+        try await s.upsertAssets([AssetSnapshot(id: "a", creationDate: Fixture.date("2026-01-01")),
+                                  AssetSnapshot(id: "b", creationDate: Fixture.date("2026-01-02"))])
+        try await s.indexText("Diagnosis: zebracornflower syndrome, Metformin", for: "a")
+        try await s.indexText("Garden party on Friday", for: "b")
+        try await s.removeText(for: "a")
+        try await s.indexText("Kontoauszug IBAN ••••", for: "b")
+        try await s.purgeDeletedText()
+        #expect(try await s.searchText("zebracornflower").isEmpty)
+        #expect(try await s.searchText("Kontoauszug") == ["b"])
+        for name in ["sortly.sqlite", "sortly.sqlite-wal"] {
+            let data = (try? Data(contentsOf: dir.appendingPathComponent(name))) ?? Data()
+            for word in ["zebracornflower", "Garden party"] {
+                #expect(data.range(of: Data(word.utf8)) == nil, "\(word) still in \(name)")
+            }
+        }
+    }
 }

@@ -3,6 +3,7 @@
 Run: python3 -m unittest discover -s .github/scripts/tests -v
 """
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -25,14 +26,21 @@ class RenderTests(unittest.TestCase):
     def test_only_the_marked_part_as_plain_text_with_build_and_commit(self):
         text = testflight_notes.render(self.notes("## Neu\n\n- **Pause** geht [hier](https://x.example)"), 41, SHA)
         self.assertEqual(text, "Neu\n\n• Pause geht hier (https://x.example)\n\nBuild 41 · 902f101")
-        self.assertNotIn(testflight_notes.FORCED_MARK, text)
 
-    def test_a_forced_build_says_so_first_and_last_and_keeps_the_limit(self):
-        text = testflight_notes.render(self.notes("Danke fürs Testen!\n\n" + "- Punkt\n" * 900), 42, SHA, forced=True)
-        self.assertTrue(text.startswith(testflight_notes.FORCED_WARNING + "\n\nDanke fürs Testen!"))
-        self.assertTrue(text.endswith(f"Build 42 · 902f101 · {testflight_notes.FORCED_MARK}"))
-        self.assertIn("FORCED – untested", testflight_notes.FORCED_WARNING)
+    def test_a_long_text_keeps_the_limit_and_the_build_line(self):
+        text = testflight_notes.render(self.notes("Danke fürs Testen!\n\n" + "- Punkt\n" * 900), 42, SHA)
+        self.assertTrue(text.startswith("Danke fürs Testen!"))
+        self.assertTrue(text.endswith("…\n\nBuild 42 · 902f101"))
         self.assertLessEqual(len(text), testflight_notes.LIMIT)
+
+    def test_there_is_no_forced_mode(self):
+        # The emergency "force" (upload without tests) was removed (the owner's decision 17.11.,
+        # G5-02/G6-02); so was the warning text for such a build.
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "testflight_notes.py")
+        run = subprocess.run([sys.executable, script, "text", "--notes", self.notes("Hallo"), "--build", "1",
+                              "--sha", SHA, "--forced"], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("unrecognized arguments: --forced", run.stderr)
 
 
 if __name__ == "__main__":

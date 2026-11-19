@@ -491,6 +491,18 @@ public actor SortlyStore: PlanJournal {
         try db.execute("DELETE FROM text_plain WHERE asset_id = ?", [.text(asset.rawValue)])
     }
 
+    /// After stored text was removed or masked: the full-text index merges its segments
+    /// ("optimize"), so the entries of the old wording are gone and not only marked deleted,
+    /// and the write-ahead log is written back and emptied. Freed pages are overwritten with
+    /// zeros (`secure_delete`, `SQLiteDatabase`). Privacy rule: such text is never stored.
+    public func purgeDeletedText() throws {
+        if hasFullTextSearch { try db.execute("INSERT INTO text_fts (text_fts) VALUES ('optimize')") }
+        try db.checkpoint()
+    }
+
+    /// Whether the connection overwrites deleted content (`secure_delete`); for the tests.
+    var securesDeletes: Bool { db.securesDeletes }
+
     public func recognizedText(for asset: AssetID) throws -> String? {
         try db.query("SELECT content FROM text_plain WHERE asset_id = ?", [.text(asset.rawValue)]).first?["content"]?.string
     }

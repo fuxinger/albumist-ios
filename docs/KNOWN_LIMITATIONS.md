@@ -112,6 +112,24 @@
   („4111/1111/…“), damit Telefonnummern wie „04321/12345678“ bleiben; eine Amex-Nummer mit
   Schrägstrichen (4-6-5) bleibt lesbar. Andere Schreibweisen (Buchstaben zwischen den Gruppen,
   stark verlesene Ziffern) können lesbar bleiben.
+- Medizinische Dokumente erkennt Albumist an Wörtern auf Deutsch und Englisch (den Sprachen der
+  Texterkennung), seit Masken-Version 5 (Nebenbefund G2-03, 18.11.) auch englische Arztbriefe
+  („Diagnosis“, „Discharge summary“, „Medication“, ICD-Codes). Ein Brief, der keines dieser
+  Wörter nennt (etwa „Betreff: Depression, stationäre Behandlung“), wird wie ein gewöhnlicher
+  Brief gespeichert (IBAN und Karten maskiert). Ein Schlüsselwort zählt nur am Wortanfang
+  (zweite Prüfung: „Collab report“, „Bau-Bescheinigung“, „Rezeption“, „Libanon“, „bicycle“,
+  „patiently“, „please be patient“ bleiben gewöhnlicher Text), deutsche Wörter auch am Ende
+  einer Zusammensetzung („Laborbefund“, „Facharztbrief“). Englische Zusammensetzungen ohne
+  Leerzeichen („misdiagnosis“) zählen deshalb nicht. Was weiter als medizinisch gilt, obwohl es
+  das nicht ist (der Text wird dann nicht gespeichert und ist nicht per Volltext suchbar): eine
+  Anleitung mit „Fehlerdiagnose“/„Fault diagnosis“, ein Kochrezept („Rezept“), ein Arbeitsvertrag
+  mit „sick leave“, „patient“ als Eigenschaftswort nach anderen Wörtern als be/so/very/more/
+  stay/remain („a patient teacher“). Ein von OCR getrenntes Wort zählt nur, wenn der
+  Bindestrich am Zeilenende steht („Diag-⏎nosis“), nicht mitten in der Zeile.
+- Gelöschter Text wird seit der zweiten Prüfung von G2-03 in der Datenbankdatei mit Nullen
+  überschrieben (`secure_delete`), der Suchindex nach dem Nachmaskieren verdichtet und das
+  Protokoll geleert. Seiten, die eine ältere Version freigegeben hat, können alten Text noch
+  enthalten, bis SQLite sie wiederverwendet oder die App gelöscht wird (kein `VACUUM`).
 - Nicht maskiert und nicht versprochen: Steuer-ID, Telefonnummern, E-Mail-Adressen, die Nummer
   der Gesundheitskarte. Der Text bleibt auf dem Gerät.
 

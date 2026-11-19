@@ -105,7 +105,7 @@ final class AccessibilityUITests: XCTestCase {
                                   shareAtlas: "Reise-Atlas teilen", sharePreview: "Vorschau des Teilen-Bilds", searchQuery: "Rom", country: "Italien",
                                   receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
-                                   settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ suggestions?.*",
+                                   settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ [Ss]uggestions?.*",
                                    suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
                                    starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
                                    applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",

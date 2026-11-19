@@ -81,6 +81,10 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 19.11.: Englisch (P3-10): „Sicher“ heißt „Certain“ statt „Safe“, überall „analyzing“ und
+  „test run“, „Alles zurücknehmen“ heißt „Undo Everything“, alle Knöpfe groß geschrieben
+  („Create Album“, „Not Now“, „Restore Purchase“ …). `check_strings.py` prüft das mit
+  `english_rule.py`.
 - 19.11.: Fotos mit einem Datum in der Zukunft bleiben nicht mehr für immer unsortiert (P1-03);
   ein als unlesbar aufgegebenes Foto wird eine Woche später noch einmal versucht (P1-08); Fotos,
   deren Land sich nicht finden lässt, gelten nicht mehr für immer als offen (P1-09); die

@@ -606,7 +606,17 @@ final class DeviceConditionUITests: XCTestCase {
     /// "Analyse neu aufbauen" in the settings: a full run from scratch.
     @discardableResult
     private func rebuildAnalysis() -> Bool {
-        guard tap(app.buttons["Einstellungen"], "settings for rebuild", timeout: 20) else { return false }
+        // Right after a launch the app may not run yet: in UI run 44397301774 (test06) the
+        // process started 15 s after the launch and its code 15 s later still (load after the
+        // boot), and the 20 s for the tap ran out on the launch screen. Wait for the tab bar
+        // first, as long as a slow Mac needs, and say how long it took.
+        let settings = app.buttons["Einstellungen"]
+        let asked = Date()
+        let ready = waitStable("app ready for rebuild", timeout: 180, stableChecks: 1) {
+            app.tabBars.firstMatch.exists || settings.exists
+        }
+        print("UI_TIMING app ready for rebuild \(Int(Date().timeIntervalSince(asked))) s (\(ready ? "ready" : "not ready"))")
+        guard tap(settings, "settings for rebuild", timeout: 20) else { return false }
         let list = app.collectionViews.firstMatch
         let rebuild = app.buttons["Analyse neu aufbauen"]
         var swipes = 0

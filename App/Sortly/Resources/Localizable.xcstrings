@@ -1261,6 +1261,16 @@
         }
       }
     },
+    "Albumist analysiert gerade deine Fotos. Danach wieder möglich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is analysing your photos. Possible again once it's done."
+          }
+        }
+      }
+    },
     "Albumist analysiert oder ändert gerade deine Mediathek. Versuche es gleich noch einmal." : {
       "localizations" : {
         "en" : {
@@ -1381,6 +1391,16 @@
         }
       }
     },
+    "Albumist legt gerade Alben an. Danach wieder möglich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is creating albums. Possible again once it's done."
+          }
+        }
+      }
+    },
     "Albumist legt ohnehin ein neues Album an und bietet dieses unter „Anpassen“ nicht mehr an. Am Album selbst ändert sich nichts." : {
       "localizations" : {
         "en" : {
@@ -1411,6 +1431,16 @@
         }
       }
     },
+    "Albumist rechnet die Reisen gerade neu. Gleich wieder möglich." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist is recalculating your trips. Possible again in a moment."
+          }
+        }
+      }
+    },
     "Albumist teilt die Reise und plant die Vorschläge neu …" : {
       "localizations" : {
         "en" : {
@@ -1427,6 +1457,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Albumist forgets which trips you split or merged. Albums already created stay as they are."
+          }
+        }
+      }
+    },
+    "Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist forgets which trips you split or merged. Albums already created stay as they are. The paused analysis then continues."
           }
         }
       }
@@ -2071,6 +2111,16 @@
         }
       }
     },
+    "Die pausierte Analyse läuft dann weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The paused analysis then continues."
+          }
+        }
+      }
+    },
     "Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen." : {
       "localizations" : {
         "en" : {
@@ -2587,6 +2637,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Story about"
+          }
+        }
+      }
+    },
+    "Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved. Albumist applies the change once the analysis is done."
           }
         }
       }
@@ -4497,6 +4557,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%1$@” and “%2$@” become one trip with %3$lld photos."
+          }
+        }
+      }
+    },
+    "„%@“ und „%@“ werden eine Reise mit %lld Fotos. Die pausierte Analyse läuft dann weiter." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%1$@” and “%2$@” become one trip with %3$lld photos. The paused analysis then continues."
           }
         }
       }

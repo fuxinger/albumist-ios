@@ -174,6 +174,30 @@
   („Rezept“ machte sie zu medizinischen Papieren); Bildschirmaufnahmen bleiben bewusst
   ausgeblendet; Kartenwörter auch mit schmalen und ideografischen Leerzeichen, neben
   chinesischen und japanischen Satzzeichen und in Vollbreite („ＶＩＳＡ“).
+- Reise-Werkstatt während einer Pause (Entscheidung 18.11.2026, „Analyse läuft dann weiter“):
+  Wer die Analyse pausiert hatte und dann eine Reise teilte, zusammenlegte, eine Änderung
+  aufhob oder in den Einstellungen „Reisen wieder automatisch erkennen“ wählte, dessen Änderung
+  wurde gespeichert, aber nicht angewendet: die Werkstatt drehte ohne Ende, die alten Reisen
+  blieben, ohne Hinweis. Jetzt startet die Analyse, die die Änderung anwendet, sofort wie nach
+  einem Tippen, und die Pause endet. Was von selbst startet (Start der App, Wiederholungen,
+  Änderungen in Fotos oder an Einstellungen), wartet weiter auf „Fortsetzen“. Die Bestätigungen
+  sagen das vorher („Die pausierte Analyse läuft dann weiter.“). Setzt die Änderung eine lange
+  Analyse fort, wartet die Werkstatt nicht mehr darauf: „Gespeichert. Albumist wendet die Änderung
+  an, sobald die Analyse fertig ist.“, und das Blatt lässt sich schließen.
+- Reise-Werkstatt: Das Blatt lässt sich auch schließen, während es auf den Lauf einer Änderung
+  wartet; die Änderung ist dann schon gespeichert. Begann zwischen dem Speichern und dem Start ein
+  anderer Lauf, folgt ihm ein weiterer, der die Änderung sicher anwendet. Während einer Pause sagen
+  auch „Reise teilen“ und „Deine Änderungen“, dass die pausierte Analyse dann weiterläuft.
+- Reise-Werkstatt: „Gleich wieder möglich“ steht nur noch bei einer kurzen Prüfung, nicht bei einer
+  mit eigener Arbeit (Labels nach „Themen“, viele neue Fotos) oder der nächtlichen Verfeinerung.
+  VoiceOver sagt an jedem grauen Knopf, warum er wartet.
+- Reise-Werkstatt (UI-Lauf 44375768011): Direkt nach dem Teilen war „Mit der Reise danach
+  zusammenlegen“ gesperrt, solange Albumist die Reisen neu rechnete, sah aber tippbar aus und sagte
+  nichts. Jetzt sind „Zusammenlegen“, „Aufheben“, „Reise teilen“ und in den Einstellungen „Reisen
+  wieder automatisch erkennen“ in dieser Zeit grau, und darunter steht mit kleinem Ladekreis,
+  warum: „Albumist rechnet die Reisen gerade neu. Gleich wieder möglich.“ (während der ersten
+  Analyse „Albumist analysiert gerade deine Fotos. Danach wieder möglich.“, beim Anlegen „Albumist
+  legt gerade Alben an. Danach wieder möglich.“). Danach werden sie von selbst wieder aktiv.
 - Fable-Analyse und Prüfungen 18.11.: Albumist schreibt die ID eines neuen Albums jetzt innerhalb
   derselben Änderung ins Protokoll, Rückgängig nach einem Abbruch nennt, was in Fotos bleibt;
   ein Protokoll, das Fotos hinterherhinkt, legt nichts doppelt an; „Fehlendes erneut versuchen“

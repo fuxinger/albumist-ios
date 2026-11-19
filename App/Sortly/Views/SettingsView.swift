@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var confirmReset = false
     @State private var redeeming = false
     @State private var rejectedCount = 0
@@ -137,17 +138,27 @@ struct SettingsView: View {
                 Section {
                     LabeledContent("Selbst geteilt oder zusammengelegt", value: model.tripCorrections.changeCount.formatted())
                     Button("Reisen wieder automatisch erkennen") { confirmTripReset = true }
-                        .disabled(model.analysis.isRunning || model.execution.isRunning)
+                        // Grey while an analysis runs or albums are made; the footer says why.
+                        .disabled(model.tripChangeWait != nil)
+                        .tripChangeWaitHint(model.tripChangeWait)
                         .accessibilityIdentifier("settings.resetTrips")
                         .confirmationDialog("Reisen wieder automatisch erkennen?", isPresented: $confirmTripReset, titleVisibility: .visible) {
                             Button("Automatisch erkennen") { Task { await model.resetTripCorrections() } }
                         } message: {
-                            Text("Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind.")
+                            // During a Pause the reset starts the analysis again (decision 18.11.2026).
+                            if model.analysis.isPausedByUser {
+                                Text("Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter.")
+                            } else {
+                                Text("Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind.")
+                            }
                         }
                 } header: {
                     Text("Reisen")
                 } footer: {
-                    Text("Albumist hält sich an deine Änderungen, auch bei jeder neuen Analyse.")
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        TripChangeWaitNote(identifier: "settings.resetTripsBusyNote")
+                        Text("Albumist hält sich an deine Änderungen, auch bei jeder neuen Analyse.")
+                    }
                 }
             }
 
@@ -201,6 +212,8 @@ struct SettingsView: View {
                 Text("Die Diagnose hilft bei Problemen. Sie enthält nur Zustände und Zahlen, keine Fotos, Albumnamen oder Orte, und du siehst sie vor dem Senden.")
             }
         }
+        // The trip reset greys and its note comes and goes with the run, without a jump.
+        .animation(reduceMotion ? nil : .smooth, value: model.tripChangeWait)
         .navigationTitle("Einstellungen")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -213,7 +226,7 @@ struct SettingsView: View {
                 Task {
                     // Refused during a change in "Dein Zuhause": only the busy message, no run.
                     if await model.resetAnalysis() {
-                        model.startAnalysis(userInitiated: true)
+                        model.startAnalysis(cause: .tap)
                     }
                 }
             }

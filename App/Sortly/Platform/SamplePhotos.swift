@@ -86,7 +86,7 @@ final class SamplePhotos {
         }
         record = Self.loadRecord()
         if record.ids.isEmpty { update { $0.keepOnly([]) } } // nothing went in: the offer may come back
-        if added > 0 { model.startAnalysis(userInitiated: true) }
+        if added > 0 { model.startAnalysis(cause: .tap) }
     }
 
     /// The JPEGs of `specs` (drawing 1600 × 1200 pictures takes a moment: never on the main actor).
@@ -189,7 +189,7 @@ final class SamplePhotos {
             // forgotten too: it stays in Photos, and Albumist never offers to delete it again.
             update { $0.keepOnly(still.subtracting(notSamples)) }
             model.inventory = after
-            model.startAnalysis(userInitiated: true)
+            model.startAnalysis(cause: .tap)
             let stayed = notSamples.intersection(still).count
             if stayed > 0 {
                 model.message = AppMessage(title: String(localized: "Nicht alles entfernt"),

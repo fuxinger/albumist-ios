@@ -161,7 +161,7 @@ struct AnalysisProgressCard: View {
     private var control: some View {
         switch state {
         case .paused:
-            Button { model.startAnalysis(userInitiated: true) } label: { CardTextButton("Fortsetzen") }
+            Button { model.startAnalysis(cause: .tap) } label: { CardTextButton("Fortsetzen") }
                 .accessibilityLabel("Analyse fortsetzen")
                 .accessibilityIdentifier("analysis.resume")
         case .pausing:
@@ -169,7 +169,7 @@ struct AnalysisProgressCard: View {
         case .waiting(.photos, _) where !model.analysis.isRunning, .waiting(.busy, _) where !model.analysis.isRunning:
             // The run ended because Photos did not answer, or because Albumist was too busy to
             // ask it; the next try comes by itself, or now.
-            Button { model.startAnalysis(userInitiated: true) } label: { CardTextButton("Jetzt versuchen") }
+            Button { model.startAnalysis(cause: .tap) } label: { CardTextButton("Jetzt versuchen") }
                 .accessibilityLabel("Analyse jetzt erneut versuchen")
                 .accessibilityIdentifier("analysis.retry")
         default:

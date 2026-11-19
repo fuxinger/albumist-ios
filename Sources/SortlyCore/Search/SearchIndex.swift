@@ -165,7 +165,9 @@ public struct SearchIndex: Sendable {
             for c in categories { post(.category(c)) }
             for c in sure { strong[c, default: []].append(p) }
             for label in f.keywords { post(.label(label)) }
-            if let document = f.document {
+            // A card or ID without a document type (`.other`) only keeps it out of previews: the
+            // search finds it as before, by its text, not as a document.
+            if let document = f.document, document.type != .other {
                 post(.anyDocument)
                 post(.document(document.type))
                 if let merchant = document.merchant {

@@ -18,10 +18,24 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
     public var groupIDs: Set<SortlyID>
     public var albumIDs: Set<CollectionID>
     /// Recognized text, kept only on device for search.
-    public var recognizedText: String?
+    public var recognizedText: String? {
+        didSet { textLooksSensitive = recognizedText.map(TextMinimizer.looksSensitive) ?? false }
+    }
+    /// The stored text shows a bank card, a statement or another sensitive paper
+    /// (`TextMinimizer.looksSensitive`). Worked out with the text, where the facts are assembled
+    /// (off the main thread), so ranking a whole library for previews reads no text (`PreviewRank`).
+    public private(set) var textLooksSensitive: Bool
     public var keywords: Set<String>
     /// Taken where the user lives (`TripAnalysis.atHome`): no place album is made for it.
     public var atHome: Bool
+    /// The image analysis took it for a document, receipt, card or other utility picture
+    /// (`ContentAnalysis.isDocumentLike`): a poor preview or cover (`PreviewRank`).
+    public var looksLikeDocument: Bool
+    /// The image analysis has looked at it (`FactsAssembler`: a content result that is not a
+    /// failed read). Until then nothing says whether it is a card: it ranks below every analysed
+    /// ordinary photo for previews and covers (`PreviewRank.unknown`) and is never the photo of
+    /// the shared atlas image. `false` unless stated: only the analysis says it.
+    public var contentKnown: Bool
 
     public init(
         asset: AssetSnapshot,
@@ -37,7 +51,9 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         albumIDs: Set<CollectionID> = [],
         recognizedText: String? = nil,
         keywords: Set<String> = [],
-        atHome: Bool = false
+        atHome: Bool = false,
+        looksLikeDocument: Bool = false,
+        contentKnown: Bool = false
     ) {
         self.asset = asset
         self.place = place
@@ -53,6 +69,9 @@ public struct AssetFacts: Hashable, Sendable, Identifiable {
         self.recognizedText = recognizedText
         self.keywords = keywords
         self.atHome = atHome
+        self.looksLikeDocument = looksLikeDocument
+        self.contentKnown = contentKnown
+        textLooksSensitive = recognizedText.map(TextMinimizer.looksSensitive) ?? false
     }
 
     public var id: AssetID { asset.id }

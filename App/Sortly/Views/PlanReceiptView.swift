@@ -424,8 +424,10 @@ private struct ReceiptAlbumRow: View {
 
     @ViewBuilder
     private var cover: some View {
-        if let id = album.coverAssetID {
-            AssetThumbnail(id: id, side: side)
+        if album.coverAssetID != nil || album.added > 0 {
+            // No cover although photos were added: every one is a sensitive document, and the
+            // tile says the preview is hidden, as in the lists (`CoverThumbnail`).
+            CoverThumbnail(id: album.coverAssetID, side: side)
         } else {
             ZStack {
                 Theme.accent.opacity(0.15)

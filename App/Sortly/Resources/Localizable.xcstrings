@@ -12642,6 +12642,16 @@
           }
         }
       }
+    },
+    "Vorschau ausgeblendet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preview hidden"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

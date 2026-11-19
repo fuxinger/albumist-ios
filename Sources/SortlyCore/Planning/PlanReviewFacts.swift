@@ -26,15 +26,16 @@ public struct PlanReviewFacts: Hashable, Sendable {
     public var filledAlbums: [FilledAlbum]
 
     /// `order`: suggestion ids in the order of the list the user chose from (see `albumPreview`).
-    public init(plan: ChangePlan, inventory: CollectionInventory, order: [SortlyID] = []) {
+    /// `ranks`: how well each photo suits a cover or the sorting show (`PreviewRank`).
+    public init(plan: ChangePlan, inventory: CollectionInventory, order: [SortlyID] = [], ranks: [AssetID: PreviewRank] = [:]) {
         planID = plan.id
         summary = plan.summary
-        albums = plan.albumPreview(inventory: inventory, order: order)
+        albums = plan.albumPreview(inventory: inventory, order: order, ranks: ranks)
         conflicts = plan.conflicts.map { ResolvedConflict($0, inventory: inventory) }
         isBlocking = plan.conflicts.contains(where: \.isBlocking)
         freeAlbumUse = plan.freeAlbumUse(applied: false)
         hasNoSteps = plan.steps.isEmpty
-        filledAlbums = plan.filledAlbums(inventory: inventory)
+        filledAlbums = plan.filledAlbums(inventory: inventory, ranks: ranks)
     }
 }
 
@@ -64,12 +65,20 @@ public struct FilledAlbum: Hashable, Sendable {
     public var title: String?
     /// The photos the plan adds, over all of the album's steps, in plan order.
     public var assets: [AssetID]
+    /// The photos the show lets fly and puts on the album's cover: at most `shownLimit` of
+    /// `assets`, ordinary photos first, never a sensitive document (`PreviewPicker.firstSuited`).
+    /// The show still counts every photo of `assets`.
+    public var shown: [AssetID]
+
+    /// More than the show ever shows of one album (the pile, five flying photos, the cover).
+    public static let shownLimit = 6
 }
 
 extension ChangePlan {
     /// The albums the plan fills, in the order of their first "add photos" step. Chunked steps
-    /// of one album are merged; steps that add nothing are left out.
-    public func filledAlbums(inventory: CollectionInventory) -> [FilledAlbum] {
+    /// of one album are merged; steps that add nothing are left out. `ranks`: how well each
+    /// photo suits the show (`PreviewRank`; missing ones are photos).
+    public func filledAlbums(inventory: CollectionInventory, ranks: [AssetID: PreviewRank] = [:]) -> [FilledAlbum] {
         var titles: [String: String] = [:]
         for step in steps {
             if case .createAlbum(let key, let title, _) = step.operation { titles[key] = title }
@@ -88,7 +97,9 @@ extension ChangePlan {
             case .planned(let key): titles[key]
             case .existing(let id): inventory[id]?.title
             }
-            return FilledAlbum(lastStep: lastStep[ref] ?? 0, title: title, assets: assets[ref] ?? [])
+            let photos = assets[ref] ?? []
+            return FilledAlbum(lastStep: lastStep[ref] ?? 0, title: title, assets: photos,
+                               shown: PreviewPicker.firstSuited(photos, count: FilledAlbum.shownLimit, ranks: ranks))
         }
     }
 }

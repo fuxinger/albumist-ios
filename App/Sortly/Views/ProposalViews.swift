@@ -107,7 +107,8 @@ struct ProposalRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.m) {
-            AssetThumbnail(id: proposal.coverAssetID ?? AssetID(""), side: 56)
+            // Never a sensitive document (a bank card, owner's iPhone build 36): `coverID`.
+            CoverThumbnail(id: model.coverID(for: proposal), side: 56)
                 .frame(width: 56, height: 56)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
@@ -224,13 +225,15 @@ struct ProposalDetailView: View {
                 .buttonStyle(.plain)
                 .disabled(preparing)
                 .accessibilityLabel(Text("Alle \(model.members(of: proposal).count) Fotos ansehen"))
+                // The label above replaces the tile's own text: VoiceOver says it here.
+                .accessibilityValue(model.previewHidden(for: proposal) ? Text("Vorschau ausgeblendet") : Text(verbatim: ""))
                 // The cover's colours glow behind the photos and end just below them, so the
                 // text under them sits on the plain background. Behind the text, XCTest's
                 // contrast audit kept failing clearly readable lines (8.9:1 measured in the
                 // screenshot) whatever the wash's colours were: "31 photos in Italien.",
                 // "LÄNDER UND ORTE · SICHER" (UI runs 2-4, 43773339053, 43779950348).
                 .background(alignment: .top) {
-                    PhotoGlow(id: model.previewIDs(for: proposal, count: 1).first ?? proposal.coverAssetID)
+                    PhotoGlow(id: model.coverID(for: proposal))
                         .padding(.horizontal, -Theme.Spacing.l)
                         .padding(.top, -240)
                         .padding(.bottom, -Theme.Spacing.s)

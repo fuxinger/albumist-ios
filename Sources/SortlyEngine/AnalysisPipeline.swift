@@ -196,6 +196,15 @@ public actor AnalysisPipeline {
     public static let labelsVersion = 1
     /// 2: screenshot categories with whole-word flight rules and short keywords as whole words
     /// (first device test 15.11.); every stored screenshot is read once more.
+    /// Not raised for `DocumentAnalyzer` reporting cards, IDs and medical papers without a
+    /// document type as `.other` (second review of the build 36 fix): texts read before keep no
+    /// document facts for them, and `PreviewRank` hides such pictures from what is stored. For
+    /// photos: taken for a document without document facts. For screenshots too (third review:
+    /// an ID or medical screenshot read before was stored with an empty text and no document
+    /// facts): any picture with an empty stored text and no document facts, and a screenshot
+    /// whose text is not read. Card and financial words in the stored text count for both.
+    /// `.other` makes no album. What is stored of a text and its masks did not change, so no
+    /// text needs reading again.
     public static let textVersion = 2
     /// Both versions together: a marker that kept another one was written before an update
     /// that changed the analysis ("Analyse nach Update", `ResumedRun`).
@@ -887,7 +896,10 @@ public actor AnalysisPipeline {
                             finished.append(asset.id)
                             analyzed += 1
                             if labelsOnly[asset.id] != nil || analysedBefore[asset.id] != nil { report.labelsAdded += 1 }
-                            if !asset.isScreenshotLike {
+                            // "Gerade angesehen" shows no screenshot, and no document, receipt or
+                            // card either (second review of the build 36 fix): this result
+                            // says whether the picture is one, before any text is read.
+                            if !asset.isScreenshotLike && !result.isDocumentLike {
                                 lookedAt.append(asset.id)
                                 if lookedAt.count > 3 { lookedAt.removeFirst() }
                             }

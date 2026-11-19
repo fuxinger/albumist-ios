@@ -584,7 +584,7 @@ struct StarterSetCard: View {
                     .font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: -14) {
                     ForEach(Array(set.prefix(5).enumerated()), id: \.element.id) { index, proposal in
-                        AssetThumbnail(id: proposal.coverAssetID ?? AssetID(""), side: 64)
+                        CoverThumbnail(id: model.coverID(for: proposal), side: 64)
                             .frame(width: 56, height: 56)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.background, lineWidth: 2))

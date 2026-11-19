@@ -69,8 +69,9 @@ public struct PlanReceipt: Hashable, Sendable {
     public var unconfirmedSteps: Int
 
     /// Built from the journal (`ChangePlan.record`); plans from versions without a journal
-    /// fall back to their succeeded steps. Steps that were not done add nothing.
-    public init(plan: ChangePlan, inventory: CollectionInventory) {
+    /// fall back to their succeeded steps. Steps that were not done add nothing. `ranks`: how
+    /// well each photo suits an album's cover (`PreviewRank`; missing ones are photos).
+    public init(plan: ChangePlan, inventory: CollectionInventory, ranks: [AssetID: PreviewRank] = [:]) {
         planID = plan.id
         isUndo = plan.reverts != nil
         startedAt = plan.confirmedAt ?? plan.createdAt
@@ -172,7 +173,12 @@ public struct PlanReceipt: Hashable, Sendable {
                 }
                 album.added += Set(added).count
                 album.unavailable += unavailable
-                if album.coverAssetID == nil { album.coverAssetID = added.first }
+                // The first added photo that suits a cover: a document only until a photo comes,
+                // never a sensitive document (`PreviewRank`).
+                if let candidate = PreviewPicker.firstSuited(added, count: 1, ranks: ranks).first,
+                   album.coverAssetID.map({ ranks[$0] ?? .photo > ranks[candidate] ?? .photo }) ?? true {
+                    album.coverAssetID = candidate
+                }
                 album.failed = album.failed || failed
                 album.unconfirmed = album.unconfirmed || unconfirmed
                 lines[album.id] = album

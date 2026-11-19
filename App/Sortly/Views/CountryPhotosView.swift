@@ -46,10 +46,10 @@ struct CountryPhotosView: View {
             .padding(.bottom, Theme.Spacing.xl)
         }
         .background(alignment: .top) {
-            // The country's own colours, taken from its newest photo.
+            // The country's own colours, taken from its newest photo that suits a cover.
             ZStack(alignment: .top) {
                 Theme.background
-                PhotoGlow(id: country.years.first?.photos.first?.id)
+                PhotoGlow(id: country.cover)
                     .frame(height: 440)
             }
             .ignoresSafeArea()

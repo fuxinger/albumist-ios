@@ -95,8 +95,8 @@ struct PreviewRankUnexplainedTests {
         #expect(PreviewRank(facts(letter)) == .document)
         let ticket = "Fahrkarte\nMünchen Hbf - Zwiesel\nGleis 12, Sitzplatz 45"
         #expect(PreviewRank(facts(ticket)) == .document)
-        // A screenshot is a document also without any text read.
-        #expect(PreviewRank(facts(nil, utility: false, screenshot: true)) == .document)
+        // A screenshot with text that explains nothing sensitive is a document.
+        #expect(PreviewRank(facts("Bestellung versandt, Lieferung morgen", utility: false, screenshot: true)) == .document)
         // A receipt paid by card names the card: when in doubt, hidden.
         #expect(PreviewRank(facts("Kassenbon\nSumme EUR 12,40\nVISA\nMwSt 7%")) == .sensitive)
     }
@@ -110,6 +110,44 @@ struct PreviewRankUnexplainedTests {
                                                 trips: [], frequentPlaces: [], groups: [], inventory: CollectionInventory([]))[0]
         #expect(!assembled.contentKnown && PreviewRank(assembled) == .unknown)
         #expect(facts(nil, utility: false).contentKnown)
+    }
+
+    /// Third review: an ID or medical screenshot read by an older version was stored with no
+    /// document facts and an empty text; a screenshot whose text is not read yet (or never, with
+    /// text reading off) says nothing either. Both are hidden, without reading anything again.
+    @Test func aScreenshotWithoutTextOrDocumentFactsIsHidden() {
+        let passport = "REISEPASS PASSPORT\nName/Surname MUSTERMANN\nGeburtsdatum/Date of birth 01.01.1980"
+        // As the older version stored it: empty text, no document facts.
+        #expect(PreviewRank(facts(passport, utility: false, screenshot: true, document: .some(nil))) == .sensitive)
+        // Not read yet.
+        #expect(PreviewRank(facts(nil, utility: false, screenshot: true)) == .sensitive)
+        // Read now: `.other` with its sensitivity, and still an empty text.
+        let current = facts(passport, utility: false, screenshot: true)
+        #expect(current.document?.type == .other && current.recognizedText == "")
+        #expect(PreviewRank(current) == .sensitive)
+        // A new-style ID screenshot whose raw text also gave screenshot categories: explained as
+        // a screenshot by its categories, hidden by the `.other` facts.
+        var flight = current
+        flight.textCategories = ["flight"]
+        #expect(PreviewRank(flight) == .sensitive)
+        // The probe of the third review: an all-screenshot suggestion.
+        let date = Self.date
+        func shot(_ id: AssetID, _ minutes: Int) -> AssetSnapshot {
+            AssetSnapshot(id: id, subtypes: .screenshot, creationDate: date.addingTimeInterval(Double(minutes) * 60))
+        }
+        let assets = [shot("id", 0), shot("s1", 10), shot("s2", 20), shot("s3", 30)]
+        var texts: [AssetID: TextResult] = ["id": TextResult(text: TextAnalysis(text: "", source: .original), document: nil)]
+        for id: AssetID in ["s1", "s2", "s3"] {
+            texts[id] = TextResult(text: TextAnalysis(text: "Bestellung versandt, Lieferung morgen", source: .original),
+                                   document: nil, screenshotCategories: ["order"])
+        }
+        let all = FactsAssembler.assemble(
+            assets: assets, places: [:],
+            contents: Dictionary(uniqueKeysWithValues: assets.map { ($0.id, ContentAnalysis(isUtility: true)) }),
+            texts: texts, trips: [], frequentPlaces: [], groups: [], inventory: CollectionInventory([]))
+        let dates = Dictionary(uniqueKeysWithValues: assets.map { ($0.id, $0.creationDate!) })
+        #expect(PreviewPicker.pick(Set(assets.map(\.id)), dates: dates, cover: nil, count: 8, ranks: PreviewRank.ranks(of: all))
+                == ["s1", "s2", "s3"])
     }
 
     @Test func aPictureTheImageAnalysisDidNotTakeForADocumentIsAPhoto() {

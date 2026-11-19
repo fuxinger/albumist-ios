@@ -76,10 +76,11 @@ public struct DocumentAnalyzer: Sendable {
     /// They do not make a document sensitive where it has a type (a receipt paid by girocard
     /// stays a receipt and keeps its album): they name a card where no document type was
     /// recognised (`analyze` → `.other`), and keep a picture out of previews (`PreviewRank`,
-    /// `TextMinimizer.looksSensitive`). Words of four letters or fewer count as whole words only.
+    /// `TextMinimizer.looksSensitive`). Short parts count as whole words only (`SensitiveWords`).
     static let paymentCardKeywords = [
         "visa", "mastercard", "maestro", "girocard", "debit", "kreditkarte", "debitkarte", "credit card", "debit card",
-        "american express", "amex", "valid thru", "valid through", "card number", "kartennummer", "cvc", "cvv",
+        "american express", "amex", "valid thru", "valid through", "good thru", "card number", "card no", "kartennummer",
+        "kartennr", "cvc", "cvv", "v pay", "unionpay", "diners",
     ]
 
     static let knownMerchants = [
@@ -106,8 +107,10 @@ public struct DocumentAnalyzer: Sendable {
             // never a preview. Nothing else of it is kept (no subject, sender, number or amount),
             // and `.other` never becomes an album of its own (`ProposalEngine`). What is stored of
             // the text is decided apart from this (`TextMinimizer.storable`) and does not change.
-            var sensitivity = TextMinimizer.sensitivity(of: rawText)
+            // Short words only as whole words: "bic" in "Arabic … cubic" is no bank (third review).
+            var sensitivity = SensitiveWords.sensitivity(of: rawText)
             if Self.containsIBAN(rawText) || TextMinimizer.namesPaymentCard(rawText) { sensitivity = max(sensitivity, .financial) }
+            if sensitivity < .identity, Self.hasMachineReadableZone(rawText) { sensitivity = .identity }
             guard sensitivity > .normal else { return nil }
             return DocumentInfo(type: .other, typeReliability: .uncertain, keywords: [], sensitivity: sensitivity)
         }

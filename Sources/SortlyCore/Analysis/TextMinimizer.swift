@@ -172,53 +172,119 @@ public enum TextMinimizer {
 }
 
 /// Words searched for in a text in one pass over its UTF-8 bytes, ignoring case for ASCII and
-/// German letters. Words of four letters or fewer count only as whole words ("bic", "visa",
-/// "iban": not in "public", "Revisaa" or "Libanon"); longer ones anywhere, as
-/// `DocumentAnalyzer` matches them.
+/// the upper-case letters of Latin-1 ("FÜHRERSCHEIN"), and taking any run of white space (also
+/// a line break or a non-breaking space) as one space ("VALID\nTHRU"). A word whose first part
+/// has four letters or fewer must start a word, one whose last part has four letters or fewer
+/// must end one ("bic", "visa", "card no": not in "Arabic", "Bicycle", "Revisaa" or "card not");
+/// longer parts match inside words ("Kreditkartenabrechnung"). Only letters count against a
+/// word boundary: punctuation, symbols and emoji („VISA“, VISA®, 💳VISA, »IBAN«) do not.
 struct SensitiveWords: Sendable {
-    /// The words by their first byte (256 entries: a table, no hashing per byte).
-    private let byFirstByte: [[(bytes: [UInt8], whole: Bool)]]
+    private struct Word: Sendable {
+        var bytes: [UInt8]
+        /// The byte before must not be part of a letter.
+        var startsWord: Bool
+        /// The byte after must not start a letter.
+        var endsWord: Bool
+    }
 
-    init(_ words: [String]) {
-        var index = [[(bytes: [UInt8], whole: Bool)]](repeating: [], count: 256)
-        for word in words {
-            let bytes = Array(word.lowercased().utf8)
-            guard let first = bytes.first else { continue }
-            index[Int(first)].append((bytes, word.count <= 4))
+    /// The words by their first byte (256 entries: a table, no hashing per byte).
+    private let byFirstByte: [[Word]]
+
+    /// `exact`: matched anywhere, also inside words (the masks).
+    init(_ words: [String], exact: [String] = []) {
+        var index = [[Word]](repeating: [], count: 256)
+        func add(_ word: String, startsWord: Bool, endsWord: Bool) {
+            let bytes = Self.normalized(Array(word.utf8))
+            guard let first = bytes.first else { return }
+            index[Int(first)].append(Word(bytes: bytes, startsWord: startsWord, endsWord: endsWord))
         }
+        for word in words {
+            let parts = word.split(separator: " ")
+            add(word, startsWord: (parts.first?.count ?? 0) <= 4, endsWord: (parts.last?.count ?? 0) <= 4)
+        }
+        for word in exact { add(word, startsWord: false, endsWord: false) }
         byFirstByte = index
     }
 
     /// Masked numbers, every sensitivity word of `DocumentAnalyzer` and the card words.
-    static let all = SensitiveWords([TextMinimizer.cardMask, TextMinimizer.ibanMask]
-                                    + DocumentAnalyzer.sensitivityKeywords.flatMap(\.1) + DocumentAnalyzer.paymentCardKeywords)
+    static let all = SensitiveWords(DocumentAnalyzer.sensitivityKeywords.flatMap(\.1) + DocumentAnalyzer.paymentCardKeywords,
+                                    exact: [TextMinimizer.cardMask, TextMinimizer.ibanMask])
     static let cards = SensitiveWords(DocumentAnalyzer.paymentCardKeywords)
+    /// The sensitivity words of `DocumentAnalyzer` per level.
+    static let levels = DocumentAnalyzer.sensitivityKeywords.map { ($0.0, SensitiveWords($0.1)) }
+
+    /// The highest level whose words occur in `text`, matched as whole words where they are
+    /// short (`DocumentAnalyzer.analyze` for a text without a document type).
+    static func sensitivity(of text: String) -> DocumentSensitivity {
+        levels.filter { $0.1.occurs(in: text) }.map(\.0).max() ?? .normal
+    }
+
+    /// Lower case (ASCII and Latin-1 upper-case letters) and every run of white space as one space.
+    static func normalized(_ input: [UInt8]) -> [UInt8] {
+        var out: [UInt8] = []
+        out.reserveCapacity(input.count)
+        var i = 0
+        while i < input.count {
+            let b = input[i]
+            let next: UInt8? = i + 1 < input.count ? input[i + 1] : nil
+            if (b >= 0x09 && b <= 0x0D) || b == 0x20 || (b == 0xC2 && next == 0xA0) {
+                if out.last != 0x20 { out.append(0x20) }
+                i += b == 0xC2 ? 2 : 1
+                continue
+            }
+            if b >= 0x41 && b <= 0x5A {
+                out.append(b + 0x20)
+            } else if b == 0xC3, let next, next >= 0x80, next <= 0x9E, next != 0x97 {
+                // À–Þ (not ×) to à–þ: "Ü" C3 9C → "ü" C3 BC.
+                out.append(b)
+                out.append(next + 0x20)
+                i += 2
+                continue
+            } else {
+                out.append(b)
+            }
+            i += 1
+        }
+        return out
+    }
+
+    /// Whether the character whose first byte is `lead` (followed by `next`) is a letter:
+    /// ASCII letters (the text is lower-cased) and the letters of other scripts. Not letters:
+    /// ASCII digits and punctuation; 0xC2 (non-breaking space, ©, ®, «, »); × and ÷; 0xE2
+    /// (general punctuation „ “ – •, ™, arrows); private use and specials; emoji (4 bytes).
+    static func isLetter(lead: UInt8, next: UInt8?) -> Bool {
+        switch lead {
+        case 0x61...0x7A: true
+        case 0xC3: next != 0x97 && next != 0xB7
+        case 0xC4...0xDF: true
+        case 0xE0, 0xE1, 0xE3...0xED: true
+        default: false
+        }
+    }
 
     func occurs(in text: String) -> Bool {
-        var bytes = Array(text.utf8)
-        // Lower case: ASCII, and the upper-case letters of Latin-1 (Ä, Ö, Ü, É …) after 0xC3.
-        for i in bytes.indices {
-            let b = bytes[i]
-            if b >= 0x41 && b <= 0x5A {
-                bytes[i] = b + 0x20
-            } else if i > 0, bytes[i - 1] == 0xC3, b >= 0x80, b <= 0x9E, b != 0x97 {
-                bytes[i] = b + 0x20
-            }
-        }
+        let bytes = Self.normalized(Array(text.utf8))
         return bytes.withUnsafeBufferPointer { text in
-            func isLetter(_ i: Int) -> Bool {
-                guard i >= 0, i < text.count else { return false }
-                let b = text[i]
-                return (b >= 0x61 && b <= 0x7A) || b >= 0x80
+            // The character that ends right before `index`: back over continuation bytes.
+            func letterBefore(_ index: Int) -> Bool {
+                var lead = index - 1
+                while lead > 0, lead > index - 4, text[lead] & 0xC0 == 0x80 { lead -= 1 }
+                guard lead >= 0 else { return false }
+                return Self.isLetter(lead: text[lead], next: lead + 1 < index ? text[lead + 1] : nil)
+            }
+            func letterAt(_ index: Int) -> Bool {
+                guard index < text.count else { return false }
+                return Self.isLetter(lead: text[index], next: index + 1 < text.count ? text[index + 1] : nil)
             }
             for start in text.indices {
                 let candidates = byFirstByte[Int(text[start])]
                 if candidates.isEmpty { continue }
-                for (word, whole) in candidates where start + word.count <= text.count {
+                for word in candidates where start + word.bytes.count <= text.count {
                     var same = true
-                    for k in 1..<max(word.count, 1) where text[start + k] != word[k] { same = false; break }
+                    for k in 1..<max(word.bytes.count, 1) where text[start + k] != word.bytes[k] { same = false; break }
                     guard same else { continue }
-                    if whole && (isLetter(start - 1) || isLetter(start + word.count)) { continue }
+                    if word.startsWord && letterBefore(start) { continue }
+                    if word.endsWord && letterAt(start + word.bytes.count) { continue }
                     return true
                 }
             }

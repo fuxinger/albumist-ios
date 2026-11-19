@@ -381,7 +381,7 @@ struct PreviewSecondReviewTests {
                      "Kreditkartenabrechnung", "4111 •••• ••••"] {
             #expect(TextMinimizer.looksSensitive(text), "\(text)")
         }
-        for text in ["", "Public transport in the Republic", "Urlaub im Libanon", "Revisaa", "Bestellung versandt"] {
+        for text in ["", "Arabic script on a cubic stone", "Bicycle tour", "Urlaub im Libanon", "Revisaa", "Bestellung versandt"] {
             #expect(!TextMinimizer.looksSensitive(text), "\(text)")
         }
         // Worked out with the text, also when the text changes afterwards.
@@ -403,5 +403,43 @@ struct PreviewSecondReviewTests {
                                 contentKnown: true)
         let hits = SearchIndex(facts: [card, letter], calendar: Fixture.calendar).search("Dokumente", now: now).ids
         #expect(Set(hits) == ["letter"])
+    }
+
+    /// Third review: card words across a line break or several spaces, more card words, and
+    /// short words next to punctuation, symbols or a non-breaking space.
+    @Test func cardWordsAcrossSpacesAndNextToPunctuation() {
+        for text in ["VALID\nTHRU 12/28", "VALID  THRU 12/28", "GOOD THRU 12/28", "Card No. 1234", "Kartennr. 1234", "V PAY",
+                     "UnionPay", "Diners Club International",
+                     "„VISA“", "VISA®", "©VISA", "VISA–Karte", "»IBAN«", "BIC\u{00A0}BYLADEM1001", "💳VISA",
+                     // Upper-case umlauts are lowered too: a driving licence prints them so.
+                     "FÜHRERSCHEIN Klasse B", "NATIONALITÄT DEUTSCH"] {
+            #expect(TextMinimizer.looksSensitive(text), "\(text)")
+        }
+        for text in ["Card not accepted", "Revisaa", "Visage", "Bicycle tour"] {
+            #expect(!TextMinimizer.looksSensitive(text), "\(text)")
+        }
+    }
+
+    /// Third review: "bic" inside "Arabic" or "cubic" made a plain text an `.other` document.
+    @Test func aPlainTextWithAShortWordInsideALongerOneIsNoDocument() {
+        #expect(DocumentAnalyzer().analyze(text: "Arabic script on a cubic stone in the old town") == nil)
+        #expect(DocumentAnalyzer().analyze(text: "BIC BYLADEM1001 for the transfer, please") != nil)
+    }
+
+    @Test func theMosaicLooksAtNoMoreThanItsLimitPerStretch() {
+        // 600 pictures not analysed yet, one analysed photo deep in the first stretch.
+        let library: [AssetID] = (0..<600).map { AssetID(String(format: "m%03d", $0)) }
+        var ranks = Dictionary(uniqueKeysWithValues: library.map { ($0, PreviewRank.unknown) })
+        ranks["m300"] = nil
+        #expect(PreviewPicker.evenly(library, count: 2, ranks: ranks) { $0 } == ["m000", "m599"])
+        // Within the limit the analysed photo wins.
+        ranks["m300"] = .unknown
+        ranks["m200"] = nil
+        #expect(PreviewPicker.evenly(library, count: 2, ranks: ranks) { $0 } == ["m200", "m599"])
+    }
+
+    @Test func theMosaicTakesAPhotoNotAnalysedYetBeforeADocument() {
+        let ranks: [AssetID: PreviewRank] = ["d": .document, "u": .unknown, "v": .unknown]
+        #expect(PreviewPicker.evenly(["d", "u", "v"], count: 1, ranks: ranks) { $0 } == ["u"])
     }
 }

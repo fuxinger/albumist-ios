@@ -29,15 +29,22 @@ public enum PreviewRank: Int, Comparable, Sendable {
     ///   textLooksSensitive`: "Visa Debit" on a card whose number is on the back or was not
     ///   read); a picture the image analysis took for a document (no screenshot) without any
     ///   document facts: its text is not read yet, unreadable (glare, an angle), or names no
-    ///   document type (an ID or medical paper, whose text is not stored).
+    ///   document type (an ID or medical paper, whose text is not stored);
+    ///   any picture whose read text is empty without document facts (third review: an ID or
+    ///   medical screenshot read by an older version was stored so), and a screenshot whose
+    ///   text is not read yet or never (text reading off) and that nothing else explains.
     /// - document: screenshots, and documents their text explains.
     /// - unknown: not looked at by the image analysis yet.
     /// Cheap: no text is read here, so a whole library is ranked in no noticeable time.
     public init(_ facts: AssetFacts) {
+        let explained = facts.document != nil || !facts.textCategories.isEmpty
         if (facts.document?.sensitivity ?? .normal) >= .financial || facts.textLooksSensitive {
             self = .sensitive
-        } else if facts.looksLikeDocument && !facts.asset.isScreenshotLike && facts.document == nil
-                    && facts.textCategories.isEmpty {
+        } else if facts.document == nil && facts.recognizedText?.isEmpty == true {
+            self = .sensitive
+        } else if !explained && facts.asset.isScreenshotLike && facts.recognizedText == nil {
+            self = .sensitive
+        } else if !explained && facts.looksLikeDocument && !facts.asset.isScreenshotLike {
             self = .sensitive
         } else if facts.asset.isScreenshotLike || facts.looksLikeDocument || facts.document != nil
                     || !facts.textCategories.isEmpty {

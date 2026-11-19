@@ -84,20 +84,32 @@
   Bildanalyse für ein Dokument hielt, gilt als sensibel, solange sein Text es nicht als harmloses
   Dokument erklärt (Text noch nicht gelesen, Original nur in iCloud, unlesbar wegen Spiegelung
   oder Winkel, Kartennummer auf der Rückseite oder verlesen, Ausweis oder Arztbrief ohne
-  erkannte Dokumentart). Was trotzdem durchrutschen kann:
+  erkannte Dokumentart). Ebenso sensibel: jedes Bild mit leerem gelesenem Text ohne
+  Dokument-Einordnung (so speicherten ältere Versionen Ausweis- und Arzt-Screenshots; nichts wird
+  dafür neu gelesen) und ein Bildschirmfoto, dessen Text nicht gelesen ist und das kein
+  Screenshot-Thema erklärt. Was trotzdem durchrutschen kann:
   - Ein Foto, das die Bildanalyse **nicht** für ein Dokument hielt, wird nie gelesen und gilt als
     gewöhnliches Foto, auch eine Bankkarte. Welche Bildmerkmale Vision einem Kartenfoto gibt,
     ist noch nicht auf einem Gerät geprüft (Liste `ContentAnalysis.documentLabels` kennt kein
     Karten-Merkmal); Idee in `IMPROVEMENTS.md` (Kartenform ID-1).
   - Sind „Themen“ und „Dokumente“ aus, fragt die Bildanalyse keine Merkmale ab: dann zählt nur
     Visions Kennzeichen für Gebrauchsbilder. Sind „Screenshots“, „Dokumente“ und „Messenger“ aus,
-    wird kein Text gelesen: dann zählt nur, ob die Bildanalyse ein Dokument sah.
+    wird kein Text gelesen: dann fehlen alle Bildschirmfotos und alle Bilder, die die Bildanalyse
+    für ein Dokument hielt, in Vorschauen; bei Fotos zählt nur die Bildanalyse.
   - Fotos, die die Bildanalyse noch nicht angesehen hat (vor allem während der ersten Analyse:
     frühe Vorschläge, das Mosaik), kommen erst nach allen angesehenen gewöhnlichen Fotos, werden
-    aber gezeigt, wenn es keine angesehenen gibt; ein Kartenfoto darunter ist dann noch nicht
-    erkannt. Das Teilen-Bild des Atlas nimmt nie ein solches Foto.
+    aber gezeigt, wenn es zu wenige angesehene gibt: sie füllen jeden Platz, der übrig bleibt. Ein
+    Kartenfoto darunter ist dann noch nicht erkannt. Das Mosaik der ersten Analyse sieht sich je
+    Abschnitt höchstens 256 Bilder an und nimmt das erste nicht angesehene, wenn darunter kein
+    angesehenes Foto ist. Das Teilen-Bild des Atlas nimmt nie ein solches Foto.
+  - Themen, die vor allem aus Bildern mit Dokument-Anschein bestehen (Whiteboards, technische
+    Dokumentation), zeigen oft „Vorschau ausgeblendet“: ohne erklärenden Text gelten diese Bilder
+    als sensibel. Das Album bekommt trotzdem alle Fotos.
   - Ein Beleg, der „VISA“ oder „girocard“ nennt, gilt für Vorschauen als sensibel und fehlt dort;
-    im Beleg-Album bleibt er (die Kartenwörter ändern die Dokument-Einordnung nicht).
+    im Beleg-Album bleibt er (die Kartenwörter ändern die Dokument-Einordnung nicht). Ein Beleg,
+    der „Kreditkarte“, eine IBAN oder „BIC“ nennt, ist dagegen schon länger als finanziell
+    eingeordnet und fehlt deshalb im Beleg-Album, solange „Sensible Dokumente einbeziehen“ aus ist
+    (Standard); das ist älteres Verhalten und hier nicht geändert.
   - Eine maskierte Bestell- oder Sendungsnummer, die die Kartenprüfung besteht, macht einen
     Screenshot zum sensiblen Dokument: er fehlt dann nur in der Vorschau.
 

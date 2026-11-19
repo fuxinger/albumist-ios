@@ -1477,7 +1477,8 @@ class SleepRuleTests(unittest.TestCase):
 
     ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
     FOLDER = os.path.join(ROOT, "App", "SortlyUITests")
-    SLEEP = re.compile(r"\b(u?sleep)\(")
+    # sleep(s), usleep(µs), Thread.sleep(forTimeInterval:/until:), RunLoop's run(until:).
+    SLEEP = re.compile(r"(?<![\w.])(u?sleep)\(|\b(Thread\.sleep)\(|\b(RunLoop\.\w+\.run)\(\s*until:")
     # Calls of sleep()/usleep() per file (code only). The count may only go down; lower it here
     # when a sleep becomes a condition wait.
     CEILING = {
@@ -1487,9 +1488,14 @@ class SleepRuleTests(unittest.TestCase):
         "SortlyFlowUITests.swift": 123,
         "SortlyLockedUITests.swift": 15,
         "UITestOnboarding.swift": 3,
-        # The poll intervals of the condition waits and the minimum time in the background.
-        "UITestWait.swift": 3,
+        # The poll intervals of the condition waits (until, toBackground, never), the minimum
+        # time in the background, and atLeast: the rest of an old fixed time after the state was
+        # reached (second review of C2). Its callers are counted in AT_LEAST.
+        "UITestWait.swift": 5,
     }
+    # UITestWait.atLeast calls per file (a fixed minimum after a wait; second review of C2):
+    # counted like the sleeps, so a new one is a decision, not a habit.
+    AT_LEAST = {"AccessibilityUITests.swift": 1, "ReleaseSmokeUITests.swift": 1, "SortlyFlowUITests.swift": 4}
     # Long sleeps (3 s or more, or a computed length) without a "// pacing:" note, per file:
     # the ones still standing in for a state. None left since the condition waits of
     # UITestWait.swift; a new one fails test_a_long_sleep_is_pacing_and_says_so.
@@ -1506,17 +1512,28 @@ class SleepRuleTests(unittest.TestCase):
             while j < len(code) and depth:
                 depth += {"(": 1, ")": -1}.get(code[j], 0)
                 j += 1
-            found.append((code.count("\n", 0, m.start()) + 1, m.group(1) + ":" + code[m.end():j - 1].strip()))
+            kind = m.group(1) or m.group(2) or m.group(3)
+            found.append((code.count("\n", 0, m.start()) + 1, kind + ":" + code[m.end():j - 1].strip()))
         return found
 
     @staticmethod
     def is_long(call: str) -> bool:
         """3 s or more, or a length the code computes (it can be anything)."""
         kind, argument = call.split(":", 1)
-        literal = argument.replace("_", "")
-        if not literal.isdigit():
-            return True
-        return int(literal) >= (3 if kind == "sleep" else 3_000_000)
+        if kind in ("sleep", "usleep"):
+            literal = argument.replace("_", "")
+            if not literal.isdigit():
+                return True
+            return int(literal) >= (3 if kind == "sleep" else 3_000_000)
+        # Thread.sleep(forTimeInterval: 2), RunLoop.main.run(until: Date().addingTimeInterval(1)):
+        # seconds as a literal; anything else (until: a date the code computes) is long.
+        number = r"([0-9][0-9_]*(?:\.[0-9]+)?)"
+        for shape in (rf"forTimeInterval:\s*{number}", rf"Date\(timeIntervalSinceNow:\s*{number}\)",
+                      rf"Date\(\)\.addingTimeInterval\({number}\)"):
+            found = re.fullmatch(shape, argument.strip())
+            if found:
+                return float(found.group(1).replace("_", "")) >= 3
+        return True
 
     @staticmethod
     def has_pacing_note(lines: list[str], number: int) -> bool:
@@ -1547,6 +1564,13 @@ class SleepRuleTests(unittest.TestCase):
         self.assertTrue(self.has_pacing_note(["sleep(3) // pacing: the show's animation"], 1))
         self.assertFalse(self.has_pacing_note(["sleep(3)"], 1))
         self.assertTrue(self.has_pacing_note(["// pacing: the results", "// (more)", "sleep(3)"], 3))
+        # Second review of C1: the other ways to sleep count too.
+        other = ("Thread.sleep(forTimeInterval: 2)\nThread.sleep(forTimeInterval: 0.5)\nThread.sleep(until: end)\n"
+                 "RunLoop.current.run(until: Date(timeIntervalSinceNow: 4))\nRunLoop.main.run(until: Date().addingTimeInterval(1))\n"
+                 "app.run(x)\n")
+        found = self.sleeps(other)
+        self.assertEqual([n for n, _ in found], [1, 2, 3, 4, 5])
+        self.assertEqual([self.is_long(c) for _, c in found], [False, False, True, True, False])
         self.assertFalse(self.has_pacing_note(["// pacing: the results", "x()", "sleep(3)"], 3))
 
     def test_the_number_of_fixed_sleeps_only_goes_down(self):
@@ -1558,6 +1582,11 @@ class SleepRuleTests(unittest.TestCase):
                                      "condition (an element, a state) with a deadline instead")
                 self.assertEqual(count, ceiling, f"{name}: {count} fixed sleeps now; lower CEILING to {count}")
         self.assertEqual(set(self.CEILING) - set(counts), set(), "CEILING names a file that is gone")
+
+    def test_the_minimums_after_a_wait_are_counted(self):
+        counts = {name: len(re.findall(r"\bUITestWait\.atLeast\(", ui_groups.strip_swift(source)))
+                  for name, source in self.files()}
+        self.assertEqual({n: c for n, c in counts.items() if c}, self.AT_LEAST)
 
     def test_a_long_sleep_is_pacing_and_says_so(self):
         for name, source in self.files():
@@ -1607,6 +1636,13 @@ class BudgetTests(unittest.TestCase):
             ui_tests.command_run(args)
         self.assertEqual(check.call_args[0][0], "flow-full")
         self.assertEqual(check.call_args[0][2], 1)
+        # A broken budget report never replaces the run's own exit code or error (second review).
+        with mock.patch.object(ui_tests, "run_group", return_value=75), \
+                mock.patch.object(ui_tests, "budget_check", side_effect=OSError("summary not writable")):
+            self.assertEqual(ui_tests.command_run(args), 75)
+        with mock.patch.object(ui_tests, "run_group", side_effect=RuntimeError("boom")), \
+                mock.patch.object(ui_tests, "budget_check", side_effect=OSError("x")), self.assertRaises(RuntimeError):
+            ui_tests.command_run(args)
         seen = []
         with mock.patch.object(ui_tests, "command_run", lambda a: seen.append(a.budget_min) or 0):
             self.assertEqual(ui_tests.main(["run", "--udid", "U", "--name", "n", "--budget-min", "70"]), 0)

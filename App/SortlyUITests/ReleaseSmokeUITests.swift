@@ -62,6 +62,8 @@ final class ReleaseSmokeUITests: XCTestCase {
         let review = app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9.]+ Vorschl(ag|äge) prüfen.*")).firstMatch
         guard tap(review, "release smoke suggestions offered", timeout: 60) else { return }
         guard tap(button("empfohlene auswählen"), "release smoke recommended ones", timeout: 20) else { return }
+        // The list takes the choice before going back (the flow tests give it a second too).
+        UITestWait.atLeast(1, since: Date())
         back()
         guard tap(button("ausgewählte Alben anlegen"), "release smoke open the plan", timeout: 20),
               UITestWait.appears(app.navigationBars["Vorschau"], "release smoke plan screen", timeout: 30) else { return }

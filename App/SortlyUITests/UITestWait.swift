@@ -72,6 +72,37 @@ enum UITestWait {
         return reached
     }
 
+    /// `condition` never holds for `seconds` (checked every half second): the check that
+    /// something does not happen watches as long as the fixed sleep before it did (second review
+    /// of C2: a check right after a state was reached saw nothing yet).
+    @discardableResult
+    static func never(_ what: String, for seconds: TimeInterval,
+                      file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) -> Bool {
+        let start = Date()
+        var seen = condition()
+        while !seen, Date().timeIntervalSince(start) < seconds {
+            usleep(500_000)
+            seen = condition()
+        }
+        let took = String(format: "%.1f", Date().timeIntervalSince(start))
+        if seen {
+            print("UI_STEP_MISSING \(what) (it happened after \(took) s)")
+            XCTFail("Within \(Int(seconds)) s: \(what) did not hold", file: file, line: line)
+        } else {
+            print("UI_STEP_OK \(what) (watched \(took) s)")
+        }
+        return !seen
+    }
+
+    /// Waits until `seconds` have passed since `start`: the old fixed time stays the minimum
+    /// after the state a wait reached (second review of C2: the screen was there, its content
+    /// or the next check needed the rest of the old time).
+    static func atLeast(_ seconds: TimeInterval, since start: Date) {
+        let rest = seconds - Date().timeIntervalSince(start)
+        // pacing: the rest of the old fixed time, after the state was reached
+        if rest > 0 { usleep(UInt32(rest * 1_000_000)) }
+    }
+
     private static func report(_ met: Bool, _ what: String, since start: Date, timeout: TimeInterval,
                                file: StaticString, line: UInt) {
         print("UI_TIMING wait \(what) \(String(format: "%.1f", Date().timeIntervalSince(start))) s")

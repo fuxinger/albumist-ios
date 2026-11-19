@@ -89,6 +89,8 @@ final class AccessibilityUITests: XCTestCase {
         var undo: String
         var atlas: String
         var shareAtlas: String
+        /// The share card's preview image (ShareCardSheet).
+        var sharePreview: String
         var searchQuery: String
         var country: String
         /// Titles of screens the walk opens and goes back from: it waits for their bar.
@@ -100,14 +102,14 @@ final class AccessibilityUITests: XCTestCase {
                                   suggestionTitle: "Vorschlag", suggestionsTitle: "Vorschläge", rowMarker: "Fotos",
                                   starterPattern: "[0-9]+ Alben (kostenlos )?anlegen", planTitle: "Vorschau",
                                   applyNow: "Alben jetzt anlegen", undo: "Rückgängig machen", atlas: "Reise-Atlas",
-                                  shareAtlas: "Reise-Atlas teilen", searchQuery: "Rom", country: "Italien",
+                                  shareAtlas: "Reise-Atlas teilen", sharePreview: "Vorschau des Teilen-Bilds", searchQuery: "Rom", country: "Italien",
                                   receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ suggestions?.*",
                                    suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
                                    starterPattern: "Create [0-9]+ Albums?( for Free)?", planTitle: "Preview",
                                    applyNow: "Create Albums Now", undo: "Undo", atlas: "Travel Atlas",
-                                   shareAtlas: "Share Travel Atlas", searchQuery: "Rome", country: "Italy",
+                                   shareAtlas: "Share Travel Atlas", sharePreview: "Preview of the share image", searchQuery: "Rome", country: "Italy",
                                    receiptTitle: "Changes", historyTitle: "History and Undo")
     }
 
@@ -342,7 +344,13 @@ final class AccessibilityUITests: XCTestCase {
                 }
                 app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
+                    let shownAt = Date()
+                    // The card itself before the audit (its preview), and at least the old 3 s:
+                    // the outlines and the cover load after the sheet is shown (second review of C2).
                     UITestWait.appears(button(w.done), "\(tag) share card with its done button", timeout: 20)
+                    UITestWait.appears(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", w.sharePreview)).firstMatch,
+                                       "\(tag) share card preview", timeout: 20)
+                    UITestWait.atLeast(3, since: shownAt)
                     check("\(tag) share sheet", english: english)
                     tap(button(w.done), "\(tag) close share")
                     sleep(2)

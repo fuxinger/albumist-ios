@@ -544,10 +544,16 @@ final class SortlyFlowUITests: XCTestCase {
 
         // Apply
         if tap(button("ausgewählte Alben anlegen"), "open plan", timeout: 20) {
-            UITestWait.appears(app.navigationBars["Vorschau"], "plan screen shown", timeout: 30)
-            shot("10-plan"); audit("plan")
+            let shownAt = Date()
             // The plan names every album it will make, not only the counts.
             let list = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Diese Alben werden")).firstMatch
+            // The plan's content before the audit, not only its bar (second review of C2): the
+            // start button, the unlock card or the album list; and at least the old 3 s.
+            UITestWait.until("plan screen shown", timeout: 30) {
+                app.buttons["plan.apply"].exists || app.staticTexts["Albumist freischalten"].exists || list.exists
+            }
+            UITestWait.atLeast(3, since: shownAt)
+            shot("10-plan"); audit("plan")
             print(list.waitForExistence(timeout: 5) ? "UI_STEP_OK plan lists albums" : "UI_STEP_MISSING plan lists albums")
             if list.exists {
                 app.swipeUp(); sleep(1)
@@ -616,7 +622,13 @@ final class SortlyFlowUITests: XCTestCase {
                 back(); sleep(1)
             }
             if tap(app.buttons["Reise-Atlas teilen"], "share atlas") {
+                let shownAt = Date()
+                // The card itself (its preview and the share button), and at least the old 3 s:
+                // the outlines and the cover load after the sheet is shown (second review of C2).
                 UITestWait.appears(button("Fertig"), "share card with its done button", timeout: 20)
+                UITestWait.appears(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Vorschau des Teilen-Bilds")).firstMatch,
+                                   "share card preview", timeout: 20)
+                UITestWait.atLeast(3, since: shownAt)
                 shot("13-share-card")
                 tap(button("Fertig"), "close share")
                 sleep(2) // the sheet slides away before the navigation bar answers again
@@ -961,8 +973,11 @@ final class SortlyFlowUITests: XCTestCase {
             sleep(1)
             shot(shotName)
             if finished {
+                let tapped = Date()
                 done.tap()
                 UITestWait.disappears(done, "trip workshop closed after \(step)", timeout: 20)
+                // The old 3 s at least: the trips list takes the split or merge after the close.
+                UITestWait.atLeast(3, since: tapped)
             }
         }
 
@@ -1232,8 +1247,11 @@ final class SortlyFlowUITests: XCTestCase {
     func test3_TapThroughSweep() {
         continueAfterFailure = true
         completeOnboardingIfCutOff("test3")
+        let prepared = Date()
         prepare()
         UITestWait.appears(app.tabBars.firstMatch, "tab bar before the sweep", timeout: 60)
+        // The old 5 s at least (second review of C2): the overview settles before the sweep.
+        UITestWait.atLeast(5, since: prepared)
         // A sweep that reaches nothing proves nothing: every tab and the suggestions list must
         // lead somewhere. The albums tab is the exception only while the library really has no
         // album (a fresh simulator before any plan): then it must say so.
@@ -1499,10 +1517,11 @@ final class SortlyFlowUITests: XCTestCase {
         UITestWait.toBackground(app, "during the analysis", atLeast: 8)
         app.activate()
         UITestWait.until("app in the foreground again", timeout: 30) { app.state == .runningForeground }
-        let running = app.buttons["Pause"].waitForExistence(timeout: 10) || analysisIdle
-        print(running ? "UI_STEP_OK analysis still there after background" : "UI_STEP_MISSING analysis still there after background")
-        XCTAssertTrue(running, "After coming back the analysis neither runs nor is done")
-        XCTAssertFalse(app.buttons["analysis.resume"].exists, "Coming back from the background paused the analysis")
+        // Running or done, polled (no 10 s extra when it is already done), and for at least the
+        // old 3 s no "Fortsetzen": a pause that comes a moment after the return is seen too
+        // (second review of C2).
+        UITestWait.until("analysis still there after background", timeout: 10) { app.buttons["Pause"].exists || analysisIdle }
+        UITestWait.never("analysis not paused by the background", for: 3) { app.buttons["analysis.resume"].exists }
         record("after background")
         shot("61-after-background")
 

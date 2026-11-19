@@ -128,8 +128,10 @@ final class DeviceConditionUITests: XCTestCase {
     /// for 2 min with the notice coming back. One more second after the state changed gives the
     /// app's own didEnterBackground observers their turn.
     @discardableResult
-    private func sendToBackground(_ why: String, atLeast: TimeInterval, timeout: TimeInterval = 30) -> Bool {
-        UITestWait.toBackground(app, why, atLeast: atLeast, timeout: timeout)
+    private func sendToBackground(_ why: String, atLeast: TimeInterval, timeout: TimeInterval = 30,
+                                  file: StaticString = #filePath, line: UInt = #line) -> Bool {
+        // The caller's file and line, so a failure points at the test, not at this helper.
+        UITestWait.toBackground(app, why, atLeast: atLeast, timeout: timeout, file: file, line: line)
     }
 
     /// Polls until `condition` held on `stableChecks` checks in a row (2 s apart).

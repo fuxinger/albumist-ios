@@ -1256,7 +1256,10 @@ def command_run(args) -> int:
     try:
         return run_group(args)
     finally:
-        budget_check(args.name, time.time() - began, getattr(args, "budget_min", 0) or 0)
+        try:
+            budget_check(args.name, time.time() - began, getattr(args, "budget_min", 0) or 0)
+        except Exception as error:  # a report: never in place of the run's exit code or error
+            print(f"UI_BUDGET {args.name}: not checked ({type(error).__name__}: {error})", flush=True)
 
 
 def budget_check(name: str, seconds: float, budget_min: float) -> bool:

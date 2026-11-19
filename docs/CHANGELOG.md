@@ -81,6 +81,9 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 19.11.: Größte Schrift: Das Symbol eines Suchvorschlags liegt nicht mehr über dem Wort
+  (P3-12); seine Spalte wächst mit der Schrift (`@ScaledMetric`), ebenso die Symbole in der
+  Reise-Werkstatt. `layout_rule.py` lehnt feste Symbol-Breiten ab.
 - 19.11.: Englisch (P3-10): „Sicher“ heißt „Certain“ statt „Safe“, überall „analyzing“ und
   „test run“, „Alles zurücknehmen“ heißt „Undo Everything“, alle Knöpfe groß geschrieben
   („Create Album“, „Not Now“, „Restore Purchase“ …). `check_strings.py` prüft das mit

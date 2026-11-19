@@ -17,27 +17,19 @@ Buildnummer und der Commit werden automatisch angehängt.
   (Beschluss 17.11.).
 
 <!-- testflight:start -->
-Danke fürs Testen! Dieser Build bringt viele Korrekturen aus deinen Tests. Bitte achte besonders auf:
+Danke fürs Testen! Dieser Build bringt Korrekturen aus der großen Prüfung. Bitte achte besonders auf:
 
-- Orte, an denen du öfter bist: heißen jetzt nach der Stadt (nicht „Bayern“), und derselbe Ort kommt nur einmal. Dein Zuhause erkennt Albumist an den Fotos des ganzen Tages.
-- Ortsnamen: Während du die App offen hast, wartet die Analyse nicht mehr auf Apple. Was dann noch fehlt, holt Albumist später nach; die Karte zeigt das als eigene Verfeinerung.
-- Ring „Sortiert“: Ignorierte Fotos zählen nicht mehr mit, der Ring kann 100 % erreichen. Die Liste „Sortiert“ in der Mediathek zeigt dieselbe Zahl.
-- Vorschaubilder: Bankkarten, Ausweise und andere sensible Dokumente erscheinen nie mehr als Vorschau oder Titelbild.
-- Namensfeld: Einen Ort selbst benennen geht jetzt wie in den Einstellungen von iOS; „Anpassen“ zeigt den Namen, den du getippt hast.
-- Pause: Änderst du während einer Pause eine Reise (teilen, zusammenlegen, „Aufheben“), läuft die Analyse weiter und wendet die Änderung an.
-- Suche: Orte, die du selbst benannt hast, findest du über ihren Namen, auch bevor es ihr Album gibt.
-- Umstrittene Gebiete (etwa Krim, Taiwan, Kosovo): Albumist ordnet sie keinem Land zu und sagt „nicht sicher“.
-- Gleicher Name: Hast du schon ein Album mit genau dem Namen eines Vorschlags, ergänzt Albumist dieses Album, statt ein zweites anzulegen.
-- Fotos mit falschem Datum in der Zukunft und Fotos, die einmal nicht lesbar waren, bleiben nicht mehr für immer unsortiert; Albumist versucht sie später noch einmal.
-- Umkreis-Suche: Findet jetzt jedes Foto im Kreis.
-- Reisen bearbeiten: Nach einem Fehler beim Neuberechnen werden die Knöpfe wieder frei.
-- Diagnosebericht: zeigt jetzt, wie viel Akku die Analyse ungefähr pro 1.000 Fotos braucht.
+- Tab „Alben“: Jedes Album steht nur noch einmal. Alben von Albumist stehen nicht zusätzlich unter „Deine Alben“.
+- Fotos groß ansehen: Öffnest du ein Foto in einer sehr großen Mediathek, geht es schneller auf. Wische bitte einmal weit vor und zurück: Springt das Bild, oder hakt es?
+- Größte Schrift (Einstellungen > Bedienungshilfen): Reise-Atlas, Suche und „Ordner für neue Alben“ sind jetzt ganz lesbar, nichts liegt mehr übereinander.
+- Englisch: Viele Texte und Knöpfe sind korrigiert (zum Beispiel „Certain“ statt „Safe“). Wer das iPhone auf Englisch hat: Klingt etwas falsch?
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
 <!-- testflight:end -->
 
 ## Frühere Builds
 
+- Build 38 (19.11.2026, erster Upload ohne Klick): Orte nach der Stadt, Ortsnamen ohne Warten, Ring „Sortiert“ bis 100 %, keine Dokumente als Vorschau, Namensfeld wie in iOS, Pause und Reisen, umstrittene Gebiete, Gleicher Name, Fotos mit Zukunftsdatum, Umkreis-Suche, Akku im Diagnosebericht.
 - Build nach PR #7 (19.11.2026): Ausblenden sofort sichtbar, Mediathek-Tab schneller, Fotos hängt nie fest, Rückgängig nach Abbruch, Suche mit Zeiträumen, Themen später einschalten, Sprache der Albumnamen, Tag zu Hause trennt eine Reise.
 - Bis 18.11.2026: Rückgängig fragt nach dem Löschen; Analyse läuft bei Wärme weiter; Probejahr bleibt; Fotos groß ansehen.
 - Build 27 (15.11.2026): erster Text, Inhalt wie oben.

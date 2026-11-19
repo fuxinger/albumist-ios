@@ -17,6 +17,10 @@ public actor SortlyStore: PlanJournal {
     /// with it that a refresh of the overview reads each of them once (review P4-02).
     public private(set) var wholeLibraryReads: [String: Int] = [:]
     private func counted(_ read: String) { wholeLibraryReads[read, default: 0] += 1 }
+    /// Rows written or deleted for the photos and the albums (`upsertAssets`, `removeAssets`,
+    /// `saveInventory`). Tests count with it that a run without a change in the library writes
+    /// nothing (review P4-03).
+    public private(set) var libraryRowWrites = 0
 
     /// - Parameter url: database file; `nil` creates an in-memory store (tests, previews).
     public init(url: URL?) throws {
@@ -104,6 +108,7 @@ public actor SortlyStore: PlanJournal {
                         try db.execute("UPDATE assets SET labels_version = 0 WHERE id = ?", [id])
                     }
                 }
+                libraryRowWrites += 1
                 try db.execute("""
                     INSERT INTO assets (id, kind, subtypes, creation_date, modification_date, latitude, longitude, location_accuracy,
                         pixel_width, pixel_height, duration, burst_id, is_favorite, original_filename, uti, fingerprint, analysis_version)
@@ -142,8 +147,36 @@ public actor SortlyStore: PlanJournal {
         try db.transaction {
             for id in stale { try db.execute("DELETE FROM assets WHERE id = ?", [.text(id)]) }
         }
+        libraryRowWrites += stale.count
         if !stale.isEmpty { placesRevision += 1 }
         return stale.count
+    }
+
+    /// Removes these assets (deleted from the library, or no longer readable) and all their
+    /// analysis results, like `removeAssets(notIn:)`. Returns how many were stored.
+    public func removeAssets(_ ids: Set<AssetID>) throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+        var removed = 0
+        try db.transaction {
+            for id in ids.sorted() {
+                guard try db.query("SELECT 1 AS x FROM assets WHERE id = ?", [.text(id.rawValue)]).isEmpty == false else { continue }
+                try db.execute("DELETE FROM assets WHERE id = ?", [.text(id.rawValue)])
+                removed += 1
+            }
+        }
+        libraryRowWrites += removed
+        if removed > 0 { placesRevision += 1 }
+        return removed
+    }
+
+    /// `assetsWithFileDetails` for these assets only (a read of the photos that changed).
+    public func fileDetails(for ids: Set<AssetID>) throws -> [AssetID: Date] {
+        var out: [AssetID: Date] = [:]
+        for id in ids {
+            guard let r = try db.query("SELECT modification_date FROM assets WHERE id = ? AND uti IS NOT NULL", [.text(id.rawValue)]).first else { continue }
+            out[id] = r["modification_date"]?.double.map { Date(timeIntervalSince1970: $0) } ?? .distantPast
+        }
+        return out
     }
 
     /// Assets whose file details (name, type, RAW) are stored, with the modification date they
@@ -363,12 +396,22 @@ public actor SortlyStore: PlanJournal {
 
     // MARK: - Album inventory
 
-    /// Replaces the stored inventory snapshot (albums, folders, memberships).
+    /// Replaces the stored inventory snapshot (albums, folders, memberships). Writes only the
+    /// albums and folders that differ from the stored ones: a library read again without a
+    /// change wrote every album and every membership again (review P4-03).
     public func saveInventory(_ inventory: CollectionInventory) throws {
+        let stored = try storedInventory()
+        let changed = inventory.collections.values.filter { stored[$0.id] != $0 }.sorted(by: { $0.id < $1.id })
+        let gone = stored.collections.keys.filter { inventory[$0] == nil }.sorted()
+        guard !changed.isEmpty || !gone.isEmpty else { return }
         try db.transaction {
-            try db.execute("DELETE FROM collection_members")
-            try db.execute("DELETE FROM collections")
-            for c in inventory.collections.values.sorted(by: { $0.id < $1.id }) {
+            for id in gone + changed.map(\.id) {
+                let raw: SQLValue = .text(id.rawValue)
+                libraryRowWrites += (stored[id]?.assetIDs.count ?? 0) + (stored[id] == nil ? 0 : 1)
+                try db.execute("DELETE FROM collection_members WHERE collection_id = ?", [raw])
+                try db.execute("DELETE FROM collections WHERE id = ?", [raw])
+            }
+            for c in changed {
                 try db.execute("INSERT INTO collections (id, title, kind, capabilities, parent_id, child_ids) VALUES (?, ?, ?, ?, ?, ?)", [
                     .text(c.id.rawValue), .text(c.title), .text(c.kind.rawValue), .integer(Int64(c.capabilities.rawValue)),
                     Self.text(c.parentID?.rawValue), try json(c.childIDs),
@@ -376,12 +419,17 @@ public actor SortlyStore: PlanJournal {
                 for a in c.assetIDs.sorted() {
                     try db.execute("INSERT INTO collection_members (collection_id, asset_id) VALUES (?, ?)", [.text(c.id.rawValue), .text(a.rawValue)])
                 }
+                libraryRowWrites += 1 + c.assetIDs.count
             }
         }
     }
 
     public func loadInventory() throws -> CollectionInventory {
         counted("loadInventory")
+        return try storedInventory()
+    }
+
+    private func storedInventory() throws -> CollectionInventory {
         var members: [String: Set<AssetID>] = [:]
         for row in try db.query("SELECT collection_id, asset_id FROM collection_members") {
             if let c = row["collection_id"]?.string, let a = row["asset_id"]?.string { members[c, default: []].insert(AssetID(a)) }

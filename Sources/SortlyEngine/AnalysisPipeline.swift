@@ -295,6 +295,10 @@ public actor AnalysisPipeline {
 
     enum Key {
         static let trips = "analysis.trips"
+        /// Where in the library's change history the stored photos and albums are
+        /// (`LibraryReadMark`). An analysis key: "Analyse neu aufbauen" and the safety copy
+        /// leave it out, so a database put back or rebuilt reads the whole library first.
+        static let libraryMark = "analysis.libraryMark"
         static let frequentPlaces = "analysis.frequentPlaces"
         static let groups = "analysis.groups"
         static let tripCorrections = "user.tripCorrections"
@@ -845,6 +849,77 @@ public actor AnalysisPipeline {
         await reader.access() != runAccess
     }
 
+    /// Where in the library's change history the stored photos and albums are: they are
+    /// the library as it was at `mark`, read with `includeHidden`. Written after a whole read
+    /// with full access and after each read of the changes; removed before a whole read.
+    struct LibraryReadMark: Codable, Sendable {
+        var mark: LibraryChangeMark
+        var includeHidden: Bool
+        /// Reads of changes since the last whole read (`wholeReadEvery`).
+        var changeReads = 0
+    }
+
+    /// After this many runs that read changes, one reads the whole library anyway: whatever
+    /// the change history may have missed is put right within days (a run starts at every
+    /// launch of the app). Runs without any change do not count.
+    static let wholeReadEvery = 30
+    /// More changed photos than this: the whole read, which says how far it is on the card
+    /// (a read of the changes says nothing until it is done).
+    static let largestChangeRead = 1_000
+
+    /// The mark at which this run read the albums and those albums, for `albumsUnchanged`.
+    private var inventoryMark: (mark: LibraryChangeMark, inventory: CollectionInventory)?
+
+    /// Step 1 by the library's change history (review P4-03): the photos added, changed or
+    /// deleted since the stored mark are read and stored, nothing else. The albums are walked
+    /// again only when anything changed at all. Returns the albums and the number of photos,
+    /// or `nil` when the whole library has to be read: no mark, another setting for hidden
+    /// photos, limited access (the selection can change without a change in the library), a
+    /// history that cannot tell (too old, another library), many changes, every
+    /// `wholeReadEvery`-th time, or a count of photos afterwards that does not fit the library.
+    /// Throws `LibraryReadPaused` on a Pause, with the mark left where it was (the changes are
+    /// read again next time).
+    private func readChanges(includeHidden: Bool, control: AnalysisRunControl,
+                             report: inout Report) async throws -> (CollectionInventory, Int)? {
+        guard runAccess == .full,
+              let stored = try await store.value(LibraryReadMark.self, forKey: Key.libraryMark),
+              stored.includeHidden == includeHidden, stored.changeReads < Self.wholeReadEvery,
+              let changes = try await reader.changes(since: stored.mark),
+              changes.assets.count + changes.deleted.count <= Self.largestChangeRead else { return nil }
+        // The deleted ones too: what is readable now stays, whatever order the history named
+        // its changes in (a photo put back from "Zuletzt gelöscht").
+        let asked = changes.assets.union(changes.deleted)
+        let read = try await reader.fetchAssets(asked, includeHidden: includeHidden,
+                                                knownDetails: try await store.fileDetails(for: asked)) { _, _ in !control.isPaused }
+        // Named and not read: deleted, hidden, or no longer of the user's library.
+        let gone = asked.subtracting(read.assets.map(\.id))
+        // Counted also when the whole read follows (it adds what it finds besides).
+        report.newOrChanged = try await store.upsertAssets(read.assets).count
+        report.removed = try await store.removeAssets(gone)
+        // The stored photos are the library now, or something is in doubt.
+        guard try await store.assetCount() == read.libraryCount else { return nil }
+        if changes.isEmpty {
+            // Nothing changed: the stored albums are the library's; the mark stays (no write).
+            return (try await store.loadInventory(), read.libraryCount)
+        }
+        // Any change walks the albums: a photo added, deleted or changed may have joined or
+        // left one. Only the albums that differ are written.
+        let inventory = try await reader.currentInventory()
+        try await store.saveInventory(inventory)
+        try await store.setValue(LibraryReadMark(mark: changes.mark, includeHidden: includeHidden, changeReads: stored.changeReads + 1),
+                                 forKey: Key.libraryMark)
+        return (inventory, read.libraryCount)
+    }
+
+    /// Whether the albums are still as this run read them (`inventory`), by the change history:
+    /// then the suggestions need no second walk over all albums (review P4-03). `false` when
+    /// that cannot be told.
+    private func albumsUnchanged(_ inventory: CollectionInventory) async -> Bool {
+        guard let (mark, read) = inventoryMark, read == inventory,
+              let changes = try? await reader.changes(since: mark) else { return false }
+        return changes.isEmpty
+    }
+
     /// `onWaiting`: the run waits for the device (hot, battery nearly empty) and goes on by
     /// itself; called with `nil` when it goes on.
     /// `control`: the app's handle to pause exactly this run. A run that is called while
@@ -885,14 +960,32 @@ public actor AnalysisPipeline {
         // keep their file details (the next read skips those), but the partial list is never
         // taken as the library: nothing is removed (review of 9f0bc40: a user who paused again
         // and again started from nothing each time).
-        let assets: [AssetSnapshot]
         let includeHidden = settings.privacy.includeHiddenAssets
         report.settingsUsed.hidden = includeHidden
+        // Only what changed since the last run, when the library's change history can say
+        // (review P4-03); otherwise, or when anything is in doubt, the whole library.
+        let inventory: CollectionInventory
+        let libraryCount: Int
         do {
-            assets = try await reader.fetchAssets(includeHidden: includeHidden,
-                                                  knownDetails: try await store.assetsWithFileDetails()) { read, total in
-                onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
-                return !control.isPaused
+            if let changed = try await readChanges(includeHidden: includeHidden, control: control, report: &report) {
+                (inventory, libraryCount) = changed
+            } else {
+                // A whole read starts without a mark: one paused or failed half way never
+                // leaves a mark that the partial read would be taken for.
+                try await store.removeValue(forKey: Key.libraryMark)
+                // Taken before the read: a change made while it reads is read next time.
+                let mark = runAccess == .full ? await reader.changeMark() : nil
+                let assets = try await reader.fetchAssets(includeHidden: includeHidden,
+                                                          knownDetails: try await store.assetsWithFileDetails()) { read, total in
+                    onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
+                    return !control.isPaused
+                }
+                report.newOrChanged += try await store.upsertAssets(assets).count
+                report.removed += try await store.removeAssets(notIn: Set(assets.map(\.id)))
+                inventory = try await reader.currentInventory()
+                try await store.saveInventory(inventory)
+                libraryCount = assets.count
+                if let mark { try await store.setValue(LibraryReadMark(mark: mark, includeHidden: includeHidden), forKey: Key.libraryMark) }
             }
         } catch let paused as LibraryReadPaused {
             if !paused.read.isEmpty { _ = try await store.upsertAssets(paused.read) }
@@ -902,11 +995,9 @@ public actor AnalysisPipeline {
             report.pausedBecause = .userPaused
             return report
         }
-        report.newOrChanged = try await store.upsertAssets(assets).count
-        report.removed = try await store.removeAssets(notIn: Set(assets.map(\.id)))
-        let inventory = try await reader.currentInventory()
-        try await store.saveInventory(inventory)
-        onProgress(Progress(stage: .inventory, completed: assets.count, total: assets.count))
+        // Where the albums are known to be as stored (`albumsUnchanged`).
+        inventoryMark = try await store.value(LibraryReadMark.self, forKey: Key.libraryMark).map { ($0.mark, inventory) }
+        onProgress(Progress(stage: .inventory, completed: libraryCount, total: libraryCount))
         report.completedStages.append(.inventory)
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
 
@@ -2126,7 +2217,9 @@ public actor AnalysisPipeline {
         // a second time.
         let generation = albumGeneration
         var inventory = inventory
-        if let fresh = try? await reader.currentInventory(), fresh != inventory {
+        if await albumsUnchanged(inventory) {
+            // Nothing changed in the library since this run read the albums.
+        } else if let fresh = try? await reader.currentInventory(), fresh != inventory {
             inventory = fresh
             try await store.saveInventory(fresh)
         }

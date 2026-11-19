@@ -32,6 +32,68 @@ public protocol PhotoLibraryReading: Sendable {
     func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
                      progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot]
     func currentInventory() async throws -> CollectionInventory
+
+    // Reading only what changed (review P4-03). A run with nothing new read every photo and
+    // every album again, on every launch of the app. Readers without a change history leave
+    // these to the defaults below: every run reads the whole library, as before.
+
+    /// The library's position in its own change history now, taken before a whole read: the
+    /// next run asks `changes(since:)` from here. `nil`: no history (then every run reads the
+    /// whole library).
+    func changeMark() async -> LibraryChangeMark?
+    /// What changed since `mark`, or `nil` when that cannot be told for sure (the history is
+    /// gone or too old, the mark belongs to another library, any error): then the whole
+    /// library is read.
+    func changes(since mark: LibraryChangeMark) async throws -> LibraryChanges?
+    /// Snapshots of those of `ids` that a whole read with `includeHidden` would return (a
+    /// photo deleted, hidden or not of the user's own library is left out), with file details
+    /// as `fetchAssets` reads them, and how many photos the whole read would return now.
+    /// `progress(read, total)` as for `fetchAssets`: `false` ends the read with
+    /// `LibraryReadPaused`. Empty `ids`: only the count.
+    func fetchAssets(_ ids: Set<AssetID>, includeHidden: Bool, knownDetails: [AssetID: Date],
+                     progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> ChangedAssets
+}
+
+/// A position in the photo library's own change history (PhotoKit's persistent change token),
+/// opaque to everything but the reader that made it.
+public struct LibraryChangeMark: Codable, Hashable, Sendable {
+    public var data: Data
+    public init(_ data: Data) { self.data = data }
+}
+
+/// What changed in the library since a `LibraryChangeMark`.
+public struct LibraryChanges: Hashable, Sendable {
+    /// Photos added (also arrived from iCloud later) or changed in any way (date, place,
+    /// edited, hidden or shown again, favourite).
+    public var assets: Set<AssetID>
+    /// Photos deleted.
+    public var deleted: Set<AssetID>
+    /// Anything else changed: albums, folders, or a kind of change the reader cannot name.
+    public var other: Bool
+    /// Where the next read goes on from. Taken before the changes were read: a change made
+    /// while they were read is read again next time, never missed.
+    public var mark: LibraryChangeMark
+
+    public init(assets: Set<AssetID> = [], deleted: Set<AssetID> = [], other: Bool = false, mark: LibraryChangeMark) {
+        self.assets = assets
+        self.deleted = deleted
+        self.other = other
+        self.mark = mark
+    }
+
+    /// Nothing at all changed: the photos and the albums are as they were at the mark.
+    public var isEmpty: Bool { assets.isEmpty && deleted.isEmpty && !other }
+}
+
+/// The photos read by `PhotoLibraryReading.fetchAssets(_:includeHidden:knownDetails:progress:)`.
+public struct ChangedAssets: Hashable, Sendable {
+    public var assets: [AssetSnapshot]
+    /// How many photos a whole read would return now.
+    public var libraryCount: Int
+    public init(assets: [AssetSnapshot], libraryCount: Int) {
+        self.assets = assets
+        self.libraryCount = libraryCount
+    }
 }
 
 /// A library read ended by Pause: the photos read until then (see `fetchAssets(progress:)`).
@@ -44,6 +106,16 @@ public extension PhotoLibraryReading {
     func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
                      progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot] {
         try await fetchAssets(includeHidden: includeHidden, knownDetails: knownDetails)
+    }
+
+    /// No change history: every run reads the whole library.
+    func changeMark() async -> LibraryChangeMark? { nil }
+    func changes(since mark: LibraryChangeMark) async throws -> LibraryChanges? { nil }
+    /// Over a whole read (only reached by a reader that has a history but not this).
+    func fetchAssets(_ ids: Set<AssetID>, includeHidden: Bool, knownDetails: [AssetID: Date],
+                     progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> ChangedAssets {
+        let all = try await fetchAssets(includeHidden: includeHidden, knownDetails: knownDetails)
+        return ChangedAssets(assets: all.filter { ids.contains($0.id) }, libraryCount: all.count)
     }
 }
 

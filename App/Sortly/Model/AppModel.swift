@@ -1552,9 +1552,10 @@ final class AppModel {
         i.isQuickCheck = isQuickCheck
         i.runningFor = now - runClockStart
         i.position = analysis.position
+        // The step it goes back to, and where in it the run before stopped: the card shows that
+        // count, not the count of the step it is catching up in (TestFlight run 44461253154).
         if analysis.isCatchingUp, let resume = analysis.resumeFrom {
-            i.catchingUpTo = AnalysisPipeline.Stage.allCases.indices.contains(resume.stage - 1)
-                ? AnalysisStep(AnalysisPipeline.Stage.allCases[resume.stage - 1]).number : nil
+            i.catchingUp(stage: resume.stage, completed: resume.completed, total: resume.total)
         }
         i.waiting = analysis.waiting
         i.slower = analysis.isRunning ? DeviceState(

@@ -978,7 +978,11 @@ public enum AnalysisCardState: Sendable, Equatable {
         public var isQuickCheck = false
         public var runningFor: Duration = .zero
         public var position: Position?
+        /// A run that goes on is still on the steps before the one it stopped in
+        /// (`ResumedRun.isCatchingUp`): that step's number ("Gleich wieder bei Schritt 4 von 6")
+        /// and where in it the run stopped (`catchingUp(stage:completed:total:)`).
         public var catchingUpTo: Int?
+        public var catchingUpAt: Position?
         public var waiting: PauseReason?
         public var slower: SlowReason?
         /// The places step waits for Apple's geocoder (the overnight refinement only): the card
@@ -998,6 +1002,16 @@ public enum AnalysisCardState: Sendable, Equatable {
         /// A long run just finished while the app was open.
         public var finished: (photos: Int, proposals: Int)?
         public init() {}
+
+        /// The run goes on from pipeline `stage` (1…7), where the run before stopped at
+        /// `completed` of `total` (`AnalysisMarker`; `nil` in markers of older versions: no count).
+        public mutating func catchingUp(stage: Int, completed: Int?, total: Int?) {
+            let stages = AnalysisPipeline.Stage.allCases
+            guard stages.indices.contains(stage - 1) else { return }
+            let step = AnalysisStep(stages[stage - 1])
+            catchingUpTo = step.number
+            catchingUpAt = Position(step: step, completed: completed ?? 0, total: completed == nil ? 0 : total ?? 0)
+        }
     }
 
     public static let pauseShownAfter: Duration = .seconds(5)
@@ -1024,7 +1038,12 @@ public enum AnalysisCardState: Sendable, Equatable {
             case .batteryLow?: return .waiting(.charging, i.position)
             default: break
             }
-            return .running(i.position, slower: i.slower, appleWait: i.appleWait, catchingUp: i.catchingUpTo)
+            // Catching up, the card names the step it goes back to: its count is where the run
+            // stopped there, not the count of the step it re-reads ("246 von 246 Fotos" from the
+            // library read beside "Gleich wieder bei Schritt 4", then "36 von 246": TestFlight
+            // run 44461253154, DeviceConditionUITests.test06).
+            let shown = i.catchingUpTo != nil ? i.catchingUpAt : i.position
+            return .running(shown, slower: i.slower, appleWait: i.appleWait, catchingUp: i.catchingUpTo)
         }
         if i.pausedByUser { return .paused(i.pausedAt) }
         // The run ended because Photos did not answer; the next try comes by itself. Never

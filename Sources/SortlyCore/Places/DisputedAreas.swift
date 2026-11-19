@@ -109,8 +109,9 @@ public enum DisputedAreas {
         DisputedArea(id: "taiwan", nameDE: "Taiwan", nameEN: "Taiwan", continent: .asia,
                      mapCountries: ["Taiwan"], mapRegions: [],
                      // The waters of Taiwan with Penghu, Liuqiu, Green Island and Orchid Island;
-                     // the Matsu Islands; Pratas; the islands off Xiamen. The map draws some of these islands not at
-                     // all. Only the sea and the map's Taiwan: the coast of Fujian keeps its country.
+                     // the Matsu Islands; Pratas; the islands off Xiamen and Dongding. The map
+                     // draws some of these islands not at all. Only the sea and the map's Taiwan:
+                     // the coast of Fujian keeps its country.
                      outlines: [
                          [(25.50, 121.40), (25.40, 122.15), (24.00, 122.00), (22.60, 121.75), (21.80, 121.70), (21.80, 120.70),
                           (22.25, 120.15), (23.00, 119.25), (23.90, 119.25), (24.60, 120.40), (25.20, 120.95)],
@@ -123,6 +124,9 @@ public enum DisputedAreas {
                          [(24.395, 118.12), (24.395, 118.15), (24.372, 118.15), (24.372, 118.12)],
                          [(24.374, 118.105), (24.374, 118.128), (24.355, 118.128), (24.355, 118.105)],
                          [(25.01, 119.42), (25.01, 119.48), (24.96, 119.48), (24.96, 119.42)],
+                         // Dongding, 25 km south of Kinmen and 15 km off the coast of Zhangzhou
+                         // (second review of bundle-i).
+                         [(24.18, 118.215), (24.18, 118.25), (24.145, 118.25), (24.145, 118.215)],
                      ],
                      outlineCountries: ["Taiwan"]),
         DisputedArea(id: "golan", nameDE: "Golanhöhen", nameEN: "Golan Heights", continent: .asia,

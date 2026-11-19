@@ -49,8 +49,31 @@ struct PromiseWordingTests {
 
     /// Whitespace folded, so a sentence wrapped across lines in Markdown is still found.
     static func flat(_ path: String) throws -> String {
-        let raw = try text(path)
-        return (path.hasSuffix(".swift") ? withoutComments(raw) : raw).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        try said(text(path), path: path).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    /// What a file says to the user: a Swift or YAML file without its comments (string
+    /// literals kept).
+    static func said(_ text: String, path: String) -> String {
+        if path.hasSuffix(".swift") { return withoutComments(text) }
+        if path.hasSuffix(".yml") || path.hasSuffix(".yaml") { return withoutYAMLComments(text) }
+        return text
+    }
+
+    /// YAML without its comments: a `#` at the start of a line or after a space, outside double
+    /// quotes, ends the line. A `#` in a single-quoted value is cut too: that can only fail the
+    /// check, never pass it.
+    static func withoutYAMLComments(_ yaml: String) -> String {
+        yaml.split(separator: "\n", omittingEmptySubsequences: false).map { line -> Substring in
+            var inQuotes = false, previous: Character = " "
+            for index in line.indices {
+                let c = line[index]
+                if c == "\"", previous != "\\" { inQuotes.toggle() }
+                if c == "#", !inQuotes, previous == " " || previous == "\t" { return line[..<index] }
+                previous = c
+            }
+            return line
+        }.joined(separator: "\n")
     }
 
     @Test func aCommentDoesNotCountAsTheSentence() {
@@ -62,6 +85,20 @@ struct PromiseWordingTests {
         let code = Self.withoutComments(source)
         #expect(!code.contains("Kein Foto"))
         #expect(code.contains("Text(\"Deine Fotos // bleiben\")"))
+    }
+
+    /// The same for the system's question in `App/project.yml` (second review of bundle-i: a
+    /// YAML comment above the value passed the check).
+    @Test func aYAMLCommentDoesNotCountAsTheSentence() {
+        let yaml = """
+        # Kein Foto wird hochgeladen, Originale werden nie verändert.
+        NSPhotoLibraryUsageDescription: "Albumist liest deine Fotos." # Kein Foto wird hochgeladen
+        Website: "https://albumist.app/#datenschutz"
+        """
+        let said = Self.said(yaml, path: "App/project.yml")
+        #expect(!said.contains("Kein Foto"))
+        #expect(said.contains("NSPhotoLibraryUsageDescription: \"Albumist liest deine Fotos.\""))
+        #expect(said.contains("\"https://albumist.app/#datenschutz\""))
     }
 
     /// The files that make promises to the user: the app's strings, the store, the website.
@@ -89,7 +126,7 @@ struct PromiseWordingTests {
         #expect(onboarding.contains(Self.placeNamesDE))
         #expect(onboarding.contains("in den Einstellungen ausschalten"))
         // The switch it points to is in the settings, and on by default.
-        #expect(try Self.text("App/Sortly/Views/SettingsView.swift").contains("$model.settings.privacy.allowOnlineGeocoding"))
+        #expect(Self.withoutComments(try Self.text("App/Sortly/Views/SettingsView.swift")).contains("$model.settings.privacy.allowOnlineGeocoding"))
         #expect(PrivacySettings().allowOnlineGeocoding)
     }
 

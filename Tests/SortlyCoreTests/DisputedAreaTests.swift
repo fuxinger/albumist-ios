@@ -54,6 +54,8 @@ struct DisputedAreaTests {
         ("Dadan", 24.383, 118.133, "taiwan"),
         ("Erdan", 24.367, 118.117, "taiwan"),
         ("Wuqiu", 24.983, 119.45, "taiwan"),
+        // Dongding, 25 km south of Kinmen (second review of bundle-i).
+        ("Dongding", 24.163, 118.232, "taiwan"),
         // The waters of Northern Cyprus (review of bundle-i: 3 km off Kyrenia Apple's "CY"
         // made it "Republik Zypern").
         ("vor Kyrenia, 3 km", 35.37, 33.32, "northern-cyprus"),
@@ -168,6 +170,45 @@ struct DisputedAreaTests {
     func atlasFillsTheCountriesAround(name: String, lat: Double, lon: Double, code: String) {
         let point = GeoCoordinate(latitude: lat, longitude: lon)
         #expect(AtlasShapes.filledCode(at: point, in: Self.shapes, visited: Self.everyCode) == code, "\(name)")
+    }
+
+    /// A tap on the atlas map opens the visited country there, or the nearest one within a
+    /// few points (small countries); in a disputed area it opens nothing: the area is never a
+    /// side's country and has no screen of its own (second review of bundle-i: a tap on the
+    /// grey Crimea opened "Russland"). 12° is the app's 12 points on a phone-wide map.
+    @Test(arguments: [
+        ("Simferopol", 44.9521, 34.1024), ("Srinagar", 34.0837, 74.7973), ("Leh", 34.1526, 77.5771),
+        ("Gilgit", 35.9208, 74.3089), ("Muzaffarabad", 34.3700, 73.4711), ("Aksai Chin", 35.2, 79.5),
+        ("Kyrenia", 35.3364, 33.3199), ("Pristina", 42.6629, 21.1655), ("Taipeh", 25.0330, 121.5654),
+        ("Katzrin", 32.9925, 35.6914), ("El Aaiún", 27.1253, -13.1625), ("Smara", 26.7384, -11.6719),
+        ("Abchasien", 43.05, 41.20),
+    ])
+    func atlasTapInADisputedAreaOpensNothing(name: String, lat: Double, lon: Double) {
+        let point = GeoCoordinate(latitude: lat, longitude: lon)
+        #expect(AtlasShapes.tappedCode(at: point, in: Self.shapes, visited: Self.everyCode, slackDegrees: 12) == nil, "\(name)")
+    }
+
+    @Test(arguments: [
+        ("Moskau", 55.7558, 37.6173, "RU"), ("Kiew", 50.4501, 30.5234, "UA"), ("Limassol", 34.7071, 33.0226, "CY"),
+        ("Belgrad", 44.7866, 20.4489, "RS"), ("Hader", 33.2670, 35.8500, "SY"), ("Tel Aviv", 32.0853, 34.7818, "IL"),
+        ("Rabat", 34.0209, -6.8416, "MA"), ("Delhi", 28.6139, 77.2090, "IN"),
+    ])
+    func atlasTapOpensTheVisitedCountry(name: String, lat: Double, lon: Double, code: String) {
+        let point = GeoCoordinate(latitude: lat, longitude: lon)
+        #expect(AtlasShapes.tappedCode(at: point, in: Self.shapes, visited: Self.everyCode, slackDegrees: 12) == code, "\(name)")
+    }
+
+    /// The slack finds a small visited country next to the finger, measured to its coast and
+    /// borders: a tap in Paris with only Russia visited opened Russia before, whose box spans
+    /// the whole map from 41° N up.
+    @Test func atlasTapSlackFindsTheNearCountryOnly() {
+        func tap(_ lat: Double, _ lon: Double, _ visited: Set<String>, _ slack: Double) -> String? {
+            AtlasShapes.tappedCode(at: GeoCoordinate(latitude: lat, longitude: lon), in: Self.shapes, visited: visited, slackDegrees: slack)
+        }
+        #expect(tap(50.85, 4.35, ["LU"], 2) == "LU") // Brussels, Luxembourg 1.5° away
+        #expect(tap(48.8566, 2.3522, ["RU"], 2) == nil) // Paris
+        #expect(tap(48.8566, 2.3522, ["RU", "LU"], 6) == "LU")
+        #expect(tap(20, -40, ["BR"], 2) == nil) // the Atlantic
     }
 
     @Test func atlasShapesForTheApp() {

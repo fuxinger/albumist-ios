@@ -49,24 +49,50 @@ enum AtlasStyle {
 
 // MARK: - Map
 
+/// One country of the map as drawn. Where disputed areas lie in it (`AtlasShapes`), a visit
+/// fills only `outside` and `disputed` stays land: an area is never a side's country (decision
+/// Fuchs 18.11.2026). Cut out instead of painted over, so no line of the visited colour shows
+/// round the area's coast (second review of bundle-i).
+struct AtlasCountryPath {
+    var code: String
+    var whole: Path
+    var outside: Path
+    var disputed: Path?
+}
+
 /// The country shapes of the map for a few sizes, made once: the map is drawn again with
 /// every step of the reveal, every change of the screen and every share picture, and making
-/// the shapes of all countries is the expensive part of drawing it.
+/// the shapes of all countries (and cutting out the disputed areas) is the expensive part of
+/// drawing it.
 final class AtlasPathCache: @unchecked Sendable {
     static let shared = AtlasPathCache()
     private let lock = NSLock()
-    private var bySize: [String: [Path]] = [:]
+    private var bySize: [String: [AtlasCountryPath]] = [:]
 
-    func paths(for outlines: [AtlasOutlines.Country], size: CGSize, make: (AtlasOutlines.Country) -> Path) -> [Path] {
+    func paths(for outlines: [AtlasOutlines.Country], size: CGSize, make: (AtlasOutlines.Country) -> Path) -> [AtlasCountryPath] {
         // The outlines are loaded once and never change; their count tells "not loaded yet".
         let key = String(format: "%.2fx%.2f/%ld", size.width, size.height, outlines.count)
         if let known = lock.withLock({ bySize[key] }) { return known }
-        let made = outlines.map(make)
+        let made = Self.countries(outlines, paths: outlines.map(make))
         lock.withLock {
             if bySize.count >= 6 { bySize.removeAll() }
             bySize[key] = made
         }
         return made
+    }
+
+    static func countries(_ outlines: [AtlasOutlines.Country], paths: [Path]) -> [AtlasCountryPath] {
+        var areas: [String: Path] = [:]
+        for (shape, path) in zip(outlines, paths) where shape.isNeutral {
+            for code in shape.neutralOver { areas[code] = areas[code].map { $0.union(path, eoFill: true) } ?? path }
+        }
+        return zip(outlines, paths).filter { !$0.0.isNeutral }.map { shape, path in
+            guard !shape.code.isEmpty, let area = areas[shape.code] else {
+                return AtlasCountryPath(code: shape.code, whole: path, outside: path, disputed: nil)
+            }
+            return AtlasCountryPath(code: shape.code, whole: path, outside: path.subtracting(area, eoFill: true),
+                                    disputed: path.intersection(area, eoFill: true))
+        }
     }
 }
 
@@ -86,13 +112,25 @@ struct AtlasMap: View {
     /// map makes by itself.
     @State private var measured = MeasuredSize()
 
+    /// Spelled out: the private `measured` would make the memberwise one private, and the app's
+    /// tests draw the map on its own (`AtlasRenderingTests`).
+    init(outlines: [AtlasOutlines.Country], highlighted: Set<String>, latest: String? = nil,
+         onTapCountry: ((String) -> Void)? = nil) {
+        self.outlines = outlines
+        self.highlighted = highlighted
+        self.latest = latest
+        self.onTapCountry = onTapCountry
+    }
+
     /// A plain reference: writing it changes nothing on screen.
     private final class MeasuredSize {
         var size: CGSize = .zero
     }
 
+    /// The latitudes the map shows (Antarctica and the far north left out).
+    private static let north = 83.0, south = -56.0
+
     private static func path(_ country: AtlasOutlines.Country, in size: CGSize) -> Path {
-        let north = 83.0, south = -56.0
         func point(_ c: GeoCoordinate) -> CGPoint {
             CGPoint(x: (c.longitude + 180) / 360 * size.width,
                     y: (north - min(max(c.latitude, south), north)) / (north - south) * size.height)
@@ -108,51 +146,35 @@ struct AtlasMap: View {
     }
 
     /// Every country's shape at this size, made once per size (`AtlasPathCache`).
-    private func countryPaths(in size: CGSize) -> [Path] {
+    private func countryPaths(in size: CGSize) -> [AtlasCountryPath] {
         AtlasPathCache.shared.paths(for: outlines, size: size) { Self.path($0, in: size) }
     }
 
-    /// The visited country at `location`; small countries get a few points of slack.
+    /// The country screen a tap at `location` opens (`AtlasShapes.tappedCode`): the visited
+    /// country there or within 12 points (small countries), nothing in a disputed area.
     private func country(at location: CGPoint) -> String? {
-        let paths = zip(outlines, countryPaths(in: measured.size))
-            .filter { highlighted.contains($0.0.code) }
-            .map { ($0.0.code, $0.1) }
-        if let hit = paths.first(where: { $0.1.contains(location, eoFill: true) }) { return hit.0 }
-        func distance(_ rect: CGRect) -> CGFloat {
-            hypot(max(rect.minX - location.x, 0, location.x - rect.maxX), max(rect.minY - location.y, 0, location.y - rect.maxY))
-        }
-        return paths.map { ($0.0, distance($0.1.boundingRect)) }
-            .filter { $0.1 <= 12 }
-            .min { $0.1 < $1.1 }?.0
+        let size = measured.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let point = GeoCoordinate(latitude: Self.north - Double(location.y / size.height) * (Self.north - Self.south),
+                                  longitude: Double(location.x / size.width) * 360 - 180)
+        return AtlasShapes.tappedCode(at: point, in: outlines, visited: highlighted, slackDegrees: 12 * 360 / Double(size.width))
     }
 
     var body: some View {
         Canvas { context, size in
             var land = Path(), visited = Path(), recent = Path()
-            var neutral: [(path: Path, over: Set<String>)] = [], byCode: [String: Path] = [:]
             MainThreadWatch.shared.section("atlas map paths") {
-                for (country, path) in zip(outlines, countryPaths(in: size)) {
-                    if country.isNeutral { neutral.append((path, country.neutralOver)); continue }
-                    if !country.code.isEmpty { byCode[country.code, default: Path()].addPath(path) }
-                    if country.code == latest { recent.addPath(path) }
-                    else if highlighted.contains(country.code) { visited.addPath(path) }
-                    else { land.addPath(path) }
+                for country in countryPaths(in: size) {
+                    if !country.code.isEmpty, country.code == latest { recent.addPath(country.outside) }
+                    else if highlighted.contains(country.code) { visited.addPath(country.outside) }
+                    else { land.addPath(country.whole); continue }
+                    if let disputed = country.disputed { land.addPath(disputed) }
                 }
             }
             let fill = FillStyle(eoFill: true)
             context.fill(land, with: .color(AtlasStyle.land), style: fill)
             context.fill(visited, with: .color(AtlasStyle.visited), style: fill)
             context.fill(recent, with: .color(AtlasStyle.latest), style: fill)
-            // A disputed area is never a visited country's (decision Fuchs 18.11.2026): painted
-            // as unvisited land over the fill, only inside the countries it lies in.
-            let filled = highlighted.union(latest.map { [$0] } ?? [])
-            for area in neutral where !area.over.isDisjoint(with: filled) {
-                var clip = Path()
-                for code in area.over { if let path = byCode[code] { clip.addPath(path) } }
-                var layer = context
-                layer.clip(to: clip, style: fill)
-                layer.fill(area.path, with: .color(AtlasStyle.land), style: fill)
-            }
         }
         .aspectRatio(360 / 139, contentMode: .fit)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { measured.size = $0 }

@@ -22,8 +22,10 @@
   Nordzypern, Kosovo, Taiwan, Golanhöhen und Abchasien heißen mit ihrem eigenen Namen statt eines
   Landes, ihr Vorschlag ist „Unsicher“. Die Umrisse von Westsahara, Golanhöhen und Aksai Chin
   und die Umrisse auf dem Wasser (um die Krim mit der Straße von Kertsch, um Taiwan, Penghu und
-  die kleinen Inseln, Kästen um Matsu, Pratas, Lieyu, Dadan, Erdan und Wuqiu, die Gewässer im
-  Norden Zyperns) sind grob (einige Kilometer). An der Grenze
+  die kleinen Inseln, Kästen um Matsu, Pratas, Lieyu, Dadan, Erdan, Wuqiu und Dongding, die Gewässer im
+  Norden Zyperns) sind grob (einige Kilometer). Die winzigen, unbewohnten Inseln Fuxing und
+  Shiyu westlich von Lieyu liegen womöglich außerhalb des Kastens (ihre Lage ist nicht sicher
+  geprüft); dort entscheidet Apples Antwort. An der Grenze
   (bis etwa 1,5 km), wo die Karte nicht sicher ist und Apple das Nachbarland nennt (etwa
   Serbien am Kosovo, Republik Zypern an der Pufferzone), gilt das Nachbarland. Orte, die vor dem Update bestimmt wurden, behalten ihr altes Land, bis „Analyse
   neu aufbauen“ sie neu bestimmt. Eine automatische Nachprüfung gibt es bewusst nicht: Die
@@ -32,8 +34,10 @@
   des Landes bestehen; eine Entscheidung zu „Russland“ ließe sich nicht sauber auf „Krim“
   übertragen. Im Reise-Atlas zählen diese Gebiete nicht als Land (ihre Reisen und Orte zählen
   mit dem Gebietsnamen), und die Atlas-Karte (auch im Teilen-Bild) füllt sie nie mit einem
-  besuchten Land (`AtlasShapes`); wer auf die Krim tippt, tippt auf Russlands Fläche und sieht
-  Russlands Fotos (ohne die der Krim). Die Suche findet sie über den Gebiets- oder Ortsnamen, nicht als
+  besuchten Land (`AtlasShapes`). Ein Tippen auf ein Gebiet öffnet nichts: Für ein Gebiet gibt es
+  keine eigene Seite, und die Seite eines der Länder ergriffe Partei (`AtlasShapes.tappedCode`).
+  Das Malen der Karte und das Tippen sind bisher nur auf Linux (Regel) und im Code geprüft, noch
+  nicht auf einem Mac (`AtlasRenderingTests`). Die Suche findet sie über den Gebiets- oder Ortsnamen, nicht als
   Land. Nicht in der Liste: Südossetien, Transnistrien, Somaliland,
   Westjordanland und Ost-Jerusalem (dort gilt die Karte wie bisher). Noch nicht behandelt, offene
   Frage an Fuchs: das Shaksgam-Tal (von China verwaltet, von Indien als Teil Kaschmirs beansprucht;

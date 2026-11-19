@@ -165,6 +165,42 @@ struct AtlasRenderingTests {
             Self.emit(scheme == .light ? "atlas" : "atlas-dark", screenImage.jpegData(compressionQuality: 0.7))
         }
     }
+
+    /// A disputed area is never filled with a visited country (decision Fuchs 18.11.2026;
+    /// second review of bundle-i): with Russia visited, Simferopol on the Crimea shows the
+    /// land colour and Moscow the visited colour, in light and dark, on screen and in the share
+    /// picture (both draw `AtlasMap`).
+    @Test(arguments: [ColorScheme.light, .dark])
+    func crimeaStaysLandWithRussiaVisited(scheme: ColorScheme) async throws {
+        let outlines = await AtlasOutlines.shared.load(from: nil)
+        let width = 1440.0, height = width * 139 / 360
+        let renderer = ImageRenderer(content: AtlasMap(outlines: outlines, highlighted: ["RU"])
+            .frame(width: width, height: height)
+            .environment(\.colorScheme, scheme))
+        renderer.scale = 1
+        let image = try #require(renderer.cgImage)
+        let traits = UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)
+        let land = Self.rgb(UIColor.systemGray5.resolvedColor(with: traits))
+        let visited = Self.rgb(try #require(UIColor(named: "AccentColor")).resolvedColor(with: traits))
+        func pixel(_ lat: Double, _ lon: Double) -> [Double] {
+            let x = Int((lon + 180) / 360 * Double(image.width)), y = Int((83 - lat) / 139 * Double(image.height))
+            var data = [UInt8](repeating: 0, count: 4)
+            let context = CGContext(data: &data, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            context?.draw(image, in: CGRect(x: -x, y: y - image.height + 1, width: image.width, height: image.height))
+            return data.prefix(3).map { Double($0) / 255 }
+        }
+        func distance(_ a: [Double], _ b: [Double]) -> Double { zip(a, b).map { ($0 - $1) * ($0 - $1) }.reduce(0, +) }
+        let simferopol = pixel(44.9521, 34.1024), moscow = pixel(55.7558, 37.6173)
+        #expect(distance(simferopol, land) < distance(simferopol, visited), "Simferopol \(simferopol)")
+        #expect(distance(moscow, visited) < distance(moscow, land), "Moskau \(moscow)")
+    }
+
+    static func rgb(_ color: UIColor) -> [Double] {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return [r, g, b].map(Double.init)
+    }
 }
 
 @Suite("English localization")

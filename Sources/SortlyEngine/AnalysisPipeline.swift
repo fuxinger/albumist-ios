@@ -665,10 +665,41 @@ public actor AnalysisPipeline {
     /// `placeTimeZones()` and the state of the places they were worked out for.
     private var placeZones: (revision: Int, zones: [AssetID: TimeZone])?
 
-    /// `dateRange` of a run: over the zones of the places known so far.
-    private func dateRange(of scope: OrganizationScope, all: [AssetSnapshot]) async throws -> Range<Date>? {
+    /// The photos the image step of a trial run over one year looks at (second review of P1-15):
+    /// those of the year on their own clock, as their facts read it (`PhotoClocks`, with the
+    /// places known so far). The count of the step and the photos it looks at are the same.
+    struct PhotosOfTheYear: Sendable {
+        /// The time they were taken in: the year on the clocks of the home and of the places
+        /// (`dateRange`), to find them in the store.
+        let range: Range<Date>
+        /// The photos taken in `range` that are of another year on their own clock: New Year's
+        /// Eve at home lies in the new year of Sydney's clock once a photo of Sydney is known.
+        let otherYears: Set<AssetID>
+        /// How many there are.
+        let count: Int
+
+        func contains(_ asset: AssetSnapshot) -> Bool {
+            (asset.creationDate.map(range.contains) ?? false) && !otherYears.contains(asset.id)
+        }
+    }
+
+    /// `PhotosOfTheYear` of a run over `scope`; nil for the whole library.
+    private func photosOfTheYear(_ scope: OrganizationScope, all: [AssetSnapshot], trips: [Trip]) async throws -> PhotosOfTheYear? {
         guard case .year = scope else { return nil }
-        return Self.dateRange(of: scope, calendar: try await homeCalendar(), zones: Set(try await placeTimeZones(library: all).values))
+        let home = try await homeCalendar()
+        let zones = try await placeTimeZones(library: all)
+        guard let range = Self.dateRange(of: scope, calendar: home, zones: Set(zones.values)) else { return nil }
+        let clocks = PhotoClocks(places: zones, trips: trips, home: home.timeZone)
+        var otherYears = Set<AssetID>()
+        var count = 0
+        for asset in all where asset.creationDate.map(range.contains) ?? false {
+            if scope.includes(AssetFacts(asset: asset, timeZone: clocks.zone(of: asset.id)), calendar: home) {
+                count += 1
+            } else {
+                otherYears.insert(asset.id)
+            }
+        }
+        return PhotosOfTheYear(range: range, otherYears: otherYears, count: count)
     }
 
     /// Pauses the run in progress at its next check; `run` then returns with `.userPaused`.
@@ -829,9 +860,9 @@ public actor AnalysisPipeline {
 
         // The photos this run analyses: all of them, or one year and the trips that touch it. A
         // photo's year is that of its own clock (review P1-15): places are looked for wherever a
-        // photo may be in the year on any clock (`reach`), the image step covers the year on the
-        // clocks of the places known (`range`, again after the places step).
-        var range = try await dateRange(of: scope, all: all)
+        // photo may be in the year on any clock (`reach`), the image step looks at the photos of
+        // the year on the clocks known (`year`, again after the places step).
+        var year = try await photosOfTheYear(scope, all: all, trips: trips)
         let reach = Self.dateRange(of: scope, calendar: calendar, zones: Self.everyClock)
         // Read once: the workload said below and the image step count the same photos.
         let labels = Self.wantsLabels(settings) ? Self.labelsVersion : nil
@@ -845,7 +876,7 @@ public actor AnalysisPipeline {
             scoped = all
         }
         onProgress(Progress(stage: .patterns, completed: grouped.of, total: grouped.of,
-                            workload: try await workload(all: all, scoped: scoped, range: range, labels: labels)))
+                            workload: try await workload(all: all, scoped: scoped, year: year, labels: labels)))
 
         // 3. Places
         // What `resolvePlaces` reads first thing (same moment, no wait in between).
@@ -858,8 +889,8 @@ public actor AnalysisPipeline {
         trips = try await inDestinationTime(trips, all: all)
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
         report.completedStages.append(.places)
-        // A trial year also covers the clocks of the places found in this run (review P1-15).
-        if range != nil { range = try await dateRange(of: scope, all: all) }
+        // A trial year also goes by the clocks of the places found in this run (review P1-15).
+        if year != nil { year = try await photosOfTheYear(scope, all: all, trips: trips) }
 
         // 4. Content
         let peopleRequest = ContentAnalysisRequest(
@@ -869,14 +900,14 @@ public actor AnalysisPipeline {
             featurePrint: true
         )
         // Photos given up as unreadable a week ago or longer get one more read (review P1-08).
-        try await reopenGivenUpPhotos(all, within: range, labels: labels)
+        try await reopenGivenUpPhotos(all, within: year, labels: labels)
         // With labels wanted, also the photos analysed while they were not: only their labels
         // are asked for (`labelsOnly` below). Each counts as one photo, like a full look.
-        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range)
+        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
+                                                                within: year?.range, excluding: year?.otherYears ?? [])
         // Shown over the whole library: after a pause the count goes on from what is done
         // (first device test 15.11.: "1.450 von 14.332", then "2.700 von 12.708").
-        let inRange = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
-        let contentBefore = max(0, inRange - contentTotal)
+        let contentBefore = max(0, (year?.count ?? all.count) - contentTotal)
         // Every report of this step goes through here: the early suggestions are said with the
         // newest one (`earlySuggestions`). Nothing of an earlier run's step.
         contentShown = nil
@@ -935,7 +966,8 @@ public actor AnalysisPipeline {
             // were saved by a run that ended before it marked them (or only their place or date
             // changed since), so they are not looked at twice; or they could not be read before.
             let stored = contentTotal > 0
-                ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion, within: range)
+                ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion,
+                                                 within: year?.range, excluding: year?.otherYears ?? [])
                 : [:]
             // Photos given up before and read once more (`reopenGivenUpPhotos`): whatever goes
             // wrong with that read, the photo is given up again for another week. An analyzer
@@ -969,12 +1001,13 @@ public actor AnalysisPipeline {
                 // Deferred photos can come back only without a cursor (behind it they are past).
                 let limit = batchSize + (cursor == nil ? deferred.count : 0)
                 var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, limit: limit,
-                                                                olderThan: cursor, within: range)
+                                                                olderThan: cursor, within: year?.range, excluding: year?.otherYears ?? [])
                 if raw.isEmpty, cursor != nil {
                     // Past the oldest dated photo: one plain pass picks up photos without a date.
                     cursor = nil
                     raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
-                                                                limit: batchSize + deferred.count, within: range)
+                                                                limit: batchSize + deferred.count, within: year?.range,
+                                                                excluding: year?.otherYears ?? [])
                 }
                 var batch = raw.filter { !deferred.contains($0.id) }
                 if batch.isEmpty { break }
@@ -1280,8 +1313,8 @@ public actor AnalysisPipeline {
 
     /// How much work this run has (see `AnalysisWorkload`): the amounts over the part of the
     /// library the run works on, and what is still to do in the image and text steps.
-    private func workload(all: [AssetSnapshot], scoped: [AssetSnapshot], range: Range<Date>?, labels: Int?) async throws -> AnalysisWorkload {
-        let photos = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
+    private func workload(all: [AssetSnapshot], scoped: [AssetSnapshot], year: PhotosOfTheYear?, labels: Int?) async throws -> AnalysisWorkload {
+        let photos = year?.count ?? all.count
         let screenshots = scoped.filter(\.isScreenshotLike)
         let read = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
         let located = scoped.filter { $0.usableLocation != nil }
@@ -1296,13 +1329,15 @@ public actor AnalysisPipeline {
         // Of the photos still to look at: those analysed already that get only their labels.
         var labelsLeft = 0
         if let labels {
-            labelsLeft = try await store.countNeedingLabelsOnly(version: Self.contentVersion, labelsVersion: labels, within: range)
+            labelsLeft = try await store.countNeedingLabelsOnly(version: Self.contentVersion, labelsVersion: labels,
+                                                                within: year?.range, excluding: year?.otherYears ?? [])
         }
         return AnalysisWorkload(
             photos: photos,
             located: located.count,
             screenshots: screenshots.count,
-            contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range),
+            contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
+                                                              within: year?.range, excluding: year?.otherYears ?? []),
             textLeft: screenshots.filter { read[$0.id] == nil }.count,
             placesLeft: placesLeft,
             labelsLeft: labelsLeft
@@ -1317,7 +1352,7 @@ public actor AnalysisPipeline {
     /// week. Looked for at most once a day (it reads every photo's result) and only in the
     /// part of the library the run works on. Not a photo this run reads anyway for its labels
     /// ("Themen" turned on later: one more full look for a photo given up, `labels`).
-    private func reopenGivenUpPhotos(_ all: [AssetSnapshot], within range: Range<Date>?, labels: Int?) async throws {
+    private func reopenGivenUpPhotos(_ all: [AssetSnapshot], within year: PhotosOfTheYear?, labels: Int?) async throws {
         let now = now()
         if let checked = try await store.value(Date.self, forKey: Key.givenUpChecked),
            (0..<86_400).contains(now.timeIntervalSince(checked)) { return }
@@ -1326,9 +1361,7 @@ public actor AnalysisPipeline {
         if let labels, !due.isEmpty {
             due.subtract(try await store.unlabelledAssets(version: Self.contentVersion, labelsVersion: labels))
         }
-        let reopen = all.filter { asset in
-            due.contains(asset.id) && (range.map { r in asset.creationDate.map(r.contains) ?? false } ?? true)
-        }.map(\.id)
+        let reopen = all.filter { asset in due.contains(asset.id) && (year?.contains(asset) ?? true) }.map(\.id)
         if !reopen.isEmpty { try await store.markAnalyzed(reopen, version: 0) }
         try await store.setValue(now, forKey: Key.givenUpChecked)
     }

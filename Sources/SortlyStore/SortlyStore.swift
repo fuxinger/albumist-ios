@@ -169,16 +169,16 @@ public actor SortlyStore: PlanJournal {
     /// Newest first. With `olderThan` (the last asset of the previous batch) the scan continues
     /// where it stopped instead of skipping every already-analyzed photo again: without it a
     /// first run over 100,000 photos spent about 18 s in this query alone.
-    /// `within`: only photos taken in this time (a trial run over one year).
+    /// `within`: only photos taken in this time (a trial run over one year), `excluding` these
+    /// (`span`).
     /// `labelsVersion`: also the photos whose image labels are older than this (asked for
     /// only while labels are wanted: "Themen" or "Dokumente" on). `nil`: labels are not wanted.
     public func assetsNeedingAnalysis(version: Int, labelsVersion: Int? = nil, limit: Int, olderThan last: AssetSnapshot? = nil,
-                                      within range: Range<Date>? = nil) throws -> [AssetSnapshot] {
+                                      within range: Range<Date>? = nil, excluding excluded: Set<AssetID> = []) throws -> [AssetSnapshot] {
         var (filter, values) = Self.needingAnalysis(version: version, labelsVersion: labelsVersion)
-        if let range {
-            filter += " AND creation_date >= ? AND creation_date < ?"
-            values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
-        }
+        let span = try Self.span(range, excluding: excluded)
+        filter += span.filter
+        values += span.values
         if let last, let date = last.creationDate?.timeIntervalSince1970 {
             return try db.query("""
                 SELECT * FROM assets WHERE \(filter)
@@ -190,32 +190,52 @@ public actor SortlyStore: PlanJournal {
     }
 
     /// See `assetsNeedingAnalysis` (the same photos).
-    public func countNeedingAnalysis(version: Int, labelsVersion: Int? = nil, within range: Range<Date>? = nil) throws -> Int {
+    public func countNeedingAnalysis(version: Int, labelsVersion: Int? = nil, within range: Range<Date>? = nil,
+                                     excluding excluded: Set<AssetID> = []) throws -> Int {
         var (filter, values) = Self.needingAnalysis(version: version, labelsVersion: labelsVersion)
-        if let range {
-            filter += " AND creation_date >= ? AND creation_date < ?"
-            values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
-        }
+        let span = try Self.span(range, excluding: excluded)
+        filter += span.filter
+        values += span.values
         return try db.query("SELECT COUNT(*) AS n FROM assets WHERE \(filter)", values).first?["n"]?.int ?? 0
     }
 
-    /// Of `countNeedingAnalysis(version:labelsVersion:within:)`: the photos analysed already (at
-    /// least `version`) whose image labels are older than `labelsVersion`, the ones the image
-    /// step gives only their labels. For the analysis card, which names this work apart from new
-    /// photos; a photo given up as unreadable is counted here too (it gets a full look instead).
-    public func countNeedingLabelsOnly(version: Int, labelsVersion: Int, within range: Range<Date>? = nil) throws -> Int {
+    /// Of `countNeedingAnalysis(version:labelsVersion:within:excluding:)`: the photos analysed
+    /// already (at least `version`) whose image labels are older than `labelsVersion`, the ones
+    /// the image step gives only their labels. For the analysis card, which names this work apart
+    /// from new photos; a photo given up as unreadable is counted here too (it gets a full look
+    /// instead).
+    public func countNeedingLabelsOnly(version: Int, labelsVersion: Int, within range: Range<Date>? = nil,
+                                       excluding excluded: Set<AssetID> = []) throws -> Int {
         var filter = "analysis_version >= ? AND labels_version < ?"
         var values: [SQLValue] = [.integer(Int64(version)), .integer(Int64(labelsVersion))]
-        if let range {
-            filter += " AND creation_date >= ? AND creation_date < ?"
-            values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
-        }
+        let span = try Self.span(range, excluding: excluded)
+        filter += span.filter
+        values += span.values
         return try db.query("SELECT COUNT(*) AS n FROM assets WHERE \(filter)", values).first?["n"]?.int ?? 0
     }
 
     private static func needingAnalysis(version: Int, labelsVersion: Int?) -> (filter: String, values: [SQLValue]) {
         guard let labelsVersion else { return ("analysis_version < ?", [.integer(Int64(version))]) }
         return ("(analysis_version < ? OR labels_version < ?)", [.integer(Int64(version)), .integer(Int64(labelsVersion))])
+    }
+
+    /// The part of the library the image step of a trial run over one year works on, as SQL to
+    /// add to a filter over the assets (`table`: their name in a join): photos taken in `range`,
+    /// none of `excluded` (the photos in that time that are of another year on their own clock,
+    /// review P1-15). The ids go in as one JSON array: one parameter for any number of them.
+    private static func span(_ range: Range<Date>?, excluding excluded: Set<AssetID>, table: String? = nil) throws -> (filter: String, values: [SQLValue]) {
+        let column = table.map { "\($0)." } ?? ""
+        var filter = ""
+        var values: [SQLValue] = []
+        if let range {
+            filter += " AND \(column)creation_date >= ? AND \(column)creation_date < ?"
+            values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
+        }
+        if !excluded.isEmpty {
+            filter += " AND \(column)id NOT IN (SELECT value FROM json_each(?))"
+            values.append(.text(String(decoding: try JSONEncoder().encode(excluded.map(\.rawValue).sorted()), as: UTF8.self)))
+        }
+        return (filter, values)
     }
 
     /// The results of one batch and the photos it is done with, in one transaction: one write
@@ -445,16 +465,16 @@ public actor SortlyStore: PlanJournal {
     /// `version`: labels a run saved before it could mark the photo (the app was ended in
     /// between, or only the place or date of the photo changed since), and photos that could
     /// not be read yet. Usually a handful, where `results(_:kind:)` reads every photo's result.
-    public func pendingResults<T: Decodable>(_ type: T.Type, kind: String, version: Int, within range: Range<Date>? = nil) throws -> [AssetID: T] {
+    public func pendingResults<T: Decodable>(_ type: T.Type, kind: String, version: Int, within range: Range<Date>? = nil,
+                                             excluding excluded: Set<AssetID> = []) throws -> [AssetID: T] {
         var sql = """
             SELECT r.asset_id, r.payload FROM analysis_results r JOIN assets a ON a.id = r.asset_id
             WHERE r.kind = ? AND r.version >= ? AND a.analysis_version < ?
             """
         var values: [SQLValue] = [.text(kind), .integer(Int64(version)), .integer(Int64(version))]
-        if let range {
-            sql += " AND a.creation_date >= ? AND a.creation_date < ?"
-            values += [.real(range.lowerBound.timeIntervalSince1970), .real(range.upperBound.timeIntervalSince1970)]
-        }
+        let span = try Self.span(range, excluding: excluded, table: "a")
+        sql += span.filter
+        values += span.values
         var out: [AssetID: T] = [:]
         for r in try db.query(sql, values) {
             if let id = r["asset_id"]?.string, let v = try decode(T.self, r["payload"]) { out[AssetID(id)] = v }

@@ -72,6 +72,34 @@ struct StoreTests {
         #expect(await s.placesRevision == last)
     }
 
+    /// Second review of P1-15: the image step of a trial year leaves out the photos in its time
+    /// that are of another year on their own clock, in every query it counts and pages with; any
+    /// number of them (they go in as one parameter).
+    @Test func theImageStepsQueriesLeaveOutPhotosOfAnotherYear() async throws {
+        let s = try store()
+        let start = Fixture.date("2026-01-01")
+        try await s.upsertAssets((0..<12).map { AssetSnapshot(id: AssetID("p\($0)"), creationDate: start.addingTimeInterval(Double($0) * 3_600)) })
+        let range = start..<start.addingTimeInterval(10 * 3_600)
+        let otherYear: Set<AssetID> = ["p1", "p4", "p8", "p11"]
+        try await s.saveResult("labels saved, not marked", kind: "content", asset: "p2", version: 3)
+        try await s.saveResult("labels saved, not marked", kind: "content", asset: "p8", version: 3)
+        #expect(try await s.countNeedingAnalysis(version: 3, within: range, excluding: otherYear) == 7)
+        var paged: [AssetID] = []
+        var cursor: AssetSnapshot?
+        while case let page = try await s.assetsNeedingAnalysis(version: 3, limit: 3, olderThan: cursor, within: range, excluding: otherYear),
+              !page.isEmpty {
+            paged += page.map(\.id)
+            cursor = page.last
+        }
+        #expect(paged == ["p9", "p7", "p6", "p5", "p3", "p2", "p0"])
+        #expect(try await s.pendingResults(String.self, kind: "content", version: 3, within: range, excluding: otherYear).keys.sorted() == ["p2"])
+        try await s.markAnalyzed(["p3", "p4"], version: 3)
+        #expect(try await s.countNeedingLabelsOnly(version: 3, labelsVersion: 1, within: range, excluding: otherYear) == 1)
+        let many = Set((0..<40_000).map { AssetID("x\($0)") }).union(["p0"])
+        #expect(try await s.countNeedingAnalysis(version: 3, within: range, excluding: many) == 7)
+        #expect(try await s.countNeedingAnalysis(version: 3, within: range) == 8)
+    }
+
     @Test func incrementalAnalysisTracking() async throws {
         let s = try store()
         try await s.upsertAssets((0..<10).map { AssetSnapshot(id: AssetID("a\($0)"), creationDate: Fixture.date("2026-01-01")) })

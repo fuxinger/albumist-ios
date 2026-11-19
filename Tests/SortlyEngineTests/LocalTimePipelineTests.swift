@@ -187,6 +187,44 @@ struct LocalTimePipelineTests {
         #expect(trialMonths["Dezember 2025"] == nil && trialMonths["Januar 2027"] == nil, "\(Self.describe(trialMonths))")
     }
 
+    /// Second review: a trial year's image step looks at the photos of that year on their own
+    /// clock, and its count says as many. Home Munich, a week in Sydney in February: Sydney's 2026
+    /// begins at 14:00 on New Year's Eve in Munich, so three photos of that evening at home lay in
+    /// the time the year covers on some clock. They are of 2025 on theirs: before, they were
+    /// looked at and counted ("von 114" for 111 photos of 2026).
+    @Test func aTrialYearLooksAtThePhotosOfThatYearOnly() async throws {
+        var lib = LibraryBuilder()
+        _ = lib.daily(from: "2025-11-01", to: "2026-03-31", at: Fixture.Places.munichHome, perDay: 1)
+        var newYearsEve: [AssetID] = []
+        for time in ["2025-12-31 18:00", "2025-12-31 21:00", "2025-12-31 23:30"] {
+            newYearsEve.append(lib.photo(at: Self.local(time, "Europe/Berlin"), Fixture.Places.munichHome, jitterMeters: 20))
+        }
+        for day in 10...16 {
+            for hour in [9, 13, 18] {
+                _ = lib.photo(at: Self.local("2026-02-\(day) \(hour):00", "Australia/Sydney"), Fixture.Places.sydney, jitterMeters: 200)
+            }
+        }
+        let store = try SortlyStore(url: nil)
+        let reader = InMemoryLibraryReader(assets: lib.assets)
+        // The first run finds the places; the second knows them from its start.
+        var totals: [Int] = []
+        var pipeline = Self.pipeline(store: store, reader: reader, geocoder: nil, deviceZone: "Europe/Berlin")
+        for run in 0..<2 {
+            if run > 0 { pipeline = Self.pipeline(store: store, reader: reader, geocoder: nil, deviceZone: "Europe/Berlin") }
+            let shown = ImageStepTotal()
+            #expect(try await pipeline.run(scope: .year(2026), onProgress: { shown.note($0) }).isComplete)
+            totals.append(shown.total ?? -1)
+        }
+        let berlin = Self.calendar("Europe/Berlin")
+        let ofTheYear = Set(try await pipeline.currentFacts().filter { OrganizationScope.year(2026).includes($0, calendar: berlin) }.map(\.id))
+        let lookedAt = Set(try await store.results(ContentAnalysis.self, kind: "content").keys)
+        print("P1-15-TRIAL-YEAR-COUNT photos of 2026 on their clock: \(ofTheYear.count); image step of the first run \(totals[0]), "
+              + "of the second \(totals[1]); photos looked at \(lookedAt.count), New Year's Eve at home among them "
+              + "\(newYearsEve.filter(lookedAt.contains).count)")
+        #expect(totals == [ofTheYear.count, ofTheYear.count])
+        #expect(lookedAt == ofTheYear)
+    }
+
     /// A photo without a location has no place to take the time from: it keeps the time zone the
     /// iPhone had at the first analysis, also when the next analysis runs on Los Angeles time.
     @Test func aPhotoWithoutLocationKeepsTheTimeZoneOfTheFirstAnalysis() async throws {
@@ -645,4 +683,15 @@ final class ZoneWork: @unchecked Sendable {
     private var calls = 0
     func add() { lock.lock(); calls += 1; lock.unlock() }
     var count: Int { lock.lock(); defer { lock.unlock() }; return calls }
+}
+
+/// The number the image step counts to ("von N"), as last said (`AnalysisPipeline.Progress`).
+final class ImageStepTotal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last: Int?
+    func note(_ progress: AnalysisPipeline.Progress) {
+        guard progress.stage == .content else { return }
+        lock.lock(); last = progress.total; lock.unlock()
+    }
+    var total: Int? { lock.lock(); defer { lock.unlock() }; return last }
 }

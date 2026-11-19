@@ -13,7 +13,7 @@ enum PhotoPalette {
     static func colors(for id: AssetID) async -> [Color] {
         if let cached = cache[id] { return cached }
         guard let image = await ThumbnailCache.shared.image(for: id, side: 60), let cg = image.cgImage else { return [] }
-        let colors = sample(cg)
+        let colors = MainThreadWatch.shared.section("photo glow colours") { sample(cg) }
         cache[id] = colors
         return colors
     }
@@ -44,22 +44,30 @@ enum PhotoPalette {
 struct PhotoGlow: View {
     var id: AssetID?
     @State private var colors: [Color] = []
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         ZStack {
-            if colors.count == 4 && !reduceTransparency {
+            // Text sits on the wash (category, title, count). Reduce Transparency and Increase
+            // Contrast both ask for a plain background behind text, so the wash stays off.
+            if colors.count == 4 && !reduceTransparency && contrast != .increased {
+                // Opaque colours, already mixed with the screen background: XCTest's contrast
+                // audit measured text on the see-through wash as if the photo colour were
+                // solid, and failed readable text even where the wash had faded to almost
+                // nothing ("31 Fotos in Italien.", "Rom und Florenz", UI runs 2-4 and
+                // 43773339053). Mixed in advance, what it measures is what is on screen;
+                // the bottom row is the background itself, so the wash still fades out.
+                // White keeps 9:1 and Theme.secondaryText 4.7:1 on any photo colour.
                 MeshGradient(width: 2, height: 3, points: [
                     [0, 0], [1, 0],
                     [0, 0.5], [1, 0.5],
                     [0, 1], [1, 1],
                 ], colors: [
-                    colors[0], colors[1],
-                    colors[2].opacity(0.55), colors[3].opacity(0.55),
-                    .clear, .clear,
+                    Theme.background.mix(with: colors[0], by: 0.3), Theme.background.mix(with: colors[1], by: 0.3),
+                    Theme.background.mix(with: colors[2], by: 0.09), Theme.background.mix(with: colors[3], by: 0.09),
+                    Theme.background, Theme.background,
                 ])
-                .opacity(scheme == .dark ? 0.5 : 0.36)
                 .transition(.opacity)
             }
         }

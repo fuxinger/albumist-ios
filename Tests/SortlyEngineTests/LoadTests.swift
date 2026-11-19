@@ -146,22 +146,166 @@ struct LoadTests {
         let statusTime = clock.measure {
             states = LibraryStatus.compute(facts: facts, snapshot: snapshot, settings: OrganizationSettings(), contentAnalyzed: Set(assets.map(\.id)))
         }
+        // What refreshDerived works out off the main actor now (review of d612bc0: it was
+        // main-thread work), with every photo analysed.
+        let contents = Dictionary(uniqueKeysWithValues: assets.map { ($0.id, ContentAnalysis(labels: [])) })
+        var derived = DerivedLibraryStatus()
+        let derivedTime = clock.measure {
+            derived = DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: OrganizationSettings(), overrides: OverrideSet(),
+                                                  contents: contents, managed: [], inventory: CollectionInventory(albums), scope: .all)
+        }
+        #expect(derived.analyzed == assets.count)
         var atlas = TravelAtlas()
         let atlasTime = clock.measure { atlas = TravelAtlas.compute(facts: facts) }
         let overlapTime = clock.measure { _ = AlbumOverlapAnalyzer().suggestions(in: CollectionInventory(albums)) }
         let searchTime = clock.measure {
-            let parser = QueryParser(vocabulary: SearchVocabulary.build(facts: facts, inventory: CollectionInventory(albums), groups: []))
-            _ = SearchEngine().search(parser.parse("Rom 2023").filter, in: facts, statuses: [:], textHits: nil)
+            _ = SearchIndex(facts: facts, inventory: CollectionInventory(albums)).search("Rom 2023")
         }
 
         func ms(_ d: Duration) -> Int { Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000) }
         print("LOAD_TIMING photos \(assets.count) proposals \(snapshot?.proposals.count ?? 0) countries \(atlas.countryCodes.count) trips \(atlas.tripCount) states \(states.count)")
-        print("LOAD_TIMING first-run \(ms(full)) ms | second-run \(ms(again)) ms | facts \(ms(factsTime)) ms | status \(ms(statusTime)) ms | atlas \(ms(atlasTime)) ms | overlap \(ms(overlapTime)) ms | search \(ms(searchTime)) ms")
+        print("LOAD_TIMING first-run \(ms(full)) ms | second-run \(ms(again)) ms | facts \(ms(factsTime)) ms | status \(ms(statusTime)) ms | derived (off main) \(ms(derivedTime)) ms | atlas \(ms(atlasTime)) ms | overlap \(ms(overlapTime)) ms | search \(ms(searchTime)) ms")
         let peak = Self.peakMemoryMB()
         print("LOAD_MEMORY photos \(assets.count) peak \(peak.map { "\($0) MB" } ?? "unknown")")
         #expect(atlas.tripCount >= 25)
         #expect(full < limits.first)
         #expect(again < limits.second) // 20,000 photos: was 44 s before the grid DBSCAN
         if let limit = limits.peakMB, let peak { #expect(peak < limit) }
+    }
+
+    // MARK: The image step's first count (stress run 44116350940)
+
+    /// The stress run's library (`UITestLargeLibrary.item`): 25 photos per trip over five days
+    /// in one of 40 cities, every fifth trip at home in Munich, all with a location.
+    static func stressLibrary(_ count: Int) -> [AssetSnapshot] {
+        let cities: [(Double, Double)] = [
+            (48.8566, 2.3522), (41.3874, 2.1686), (40.7128, -74.0060), (48.2082, 16.3738), (62.1008, 7.2059),
+            (43.5081, 16.4402), (38.7223, -9.1393), (43.7696, 11.2558), (55.6761, 12.5683), (64.1466, -21.9426),
+            (41.8902, 12.4922), (35.0116, 135.7681), (51.5072, -0.1276), (52.5200, 13.4050), (45.4408, 12.3155),
+            (37.9838, 23.7275), (50.0755, 14.4378), (47.4979, 19.0402), (59.3293, 18.0686), (60.1699, 24.9384),
+            (53.3498, -6.2603), (55.9533, -3.1883), (40.4168, -3.7038), (37.3891, -5.9845), (43.2965, 5.3698),
+            (45.7640, 4.8357), (46.2044, 6.1432), (47.3769, 8.5417), (50.8503, 4.3517), (52.3676, 4.9041),
+            (34.0522, -118.2437), (37.7749, -122.4194), (25.7617, -80.1918), (19.4326, -99.1332), (-33.8688, 151.2093),
+            (-37.8136, 144.9631), (1.3521, 103.8198), (13.7563, 100.5018), (22.3193, 114.1694), (35.6762, 139.6503),
+        ]
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
+        return (0..<count).map { index in
+            let trip = index / 25
+            let spot = trip % 5 == 4 ? (48.1374, 11.5755) : cities[trip % cities.count]
+            let start = calendar.date(from: DateComponents(year: 2010 + trip % 15, month: 1 + (trip * 7) % 12, day: 1 + (trip * 3) % 25,
+                                                           hour: 9 + index % 10, minute: (index * 13) % 60))!
+            let date = calendar.date(byAdding: .day, value: (index % 25) / 5, to: start)!
+            let dLat = Double((index * 7_919) % 400) / 10_000 - 0.02, dLon = Double((index * 104_729) % 400) / 10_000 - 0.02
+            return AssetSnapshot(id: AssetID(String(format: "large-%06d", index)), kind: .image, creationDate: date,
+                                 location: GeoCoordinate(latitude: spot.0 + dLat, longitude: spot.1 + dLon),
+                                 pixelWidth: 192, pixelHeight: 144, originalFilename: "IMG_\(20_000 + index).JPG")
+        }
+    }
+
+    /// Half a second per photo (the simulator takes about 2 s; the time per photo only sets the
+    /// rhythm of the counts here).
+    final class TimedAnalyzer: ContentAnalyzing, @unchecked Sendable {
+        func analyzeContent(_ asset: AssetSnapshot, request: ContentAnalysisRequest) async throws -> ContentAnalysis {
+            try await Task.sleep(for: .milliseconds(500))
+            return ContentAnalysis(labels: [LabelScore("outdoor", 0.8)], source: .localPreview)
+        }
+        func recognizeText(_ asset: AssetSnapshot, allowNetwork: Bool) async throws -> TextAnalysis {
+            TextAnalysis(text: "", source: .original)
+        }
+    }
+
+    struct OfflineGeocoder: ReverseGeocoding {
+        func reverseGeocode(_ coordinate: GeoCoordinate) async throws -> PlaceComponents? { throw GeocodingError.offline }
+    }
+
+    /// The stress run's 50,000 photos, offline, with the overview's refresh after the early
+    /// suggestions (as `AppModel.refreshDerived` does it). The early suggestions take about
+    /// 2.8 s here and stood between "0 von 50.000" and the first photo until now (measured
+    /// before the change: first count 4.1 s after the step began, 1.0 s over 500 photos).
+    /// Now the first count comes after the first photos at any size, and the count keeps its
+    /// rhythm while the early suggestions are made.
+    @Test func stressLibraryImageStepCountsAtOnce() async throws {
+        let assets = Self.stressLibrary(50_000)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sortly-load-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = try SortlyStore(url: dir.appendingPathComponent("sortly.sqlite"))
+        let pipeline = AnalysisPipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: TimedAnalyzer(),
+                                        geocoder: OfflineGeocoder(), map: try WorldMapResource.load(), conditions: FakeConditions(),
+                                        settings: OrganizationSettings(), foregroundOnlineBudget: 60)
+        let control = AnalysisRunControl()
+        let reports = Mutex<[(at: ContinuousClock.Instant, progress: AnalysisPipeline.Progress)]>([])
+        let refreshed = Mutex<ContinuousClock.Instant?>(nil)
+        let report = try await pipeline.run(control: control) { progress in
+            guard progress.stage == .content else { return }
+            let count = reports.withLock { $0.append((.now, progress)); return $0.count }
+            if progress.earlyProposals {
+                Task {
+                    _ = try? await pipeline.refreshMatchesIfOutdated()
+                    let facts = (try? await pipeline.currentFacts()) ?? []
+                    let contents = (try? await store.results(ContentAnalysis.self, kind: "content")) ?? [:]
+                    let snapshot = try? await pipeline.latestProposals()
+                    _ = await Task.detached {
+                        DerivedLibraryStatus.derive(facts: facts, snapshot: snapshot, settings: OrganizationSettings(), overrides: OverrideSet(),
+                                                    contents: contents, managed: [], inventory: CollectionInventory(), scope: .all)
+                    }.value
+                    refreshed.withLock { $0 = .now }
+                }
+            }
+            // A while after the early suggestions and the refresh: enough to see the rhythm (at
+            // the latest after 60 reports, so a refresh that never ends does not run all photos).
+            if count >= 12, refreshed.withLock({ $0 }) != nil || count >= 60 { control.pause() }
+        }
+        #expect(report.pausedBecause == .userPaused)
+        #expect(report.earlyProposals)
+        #expect(refreshed.withLock { $0 } != nil, "the overview's refresh after the early suggestions did not end")
+        let seen = reports.withLock { $0 }
+        func ms(_ d: Duration) -> Int { Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000) }
+        let start = try #require(seen.first)
+        print("LOAD_IMAGE_STEP " + seen.map { "\(ms($0.at - start.at)) ms \($0.progress.completed)\($0.progress.earlyProposals ? " early" : "")" }.joined(separator: " | "))
+        let firstCount = try #require(seen.first { $0.progress.completed > start.progress.completed })
+        let early = try #require(seen.first { $0.progress.earlyProposals })
+        #expect(early.at - start.at < .seconds(5), "early suggestions \(ms(early.at - start.at)) ms after the step began")
+        #expect(firstCount.at - start.at < .seconds(2), "first count \(ms(firstCount.at - start.at)) ms after the step began")
+        let gaps = zip(seen, seen.dropFirst()).map { $1.at - $0.at }
+        #expect(gaps.allSatisfy { $0 < .seconds(3) }, "longest gap \(ms(gaps.max() ?? .zero)) ms")
+    }
+
+    /// Review of 9ff0dfc: Pause while the early suggestions are made (2.8 s over these 50,000
+    /// photos) waited for them: 1.6 s at the first counted photo. Pause takes effect within a
+    /// second, at the report that starts the image step and at the first counted photo; the
+    /// early suggestions not done by then are dropped and made again by the next run.
+    @Test(arguments: [false, true]) func stressLibraryPauseDuringTheEarlySuggestions(atFirstCount: Bool) async throws {
+        let assets = Self.stressLibrary(50_000)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sortly-load-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = try SortlyStore(url: dir.appendingPathComponent("sortly.sqlite"))
+        let pipeline = AnalysisPipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: TimedAnalyzer(),
+                                        geocoder: OfflineGeocoder(), map: try WorldMapResource.load(), conditions: FakeConditions(),
+                                        settings: OrganizationSettings(), foregroundOnlineBudget: 60)
+        let control = AnalysisRunControl()
+        let pausedAt = Mutex<(at: ContinuousClock.Instant, completed: Int)?>(nil)
+        let start = Mutex<Int?>(nil)
+        let report = try await pipeline.run(control: control) { progress in
+            guard progress.stage == .content, pausedAt.withLock({ $0 }) == nil else { return }
+            let first = start.withLock { s -> Int in
+                if s == nil { s = progress.completed }
+                return s!
+            }
+            if !atFirstCount || progress.completed > first {
+                pausedAt.withLock { $0 = (.now, progress.completed) }
+                control.pause()
+            }
+        }
+        let ended = ContinuousClock.now
+        let paused = try #require(pausedAt.withLock { $0 })
+        let took = ended - paused.at
+        print("LOAD_PAUSE_EARLY \(atFirstCount ? "first count" : "step start") at \(paused.completed): \(took), early \(report.earlyProposals)")
+        #expect(report.pausedBecause == .userPaused)
+        #expect(took < .seconds(1), "Pause took \(took)")
+        await pipeline.waitForEarlyLeftBehind()
+        if !report.earlyProposals { #expect(try await pipeline.latestProposals() == nil) }
     }
 }

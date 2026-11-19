@@ -140,15 +140,17 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
 
     /// Albums this plan uses from the free allowance: new albums and extended existing ones,
     /// except albums an earlier run of the same changes created (counted with that run).
-    /// `applied` counts what really happened, otherwise what is planned.
+    /// `applied` counts what really happened, otherwise what is planned. An album Photos made
+    /// whose check failed afterwards (its id is written down) counts as made: it is in Photos,
+    /// and undo removes it like any other (plugin review N4: it was never counted).
     public func freeAlbumUse(applied: Bool) -> Int {
         var newAlbums = 0
         var extended = Set<CollectionID>()
         for step in steps {
             let succeeded: Bool = if case .succeeded = step.state { true } else { false }
             switch step.operation {
-            case .createAlbum:
-                if !applied || succeeded { newAlbums += 1 }
+            case .createAlbum(let key, _, _):
+                if !applied || succeeded || resolvedKeys[key] != nil { newAlbums += 1 }
             case .addAssets(.existing(let id), let assets):
                 let added = applied ? confirmedMedia(of: step) : assets
                 if !added.isEmpty { extended.insert(id) }
@@ -157,6 +159,16 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
             }
         }
         return newAlbums + extended.subtracting(albumsFromRetriedPlan ?? []).count
+    }
+
+    /// Existing albums this plan verifiably added media to (the ones `freeAlbumUse(applied:
+    /// true)` counts as extended).
+    public var extendedAlbums: Set<CollectionID> {
+        var extended = Set<CollectionID>()
+        for step in steps {
+            if case .addAssets(.existing(let id), _) = step.operation, !confirmedMedia(of: step).isEmpty { extended.insert(id) }
+        }
+        return extended
     }
     /// What really happened (planned counts for plans from older versions).
     public var appliedSummary: PlanSummary { PlanSummary(applied: self) }
@@ -174,6 +186,19 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
         let succeeded: Bool = if case .succeeded = step.state { true } else { false }
         if record?.unverified.contains(step.id) == true { return [] }
         return record?.media[step.id] ?? (succeeded ? planned : [])
+    }
+}
+
+extension ChangePlan {
+    /// This plan with the ids written down for its new albums and folders in `stored` (the same
+    /// plan's record as it is stored) that it lacks (`ExecutionRecord.takeNotedIDs`).
+    @discardableResult
+    public mutating func takeNotedIDs(from stored: ExecutionRecord?) -> Bool {
+        guard let stored, !stored.maybeCreated.isEmpty || !stored.earlierMaybeCreated.isEmpty else { return false }
+        var merged = record ?? ExecutionRecord()
+        guard merged.takeNotedIDs(from: stored) else { return false }
+        record = merged
+        return true
     }
 }
 
@@ -197,10 +222,32 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
     /// Existing albums and folders the plan touched, with the name and folder path they had
     /// when it ran, so the receipt keeps showing those names after a later rename (audit 2, 7.2).
     public var names: [CollectionID: RecordedName] = [:]
+    /// Planned key → the id Photos gave the new album or folder, written down inside the change
+    /// before Photos stored it (`noteRequested`, review P2-01), or of a request that then got no
+    /// answer in time (`PhotosNotResponding`, with `maybeCreatedAt`): it may land later, and is
+    /// never forgotten. If it
+    /// is there when the plan goes on or is taken back, it is this plan's own (made, not
+    /// adopted), never made a second time. While it may still land, no second one is made
+    /// (`ChangeExecutor.lateCreateWait`); one that lands after the plan made the album anyway is
+    /// still Albumist's: the album records keep it and undo deletes it (`mayStillLand`; second
+    /// and third review of the PhotoKit limits, 1 and N2).
+    public var maybeCreated: [String: CollectionID] = [:]
+    /// When the request of `maybeCreated[key]` was given up (only for a request that got no
+    /// answer: an id merely written down inside the change is not waited for).
+    public var maybeCreatedAt: [String: Date] = [:]
+    /// Earlier `maybeCreated` ids of a key whose later request got no answer either.
+    public var earlierMaybeCreated: [CollectionID] = []
+    /// Step id → photos of an add step that were already in someone else's album when a
+    /// resumed plan reached it, while the journal may have been one entry behind Photos (review
+    /// P2-07): Albumist may have put them there, or the user. Never claimed (undo leaves them),
+    /// but named after an undo (`UndoRemainder`).
+    public var unclear: [String: [AssetID]] = [:]
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case media, unverified, adoptedKeys, deletedAlbums, unavailable, names }
+    enum CodingKeys: String, CodingKey {
+        case media, unverified, adoptedKeys, deletedAlbums, unavailable, names, maybeCreated, maybeCreatedAt, earlierMaybeCreated, unclear
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -210,6 +257,85 @@ public struct ExecutionRecord: Hashable, Sendable, Codable {
         deletedAlbums = try c.decodeIfPresent([CollectionID: DeletedAlbumRecord].self, forKey: .deletedAlbums) ?? [:]
         unavailable = try c.decodeIfPresent([String: Int].self, forKey: .unavailable) ?? [:]
         names = try c.decodeIfPresent([CollectionID: RecordedName].self, forKey: .names) ?? [:]
+        maybeCreated = try c.decodeIfPresent([String: CollectionID].self, forKey: .maybeCreated) ?? [:]
+        maybeCreatedAt = try c.decodeIfPresent([String: Date].self, forKey: .maybeCreatedAt) ?? [:]
+        earlierMaybeCreated = try c.decodeIfPresent([CollectionID].self, forKey: .earlierMaybeCreated) ?? []
+        unclear = try c.decodeIfPresent([String: [AssetID]].self, forKey: .unclear) ?? [:]
+    }
+
+    /// Photos gave this id to the new album or folder of `key`, inside the change and before
+    /// it stored it (`ChangePlanStoring.noteCreated`, review P2-01): if it is in the library,
+    /// Albumist made it. Unlike `noteMaybeCreated` nothing waits for it: after an app that
+    /// ended, Photos has stored the change or never will. An earlier id of the same key stays
+    /// Albumist's (`earlierMaybeCreated`).
+    public mutating func noteRequested(_ id: CollectionID, key: String) {
+        guard maybeCreated[key] != id else { return }
+        if let earlier = maybeCreated[key], !earlierMaybeCreated.contains(earlier) {
+            earlierMaybeCreated.append(earlier)
+        }
+        maybeCreated[key] = id
+        maybeCreatedAt[key] = nil
+    }
+
+    /// Takes the ids written down for new albums and folders in `stored` (the same plan as it is
+    /// stored) that this copy lacks: an id written from inside a change that Photos ran only
+    /// after the run stopped waiting reaches the stored plan, not the copy the app or a run
+    /// holds (second review of P2-01, S1). Never drops anything: a key this copy lacks takes the
+    /// stored id (and when it was given up); a different stored id for a key this copy knows
+    /// stays Albumist's as an earlier one (`earlierMaybeCreated`, which is joined too). Returns
+    /// whether anything was taken.
+    @discardableResult
+    public mutating func takeNotedIDs(from stored: ExecutionRecord) -> Bool {
+        var changed = false
+        // Only the entries that differ are sorted (a save of a large plan usually has none).
+        let differing = stored.maybeCreated.filter { maybeCreated[$0.key] != $0.value }
+        for (key, id) in differing.sorted(by: { $0.key < $1.key }) {
+            if let mine = maybeCreated[key] {
+                if mine != id, !earlierMaybeCreated.contains(id) {
+                    earlierMaybeCreated.append(id)
+                    changed = true
+                }
+            } else {
+                maybeCreated[key] = id
+                if let at = stored.maybeCreatedAt[key] { maybeCreatedAt[key] = at }
+                changed = true
+            }
+        }
+        guard !stored.earlierMaybeCreated.isEmpty else { return changed }
+        let current = Set(maybeCreated.values)
+        for id in stored.earlierMaybeCreated where !earlierMaybeCreated.contains(id) && !current.contains(id) {
+            earlierMaybeCreated.append(id)
+            changed = true
+        }
+        return changed
+    }
+
+    /// Until when the create of `key`, whose request got no answer (`maybeCreatedAt`), may
+    /// still land if it is not in the library (`ChangeExecutor.lateCreateWait`); nil when it
+    /// cannot any more: its request returned in this launch (`answered`), the wait is over, or
+    /// it was only written down inside the change (an app that ended, not a request without
+    /// an answer). A clock set back never makes it wait longer than the wait (round-3 review, L2).
+    public func lateCreateWaitsUntil(_ key: String, answered: Bool, now: Date) -> Date? {
+        guard maybeCreated[key] != nil, let since = maybeCreatedAt[key], !answered else { return nil }
+        let until = since.addingTimeInterval(ChangeExecutor.lateCreateWait)
+        if until.timeIntervalSince(now) > ChangeExecutor.lateCreateWait { return nil }
+        return now < until ? until : nil
+    }
+
+    /// A request that got no answer gave Photos this id for a new album or folder.
+    mutating func noteMaybeCreated(_ id: CollectionID, key: String, at date: Date) {
+        if let earlier = maybeCreated[key], earlier != id, !earlierMaybeCreated.contains(earlier) {
+            earlierMaybeCreated.append(earlier)
+        }
+        maybeCreated[key] = id
+        maybeCreatedAt[key] = date
+    }
+
+    /// Albums and folders Albumist asked Photos for that may still land, or landed, next to
+    /// the one the plan settled on for their key: Albumist's own, never the user's.
+    public func mayStillLand(resolved: [String: CollectionID]) -> [CollectionID] {
+        let latest = maybeCreated.sorted { $0.key < $1.key }.compactMap { key, id in resolved[key] == id ? nil : id }
+        return earlierMaybeCreated.filter { !resolved.values.contains($0) } + latest
     }
 
     /// Notes the current name and path of every existing album or folder the plan refers to,

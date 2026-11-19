@@ -39,22 +39,23 @@ targets:
         # Short name (the target is still called Sortly): Appetize and some system lists show it.
         CFBundleName: Albumist
         CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The commit an App Store archive was built from (testflight.yml sets it, "local"
+        # otherwise). The upload checks it before it signs and ships the archive.
+        AlbumistCommit: $(ALBUMIST_COMMIT)
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: LaunchBackground
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        # Version 1: iPhone only, portrait only (Fuchs 15.11.2026: "iPad machen wir in einer
+        # späteren Version"); landscape and iPad were never tested (plugin review W5).
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        NSPhotoLibraryUsageDescription: "Albumist liest deine Fotos nur auf diesem Gerät, um Alben vorzuschlagen. Nichts wird hochgeladen, Originale werden nie verändert."
+        # Read and write (PHAccessLevel.readWrite): the app reads to suggest and, after the user
+        # confirms a plan, creates albums and folders and adds or removes album memberships
+        # (App Review 5.1.1(ii): the purpose string names both). English: InfoPlist.xcstrings.
+        NSPhotoLibraryUsageDescription: "Albumist liest deine Fotos nur auf diesem Gerät, um Alben vorzuschlagen. Erst wenn du bestätigst, legt es Alben und Ordner in Fotos an und fügt Fotos hinzu oder nimmt sie aus Alben heraus. Es werden keine Fotos hochgeladen, Originale werden nie verändert."
         UIBackgroundModes:
           - processing
         BGTaskSchedulerPermittedIdentifiers:
@@ -64,24 +65,58 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.albumist.ios
-        TARGETED_DEVICE_FAMILY: "1,2"
+        TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
+        ALBUMIST_COMMIT: local
   SortlyTests:
     type: bundle.unit-test
     platform: iOS
     sources:
       - path: SortlyTests
+      # The app's product for StoreKit testing (SKTestSession in PurchaseStoreKitTests).
+      # Price and product id mirror App Store Connect; the app itself reads the price from StoreKit.
+      - path: StoreKit/Albumist.storekit
+        buildPhase: resources
     dependencies:
       - target: Sortly
       - package: SortlyKit
         product: SortlyTestSupport
+    postBuildScripts:
+      # StoreKit testing (SKTestSession) recognizes the test host by its code signing
+      # identifier. Built with CODE_SIGNING_ALLOWED=NO (CI), the app only carries the
+      # linker's signature with the identifier "Sortly", so StoreKit treats it as an
+      # unknown app and asks the real App Store: no product, no transactions. Signing the
+      # simulator test host ad hoc gives it its bundle id. Never runs for devices or archives.
+      - name: Sign test host for StoreKit testing
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "$PLATFORM_NAME" = "iphonesimulator" ] && [ "$CODE_SIGNING_ALLOWED" != "YES" ] && [ -n "$TEST_HOST" ]; then
+            APP="${TEST_HOST%/*}"
+            ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+            LOG=$(mktemp)
+            # The whole bundle; if a nested part refuses, at least the executable gets the id.
+            codesign --force --deep --sign - --timestamp=none "$APP" 2> "$LOG" \
+              || codesign --force --sign - --timestamp=none --identifier "$ID" "$TEST_HOST" 2>> "$LOG"
+            # Checked, not assumed: with any other identifier StoreKit lists no product and every
+            # StoreKit test waits its whole budget for nothing (CI 44340950061 could not tell why,
+            # the result of this step was not in the job log). A wrong identifier stops the build.
+            SIGNED=$(codesign -dv "$TEST_HOST" 2>&1 | sed -n 's/^Identifier=//p')
+            if [ "$SIGNED" = "$ID" ]; then
+              echo "note: test host signed ad hoc for StoreKit testing: Identifier=$SIGNED"
+            else
+              echo "error: SortlyTests could not sign the test host for StoreKit testing: identifier '$SIGNED', expected '$ID'; $(tr '\n' ' ' < "$LOG")"
+              exit 1
+            fi
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.albumist.ios.tests
         GENERATE_INFOPLIST_FILE: YES
+        # The script above writes into the test host's bundle.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
   SortlyUITests:
     type: bundle.ui-testing
     platform: iOS

@@ -86,7 +86,7 @@ struct AuditAnalysisTests {
         let s = try PipelineTests().setup()
         _ = try await s.pipeline.run()
         let first = try #require(try await s.pipeline.latestProposals())
-        let trip = try #require(first.proposals.first { $0.kind == .trip && $0.title.hasPrefix("Rom ·") })
+        let trip = try #require(first.proposals.first { $0.kind == .trip && $0.title.hasPrefix("Rom,") })
         try await s.store.addOverride(UserOverride(scope: .source(trip.id), decision: .rejectProposal))
 
         // An older photo of the trip arrives (shared by a friend), and the first one is deleted.
@@ -104,7 +104,7 @@ struct AuditAnalysisTests {
         let rome = try #require(trips.first { $0.geotaggedAssetIDs.contains("imported-earlier") })
         #expect(rome.id == trip.id)
         let next = try #require(try await s.pipeline.latestProposals())
-        #expect(!next.proposals.contains { $0.kind == .trip && $0.title.hasPrefix("Rom ·") })
+        #expect(!next.proposals.contains { $0.kind == .trip && $0.title.hasPrefix("Rom,") })
     }
 
     // MARK: 2.2 / 2.3 / 2.5 store invalidation
@@ -227,12 +227,16 @@ struct AuditAnalysisTests {
         analyzer.state.withLock { $0.contentFailures = [ids[1]: 1] }
         let reader = InMemoryLibraryReader(assets: assets)
         let store = try SortlyStore(url: nil)
-        let p = pipeline(store: store, reader: reader, analyzer: analyzer)
+        let clock = Clock()
+        let p = pipeline(store: store, reader: reader, analyzer: analyzer, clock: clock)
         let first = try await p.run()
         #expect(first.contentAnalyzed == 2)
         #expect(try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 1)
         #expect(try await store.result(ContentAnalysis.self, kind: "content", asset: ids[1])?.failedAttempts == 1)
 
+        // Retried in a later run, spaced out (first device test 15.11.: catch-up runs follow
+        // each other within seconds).
+        clock.advance(ContentAnalysis.retrySpacing)
         let second = try await p.run()
         #expect(second.contentAnalyzed == 1)
         let result = try #require(try await store.result(ContentAnalysis.self, kind: "content", asset: ids[1]))
@@ -246,8 +250,12 @@ struct AuditAnalysisTests {
         analyzer.state.withLock { $0.contentFailures = [ids[0]: 10] }
         let reader = InMemoryLibraryReader(assets: assets)
         let store = try SortlyStore(url: nil)
-        let p = pipeline(store: store, reader: reader, analyzer: analyzer)
-        for _ in 0..<3 { _ = try await p.run() }
+        let clock = Clock()
+        let p = pipeline(store: store, reader: reader, analyzer: analyzer, clock: clock)
+        for _ in 0..<3 {
+            _ = try await p.run()
+            clock.advance(ContentAnalysis.retrySpacing)
+        }
         #expect(try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 0)
         #expect(try await store.result(ContentAnalysis.self, kind: "content", asset: ids[0])?.failedAttempts == 3)
         let reads = analyzer.state.withLock { $0.contentCalls }
@@ -318,6 +326,63 @@ struct AuditAnalysisTests {
         #expect(stored?.contains("Danke") == true)
         #expect(try await store.searchText("4111").isEmpty)
         #expect(try await store.searchText("Danke") == [ids[0]])
+        #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
+    }
+
+    /// Review finding P2-04: texts stored with the masks of version 2 (IBAN with dots, the back
+    /// of an ID card) are masked again once, without reading the photos again.
+    @Test func textsStoredByMaskVersionTwoAreMaskedAgain() async throws {
+        let (assets, ids) = screenshots(2)
+        let store = try SortlyStore(url: nil)
+        _ = try await store.upsertAssets(assets)
+        try await store.setValue(2, forKey: AnalysisPipeline.Key.textMaskVersion)
+        let iban = "Bitte überweisen auf DE89.3704.0044.0532.0130.00 danke"
+        let idBack = "Augenfarbe BRAUN Größe 178 IDD<<L01X00T471<<<<<<<<<<<<<<< MUSTERMANN<<ERIKA<<<<<<<<<<<<<"
+        for (id, text) in zip(ids, [iban, idBack]) {
+            var result = TextResult(text: TextAnalysis(text: text, source: .original))
+            // Document facts as version 2 stored them, with the subject line unmasked.
+            result.document = try JSONDecoder().decode(DocumentInfo.self, from: Data(#"""
+                {"type":"letter","typeReliability":1,"subject":"Ihr Konto DE89-3704-0044-0532-0130-00","keywords":[],"sensitivity":"financial"}
+                """#.utf8))
+            try await store.saveResult(result, kind: "text", asset: id, version: AnalysisPipeline.textVersion)
+            try await store.indexText(text, for: id)
+        }
+        let analyzer = ScriptedAnalyzer()
+        _ = try await pipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: analyzer).run()
+        let first = try await store.result(TextResult.self, kind: "text", asset: ids[0])?.text?.text
+        #expect(first?.contains("0532") == false)
+        #expect(first?.contains("danke") == true)
+        #expect(try await store.searchText("0532").isEmpty)
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[0])?.document?.subject == "Ihr Konto IBAN ••••")
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[1])?.text?.text == "")
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[1])?.document?.subject == nil)
+        #expect(try await store.searchText("Augenfarbe").isEmpty)
+        #expect(try await store.searchText("danke") == [ids[0]])
+        #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
+    }
+
+    /// Second review of P2-04: version 2 stored no text for a medical or ID document, but its
+    /// subject line in full, and masking again skipped every result without text, so an IBAN
+    /// in such a subject stayed on disk.
+    @Test func subjectsOfDocumentsWithoutStoredTextAreClearedToo() async throws {
+        let (assets, ids) = screenshots(2)
+        let store = try SortlyStore(url: nil)
+        _ = try await store.upsertAssets(assets)
+        try await store.setValue(2, forKey: AnalysisPipeline.Key.textMaskVersion)
+        for (id, sensitivity) in zip(ids, ["medical", "identity"]) {
+            var result = TextResult(text: TextAnalysis(text: "", source: .original))
+            result.document = try JSONDecoder().decode(DocumentInfo.self, from: Data(#"""
+                {"type":"letter","typeReliability":1,"subject":"Befund, Erstattung auf DE89 3704 0044 0532 0130 00","keywords":[],"sensitivity":"\#(sensitivity)"}
+                """#.utf8))
+            try await store.saveResult(result, kind: "text", asset: id, version: AnalysisPipeline.textVersion)
+        }
+        let analyzer = ScriptedAnalyzer()
+        _ = try await pipeline(store: store, reader: InMemoryLibraryReader(assets: assets), analyzer: analyzer).run()
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[0])?.document?.subject == nil)
+        #expect(try await store.result(TextResult.self, kind: "text", asset: ids[1])?.document?.subject == nil)
+        for id in ids {
+            #expect(try await store.result(TextResult.self, kind: "text", asset: id)?.document?.type == .letter, "the facts stay")
+        }
         #expect(analyzer.state.withLock { $0.textCalls }.isEmpty)
     }
 
@@ -427,7 +492,7 @@ struct AuditAnalysisTests {
         _ = try await pipeline.run()
         #expect(await reader.applied)
         let snapshot = try #require(try await pipeline.latestProposals())
-        let trip = try #require(snapshot.proposals.first { $0.title.hasPrefix("Rom ·") })
+        let trip = try #require(snapshot.proposals.first { $0.title.hasPrefix("Rom,") })
         #expect(snapshot.matches[trip.id]?.best?.albumID == "rom")
         #expect(try await store.loadInventory()["rom"] != nil)
     }

@@ -19,6 +19,15 @@ struct SortingShow: View {
 
     let albums: [Album]
     var onFinish: () -> Void
+    /// Distinct photos of all albums, counted once here: the pile asked for it in every
+    /// redraw, and the show redraws many times a second (a set over every photo of the plan).
+    private let totalPhotos: Int
+
+    init(albums: [Album], onFinish: @escaping () -> Void) {
+        self.albums = albums
+        self.onFinish = onFinish
+        totalPhotos = Set(albums.flatMap(\.assets)).count
+    }
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -36,7 +45,6 @@ struct SortingShow: View {
     private var pileCenter: CGPoint { CGPoint(x: width / 2, y: 78) }
     private var albumCenter: CGPoint { CGPoint(x: width / 2, y: 252) }
     private var spacing: CGFloat { min(176, width * 0.44) }
-    private var totalPhotos: Int { Set(albums.flatMap(\.assets)).count }
     private var counted: Int { sorted.count }
 
     /// Loose photos on the pile: offset x, offset y, rotation in degrees.
@@ -60,10 +68,10 @@ struct SortingShow: View {
             .accessibilityHidden(true)
 
             // Ends only the animation; the albums keep being created in the background.
+            // A plain secondary button: glass belongs to the bars above the content
+            // (Theme.swift, design review N3).
             Button("Animation überspringen", action: onFinish)
-                .font(.subheadline.weight(.semibold))
-                .buttonStyle(.glass)
-                .controlSize(.large)
+                .buttonStyle(SecondaryButtonStyle())
         }
         // iPad: a focused column instead of a small cluster in a wide band.
         .frame(maxWidth: 520)
@@ -97,6 +105,11 @@ struct SortingShow: View {
                 .monospacedDigit()
                 .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(counted)))
         }
+        // Wrapped lines stay centred under the count. The show lasts a few seconds and its
+        // progress is spoken in full below, so the captions stop growing at AX1: beyond that
+        // they outgrow the 56 pt count and push the albums off a small screen.
+        .multilineTextAlignment(.center)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Fotos werden einsortiert"))
@@ -174,7 +187,7 @@ struct SortingShow: View {
             if Task.isCancelled || execution.failure != nil { break }
             if !execution.isRunning && execution.finished == nil { break } // never started: no celebration
             // A step that failed or was skipped gets no checkmark.
-            if execution.unsuccessfulSteps.contains(albums[index].id) { continue }
+            if model.executionProgress.unsuccessfulSteps.contains(albums[index].id) { continue }
             // Photos fly while the show keeps up; a backlog of finished albums is riffled through.
             let quick = !calm || (!essential && albumsDone() - index > 1)
             let mustMove = current != index && (!quick || index == albums.count - 1)
@@ -264,7 +277,7 @@ struct SortingShow: View {
         while !Task.isCancelled {
             let execution = model.execution
             // completedSteps only counts for this run while it runs (a previous run leaves its value).
-            if execution.isRunning && execution.completedSteps > albums[index].id { return }
+            if execution.isRunning && model.executionProgress.completedSteps > albums[index].id { return }
             if execution.finished != nil || execution.failure != nil { return }
             if !execution.isRunning && Date().timeIntervalSince(started) > 3 { return }
             try? await Task.sleep(for: .milliseconds(60))
@@ -286,7 +299,8 @@ struct SortingShow: View {
         let execution = model.execution
         if execution.finished != nil { return albums.count }
         guard execution.isRunning else { return 0 }
-        return albums.filter { execution.completedSteps > $0.id }.count
+        let completed = model.executionProgress.completedSteps
+        return albums.filter { completed > $0.id }.count
     }
 
     /// Loads the photos about to fly now, not mid-flight.
@@ -301,26 +315,12 @@ struct SortingShow: View {
     /// The albums a plan fills, in plan order. Chunked "add photos" steps of one album are
     /// merged; the album counts as done when its last chunk is done.
     static func albums(from plan: ChangePlan, inventory: CollectionInventory) -> [Album] {
-        var titles: [String: String] = [:]
-        for step in plan.steps {
-            if case .createAlbum(let key, let title, _) = step.operation { titles[key] = title }
-        }
-        var order: [AlbumRef] = []
-        var lastStep: [AlbumRef: Int] = [:]
-        var assets: [AlbumRef: [AssetID]] = [:]
-        for (index, step) in plan.steps.enumerated() {
-            guard case .addAssets(let ref, let ids) = step.operation, !ids.isEmpty else { continue }
-            if lastStep[ref] == nil { order.append(ref) }
-            lastStep[ref] = index
-            assets[ref, default: []].append(contentsOf: ids)
-        }
-        return order.map { ref in
-            let title: String = switch ref {
-            case .planned(let key): titles[key] ?? String(localized: "Album")
-            case .existing(let id): inventory[id]?.title ?? String(localized: "Album")
-            }
-            return Album(id: lastStep[ref] ?? 0, title: title, assets: assets[ref] ?? [])
-        }
+        albums(from: plan.filledAlbums(inventory: inventory))
+    }
+
+    /// The albums of `PlanReviewFacts.filledAlbums` (worked out off the main thread).
+    static func albums(from filled: [FilledAlbum]) -> [Album] {
+        filled.map { Album(id: $0.lastStep, title: $0.title ?? String(localized: "Album"), assets: $0.assets) }
     }
 }
 

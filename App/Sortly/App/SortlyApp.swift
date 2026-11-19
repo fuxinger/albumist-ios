@@ -1,5 +1,9 @@
 import SwiftUI
+import UIKit
 
+/// The app's entry: launch set-up (background work, notifications, UI-run helpers), one
+/// `AppModel` and `Purchases` for the window, and what happens when the app comes on screen or
+/// goes to the background (the analysis goes on, the backup copy of the decisions is written).
 @main
 struct SortlyApp: App {
     @State private var model = AppModel.shared
@@ -7,7 +11,14 @@ struct SortlyApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // UI runs only: a full console pipe held the main thread (see the function).
+        UITestSupport.moveConsoleToFile()
         BackgroundWork.register()
+        UITestSupport.prepareLaunch()
+        // Before launch ends, so the tap on "Analyse fertig" that opened the app arrives.
+        NotificationRouter.register()
+        // UI runs only: says in the log when the main thread or the whole app stood still.
+        MainThreadWatch.shared.start()
     }
 
     var body: some Scene {
@@ -21,12 +32,26 @@ struct SortlyApp: App {
                     await model.bootstrap()
                     if model.access.canRead { LibraryChangeWatcher.shared.start() }
                     // Photos may have changed while Albumist was closed (albums made in Photos).
-                    // (UI runs start it themselves, except the one that rebuilds the database.)
-                    if model.phase == .ready && model.access.canRead && (!UITestSupport.isRunning || UITestSupport.rebuildsDatabase) {
+                    // (UI runs start it themselves, except the ones that rebuild the database or
+                    // test a relaunch; a fast-started UI run creates its demo library first.)
+                    if model.phase == .ready && model.access.canRead && (!UITestSupport.isRunning || UITestSupport.startsAnalysisAtLaunch) {
                         model.startAnalysis()
                     }
+                    await UITestSupport.didLaunch(model)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+                    model.timeChanged()
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    ContinuedAnalysis.sceneChanged(onScreen: phase == .active)
+                    model.sceneChanged(onScreen: phase == .active)
+                    // Back on screen: an analysis that iOS ended goes on by itself, a running
+                    // one asks for background time again.
+                    if phase == .active {
+                        model.sceneBecameActive()
+                        // An approval or a purchase elsewhere whose update did not arrive.
+                        Task { await purchases.becameActive() }
+                    }
                     // The copy of the decisions for the iPhone backup is current before iOS may
                     // end the app (a background task keeps the app awake for the short write).
                     guard phase == .background else { return }

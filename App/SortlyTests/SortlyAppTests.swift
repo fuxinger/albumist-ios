@@ -6,6 +6,7 @@ import Vision
 import SwiftUI
 import UIKit
 import SortlyCore
+import SortlyEngine
 @testable import Sortly
 
 @Suite("Platform mapping")
@@ -200,6 +201,68 @@ struct LocalizationTests {
     }
 }
 
+/// "Dein Zuhause": how homes and places are called (`HomeText`), and the English of its texts.
+@Suite("Dein Zuhause texts")
+struct HomeTextTests {
+    static let munich = PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Bayern", locality: "München")
+    static let offline = PlaceComponents(isoCountryCode: "DE", country: "Deutschland", administrativeArea: "Bayern")
+
+    @Test func areaNamesTheTownOrOfflineTheRegion() {
+        #expect(HomeText.area(Self.munich).contains("München"))
+        #expect(!HomeText.area(Self.munich).contains("Bayern"))
+        #expect(HomeText.area(Self.offline).contains("Bayern"))
+        #expect(!HomeText.area(nil).isEmpty)
+        #expect(HomeText.short(Self.munich) == "München")
+        #expect(HomeText.short(Self.offline) == "Bayern")
+    }
+
+    @Test func summaryFollowsTheSettings() {
+        let place = HomePlace(center: GeoCoordinate(latitude: 48.137, longitude: 11.575), components: Self.munich)
+        #expect(HomeText.summary(HomeSettings(), detected: place) == "München")
+        #expect(HomeText.summary(HomeSettings().confirming(place, date: .now), detected: nil) == "München")
+        let none = HomeText.summary(HomeSettings().withoutHome(date: .now), detected: place)
+        #expect(none != "München" && !none.isEmpty)
+        #expect(!HomeText.summary(HomeSettings(), detected: nil).isEmpty)
+    }
+
+    /// The last day lived there is shown, not the day after.
+    @Test func formerHomeShowsTheLastMonth() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let until = calendar.date(from: DateComponents(year: 2019, month: 1, day: 1))!
+        let home = FormerHome(place: HomePlace(center: GeoCoordinate(latitude: 53.55, longitude: 9.99), components: .init(locality: "Hamburg")), until: until)
+        let line = HomeText.former(home)
+        #expect(line.contains("Hamburg"))
+        #expect(line.contains("2018"))
+    }
+
+    /// The user's own name first, then what the place is, then the place's name.
+    @Test func placeTitles() {
+        let base = PlaceAnswer(id: SortlyID("a"), center: GeoCoordinate(latitude: 45.6, longitude: 10.7), oftenHere: true, name: "Malcesine", answeredAt: .now)
+        #expect(HomeText.title(base, placeName: "Gardasee") == "Gardasee")
+        var parents = base
+        parents.kind = .parents
+        #expect(HomeText.title(parents, placeName: "Gardasee") == HomeText.kind(.parents))
+        var own = parents
+        own.label = "Oma"
+        #expect(HomeText.title(own, placeName: "Gardasee") == "Oma")
+        #expect(Set(PersonalPlaceKind.allCases.map(HomeText.kind)).count == PersonalPlaceKind.allCases.count)
+        #expect(Set(PersonalPlaceKind.allCases.map(HomeText.symbol)).count == PersonalPlaceKind.allCases.count)
+    }
+
+    @Test func englishTexts() throws {
+        let path = try #require(Bundle.main.path(forResource: "en", ofType: "lproj"))
+        let bundle = try #require(Bundle(path: path))
+        #expect(bundle.localizedString(forKey: "Dein Zuhause", value: nil, table: nil) == "Your home")
+        #expect(bundle.localizedString(forKey: "Kein Zuhause festlegen", value: nil, table: nil) == "Don't set a home")
+        let area = bundle.localizedString(forKey: "%@ und Umgebung", value: nil, table: nil)
+        #expect(String(format: area, "Munich") == "Munich and surroundings")
+        let removed = bundle.localizedString(forKey: "%lld Vorschläge passen nicht mehr und sind weggefallen.", value: nil, table: nil)
+        #expect(String.localizedStringWithFormat(removed, 1) == "1 suggestion no longer fits and was removed.")
+        #expect(String.localizedStringWithFormat(removed, 3) == "3 suggestions no longer fit and were removed.")
+    }
+}
+
 @Suite("Siri, Shortcuts and Spotlight")
 @MainActor
 struct IntentDataTests {
@@ -244,5 +307,208 @@ struct DemoLibraryTests {
         print("DEMO_SCREENSHOT_EXIF \(String(describing: exif?[kCGImagePropertyExifUserComment]))")
         #expect(DemoLibrary.documentPhoto(["Rechnung"]).size == CGSize(width: 1500, height: 2000))
         #expect(DemoLibrary.shared.expectedCount > 200)
+    }
+}
+
+/// Device test 15.11.: the Lock Screen bar came only for the first analysis of an app session,
+/// because every request used the same identifier and iOS runs an identifier only once.
+@Suite("Continued analysis identifiers")
+struct ContinuedAnalysisIdentifierTests {
+    @Test func everyRequestHasItsOwnIdentifierThatInfoPlistPermits() throws {
+        let ids = (0..<50).map { _ in ContinuedAnalysis.makeIdentifier() }
+        #expect(Set(ids).count == ids.count)
+        let permitted = try #require(Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String])
+        let wildcard = try #require(permitted.first { $0.hasSuffix(".*") })
+        let prefix = String(wildcard.dropLast(1))
+        for id in ids {
+            #expect(id.hasPrefix(prefix))
+            #expect(id.count > prefix.count)
+            // Under the bundle identifier, as iOS requires for continued processing tasks.
+            #expect(id.hasPrefix(try #require(Bundle.main.bundleIdentifier) + "."))
+        }
+    }
+}
+
+/// Device test 15.11. 22:57: the analysis had stopped, and the Lock Screen still said
+/// "Albumist analysiert deine Fotos". Every way a run ends gets its own text there.
+@MainActor
+@Suite("Lock Screen text when a run ends")
+struct ContinuedAnalysisEndingTests {
+    private func state(complete: Bool = false, paused: PauseReason? = nil, needsResume: Bool) -> AppModel.AnalysisState {
+        var report = AnalysisPipeline.Report()
+        if complete { report.completedStages = AnalysisPipeline.Stage.allCases }
+        report.pausedBecause = paused
+        var state = AppModel.AnalysisState()
+        state.lastReport = report
+        state.needsResume = needsResume
+        return state
+    }
+
+    @Test func finishedSaysSoAndFillsTheCircle() {
+        let ending = ContinuedAnalysis.ending(state(complete: true, needsResume: false))
+        #expect(ending.title == String(localized: "Analyse fertig"))
+        #expect(ending.complete)
+    }
+
+    @Test func pausedByTheUserSaysPaused() {
+        let ending = ContinuedAnalysis.ending(state(paused: .userPaused, needsResume: false))
+        #expect(ending.title == String(localized: "Analyse pausiert"))
+        #expect(!ending.complete)
+    }
+
+    @Test func stoppedByTheDeviceOrIOSWaitsForTheUser() {
+        for reason in [PauseReason.thermal, .batteryLow, .lowPower, .timeBudget, .accessRevoked] {
+            let ending = ContinuedAnalysis.ending(state(paused: reason, needsResume: true))
+            #expect(ending.title == String(localized: "Analyse wartet auf dich"), "\(reason)")
+            #expect(!ending.complete)
+        }
+    }
+
+    /// Point 5: "Analyse fertig" with the number of suggestions under it.
+    @Test func finishedSaysHowManySuggestions() {
+        var analysis = state(complete: true, needsResume: false)
+        analysis.lastReport?.proposals = 216
+        let ending = ContinuedAnalysis.ending(analysis)
+        #expect(ending.title == String(localized: "Analyse fertig"))
+        #expect(ending.subtitle == String(localized: "\(216) Vorschläge"))
+    }
+
+    /// An error leaves the report of the run before: a finished one must not read as "fertig".
+    @Test func anErrorAfterAFinishedRunIsNotFinished() {
+        let ending = ContinuedAnalysis.ending(state(complete: true, needsResume: true))
+        #expect(ending.title == String(localized: "Analyse wartet auf dich"))
+        #expect(!ending.complete)
+    }
+}
+
+/// Point 5 and the card's texts (progress display v3): number first, the finish time only when
+/// there is one to trust, never while the run waits.
+@MainActor
+@Suite("Analysis card and Lock Screen texts")
+struct AnalysisTextTests {
+    private func running(_ step: AnalysisPipeline.Stage = .content, completed: Int = 2_431, total: Int = 5_683) -> AppModel.AnalysisState {
+        var state = AppModel.AnalysisState()
+        state.isRunning = true
+        state.stage = step
+        state.completed = completed
+        state.total = total
+        return state
+    }
+
+    @Test func lockScreenNumberFirstThenFinishTime() {
+        let today = Calendar.current.date(bySettingHour: 23, minute: 40, second: 0, of: Date()) ?? Date()
+        let count = AnalysisText.count(.init(step: .content, completed: 2_431, total: 5_683))
+        #expect(count.hasPrefix(2_431.formatted()))
+        #expect(count.contains(5_683.formatted()))
+        let withTime = ContinuedAnalysis.subtitle(running(), finish: .at(today))
+        #expect(withTime.hasPrefix(count))
+        #expect(withTime.contains(AnalysisText.time(today)))
+        // Without a time to trust: the count only.
+        #expect(ContinuedAnalysis.subtitle(running(), finish: nil) == count)
+        // Waiting: no time, the reason.
+        var waiting = running()
+        waiting.waiting = .batteryLow
+        #expect(ContinuedAnalysis.subtitle(waiting, finish: .at(today)) == String(localized: "Wartet aufs Laden"))
+        // A step without a count says the step.
+        #expect(ContinuedAnalysis.subtitle(running(.groups, completed: 0, total: 0), finish: nil)
+                == String(localized: "Schritt \(6) von \(6)"))
+    }
+
+    @Test func unitsFollowTheStepWithSingular() {
+        #expect(AnalysisText.ofTotal(1, .photos) == String(localized: "von \(1) Fotos"))
+        #expect(AnalysisText.ofTotal(1_600, .places) == String(localized: "von \(1_600) Orten"))
+        #expect(AnalysisText.ofTotal(1_040, .screenshots) == String(localized: "von \(1_040) Screenshots"))
+        #expect(AnalysisText.ofTotal(1, .photos) != AnalysisText.ofTotal(2, .photos).replacingOccurrences(of: "2", with: "1"))
+    }
+
+    @Test func finishTimeTodayTomorrowAndSoon() {
+        let now = Calendar.current.date(bySettingHour: 22, minute: 55, second: 0, of: Date()) ?? Date()
+        let later = now.addingTimeInterval(45 * 60)
+        let tomorrow = now.addingTimeInterval(8 * 3_600)
+        #expect(AnalysisText.finish(.at(later), now: now) == String(localized: "Fertig gegen \(AnalysisText.time(later))"))
+        #expect(AnalysisText.finish(.at(tomorrow), now: now) == String(localized: "Fertig morgen gegen \(AnalysisText.time(tomorrow))"))
+        #expect(AnalysisText.finish(.soon, now: now) == String(localized: "Gleich fertig"))
+    }
+
+    @Test func alreadyDoneLeavesZerosOut() {
+        #expect(AnalysisText.alreadyDone(AlreadyDone(trips: 51, places: 38))
+                == String(localized: "\(51) Reisen") + ", " + String(localized: "\(38) Orte"))
+        #expect(AnalysisText.alreadyDone(AlreadyDone(trips: 0, places: 3)) == String(localized: "\(3) Orte"))
+    }
+}
+
+/// Counts in catalog sentences stay plain integers (`%lld` keys with plural forms). A thousands
+/// separator needs its own catalog keys first (docs/IMPROVEMENTS.md).
+struct CountFormattingTests {
+    /// Run 43796534873: `format: .number` turned the key into one the catalog does not have, so
+    /// the English overview showed "57 Fotos von zu Hause". The plain count must find the key.
+    @Test func countLinesFindTheirCatalogKeyAndPlurals() {
+        let one = 1, many = 1354
+        let single = String(localized: "\(one) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
+        let plural = String(localized: "\(many) Fotos von zu Hause", locale: Locale(identifier: "de_DE"))
+        print("COUNT_FORMAT \(single) | \(plural)")
+        // The test host may run in English or German: the singular form proves the key (and its
+        // plural variations) was found; an untranslated key would keep "Fotos" for one photo.
+        #expect(single.hasPrefix("1 ") && !single.contains("Fotos") && !single.contains("photos"))
+        #expect(plural.contains("Fotos") || plural.contains("photos"))
+    }
+}
+
+/// Fuchs 16.11. ("Ja"): after "Analyse neu aufbauen" or another part of the library, the photo
+/// mosaic comes back, because the next run counts as a first analysis again.
+@MainActor
+struct MosaicAfterRebuildTests {
+    @Test func rebuildMakesTheNextRunAFirstAnalysisAgain() {
+        let key = "analysis.completedOnce"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+
+        AnalysisMarker.finished()
+        #expect(AnalysisMarker.completedOnce)
+        #expect(!ScanShowRule.shows(isRunning: true, firstAnalysis: !AnalysisMarker.completedOnce, isQuickCheck: false))
+
+        AnalysisMarker.reset()   // what "Analyse neu aufbauen" and another library part call
+        #expect(!AnalysisMarker.completedOnce)
+        #expect(ScanShowRule.shows(isRunning: true, firstAnalysis: !AnalysisMarker.completedOnce, isQuickCheck: false))
+    }
+}
+
+/// Second review of the labels fix, finding 9; third review, 7: the marker as the app really
+/// keeps it (`AnalysisMarker.Point` in UserDefaults), not a copy of it. "Fotos werden für die
+/// neuen Bereiche angesehen" is kept as "Neue Fotos" plus a flag, so a build before that label
+/// (TestFlight back to it) reads the marker instead of dropping it whole.
+@MainActor
+struct AnalysisMarkerLabelTests {
+    /// The marker of a build before `newAreas`: its label knew four cases, and a value it could
+    /// not read made the whole marker unreadable.
+    struct OlderPoint: Codable {
+        enum NewWork: String, Codable { case newPhotos, afterUpdate, moreNewPhotos, afterUpdateAgain }
+        var stage: Int
+        var overall: Double
+        var newWork: NewWork?
+    }
+
+    @Test func olderBuildsReadTheMarkerAndThisBuildReadsItsLabelBack() throws {
+        let key = "analysis.unfinished"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(saved, forKey: key) }
+
+        for label in [ResumedRun.NewWork.newAreas, .newPhotos, .moreNewPhotos, .afterUpdate, .afterUpdateAgain] {
+            let point = AnalysisMarker.Point(stage: 4, overall: 0.4, newWork: label.markerValue, newAreas: label.markerFlag)
+            AnalysisMarker.unfinished = point
+            let stored = try #require(UserDefaults.standard.data(forKey: key))
+            let older = try JSONDecoder().decode(OlderPoint.self, from: stored)
+            #expect(older.stage == 4)
+            #expect(older.newWork?.rawValue == label.markerValue.rawValue)
+            let back = try #require(AnalysisMarker.unfinished)
+            #expect(back == point)
+            #expect(ResumedRun.NewWork.fromMarker(back.newWork, flag: back.newAreas) == label)
+        }
+        // A marker an older build wrote reads as it is.
+        let written = try JSONEncoder().encode(OlderPoint(stage: 4, overall: 0.4, newWork: .moreNewPhotos))
+        UserDefaults.standard.set(written, forKey: key)
+        let read = try #require(AnalysisMarker.unfinished)
+        #expect(read.newAreas == nil)
+        #expect(ResumedRun.NewWork.fromMarker(read.newWork, flag: read.newAreas) == .moreNewPhotos)
     }
 }

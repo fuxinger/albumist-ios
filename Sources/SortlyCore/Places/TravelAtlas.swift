@@ -16,6 +16,11 @@ public struct TravelAtlas: Hashable, Sendable {
     public var tripCount = 0
     public var sinceYear: Int?
     public var longestTripDays: Int?
+    /// The longest trip itself, so the atlas can say where it went (Fuchs 15.11.: "Bei der
+    /// längsten Reise wäre gerne das Land angezeigt"). The more recent one wins a tie.
+    public var longestTrip: TripSummary? {
+        trips.max { ($0.days, $0.start) < ($1.days, $1.start) }
+    }
     /// Most photographed town outside the home area (by trip photos), if any.
     public var favoriteTripCity: String?
     /// A good photo from the favorite destination for the share image: a real photo (no
@@ -33,6 +38,13 @@ public struct TravelAtlas: Hashable, Sendable {
     public var continents: Set<Continent> { Set(countryCodes.compactMap(Continent.forCountryCode)) }
     /// Share of the 195 UN-recognized states (rounded down to whole percent in the UI).
     public var worldShare: Double { min(1, Double(countryCodes.count) / 195) }
+
+    /// How the world share is shown (design review N11): the locale's percent format
+    /// ("0,51 %" in German, "0.51%" in English) with two significant digits, so one country
+    /// is not "0 %" as with the old whole-number cut-off.
+    public static var worldShareStyle: FloatingPointFormatStyle<Double>.Percent {
+        .percent.precision(.significantDigits(1...2))
+    }
     /// Countries ordered by first visit (unknown dates last, then alphabetically).
     public var countriesByFirstVisit: [String] {
         countryCodes.sorted { a, b in

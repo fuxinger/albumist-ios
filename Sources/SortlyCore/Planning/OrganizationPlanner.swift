@@ -12,10 +12,12 @@ public enum ProposalDecision: Hashable, Sendable, Codable {
     case extendExisting(CollectionID)
     case renameExisting(CollectionID, newTitle: String, extend: Bool)
     case moveExisting(CollectionID, folderPath: [String], extend: Bool)
-    /// Merge several albums into one target. `removeSourceAlbums` deletes only the old
-    /// album containers after all their media were added to the target.
-    /// `title` nil keeps an existing target's name exactly as the user wrote it.
-    case merge(target: CollectionID?, sources: [CollectionID], title: String?, folderPath: [String]?, removeSourceAlbums: Bool)
+    /// Merge several albums into one target: their media are added to it, the source albums
+    /// stay as they are. `title` nil keeps an existing target's name exactly as the user wrote it.
+    /// (Removing the source albums is not offered: it would delete the user's own albums without
+    /// a delete guard, review P2-06. Decisions stored with `removeSourceAlbums` still decode; the
+    /// key is ignored.)
+    case merge(target: CollectionID?, sources: [CollectionID], title: String?, folderPath: [String]?)
 }
 
 /// A proposal together with the user's selection.
@@ -48,7 +50,7 @@ public struct OrganizationPlanner: Sendable {
     public var chunkSize: Int
 
     public init(rootFolderTitle: String = "Albumist", chunkSize: Int = 500) {
-        self.rootFolderTitle = rootFolderTitle
+        self.rootFolderTitle = rootFolderTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         self.chunkSize = max(1, chunkSize)
     }
 
@@ -143,7 +145,7 @@ public struct OrganizationPlanner: Sendable {
                     builder.add(filtered(for: albumID).filter { !album.assetIDs.contains($0) }, to: .existing(albumID), source: sourceID)
                 }
 
-            case .merge(let target, let sources, let title, let path, let removeSources):
+            case .merge(let target, let sources, let title, let path):
                 let validSources = sources.filter { requireEditable($0) }
                 guard validSources.count == sources.count else { continue }
                 var union = Set<AssetID>()
@@ -166,11 +168,6 @@ public struct OrganizationPlanner: Sendable {
                     targetMembers = []
                 }
                 builder.add(union.subtracting(targetMembers).sorted(), to: ref, source: sourceID)
-                if removeSources {
-                    for s in validSources where AlbumRef.existing(s) != ref {
-                        builder.append(.deleteCollection(s, title: inventory[s]?.title ?? ""), source: sourceID)
-                    }
-                }
             }
         }
 
@@ -305,13 +302,17 @@ extension ProposalDecision {
     /// What "Übernehmen" does for a proposal (prompt §5.4): keep a complete album, extend a
     /// matching one, otherwise create a new album. Ambiguous cases and unnamed personal
     /// places/groups stay undecided until the user chooses.
+    ///
+    /// Only a certain match (`extendable`) changes an album of the user. A possible match
+    /// (`possibleMatch`) gets an album of its own; the user can still pick the existing album
+    /// under "Anpassen" (review 16.11., A1–A4: "Unklar heißt nicht erledigt").
     public static func recommended(for proposal: AlbumProposal, match: MatchResult?, userTitle: String? = nil) -> ProposalDecision {
         let title = userTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         if proposal.requiresUserName && (title ?? "").isEmpty { return .undecided }
         switch match?.status {
         case .alreadyComplete:
             if let id = match?.best?.albumID { return .keepExisting(id) }
-        case .extendable, .possibleMatch:
+        case .extendable:
             if let best = match?.best, best.isEditable { return .extendExisting(best.albumID) }
         case .multipleMatches, .ambiguous:
             return .undecided
@@ -319,6 +320,69 @@ extension ProposalDecision {
             break
         }
         return .createNew(title: (title?.isEmpty ?? true) ? nil : title, folderPath: nil)
+    }
+
+    /// Whether a suggestion may be accepted without the user looking at it ("Dein Startpaket",
+    /// "Empfohlene auswählen"): at least likely, nothing sensitive, no name needed, a clear
+    /// action, and no similar album of the user that only possibly fits (review 16.11.).
+    /// An album that already holds everything is no action: "15 empfohlene auswählen" turned
+    /// 15 complete suggestions into "Ausgewählt" without anything to create (UI run
+    /// 43823834271), and once their albums were taken back they stayed that way.
+    public static func isSafeToAcceptUnseen(_ proposal: AlbumProposal, match: MatchResult?) -> Bool {
+        let recommended = recommended(for: proposal, match: match)
+        return proposal.reliability >= .likely && !proposal.isSensitive && !proposal.requiresUserName
+            && match?.status != .possibleMatch && recommended.isAccepted && !recommended.isKeepExisting
+    }
+
+    /// "So lassen" decisions for albums an undo deleted: such a decision changes nothing and
+    /// is not counted as open either, so its suggestion could never be created again (UI run
+    /// 43823834271: two plans taken back, their 15 suggestions stayed "Ausgewählt" with "Neues
+    /// Album" and nothing to create). They go back to open.
+    ///
+    /// Only albums the undo's own deletion steps removed (verified by the executor), never an
+    /// album that an album list lacks: with limited access or during an iCloud sync the list can
+    /// hold few or no albums, and a deliberate "So lassen" must not be lost to that (review of
+    /// 697852f: the Startpaket could then extend that album).
+    public static func keepsOfAlbumsDeleted(by plan: ChangePlan, in decisions: [SortlyID: ProposalDecision]) -> Set<SortlyID> {
+        guard plan.reverts != nil else { return [] }
+        let deleted = Set(plan.steps.compactMap { step -> CollectionID? in
+            guard case .deleteCollection(let id, _) = step.operation, case .succeeded = step.state else { return nil }
+            return id
+        })
+        guard !deleted.isEmpty else { return [] }
+        return Set(decisions.compactMap { id, decision in
+            if case .keepExisting(let album) = decision, deleted.contains(album) { return id }
+            return nil
+        })
+    }
+
+    /// The existing album an accepted decision adds photos to: "ergänzen", or renaming or
+    /// moving with extending. nil when it adds nothing to an album of the user.
+    public var extendedAlbum: CollectionID? {
+        switch self {
+        case .extendExisting(let id): id
+        case .renameExisting(let id, _, true), .moveExisting(let id, _, true): id
+        default: nil
+        }
+    }
+
+    /// After the matching rules changed (a new `AlbumMatcher.version`): the suggestions whose
+    /// accepted, not yet applied decision still adds photos to an album that is no longer a
+    /// certain match for it (`AlbumMatcher.sortingAlbums`). They go back to open, so the user
+    /// decides again (re-check 16.11.: a Startpaket "ergänzen" on what is now only a possible
+    /// match must not run). Applied suggestions have no decision any more; `protected` are the
+    /// suggestions of a plan that already started (an interrupted one): never touched.
+    public static func uncertainExtensions(_ decisions: [SortlyID: ProposalDecision], proposals: [AlbumProposal],
+                                           matches: [SortlyID: MatchResult], protected: Set<SortlyID> = []) -> Set<SortlyID> {
+        let matcher = AlbumMatcher()
+        var result = Set<SortlyID>()
+        for proposal in proposals where !protected.contains(proposal.id) {
+            guard let decision = decisions[proposal.id], decision.isAccepted, let album = decision.extendedAlbum else { continue }
+            if !matcher.sortingAlbums(matches[proposal.id], kind: proposal.kind, title: proposal.title).contains(album) {
+                result.insert(proposal.id)
+            }
+        }
+        return result
     }
 
     public var isAccepted: Bool {

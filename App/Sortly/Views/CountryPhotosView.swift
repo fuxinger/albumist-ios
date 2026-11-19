@@ -9,10 +9,10 @@ struct CountryPhotosView: View {
     var code: String
     /// The year chosen in the atlas; nil = all years.
     var year: Int?
-    @State private var detail: AssetFacts?
+    /// A tap opens the photo large, its details behind "i" (design review W12).
+    @State private var viewing: PhotoViewer.Start?
     /// The photo zooms out of its thumbnail and back into it.
     @Namespace private var zoom
-    @State private var addingToAlbum: [AssetID]?
 
     var body: some View {
         let country = model.countryPhotos(code, year: year)
@@ -20,9 +20,7 @@ struct CountryPhotosView: View {
             LazyVStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                 header(country)
                 if let proposal = model.countryProposal(for: country) {
-                    NavigationLink {
-                        ProposalDetailView(proposal: proposal)
-                    } label: {
+                    PushLink(.proposal(ProposalRef(proposal)), chevron: false) {
                         suggestion(proposal)
                     }
                     .buttonStyle(.plain)
@@ -36,11 +34,11 @@ struct CountryPhotosView: View {
                                 Text("Ohne Datum").font(.title3.weight(.bold))
                             }
                             Spacer()
-                            Text("\(group.photos.count) Fotos").font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                            Text("\(group.photos.count) Fotos").font(.subheadline).foregroundStyle(Theme.secondaryText).monospacedDigit() // on the photo wash
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityAddTraits(.isHeader)
-                        grid(group.photos)
+                        grid(group.photos, all: country.years.flatMap { $0.photos.map(\.id) })
                     }
                 }
             }
@@ -63,13 +61,13 @@ struct CountryPhotosView: View {
                                        description: Text("Für dieses Land gibt es gerade keine Fotos."))
             }
         }
-        .sheet(item: $detail) { facts in
-            AssetDetailView(facts: facts) { addingToAlbum = [facts.id] }
-                .navigationTransition(.zoom(sourceID: facts.id, in: zoom))
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
+                .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
-        .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
-            AddToAlbumSheet(assets: addingToAlbum ?? []) {}
-        }
+        // "Widerrufen" stays in reach after the viewer closed (design review D4).
+        .safeAreaInset(edge: .bottom) { IgnoreUndoBar() }
+        .animation(.snappy, value: model.lastIgnored)
     }
 
     private func header(_ country: CountryPhotos) -> some View {
@@ -79,7 +77,7 @@ struct CountryPhotosView: View {
                 Text(summary(country)).font(.headline)
                 if !country.topPlaces.isEmpty {
                     Text(country.topPlaces.formatted(.list(type: .and)))
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.subheadline).foregroundStyle(Theme.secondaryText) // sits on the photo wash
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -102,7 +100,7 @@ struct CountryPhotosView: View {
             IconTile(systemName: "rectangle.stack.badge.plus", tint: Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Album „\(model.userTitles[proposal.id] ?? proposal.title)“ anlegen").font(.body.weight(.medium))
-                Text("Vorschlag mit \(proposal.assetIDs.count) Aufnahmen").font(.footnote).foregroundStyle(.secondary)
+                Text("Vorschlag mit \(proposal.assetIDs.count) Fotos").font(.footnote).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
@@ -112,11 +110,11 @@ struct CountryPhotosView: View {
         .contentShape(Rectangle())
     }
 
-    private func grid(_ photos: [AssetFacts]) -> some View {
+    private func grid(_ photos: [AssetFacts], all: [AssetID]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
             ForEach(photos, id: \.id) { facts in
                 Button {
-                    detail = facts
+                    viewing = PhotoViewer.Start(id: facts.id, ids: all)
                 } label: {
                     AssetThumbnail(id: facts.id, side: 110)
                         .aspectRatio(1, contentMode: .fill)

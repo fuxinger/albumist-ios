@@ -118,6 +118,13 @@ public struct Labels: Sendable {
     }
 
     public func frequentPlacePlaceholder(number: Int) -> String { t("Häufiger Ort \(number)", "Frequent Place \(number)") }
+    public func frequentPlacePlaceholder(in city: String) -> String { t("Häufiger Ort in \(city)", "Frequent Place in \(city)") }
     public var roadTripSuffix: String { "Roadtrip" }
+    /// "Lissabon, Porto und Sevilla" / "Lisbon, Porto and Sevilla", for the places a trip went to.
+    public func list(_ items: [String]) -> String {
+        guard let last = items.last else { return "" }
+        guard items.count > 1 else { return last }
+        return items.dropLast().joined(separator: ", ") + t(" und ", " and ") + last
+    }
     public var unknownPlace: String { t("Unbekannter Aufnahmeort", "Unknown Location") }
 }

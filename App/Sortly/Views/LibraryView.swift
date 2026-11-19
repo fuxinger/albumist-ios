@@ -8,7 +8,8 @@ struct LibraryView: View {
     @State private var bucket: InboxBucket = .unorganized
     @State private var selecting = false
     @State private var selection: Set<AssetID> = []
-    @State private var detail: AssetFacts?
+    /// A tap opens the photo large, its details behind "i" (design review W12).
+    @State private var viewing: PhotoViewer.Start?
     /// The photo zooms out of its thumbnail and back into it.
     @Namespace private var zoom
     @State private var addingToAlbum: [AssetID]?
@@ -22,43 +23,35 @@ struct LibraryView: View {
     private static let buckets: [InboxBucket] = [.unorganized, .suggestions, .uncertain, .organized, .ignored, .all]
 
     var body: some View {
-        let members = model.bucketMembers(bucket)
+        let _ = MainThreadWatch.shared.count("library body")
+        // Made off the main thread (`AppModel.libraryBuckets`); `nil` only before the first pass.
+        let members = model.libraryBuckets?[bucket]
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 bucketPicker
-                if bucket == .suggestions {
-                    Text("\(model.openProposals.count) Vorschläge für \(members.count.formatted()) Fotos und Videos")
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                if let members {
+                    content(members)
                 } else {
-                    Text("\(members.count.formatted()) Fotos und Videos")
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-                }
-
-                if bucket == .suggestions {
-                    // Photos with a suggestion: show the suggestions themselves, ready to open.
-                    proposalList
-                } else if members.isEmpty {
-                    ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
-                                           description: Text(emptyDescription))
-                } else {
-                    grid(members)
-                    if members.count > shown {
-                        VStack(spacing: Theme.Spacing.s) {
-                            Text("\(shown.formatted()) von \(members.count.formatted()) angezeigt")
-                                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
-                            Button("Weitere Fotos anzeigen") { shown += Self.page }
-                                .buttonStyle(.bordered)
-                                .accessibilityIdentifier("library.showMore")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, Theme.Spacing.s)
+                    // The first pass over all photos (a moment in a very large library). Not
+                    // "Alles sortiert" or "0 Fotos": that would not be true yet.
+                    HStack(spacing: Theme.Spacing.s) {
+                        ProgressView()
+                            .accessibilityHidden(true)
+                        Text("Fotos werden zusammengestellt …")
                     }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("library.preparing")
                 }
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.bottom, Theme.Spacing.xl)
         }
         .background(Theme.background)
+        .onAppear { model.showLibraryBuckets() }
+        .onDisappear { model.hideLibraryBuckets() }
         .navigationTitle("Mediathek")
         .toolbar {
             if bucket != .suggestions {
@@ -72,20 +65,24 @@ struct LibraryView: View {
         }
         .safeAreaInset(edge: .bottom) {
             if selecting && !selection.isEmpty {
-                SelectionBar(count: selection.count, canIgnore: bucket != .ignored) {
+                // In "Ignoriert" the way back instead of ignoring again (design review D4).
+                SelectionBar(count: selection.count, ignoreAction: bucket == .ignored ? .unignore : .ignore) {
                     addingToAlbum = Array(selection)
                 } ignore: {
-                    model.ignore(Array(selection))
+                    if bucket == .ignored { model.unignore(Array(selection)) } else { model.ignore(Array(selection)) }
                     selection = []
                     selecting = false
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                IgnoreUndoBar()
             }
         }
         .animation(.snappy, value: selection.isEmpty)
-        .sheet(item: $detail) { facts in
-            AssetDetailView(facts: facts) { addingToAlbum = [facts.id] }
-                .navigationTransition(.zoom(sourceID: facts.id, in: zoom))
+        .animation(.snappy, value: model.lastIgnored)
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
+                .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {
@@ -94,6 +91,42 @@ struct LibraryView: View {
             }
         }
         .refreshable { await model.refreshDerived() }
+    }
+
+    /// One area's count and its photos (or its suggestions).
+    @ViewBuilder
+    private func content(_ members: [LibraryBuckets.Item]) -> some View {
+        if bucket == .suggestions {
+            // Numbers as plural strings (design review W5: "1 Fotos und Videos").
+            Text("\(model.openProposals.count) Vorschläge für \(members.count) Fotos und Videos")
+                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+        } else {
+            Text("\(members.count) Fotos und Videos")
+                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+        }
+
+        if bucket == .suggestions {
+            // Photos with a suggestion: show the suggestions themselves, ready to open.
+            proposalList
+        } else if members.isEmpty {
+            ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
+                                   description: Text(emptyDescription))
+        } else {
+            grid(members)
+            if members.count > shown {
+                // The next photos load by themselves when the end of the grid comes
+                // into view (design review N10: a button every 3,000 photos).
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Spacing.m)
+                    .accessibilityLabel(Text("Weitere Fotos werden geladen"))
+                    .onScrollVisibilityChange(threshold: 0.1) { visible in
+                        if visible { shown += Self.page }
+                    }
+                    .accessibilityLabel(Text("Weitere Fotos werden geladen"))
+                    .accessibilityIdentifier("library.loadingMore")
+            }
+        }
     }
 
     @ViewBuilder
@@ -105,9 +138,7 @@ struct LibraryView: View {
         } else {
             VStack(spacing: 0) {
                 ForEach(Array(open.enumerated()), id: \.element.id) { index, proposal in
-                    NavigationLink {
-                        ProposalDetailView(proposal: proposal)
-                    } label: {
+                    PushLink(.proposal(ProposalRef(proposal)), chevron: false) {
                         HStack {
                             ProposalRow(proposal: proposal)
                             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
@@ -124,13 +155,16 @@ struct LibraryView: View {
         }
     }
 
-    private func grid(_ members: [AssetFacts]) -> some View {
+    private func grid(_ members: [LibraryBuckets.Item]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
-            ForEach(members.prefix(shown), id: \.id) { facts in
-                let id = facts.id
+            ForEach(members.prefix(shown)) { item in
+                let id = item.id
                 // A real button: VoiceOver, Switch Control and the hit-area audit see it as one.
                 Button {
-                    guard selecting else { detail = facts; return }
+                    guard selecting else {
+                        viewing = PhotoViewer.Start(id: id, ids: members.prefix(shown).map(\.id))
+                        return
+                    }
                     if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
                 } label: {
                     AssetThumbnail(id: id, side: 110)
@@ -147,7 +181,7 @@ struct LibraryView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(Text(facts.asset.creationDate?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+                .accessibilityLabel(Text(item.date?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
                 .accessibilityAddTraits(selecting && selection.contains(id) ? .isSelected : [])
             }
         }
@@ -179,6 +213,8 @@ struct LibraryView: View {
                                 .padding(.horizontal, 14).padding(.vertical, 8)
                                 .background(b == bucket ? Theme.accent : Theme.card, in: Capsule())
                                 .foregroundStyle(b == bucket ? Theme.onAccent : Color.primary)
+                                // The capsule stays as it is; the tap area is 44 pt (design review W9).
+                                .minimumHitTarget()
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(b == bucket ? .isSelected : [])
@@ -210,8 +246,10 @@ struct LibraryView: View {
 
 /// Actions for the selected photos, floating above the tab bar.
 struct SelectionBar: View {
+    enum IgnoreAction { case ignore, unignore }
+
     var count: Int
-    var canIgnore: Bool
+    var ignoreAction: IgnoreAction
     var addToAlbum: () -> Void
     var ignore: () -> Void
 
@@ -221,16 +259,19 @@ struct SelectionBar: View {
                 Label("Zu Album hinzufügen", systemImage: "rectangle.stack.badge.plus").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            if canIgnore {
-                Button(action: ignore) {
-                    Label("Ignorieren", systemImage: "eye.slash")
+            // Not red: nothing is deleted, and it can be taken back (design review D4).
+            Button(action: ignore) {
+                switch ignoreAction {
+                case .ignore: Label("Ignorieren", systemImage: "eye.slash")
+                case .unignore: Label("Nicht mehr ignorieren", systemImage: "eye")
                 }
-                .buttonStyle(.bordered)
             }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier(ignoreAction == .ignore ? "selection.ignore" : "selection.unignore")
         }
         .controlSize(.large)
         .padding(Theme.Spacing.m)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .floatingPanel()
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.bottom, Theme.Spacing.s)
         .overlay(alignment: .topTrailing) {
@@ -245,6 +286,38 @@ struct SelectionBar: View {
     }
 }
 
+/// Right after "Ignorieren": "12 Fotos ignoriert" with "Widerrufen" (design review D4), like
+/// the undo note Mail shows after moving a message. It goes away by itself after a few
+/// seconds (later with VoiceOver), and the photos can still be brought back from "Ignoriert".
+struct IgnoreUndoBar: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let undo = model.lastIgnored {
+            HStack(spacing: Theme.Spacing.m) {
+                Label {
+                    Text("\(undo.assets.count) Fotos ignoriert")
+                } icon: {
+                    Image(systemName: "eye.slash")
+                }
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Widerrufen") { model.unignore(undo.assets) }
+                    .font(.subheadline.weight(.semibold))
+                    .minimumHitTarget()
+                    .accessibilityIdentifier("ignore.undo")
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.xs)
+            .floatingPanel(cornerRadius: 22)
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.bottom, Theme.Spacing.s)
+            .accessibilityElement(children: .contain)
+            .motionAwareTransition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+}
+
 /// One photo, large, with what Albumist knows about it and why it is (not) sorted.
 struct AssetDetailView: View {
     @Environment(AppModel.self) private var model
@@ -253,15 +326,9 @@ struct AssetDetailView: View {
     var addToAlbum: () -> Void
 
     var body: some View {
-        NavigationStack {
+        NavigationRoot {
             List {
-                Section {
-                    AssetThumbnail(id: facts.id, side: 420)
-                        .aspectRatio(aspect, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                }
+                // The photo itself is behind this sheet, in the viewer (design review W12).
                 Section {
                     if let date = facts.asset.creationDate {
                         LabeledContent("Aufgenommen", value: date.formatted(date: .long, time: .shortened))
@@ -287,9 +354,7 @@ struct AssetDetailView: View {
                 if !suggestions.isEmpty {
                     Section {
                         ForEach(suggestions.prefix(6)) { proposal in
-                            NavigationLink {
-                                ProposalDetailView(proposal: proposal)
-                            } label: {
+                            PushLink(.proposal(ProposalRef(proposal))) {
                                 ProposalRow(proposal: proposal)
                             }
                         }
@@ -310,27 +375,49 @@ struct AssetDetailView: View {
                     } label: {
                         Label("Zu Album hinzufügen", systemImage: "rectangle.stack.badge.plus")
                     }
-                    Button(role: .destructive) {
-                        model.ignore([facts.id])
-                        dismiss()
-                    } label: {
-                        Label("Ignorieren", systemImage: "eye.slash")
+                    // No destructive role: ignoring deletes nothing and can be taken back
+                    // (design review D4); an ignored photo offers the way back here too.
+                    if isIgnored {
+                        Button {
+                            model.unignore([facts.id])
+                            dismiss()
+                        } label: {
+                            Label("Nicht mehr ignorieren", systemImage: "eye")
+                        }
+                        .accessibilityIdentifier("detail.unignore")
+                    } else {
+                        Button {
+                            model.ignore([facts.id])
+                            dismiss()
+                        } label: {
+                            Label("Ignorieren", systemImage: "eye.slash")
+                        }
+                        .accessibilityIdentifier("detail.ignore")
                     }
                 } footer: {
-                    Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts.")
+                    if isIgnored {
+                        Text("Albumist zählt das Foto dann wieder mit und kann es wieder vorschlagen.")
+                    } else {
+                        Text("Ignorierte Fotos schlägt Albumist nicht mehr vor. Am Foto selbst ändert sich nichts, und du kannst es jederzeit zurücknehmen.")
+                    }
                 }
             }
-            .navigationTitle("Foto")
+            .accessibilityIdentifier("detail.list")
+            .navigationTitle("Info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
+                // An xmark like the viewer's own close button: "Fertig" was clipped at the
+                // largest text size (UI run 43773339053).
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
+                        .accessibilityIdentifier("detail.close")
+                }
             }
         }
     }
 
-    private var aspect: CGFloat {
-        let w = CGFloat(facts.asset.pixelWidth), h = CGFloat(facts.asset.pixelHeight)
-        return w > 0 && h > 0 ? w / h : 1
+    private var isIgnored: Bool {
+        model.states[facts.id].map { model.resolver.overall($0) == .ignored } ?? false
     }
 
     private var placeText: String? {
@@ -370,15 +457,21 @@ struct AddToAlbumSheet: View {
     var onDone: () -> Void
     @State private var newTitle = ""
     @State private var query = ""
-    @State private var plan: ChangePlan?
-    @State private var showPlan = false
+    /// The sheet's stack; the preview of the plan is pushed onto it as a value (`AppScreen`).
+    /// Not `navigationDestination(isPresented:)`: with it, the preview was presented again and
+    /// again, 11,062 times in one 36 s stall of the main thread (UI run 44055738268, device
+    /// test 05: "plan review body" counter, the stacks in SwiftUI's navigation updates).
+    @State private var navigator = Navigator()
+    @FocusState private var naming: Bool
 
     var body: some View {
-        NavigationStack {
+        let _ = MainThreadWatch.shared.count("add to album body")
+        NavigationRoot(navigator) {
             List {
                 Section {
                     HStack {
                         TextField("Name des neuen Albums", text: $newTitle)
+                            .focused($naming)
                             .submitLabel(.done)
                             .onSubmit { Task { await prepare(target: nil) } }
                         Button("Anlegen") { Task { await prepare(target: nil) } }
@@ -388,7 +481,10 @@ struct AddToAlbumSheet: View {
                     Text("Neues Album")
                 }
                 Section {
-                    if albums.isEmpty {
+                    // The system's empty search state (design review N12).
+                    if albums.isEmpty && !query.isEmpty {
+                        ContentUnavailableView.search(text: query)
+                    } else if albums.isEmpty {
                         Text("Noch keine Alben").foregroundStyle(.secondary)
                     }
                     ForEach(albums) { album in
@@ -416,9 +512,6 @@ struct AddToAlbumSheet: View {
                     Button { dismiss() } label: { Label("Schließen", systemImage: "xmark") }
                 }
             }
-            .navigationDestination(isPresented: $showPlan) {
-                PlanReviewView(prebuilt: plan)
-            }
             .onChange(of: model.execution.finished) { _, finished in
                 if finished != nil { onDone() }
             }
@@ -432,9 +525,17 @@ struct AddToAlbumSheet: View {
     }
 
     private func prepare(target: CollectionID?) async {
+        // The keyboard goes first, on this screen, and the preview slides in once it is down.
+        // In UI run 44038288087 (device test 05, two of three new albums) the main thread hung
+        // for 52 and 68 s right after "Anlegen": each stack that reached deep enough showed the
+        // keyboard's hiding laying out the sheet while the preview was pushed into it, and
+        // SwiftUI drawing that preview.
+        let hadKeyboard = naming
+        naming = false
         let title = target == nil ? newTitle.trimmingCharacters(in: .whitespaces) : nil
         guard let built = await model.manualPlan(assets: assets, target: target, newTitle: title) else { return }
-        plan = built
-        showPlan = true
+        // The keyboard takes about a quarter of a second to go down.
+        if hadKeyboard { try? await Task.sleep(for: .milliseconds(400)) }
+        navigator.path = [.prebuiltPlan(PlanToken(built))]
     }
 }

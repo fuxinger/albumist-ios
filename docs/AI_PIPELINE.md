@@ -18,6 +18,12 @@ Kein eigenes Modell, kein Training, kein Netzwerkzugriff für die Analyse.
 - Texterkennung nur für Screenshots und dokumentähnliche Bilder; dafür wird das Original
   verwendet, aus iCloud nur mit Zustimmung und im WLAN. Videos werden nie geladen.
 - Ergebnisse werden versioniert gespeichert (`contentVersion`, `textVersion`).
+- Bildlabels werden nur berechnet, solange „Themen“ oder „Dokumente“ an ist. Die Datenbank
+  merkt sich je Foto, ob es Labels hat (`labels_version`, `labelsVersion`). Wird einer der
+  Bereiche später eingeschaltet, holt der nächste Lauf im Schritt „Bildinhalte“ für genau die
+  Fotos ohne Labels nur die Labels nach (`ContentAnalysisRequest.labelsOnly`, ins frühere
+  Ergebnis übernommen); Fotos, die sich dadurch als Dokument zeigen, werden danach erstmals
+  gelesen. Ausschalten löscht keine Labels.
 
 ## Kategorien
 Die Taxonomie (`ImageTaxonomy` in `ContentClassifiers.swift`) ordnet Vision-Begriffe rund

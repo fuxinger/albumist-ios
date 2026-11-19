@@ -12,14 +12,28 @@ enum BackgroundWork {
             let box = TaskBox(task: task)
             let work = Task { @MainActor in
                 let success = await AppModel.shared.runBackgroundRefinement()
+                // The next night is asked for before the task ends (Apple's order): once
+                // completed, iOS may suspend the app before a queued request is sent. The
+                // request itself runs off the main thread (see `scheduleRefinement`).
+                await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                    DispatchQueue.global(qos: .utility).async {
+                        submitRefinement()
+                        done.resume()
+                    }
+                }
                 box.task.setTaskCompleted(success: success)
-                scheduleRefinement()
             }
             box.task.expirationHandler = { work.cancel() }
         }
     }
 
+    /// On a background queue: the request waits for the system's task scheduler, which can be
+    /// busy for seconds (the main thread waited for it after every analysis).
     static func scheduleRefinement() {
+        DispatchQueue.global(qos: .utility).async { submitRefinement() }
+    }
+
+    private static func submitRefinement() {
         let request = BGProcessingTaskRequest(identifier: AppInfo.refinementTaskID)
         request.requiresExternalPower = true
         request.requiresNetworkConnectivity = false

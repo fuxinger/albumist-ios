@@ -72,18 +72,41 @@ final class DeviceConditions: AnalysisConditions, @unchecked Sendable {
         self.isBackgroundRun = isBackgroundRun
     }
 
+    /// The rules live in `DeviceState` (SortlyCore, tested); this only reads the device.
     func pauseReason() async -> PauseReason? {
-        let info = ProcessInfo.processInfo
-        if info.thermalState == .critical || info.thermalState == .serious { return .thermal }
-        let (state, level) = await MainActor.run { () -> (UIDevice.BatteryState, Float) in
-            UIDevice.current.isBatteryMonitoringEnabled = true
-            return (UIDevice.current.batteryState, UIDevice.current.batteryLevel)
-        }
-        let charging = state == .charging || state == .full
-        if info.isLowPowerModeEnabled && !charging { return .lowPower }
-        if !charging && level >= 0 && level < 0.2 { return .batteryLow }
-        return nil
+        await state().refinementPauseReason
     }
+
+    func pace() async -> AnalysisPace {
+        await state().appPace
+    }
+
+    /// The battery is read on the main thread at most every few seconds: asked before every
+    /// photo, it would otherwise wait for the main thread each time while the UI is busy.
+    private func state() async -> DeviceState {
+        let info = ProcessInfo.processInfo
+        let thermal = DeviceState.Thermal(rawValue: info.thermalState.rawValue) ?? .critical
+        HeatLog.note(thermal)
+        let battery: (level: Float, charging: Bool)
+        if let cached = batteryCache.value, Date().timeIntervalSince(cached.read) < 5 {
+            battery = (cached.level, cached.charging)
+        } else {
+            battery = await MainActor.run { () -> (Float, Bool) in
+                UIDevice.current.isBatteryMonitoringEnabled = true
+                let state = UIDevice.current.batteryState
+                return (UIDevice.current.batteryLevel, state == .charging || state == .full)
+            }
+            batteryCache.value = (read: Date(), level: battery.level, charging: battery.charging)
+        }
+        return DeviceState(
+            thermal: thermal,
+            batteryLevel: battery.level >= 0 ? Double(battery.level) : nil,
+            isCharging: battery.charging,
+            isLowPowerMode: info.isLowPowerModeEnabled
+        )
+    }
+
+    private let batteryCache = LockedBox<(read: Date, level: Float, charging: Bool)?>(nil)
 
     func isOnWiFi() async -> Bool { NetworkStatus.shared.isOnWiFi }
 }

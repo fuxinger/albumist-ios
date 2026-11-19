@@ -184,7 +184,7 @@ struct PlanningExecutionTests {
         let library = InMemoryPhotoLibrary(assets: allAssets, collections: [a, b, c])
         let items = [
             ConfirmedProposal(proposal: proposal("m", .trip, "Gardasee · 2026", ["Reisen"], ids("a", 0..<40)),
-                              decision: .merge(target: "a", sources: ["a", "b"], title: "Gardasee · 2026", folderPath: nil, removeSourceAlbums: true)),
+                              decision: .merge(target: "a", sources: ["a", "b"], title: "Gardasee · 2026", folderPath: nil)),
             ConfirmedProposal(proposal: proposal("r", .trip, "Neu", [], ids("a", 50..<55)), decision: .moveExisting("c", folderPath: ["Archiv"], extend: false)),
         ]
         let plan = confirmed(planner.makePlan(from: items, inventory: try await library.currentInventory()))
@@ -193,9 +193,41 @@ struct PlanningExecutionTests {
         let inv = try await library.currentInventory()
         #expect(inv["a"]?.title == "Gardasee · 2026")
         #expect(inv["a"]?.assetIDs == ids("a", 0..<40))
-        #expect(inv["b"] == nil) // old album container removed after merge
+        #expect(inv["b"]?.assetIDs == ids("a", 10..<40)) // the source album stays as it was (P2-06)
         #expect(inv.path(of: "c") == ["Albumist", "Archiv"])
         #expect(await library.assets == allAssets)
+    }
+
+    /// Review P2-06: no plan the planner makes deletes an album without a delete guard (an
+    /// album is deleted only while it holds nothing but the media its guard allows). Before,
+    /// "merge and remove the source albums" deleted the user's own albums unguarded, even when
+    /// a photo came into them while the plan ran.
+    @Test func noPlanDeletesAnAlbumWithoutADeleteGuard() async throws {
+        let a = CollectionSnapshot(id: "a", title: "Sommer", assetIDs: ids("a", 0..<5))
+        let b = CollectionSnapshot(id: "b", title: "Sommer 2", assetIDs: ids("a", 5..<8))
+        let inventory = CollectionInventory([a, b])
+        let decisions: [ProposalDecision] = [
+            .createNew(title: nil, folderPath: nil), .extendExisting("a"), .keepExisting("a"),
+            .renameExisting("a", newTitle: "Neu", extend: true), .moveExisting("a", folderPath: ["Archiv"], extend: true),
+            .merge(target: "a", sources: ["a", "b"], title: nil, folderPath: nil),
+            .merge(target: nil, sources: ["a", "b"], title: "Alle", folderPath: nil),
+        ]
+        for decision in decisions {
+            let plan = planner.makePlan(from: [ConfirmedProposal(proposal: proposal("m", .trip, "Sommer", [], ids("a", 0..<10)), decision: decision)],
+                                        inventory: inventory)
+            for step in plan.steps {
+                guard case .deleteCollection(let id, _) = step.operation else { continue }
+                #expect(plan.deleteGuards?[id] != nil, "\(decision): deletes \(id) without a guard")
+            }
+        }
+        // A decision stored by an older version with "remove the source albums" still loads,
+        // and only merges.
+        let old = Data(#"{"merge":{"target":"a","sources":["a","b"],"removeSourceAlbums":true}}"#.utf8)
+        let decoded = try JSONDecoder().decode(ProposalDecision.self, from: old)
+        #expect(decoded == .merge(target: "a", sources: ["a", "b"], title: nil, folderPath: nil))
+        let merged = planner.makePlan(from: [ConfirmedProposal(proposal: proposal("m", .trip, "Sommer", [], ids("a", 0..<10)), decision: decoded)],
+                                      inventory: inventory)
+        #expect(!merged.steps.contains { if case .deleteCollection = $0.operation { true } else { false } })
     }
 
     @Test func undoRevertsOnlyOwnChanges() async throws {
@@ -278,6 +310,37 @@ struct PlanningExecutionTests {
         #expect(await library.deleteRequests == 1)
         let left = try await library.currentInventory().collections.count
         #expect(left == 0)
+        #expect(await library.assets == allAssets)
+    }
+
+    /// First iPhone test (15.11.): undo ran three times, Photos raised no error, and the album
+    /// and both folders were still there. Each step must say why, in a way the user can act
+    /// on, nothing may be counted as removed, and trying again later must take it all back.
+    @Test(arguments: [InMemoryPhotoLibrary.DeletionBehavior.silentlyIgnored, .declined])
+    func undoThatPhotosDidNotCarryOutSaysWhyAndCanBeRepeated(_ behavior: InMemoryPhotoLibrary.DeletionBehavior) async throws {
+        let library = InMemoryPhotoLibrary(assets: allAssets)
+        let items = [ConfirmedProposal(proposal: proposal("m", .trip, "Marokko", ["Reisen"], ids("a", 0..<40)), decision: .createNew(title: nil, folderPath: nil))]
+        let plan = confirmed(planner.makePlan(from: items, inventory: try await library.currentInventory()))
+        let executed = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(plan)
+        let before = try await library.currentInventory()
+
+        await library.setDeletionBehavior(behavior, times: 1)
+        let undo = confirmed(UndoPlanner().undoPlan(for: executed, current: before))
+        let failed = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(undo)
+        #expect(failed.status == .completedWithErrors)
+        let reason = behavior == .declined ? StepState.deletionDeclinedReason : StepState.deletionNotAppliedReason
+        let deletions = failed.steps.filter { if case .deleteCollection = $0.operation { true } else { false } }
+        #expect(!deletions.isEmpty)
+        #expect(deletions.allSatisfy { $0.state == .failed(reason: reason) })
+        #expect(failed.record?.deletedAlbums.isEmpty ?? true)
+        #expect(PlanDiagnostics.reasonCode(reason) == reason)
+        #expect(try await library.currentInventory() == before)
+
+        // "Rest rückgängig machen" a few minutes later.
+        let again = confirmed(UndoPlanner().undoPlan(for: executed, current: try await library.currentInventory()))
+        let done = try await ChangeExecutor(library: library, store: InMemoryPlanStore()).execute(again)
+        #expect(done.status == .completed)
+        #expect(try await library.currentInventory().albums.contains { $0.title == "Marokko" } == false)
         #expect(await library.assets == allAssets)
     }
 

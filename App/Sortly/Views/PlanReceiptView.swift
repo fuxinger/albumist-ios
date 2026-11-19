@@ -3,21 +3,34 @@ import SortlyCore
 
 /// The change receipt of one executed plan (I01): what Albumist really changed, album by
 /// album, read from the execution journal, and what it did not touch. Opened from
-/// Einstellungen › Verlauf and from the result after "Jetzt umsetzen".
+/// Einstellungen › Verlauf and from the result after "Alben jetzt anlegen".
 struct PlanReceiptView: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
     @State private var receipt: PlanReceipt?
     /// Undos of this plan, newest first (more than one when the first was only partial).
     @State private var undos: [PlanReceipt] = []
+    /// The text of "Liste teilen", made with the receipt (it was made again at every redraw).
+    @State private var shareText: String?
     private var undo: PlanReceipt? { undos.first }
     /// Taken back only in part: the rest can be taken back again (audit 2, 1.6).
     private var partlyUndone: Bool { (undo.map { !$0.isComplete } ?? false) && !model.undonePlans.contains(plan.id) }
     @State private var showAllAlbums = false
     @State private var confirmUndo = false
     /// "Erneut versuchen": the plan with what is missing, opened in the normal review.
-    @State private var retry: ChangePlan?
-    @State private var showRetry = false
+    @Environment(Navigator.self) private var navigator: Navigator?
+    /// "Fehlendes erneut versuchen" is building its plan: the button waits (a second tap
+    /// pushed a second preview), and so does "Rückgängig machen" (the plan would be made from a
+    /// library that is being taken back).
+    @State private var retrying = false
+    /// A plan of "Fehlendes erneut versuchen" that was ready while another tab was chosen:
+    /// offered again when this tab shows (`showWaiting()`).
+    @State private var waiting: WaitingRetry?
+
+    private struct WaitingRetry {
+        let plan: ChangePlan
+        let request: PlanRequest
+    }
     @State private var nothingToRetry = false
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     private let collapsedCount = 12
@@ -34,13 +47,24 @@ struct PlanReceiptView: View {
                 undoSection(receipt)
             }
         }
-        .navigationTitle("Änderungsbeleg")
+        .navigationTitle("Änderungen")
         .navigationBarTitleDisplayMode(.inline)
+        // Opened from the result, the receipt belongs to it: the App Store rating question
+        // waits until the user has left both (`ReviewPrompt`).
+        .onAppear {
+            ReviewPrompt.shared.screenAppeared()
+            showWaiting()
+        }
+        .onDisappear {
+            ReviewPrompt.shared.screenDisappeared()
+        }
+        // The tab shows again (`Navigator.appearances`): a result that waited is offered now.
+        .onChange(of: navigator?.appearances) { showWaiting() }
         .toolbar {
-            if let receipt {
+            if receipt != nil, let shareText {
                 ToolbarItem(placement: .primaryAction) {
-                    ShareLink(item: ReceiptText.text(receipt, undo: undo, inventory: model.inventory)) {
-                        Label("Beleg teilen", systemImage: "square.and.arrow.up")
+                    ShareLink(item: shareText) {
+                        Label("Liste teilen", systemImage: "square.and.arrow.up")
                     }
                 }
             }
@@ -48,8 +72,17 @@ struct PlanReceiptView: View {
         // Reloaded after an undo, also after one that was only partial.
         .task(id: "\(model.undonePlans.contains(plan.id))-\(model.execution.finished?.id.rawValue ?? "")") {
             let loaded = await model.receipt(for: plan)
+            // A newer load (after an undo) has started: this older one writes nothing.
+            guard !Task.isCancelled else { return }
             receipt = loaded.plan
             undos = loaded.undos
+            let inventory = model.inventory
+            let text = await Task.detached(priority: .userInitiated) {
+                ReceiptText.text(loaded.plan, undo: loaded.undos.first, inventory: inventory)
+            }.value
+            // A newer load (after an undo) or a closed screen keeps its own text.
+            guard !Task.isCancelled else { return }
+            shareText = text
         }
         .confirmationDialog("Diese Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
             Button("Rückgängig machen", role: .destructive) {
@@ -61,10 +94,6 @@ struct PlanReceiptView: View {
         } message: {
             Text("Alben und Zuordnungen von Albumist werden entfernt. Deine Fotos bleiben unverändert.")
         }
-        // On the list, not inside it: a destination inside a lazy list is ignored.
-        .navigationDestination(isPresented: $showRetry) {
-            if let retry { PlanReviewView(prebuilt: retry) }
-        }
         .alert("Nichts mehr zu tun", isPresented: $nothingToRetry) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -74,35 +103,39 @@ struct PlanReceiptView: View {
 
     // MARK: Sections
 
+    /// The state now comes first: a plan that was taken back says so at the top instead of
+    /// "Vollständig umgesetzt" (Fuchs 15.11.: "Finde die Nachricht oben etwas komisch").
     private func header(_ receipt: PlanReceipt) -> some View {
         Section {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Group {
-                    if receipt.isComplete {
+                    if undo != nil, !receipt.isUndo {
+                        if partlyUndone {
+                            Label("Teilweise rückgängig gemacht", systemImage: "arrow.uturn.backward.circle.fill")
+                                .foregroundStyle(Theme.tint(for: .documents))
+                        } else {
+                            Label("Rückgängig gemacht", systemImage: "arrow.uturn.backward.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if receipt.isComplete {
                         Label("Vollständig umgesetzt", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(Theme.accent)
                     } else {
                         Label("Teilweise umgesetzt", systemImage: "exclamationmark.circle.fill")
+                            .foregroundStyle(Theme.tint(for: .documents))
                     }
                 }
                 .font(.headline)
-                .foregroundStyle(receipt.isComplete ? Theme.accent : Theme.tint(for: .documents))
-                Text(receipt.startedAt.formatted(date: .long, time: .shortened))
-                    .font(.subheadline).foregroundStyle(.secondary)
-                // Taken back: said at the top too, or the "Neu" albums below read as still there.
-                if let undo {
-                    Label {
-                        if partlyUndone {
-                            Text("Am \(undo.startedAt.formatted(date: .long, time: .shortened)) teilweise rückgängig gemacht")
-                        } else {
-                            Text("Am \(undo.startedAt.formatted(date: .long, time: .shortened)) rückgängig gemacht")
-                        }
-                    } icon: {
-                        Image(systemName: "arrow.uturn.backward.circle.fill")
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                if let undo, !receipt.isUndo {
+                    Text("Umgesetzt am \(receipt.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Text("Zurückgenommen am \(undo.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Text(receipt.startedAt.formatted(date: .long, time: .shortened))
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
-                Text("Gezählt wird nur, was Albumist danach in deiner Mediathek nachgeprüft hat.")
+                Text("Alle Zahlen hat Albumist danach in deiner Mediathek nachgeprüft.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -129,9 +162,22 @@ struct PlanReceiptView: View {
 
     private func originals(_ receipt: PlanReceipt) -> some View {
         Section {
-            guarantee(Text("\(receipt.originalsDeleted) Originale gelöscht"))
-            guarantee(Text("\(receipt.originalsEdited) Originale bearbeitet"))
-            guarantee(Text("\(receipt.originalCopiesCreated) Kopien angelegt"))
+            // What did not happen, in words (design review W1); a number only if it ever did.
+            if receipt.originalsDeleted == 0 {
+                guarantee(Text("Kein Original gelöscht"))
+            } else {
+                Text("\(receipt.originalsDeleted) Originale gelöscht")
+            }
+            if receipt.originalsEdited == 0 {
+                guarantee(Text("Kein Original bearbeitet"))
+            } else {
+                Text("\(receipt.originalsEdited) Originale bearbeitet")
+            }
+            if receipt.originalCopiesCreated == 0 {
+                guarantee(Text("Keine Kopie angelegt"))
+            } else {
+                Text("\(receipt.originalCopiesCreated) Kopien angelegt")
+            }
         } header: {
             Text("Deine Originale")
         } footer: {
@@ -151,7 +197,7 @@ struct PlanReceiptView: View {
             }
             // Not a failure, but not sorted in either: the plan is not complete (audit 2, 7.1).
             if receipt.unavailablePhotos > 0 {
-                Text("\(receipt.unavailablePhotos) Fotos waren beim Umsetzen nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
+                Text("\(receipt.unavailablePhotos) Fotos waren beim Anlegen nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
             }
             ForEach(StepProblemText.texts(receipt.problems), id: \.self) { text in
                 Label(text, systemImage: "exclamationmark.triangle")
@@ -163,18 +209,11 @@ struct PlanReceiptView: View {
             }
             if canRepair(receipt) {
                 Button {
-                    Task {
-                        if let missing = await model.retryPlan(for: plan) {
-                            retry = missing
-                            showRetry = true
-                        } else {
-                            nothingToRetry = true
-                        }
-                    }
+                    retry()
                 } label: {
                     Label("Fehlendes erneut versuchen", systemImage: "arrow.clockwise")
                 }
-                .disabled(model.execution.isRunning)
+                .disabled(model.execution.isRunning || retrying)
                 .accessibilityIdentifier("receipt.retry")
             }
             DiagnosticShareRow()
@@ -185,6 +224,57 @@ struct PlanReceiptView: View {
                 Text("Erneut versuchen legt nur an, was fehlt; nichts wird doppelt angelegt, und du siehst vorher, was passiert. Du kannst es auch so lassen: Das Erledigte bleibt, und die fehlenden Fotos schlägt Albumist bei der nächsten Analyse wieder vor.")
             }
         }
+    }
+
+    /// Makes the plan of what is missing; the button waits meanwhile.
+    private func retry(attempt: Int = 1) {
+        waiting = nil
+        retrying = true
+        let request = PlanRequest(model: model, navigator: navigator)
+        Task {
+            let said = model.message
+            let missing = await model.retryPlan(for: plan)
+            retrying = false
+            guard let missing else {
+                // Not "Nichts mehr zu tun" when the app said why (an album that may still land).
+                if model.message == said, navigator?.isShowing(request.mark) == true { nothingToRetry = true }
+                return
+            }
+            offer(WaitingRetry(plan: missing, request: request), attempt: attempt)
+        }
+    }
+
+    /// A plan of "Fehlendes erneut versuchen" that is ready, or that waited for this tab, with
+    /// the same checks both times (`PlanRequest`): pushed onto the stack's path (`AppScreen`) if
+    /// it is still current; kept while another tab is chosen; made again once when the album
+    /// list changed meanwhile and the plan can still be completed (a second change says Albumist
+    /// is busy); dropped when the user went elsewhere on this stack. Never pushed twice:
+    /// `waiting` holds it only while it is not shown.
+    private func offer(_ ready: WaitingRetry, attempt: Int) {
+        switch ready.request.verdict(model: model, navigator: navigator) {
+        case .show:
+            Navigator.push(.prebuiltPlan(PlanToken(ready.plan)), on: navigator, ifStill: ready.request.mark)
+        case .wait:
+            waiting = ready
+        case .gone:
+            break
+        case .busy:
+            model.message = .busy
+        case .stale:
+            if attempt > 1 {
+                model.message = .busy
+            } else if let receipt, canRepair(receipt) {
+                retry(attempt: attempt + 1)
+            }
+            // Otherwise the plan was taken back meanwhile: the receipt says so.
+        }
+    }
+
+    /// The tab shows again: a plan that was ready meanwhile is offered now.
+    private func showWaiting() {
+        guard let ready = waiting, navigator?.showing == true else { return }
+        waiting = nil
+        offer(ready, attempt: 1)
     }
 
     /// Only plans that changed the library and were not taken back can be completed.
@@ -214,9 +304,9 @@ struct PlanReceiptView: View {
             Text("Alben")
         } footer: {
             if undo != nil {
-                Text("So sah es beim Umsetzen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“.")
+                Text("So sah es beim Anlegen aus. Was davon zurückgenommen wurde, steht unten unter „Rückgängig gemacht“.")
             } else {
-                Text("Namen wie beim Umsetzen. Was du danach in Fotos geändert hast, respektiert Albumist.")
+                Text("Namen wie beim Anlegen. Was du danach in Fotos geändert hast, respektiert Albumist.")
             }
         }
     }
@@ -233,8 +323,13 @@ struct PlanReceiptView: View {
                 if partlyUndone {
                     Text("Nicht alles ließ sich zurücknehmen. Du kannst es noch einmal versuchen oder es so lassen.")
                         .font(.subheadline).foregroundStyle(.secondary)
+                    // Why, in words the user can act on (first iPhone test, 15.11.).
+                    ForEach(StepProblemText.texts(undo.problems), id: \.self) { text in
+                        Label(text, systemImage: "exclamationmark.triangle")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
                     Button("Rest rückgängig machen", role: .destructive) { confirmUndo = true }
-                        .disabled(model.execution.isRunning)
+                        .disabled(model.execution.isRunning || retrying)
                         .accessibilityIdentifier("receipt.undoRest")
                 } else if !undo.isComplete {
                     Text("Was Albumist nicht zurücknehmen konnte, bleibt, wie es ist.")
@@ -251,10 +346,10 @@ struct PlanReceiptView: View {
                     && (plan.status == .completed || plan.status == .completedWithErrors) {
             Section {
                 Button("Rückgängig machen", role: .destructive) { confirmUndo = true }
-                    .disabled(model.execution.isRunning)
+                    .disabled(model.execution.isRunning || retrying)
                     .accessibilityIdentifier("receipt.undo")
             } footer: {
-                Text("Entfernt nur die neuen Alben und Zuordnungen dieses Umsetzens. Deine Fotos bleiben.")
+                Text("Entfernt nur die neuen Alben und Zuordnungen dieser Änderungen. Deine Fotos bleiben.")
             }
         }
     }
@@ -273,6 +368,7 @@ struct PlanReceiptView: View {
                 .foregroundStyle(Theme.accent)
                 .frame(width: iconWidth)
                 .accessibilityHidden(true)
+                .hiddenAtAccessibilitySizes()
             Text(title)
             Spacer(minLength: Theme.Spacing.s)
             Text(value.formatted()).monospacedDigit().font(.body.weight(.semibold))
@@ -295,16 +391,16 @@ private struct ReceiptAlbumRow: View {
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = 44
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.m) {
+        AdaptiveStack(spacing: Theme.Spacing.m) {
             cover
                 .frame(width: side, height: side)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.body.weight(.medium)).lineLimit(2)
+                Text(title).font(.body.weight(.medium)).compactLineLimit(2)
                 if !album.folderPath.isEmpty {
                     Text(album.folderPath.joined(separator: " › "))
-                        .font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                        .font(.footnote).foregroundStyle(.secondary).compactLineLimit(2)
                 }
                 if album.failed {
                     Text("Nicht vollständig umgesetzt").font(.footnote).foregroundStyle(Theme.tint(for: .documents))
@@ -360,7 +456,7 @@ private struct ReceiptAlbumRow: View {
 enum ReceiptText {
     static func text(_ receipt: PlanReceipt, undo: PlanReceipt?, inventory: CollectionInventory) -> String {
         var lines: [String] = []
-        lines.append(String(localized: "Albumist – Änderungsbeleg"))
+        lines.append(String(localized: "Albumist – Änderungen"))
         lines.append(receipt.startedAt.formatted(date: .long, time: .shortened))
         lines.append(receipt.isComplete ? String(localized: "Vollständig umgesetzt") : String(localized: "Teilweise umgesetzt"))
         lines.append("")
@@ -374,9 +470,13 @@ enum ReceiptText {
         add("Nicht mehr in der Mediathek", receipt.unavailablePhotos)
         add("Aus Alben genommen", receipt.membershipsRemoved)
         add("Entfernte Alben und Ordner", receipt.containersDeleted)
-        add("Originale gelöscht", receipt.originalsDeleted, always: true)
-        add("Originale bearbeitet", receipt.originalsEdited, always: true)
-        add("Kopien angelegt", receipt.originalCopiesCreated, always: true)
+        // As on screen: what did not happen in words, a number only if it did (W1).
+        lines.append(receipt.originalsDeleted == 0 ? String(localized: "Kein Original gelöscht")
+                     : "\(String(localized: "Originale gelöscht")): \(receipt.originalsDeleted.formatted())")
+        lines.append(receipt.originalsEdited == 0 ? String(localized: "Kein Original bearbeitet")
+                     : "\(String(localized: "Originale bearbeitet")): \(receipt.originalsEdited.formatted())")
+        lines.append(receipt.originalCopiesCreated == 0 ? String(localized: "Keine Kopie angelegt")
+                     : "\(String(localized: "Kopien angelegt")): \(receipt.originalCopiesCreated.formatted())")
         if !receipt.albums.isEmpty {
             lines.append("")
             lines.append(String(localized: "Alben"))

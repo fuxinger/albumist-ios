@@ -24,7 +24,7 @@ enum StepProblemText {
     static func text(_ reason: String) -> String {
         switch reason {
         case "interrupted":
-            String(localized: "Das Umsetzen wurde unterbrochen.")
+            String(localized: "Der Vorgang wurde unterbrochen.")
         case "parent folder was not created", "target album was not created", "target folder was not created":
             String(localized: "Ein Ordner oder Album, das davor angelegt werden sollte, fehlte.")
         case "a collection with this title appeared meanwhile":
@@ -43,6 +43,10 @@ enum StepProblemText {
             String(localized: "Nach der Unterbrechung war nicht sicher, ob Fotos schon einsortiert waren. Albumist fügt sie nicht von selbst hinzu.")
         case StepState.deletedByUserReason:
             String(localized: "Ein Album hattest du inzwischen gelöscht. Albumist legt es nicht wieder an.")
+        case StepState.deletionDeclinedReason:
+            String(localized: "Du hast das Löschen in der Frage von iOS nicht erlaubt. Die Alben sind noch da. Versuche es noch einmal und tippe dann auf „Löschen“.")
+        case StepState.deletionNotAppliedReason:
+            String(localized: "Die Fotos-App hat das Löschen nicht ausgeführt, die Alben sind noch da. Versuche es in ein paar Minuten noch einmal.")
         case let r where r.hasSuffix("could not be verified"):
             String(localized: "Eine Änderung ließ sich in der Mediathek nicht nachprüfen.")
         default:

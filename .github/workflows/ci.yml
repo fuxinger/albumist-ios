@@ -7,6 +7,20 @@ on:
   pull_request:
     paths-ignore: ['**.md']
   workflow_dispatch:
+    inputs:
+      appetize:
+        # The free Appetize minutes are used up, so the browser-test upload no longer runs on
+        # every push (it held a macOS runner for ~4 min each time). Kept for a manual run.
+        description: Also build the simulator app and upload it to Appetize
+        type: boolean
+        default: false
+  # testflight.yml runs CI for the commit it uploads, in the same run (release: true).
+  workflow_call:
+    inputs:
+      release:
+        description: Called by testflight.yml (own concurrency group, the iOS job always runs)
+        type: boolean
+        default: false
 
 # Read-only token: no job writes to the repository.
 permissions:
@@ -17,8 +31,15 @@ env:
   HOMEBREW_NO_AUTO_UPDATE: 1
   HOMEBREW_NO_INSTALL_CLEANUP: 1
 
+# A new push to the same branch or PR cancels the run of the previous one. Called by
+# testflight.yml, CI has a group of its own for that TestFlight run, so a push to main never
+# cancels the tests of a build: release: true says so, and github.workflow, the caller's name
+# "TestFlight" in a called workflow, is a second guard. CI is not in the Mac queue of the UI
+# runs and stress passes (ui.yml, "concurrency"); see the ios job.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: >-
+    ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-ci-{0}', github.run_id)
+    || format('ci-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
@@ -28,72 +49,170 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Navigation rule
-        # Navigation uses destination-based links only. A value-based link inside a screen that
-        # was itself pushed by a destination-based link leads nowhere (dead row, warning triangle).
-        run: |
-          if grep -rn "NavigationLink(value:" App/Sortly; then
-            echo "::error::Use NavigationLink { destination } label: { … } instead of NavigationLink(value:)"
-            exit 1
-          fi
+        # Screens opened in code are pushed by value onto a NavigationRoot's path (AppScreen).
+        # No navigationDestination(isPresented:/item:) (presented again and again, main thread
+        # stood up to 352 s), no NavigationLink(value:) (PushLink instead), and every stack is a
+        # NavigationRoot, so no pushed value leads nowhere (dead row, warning triangle).
+        run: python3 .github/scripts/navigation_rule.py .
+      - name: Spinner rule
+        # A bare spinner is an element with no description (accessibility audit, VoiceOver).
+        run: python3 .github/scripts/spinner_rule.py .
       - name: Every UI string has English
         run: python3 .github/scripts/check_strings.py .
+      - name: Code map lists every Swift file
+        run: python3 scripts/gen_codemap.py --check
+      - name: CI scripts (unit tests)
+        # The retry rule of the UI jobs (ui_tests.py) and the test gate (ci_gate.py), with log
+        # snippets of real runs: a simulator failure is repeated, a real finding never.
+        run: python3 -m unittest discover -s .github/scripts/tests -v
+      - name: Test-plan map names real tests
+        # Warnings only: a stale name in docs/TEST_COVERAGE_MAP.txt makes a case look untested
+        # in the job summary, it does not make the app worse.
+        run: python3 .github/scripts/test_summary.py map-check
+
+  changes:
+    # Decides whether the macOS job has to run: it is skipped when only *.md / docs/ changed
+    # since the last commit whose iOS tests passed (pull_request path filters cannot do this,
+    # they look at the whole PR diff). Not in a TestFlight run: there the iOS job always runs,
+    # so the run tests the commit it uploads itself.
+    name: Changes
+    if: ${{ !inputs.release }}
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      actions: read
 
   core-linux:
     name: Core tests (Linux)
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
     timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install SQLite headers
-        run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev
-      - name: Build and test
-        run: swift test --parallel
-      - name: Load test (20,000 and 100,000 photos, time and memory limits)
-        run: SORTLY_LOAD_TEST=1 swift test --skip-build --filter LoadTests 2>&1 | grep -E "LOAD_|passed|failed|error"; exit ${PIPESTATUS[0]}
+    defaults:
+      run:
         shell: bash
-
-  names:
-    # App name candidates against the App Store (the API is only reachable from CI).
-    name: App name check
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
-      - run: python3 .github/scripts/name_check.py docs/launch/name-candidates.txt
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install SQLite headers
+        run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev python3 > /dev/null
+      - name: Build and test
+        run: |
+          set -o pipefail
+          swift test --parallel 2>&1 | tee core-linux.log
+      - name: Load test (20,000 and 100,000 photos, time and memory limits)
+        run: |
+          set +e
+          SORTLY_LOAD_TEST=1 swift test --skip-build --filter LoadTests > load.log 2>&1
+          status=$?
+          grep -E "LOAD_|passed|failed|error" load.log
+          exit $status
+      - name: Job summary
+        if: always()
+        run: |
+          python3 .github/scripts/test_summary.py summary --title "Core tests (Linux)" \
+            --swift-log core-linux.log --swift-log load.log --load-log load.log >> "$GITHUB_STEP_SUMMARY" || true
 
   ios:
     name: iOS build and tests (macOS)
+    # Fast first, then expensive (Fuchs 15.11.): the Mac job starts only when the Linux core
+    # tests and the app rules passed. It still runs unless the changes job positively found a
+    # docs-only change (also when that job failed).
+    # Not in the Mac queue ("mac-queue", ui.yml) on purpose: this is the quick verdict of every
+    # push (one Mac, ~20 min). In the queue it would wait behind the UI run of its own commit
+    # (about an hour), and since GitHub keeps only one waiting run per group, the next run to
+    # join would cancel it. Per branch only the newest CI run goes on (concurrency above).
+    needs: [changes, lint, core-linux]
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' }}
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
-      - name: Select newest Xcode
-        run: |
-          ls -d /Applications/Xcode*.app
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
-          xcodebuild -version
-          xcrun simctl list runtimes
-      - name: Core tests (macOS)
-        run: swift test --parallel
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select pinned Xcode
+        # Xcode and simulator runtime pinned in .github/toolchain.json; the job stops when the
+        # image lacks them.
+        run: python3 .github/scripts/toolchain.py xcode --runtime
+      - name: Install XcodeGen
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py); a
+        # failed project generation is not.
+        if: hashFiles('App/project.yml') != ''
+        run: python3 .github/scripts/toolchain.py xcodegen
       - name: Generate Xcode project
         if: hashFiles('App/project.yml') != ''
-        run: |
-          brew install xcodegen
-          cd App && xcodegen generate
+        run: cd App && xcodegen generate
       - name: Pick simulator
         if: hashFiles('App/project.yml') != ''
         id: sim
+        # Not booted early on purpose (booted in "Fresh simulator" after the core tests): a first boot competes with the package build for the
+        # three cores and made both several minutes slower (run 43749559109).
         run: |
-          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py)
+          UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --role default)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-      - name: Build and test app
-        if: hashFiles('App/project.yml') != ''
+      - name: Core tests (macOS)
         run: |
+          set -o pipefail
+          mkdir -p build
+          swift test --parallel 2>&1 | tee build/core-macos.log
+      - name: Fresh simulator (erased and booted)
+        # 18.11.: StoreKit listed no product for 300 s in four runs from ~16:00 UTC on, with no
+        # error, also on claude/next at 3dfda45 (CI 44369338871), whose code was green in every
+        # run before (until 10:10 UTC) and whose image, Xcode, runtime and simulator were the same
+        # (20261103.629, Xcode 27.2, iOS 27.2 24B8117, iPhone 17e). So the cause is in the
+        # environment (runner, simulator or Apple's services), not in the app or test code. The
+        # simulator now starts erased (no state from the image; it may well have been fresh
+        # already, so this alone may not help), booted after the core tests (nothing competes
+        # with the boot then), and its StoreKit log is recorded live: after xcodebuild has shut
+        # it down, `log show` gave only "<compose failure>" lines from after a new boot
+        # (CI 44368423344). Boot like ui_tests.py: up to three attempts, each counted.
+        # After the fresh boot the whole Mac was starved for 2-3 min: even a one-file
+        # hashFiles('App/project.yml') timed out after 120 s (CI 44376522818; under 1 s before the
+        # boot). So the step waits until the load has gone down (at most 5 min, every value in the
+        # log as SIM_SETTLE), and the later steps ask whether a simulator was picked (only when
+        # App/project.yml exists) instead of hashFiles().
+        # CI 44383157858 and 44390350152 (erased and booted): StoreKit served the test host from
+        # the App Store's sandbox, not from the local configuration. Both: "Error updating
+        # Storefront ... environment: Optional("Sandbox")"; storekitd ran the product request as
+        # "[Client] app.albumist.ios (Albumist) Sandbox" against the Media API and logged "Ignoring
+        # empty product response" (44390350152, network up: empty list, no error), or it failed
+        # with URLError -1009 (44383157858). The test session now comes before the test process's
+        # first StoreKit call (PurchaseStoreKitTests, StoreKitEnvironment).
+        if: steps.sim.outputs.udid != ''
+        timeout-minutes: 20
+        run: |
+          UDID="${{ steps.sim.outputs.udid }}"
+          xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
+          xcrun simctl erase "$UDID"
+          for attempt in 1 2 3; do
+            xcrun simctl boot "$UDID" > /dev/null 2>&1 || true
+            xcrun simctl bootstatus "$UDID" -b > /dev/null && break
+            [ "$attempt" = 3 ] && { echo "simulator did not boot (3 attempts)"; exit 1; }
+            echo "FLAKY_BOOT bootstatus failed (attempt $attempt of 3), retrying"
+            xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
+            sleep 15
+          done
+          for i in $(seq 1 30); do
+            load=$(sysctl -n vm.loadavg | awk '{print $2}')
+            echo "SIM_SETTLE load(1m)=$load after $((i * 10 - 10)) s"
+            # What keeps the Mac busy, once a minute (CI 44383157858: load 330, 551, then 243 after
+            # 5 min; 44390350152: 198, 594, then 420; on three cores, before the StoreKit log
+            # started; which processes, the log did not say).
+            if [ $((i % 6)) = 1 ]; then
+              echo "SIM_TOP $(ps -A | wc -l | tr -d ' ') processes, $(pgrep -f CoreSimulator/Volumes | wc -l | tr -d ' ') from the simulator runtime; busiest:"
+              ps -Ao pcpu=,state=,comm= -r | head -12 | cut -c1-160 | sed 's/^/SIM_TOP /'
+            fi
+            awk -v l="$load" 'BEGIN { exit !(l < 3.5) }' && break
+            sleep 10
+          done
+          nohup xcrun simctl spawn "$UDID" log stream --style compact --level debug \
+            --predicate 'process CONTAINS[c] "storekit" OR subsystem CONTAINS[c] "storekit" OR process == "appstored" OR process == "itunesstored" OR subsystem == "com.apple.AppleMediaServices"' \
+            > storekit-live.log 2>&1 &
+          echo "simulator $UDID erased and booted; StoreKit log recorded live (pid $!)"
+      - name: Build and test app
+        if: steps.sim.outputs.udid != ''
+        run: |
+          echo "LOAD at start: $(sysctl -n vm.loadavg)"
+          ps -Ao pcpu=,state=,comm= -r | head -8 | cut -c1-160 | sed 's/^/SIM_TOP at start /'
           set +e
           cd App
           xcodebuild test \
@@ -101,49 +220,116 @@ jobs:
             -scheme Sortly \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath ../build/TestResults.xcresult \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1
           status=$?
-          grep -E "error:|warning: .*Sortly|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
+          # StoreKit's own lines too (SKTestSession, StoreKitServiceError with its environment):
+          # "[SKTestSession] Error saving configuration file: ... SKInternalErrorDomain" names no
+          # "error:" and stayed in the artifact, where it cannot be read when the download fails.
+          grep -E "error:|warning: .*Sortly|test host signed ad hoc|STOREKIT|SKTestSession|SKInternalErrorDomain|StoreKitServiceError|Test Suite|Test case|Executed|TAXONOMY|VISION_IDENTIFIERS|PREVIEW_JPEG|\*\* |✘|recorded an issue|Test run with|Testing failed|Fatal error|crashed" ../build-log.txt | grep -v "/SourcePackages/" | head -3000
+          # Whether the test session's configuration reached the simulator: storekitd keeps it in
+          # its app group under Persistence/Octane/<bundle id>/Configuration.storekit (Apple
+          # forum 826971, FB22237318: "Missing" when SKTestSession could not save it). In green
+          # runs too, so a red one can be compared; nothing listed in both says nothing.
+          find "$HOME/Library/Developer/CoreSimulator/Devices/${{ steps.sim.outputs.udid }}/data/Containers/Shared/AppGroup" \
+            -maxdepth 6 -path "*/Persistence/Octane*" -exec ls -ld {} + 2>&1 | head -20 | sed 's/^/OCTANE /'
+          echo "OCTANE end of list (empty: no Octane folder in the simulator's app groups)"
           exit $status
-      - name: Export strings for translation
-        if: success() && hashFiles('App/project.yml') != ''
+      - name: StoreKit daemon log
+        # Only when the StoreKit test environment never came up: what the simulator's StoreKit
+        # daemon said during the tests (recorded live, see "Fresh simulator") and whether Apple's
+        # store hosts answer from this runner, so the cause is in the job log (the build log is
+        # an artifact). Also after a cancel: CI 44383157858 was cancelled from outside the job
+        # seconds before the failed test step ended (no timeout, no newer run), and the step was
+        # skipped, with the store hosts unchecked.
+        if: (failure() || cancelled()) && steps.sim.outputs.udid != ''
+        run: |
+          if [ -f build-log.txt ] && grep -q "StoreKit test environment not" build-log.txt; then
+            [ -f storekit-live.log ] && echo "StoreKit log: $(wc -l < storekit-live.log | tr -d ' ') lines" || echo "no live StoreKit log"
+            # CI 44390350152: the last 300 lines below were all product requests from the last
+            # minute; what storekitd did with the session's configuration at set-up was cut off.
+            echo "--- how storekitd classed this app's requests ([Client] bundle id (name) environment)"
+            grep -aoE "\[Client\] [^ ]+ \([^)]*\) [A-Za-z]+" storekit-live.log | sort | uniq -c || true
+            echo "--- StoreKit Testing in Xcode: storekitd's XcodeTest and Octane lines (first 150)"
+            grep -aE "XcodeTest|Octane|SKTestSession" storekit-live.log | head -150 || true
+            echo "--- errors and failures (last 300)"
+            grep -iE "error|fail|denied|timed? ?out|invalid|unable|refus|not (found|allowed|available)|configuration|products?|sandbox|octane|storefront|environment" storekit-live.log | tail -300 || true
+            echo "--- last 200 lines"
+            tail -200 storekit-live.log || true
+            echo "--- Apple store hosts from this runner (connect time: a hang shows as a long one or as the 15 s limit)"
+            for url in https://bag.itunes.apple.com/bag.xml https://buy.itunes.apple.com https://xp.apple.com; do
+              curl -sS -o /dev/null -m 15 -w "$url: HTTP %{http_code}, connect %{time_connect} s, total %{time_total} s\n" "$url" 2>&1 || true
+            done
+          fi
+      - name: Build UI tests
+        # The UI tests run in their own workflow (ui.yml); building them here finds a compile
+        # error in them within this run instead of after the long simulator setup there.
+        if: steps.sim.outputs.udid != ''
         run: |
           cd App
-          xcodebuild -exportLocalizations -project Sortly.xcodeproj -localizationPath ../build/loc -exportLanguage en CODE_SIGNING_ALLOWED=NO | tail -3
+          xcodebuild build-for-testing \
+            -project Sortly.xcodeproj \
+            -scheme SortlyUI \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO > ../build-ui-log.txt 2>&1 \
+            || { grep -E "error:" -A3 ../build-ui-log.txt | grep -v "/SourcePackages/" | head -80; exit 1; }
+          grep -E "warning: .*SortlyUITests" ../build-ui-log.txt | head -40 || true
+          tail -2 ../build-ui-log.txt
+      - name: Export strings for translation
+        if: success() && steps.sim.outputs.udid != ''
+        run: |
+          set -o pipefail
+          cd App
+          xcodebuild -exportLocalizations -project Sortly.xcodeproj -localizationPath ../build/loc -exportLanguage en CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO | tail -3
           find ../build/loc -name "*.xliff" -exec sh -c 'base64 -i "$1" | tr -d "\n" | fold -w 4000 | sed "s/^/XLIFF /"' _ {} \;
       - name: Upload strings
-        if: success() && hashFiles('build/loc/**') != ''
-        uses: actions/upload-artifact@v6
+        if: success() && steps.sim.outputs.udid != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: localizations
           path: build/loc
+          if-no-files-found: ignore
           retention-days: 7
+          # "Re-run failed jobs" may upload it again under the same name.
+          overwrite: true
+      - name: Job summary
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results tests --path build/TestResults.xcresult > build/app-tests.json 2>/dev/null || true
+          python3 .github/scripts/test_summary.py summary --title "iOS build and tests (macOS)" \
+            --swift-log build/core-macos.log --xcresult-json build/app-tests.json >> "$GITHUB_STEP_SUMMARY" || true
       - name: Upload logs
-        if: always() && hashFiles('build-log.txt') != ''
-        uses: actions/upload-artifact@v6
+        if: always() && steps.sim.outputs.udid != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-build-log
           path: |
             build-log.txt
             build/TestResults.xcresult
+            storekit-live.log
+          if-no-files-found: ignore
           retention-days: 7
+          # "Re-run failed jobs" uploads it again under the same name.
+          overwrite: true
 
   simulator:
-    # Runs in parallel with the tests so the browser-test link is ready sooner.
+    # Manual only (workflow_dispatch input "appetize"): builds the simulator app and uploads it
+    # to Appetize for browser testing.
     name: Simulator app for browser testing
+    if: github.event_name == 'workflow_dispatch' && inputs.appetize
     runs-on: xcode-27
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v5
-      - name: Select newest Xcode
-        run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$XCODE" ] || XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode
+      - name: Install XcodeGen
+        # The pinned version (.github/toolchain.json), checked against its sha256. Its own step:
+        # a failed download is machinery for "Re-run failed jobs" (earlier_attempts.py); a
+        # failed project generation is not.
+        run: python3 .github/scripts/toolchain.py xcodegen
       - name: Generate Xcode project
-        run: |
-          brew install xcodegen
-          cd App && xcodegen generate
+        run: cd App && xcodegen generate
       - name: Build simulator app for browser testing
         run: |
           set -o pipefail
@@ -164,11 +350,13 @@ jobs:
           ls -la ../../../../Sortly-simulator.zip
       - name: Upload simulator app
         if: success() && hashFiles('build/Sortly-simulator.zip') != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Sortly-simulator-app
           path: build/Sortly-simulator.zip
           retention-days: 30
+          # "Re-run failed jobs" may upload it again under the same name.
+          overwrite: true
       - name: Upload to Appetize for browser testing
         # Runs only when the repository has the secret APPETIZE_TOKEN. Keeps one app
         # (note "sortly-ci") and updates it, so the test link stays the same.

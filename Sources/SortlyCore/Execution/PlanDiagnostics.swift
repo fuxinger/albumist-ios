@@ -13,6 +13,7 @@ public enum PlanDiagnostics {
         "deletion could not be verified", "folder is not empty", StepState.leftByUserReason,
         "kept: the album holds photos added meanwhile; only Albumist's photos were taken out",
         StepState.unclearReason, StepState.deletedByUserReason,
+        StepState.deletionDeclinedReason, StepState.deletionNotAppliedReason, StepState.stillThereReason,
     ])
 
     public static func reasonCode(_ reason: String) -> String {

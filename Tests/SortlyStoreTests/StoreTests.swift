@@ -10,7 +10,7 @@ struct StoreTests {
 
     @Test func migrationsRun() async throws {
         let s = try store()
-        #expect(await s.schemaVersion == 4)
+        #expect(await s.schemaVersion == 5)
     }
 
     @Test func fileBackedStoreSurvivesReopen() async throws {
@@ -22,7 +22,7 @@ struct StoreTests {
         }
         let reopened = try SortlyStore(url: url)
         #expect(try await reopened.assetCount() == 1)
-        #expect(await reopened.schemaVersion == 4)
+        #expect(await reopened.schemaVersion == 5)
     }
 
     @Test func upsertReportsOnlyChangedAssetsAndRoundTrips() async throws {
@@ -126,7 +126,7 @@ struct StoreTests {
             try old.execute("INSERT INTO text_fts (asset_id, content) VALUES ('gone', 'Kontoauszug alt')")
         }
         let s = try SortlyStore(url: URL(fileURLWithPath: path))
-        #expect(await s.schemaVersion == 4)
+        #expect(await s.schemaVersion == 5)
         #expect(await s.hasFullTextSearch)
         #expect(try await s.searchText("Hotel") == ["a"])
         #expect(try await s.searchText("Kontoauszug").isEmpty) // orphan from the old index is gone
@@ -311,6 +311,34 @@ struct StoreTests {
         #expect(try await s.value([String: Int].self, forKey: "user.decisions") == ["x": 1])
     }
 
+    /// Plugin review N7: the comparison with Photos is slow; a plan that finished meanwhile
+    /// stored its new album, and the reconciliation must not write the older list over it.
+    @Test func staleReconciliationDoesNotOverwriteAFreshPlan() async throws {
+        let s = try store()
+        let old = ManagedAlbumState(albumID: "a", sourceID: SortlyID("p"), lastKnownTitle: "Rom", lastKnownParentID: nil, lastKnownMembers: ["1"], addedBySortly: ["1"], createdBySortly: true)
+        try await s.saveManagedAlbums([old])
+        // The reconciliation starts from what is stored now …
+        let startedFrom = try await s.managedAlbums()
+        var seen = old
+        seen.lastKnownMembers = ["1", "9"]
+        // … a plan finishes meanwhile and stores its new album …
+        let fresh = ManagedAlbumState(albumID: "b", sourceID: SortlyID("q"), lastKnownTitle: "Paris", lastKnownParentID: nil, lastKnownMembers: ["2"], addedBySortly: ["2"], createdBySortly: true)
+        var plan = OrganizationPlanner().makePlan(from: [], inventory: CollectionInventory())
+        plan.status = .completed
+        try await s.finalize(plan, managedAlbums: [old, fresh], values: [:])
+        // … and the late reconciliation is refused: Paris stays, no override is written.
+        let o = UserOverride(scope: .assetInAlbum("1", "a"), decision: .neverAdd)
+        let applied = try await s.applyReconciliation(overrides: [o], managedAlbums: [seen], expected: startedFrom)
+        #expect(!applied)
+        #expect(try await s.managedAlbums().map(\.albumID) == ["a", "b"])
+        #expect(try await s.overrides().isEmpty)
+        // Started again from the fresh list, it goes through.
+        let now = try await s.managedAlbums()
+        #expect(try await s.applyReconciliation(overrides: [o], managedAlbums: [seen, fresh], expected: now))
+        #expect(try await s.managedAlbums() == [seen, fresh])
+        #expect(try await s.overrides() == [o])
+    }
+
     @Test func storeWorksAsExecutorJournal() async throws {
         let s = try store()
         let library = InMemoryPhotoLibrary(assets: ["1", "2"])
@@ -476,5 +504,17 @@ struct StoreTests {
         try backup.write(to: file)
         #expect(try SafetyBackup.read(from: file) == nil)
         #expect(try SafetyBackup.read(from: file.appendingPathExtension("missing")) == nil)
+    }
+
+    /// Settings stored by an earlier version, read after an update added a field (plugin
+    /// review 15.11., K3): the stored choices stay, the new field gets its default.
+    @Test func settingsOfAnEarlierVersionStayReadable() async throws {
+        struct Earlier: Codable { var minPhotos = 25 }
+        struct Later: Codable, Equatable { var minPhotos = 10; var folderPerYear = true }
+        let s = try store()
+        try await s.setValue(Earlier(), forKey: "settings")
+        await #expect(throws: (any Error).self) { try await s.value(Later.self, forKey: "settings") }
+        #expect(try await s.value(Later.self, forKey: "settings", defaults: Later()) == Later(minPhotos: 25, folderPerYear: true))
+        #expect(try await s.value(Later.self, forKey: "missing", defaults: Later()) == nil)
     }
 }

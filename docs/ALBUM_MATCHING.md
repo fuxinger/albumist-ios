@@ -18,9 +18,14 @@ Namenskonflikten.
 | zusätzlich | \|A \ P\| | Fotos im Album, die bleiben, aber nicht dazugehören |
 
 ## Schwellen (Standard)
-Kandidat ab Reinheit oder Abdeckung ≥ 0,5 und mindestens 3 gemeinsamen Fotos.
+Kandidat ab Reinheit ≥ 0,5 und mindestens 3 gemeinsamen Fotos. Ein Album, das den Vorschlag
+zwar enthält (Abdeckung ≥ 0,5), aber zum größten Teil aus anderen Fotos besteht (Reinheit
+< 0,5, z. B. „iPhone-Export“ mit einer ganzen Reise, „Familie“ mit den Hundefotos, „Italien“
+mit der Stadt Rom), ist **kein** Kandidat: Es wird nur unter „Anpassen“ angeboten.
 **Vollständig**: Abdeckung ≥ 0,98 und Reinheit ≥ 0,9. **Ergänzbar**: Reinheit ≥ 0,8 und
-Abdeckung ≥ 0,25. **Größere Sammlung**: ≥ 20 % des Albums gehören zu Geschwister-Vorschlägen
+Abdeckung ≥ 0,25; bei Sammlungen (alles außer Reisen und Zeiträumen) zusätzlich: Der
+Albumname sagt, dass es diese Sammlung ist, oder das Album hat schon ≥ 80 % davon (siehe
+„Sammlungen“). Sonst nur „Ähnliches Album gefunden“. **Größere Sammlung**: ≥ 20 % des Albums gehören zu Geschwister-Vorschlägen
 derselben Familie (z. B. ein Album „Italien“ über mehrere Italienreisen). Liegen zwei Kandidaten
 weniger als 0,15 Punkte auseinander, gilt „mehrere passende Alben“.
 
@@ -29,12 +34,38 @@ weniger als 0,15 Punkte auseinander, gilt „mehrere passende Alben“.
 |---|---|
 | Schon vollständig vorhanden | Album so lassen (zählt als sortiert) |
 | Vorhandenes Album wird ergänzt | fehlende Fotos hinzufügen |
-| Vorhandenes Album passt vermutlich | ergänzen, Nutzer sieht die Begründung |
+| Ähnliches Album gefunden (passt vermutlich) | **neues Album**; das vorhandene bleibt unverändert und wird unter „Anpassen“ angeboten; zählt nicht als sortiert, nicht im Startpaket |
 | Mehrere passende Alben | Nutzer wählt unter „Anpassen“ |
 | Gleicher Name, anderer Inhalt | neues Album, Konflikt wird angezeigt |
 | Neues Album | anlegen im Ordner unter dem Hauptordner |
 | Nicht eindeutig | Nutzer entscheidet |
 | Album nicht bearbeitbar | (z. B. geteiltes Album) neues Album |
+
+Grundsatz (Prüfung 16.11.2026): Albumist ändert ein Album des Nutzers nur, wenn der Abgleich
+sicher ist („wird ergänzt“). „Passt vermutlich“ ändert nie etwas von selbst und zählt im Ring
+nicht als sortiert. Unklar heißt nicht erledigt.
+
+**Was als sortiert zählt** (Ring, „davon in deinen Alben“, Bereichsübersicht, alle über
+`AlbumMatcher.sortingAlbums`): das Album bei „schon vollständig“ und „wird ergänzt“. Bei
+„Mehrere passende Alben“ nur Alben, die zu ≥ 80 % aus dem Vorschlag bestehen (das beste und
+die gleich guten). „Ähnliches Album gefunden“ und nicht bearbeitbare Alben zählen nie.
+
+**„Dein Startpaket“ und „Empfohlene auswählen“** nehmen dieselben Vorschläge
+(`ProposalDecision.isSafeToAcceptUnseen`): mindestens wahrscheinlich, nicht persönlich, kein
+Name nötig, klare Aktion, kein „Ähnliches Album gefunden“.
+
+**Albumists eigenes Album** für einen Vorschlag bleibt dessen Album, auch wenn der Vorschlag
+stark wächst („2026“ im Januar angelegt): Es wird ergänzt, nie ein zweites angelegt.
+
+**Gespeicherte Ergebnisse** tragen die Version der Regeln (`AlbumMatcher.version`). Sind sie
+älter, gleicht die App beim Start einmal neu ab. Eine ausgewählte, noch nicht ausgeführte
+Entscheidung, die ein Album ergänzen würde, das nach den neuen Regeln nicht mehr sicher passt
+(z. B. „ergänzen“ aus dem Startpaket auf jetzt nur „Ähnliches Album gefunden“), ist danach
+wieder offen. Die Übersicht sagt es: „N Vorschläge neu geprüft: bitte noch einmal ansehen“.
+Ausgeführte und angefangene Pläne bleiben unberührt. Neue Ergebnisse mit Versionsstempel,
+die wieder geöffneten Entscheidungen und die Zahl für die Übersicht werden in einem Schritt
+gespeichert: Endet die App mittendrin, ist nichts gespeichert, und der nächste Start
+wiederholt es.
 
 ## Konfliktstrategien
 - Fotos, die der Nutzer selbst aus einem Album entfernt hat, werden nie wieder hinzugefügt.
@@ -48,13 +79,37 @@ weniger als 0,15 Punkte auseinander, gilt „mehrere passende Alben“.
 Smart-Alben (Favoriten, Screenshots …) werden nicht als Ziel verwendet. Geteilte und
 synchronisierte Alben sind nur lesbar. Ausgeblendete Fotos zählen nur mit Zustimmung.
 
+### Sammlungen: Name oder Menge (Zweitprüfung 16.11.2026)
+Eine Sammlung (Land, Ort, Jahr, Monat, Kategorie, Medientyp …) ergänzt ein Album des Nutzers,
+das nur einen Teil von ihr enthält, nur wenn
+- der Albumname nichts sagt, was nicht auch im Namen des Vorschlags steht („Italien“ für
+  Italien, „2019“ für 2019, „Winter 2025/2026“ für „Winter 2025/26“), oder er ein Wort mit
+  ihm teilt, das kein Datum ist („Unsere Hunde“ für Hunde, „Urlaub in Italien“ für Italien),
+- oder das Album schon ≥ 80 % der Sammlung enthält.
+Sonst ist es nur „Ähnliches Album gefunden“: Das Jahr 2019 ergänzt nicht „Italien 2019“ mit
+Fotos von zu Hause, die Kategorie Hunde nicht „Bello“ mit allen anderen Hunden, der Monat
+Mai 2024 nicht „Italien, Mai 2024“. Monate, Jahreszeiten und Zahlen zählen als Datum.
+
 ### Teil-Alben bei Ländern und Orten
 Ein kleineres Album mit anderem Namen ist bei einer Orts-Sammlung ein Teil, nicht das
 Album: „Rom · 2024“ enthält nur Italien-Fotos, ist aber Rom. Albumist schlägt nie vor, es
 mit Fotos aus ganz Italien zu ergänzen. Ergänzt wird nur ein Album, das ein Wort mit dem
-Ort teilt („Italien 2019“, „Urlaub in Italien“). Ein Album, das schon den ganzen Ort
-enthält, zählt weiter als vollständig. Unter „Anpassen“ kann man ein Teil-Album trotzdem
-wählen.
+Ort teilt („Urlaub in Italien“). Ein Album, das schon den ganzen Ort enthält, zählt weiter
+als vollständig. Unter „Anpassen“ kann man ein Teil-Album trotzdem wählen.
+
+**Eine Reise** (BEFUNDE #3): Liegen alle Fotos eines Albums in einer einzigen erkannten Reise
+(auch einer, die zu klein für einen eigenen Vorschlag ist), und hat diese Reise weniger als
+80 % der Fotos des Orts, ist das Album diese Reise, ein Teil – auch ohne Jahr im Namen
+(„Urlaub in Italien“). Hat man das Land nur auf dieser Reise besucht, bleibt es sein Album.
+**Ausnahme:** Ein Album, das nur nach dem Ort heißt („Italien“, nach der ersten Reise
+angelegt), bleibt das Album des Orts wie ohne Reisen. Die Reise wird pro Album nur einmal je
+Abgleich bestimmt.
+
+**Jahr im Namen** (Prüfung 16.11.2026, A2/A9): Steht im Albumnamen ein Jahr, das nicht im
+Namen des Vorschlags steht („Italien 2019“, „Italien '19“, „Urlaub2019“, Albumists eigenes
+„Italien · Mai 2024“; „2025/26“ nennt 2025 und 2026), ist das
+Album eine Reise bzw. ein Teil. Keine Sammlung (Land, Ort, Kategorie, Medientyp …) ergänzt es
+mit Fotos anderer Jahre. Reisen und Zeiträume sind selbst begrenzt und davon nicht betroffen.
 
 ### Alben anderer Vorschläge
 Ein Album, das Albumist für einen anderen Vorschlag angelegt oder ergänzt hat (laut den
@@ -62,6 +117,69 @@ Aufzeichnungen zu verwalteten Alben), wird nie mit fremden Fotos ergänzt und ni
 angeboten. Es zählt nur, wenn es schon genau diesen Vorschlag enthält (ein Land, das man
 auf einer einzigen Reise besucht hat).
 
+### Ein Album pro Lauf für einen Vorschlag (Prüfung 16.11.2026, A5/A10)
+In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen Vorschlag:
+- **Gleicher Name gewinnt** (Entscheidung Fuchs 16.11.2026): Heißt das Album genau wie ein
+  Vorschlag (ohne Groß-/Kleinschreibung und Akzente, z. B. „Italien“ für das Land Italien)
+  und würde dieser Vorschlag es ergänzen, gehört es ihm – auch wenn eine Reise im selben Lauf
+  es ergänzen will oder schon ganz darin steckt, und auch gegenüber zurückgestellten
+  Vorschlägen. Das Land ergänzt dann „Italien“ (in der Vorschau unter „Ergänzt“, rückgängig
+  zu machen); die Reise „Italien · Mai 2019“ bekommt ein eigenes Album und sieht „Italien“
+  nur unter „Anpassen“. Alben mit Jahr („Italien 2019“) bleiben Teile und gehen weiter an
+  die Reise. Ausnahmen: Albumist hat das Album schon für einen anderen Vorschlag angelegt
+  oder ergänzt („Alben anderer Vorschläge“), oder ein Vorschlag mit genau diesem Namen ist
+  schon vollständig darin.
+- Sonst: Ein Album, das einen Vorschlag schon vollständig enthält („Album so lassen“, auch ohne dass
+  man es antippt), gehört diesem Vorschlag. Kein anderer Vorschlag ergänzt es. Das gilt auch
+  für Vorschläge, die man mit „Nicht jetzt“ zurückgestellt hat.
+- Wollen mehrere Vorschläge dasselbe Album ergänzen, bekommt es der, dem es am ähnlichsten
+  ist (Jaccard, dann Wert). Die anderen bekommen ein eigenes Album und sehen das vorhandene
+  nur unter „Anpassen“.
+
 ### Mehrere passende Alben
 Albumist ergänzt dann nichts von sich aus. Die Erklärung nennt jedes passende Album; der
 Hauptknopf heißt „Album auswählen“ und öffnet die Auswahl.
+
+## Dein Zuhause (16.11.2026)
+Die Einstellungen in „Dein Zuhause“ ändern, **welche** Vorschläge entstehen (Reisen, Reisenamen,
+Orte-Alben des Zuhauses), nicht wie ein Vorschlag mit vorhandenen Alben abgeglichen wird:
+`AlbumMatcher` ist unverändert, `AlbumMatcher.version` bleibt. Nach einer Änderung macht
+`AnalysisPipeline.resuggest` die Vorschläge neu und gleicht sie wie nach jeder Analyse ab.
+Ein Vorschlag, den der Nutzer schon ausgewählt hat und den die Änderung verändern oder entfernen
+würde, bleibt mit seinem Inhalt von damals (`HeldSuggestions`, Schlüssel `user.heldSuggestions`)
+und wird gegen die Alben von jetzt abgeglichen; er geht erst, wenn er angelegt oder abgewählt ist.
+Fotos, die nicht mehr in der Mediathek sind, fallen aus ihm heraus; bleibt keines, geht er.
+
+Welcher Schritt die Vorschläge nach einer Änderung macht, ist gleich: die Änderung wird mit einer
+Vormerkung (`analysis.pendingHomeChange`, die Vorschläge von vorher) in einer Transaktion
+gespeichert. Wer zuerst Vorschläge macht – `resuggest`, ein Lauf, der den Lock vorher bekam, oder
+der Lauf nach dem nächsten Start, wenn die App dazwischen beendet wurde –, hält die Auswahl, schreibt
+den Hinweis für die Übersicht und löscht die Vormerkung in derselben Transaktion wie die neuen
+Vorschläge. „Analyse neu aufbauen“ läuft über denselben Lock und löscht die Vormerkung mit.
+
+Regeln, wann ein gewähltes Zuhause gilt:
+- **„Stimmt“** auf dem erkannten Zuhause gilt ab dem Moment der Bestätigung
+  (`HomeSettings.confirmedFrom`). Davor entscheidet weiter die Erkennung, in den Monaten eines
+  Umzugs mit beiden Zuhause; „Stimmt“ ändert also nichts an der Vergangenheit und hält das Zuhause
+  nur für spätere Fotos fest. Ohne Namen (noch kein Ort bekannt) wird „Stimmt“ nicht angeboten.
+- **Ein Ort unter „Ändern“** gilt ab dem Tag, seit dem der Nutzer dort wohnt, nie für alle Zeit
+  (Produktregel, Re-Review 16.11.). Nach der Wahl fragt die App „Seit wann wohnst du dort?“,
+  vorgeschlagen ist der Beginn des letzten Aufenthalts dort (`HomeCandidates.stayStart`, Runde 4).
+  Gezählt werden nur Tage mit Fotos, jeder im Umkreis (30 km) oder woanders, je nachdem, wo die
+  meisten seiner Fotos liegen; Tage ohne Fotos sagen nichts. Vom neuesten Tag im Umkreis zurück
+  endet der Aufenthalt an der ersten Strecke von 28 Fototagen, von denen mehr als die Hälfte
+  woanders sind (`moveStretchDays`, `moveShareElsewhere`). Er beginnt an dem Tag im Umkreis, ab
+  dem (bis heute) die Tage im Umkreis am weitesten vor den Tagen woanders liegen, ein Tag woanders
+  zählt doppelt; bei Gleichstand der neuere. So ziehen Besuche vor einem Umzug, auch jedes
+  Wochenende (2 von 7 Tagen), das Datum nicht zurück, eine kurze Reise in den Wochen nach dem
+  Umzug schiebt es nicht dahinter, und eine Woche woanders jeden Monat (ein Viertel) beendet
+  keinen Aufenthalt. Ab etwa zwei Wochen Urlaub mit Fotos jeden Tag (oder seltenen Fotos zu Hause)
+  liegt das Datum nach dem Urlaub: das ist harmlos, denn davor entscheidet die Erkennung, und die
+  Reisen bleiben, wie sie waren (getestet). Der Nutzer kann das Datum ändern.
+  Davor entscheidet die Erkennung wie nach „Stimmt“ (derselbe `confirmedFrom`). So werden die
+  Jahre am alten Wohnort keine Reise, auch nicht, wenn dort vorher ein Zuhause bestätigt war.
+- **Frühere Zuhause** gelten bis zu ihrem Datum (Kette, siehe `HomeSettings.home(at:)`).
+- Welche Länder, Regionen und Orte ein gewähltes Zuhause sind, kommt aus den Fotos im Umkreis
+  (30 km) bei jedem Vorschlagslauf (`HomeContext`), der Name bei der Wahl ist nur Ersatz: ein Ort
+  mit mindestens einem Viertel der Fotos dort, oder dessen Fotos überwiegend dort liegen (ein Land
+  jenseits der nahen Grenze, solange seine Fotos Alltag sind).

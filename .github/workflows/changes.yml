@@ -1,0 +1,66 @@
+name: Changes
+
+# Reusable: tells the calling workflow whether code (anything but *.md and docs/) changed since
+# the last commit on which its expensive job passed, so macOS jobs can be skipped for docs-only
+# pushes. A pull_request `paths` filter cannot do this: it looks at the whole PR diff, so a
+# docs-only push to an open PR still started every macOS job. See .github/scripts/changes.py.
+#
+# Use (the calling job needs `actions: read` to look up earlier runs):
+#   changes:
+#     uses: ./.github/workflows/changes.yml
+#     permissions: { contents: read, actions: read }
+#     with: { workflow: ui.yml, job-prefix: 'UI flow' }
+#   my-job:
+#     needs: changes
+#     if: needs.changes.outputs.code == 'true'
+on:
+  workflow_call:
+    inputs:
+      workflow:
+        description: Workflow file whose earlier runs count as "tested"
+        type: string
+        default: ci.yml
+      job-prefix:
+        description: A run counts only if a job whose name starts with this succeeded
+        type: string
+        default: iOS build and tests
+    outputs:
+      code:
+        description: "'true' unless only documentation changed since the last tested commit"
+        value: ${{ jobs.changes.outputs.code }}
+      swift:
+        description: "'true' if Swift sources, Package.swift or App/project.yml changed"
+        value: ${{ jobs.changes.outputs.swift }}
+      base:
+        description: The last tested commit the diff was taken against (empty = everything runs)
+        value: ${{ jobs.changes.outputs.base }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: What changed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+      swift: ${{ steps.diff.outputs.swift }}
+      base: ${{ steps.diff.outputs.base }}
+    steps:
+      # The commit CI tests (for a pull request GitHub's merge commit), whole history but no
+      # file contents (a sparse checkout implies --filter=blob:none): `git diff --name-only`
+      # and the ancestry check only need commits and trees.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          sparse-checkout: .github/scripts
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW: ${{ inputs.workflow }}
+          JOB_PREFIX: ${{ inputs.job-prefix }}
+        run: python3 .github/scripts/changes.py

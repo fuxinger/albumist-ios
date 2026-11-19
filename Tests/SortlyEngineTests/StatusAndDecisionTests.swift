@@ -4,6 +4,7 @@ import Testing
 @testable import SortlyCore
 import SortlyTestSupport
 
+/// Recommended decisions and the per-photo status on hand-made suggestions.
 @Suite("Status and recommended decisions")
 struct StatusAndDecisionTests {
     let proposal = AlbumProposal(id: SortlyID("p"), kind: .trip, title: "Rom · 2026", assetIDs: ["1", "2", "3"])
@@ -43,6 +44,8 @@ struct StatusAndDecisionTests {
             proposals: [
                 AlbumProposal(id: SortlyID("p"), kind: .trip, title: "Rom", assetIDs: [trip]),
                 AlbumProposal(id: SortlyID("c"), kind: .placeCollection(.country), title: "Deutschland", assetIDs: [home]),
+                // Italy was visited more than once: its own country album, not yet made.
+                AlbumProposal(id: SortlyID("it"), kind: .placeCollection(.country), title: "Italien", assetIDs: [trip]),
             ],
             matches: [SortlyID("p"): match(.alreadyComplete)]
         )

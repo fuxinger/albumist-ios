@@ -26,6 +26,14 @@ public struct ChronologyKey: Hashable, Sendable, Codable, Comparable, CustomStri
 
     public var description: String { "\(granularity.rawValue):" + components.map(String.init).joined(separator: "-") }
 
+    /// Third component of a season on the southern hemisphere ([year, season, 1]).
+    public static let southernHemisphere = 1
+
+    /// A season of the southern hemisphere.
+    public var isSouthernSeason: Bool {
+        granularity == .season && components.count > 2 && components[2] == Self.southernHemisphere
+    }
+
     public static func < (lhs: Self, rhs: Self) -> Bool {
         if lhs.granularity != rhs.granularity { return lhs.granularity < rhs.granularity }
         return lhs.components.lexicographicallyPrecedes(rhs.components)
@@ -56,13 +64,19 @@ public struct ChronologyGrouper: Sendable {
             guard let week = c.weekOfYear, let weekYear = c.yearForWeekOfYear else { return nil }
             return ChronologyKey(.isoWeek, [weekYear, week])
         case .season:
-            let (season, seasonYear) = Self.season(month: month, year: year, southernHemisphere: (latitude ?? 1) < 0)
-            return ChronologyKey(.season, [seasonYear, Season.allCases.firstIndex(of: season)!])
+            let southern = (latitude ?? 1) < 0
+            let (season, seasonYear) = Self.season(month: month, year: year, southernHemisphere: southern)
+            // The hemisphere is part of the key: the winter in Sydney (July) is not the winter
+            // in Munich (January), nor is Sydney's summer Munich's (review P1-04). Northern keys
+            // are as before, so the ids of their suggestions stay.
+            let index = Season.allCases.firstIndex(of: season)!
+            return ChronologyKey(.season, southern ? [seasonYear, index, ChronologyKey.southernHemisphere] : [seasonYear, index])
         }
     }
 
-    /// Meteorological season; December belongs to the winter of the following year
-    /// (Winter 2025/26 is keyed as 2026) so a winter is never split in two.
+    /// Meteorological season; December belongs to the season of the following year (the
+    /// northern Winter 2025/26 and the southern Summer 2025/26 are keyed as 2026) so a season
+    /// is never split in two.
     public static func season(month: Int, year: Int, southernHemisphere: Bool) -> (Season, Int) {
         let northern: Season
         switch month {

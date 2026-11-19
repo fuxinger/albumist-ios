@@ -78,12 +78,21 @@ public struct ManagedAlbumTracker: Sendable {
         public var newOverrides: [UserOverride]
     }
 
-    public func reconcile(_ states: [ManagedAlbumState], with inventory: CollectionInventory, now: Date = Date()) -> Reconciliation {
+    /// - Parameter changing: albums an unfinished plan of Albumist is still changing (an
+    ///   interrupted run or undo). What is missing there may be Albumist's own doing, not the
+    ///   user's: such an album is compared again once that plan is settled, so an interrupted
+    ///   undo never turns into "deleted by the user" decisions the user did not make.
+    public func reconcile(_ states: [ManagedAlbumState], with inventory: CollectionInventory, changing: Set<CollectionID> = [],
+                          now: Date = Date()) -> Reconciliation {
         var changes: [ExternalAlbumChange] = []
         var updated: [ManagedAlbumState] = []
         var overrides: [UserOverride] = []
 
         for var state in states {
+            if changing.contains(state.albumID) {
+                updated.append(state)
+                continue
+            }
             guard let album = inventory[state.albumID] else {
                 // Deleted on purpose by the user: never silently re-create it (for any of the
                 // suggestions it stood for).
@@ -117,6 +126,68 @@ public struct ManagedAlbumTracker: Sendable {
             updated.append(state)
         }
         return Reconciliation(changes: changes, updatedStates: updated, newOverrides: overrides)
+    }
+
+    /// Albums Albumist asked for whose request got no answer, and which have landed since
+    /// (`lateCreates`, by plan, as `SortlyStore.lateCreates` reads them): recorded as Albumist's like any
+    /// album it made, when the album check sees them first, not only when their plan was
+    /// finalized (round-3 review of the PhotoKit limits, L3). Albums a plan still changes
+    /// (`changing`) are left to that plan.
+    public func recordingLateAlbums(_ states: [ManagedAlbumState], lateCreates: [(plan: SortlyID, ids: [CollectionID])],
+                                    inventory: CollectionInventory, changing: Set<CollectionID> = []) -> [ManagedAlbumState] {
+        var result = states
+        var known = Set(states.map(\.albumID))
+        for (plan, ids) in lateCreates {
+            for id in ids where !known.contains(id) && !changing.contains(id) {
+                guard let album = inventory[id], album.kind == .userAlbum else { continue }
+                result.append(ManagedAlbumState(albumID: id, sourceID: plan, lastKnownTitle: album.title, lastKnownParentID: album.parentID,
+                                                lastKnownMembers: album.assetIDs, addedBySortly: [], createdBySortly: true))
+                known.insert(id)
+            }
+        }
+        return result
+    }
+
+    /// `reconcile` against the library itself (plugin review W3). A deletion is recorded for
+    /// good (the suggestion never comes back), so an album missing from the album list counts
+    /// as deleted only once Photos confirms it when asked for that album on its own: the list
+    /// can lack some albums for a while (iCloud still syncing after a restore from a backup, a
+    /// library being updated). An album found that way, with the folders above it, is added to
+    /// the list everything else works with. Only when every remembered album still seems gone,
+    /// the whole list is read once more after `pause` (the user may also have deleted them all).
+    /// A failed read throws: nothing is recorded, and planning waits (audit 2, 1.5).
+    /// - Parameter listed: the album list as just read.
+    /// - Returns: the reconciliation and the album list it compared with.
+    public func reconcile(_ states: [ManagedAlbumState], listed: CollectionInventory, in library: any PhotoLibraryWriting,
+                          changing: Set<CollectionID> = [], pause: Duration = .milliseconds(300),
+                          now: Date = Date()) async throws -> (reconciliation: Reconciliation, inventory: CollectionInventory) {
+        var current = try await completed(listed, states: states, changing: changing, in: library)
+        var result = reconcile(states, with: current, changing: changing, now: now)
+        if !states.isEmpty, result.updatedStates.isEmpty {
+            try? await Task.sleep(for: pause)
+            current = try await completed(try await library.currentInventory(), states: states, changing: changing, in: library)
+            result = reconcile(states, with: current, changing: changing, now: now)
+        }
+        return (result, current)
+    }
+
+    /// The list with every remembered album it lacks looked up on its own, and the folders
+    /// above an album found that way.
+    private func completed(_ listed: CollectionInventory, states: [ManagedAlbumState], changing: Set<CollectionID>,
+                           in library: any PhotoLibraryWriting) async throws -> CollectionInventory {
+        var current = listed
+        for state in states where current[state.albumID] == nil && !changing.contains(state.albumID) {
+            guard let found = try await library.collection(state.albumID) else { continue }
+            current.upsert(found)
+            var parent = found.parentID
+            var depth = 0
+            while let id = parent, current[id] == nil, depth < 32, let folder = try await library.collection(id) {
+                current.upsert(folder)
+                parent = folder.parentID
+                depth += 1
+            }
+        }
+        return current
     }
 }
 
@@ -155,6 +226,14 @@ public struct UserOverride: Hashable, Sendable, Codable, Identifiable {
         self.decision = decision
         self.ruleID = ruleID
         self.createdAt = createdAt
+    }
+}
+
+extension UserOverride {
+    /// The photo this override ignores ("Ignorieren"), or nil for any other decision.
+    public var ignoredAsset: AssetID? {
+        if case .asset(let id) = scope, decision == .ignoreAsset { return id }
+        return nil
     }
 }
 
@@ -199,6 +278,8 @@ public struct OverrideSet: Sendable {
         alwaysAddInAlbum.contains(asset.rawValue + "|" + album.rawValue)
     }
     public func isIgnored(_ asset: AssetID) -> Bool { ignoredAssets.contains(asset) }
+    /// Every photo the user ignored.
+    public var ignored: Set<AssetID> { ignoredAssets }
     public func isExcluded(_ asset: AssetID) -> Bool { excludedAssets.contains(asset) }
     public func isExcludedAlbum(_ album: CollectionID) -> Bool { excludedAlbums.contains(album) }
     public func isRejected(_ source: SortlyID) -> Bool { rejectedSources.contains(source) }
@@ -283,6 +364,16 @@ extension ManagedAlbumTracker {
             default:
                 break
             }
+        }
+        // An album Albumist asked for whose request got no answer, and which landed next to the
+        // one the plan settled on: Albumist's own, recorded like any album it made, so it can be
+        // listed and removed (third review of the PhotoKit limits, N2).
+        for late in record?.mayStillLand(resolved: plan.resolvedKeys) ?? [] where byID[late] == nil {
+            guard let album = inventory[late], album.kind == .userAlbum else { continue }
+            byID[late] = ManagedAlbumState(albumID: late, sourceID: plan.id, lastKnownTitle: album.title, lastKnownParentID: nil,
+                                           lastKnownMembers: [], addedBySortly: [], createdBySortly: true)
+            touched.insert(late)
+            createdNow.insert(late)
         }
 
         var result: [ManagedAlbumState] = []

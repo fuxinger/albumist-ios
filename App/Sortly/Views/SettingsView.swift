@@ -15,6 +15,45 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var model = model
         Form {
+            // Undo first and on its own screen (design review W16: the history sat between
+            // privacy and the purchase, the seventh of twelve sections).
+            Section {
+                // Pushed by value (`AppScreen`), like the screens behind it: a receipt pushes
+                // "Fehlendes erneut versuchen".
+                PushLink(.history) {
+                    LabeledContent {
+                        if model.interruptedPlan != nil { Text("Unterbrochen") }
+                    } label: {
+                        Label("Verlauf und Rückgängig", systemImage: "clock.arrow.circlepath")
+                    }
+                }
+                .accessibilityIdentifier("settings.history")
+            } footer: {
+                Text("Alles, was Albumist in Fotos geändert hat, und der Weg zurück.")
+            }
+
+            Section {
+                Picker("Albumist arbeitet mit", selection: scopeYear) {
+                    Text("Ganze Mediathek").tag(Int?.none)
+                    ForEach(scopeYears, id: \.self) { year in
+                        Text("Nur \(String(year))").tag(Int?.some(year))
+                    }
+                }
+                .adaptivePickerStyle()
+            } header: {
+                Text("Mediathek")
+            } footer: {
+                Text("Mit einem Jahr geht es schneller: Albumist analysiert dann nur diese Fotos und macht nur dafür Vorschläge.")
+            }
+
+            // Where the user lives, former homes and other places that are not trips (also the
+            // places answered with "Ja, hier bin ich öfter").
+            Section {
+                HomeSettingsRow()
+            } footer: {
+                Text("Wo du wohnst und welche Orte keine Reisen sind.")
+            }
+
             Section {
                 ForEach(OrganizationArea.available) { area in
                     Toggle(isOn: areaBinding(area, \.enabledAreas)) {
@@ -27,14 +66,15 @@ struct SettingsView: View {
                 Text("Nur eingeschaltete Bereiche bekommen Vorschläge.")
             }
 
+            // Says what the second list of areas is for (W16: it read like the first one again).
             Section {
                 ForEach(OrganizationArea.available.filter { model.settings.enabledAreas.contains($0) }) { area in
                     Toggle(isOn: areaBinding(area, \.primaryAreas)) { Text(area.title) }
                 }
             } header: {
-                Text("Hauptbereiche")
+                Text("Zählt als sortiert")
             } footer: {
-                Text("Ein Foto gilt als sortiert, wenn es in einem dieser Bereiche ein Album hat.")
+                Text("Ein Foto gilt als sortiert, wenn es in einem dieser Bereiche in einem Album liegt.")
             }
 
             Section("Alben") {
@@ -42,8 +82,9 @@ struct SettingsView: View {
                     Text("Deutsch").tag(TitleLanguage.german)
                     Text("Englisch").tag(TitleLanguage.english)
                 }
-                LabeledContent("Hauptordner") {
-                    TextField("Albumist", text: $model.settings.rootFolderTitle)
+                .adaptivePickerStyle()
+                LabeledContent("Ordner für neue Alben") {
+                    TextField("Kein Ordner", text: $model.settings.rootFolderTitle)
                         .multilineTextAlignment(.trailing)
                 }
                 if model.settings.enabledAreas.contains(.places) {
@@ -59,10 +100,9 @@ struct SettingsView: View {
                     }
                 }
                 Toggle("Foto in mehreren Alben erlauben", isOn: $model.settings.allowMultipleAssignments)
-                NavigationLink {
-                    ManagedAlbumsView()
-                } label: {
-                    LabeledContent("Von Albumist angelegt", value: model.managedAlbums.count.formatted())
+                // Pushed by value: it pushes the preview of a removal (`AppScreen`).
+                PushLink(.managedAlbums) {
+                    LabeledContent("Alben von Albumist", value: model.managedAlbums.count.formatted())
                 }
             }
 
@@ -112,29 +152,6 @@ struct SettingsView: View {
             }
 
             Section {
-                if let interrupted = model.interruptedPlan {
-                    InterruptedHistoryRow(plan: interrupted)
-                }
-                if model.history.isEmpty && model.interruptedPlan == nil {
-                    Text("Noch keine Änderungen").foregroundStyle(.secondary)
-                }
-                ForEach(model.history) { plan in
-                    HistoryRow(plan: plan)
-                }
-                if model.historyHasMore {
-                    Button("Ältere anzeigen") { Task { await model.loadMoreHistory() } }
-                }
-            } header: {
-                Text("Verlauf")
-            } footer: {
-                // The analysis can be rebuilt, the decisions cannot: they are copied into the
-                // device backup (I12), so a new iPhone or a rebuilt database gets them back.
-                if let saved = model.lastSafetyBackup {
-                    Text("Deine Entscheidungen, Alben und der Verlauf liegen als kleine Kopie im Backup deines Geräts. Zuletzt gesichert: \(saved.formatted(date: .abbreviated, time: .shortened)).")
-                }
-            }
-
-            Section {
                 Button("Analyse neu aufbauen", role: .destructive) { confirmReset = true }
             } footer: {
                 Text("Löscht nur Albumists eigene Analyse. Deine Fotos und Alben bleiben, wie sie sind.")
@@ -144,27 +161,27 @@ struct SettingsView: View {
                 if purchases.isUnlocked {
                     Label("Freigeschaltet", systemImage: "checkmark.seal.fill").foregroundStyle(Theme.accent)
                 } else {
-                    LabeledContent("Noch kostenlos", value: "\(purchases.remainingFreeAlbums) Alben")
-                    Button {
-                        Task { await purchases.purchase() }
+                    LabeledContent {
+                        Text("\(purchases.remainingFreeAlbums) Alben")
                     } label: {
-                        if let product = purchases.product {
-                            Text("Freischalten für \(product.displayPrice)")
-                        } else {
-                            Text("Freischalten")
-                        }
+                        Text("Noch kostenlos")
                     }
-                    .disabled(purchases.isPurchasing)
+                    UnlockButton() // without a price: "Preis wird geladen …", not tappable (W7)
                     Button("Kauf wiederherstellen") { Task { await purchases.restore() } }
+                        .disabled(purchases.isPurchasing)
                     Button("Code einlösen") { redeeming = true }
                     if let error = purchases.lastError {
-                        Text(error).font(.footnote).foregroundStyle(.red)
+                        ErrorNote(text: error)
                     }
                 }
             }
+            // The price comes from StoreKit; a start without network is made up for here.
+            .task { await purchases.loadProductIfNeeded() }
             .offerCodeRedemption(isPresented: $redeeming) { _ in
-                Task { await purchases.refreshEntitlements() }
+                Task { await purchases.refreshEntitlements(mayLock: false) }
             }
+
+            SamplePhotosSection()
 
             #if targetEnvironment(simulator)
             Section {
@@ -194,13 +211,30 @@ struct SettingsView: View {
         .confirmationDialog("Analyse neu aufbauen?", isPresented: $confirmReset, titleVisibility: .visible) {
             Button("Neu aufbauen", role: .destructive) {
                 Task {
-                    await model.resetAnalysis()
-                    model.startAnalysis(userInitiated: true)
+                    // Refused during a change in "Dein Zuhause": only the busy message, no run.
+                    if await model.resetAnalysis() {
+                        model.startAnalysis(userInitiated: true)
+                    }
                 }
             }
         } message: {
-            Text("Die Analyse läuft danach noch einmal über die ganze Mediathek.")
+            Text("Die Analyse läuft danach noch einmal über alle Fotos, mit denen Albumist arbeitet.")
         }
+    }
+
+    /// The trial year (kept for every run) or the whole library.
+    private var scopeYear: Binding<Int?> {
+        Binding(
+            get: { if case .year(let year) = model.analysisScope { year } else { nil } },
+            set: { model.changeScope($0.map { .year($0) } ?? .all) }
+        )
+    }
+
+    private var scopeYears: [Int] {
+        let current = Calendar.current.component(.year, from: Date())
+        var years = (0..<6).map { current - $0 }
+        if case .year(let chosen) = model.analysisScope, !years.contains(chosen) { years.append(chosen) }
+        return years
     }
 
     private func areaBinding(_ area: OrganizationArea, _ keyPath: WritableKeyPath<OrganizationSettings, Set<OrganizationArea>>) -> Binding<Bool> {
@@ -214,15 +248,45 @@ struct SettingsView: View {
     }
 }
 
+/// Every change Albumist made, newest first, each with its way back (design review W16).
+struct HistoryView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        List {
+            Section {
+                if let interrupted = model.interruptedPlan {
+                    InterruptedHistoryRow(plan: interrupted)
+                }
+                if model.history.isEmpty && model.interruptedPlan == nil {
+                    Text("Noch keine Änderungen").foregroundStyle(.secondary)
+                }
+                ForEach(model.history) { plan in
+                    HistoryRow(plan: plan)
+                }
+                if model.historyHasMore {
+                    Button("Ältere anzeigen") { Task { await model.loadMoreHistory() } }
+                }
+            } footer: {
+                // The analysis can be rebuilt, the decisions cannot: they are copied into the
+                // device backup (I12), so a new iPhone or a rebuilt database gets them back.
+                if let saved = model.lastSafetyBackup {
+                    Text("Deine Entscheidungen, Alben und der Verlauf liegen als kleine Kopie im Backup deines Geräts. Zuletzt gesichert: \(saved.formatted(date: .abbreviated, time: .shortened)).")
+                }
+            }
+        }
+        .navigationTitle("Verlauf und Rückgängig")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 /// One executed plan; opens its change receipt (with "Rückgängig machen" there).
 struct HistoryRow: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
 
     var body: some View {
-        NavigationLink {
-            PlanReceiptView(plan: plan)
-        } label: {
+        PushLink(.receipt(PlanToken(plan))) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text((plan.confirmedAt ?? plan.createdAt).formatted(date: .abbreviated, time: .shortened))
@@ -263,25 +327,35 @@ struct InterruptedHistoryRow: View {
             .font(.subheadline)
             .disabled(model.execution.isRunning)
         }
-        .confirmationDialog("Bisherige Änderungen rückgängig machen?", isPresented: $confirmUndo, titleVisibility: .visible) {
-            Button("Rückgängig machen", role: .destructive) {
+        .confirmationDialog("Alles zurücknehmen?", isPresented: $confirmUndo, titleVisibility: .visible) {
+            Button("Alles zurücknehmen", role: .destructive) {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
-            Text("Albumist entfernt die schon angelegten Alben und Zuordnungen. Deine Fotos bleiben unverändert.")
+            Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt. Deine Fotos bleiben unverändert.")
         }
     }
 
+    /// The same words as on the overview card (design review W17).
     @ViewBuilder
     private var buttons: some View {
-        Button("Fortsetzen") {
+        let isUndo = plan.reverts != nil
+        // Borderless buttons in one row: each label gets the 44 pt tap area itself (W9).
+        Button {
             Task {
                 await model.resumeInterruptedPlan()
                 await model.refreshDerived()
             }
+        } label: {
+            Text(isUndo ? LocalizedStringKey("Rest zurücknehmen") : LocalizedStringKey("Rest anlegen")).minimumHitTarget()
         }
-        Button("Rückgängig") { confirmUndo = true }
-        Button("So lassen") { Task { await model.keepInterruptedPlanAsIs() } }
+        // An interrupted undo cannot itself be taken back; it goes on or stays as it is.
+        if !isUndo {
+            Button { confirmUndo = true } label: { Text("Alles zurücknehmen").minimumHitTarget() }
+        }
+        Button { Task { await model.keepInterruptedPlanAsIs() } } label: {
+            Text(isUndo ? LocalizedStringKey("So lassen") : LocalizedStringKey("Nur Erledigtes behalten")).minimumHitTarget()
+        }
     }
 }
 

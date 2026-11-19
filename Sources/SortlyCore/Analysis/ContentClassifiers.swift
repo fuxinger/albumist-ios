@@ -22,7 +22,6 @@ public struct ScreenshotClassifier: Sendable {
         .order: ["bestellnummer", "bestellung", "order number", "your order", "versandt", "shipped", "lieferung", "zustellung", "sendungsverfolgung", "tracking"],
         .invoice: ["rechnung", "invoice", "rechnungsnummer", "zahlbar", "mwst", "ust", "vat"],
         .ticket: ["ticket", "fahrkarte", "eintritt", "einlass", "sitzplatz", "seat", "gleis", "platform", "qr-code", "barcode"],
-        .flight: ["flug", "flight", "boarding", "gate", "abflug", "departure", "ankunft", "arrival", "terminal", "lufthansa", "ryanair", "eurowings"],
         .hotel: ["hotel", "check-in", "check-out", "zimmer", "room", "übernachtung", "nights", "booking.com", "airbnb", "unterkunft"],
         .recipe: ["zutaten", "ingredients", "zubereitung", "preparation", "esslöffel", "teelöffel", "tbsp", "tsp", "backofen", "oven", "minuten garen"],
         .product: ["in den warenkorb", "add to cart", "lieferbar", "in stock", "bewertungen", "reviews", "artikelnummer", "produktdetails"],
@@ -42,12 +41,22 @@ public struct ScreenshotClassifier: Sendable {
     /// so weak categories need two hits.
     static let minimumHits: [ScreenshotCategory: Int] = [.chat: 2, .mapNavigation: 3, .manual: 2, .technical: 2, .note: 1, .news: 2, .socialMedia: 2, .offer: 2, .realEstate: 3]
 
+    /// Short keywords count only as whole words: as parts of words they were everywhere
+    /// ("ust" in "August" and "Zustellung" made order screenshots invoices, "eta" in "Details",
+    /// "min" in "Admin", "read" in "already"). Longer ones still match inside compounds
+    /// ("rechnung" in "Rechnungsnummer").
+    static func contains(_ keyword: String, lower: String, tokens: Set<String>) -> Bool {
+        if keyword.count <= 4, keyword.allSatisfy(\.isLetter) { return tokens.contains(keyword) }
+        return lower.contains(keyword)
+    }
+
     public func classify(text: String, barcodePayloads: [String] = [], imageLabels: Set<String> = []) -> Result {
         let lower = text.lowercased()
+        let tokens = Set(lower.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty })
         var categories: [ScreenshotCategory: Reliability] = [:]
         var terms: [ScreenshotCategory: [String]] = [:]
         for (category, words) in Self.keywords {
-            let hits = words.filter { lower.contains($0) }
+            let hits = words.filter { Self.contains($0, lower: lower, tokens: tokens) }
             let needed = Self.minimumHits[category] ?? 1
             guard hits.count >= needed else { continue }
             terms[category] = hits
@@ -60,11 +69,57 @@ public struct ScreenshotClassifier: Sendable {
         if imageLabels.contains("map") {
             categories[.mapNavigation] = max(categories[.mapNavigation] ?? .plausible, .likely)
         }
+        if let flight = Self.flight(in: text) {
+            categories[.flight] = flight.reliability
+            terms[.flight] = flight.terms
+        }
         // A flight is also a ticket (prompt example: flight booking appears in several places).
         if categories[.flight] != nil, categories[.ticket] == nil, lower.contains("boarding") {
             categories[.ticket] = .plausible
         }
         return Result(categories: categories, matchedTerms: terms)
+    }
+}
+
+// MARK: - Flights
+
+extension ScreenshotClassifier {
+    /// Whole words that hint at a flight. Single substrings were far too loose (first device
+    /// test 15.11.: "Flugbuchungen falsch erkannt"): "flug" is in "Flugmodus" and "Ausflug",
+    /// "gate" in "Navigate", "boarding" in "Snowboarding" and "Onboarding".
+    static let flightWords = ["flug", "flight", "flüge", "flights", "boarding", "gate", "abflug", "departure", "ankunft",
+                              "arrival", "terminal", "sitzplatz", "seat", "gepäck", "baggage", "lufthansa", "ryanair",
+                              "eurowings", "easyjet", "condor", "discover", "tuifly", "wizz", "klm", "swiss", "austrian",
+                              "flughafen", "airport"]
+    /// One of these alone is a flight booking or boarding pass.
+    static let flightPhrases = ["boarding pass", "bordkarte", "flugnummer", "flight number", "buchungsbestätigung flug",
+                                "flugbuchung", "flight booking", "booking reference", "buchungscode", "e-ticket", "check-in schließt"]
+    static let flightNumber = try? NSRegularExpression(pattern:
+        #"\b(LH|FR|EW|U2|DE|X3|4U|TK|BA|AF|KL|LX|OS|SN|IB|VY|W6|EK|QR|UA|AA|DL|AZ|SK|AY|TP|EI|PC|HV|LO|A3|EY|SQ|CX)\s?\d{2,4}\b"#)
+    static let airportPair = try? NSRegularExpression(pattern: #"\b[A-Z]{3}\s*(→|->|–|-|>|✈)\s*[A-Z]{3}\b"#)
+    /// Settings and Control Center show "Flugmodus" / "Airplane Mode": never a booking.
+    static let notFlight = ["flugmodus", "airplane mode", "flugzeugmodus"]
+
+    /// Needs a strong sign (flight number, route like "MUC → BCN", "Bordkarte") plus a flight
+    /// word, or several different flight words that include an airline or the word flight.
+    static func flight(in text: String) -> (reliability: Reliability, terms: [String])? {
+        let lower = text.lowercased()
+        let range = NSRange(text.startIndex..., in: text)
+        var strong: [String] = flightPhrases.filter { lower.contains($0) }
+        if let match = flightNumber?.firstMatch(in: text, range: range), let r = Range(match.range, in: text) { strong.append(String(text[r])) }
+        if let match = airportPair?.firstMatch(in: text, range: range), let r = Range(match.range, in: text) { strong.append(String(text[r])) }
+        var cleaned = lower
+        for phrase in notFlight { cleaned = cleaned.replacingOccurrences(of: phrase, with: " ") }
+        let words = Set(cleaned.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty })
+        let hits = flightWords.filter { words.contains($0) }
+        let anchors: Set<String> = ["flug", "flight", "flüge", "flights", "abflug", "lufthansa", "ryanair", "eurowings", "easyjet", "condor", "tuifly", "wizz"]
+        if !strong.isEmpty && !hits.isEmpty {
+            return (strong.count + hits.count >= 4 ? .likely : .plausible, strong + hits)
+        }
+        if strong.isEmpty, hits.count >= 3, hits.contains(where: anchors.contains) {
+            return (.plausible, hits)
+        }
+        return nil
     }
 }
 

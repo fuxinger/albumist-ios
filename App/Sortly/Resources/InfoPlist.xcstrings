@@ -16,7 +16,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sortly"
+            "value" : "Albumist"
           }
         }
       }
@@ -26,7 +26,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist reads your photos only on this device to suggest albums. Nothing is uploaded, and originals are never changed."
+            "value" : "Albumist reads your photos only on this device to suggest albums. Only when you confirm does it create albums and folders in Photos and add photos to albums or take them out. No photos are uploaded, and originals are never changed."
           }
         }
       }

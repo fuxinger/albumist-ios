@@ -1,0 +1,96 @@
+name: CodeQL
+
+# Code scanning (advanced setup; GitHub's default setup is off for this repository, the two
+# cannot run side by side). Results appear under Security > Code scanning.
+#   - actions and python (workflows and .github/scripts): Linux, no build, every pull request.
+#   - swift: needs a real build on macOS, so it runs nightly (and by hand) only, not on pull
+#     requests: on PR #1 its Mac job ran 26 min beside a UI run and held the accessibility
+#     group back by 14 min (UI run 44202318875, five Macs busy; docs/TESTFLIGHT.md, "Messung").
+#     It analyses the core package (Sources/**, built with `swift build`), not the app target:
+#     the app uses Swift macros (@Observable, @State, ...), and under the CodeQL tracer the
+#     compiler cannot start Xcode's macro plugin server ("swift-plugin-server could not be
+#     loaded: Bad CPU type in executable", CodeQL run 44202319351, after 24 min of building),
+#     like sandbox-exec before it. The core package uses no macros. The app's own Swift
+#     (App/Sortly) is NOT analysed by CodeQL today; it is again once CodeQL's tracer can start
+#     the plugin server on the arm64 runners (try: a manual run with the newest codeql-action;
+#     docs/TESTFLIGHT.md), under its own category.
+# Sources/CSQLite is a module map and a header shim with no C code, so c-cpp is not analysed.
+# Not part of a TestFlight run (testflight.yml runs CI, the UI flow and the stress pass): a
+# finding never blocks a build for the testers; it is reviewed in the Security tab.
+on:
+  pull_request:
+    paths-ignore: ['**.md']
+  schedule:
+    # 01:30 UTC, after the nightly test run has started.
+    - cron: '30 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, python]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+
+  swift:
+    name: Analyze (swift)
+    if: github.event_name != 'pull_request'
+    runs-on: xcode-27
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select pinned Xcode
+        run: python3 .github/scripts/toolchain.py xcode
+      # The package manifest is compiled and run before CodeQL starts tracing: under the tracer
+      # sandbox-exec failed with "Bad CPU type in executable (86)".
+      - name: Resolve the package
+        run: swift package resolve --scratch-path "$RUNNER_TEMP/codeql-build"
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: swift
+          build-mode: manual
+      # A clean build of the core libraries (fresh .build, no cache): CodeQL only sees what is
+      # compiled. No tests: they use the Swift Testing macros (@Test), see the top of this file.
+      - name: Build the core package
+        run: |
+          set -o pipefail
+          swift build --disable-sandbox --scratch-path "$RUNNER_TEMP/codeql-build" 2>&1 | tail -20
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          # Its own category: the core package only. Under "/language:swift" the earlier app
+          # analyses would stay the newest results for App/** and keep their alerts open as if
+          # still checked (docs/TESTFLIGHT.md, "Code-Scanning").
+          category: /language:swift-core

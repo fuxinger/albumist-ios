@@ -105,34 +105,29 @@ final class DemoLibrary {
         }
         total = specs.count
 
-        let sources = await sampleImages()
+        let sources = SourceImages(images: await Self.sampleImages())
         var number = 1000
         for start in stride(from: 0, to: specs.count, by: 15) {
-            var chunk: [Item] = []
-            for spec in specs[start..<min(start + 15, specs.count)] {
-                number += 1
-                switch spec {
-                case let .photo(spot, spread, day):
-                    let location = CLLocation(
-                        coordinate: CLLocationCoordinate2D(latitude: spot.lat + rng.next(in: -spread...spread),
-                                                           longitude: spot.lon + rng.next(in: -spread...spread)),
-                        altitude: 0, horizontalAccuracy: 8, verticalAccuracy: 8, timestamp: day)
-                    let source = sources.isEmpty ? Self.fallbackImage() : sources[Int(rng.next(in: 0...999)) % sources.count]
-                    let image = Self.crop(source, rng: &rng)
-                    chunk.append(Item(data: image.jpegData(compressionQuality: 0.85)!, type: .jpeg, name: "IMG_\(number).JPG", date: day, location: location))
-                case let .screenshot(lines, day):
-                    chunk.append(Item(data: Self.screenshotPNG(lines), type: .png, name: "IMG_\(number).PNG", date: day, location: nil))
-                case let .document(lines, day):
-                    chunk.append(Item(data: Self.documentPhoto(lines).jpegData(compressionQuality: 0.85)!, type: .jpeg,
-                                      name: "IMG_\(number).JPG", date: day, location: nil))
-                }
-            }
-            let items = chunk
+            // Cropping, drawing and JPEG encoding take seconds per batch. Off the main actor,
+            // so the app stays responsive while the demo library is written: on the main actor
+            // the UI tests' accessibility queries timed out at the largest text size ("Failed
+            // to get matching snapshots: Timed out while evaluating UI query", run 43856872524).
+            // The random generator is handed through each batch in order, so the library stays
+            // the same every time.
+            let part = Array(specs[start..<min(start + 15, specs.count)])
+            // Off the main actor (drawing a batch takes seconds). No priority of its own: the
+            // task is awaited right here, which raises it to the priority of this task anyway.
+            let made = await Task.detached { [rng, number] in
+                Self.items(part, sources: sources, firstNumber: number, rng: rng)
+            }.value
+            rng = made.rng
+            number += part.count
+            let items = made.items
             do {
                 try await Self.save(items)
                 created += items.count
             } catch {
-                model.message = error.localizedDescription
+                model.message = .failure(error.localizedDescription)
                 return
             }
             await Task.yield()
@@ -182,7 +177,9 @@ final class DemoLibrary {
 
     // MARK: Images
 
-    private func sampleImages() async -> [UIImage] {
+    /// Off the main actor: the fetch is a synchronous call to the Photos service, which is
+    /// busy with the library being written.
+    nonisolated private static func sampleImages() async -> [UIImage] {
         let options = PHFetchOptions()
         options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
         options.fetchLimit = 12
@@ -194,8 +191,43 @@ final class DemoLibrary {
         return images
     }
 
+    /// The images a batch of the demo library is drawn from (they are only read).
+    struct SourceImages: @unchecked Sendable { let images: [UIImage] }
+
+    /// Draws and encodes one batch. Runs off the main actor; returns the generator's state
+    /// so the next batch continues the same sequence.
+    nonisolated static func items(_ specs: [Spec], sources: SourceImages, firstNumber: Int,
+                                  rng start: SeededRandom) -> (items: [Item], rng: SeededRandom) {
+        var rng = start
+        var number = firstNumber
+        var chunk: [Item] = []
+        for spec in specs {
+            number += 1
+            // Each photo's bitmaps (a 1600 × 1200 rendering, its source crop) are freed before
+            // the next one; without a pool a batch kept all of them until the task ended.
+            autoreleasepool {
+                switch spec {
+                case let .photo(spot, spread, day):
+                    let location = CLLocation(
+                        coordinate: CLLocationCoordinate2D(latitude: spot.lat + rng.next(in: -spread...spread),
+                                                           longitude: spot.lon + rng.next(in: -spread...spread)),
+                        altitude: 0, horizontalAccuracy: 8, verticalAccuracy: 8, timestamp: day)
+                    let source = sources.images.isEmpty ? Self.fallbackImage() : sources.images[Int(rng.next(in: 0...999)) % sources.images.count]
+                    let image = Self.crop(source, rng: &rng)
+                    chunk.append(Item(data: image.jpegData(compressionQuality: 0.85)!, type: .jpeg, name: "IMG_\(number).JPG", date: day, location: location))
+                case let .screenshot(lines, day):
+                    chunk.append(Item(data: Self.screenshotPNG(lines), type: .png, name: "IMG_\(number).PNG", date: day, location: nil))
+                case let .document(lines, day):
+                    chunk.append(Item(data: Self.documentPhoto(lines).jpegData(compressionQuality: 0.85)!, type: .jpeg,
+                                      name: "IMG_\(number).JPG", date: day, location: nil))
+                }
+            }
+        }
+        return (chunk, rng)
+    }
+
     /// A random 50–85 % crop, sometimes mirrored, as a 1600 × 1200 (or portrait) photo.
-    static func crop(_ source: UIImage, rng: inout SeededRandom) -> UIImage {
+    nonisolated static func crop(_ source: UIImage, rng: inout SeededRandom) -> UIImage {
         let portrait = rng.next(in: 0...1) < 0.3
         let output = portrait ? CGSize(width: 1200, height: 1600) : CGSize(width: 1600, height: 1200)
         let scale = CGFloat(rng.next(in: 0.5...0.85))
@@ -213,14 +245,14 @@ final class DemoLibrary {
         }
     }
 
-    static func fallbackImage() -> UIImage {
+    nonisolated static func fallbackImage() -> UIImage {
         UIGraphicsImageRenderer(size: CGSize(width: 1600, height: 1200)).image { ctx in
             UIColor.systemTeal.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 1600, height: 1200))
         }
     }
 
     /// iPhone-sized screenshot with an EXIF "Screenshot" comment, as iOS writes it.
-    static func screenshotPNG(_ lines: [String]) -> Data {
+    nonisolated static func screenshotPNG(_ lines: [String]) -> Data {
         // Looks like a real app screen: status bar, colored header with the title, the
         // details in a list and a button, so previews are recognizable at any crop.
         let size = CGSize(width: 1179, height: 2556)
@@ -273,7 +305,7 @@ final class DemoLibrary {
     }
 
     /// A printed page photographed on a table.
-    static func documentPhoto(_ lines: [String]) -> UIImage {
+    nonisolated static func documentPhoto(_ lines: [String]) -> UIImage {
         let size = CGSize(width: 1500, height: 2000)
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1

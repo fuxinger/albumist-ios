@@ -123,8 +123,25 @@ public struct AlbumProposal: Hashable, Sendable, Codable, Identifiable {
         self.reasons = reasons
         self.dateRange = dateRange
         self.placeKeys = placeKeys
-        self.coverAssetID = coverAssetID ?? assetIDs.min()
+        self.coverAssetID = coverAssetID ?? Self.cover(for: id, from: assetIDs)
         self.isSensitive = isSensitive
         self.requiresUserName = requiresUserName
+    }
+
+    /// A cover of its own for every suggestion, the same in every run. The smallest id was the
+    /// same photo for a country, its towns and the trips there (first device test 15.11.:
+    /// many suggestions showed the same picture).
+    static func cover(for id: SortlyID, from assetIDs: Set<AssetID>) -> AssetID? {
+        func rank(_ asset: AssetID) -> UInt64 {
+            // FNV alone barely changes the high bits for ids that differ only at the end.
+            var z = StableHash.fnv1a64(id.rawValue + "|" + asset.rawValue) &+ 0x9E37_79B9_7F4A_7C15
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+        return assetIDs.min { a, b in
+            let ra = rank(a), rb = rank(b)
+            return ra != rb ? ra < rb : a < b
+        }
     }
 }

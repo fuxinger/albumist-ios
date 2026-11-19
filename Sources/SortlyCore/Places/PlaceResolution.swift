@@ -74,10 +74,20 @@ public actor PlaceResolutionService {
         public var coordinate: GeoCoordinate
         /// Higher first (trips and frequent places before everything else, speed-up 3).
         public var priority: Int
-        public init(assetID: AssetID, coordinate: GeoCoordinate, priority: Int = 0) {
+        /// The photo has a town already (a refinement asks for a finer one): nothing coarser
+        /// is ever saved over it, not the map's country before the lookup, nor a country after
+        /// a lookup whose town was dropped (review of d612bc0: a stopped refinement lost towns).
+        public var hasTown: Bool
+        /// The photo got its country from the map in an earlier run and waits for its town:
+        /// the map pass does not check it again, it counts as checked from the start (review
+        /// of 9f0bc40: after a Pause the "geprüft" count started lower again).
+        public var hasCountry: Bool
+        public init(assetID: AssetID, coordinate: GeoCoordinate, priority: Int = 0, hasTown: Bool = false, hasCountry: Bool = false) {
             self.assetID = assetID
             self.coordinate = coordinate
             self.priority = priority
+            self.hasTown = hasTown
+            self.hasCountry = hasCountry
         }
     }
 
@@ -88,6 +98,12 @@ public actor PlaceResolutionService {
         public var onlineRequests = 0
         public var cacheHits = 0
         public var stoppedBecauseOffline = false
+        /// Apple's geocoder kept refusing (rate limit): the remaining cells wait for a later run.
+        public var stoppedBecauseThrottled = false
+        /// The run's lookup limit ran out while cells that were neither cached nor asked remained.
+        public var stoppedAtRequestLimit = false
+        /// Asking stopped early because the run was paused (or got too hot, or the battery ran low).
+        public var stoppedAsking = false
         public init() {}
     }
 
@@ -101,6 +117,16 @@ public actor PlaceResolutionService {
     private let time: TimeSource
     private let now: @Sendable () -> Date
     private var requestTimes: [Duration] = []
+    /// Time spent in this `resolve` waiting for the geocoder after it refused.
+    private var rateLimitWaited: Duration = .zero
+    /// Told how long a wait for the geocoder still takes, and `nil` when it is over (see `resolve`).
+    private var onWait: (@Sendable (Duration?) async -> Void)?
+    /// Longest single sleep between two checks of `shouldStop`: Pause, heat or the end of the
+    /// app's time interrupt a wait for the geocoder within seconds, not after minutes.
+    static let waitSlice: Duration = .seconds(2)
+    /// The pass over the offline map is saved, said (`checked`) and checked for Pause in
+    /// parts of this size.
+    static let offlineChunk = 1_000
 
     public init(
         map: OfflineWorldMap?,
@@ -123,20 +149,79 @@ public actor PlaceResolutionService {
     /// Resolves all requests. Results are handed to `sink` in batches as they arrive, so a
     /// paused or killed run keeps everything finished so far. Cancellation stops early and
     /// reports the rest as pending.
+    ///
+    /// `maxRateLimitWait`: how long this call may wait in total after the geocoder refused
+    /// (rate limit). Once that is used up, or the geocoder still refuses after its retries, no
+    /// more online lookups are made in this call and the rest is reported as pending.
+    ///
+    /// `progress`: how many requests are final (resolved, or not resolvable). Requests left
+    /// for a later call (budget, refusal, offline, Pause) are not counted.
+    ///
+    /// `waiting`: called every 2 s while this call waits for the geocoder (its limit of about
+    /// 40 lookups a minute, or a refusal) with the time left, and with `nil` when it goes on.
     public func resolve(
         _ requests: [Request],
         refining: Bool = false,
         maxOnlineRequests: Int? = nil,
+        maxRateLimitWait: Duration? = nil,
         shouldStop: (@Sendable () async -> Bool)? = nil,
         onlineAllowed: (@Sendable () async -> Bool)? = nil,
+        progress: (@Sendable (Int) async -> Void)? = nil,
+        checked: (@Sendable (Int) async -> Void)? = nil,
+        paused: (@Sendable () -> Bool)? = nil,
+        waiting: (@Sendable (Duration?) async -> Void)? = nil,
         sink: Sink
     ) async throws -> Outcome {
         var outcome = Outcome()
+        rateLimitWaited = .zero
+        onWait = waiting
+        defer { onWait = nil }
+        // How many requests are final (resolved, or not resolvable). A country known early from
+        // the map does not count yet when the town still needs the online lookup, so the count
+        // rises with the real work (first device test 15.11.: "5.683 von 5.683" showed at once
+        // while the lookups had only begun). Requests left for a later run do not count either:
+        // they are looked up again there, and that run's count starts where this one ended
+        // instead of below it (simulated full run: Pause in step 3 jumped to "1.615 von 1.615",
+        // the run that went on started at "271 von 1.615").
+        var processed = 0
         var offlineOnly: [AssetID: ResolvedPlace] = [:]
-        var needsOnline: [Request] = []
+        // Checked against the map in an earlier run (country saved, town still open, which
+        // needs the online lookup at any level that asks for towns): straight to the lookups.
+        let checkedBefore = requests.filter { $0.hasCountry && !$0.hasTown && policy.deepestLevel >= .locality }
+        let toCheck = checkedBefore.isEmpty ? requests : requests.filter { !($0.hasCountry && !$0.hasTown && policy.deepestLevel >= .locality) }
+        var needsOnline: [Request] = checkedBefore
         var offlineCache: [GeoCell: OfflineWorldMap.Match] = [:]
 
-        for r in requests where r.coordinate.isPlausible {
+        // Every place saved from the map, so a town found later is not counted a second time
+        // (review of d612bc0: 8,500 resolved for 4,500 photos once the map pass came in parts).
+        var savedFromMap = Set<AssetID>()
+        // In parts of `offlineChunk`: saved, then counted, then said (`checked`), and Pause is
+        // looked at. 50,000 photos at once stood at "0 von 50.233 Orten" for a minute
+        // (stress run 43833158673); with towns on (the default) none of them is final before
+        // its lookup, so `checked` is the honest sign of life of this pass.
+        if !checkedBefore.isEmpty { await checked?(checkedBefore.count) }
+        for (index, r) in toCheck.enumerated() {
+            if index > 0, index % Self.offlineChunk == 0 {
+                if !offlineOnly.isEmpty {
+                    try await sink(offlineOnly)
+                    outcome.resolved += offlineOnly.count
+                    savedFromMap.formUnion(offlineOnly.keys)
+                    offlineOnly.removeAll(keepingCapacity: true)
+                }
+                let final = index - (needsOnline.count - checkedBefore.count)
+                if final > processed {
+                    processed = final
+                    await progress?(processed)
+                }
+                await checked?(checkedBefore.count + index)
+                // Pause: what is saved stays; the rest is asked for again by the next run.
+                if paused?() == true || Task.isCancelled {
+                    outcome.pendingOnline.formUnion(toCheck[index...].map(\.assetID))
+                    outcome.pendingOnline.formUnion(needsOnline.map(\.assetID))
+                    return outcome
+                }
+            }
+            guard r.coordinate.isPlausible else { continue }
             let match = offlineMatch(r.coordinate, memo: &offlineCache)
             if !requiresOnline(match) {
                 if let components = match?.components(language: policy.language) {
@@ -144,8 +229,9 @@ public actor PlaceResolutionService {
                 }
             } else {
                 needsOnline.append(r)
-                // Country/region are useful right away, even before the town is known.
-                if let match, match.countryIsCertain, let c = match.components(language: policy.language) {
+                // Country/region are useful right away, even before the town is known (but never
+                // over a town the photo has already).
+                if !r.hasTown, let match, match.countryIsCertain, let c = match.components(language: policy.language) {
                     offlineOnly[r.assetID] = ResolvedPlace(components: c, source: .gpsReverseGeocoded, resolvedAt: now())
                 }
             }
@@ -153,7 +239,12 @@ public actor PlaceResolutionService {
         if !offlineOnly.isEmpty {
             try await sink(offlineOnly)
             outcome.resolved += offlineOnly.count
+            savedFromMap.formUnion(offlineOnly.keys)
+            offlineOnly.removeAll(keepingCapacity: true)
         }
+        processed = requests.count - needsOnline.count
+        await progress?(processed)
+        await checked?(requests.count)
 
         // One online request per raster cell, highest priority and biggest cells first.
         let cellMeters = policy.cellMeters(refining: refining)
@@ -167,9 +258,10 @@ public actor PlaceResolutionService {
 
         var onlineDisabled = !policy.onlineAllowed || geocoder == nil
         for (cell, members) in groups {
+            let pendingBefore = outcome.pendingOnline.count
             if Task.isCancelled { outcome.pendingOnline.formUnion(members.map(\.assetID)); continue }
             // Pause, heat or low battery: no more online lookups; cached cells still count.
-            if !onlineDisabled, let shouldStop, await shouldStop() { onlineDisabled = true }
+            if !onlineDisabled, let shouldStop, await shouldStop() { onlineDisabled = true; outcome.stoppedAsking = true }
             // The user's consent is read again before every online lookup: switching it off in
             // the settings stops the next request, not only the next run (audit 2, 5.2).
             if !onlineDisabled, let onlineAllowed, !(await onlineAllowed()) { onlineDisabled = true }
@@ -178,21 +270,32 @@ public actor PlaceResolutionService {
                 outcome.cacheHits += 1
             } else if !onlineDisabled, maxOnlineRequests.map({ outcome.onlineRequests < $0 }) ?? true, let geocoder {
                 let representative = Self.representative(of: members.map(\.coordinate))
-                switch await request(geocoder, representative) {
-                case .success(let components):
+                switch await request(geocoder, representative, patience: maxRateLimitWait, shouldStop: shouldStop) {
+                case .found(let components):
                     outcome.onlineRequests += 1
                     // "Nothing here" (open sea, a lake, wilderness) is remembered as an empty
                     // answer, so the cell is not asked again every night.
                     let answer = components ?? PlaceComponents()
                     online = answer
                     try await cache.cachePlace(answer, cell: cell, resolvedAt: now())
-                case .failure(.offline):
+                case .offline:
                     outcome.onlineRequests += 1
                     onlineDisabled = true
                     outcome.stoppedBecauseOffline = true
-                case .failure:
+                case .throttled:
+                    // Asking the next cell would only be refused as well (and wait again).
+                    outcome.onlineRequests += 1
+                    onlineDisabled = true
+                    outcome.stoppedBecauseThrottled = true
+                case .stopped:
+                    onlineDisabled = true
+                    outcome.stoppedAsking = true
+                case .failed:
                     outcome.onlineRequests += 1
                 }
+            } else if !onlineDisabled, geocoder != nil {
+                // Not cached and not asked: the run's lookup limit is used up.
+                outcome.stoppedAtRequestLimit = true
             }
             guard let online else {
                 outcome.pendingOnline.formUnion(members.map(\.assetID))
@@ -206,12 +309,22 @@ public actor PlaceResolutionService {
                     if online != PlaceComponents() { outcome.pendingOnline.insert(member.assetID) }
                     continue
                 }
+                if member.hasTown, !merged.townIsValid {
+                    // Only a country came back: the stored town stays.
+                    outcome.pendingOnline.insert(member.assetID)
+                    continue
+                }
                 batch[member.assetID] = ResolvedPlace(components: merged.components, source: .gpsReverseGeocoded, resolvedAt: now(), precisionMeters: merged.townIsValid ? cellMeters : nil)
                 if !merged.townIsValid { outcome.pendingOnline.insert(member.assetID) }
             }
             if !batch.isEmpty {
                 try await sink(batch)
-                outcome.resolved += batch.count - batch.keys.filter { offlineOnly[$0] != nil }.count
+                outcome.resolved += batch.keys.filter { !savedFromMap.contains($0) }.count
+            }
+            let final = members.count - (outcome.pendingOnline.count - pendingBefore)
+            if final > 0 {
+                processed += final
+                await progress?(processed)
             }
         }
         return outcome
@@ -272,37 +385,76 @@ public actor PlaceResolutionService {
 
     // MARK: Throttled requests
 
-    private func request(_ geocoder: any ReverseGeocoding, _ coordinate: GeoCoordinate) async -> Result<PlaceComponents?, GeocodingError> {
+    enum Lookup: Equatable {
+        case found(PlaceComponents?)
+        case offline
+        /// Still refused after the retries, or the patience for this call is used up.
+        case throttled
+        /// Pause, heat or the end of the app's time while waiting.
+        case stopped
+        case failed
+    }
+
+    private func request(
+        _ geocoder: any ReverseGeocoding, _ coordinate: GeoCoordinate,
+        patience: Duration?, shouldStop: (@Sendable () async -> Bool)?
+    ) async -> Lookup {
         var backoff: Duration = .seconds(30)
-        for _ in 0..<4 {
+        let attempts = 4
+        for attempt in 1...attempts {
+            guard await waitForSlot(shouldStop) else { return .stopped }
             do {
-                try await waitForSlot()
-                return .success(try await geocoder.reverseGeocode(coordinate))
+                return .found(try await geocoder.reverseGeocode(coordinate))
             } catch let error as GeocodingError {
                 switch error {
                 case .rateLimited(let retryAfter):
+                    if attempt == attempts { return .throttled }
                     let wait = retryAfter.map { Duration.milliseconds(Int64($0 * 1000)) } ?? backoff
                     backoff = min(backoff * 2, .seconds(600))
-                    do { try await time.sleep(wait) } catch { return .failure(.failed) }
-                case .offline, .failed:
-                    return .failure(error)
+                    if let patience, rateLimitWaited + wait > patience { return .throttled }
+                    rateLimitWaited += wait
+                    guard await pause(for: wait, shouldStop) else { return .stopped }
+                case .offline:
+                    return .offline
+                case .failed:
+                    return .failed
                 }
             } catch {
-                return .failure(.failed)
+                return .failed
             }
         }
-        return .failure(.rateLimited(retryAfter: nil))
+        return .throttled
     }
 
-    private func waitForSlot() async throws {
+    /// Sleeps in short slices and asks `shouldStop` between them. False: stopped.
+    /// Each slice is announced with the time left, and the end of the wait too: without it the
+    /// count stood still for up to a minute while the run waited (simulated full run: 48 s at
+    /// the limit of 40 lookups a minute, 30 s after a refusal), and looked stuck.
+    private func pause(for duration: Duration, _ shouldStop: (@Sendable () async -> Bool)?) async -> Bool {
+        var left = duration
+        var stopped = false
+        while left > .zero {
+            if Task.isCancelled { stopped = true; break }
+            if let shouldStop, await shouldStop() { stopped = true; break }
+            await onWait?(left)
+            let slice = min(left, Self.waitSlice)
+            do { try await time.sleep(slice) } catch { stopped = true; break }
+            left -= slice
+        }
+        if duration > .zero { await onWait?(nil) }
+        return !stopped && !Task.isCancelled
+    }
+
+    private func waitForSlot(_ shouldStop: (@Sendable () async -> Bool)?) async -> Bool {
         var current = time.elapsed()
         requestTimes.removeAll { current - $0 >= throttle.window }
         if requestTimes.count >= throttle.maxRequests, let oldest = requestTimes.first {
-            try await time.sleep(throttle.window - (current - oldest))
+            guard await pause(for: throttle.window - (current - oldest), shouldStop) else { return false }
             current = time.elapsed()
             requestTimes.removeAll { current - $0 >= throttle.window }
         }
         requestTimes.append(current)
+        return true
     }
 }
 

@@ -70,7 +70,11 @@ public struct SafetyBackup: Codable, Sendable, Equatable {
     /// next launch still finishes them (audit 2, 3.1). Missing in copies of older versions.
     public var pendingFinalization: [String]? = nil
 
-    public var isEmpty: Bool { overrides.isEmpty && rules.isEmpty && managedAlbums.isEmpty && plans.isEmpty && values.isEmpty }
+    /// Values that are not the database's own stamp count (copies made by 83db832 carried it).
+    public var isEmpty: Bool {
+        overrides.isEmpty && rules.isEmpty && managedAlbums.isEmpty && plans.isEmpty
+            && values.allSatisfy { !SortlyStore.isSafetyValue($0.key) }
+    }
 
     /// The managed-album records in this copy (to check that it belongs to this library).
     public func managedAlbumStates() -> [ManagedAlbumState] {
@@ -88,6 +92,21 @@ public struct SafetyBackup: Codable, Sendable, Equatable {
         guard !states.isEmpty else { return true }
         let found = states.filter { existing.contains($0.albumID) }.count
         return found * 2 >= states.count
+    }
+
+    /// Whether the album records and history of this copy may come back, for the photo
+    /// access Albumist has and the albums it can see (`visibleAlbums`, nil when they could not
+    /// be read). true: restore them; false: the copy comes from another library (a new iPhone
+    /// with new album identifiers), only the decisions come back; nil: cannot be told yet,
+    /// they wait (and the copy is not overwritten meanwhile).
+    /// - No photo access: wait.
+    /// - Limited access: the albums may be hidden, so only a match counts; otherwise wait.
+    /// - Full access: a match restores, anything else is another library.
+    public func belongsToLibrary(access: LibraryAccess, visibleAlbums: Set<CollectionID>?) -> Bool? {
+        guard !managedAlbums.isEmpty else { return true }
+        guard access.canRead, let visibleAlbums else { return nil }
+        if matchesLibrary(albums: visibleAlbums) { return true }
+        return access == .full ? false : nil
     }
 
     // MARK: File
@@ -139,9 +158,17 @@ public actor SafetyBackupWriter {
     }
 
     /// Writes `backup`, taken as snapshot number `sequence` (`SortlyStore.safetyBackupSnapshot`).
-    /// Returns false, without writing, when a later snapshot is already on disk.
+    /// Returns false, without writing, when a later snapshot is already on disk, or when an
+    /// empty snapshot would replace a copy that holds decisions: an empty database next to a
+    /// full copy is one whose restore did not happen (failed, full disk, a copy from a newer
+    /// version); overwriting the copy then would lose the decisions for good.
     public func write(_ backup: SafetyBackup, sequence: Int) throws -> Bool {
         if let newest = newestWritten, newest > sequence { return false }
+        if backup.isEmpty, FileManager.default.fileExists(atPath: url.path) {
+            // Unreadable counts as holding something: it may be a newer format.
+            let existing = try? SafetyBackup.read(from: url)
+            if existing?.isEmpty != true { return false }
+        }
         try backup.write(to: url)
         protect(url)
         newestWritten = sequence
@@ -175,7 +202,16 @@ extension SortlyStore {
         return false
     }
 
-    private static let keptValues = "key NOT LIKE 'analysis.%' AND key NOT LIKE 'execution.%'"
+    /// Settings rows a copy keeps. Not the analysis results, not in-flight execution markers,
+    /// and never the database's own stamp (`identity.%`; `database.identity` in 83db832):
+    /// counted as safety data it made a fresh database refuse the restore, and its copy
+    /// replace a good one (third review of the switches branch).
+    private static let keptValues = "key NOT LIKE 'analysis.%' AND key NOT LIKE 'execution.%' AND key NOT LIKE 'identity.%' AND key <> 'database.identity'"
+
+    /// The same rule for one key (a copy's rows on restore, `SafetyBackup.isEmpty`).
+    public static func isSafetyValue(_ key: String) -> Bool {
+        !key.hasPrefix("analysis.") && !key.hasPrefix("execution.") && !key.hasPrefix("identity.") && key != "database.identity"
+    }
     /// Plans that finished but are not finalized yet (written by the app).
     public static let pendingFinalizationKey = "execution.pendingFinalization"
 
@@ -226,7 +262,8 @@ extension SortlyStore {
                     try db.execute("INSERT OR REPLACE INTO rules (id, version, payload, updated_at) VALUES (?, ?, ?, NULL)",
                                    [.text(r.key), .integer(Int64(r.number ?? 1)), .blob(r.payload)])
                 }
-                for r in backup.values {
+                // Never the old database's stamp: the new one keeps its own.
+                for r in backup.values where Self.isSafetyValue(r.key) {
                     try db.execute("INSERT OR REPLACE INTO settings (key, payload) VALUES (?, ?)", [.text(r.key), .blob(r.payload)])
                 }
                 if includingLibraryState { try insertLibraryState(backup) }
@@ -258,6 +295,7 @@ extension SortlyStore {
             try db.execute("DELETE FROM plan_steps WHERE plan_id = ?", [.text(r.key)])
             try db.execute("DELETE FROM plan_media WHERE plan_id = ?", [.text(r.key)])
             journalCache[SortlyID(r.key)] = nil
+            headerCache[SortlyID(r.key)] = nil
         }
         // Only plans that are part of this copy.
         let planIDs = Set(backup.plans.map(\.key))

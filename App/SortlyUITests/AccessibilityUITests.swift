@@ -21,6 +21,9 @@ import UIKit
 ///   left in the interface (untranslated strings)
 /// - text that runs off the side of the screen
 ///
+/// Also failing: an audit that does not complete in two attempts ("Audit failed to complete in
+/// time", each attempt printed as `A11Y_AUDIT_ERROR`): the screen would otherwise pass unchecked.
+///
 /// Reported, not failing (`A11Y_WARN`), each with its reason:
 /// - "Contrast nearly passed": the system `secondaryLabel` colour Apple uses for secondary
 ///   text is 3.3–3.4:1 on light backgrounds (5.9–6.4:1 in dark mode); the app keeps the
@@ -496,8 +499,10 @@ final class AccessibilityUITests: XCTestCase {
             pendingContrast = []
             sleep(2)
         }
-        // "Audit failed to complete in time" twice: say so loudly, the tree checks still ran.
-        print("A11Y_WARN \(screen) | audit | did not complete, screen not audited")
+        // "Audit failed to complete in time" twice: the screen went unaudited, and a screen nobody
+        // checked must not pass (Prüfer B G5-06). The tree checks still ran; check() fails the test.
+        print("A11Y_FAIL \(screen) | audit | did not complete in 2 attempts, screen not audited")
+        auditFailures.append("audit did not complete in 2 attempts, screen not audited")
     }
 
     /// "Contrast failed" must repeat in a second contrast audit two seconds later to count.

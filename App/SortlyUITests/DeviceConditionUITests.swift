@@ -1383,17 +1383,19 @@ final class DeviceConditionUITests: XCTestCase {
 
     // MARK: 12 Stress: 50 000 photos, iCloud-only, offline
 
-    /// Runs only when the runner sets SORTLY_STRESS_PHOTOS (ui-stress.yml, started by hand;
-    /// xcodebuild hands TEST_RUNNER_SORTLY_STRESS_PHOTOS on as that); the "device conditions"
-    /// group of ui.yml skips it at once. Two phases, so that neither disturbs the other (stress runs
-    /// 43795785359 and 43823462215 mixed them):
+    /// Runs only when the runner sets SORTLY_STRESS_PHOTOS (ui-stress.yml: before each TestFlight
+    /// build, weekly at night, or by hand; xcodebuild hands TEST_RUNNER_SORTLY_STRESS_PHOTOS on
+    /// as that); the "device conditions" group of ui.yml skips it at once. Two phases, so that
+    /// neither disturbs the other (stress runs 43795785359 and 43823462215 mixed them):
     /// 1. Creating: launches with `-SortlyUITestCreateOnly` add that many photos and end the
     ///    app when they are done, writing how far they are into a file of the runner's.
     /// 2. Measuring: a fresh launch sets the database aside (-SortlyUITestRebuildDatabase) and
     ///    analyses everything from the start, originals only in iCloud and no network. Printed:
     ///    speed per step, Pause and Fortsetzen reaction, the longest time the progress line
     ///    stood still, the slowest answer of the app (one snapshot). The workflow samples the
-    ///    app's memory on the Mac and prints crash reports and why iOS ended the app.
+    ///    app's memory on the Mac and prints crash reports and why iOS ended the app. Fails
+    ///    unless photos were counted in the image step and Pause and Fortsetzen were tried
+    ///    (or the whole library was analysed before either could come).
     func test12_StressManyPhotosICloudOnlyOffline() throws {
         guard let count = ProcessInfo.processInfo.environment["SORTLY_STRESS_PHOTOS"].flatMap({ Int($0) }), count > 0 else {
             throw XCTSkip("Stress run only (SORTLY_STRESS_PHOTOS)")
@@ -1525,6 +1527,23 @@ final class DeviceConditionUITests: XCTestCase {
         print("UI_FACT stress result \(String(describing: analysedPhotos()))")
         shot("26-stress-done")
         if !finished { print("UI_FACT stress measured \(minutes) min; the analysis was not finished then (simulator speed)") }
+        // The measurement means something only when the analysis got on and Pause was tried
+        // (Prüfer B G5-07: a run that only said "Wartet" for 15 min, or never reached Pause,
+        // was green). Photos counted in the image step while measured; or, for a library small
+        // enough to be done before that, every photo analysed. The image step begins about 3 min
+        // in with 10,000 photos and about 14 min in with 50,000 (stress run 44116350940: 3,419
+        // photos in its last 31 of 45 min), so both passes count photos in it.
+        let allAnalysed = finished && everyPhotoAnalysed
+        let imageStep = stepCounts[4].map { $0.last - $0.first } ?? 0
+        print("UI_FACT stress image step counted \(imageStep) photos while measured (all analysed: \(allAnalysed))")
+        XCTAssertTrue(imageStep > 0 || allAnalysed,
+                      "The analysis did not get on in \(minutes) min: no photo counted in the image step (steps seen: \(stepCounts.keys.sorted()), last line '\(lastLine)')")
+        // Pause comes 200 photos or 2 min into the image step; it can only be missed by a library
+        // whose whole analysis is done before that.
+        if !paused && allAnalysed {
+            print("UI_FACT stress pause not tried: the analysis was done before 200 photos or 2 min of the image step")
+        }
+        XCTAssertTrue(paused || allAnalysed, "Pause and Fortsetzen were never tried: the image step did not run 200 photos or 2 min within \(minutes) min")
         XCTAssertEqual(ended, 0, "The app ended during the analysis")
         let still = recorded.map { (seconds: $0.seconds, line: $0.line) } ?? longestStill
         XCTAssertLessThanOrEqual(still.seconds, 10, "The progress line stood still \(String(format: "%.1f", still.seconds)) s at '\(still.line)'")
@@ -1632,7 +1651,13 @@ final class DeviceConditionUITests: XCTestCase {
     /// "Fortsetzen", but its label is "Analyse fortsetzen": found by its identifier now.
     private func measurePauseAndResume() {
         let pause = app.buttons["analysis.pause"]
-        guard pause.waitForExistence(timeout: 5) else { print("UI_STEP_MISSING stress pause"); return }
+        guard pause.waitForExistence(timeout: 5) else {
+            // The card shows Pause while the analysis runs (AnalysisProgressCard.control), and
+            // this is called only while the image step counts: a missing button is a finding.
+            print("UI_STEP_MISSING stress pause")
+            XCTFail("No Pause button on the analysis card during the image step ('\(progressText() ?? "")')")
+            return
+        }
         let before = analysisCount()?.done ?? 0
         let tapStarted = Date()
         pause.tap()

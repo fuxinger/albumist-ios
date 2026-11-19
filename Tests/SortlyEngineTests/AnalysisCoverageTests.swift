@@ -287,8 +287,17 @@ struct AnalysisCoverageTests {
         let first = Self.pipeline(store: firstStore, reader: InMemoryLibraryReader(assets: assets), analyzer: killed, batchSize: batch)
         let progress = Mutex<[AnalysisPipeline.Progress]>([])
         let abandoned = Task { try await first.run(onProgress: { p in progress.withLock { $0.append(p) } }) }
-        // Wait until it hangs in the 25th photo.
-        while killed.contentCalls.withLock({ $0.count }) < 25 { try await Task.sleep(for: .milliseconds(5)) }
+        // Wait until it hangs in the 25th photo, and until the early suggestions it makes beside
+        // the image step are saved: a process iOS has ended writes nothing more, but this one
+        // goes on in the test, and a write of it during the second run locked the database
+        // ("SQLite error 5", 1 of 6 runs on main 31ec24c, 5 of 6 once the overview refresh
+        // made the early set later).
+        let clock = ContinuousClock()
+        let waitedFrom = clock.now
+        while killed.contentCalls.withLock({ $0.count }) < 25 || !progress.withLock({ $0.contains(where: \.earlyProposals) }) {
+            try #require(clock.now - waitedFrom < .seconds(60), "the first process never got to the 25th photo with its early suggestions saved")
+            try await Task.sleep(for: .milliseconds(5))
+        }
         let markedBefore = try await firstStore.assetCount() - (try await firstStore.countNeedingAnalysis(version: AnalysisPipeline.contentVersion))
         #expect(markedBefore >= 20 && markedBefore < 25)
 

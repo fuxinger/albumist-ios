@@ -25,20 +25,13 @@ struct AlbumsView: View {
         let request: PlanRequest
     }
 
-    private var topLevel: [CollectionSnapshot] {
-        model.inventory.collections.values
-            .filter { $0.parentID == nil && $0.kind != .smartAlbum }
-            .sorted(by: Self.order)
-    }
-
     private var suggestions: [AlbumOverlapAnalyzer.MergeSuggestion] { model.mergeSuggestions }
 
-    static func order(_ a: CollectionSnapshot, _ b: CollectionSnapshot) -> Bool {
-        if (a.kind == .folder) != (b.kind == .folder) { return a.kind == .folder }
-        return a.title.localizedStandardCompare(b.title) == .orderedAscending
-    }
+    static func order(_ a: CollectionSnapshot, _ b: CollectionSnapshot) -> Bool { AlbumTabSections.order(a, b) }
 
     var body: some View {
+        // Each album once: "Deine Alben" leaves out Albumist's albums listed above (review P3-16).
+        let sections = AlbumTabSections(inventory: model.inventory, managed: model.managedAlbums)
         List {
             if !suggestions.isEmpty {
                 Section {
@@ -72,10 +65,9 @@ struct AlbumsView: View {
                 }
             }
 
-            let fromSortly = model.managedAlbums.compactMap { model.inventory[$0.albumID] }
-            if !fromSortly.isEmpty {
+            if !sections.fromAlbumist.isEmpty {
                 Section {
-                    ForEach(fromSortly.sorted(by: Self.order)) { collection in
+                    ForEach(sections.fromAlbumist) { collection in
                         CollectionRow(collection: collection)
                             .disabled(preparing != nil)
                             .accessibilityHint(waitHint)
@@ -105,10 +97,10 @@ struct AlbumsView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                } else if topLevel.isEmpty {
+                } else if sections.yours.isEmpty {
                     Text("Noch keine Alben").foregroundStyle(.secondary)
                 }
-                ForEach(topLevel) { collection in
+                ForEach(sections.yours) { collection in
                     CollectionRow(collection: collection)
                         .disabled(preparing != nil)
                         .accessibilityHint(waitHint)

@@ -44,38 +44,42 @@ enum UITestWait {
         return met
     }
 
-    /// Presses Home and waits until iOS has the app in the background (or ended it), then until
-    /// at least `atLeast` seconds have passed since the press, at least 1 s after the state was
-    /// reached. A fixed sleep after Home brought the app back before it was ever in the
-    /// background on a slow Mac (device test06, UI run 44480215847; d8f863f).
+    /// Presses Home and waits until iOS has the app in the background (or ended it), then keeps
+    /// it there for `atLeast` seconds (at least 1 s), counted from the moment iOS reported it. A
+    /// fixed sleep after Home brought the app back before it was ever in the background on a
+    /// slow Mac (device test06, UI run 44480215847; d8f863f).
     ///
     /// The Home press itself can be lost on the CI simulator: in UI run 44497741096 (19.11.) the
     /// app stayed in the foreground (state 4) for 30 s after it in test03 and test06, while
-    /// simctl calls to the same simulator timed out. So a press without effect after 12 s is
+    /// simctl calls to the same simulator timed out. So a press without effect after 20 s is
     /// tried once more (15 s), and then the Settings app is brought to the front (30 s), which
     /// sends this app to the background without SpringBoard's Home gesture. Each extra try is a
     /// counted flaky retry (`UI_FLAKY_RETRY <Class.test>`, from `test`), never silent; the test
     /// fails only when no way reached the background. Every Home press of the UI tests goes
-    /// through here.
+    /// through here. The time in the background never counts from the first press: after a late
+    /// way (20-35 s after it) the app would otherwise stay there only 1 s, and test03's expiry
+    /// might never happen (second review of 5d730ac, 6d6baf1).
     @discardableResult
     static func toBackground(_ app: XCUIApplication, _ why: String, atLeast: TimeInterval, in test: XCTestCase,
                              timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) -> Bool {
         let pressed = Date()
         UITestOnboarding.clock("wait start app in the background \(why)")
-        func inBackground(within seconds: TimeInterval) -> Bool {
+        // The moment iOS reported the app in the background (or ended), nil while it has not.
+        func inBackground(within seconds: TimeInterval) -> Date? {
             let until = Date().addingTimeInterval(seconds)
             repeat {
                 let state = app.state
-                if state == .runningBackground || state == .runningBackgroundSuspended || state == .notRunning { return true }
+                if state == .runningBackground || state == .runningBackgroundSuspended || state == .notRunning { return Date() }
                 usleep(250_000)
             } while Date() < until
-            return false
+            return nil
         }
         // Plain values, no closures: XCUIDevice and XCUIApplication belong to the main actor.
         let ways: [(name: String, wait: TimeInterval)] = [
-            ("Home press", min(timeout, 12)), ("second Home press", 15), ("Settings app in front", 30),
+            ("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30),
         ]
         var reached = false
+        var inBackgroundSince = pressed
         for (index, way) in ways.enumerated() {
             if index > 0 {
                 print("UI_FLAKY_RETRY \(testID(test)) app still in the foreground (state \(app.state.rawValue)) \(Int(Date().timeIntervalSince(pressed))) s after the Home press \(why), tried: \(way.name)")
@@ -85,8 +89,9 @@ enum UITestWait {
             } else {
                 XCUIApplication(bundleIdentifier: "com.apple.Preferences").activate()
             }
-            if inBackground(within: way.wait) {
+            if let since = inBackground(within: way.wait) {
                 reached = true
+                inBackgroundSince = since
                 print("UI_FACT app in the background \(why) by \(way.name)")
                 break
             }
@@ -100,8 +105,8 @@ enum UITestWait {
             print("UI_STEP_MISSING app in the background \(why) (Home twice and Settings, \(Int(took)) s)")
             XCTFail("The app did not reach the background \(why) (Home twice and Settings, \(Int(took)) s)", file: file, line: line)
         }
-        let wait = max(atLeast - took, reached ? 1 : 0)
-        // pacing: the minimum time in the background, counted after iOS reported it
+        let wait = reached ? max(atLeast - Date().timeIntervalSince(inBackgroundSince), 1) : 0
+        // pacing: the minimum time in the background, counted from when iOS reported it
         if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
         return reached
     }

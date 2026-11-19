@@ -121,8 +121,8 @@ final class DeviceConditionUITests: XCTestCase {
         }
     }
 
-    /// Sends the app to the background and waits until iOS reports it there, then at least
-    /// `atLeast` seconds in all. A fixed sleep was not enough on a starved Mac: in PR #9's UI run
+    /// Sends the app to the background and waits until iOS reports it there, then keeps it there
+    /// at least `atLeast` seconds, counted from that report. A fixed sleep was not enough on a starved Mac: in PR #9's UI run
     /// 44480215847 (test06, 19.11.) the app was back before it had ever entered the background,
     /// so the full disk (cleared by didEnterBackground) stayed full and the analysis stood still
     /// for 2 min with the notice coming back. A lost Home press is tried again, then the Settings

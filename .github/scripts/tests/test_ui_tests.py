@@ -1243,7 +1243,13 @@ class HostTerminateTests(unittest.TestCase):
             wait = source.read()
         body = wait[wait.index("static func toBackground("):wait.index("static func testID(")]
         self.assertEqual(len(re.findall(r"\.press\(\.home\)", body)), 1)  # in the loop of ways
-        self.assertIn('("Home press", min(timeout, 12)), ("second Home press", 15), ("Settings app in front", 30)', body)
+        self.assertIn('("Home press", min(timeout, 20)), ("second Home press", 15), ("Settings app in front", 30)', body)
+        # The time in the background counts from when iOS reported it, not from the first press:
+        # after a late way the app stayed there 1 s only (second review of 5d730ac, 6d6baf1), and
+        # SortlyFlowUITests says "at least the old 8 s, counted once iOS has it there".
+        self.assertIn("inBackgroundSince = since", body)
+        self.assertIn("let wait = reached ? max(atLeast - Date().timeIntervalSince(inBackgroundSince), 1) : 0", body)
+        self.assertNotRegex(body, r"atLeast - took\b")
         self.assertIn('XCUIApplication(bundleIdentifier: "com.apple.Preferences").activate()', body)
         retry = re.search(r'print\("UI_FLAKY_RETRY \\\(testID\(test\)\) ([^"]*)"\)', body)
         self.assertIsNotNone(retry)

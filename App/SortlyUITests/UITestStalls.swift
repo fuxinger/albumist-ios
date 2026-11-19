@@ -23,6 +23,8 @@ enum UITestStalls {
     static func report(_ file: String? = nil) {
         let file = file ?? path
         guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { return }
+        // The app may still run (a teardown report): its process id stays known for its end.
+        UITestLaunchRecord.shared.read(text, of: file)
         try? FileManager.default.removeItem(atPath: file)
         for line in text.split(separator: "\n") {
             if line.hasPrefix("# ") {

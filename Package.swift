@@ -53,11 +53,12 @@ let package = Package(
             dependencies: ["SortlyCore"],
             swiftSettings: strictSettings
         ),
-        // test12's pause check: a file of the UI tests, built here as well so Linux tests it.
+        // Files of the UI tests built here as well so Linux tests them: test12's pause check,
+        // and which app process the end of the app is about (UITestLaunchRecord).
         .target(
             name: "SortlyUITestLogic",
             path: "App/SortlyUITests",
-            sources: ["PauseCountCheck.swift"],
+            sources: ["PauseCountCheck.swift", "UITestLaunchRecord.swift"],
             swiftSettings: strictSettings
         ),
         .testTarget(

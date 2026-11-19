@@ -15,12 +15,12 @@ final class SortlySearchUITests: XCTestCase {
     // MARK: Helpers (as in SortlyFlowUITests)
 
     private func launch(_ extra: [String] = []) {
-        UITestAppEnd.end(app)
+        // UITestAppEnd.launch ends the app of the last launch first.
         app = XCUIApplication()
         // The stall file also gives the Mac the app's process id to end it by (`UITestAppEnd`).
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"]
             + UITestStalls.arguments(besides: extra) + extra
-        app.launch()
+        UITestAppEnd.launch(app)
     }
 
     private func button(_ text: String) -> XCUIElement {

@@ -17,8 +17,8 @@ final class DeviceConditionUITests: XCTestCase {
     // MARK: Helpers (copied from SortlyFlowUITests, which stays as it is)
 
     private func launch(_ extra: [String] = []) {
-        // Ended first: the stall file holds the app's process id for the Mac (`UITestAppEnd`).
-        UITestAppEnd.end(app)
+        // The app of the last launch is ended in UITestAppEnd.launch (its process id stays known
+        // when the report removes the stall file, `UITestLaunchRecord`).
         UITestStalls.report()
         if !stallsReportedAtEnd {
             stallsReportedAtEnd = true
@@ -28,8 +28,7 @@ final class DeviceConditionUITests: XCTestCase {
         let stalls = UITestStalls.arguments(besides: extra)
         app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked"] + stalls + extra
         launchExtra = extra
-        UITestOnboarding.clock("launch")
-        app.launch()
+        UITestAppEnd.launch(app, justBefore: { UITestOnboarding.clock("launch") })
     }
 
     /// The test's own arguments of the last launch: the onboarding helpers open the app again

@@ -1,6 +1,6 @@
 # Befunde: Stand der Arbeit
 
-Stand: **19.11.2026, 15:20 Uhr**, `main` 5f9ad8a (PR #10: Pakete c–r aus PR #9, dazu „Gleicher Name
+Stand: **19.11.2026, 17:00 Uhr**, `main` 5f9ad8a = Build 38 in TestFlight (PR #10: Pakete c–r aus PR #9, dazu „Gleicher Name
 gewinnt“, die nie-fertig-Fälle, Akku-Zahlen, Upload ohne Klick und die Bau-Strecke P5).
 
 Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergessen wird:
@@ -13,8 +13,8 @@ Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergesse
 
 | Status | Große Analyse | Prüfung von außen | Zusammen |
 |---|---:|---:|---:|
-| ✅ erledigt | 29 | 24 | 53 |
-| 🔧 in Arbeit | 5 | 0 | 5 |
+| ✅ erledigt | 31 | 24 | 55 |
+| 🔧 in Arbeit | 3 | 0 | 3 |
 | 📋 geplant (offen, noch nicht begonnen) | 32 | 11 | 43 |
 | ⏸ bewusst verschoben | 0 | 2 | 2 |
 | 👤 braucht Fuchs | 13 | 1 | 14 |
@@ -123,8 +123,8 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | Nr. | Worum es geht | Status | Beleg |
 |---|---|---|---|
 | P5-01 | Build 36 erst im dritten Versuch grün, das Tor merkt Wiederholungen nicht | ✅ | d94be53, 96fe370; `test_ci_gate.py`, `test_earlier_attempts.py` |
-| P5-02 | Schalter „force“ lädt ohne Test hoch, Apple-Schlüssel ungeschützt (⊂ G5-02) | 🔧 | „force“ weg (51e72f3), Umgebung `testflight-upload` von dir eingerichtet (19.11.), Upload ohne Klick nur von `main`; Beleg: TestFlight-Lauf 44541589587 |
-| P5-03 | Getestet wird nur die Debug-Fassung, die ausgelieferte Release-Fassung nie | 🔧 | Rauchtest des Release-Builds vor dem Upload auf `main` (8304617, d159140); Beleg: TestFlight-Lauf 44541589587 |
+| P5-02 | Schalter „force“ lädt ohne Test hoch, Apple-Schlüssel ungeschützt (⊂ G5-02) | ✅ | „force“ weg (51e72f3), Umgebung `testflight-upload` von dir eingerichtet (19.11.), Upload ohne Klick nur von `main`; Beleg: TestFlight-Lauf 44541589587, Build 38 (Tag `build-38`), alle Tore grün beim ersten Versuch |
+| P5-03 | Getestet wird nur die Debug-Fassung, die ausgelieferte Release-Fassung nie | ✅ | Rauchtest des Release-Builds vor dem Upload auf `main` (8304617, d159140); Beleg: TestFlight-Lauf 44541589587, Job „Release build smoke test (UI)“ grün vor dem Upload von Build 38 |
 | P5-04 | Kein Zeitplan läuft (Nachtlauf, Härtetest, Abholen der Abstürze) | 📋 | Abläufe seit 19.11. auf `main` (da79816); bis 19.11. vormittags noch kein Zeitplan-Lauf zu sehen, nur noch prüfen |
 | P5-05 | Bedienungs-Durchgang wartet vor allem, Demo-Mediathek wird in jeder Gruppe neu analysiert | 📋 | Stufe 1 und 2 aus dem Plan von Prüfer 5 noch offen |
 | P5-06 | 8 von 15 roten Durchgängen waren kein App-Fehler | ✅ | `main` 5f9ad8a: bedingte Wartezeiten (90c79c1), Home-Druck mit drei Wegen, jede Wiederholung gezählt; UI-Lauf 44529147724 auf PR #10 im ersten Versuch grün |
@@ -208,7 +208,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 
 ## Was braucht Fuchs (alle 👤 auf einen Blick)
 
-1. **Freigabe vor dem Hochladen einrichten** (10 Min., `docs/launch/FREIGABE_EINRICHTEN.md`): P5-02, P6-02. Bis dahin lädt TestFlight nichts hoch.
+1. ~~**Freigabe vor dem Hochladen einrichten**~~: erledigt (19.11., Umgebung `testflight-upload`). Build 38 ging am 19.11. um 16:40 Uhr ohne Klick zu TestFlight (P5-02 ✅; P6-02 wartet auf den ersten Tages-Build am 20.11.).
 2. **Hauptzweig `main` schützen** (Klick bei GitHub): P5-09, G6-05.
 3. **Einstellungen bei GitHub:** Freigabe für Läufe aus fremden Kopien; Dependabot-PR #8 annehmen oder schließen: P5-12.
 4. **Entscheidungen, die im Repo noch nicht festgehalten sind:** 6 Grafikeinheit (nach Messung, P4-13), 7 Album fürs Zuhause (P1-10), 9 „Merken“ oder „Auswählen“ (Paket 4A), 11 „Vollgas“/Limit (P6-03), 13 Technik beim Koordinator (P6-08), dazu P2-09 (zwei Pläne, ein Album).

@@ -38,7 +38,9 @@ ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
 
 
 class ApiError(RuntimeError):
-    pass
+    def __init__(self, message: str, code: int | None = None):
+        super().__init__(message)
+        self.code = code  # the HTTP status, when GitHub answered
 
 
 def api(path: str, method: str = "GET", **params):
@@ -61,7 +63,7 @@ def api(path: str, method: str = "GET", **params):
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             last = error
         time.sleep(5 * (attempt + 1))
-    raise ApiError(f"{path}: {last}")
+    raise ApiError(f"{path}: {last}", getattr(last, "code", None))
 
 
 def older_runs(runs: list[dict], repo: str, branch: str, head_sha: str, before: str) -> list[int]:
@@ -109,7 +111,7 @@ def main(call=api, env=os.environ) -> int:
                 lines.append(f"Cancelled UI run {run_id} (commit {shas[run_id][:7]}): "
                              f"{head_sha[:7]} is newer.")
             except ApiError as error:
-                ended = "409" in str(error)
+                ended = error.code == 409
                 lines.append(f"UI run {run_id} not cancelled ({error})"
                              + ("; it ended meanwhile." if ended else "."))
         if not ids and not lines:

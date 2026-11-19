@@ -92,7 +92,7 @@ class FakeApi:
         if path.startswith("actions/runs/") and path.endswith("/cancel") and method == "POST":
             run_id = int(path.split("/")[2])
             if run_id in self.refuse:
-                raise ui_supersede.ApiError(f"{path}: HTTP Error {self.refuse[run_id]}")
+                raise ui_supersede.ApiError(f"{path}: HTTP Error {self.refuse[run_id]}", self.refuse[run_id])
             self.cancelled.append(run_id)
             return {}
         raise AssertionError(f"unexpected call {method} {path}")
@@ -143,10 +143,18 @@ class MainTests(unittest.TestCase):
         self.assertNotIn("ended", out)
 
     def test_never_on_the_default_branch(self):
-        self.env["HEAD_REF"] = "main"
-        api = FakeApi(runs=[run(11, branch="main")])
+        for default in ("main", "trunk"):
+            with self.subTest(default=default):
+                self.env.update(HEAD_REF=default, DEFAULT_BRANCH=default)
+                api = FakeApi(runs=[run(11, branch=default)])
+                code, out = self.main(api)
+                self.assertEqual((code, api.cancelled, api.calls), (0, [], []))
+
+    def test_a_403_on_a_run_whose_id_contains_409_is_no_ended_run(self):
+        api = FakeApi(runs=[run(14090)])
+        api.refuse = {14090: 403}
         code, out = self.main(api)
-        self.assertEqual((code, api.cancelled, api.calls), (0, [], []))
+        self.assertNotIn("ended", out)
 
     def test_a_run_that_ended_meanwhile_is_no_failure(self):
         # GitHub answers 409 when the run finished between the listing and the cancel.

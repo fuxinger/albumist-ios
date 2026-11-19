@@ -47,17 +47,21 @@ public enum OrganizationScope: Hashable, Sendable, Codable {
     case year(Int)
     case album(CollectionID)
 
+    /// A year is the year on the photo's own clock (review P1-15, `LocalTime`): New Year's Eve in
+    /// New York belongs to the old year also on an iPhone on German time. `calendar`'s zone counts
+    /// only for facts made without zones.
     public func includes(_ facts: AssetFacts, calendar: Calendar) -> Bool {
         switch self {
         case .all: true
-        case .year(let y): facts.asset.creationDate.map { calendar.component(.year, from: $0) == y } ?? false
+        case .year(let y): facts.wallClock(or: calendar.timeZone).map { LocalTime.wallCalendar(calendar).component(.year, from: $0) == y } ?? false
         case .album(let id): facts.albumIDs.contains(id)
         }
     }
 }
 
 /// Joins stored analysis results into the per-asset facts the proposal engine, status
-/// resolver and search work on.
+/// resolver and search work on. With `homeTimeZone` each photo gets the time zone of its clock
+/// (`AssetFacts.timeZone`, review P1-15): its place's, else its country's there, else that one.
 public enum FactsAssembler {
     public static func assemble(
         assets: [AssetSnapshot],
@@ -69,7 +73,8 @@ public enum FactsAssembler {
         groups: [ObservationGroup],
         inventory: CollectionInventory,
         home: Set<AssetID> = [],
-        withoutCountry: Set<AssetID> = []
+        withoutCountry: Set<AssetID> = [],
+        homeTimeZone: TimeZone? = nil
     ) -> [AssetFacts] {
         var tripOf: [AssetID: SortlyID] = [:]
         for trip in trips { for id in trip.geotaggedAssetIDs { tripOf[id] = trip.id } }
@@ -80,6 +85,7 @@ public enum FactsAssembler {
         let membership = inventory.albumMembershipIndex()
         let titles = inventory.collections.mapValues(\.title)
         let messenger = MessengerClassifier()
+        var zones = TimeZoneFinder()
 
         return assets.map { asset in
             let place = places[asset.id]
@@ -89,7 +95,7 @@ public enum FactsAssembler {
             let recognized = text?.text?.text
             let assessment = messenger.assess(asset: asset, recognizedText: recognized, albumTitles: albums.compactMap { titles[$0] })
             let categories = content.map { ImageTaxonomy.categories(from: $0.labels.map { ($0.identifier, $0.confidence) }) } ?? [:]
-            return AssetFacts(
+            var facts = AssetFacts(
                 asset: asset,
                 place: place?.components,
                 placeSource: place?.source,
@@ -110,6 +116,10 @@ public enum FactsAssembler {
                 // Only while it has no place: one found since wins.
                 countryOutOfReach: place == nil && withoutCountry.contains(asset.id)
             )
+            if let homeTimeZone {
+                facts.timeZone = zones.zone(of: facts.gpsPlace, at: asset.usableLocation) ?? homeTimeZone
+            }
+            return facts
         }
     }
 }

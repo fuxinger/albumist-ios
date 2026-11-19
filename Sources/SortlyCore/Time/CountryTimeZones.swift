@@ -12,6 +12,9 @@ public enum CountryTimeZones {
         let zone: String
         let latitude: Double
         let longitude: Double
+        /// The place as a point on the unit sphere: the nearest place to a photo is the one with
+        /// the largest dot product (the smallest great-circle distance), without a sine per place.
+        let point: (x: Double, y: Double, z: Double)
 
         /// The only zone of a country: no place needed.
         init(_ zone: String) {
@@ -22,6 +25,12 @@ public enum CountryTimeZones {
             self.zone = zone
             self.latitude = latitude
             self.longitude = longitude
+            point = Self.unit(latitude, longitude)
+        }
+
+        static func unit(_ latitude: Double, _ longitude: Double) -> (x: Double, y: Double, z: Double) {
+            let φ = latitude * .pi / 180, λ = longitude * .pi / 180
+            return (cos(φ) * cos(λ), cos(φ) * sin(λ), sin(φ))
         }
     }
 
@@ -33,11 +42,13 @@ public enum CountryTimeZones {
         guard let references = usable[country.uppercased()], let first = references.first else { return nil }
         guard references.count > 1 else { return first.zone }
         guard let coordinate else { return nil }
-        let point = rounded(coordinate)
-        var best = first.zone, bestDistance = Double.infinity
+        let rounded = rounded(coordinate)
+        let p = Reference.unit(rounded.latitude, rounded.longitude)
+        var best = first.zone, closest = -Double.infinity
         for reference in references {
-            let distance = GeoMath.distance(point, GeoCoordinate(latitude: reference.latitude, longitude: reference.longitude))
-            if distance < bestDistance { (best, bestDistance) = (reference.zone, distance) }
+            let q = reference.point
+            let dot = q.x * p.x + q.y * p.y + q.z * p.z
+            if dot > closest { (best, closest) = (reference.zone, dot) }
         }
         return best
     }

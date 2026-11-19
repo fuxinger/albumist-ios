@@ -1160,9 +1160,13 @@ public actor AnalysisPipeline {
     /// zone (an evening in New York is already the next day in Munich): the zone the online
     /// lookup names, else the country's there (review P1-15). Stored when it changed.
     private func inDestinationTime(_ trips: [Trip], all: [AssetSnapshot]) async throws -> [Trip] {
-        let zones = try await placeTimeZones(all: all).mapValues(\.identifier)
+        // Only the trips' photos count: with the zones of countries known offline nearly every
+        // photo with a location has one.
+        let members = Set(trips.lazy.flatMap(\.geotaggedAssetIDs))
+        let travelled = all.filter { members.contains($0.id) }
+        let zones = try await placeTimeZones(all: travelled).mapValues(\.identifier)
         guard !zones.isEmpty else { return trips }
-        let localTrips = TripDetector.inDestinationTime(trips, assets: Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) }),
+        let localTrips = TripDetector.inDestinationTime(trips, assets: Dictionary(uniqueKeysWithValues: travelled.map { ($0.id, $0) }),
                                                         timeZones: zones, calendar: try await homeCalendar())
         if localTrips != trips { try await store.setValue(localTrips, forKey: Key.trips) }
         return localTrips

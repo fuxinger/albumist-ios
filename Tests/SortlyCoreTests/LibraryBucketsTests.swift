@@ -124,25 +124,28 @@ struct LibraryBucketsTests {
     }
 
     /// 50,000 photos: one pass off the main thread, and one tap moves its photos in a moment.
-    /// Linux debug build here; the app's release build is faster. Before, the same work ran in
-    /// the view's body on the main thread (1.6 s measured there, the stall 7.7 s).
+    /// Before, the same work ran in the view's body on the main thread, filtered and sorted for
+    /// each area anew (1.6 s measured there, the stall 7.7 s).
     @Test func fiftyThousandPhotos() throws {
         let facts = SearchPerformanceTests.library(count: 50_000)
         let states = Self.states(for: facts)
-        let clock = ContinuousClock()
-        var buckets: LibraryBuckets?
-        let make = clock.measure { buckets = LibraryBuckets.make(facts: facts, states: states, resolver: Self.resolver) }
-        let made = try #require(buckets)
+        var makeReads = 0
+        let made = try #require(LibraryBuckets.make(facts: facts, states: states, resolver: Self.resolver, photoReads: &makeReads))
         let tapped = Array(made[.unorganized].prefix(2).map(\.id))
         var new = states
         for id in tapped { new[id]?.areas = states[id]!.areas.mapValues { _ in .ignored } }
-        var updated = made
-        let tap = clock.measure { updated = made.updating(tapped, to: new, resolver: Self.resolver) }
-        // The former code on the main thread, for one area (it ran for each area shown).
-        let former = clock.measure { _ = Self.before(.unorganized, facts: facts, states: states) }
-        print("LIBRARY_BUCKETS 50000 make \(make) (all areas, off the main thread), ignore tap \(tap); before: \(former) for one area on the main thread")
+        var tapReads = 0
+        let updated = made.updating(tapped, to: new, resolver: Self.resolver, photoReads: &tapReads)
+        print("LIBRARY_BUCKETS 50000 make \(makeReads) photo reads (all areas), ignore tap \(tapReads)")
         #expect(updated[.ignored].count == made[.ignored].count + 2)
-        #expect(make < .seconds(5))
-        #expect(tap < .milliseconds(500))
+        // Counted, not timed (review P5-14 b: the old limits of 5 s and 0.5 s wall clock failed at
+        // 8.6 s on a machine running three times as many threads as it has cores, 19.11.).
+        // Ordering the photos once, for all areas together, takes about n log2 n comparisons:
+        // 1.2 million reads here (19.11.). Ordering each area on its own, as before, was 8 million.
+        let log = Int(log2(Double(facts.count)).rounded(.up))
+        #expect(makeReads <= 3 * facts.count * log, "\(makeReads) photo reads")
+        // A tap finds each photo's place in each area by binary search, twice at most. Going
+        // through the areas instead reads thousands of photos.
+        #expect(tapReads <= 2 * InboxBucket.allCases.count * tapped.count * log, "\(tapReads) photo reads")
     }
 }

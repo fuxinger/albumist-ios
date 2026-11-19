@@ -83,8 +83,28 @@ public enum LibraryStatus {
         organizedBySortly: [OrganizationArea: Set<AssetID>] = [:],
         calendar: Calendar = .sortlyDefault
     ) -> (states: [AssetID: AssetOrganizationState], reasons: Reasons) {
+        var suggestionReads = 0
+        return computeWithReasons(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
+                                  contentAnalyzed: contentAnalyzed, organizedBySortly: organizedBySortly, calendar: calendar,
+                                  suggestionReads: &suggestionReads)
+    }
+
+    /// `computeWithReasons`, adding to `suggestionReads` how often a suggestion's photos were gone
+    /// through (`computeAll`): once per suggestion, not once per photo of the library (tests count
+    /// it instead of timing it; review P5-14 b).
+    static func computeWithReasons(
+        facts: [AssetFacts],
+        snapshot: ProposalSnapshot?,
+        settings: OrganizationSettings,
+        overrides: OverrideSet = OverrideSet(),
+        contentAnalyzed: Set<AssetID>,
+        organizedBySortly: [OrganizationArea: Set<AssetID>] = [:],
+        calendar: Calendar = .sortlyDefault,
+        suggestionReads: inout Int
+    ) -> (states: [AssetID: AssetOrganizationState], reasons: Reasons) {
         let all = computeAll(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                             contentAnalyzed: contentAnalyzed, organizedBySortly: organizedBySortly, calendar: calendar)
+                             contentAnalyzed: contentAnalyzed, organizedBySortly: organizedBySortly, calendar: calendar,
+                             suggestionReads: &suggestionReads)
         return (all.states, all.reasons)
     }
 
@@ -92,6 +112,10 @@ public enum LibraryStatus {
     /// ignored (`ifNotIgnored`): "Nicht mehr ignorieren" shows it at once from there, before the
     /// recount (`IgnoreChange`). An ignored photo's area facts do not depend on the ignore, so
     /// this is exactly what the recount after "Nicht mehr ignorieren" gives.
+    ///
+    /// `suggestionReads`: one per shown, dismissed and standing-in suggestion whose photos are
+    /// gone through. Each one once: its photos go into sets per area, and each photo of the
+    /// library asks these sets, never the suggestions (that would be photos times suggestions).
     static func computeAll(
         facts: [AssetFacts],
         snapshot: ProposalSnapshot?,
@@ -99,7 +123,8 @@ public enum LibraryStatus {
         overrides: OverrideSet,
         contentAnalyzed: Set<AssetID>,
         organizedBySortly: [OrganizationArea: Set<AssetID>],
-        calendar: Calendar
+        calendar: Calendar,
+        suggestionReads: inout Int
     ) -> (states: [AssetID: AssetOrganizationState], reasons: Reasons, ifNotIgnored: [AssetID: AssetOrganizationState]) {
         var ifNotIgnored: [AssetID: AssetOrganizationState] = [:]
         var proposedIn: [OrganizationArea: Set<AssetID>] = [:]
@@ -116,6 +141,7 @@ public enum LibraryStatus {
         let open = snapshot?.proposals ?? []
         let dismissed = snapshot?.dismissed ?? []
         for p in open {
+            suggestionReads += 1
             let area = p.kind.area
             proposedIn[area, default: []].formUnion(p.assetIDs)
             albumIn[area, default: []].formUnion(p.assetIDs)
@@ -123,6 +149,7 @@ public enum LibraryStatus {
             note(fittingAlbums(snapshot?.matches[p.id], kind: p.kind, title: p.title), .own, area, p.assetIDs)
         }
         for p in dismissed {
+            suggestionReads += 1
             albumIn[p.kind.area, default: []].formUnion(p.assetIDs)
             note(fittingAlbums(snapshot?.matches[p.id], kind: p.kind, title: p.title), .dismissed, p.kind.area, p.assetIDs)
         }
@@ -130,6 +157,7 @@ public enum LibraryStatus {
         let byID = Dictionary((open + dismissed).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for s in snapshot?.standIns ?? [] {
             guard let by = byID[s.suggestion] else { continue }
+            suggestionReads += 1
             albumIn[s.area, default: []].formUnion(s.assetIDs)
             if openIDs.contains(by.id) { proposedIn[s.area, default: []].formUnion(s.assetIDs) }
             if isUncertain(by) { uncertainIn[s.area, default: []].formUnion(s.assetIDs) }
@@ -408,8 +436,10 @@ public struct DerivedLibraryStatus: Sendable {
         // Photos Albumist put into albums count as sorted in the area of their suggestion,
         // also once that suggestion is no longer shown.
         let byAlbumist = LibraryStatus.organizedBySortly(managed, inventory: inventory, snapshot: snapshot)
+        var suggestionReads = 0
         let all = LibraryStatus.computeAll(facts: facts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                           contentAnalyzed: analyzed, organizedBySortly: byAlbumist, calendar: calendar)
+                                           contentAnalyzed: analyzed, organizedBySortly: byAlbumist, calendar: calendar,
+                                           suggestionReads: &suggestionReads)
         let states = all.states, reasons = all.reasons
         result.states = states
         result.reasons = reasons

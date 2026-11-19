@@ -116,6 +116,7 @@
 - CI 19.11.: Die Ubuntu-Paketquelle war eine Viertelstunde nicht erreichbar, die Linux-Kerntests
   auf `main` liefen nie. Pakete kommen jetzt über `apt_install.sh` (20 s Grenze, Wiederholung,
   zweite Paketquelle, jede Wiederholung gezählt).
+- Tests 19.11. (P5-14 b): Mediathek-Bereiche und Sortiert-Zählung zählen ihre Arbeit statt der Zeit; ein voller Rechner macht sie nicht mehr rot.
 - UI-Tests: jede Gruppe wartet vor ihrem ersten Test (und vor einer Wiederholung) bis zu 5 Min.,
   bis der Simulator nach seinem Start wieder schnell antwortet (`SIM_SETTLE`);
   vorher verlor XCTest dabei die App beim ersten Start (UI-Lauf 44437759848, test05).

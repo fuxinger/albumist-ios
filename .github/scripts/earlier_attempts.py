@@ -36,6 +36,9 @@ MACHINERY_STEPS = {
     # simulator's, no test ran yet.
     "Fresh simulator (erased and booted)",
     "Unpack build products", "Keep the retry record for the run summary",
+    # ui.yml: the second try of that upload after GitHub's artifact service did not answer, and
+    # the minute it waits before it; an artifact that did not arrive, no test.
+    "Wait before the second try of the retry record", "Keep the retry record for the run summary (second try)",
     # This check itself: it fails on what it finds in an earlier attempt (found again from
     # there) or when the API does not answer (then a re-run of the upload job is right).
     "Earlier attempts of this run",

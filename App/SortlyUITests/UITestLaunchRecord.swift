@@ -34,10 +34,15 @@ final class UITestLaunchRecord: @unchecked Sendable {
         return parts.count >= 2 ? Int32(parts[1]) : nil
     }
 
-    /// A launch with these arguments starts now: its app is the one the next end is about.
+    /// A launch with these arguments starts now: its app is the one the next end is about. Its
+    /// watch file is removed first (the app makes it anew): until the new app writes its line,
+    /// the file still held the last app's id, and after a launch that failed or came late the
+    /// next end would name that dead process, which the Mac skips while the new app runs on.
     func launching(_ arguments: [String]) {
+        let watch = Self.watchFile(in: arguments)
+        if let watch { try? FileManager.default.removeItem(atPath: watch) }
         lock.lock()
-        file = Self.watchFile(in: arguments)
+        file = watch
         pid = nil
         lock.unlock()
     }

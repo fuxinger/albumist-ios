@@ -61,6 +61,25 @@ struct UITestLaunchRecordTests {
         #expect(record.processID(fallback: nil) { _ in nil } == 5000)
     }
 
+    /// The file on disk still holds the last app's line until the new app writes its own
+    /// (Flow, Search and Locked never remove it): a launch that failed or came late would let the
+    /// next end name that dead process, which the Mac skips ("had ended already") while the new
+    /// app runs on, and the test waits 60 s for XCTest. A launch removes the file first.
+    @Test func aLaunchRemovesTheLastAppsFile() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("uitest-main-stalls.txt").path
+        try "@ 4711 1.0 2.0\n".write(toFile: file, atomically: true, encoding: .utf8)
+        let record = UITestLaunchRecord()
+        record.launching(arguments(file))
+        #expect(!FileManager.default.fileExists(atPath: file))
+        #expect(record.processID(fallback: nil) { try? String(contentsOfFile: $0, encoding: .utf8) } == nil)
+        // The new app writes its own line: that one counts.
+        try "@ 5000 3.0 4.0\n".write(toFile: file, atomically: true, encoding: .utf8)
+        #expect(record.processID(fallback: nil) { try? String(contentsOfFile: $0, encoding: .utf8) } == 5000)
+    }
+
     /// No launch known (the test runner restarted after a crash): the object's own file or the
     /// default one, as before.
     @Test func withoutAKnownLaunchTheFallbackFileIsRead() {

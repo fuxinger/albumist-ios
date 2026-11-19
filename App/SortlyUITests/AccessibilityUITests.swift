@@ -342,7 +342,7 @@ final class AccessibilityUITests: XCTestCase {
                 }
                 app.swipeDown(); app.swipeDown(); app.swipeDown(); sleep(1)
                 if tap(app.buttons[w.shareAtlas], "\(tag) share atlas", timeout: 5) {
-                    sleep(3)
+                    UITestWait.appears(button(w.done), "\(tag) share card with its done button", timeout: 20)
                     check("\(tag) share sheet", english: english)
                     tap(button(w.done), "\(tag) close share")
                     sleep(2)
@@ -404,6 +404,8 @@ final class AccessibilityUITests: XCTestCase {
             if field.waitForExistence(timeout: 5) {
                 field.tap()
                 field.typeText(w.searchQuery)
+                // pacing: the results before the audit; nothing is asserted on them here
+                // (SearchUITests checks the results)
                 sleep(3)
                 // The keyboard covers the lower half; the results and chips above it count.
                 check("\(tag) search results", english: english)

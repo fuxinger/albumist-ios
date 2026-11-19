@@ -129,26 +129,7 @@ final class DeviceConditionUITests: XCTestCase {
     /// app's own didEnterBackground observers their turn.
     @discardableResult
     private func sendToBackground(_ why: String, atLeast: TimeInterval, timeout: TimeInterval = 30) -> Bool {
-        let pressed = Date()
-        XCUIDevice.shared.press(.home)
-        UITestOnboarding.clock("wait start app in the background \(why)")
-        var reached = false
-        while Date().timeIntervalSince(pressed) < timeout {
-            let state = app.state
-            if state == .runningBackground || state == .runningBackgroundSuspended || state == .notRunning {
-                reached = true
-                break
-            }
-            usleep(250_000)
-        }
-        let took = Date().timeIntervalSince(pressed)
-        print("UI_FACT app in the background \(why): state \(app.state.rawValue) after \(String(format: "%.1f", took)) s")
-        print(reached ? "UI_STEP_OK app in the background \(why)" : "UI_STEP_MISSING app in the background \(why) (timeout \(Int(timeout)) s)")
-        XCTAssertTrue(reached, "The app did not reach the background \(why)")
-        let wait = max(atLeast - took, reached ? 1 : 0)
-        // pacing: the minimum time in the background, counted after iOS reported it
-        if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
-        return reached
+        UITestWait.toBackground(app, why, atLeast: atLeast, timeout: timeout)
     }
 
     /// Polls until `condition` held on `stableChecks` checks in a row (2 s apart).
@@ -1098,8 +1079,7 @@ final class DeviceConditionUITests: XCTestCase {
         print("UI_FACT plan failure card shown: \(anything("Nicht alles hat geklappt").exists)")
         dismissNotices()
         XCTAssertEqual(app.state, .runningForeground, "The app ended with a full disk during the plan")
-        XCUIDevice.shared.press(.home)
-        sleep(3)
+        sendToBackground("before it is ended after the full disk during the plan", atLeast: 3)
         UITestAppEnd.end(app, "after the full disk during the plan")
         sleep(2)
         start()

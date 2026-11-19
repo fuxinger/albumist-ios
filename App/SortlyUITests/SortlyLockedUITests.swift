@@ -134,7 +134,7 @@ final class SortlyLockedUITests: XCTestCase {
         print("UI_FACT locked: plans taken back to have suggestions again: \(undone)")
         back(); sleep(1)
         tap(button("Fertig"), "close settings (locked)")
-        sleep(3)
+        UITestWait.disappears(app.navigationBars["Einstellungen"], "settings closed (locked)", timeout: 20)
         return undone
     }
 
@@ -275,7 +275,7 @@ final class SortlyLockedUITests: XCTestCase {
         XCTAssertNotNil(free, "Settings shows no readable \"Noch kostenlos\"")
         let left = free ?? 1
         guard tap(apply, "open plan (locked)", timeout: 20) else { return }
-        sleep(3)
+        guard UITestWait.appears(app.navigationBars["Vorschau"], "plan screen (locked)", timeout: 30) else { return }
 
         // The unlock card comes exactly when the plan needs more albums than are free
         // (PlanReviewView: !purchases.allows(albums: facts.freeAlbumUse)). freeAlbumUse of a
@@ -301,12 +301,12 @@ final class SortlyLockedUITests: XCTestCase {
             XCTAssertTrue(app.buttons["unlock.buy"].exists, "No unlock button")
             XCTAssertTrue(button("Kauf wiederherstellen").exists, "No restore button")
             guard tap(button("jetzt kostenlos anlegen"), "keep the free albums only") else { return }
-            sleep(3)
         } else {
             print("UI_FACT locked: the plan has \(planned) albums, they fit the \(left) free ones")
         }
         let start = app.buttons["plan.apply"]
-        XCTAssertTrue(start.waitForExistence(timeout: 20), "The plan within the free albums cannot be applied")
+        // Waited for (also after "jetzt kostenlos anlegen", which had a fixed 3 s before).
+        UITestWait.appears(start, "the plan within the free albums can be applied (locked)", timeout: 23)
         // What is free afterwards: the free albums less what this plan uses ("Die ersten N"
         // made the plan anew, so its summary is read again).
         let used = cardShown ? (rowCount("Neue Alben", timeout: 10) ?? 0) + (rowCount("Ergänzte Alben", timeout: 0) ?? 0) : planned

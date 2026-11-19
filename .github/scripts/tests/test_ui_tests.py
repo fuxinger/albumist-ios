@@ -1481,22 +1481,19 @@ class SleepRuleTests(unittest.TestCase):
     # Calls of sleep()/usleep() per file (code only). The count may only go down; lower it here
     # when a sleep becomes a condition wait.
     CEILING = {
-        "AccessibilityUITests.swift": 49,
-        "DeviceConditionUITests.swift": 48,
+        "AccessibilityUITests.swift": 48,
+        "DeviceConditionUITests.swift": 45,
         "SearchUITests.swift": 4,
-        "SortlyFlowUITests.swift": 134,
-        "SortlyLockedUITests.swift": 18,
+        "SortlyFlowUITests.swift": 123,
+        "SortlyLockedUITests.swift": 15,
         "UITestOnboarding.swift": 3,
+        # The poll intervals of the condition waits and the minimum time in the background.
+        "UITestWait.swift": 3,
     }
     # Long sleeps (3 s or more, or a computed length) without a "// pacing:" note, per file:
-    # the ones still standing in for a state (a plan or share screen, the background, the app
-    # after a launch, search results). Only goes down, to none.
-    STATE_SLEEPS_LEFT: dict[str, int] = {
-        "AccessibilityUITests.swift": 2,
-        "DeviceConditionUITests.swift": 1,
-        "SortlyFlowUITests.swift": 13,
-        "SortlyLockedUITests.swift": 3,
-    }
+    # the ones still standing in for a state. None left since the condition waits of
+    # UITestWait.swift; a new one fails test_a_long_sleep_is_pacing_and_says_so.
+    STATE_SLEEPS_LEFT: dict[str, int] = {}
 
     @classmethod
     def sleeps(cls, source: str) -> list[tuple[int, str]]:
@@ -1523,7 +1520,15 @@ class SleepRuleTests(unittest.TestCase):
 
     @staticmethod
     def has_pacing_note(lines: list[str], number: int) -> bool:
-        return any("// pacing:" in lines[n - 1] for n in (number, number - 1) if n >= 1)
+        """A "// pacing:" note on the sleep's line or in the comment block right above it."""
+        if "// pacing:" in lines[number - 1]:
+            return True
+        n = number - 1
+        while n >= 1 and lines[n - 1].lstrip().startswith("//"):
+            if "// pacing:" in lines[n - 1]:
+                return True
+            n -= 1
+        return False
 
     def files(self):
         for name in sorted(os.listdir(self.FOLDER)):
@@ -1541,6 +1546,8 @@ class SleepRuleTests(unittest.TestCase):
         self.assertTrue(self.has_pacing_note(["// pacing: the poll's interval", "sleep(interval)"], 2))
         self.assertTrue(self.has_pacing_note(["sleep(3) // pacing: the show's animation"], 1))
         self.assertFalse(self.has_pacing_note(["sleep(3)"], 1))
+        self.assertTrue(self.has_pacing_note(["// pacing: the results", "// (more)", "sleep(3)"], 3))
+        self.assertFalse(self.has_pacing_note(["// pacing: the results", "x()", "sleep(3)"], 3))
 
     def test_the_number_of_fixed_sleeps_only_goes_down(self):
         counts = {name: len(self.sleeps(source)) for name, source in self.files()}

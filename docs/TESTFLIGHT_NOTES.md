@@ -22,6 +22,8 @@ Danke fürs Testen! Dieser Build bringt Korrekturen aus der großen Prüfung. Bi
 - Tab „Alben“: Jedes Album steht nur noch einmal. Alben von Albumist stehen nicht zusätzlich unter „Deine Alben“.
 - Fotos groß ansehen: Öffnest du ein Foto in einer sehr großen Mediathek, geht es schneller auf. Wische bitte einmal weit vor und zurück: Springt das Bild, oder hakt es?
 - Größte Schrift (Einstellungen > Bedienungshilfen): Reise-Atlas, Suche und „Ordner für neue Alben“ sind jetzt ganz lesbar, nichts liegt mehr übereinander.
+- Monatsalben nach Ortszeit: Fotos zählen jetzt zu dem Tag und Monat, den die Uhr am Aufnahmeort zeigte, wie in Apple Fotos. Ein Silvesterfoto aus New York landet also im Dezember, nicht im Januar.
+- Suche: Beim Tippen steht neben einem Vorschlag wie „Italien“ kein „nicht erkannt“ mehr.
 - Englisch: Viele Texte und Knöpfe sind korrigiert (zum Beispiel „Certain“ statt „Safe“). Wer das iPhone auf Englisch hat: Klingt etwas falsch?
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.

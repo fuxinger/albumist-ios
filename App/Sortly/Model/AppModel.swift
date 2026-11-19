@@ -380,8 +380,7 @@ final class AppModel {
     /// 250 ms to make again on the main thread) and the preview ranks (small, made off the main
     /// thread only when the facts are refreshed).
     private func dropCaches() {
-        let dropped = (searchIndexCache, factsIndex, datesCache, countryCache)
-        searchIndexCache = nil
+        let dropped = (searchIndexStore.dropCache(), factsIndex, datesCache, countryCache)
         factsIndex = nil
         datesCache = nil
         countryCache = [:]
@@ -3513,17 +3512,14 @@ final class AppModel {
 
     /// Search index over the current facts, album names and the names the user gave places,
     /// built once per change and off the main thread (a large library takes a moment); every
-    /// search then only combines prepared sets.
-    @ObservationIgnored private var searchIndexCache: SearchIndex?
-    @ObservationIgnored private var searchIndexTask: Task<SearchIndex, Never>?
-    @ObservationIgnored private var searchIndexGeneration = 0
+    /// search then only combines prepared sets. A change while an index is being built gives
+    /// every search the index of the new state, also one already waiting (review G4-05).
+    private let searchIndexStore = SearchIndexStore()
     /// The names of places the index was made with.
     @ObservationIgnored private var searchIndexPlaceNames: [NamedPlace] = []
 
     private func resetSearchIndex() {
-        searchIndexCache = nil
-        searchIndexTask = nil
-        searchIndexGeneration += 1
+        searchIndexStore.invalidate()
     }
 
     func searchIndex() async -> SearchIndex {
@@ -3536,21 +3532,11 @@ final class AppModel {
             resetSearchIndex()
             searchIndexPlaceNames = placeNames
         }
-        if let searchIndexCache { return searchIndexCache }
-        if let searchIndexTask { return await searchIndexTask.value }
-        let facts = facts, inventory = inventory, generation = searchIndexGeneration
-        let home = homeSettings
-        let task = Task.detached(priority: .userInitiated) {
-            SearchIndex(facts: facts, inventory: inventory, namedPlaces: placeNames, home: home)
+        // The inputs as they are when a build starts (again, after a change while waiting).
+        return await searchIndexStore.index {
+            let facts = facts, inventory = inventory, home = homeSettings, placeNames = searchIndexPlaceNames
+            return { SearchIndex(facts: facts, inventory: inventory, namedPlaces: placeNames, home: home) }
         }
-        searchIndexTask = task
-        let index = await task.value
-        // Facts or names that changed meanwhile start a new index on the next search.
-        if generation == searchIndexGeneration {
-            searchIndexCache = index
-            searchIndexTask = nil
-        }
-        return index
     }
 
     /// Keywords Apple Intelligence derived from the last sentence-style query (shown in the UI).

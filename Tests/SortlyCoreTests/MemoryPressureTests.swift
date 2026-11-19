@@ -187,7 +187,7 @@ struct MemoryPressureTests {
         #expect(thumbnailsRegister, "the thumbnails are not registered")
 
         let purge = AppSource.code(AppSource.body(of: "func dropCaches(", in: model) ?? "")
-        for cache in ["searchIndexCache = nil", "factsIndex = nil", "datesCache = nil", "countryCache = [:]"] {
+        for cache in ["searchIndexStore.dropCache()", "factsIndex = nil", "datesCache = nil", "countryCache = [:]"] {
             #expect(purge.contains(cache), "\(cache) is kept through a memory warning")
         }
         // Released off the main thread (second review, 4).
@@ -196,12 +196,14 @@ struct MemoryPressureTests {
         // the library's areas (a few MB; the grid would lose its place under the photo view) nor
         // the atlas (a few KB, 100 to 250 ms to make again on the main thread): second review, 1-2.
         let state = ["facts", "states", "snapshot", "decisions", "userTitles", "inventory", "removedFromProposals",
-                     "managedAlbums", "history", "statesIfNotIgnored", "ignoredIDs", "searchIndexTask", "libraryBucketsTask",
+                     "managedAlbums", "history", "statesIfNotIgnored", "ignoredIDs", "libraryBucketsTask",
                      "libraryBuckets", "libraryBucketsMadeFor", "atlasCache"]
         for name in state {
             let assigned = purge.range(of: "\\b\(name)\\s*(=(?!=)|\\[|\\.remove)", options: .regularExpression) != nil
             #expect(!assigned, "a memory warning changes \(name)")
         }
+        // A search index still being built is left to finish (`SearchIndexStore.dropCache`).
+        #expect(AppSource.calls(of: "searchIndexStore.invalidate(", in: purge).isEmpty, "a memory warning stops the index being built")
     }
 
     /// Second review, 6 and 7: the previews loaded ahead for the analysis and the thumbnails'

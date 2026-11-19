@@ -376,6 +376,9 @@ struct ProposalDetailView: View {
         .sheet(isPresented: $showWorkshop, onDismiss: { if reshaped { dismiss() } }) {
             NavigationRoot { TripWorkshopView(proposal: proposal) { reshaped = true } }
         }
+        // Swiped away while the change was being stored: told after the sheet closed, the trip
+        // view still closes instead of staying on the trip that goes.
+        .onChange(of: reshaped) { _, now in if now && !showWorkshop { dismiss() } }
         .onChange(of: model.execution.finished) { _, finished in
             if showsDirect && finished != nil { applied = true }
         }

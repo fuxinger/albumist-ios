@@ -1073,6 +1073,76 @@ public enum AnalysisCardState: Sendable, Equatable {
     public var isWorking: Bool { if case .running(_, _, let appleWait, _) = self { !appleWait } else { false } }
 }
 
+/// The "Analyse fertig" moment (point 4) of runs in the app (`AppModel`): owed by the run that
+/// finished the analysis until it was seen.
+///
+/// Before, a short run that slipped in right after the run that finished took it away: the end
+/// of the finished run waits for the overview, saw the newer run there
+/// (`AnalysisRunEnd.afterWait(isNewest: false)`) and said nothing; the newer run (a trip change,
+/// "Neu prüfen", photos added meanwhile) was a quick check, which never celebrates
+/// (`AnalysisCardState.celebratesFinish`); and each start cleared a finish card that had not been
+/// seen yet (shown while the app was in the background). Now:
+/// - the end of a run says what it owes before it waits (`runEnded`), so a run that starts during
+///   the wait cannot drop it;
+/// - the moment comes at the end of the newest run that ends finished (`afterWait`), whichever
+///   run owed it; never while work is left (paused, a change left, an error);
+/// - a start hides the finish card for its own card, the moment stays owed until the card was on
+///   screen (`claim`); the notification outside the app is sent once.
+public struct FinishMoment: Sendable, Equatable {
+    /// What the end of a run shows: the finish card, and outside the app the notification.
+    public struct Shown: Sendable, Equatable {
+        public var card: Bool
+        public var notification: Bool
+        public init(card: Bool, notification: Bool) {
+            self.card = card
+            self.notification = notification
+        }
+        public static let nothing = Shown(card: false, notification: false)
+    }
+
+    /// A run finished the analysis and celebrates (`celebratesFinish`), and its card has not been
+    /// on screen yet.
+    public private(set) var owed = false
+    /// The notification for the moment owed was sent.
+    public private(set) var notified = false
+    /// The check mark and haptic of the card shown now have played.
+    public private(set) var played = false
+    public init() {}
+
+    /// A run in the app starts: its own card replaces the finish card; a moment nobody saw stays
+    /// owed.
+    public mutating func runStarted() { played = false }
+
+    /// The end of a run is decided, before it waits for the overview.
+    public mutating func runEnded(finished: Bool, celebrates: Bool) {
+        guard finished && celebrates else { return }
+        owed = true
+        notified = false
+    }
+
+    /// After the wait. `settled`: `AnalysisRunEnd.afterWait(isNewest:).finishMoment` of this end
+    /// (it finished the analysis, and no newer run started meanwhile). `appActive`: the app is in
+    /// front (otherwise the notification, once).
+    public mutating func afterWait(settled: Bool, appActive: Bool) -> Shown {
+        guard owed && settled else { return .nothing }
+        let notify = !appActive && !notified
+        // Shown in the app (even if not looked at yet, another tab): no notification for it
+        // later (second review of 4e26e08, S1: a check ending in the background hours later
+        // notified a finish that had been on screen).
+        notified = true
+        return Shown(card: true, notification: notify)
+    }
+
+    /// The finish card is on screen (`AppModel.claimFinishMoment`): the check mark plays once,
+    /// and the moment is no longer owed.
+    public mutating func claim() -> Bool {
+        guard !played else { return false }
+        played = true
+        owed = false
+        return true
+    }
+}
+
 // MARK: Photo mosaic
 
 /// The photo mosaic with the trips found ("Erster Scan als Show", `ScanShow`) above the

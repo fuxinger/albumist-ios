@@ -179,7 +179,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install SQLite headers
-        run: apt-get update -qq && apt-get install -y -qq libsqlite3-dev > /dev/null
+        run: bash .github/scripts/apt_install.sh libsqlite3-dev
       - name: Build and test
         run: swift test --parallel
 

@@ -107,6 +107,21 @@ def job_field(text, job, field):
     return " ".join(value.split())
 
 
+class AptTests(unittest.TestCase):
+    """19.11.2026: archive.ubuntu.com was unreachable, a bare apt-get waited 6-13 minutes and the
+    core tests on main never ran. Every Ubuntu package goes through apt_install.sh (short
+    timeouts, retries, a second mirror; see test_apt_install.py)."""
+
+    def test_no_workflow_calls_apt_get_directly(self):
+        found = 0
+        for path in WORKFLOWS:
+            text = "\n".join(strip_comment(line) for line in read(path).splitlines())
+            with self.subTest(workflow=os.path.basename(path)):
+                self.assertNotRegex(text, r"\bapt(?:-get)?\s+(?:update|install)\b")
+            found += text.count(".github/scripts/apt_install.sh")
+        self.assertGreaterEqual(found, 3)  # ci.yml, ui.yml, nightly.yml
+
+
 class CacheTests(unittest.TestCase):
     """No Actions cache anywhere: the owner's rule (a Mac build cache only if it provably cannot ship
     stale code; none is used)."""

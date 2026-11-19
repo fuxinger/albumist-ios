@@ -129,7 +129,7 @@ def review(environment: dict | None, public: bool = True,
     if not reviewing or all(isinstance(r.get("reviewers"), list) and not r["reviewers"] for r in reviewing):
         return [f"the environment {ENVIRONMENT} has no required reviewer"], [], []
     policy = environment.get("deployment_branch_policy") or {}
-    rules_named = sorted(((b or {}).get("name"), (b or {}).get("type", "branch")) for b in branches or [])
+    rules_named = sorted((str((b or {}).get("name")), str((b or {}).get("type", "branch"))) for b in branches or [])
     if policy.get("protected_branches") or not policy.get("custom_branch_policies") or rules_named != MAIN_ONLY:
         return [f"the environment {ENVIRONMENT} may be used from other branches than main: set 'Deployment "
                 "branches and tags' to 'Selected branches and tags' with the one rule main"], [], []

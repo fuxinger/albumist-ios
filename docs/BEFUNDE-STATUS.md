@@ -1,7 +1,7 @@
 # Befunde: Stand der Arbeit
 
-Stand: **19.11.2026, 17:00 Uhr**, `main` 5f9ad8a = Build 38 in TestFlight (PR #10: Pakete c–r aus PR #9, dazu „Gleicher Name
-gewinnt“, die nie-fertig-Fälle, Akku-Zahlen, Upload ohne Klick und die Bau-Strecke P5).
+Stand: **19.11.2026, 23:40 Uhr**, `main` 31ec24c (PR #11 zusammengeführt, TestFlight-Lauf für den nächsten Build läuft).
+Davor Build 38 = PR #10 (5f9ad8a).
 
 Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergessen wird:
 
@@ -13,9 +13,9 @@ Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergesse
 
 | Status | Große Analyse | Prüfung von außen | Zusammen |
 |---|---:|---:|---:|
-| ✅ erledigt | 31 | 24 | 55 |
-| 🔧 in Arbeit | 3 | 0 | 3 |
-| 📋 geplant (offen, noch nicht begonnen) | 32 | 11 | 43 |
+| ✅ erledigt | 40 | 31 | 71 |
+| 🔧 in Arbeit | 2 | 0 | 2 |
+| 📋 geplant (offen, noch nicht begonnen) | 24 | 4 | 28 |
 | ⏸ bewusst verschoben | 0 | 2 | 2 |
 | 👤 braucht Fuchs | 13 | 1 | 14 |
 | 📱 nur am iPhone prüfbar | 2 | 1 | 3 |
@@ -90,14 +90,14 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P3-07 | Rückgängig später schwer zu finden, iOS-Löschfrage kommt unangekündigt (= G3-09) | 📋 | `PlanReceiptView` unverändert; TEST_PLAN C4 |
 | P3-08 | Analyse-Karte zeigt neun Dinge auf einmal | 📋 | offen |
 | P3-09 | Mehrere Wörter für dieselbe Sache | 📋 | offen |
-| P3-10 | Englisch mit Fehlern, z. B. „Safe“ statt „Certain“ (= G3-10) | 📋 | `Localizable.xcstrings` sagt weiter „Safe“ |
-| P3-11 | Größte Schrift: Länderliste im Reise-Atlas wird zerhackt (= G3-01) | 📋 | TEST_PLAN A13 |
-| P3-12 | Größte Schrift: Symbol überlappt Text in der Suche (= G3-07) | 📋 | `SearchView.swift:149` (`frame(width: 24)`) |
-| P3-13 | Suche meldet „nicht erkannt“ neben einem Treffer-Vorschlag (= G3-06) | 📋 | TEST_PLAN N14 |
+| P3-10 | Englisch mit Fehlern, z. B. „Safe“ statt „Certain“ (= G3-10) | ✅ | PR #11 (31ec24c): b5f7cee, `english_rule.py` |
+| P3-11 | Größte Schrift: Länderliste im Reise-Atlas wird zerhackt (= G3-01) | ✅ | PR #11 (31ec24c): f3c061a, `checkAtlasRows` |
+| P3-12 | Größte Schrift: Symbol überlappt Text in der Suche (= G3-07) | ✅ | PR #11 (31ec24c): fc41e52, `layout_rule.py` |
+| P3-13 | Suche meldet „nicht erkannt“ neben einem Treffer-Vorschlag (= G3-06) | ✅ | PR #11 (31ec24c): 836c083 |
 | P3-14 | Kleine graue Texte auf weißen Karten zu blass | 📋 | offen |
 | P3-15 | Titel bleibt „Vorschau“ auch während Sortier-Show und „Fertig“ | 📋 | `PlanReviewView.swift:95` |
-| P3-16 | Im Tab „Alben“ stehen Alben doppelt (= G3-02) | 📋 | `AlbumsView.swift` unverändert |
-| P3-17 | „Ordner für neue Alben“ schon bei normaler Schrift abgeschnitten (= G3-08) | 📋 | `SettingsView.swift:87` |
+| P3-16 | Im Tab „Alben“ stehen Alben doppelt (= G3-02) | ✅ | PR #11 (31ec24c): `AlbumTabSections`, DeviceCondition test07 |
+| P3-17 | „Ordner für neue Alben“ schon bei normaler Schrift abgeschnitten (= G3-08) | ✅ | PR #11 (31ec24c): ab98c57, `checkFullyShown` |
 | P3-18 | Sammlung kleiner Punkte (an Bildschirmfotos belegt) | 📋 | offen |
 
 ### Prüfer 4: Tempo und Stabilität
@@ -114,7 +114,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P4-08 | Erstes Lesen und Bilderkennung nur im Simulator gemessen (7,3 h für 50.000) | 📱 | braucht Messung am iPhone (kommt mit P4-05) |
 | P4-09 | Weitere Rechnungen über alle Fotos auf dem Haupt-Strang | 📋 | offen (niedrig) |
 | P4-10 | Schutz gegen veraltete Ergebnisse deckt nur die letzte Zuweisung (= G4-03) | ✅ | `main` 5f9ad8a: c7a21f9 und Folge-Commits (f4ce44e, 00c33c5); Tests `TripChangeLedgerTests` |
-| P4-11 | Foto-Ansicht blättert über bis zu 3.000 Seiten | 📋 | `PhotoViewer.swift:41` unverändert |
+| P4-11 | Foto-Ansicht blättert über bis zu 3.000 Seiten | ✅ | PR #11 (31ec24c): `PageWindow` |
 | P4-12 | Dauer-Animationen: Kosten für Akku und Wärme unbekannt | 📱 | erst am iPhone messen; Akku-Zahl kommt mit `feat/battery` |
 | P4-13 | Im Hintergrund werden Screenshots viel langsamer gelesen | 👤 | deine 5-Minuten-Messung, danach Entscheidung 6 (Grafikeinheit) |
 
@@ -129,13 +129,13 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P5-05 | Bedienungs-Durchgang wartet vor allem, Demo-Mediathek wird in jeder Gruppe neu analysiert | 📋 | Stufe 1 und 2 aus dem Plan von Prüfer 5 noch offen |
 | P5-06 | 8 von 15 roten Durchgängen waren kein App-Fehler | ✅ | `main` 5f9ad8a: bedingte Wartezeiten (90c79c1), Home-Druck mit drei Wegen, jede Wiederholung gezählt; UI-Lauf 44529147724 auf PR #10 im ersten Versuch grün |
 | P5-07 | Geplanter Umbau bringt nur 60 statt 84 Min. und macht die Bau-Strecke größer | 📋 | Stufe 4 (Tor vereinfachen, rund 1.400 Zeilen weg) offen |
-| P5-08 | Das neue Tor hat eigene Lücken (a bis f) | 📋 | (a) „force“ weg, (b) = G5-04 erledigt; (c), (d), (f) offen, (e) = P5-02 |
+| P5-08 | Das neue Tor hat eigene Lücken (a bis f) | 📋 | (a) „force“ weg, (b) = G5-04 erledigt, (e) = P5-02; (d) teilweise in PR #11 (keine Antwort der Log-Schnittstelle = kein Urteil); (c), (f) offen |
 | P5-09 | Tests laufen fast nie von selbst, Hauptzweig nicht geschützt (≈ G6-05) | 👤 | GitHub meldet am 19.11. „Branch not protected“: Schutz für `main` einschalten |
 | P5-10 | Läufe für Build 36 prüften einen zusammengeführten Stand, nicht den ausgelieferten | ✅ | 3bad601 (TestFlight-Lauf testet seinen eigenen Commit), `archive_check.py` |
-| P5-11 | 3 von 11 eingebauten Fehlern blieben in den schnellen Tests unentdeckt | 🔧 | Stichprobe 19.11.: 2 Fehler weiter unentdeckt (Schwelle 0,8; unklarer Ausgang beim Abgleich vor dem Rückgängig), der dritte von 18 Prüfungen gefunden. 5 neue Tests (7f1df09, kommt mit dem nächsten PR) |
+| P5-11 | 3 von 11 eingebauten Fehlern blieben in den schnellen Tests unentdeckt | ✅ | PR #11 (31ec24c): 7f1df09, `SeededFaultTests` |
 | P5-12 | Schlüssel und fremde Pull Requests: drei offene Punkte | 👤 | CodeQL läuft wieder grün; offen: Dependabot (jetzt PR #8) und Freigabe für fremde Mitwirkende in den Einstellungen |
-| P5-13 | Regel „nie still wiederholen“ gebrochen, Test vor dem Build gelockert | 📋 | Regel „Zeitgrenze nur mit Eintrag lockern“ fehlt noch |
-| P5-14 | Kleinere Punkte in den schnellen Tests (Dateinamen, Zeitmessungen, Zufall) | 📋 | teilweise: Zeitmessungen zählen jetzt Arbeit (9e60f7a, d96e95f); Rest offen |
+| P5-13 | Regel „nie still wiederholen“ gebrochen, Test vor dem Build gelockert | ✅ | PR #11 (31ec24c): Lint-Schritt „Zeitgrenze nur mit Eintrag lockern“ |
+| P5-14 | Kleinere Punkte in den schnellen Tests (Dateinamen, Zeitmessungen, Zufall) | 📋 | teilweise in PR #11 (31ec24c): fester Zufall, Zählung statt Zeit; Dateinamen nach Thema in PR #12 |
 | P5-15 | Alter Upload-Ablauf auf `main` lädt ungetestete Stände hoch (= P6-01, G5-01) | ✅ | 8b5afbd (PR #5, 6cdefb3); `test_workflows.py` |
 
 ### Prüfer 6: Vorgaben und Arbeitsweise
@@ -167,16 +167,16 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | G2-01 | Neues Foto hält Album beim Rückgängig nicht fest (= P2-08) | ✅ | 87e1094; `UndoHardeningTests` |
 | G2-02 | Ortsnamen ab Werk an, Start sagt „Nichts wird hochgeladen“ (= P2-03, G3-03) | ✅ | 752ba07, 8dbc5cc; `PromiseWordingTests`; Entscheidung 3 |
 | G2-03 | Arzt-Betreff gespeichert; englische Arztbriefe nicht erkannt (⊂ P2-04) | ✅ | deutsch 91f59c7; englisch 78fcb61, 9f92569, d942fd7; `TextMinimizerTests`, `DataSafetyTests` |
-| G3-01 | Länderliste im Atlas bei größter Schrift zerstückelt (= P3-11) | 📋 | offen |
-| G3-02 | Alben im Tab „Alben“ doppelt (= P3-16) | 📋 | offen |
+| G3-01 | Länderliste im Atlas bei größter Schrift zerstückelt (= P3-11) | ✅ | PR #11 (31ec24c): = P3-11 |
+| G3-02 | Alben im Tab „Alben“ doppelt (= P3-16) | ✅ | PR #11 (31ec24c): = P3-16 |
 | G3-03 | Start sagt „Nichts wird hochgeladen“ (= G2-02) | ✅ | wie G2-02 |
 | G3-04 | Entfernen-Knopf hinter der Tab-Leiste (= P3-01) | 📋 | offen; ob antippbar, zeigt nur dein Test am iPhone |
 | G3-05 | „Alben anlegen“ erst nach Scrollen sichtbar (= P3-05) | 📋 | offen |
-| G3-06 | Suche zeigt „nicht erkannt“ neben dem Vorschlag „Italien“ (= P3-13) | 📋 | offen |
-| G3-07 | Symbol über dem Wort bei größter Schrift (= P3-12) | 📋 | offen |
-| G3-08 | Ordner-Beschriftung abgeschnitten (= P3-17) | 📋 | offen |
+| G3-06 | Suche zeigt „nicht erkannt“ neben dem Vorschlag „Italien“ (= P3-13) | ✅ | PR #11 (31ec24c): = P3-13 |
+| G3-07 | Symbol über dem Wort bei größter Schrift (= P3-12) | ✅ | PR #11 (31ec24c): = P3-12 |
+| G3-08 | Ordner-Beschriftung abgeschnitten (= P3-17) | ✅ | PR #11 (31ec24c): = P3-17 |
 | G3-09 | Rückgängig kündigt die iOS-Löschfrage nicht an (= P3-07) | 📋 | offen |
-| G3-10 | Englisch „SAFE“ missverständlich (= P3-10) | 📋 | offen |
+| G3-10 | Englisch „SAFE“ missverständlich (= P3-10) | ✅ | PR #11 (31ec24c): = P3-10 |
 | G4-01 | Mediathek sortiert auf der Oberfläche (= P4-04) | ✅ | 2960726, d71fcea |
 | G4-02 | „Rückgängig“ nach Ignorieren kommt spät (= P4-01) | ✅ | f42c48f, d71fcea |
 | G4-03 | Kurze Zwischenstände bei gleichzeitigen Neuberechnungen (= P4-10) | ✅ | = P4-10, `main` 5f9ad8a |
@@ -196,7 +196,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | G6-05 | Zweitprüfung nirgends nachweisbar (≈ P5-09) | 👤 | `main` nicht geschützt (Klick von dir); PR-Vorlage hat noch kein Feld für die Zweitprüfung |
 | G6-06 | Testplan widerspricht sich (77 offene Fälle) | ✅ | 96cef21; TEST_PLAN „Tore“; DECISIONS „Zwei Tore“ |
 | G7-01 | Store-Text verspricht Städte-Alben | ✅ | 752ba07; `PromiseWordingTests`; Entscheidung 14 |
-| G7-02 | Featuring-Check nennt iPad, die App ist nur fürs iPhone | 📋 | `docs/launch/FEATURING_AUDIT.md` Zeile 11 und 32 |
+| G7-02 | Featuring-Check nennt iPad, die App ist nur fürs iPhone | ✅ | PR #11 (31ec24c): 53bbac1 |
 
 ### Zusätzlich gefunden beim Nachprüfen (nicht mitgezählt)
 

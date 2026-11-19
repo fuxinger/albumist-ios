@@ -697,15 +697,36 @@ struct SameNameWinsTests {
         #expect(ProposalDecision.recommended(for: country, match: c) == .extendExisting("it"))
         #expect(c.best?.metrics.purity == 1)
         #expect(ProposalDecision.isSafeToAcceptUnseen(country, match: c))
-        // Under another name the content decides, and it is the country's album by content.
+        // Only for the album of the name (third review 19.11., S6): under another name the
+        // content decides with every photo, and 160 of 310 are not Italy.
         let named = CollectionSnapshot(id: "u", title: "Urlaub in Italien", assetIDs: album.assetIDs)
         let u = try #require(matcher.match([country], against: CollectionInventory([named]), unlocated: unlocated)[country.id])
-        #expect(ProposalDecision.recommended(for: country, match: u) == .extendExisting("u"), "\(u.status)")
+        #expect(ProposalDecision.recommended(for: country, match: u).extendedAlbum == nil, "\(u.status)")
         // Not for a theme: a photo without a location can be a dog photo.
         let dogs = AlbumProposal(id: SortlyID("dogs"), kind: .imageCategory("dog"), title: "Hunde", assetIDs: set("dog", 0..<100))
         let h = CollectionSnapshot(id: "h", title: "Meine Tiere", assetIDs: set("dog", 0..<60).union(unlocated))
         let d = try #require(matcher.match([dogs], against: CollectionInventory([h]), unlocated: unlocated)[dogs.id])
         #expect(d.best.map { $0.metrics.purity < 0.5 } ?? true)
+    }
+
+    /// Third review 19.11. (S6): photos without a location are left out only for the album
+    /// named exactly like the place. An album that holds the whole country among many photos
+    /// without a location ("Alle Fotos", "iPhone-Export", "Sommer 2019") stays what it was by
+    /// its content: never the country's album, never "so lassen", and the country's photos do
+    /// not count as sorted through it (review 16.11., A1 and A3).
+    @Test(arguments: [("Sommer 2019", 1_000), ("Alle Fotos", 5_000), ("iPhone-Export", 300)])
+    func photosWithoutALocationCountForOtherAlbums(title: String, unlocatedCount: Int) throws {
+        let italy = set("it", 0..<300)
+        let unlocated = set("noloc", 0..<unlocatedCount)
+        let country = AlbumProposal(id: SortlyID("country-it"), kind: .placeCollection(.country), title: "Italien", folderPath: ["Länder"],
+                                    assetIDs: italy, reliability: .certain)
+        let album = CollectionSnapshot(id: "x", title: title, assetIDs: italy.union(unlocated))
+        let plain = try #require(matcher.match([country], against: CollectionInventory([album]))[country.id])
+        let with = try #require(matcher.match([country], against: CollectionInventory([album]), unlocated: unlocated)[country.id])
+        #expect(with.status != .alreadyComplete && with.status != .extendable, "\(title): \(with.status)")
+        #expect(ProposalDecision.recommended(for: country, match: with).existingAlbum == nil)
+        #expect(!matcher.sortingAlbums(with, kind: country.kind, title: country.title).contains("x"))
+        #expect(with.status == plain.status && with.best?.albumID == plain.best?.albumID)
     }
 
     /// Third review 19.11. (M3): another album of the user already holds the whole country

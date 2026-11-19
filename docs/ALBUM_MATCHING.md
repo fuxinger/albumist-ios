@@ -138,8 +138,10 @@ In einem Abgleich ändert Albumist ein Album des Nutzers für höchstens einen V
   empfiehlt Albumist, es zu ergänzen, auch wenn es wenig davon (17 % des Landes nach fünf
   Reisen), andere Fotos dazu oder noch gar keins davon enthält; nie ein zweites Album
   gleichen Namens. Enthält es schon alles, heißt es „Album so lassen“. Fotos ohne Ort zählen
-  bei Ländern, Orten und Reisezielen nicht gegen die Reinheit des Albums (150 Fotos aus
-  Italien und 160 ohne Ort sind ein reines Italien-Album). Enthält das Album auch andere
+  bei Ländern, Orten und Reisezielen nicht gegen die Reinheit dieses Albums (150 Fotos aus
+  Italien und 160 ohne Ort sind ein reines Italien-Album); nur bei ihm, nicht bei Alben
+  anderen Namens („Alle Fotos“, „iPhone-Export“ mit dem ganzen Land bleiben nach A1/A3 kein
+  Album des Landes, dritte Prüfung 19.11.2026, S6). Enthält das Album auch andere
   Fotos mit Ort, oder fehlen ihm Fotos des Vorschlags ganz, wählt „Empfohlene auswählen“ es
   nicht von selbst aus; die Empfehlung bleibt „ergänzen“. Bei zwei bearbeitbaren Alben
   dieses Namens wählt der Inhalt eines davon (das mit mehr Fotos des Vorschlags), nie ein

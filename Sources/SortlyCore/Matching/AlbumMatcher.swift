@@ -142,7 +142,10 @@ public struct AlbumMatcher: Sendable {
     /// 5: "Gleicher Name gewinnt" whatever the album holds (review P1-02), and photos without a
     ///    location do not count against a place: saved matches that offer a second "Italien"
     ///    next to the user's are matched again.
-    public static let version = 5
+    /// 6: another album that holds the whole suggestion stays its album over the album of the
+    ///    name, and photos without a location are left out only for the album of the name
+    ///    (third review 19.11., M3 and S6): saved matches of version 5 are matched again.
+    public static let version = 6
 
     /// Matches all proposals in one pass using an inverted membership index.
     /// - Parameters:
@@ -159,7 +162,8 @@ public struct AlbumMatcher: Sendable {
     ///   - trips: the photos of every detected trip. A place album that holds photos of one
     ///     trip only is a part of the place (`isPart`), whatever its name.
     ///   - unlocated: photos without a usable location. For places (countries, regions, towns,
-    ///     frequent places) they never count against an album: they cannot be in a place.
+    ///     frequent places) they do not count against the user's album named exactly like the
+    ///     place: they cannot be in a place. For every other album they count as usual.
     ///
     /// Within one run an album of the user is changed for one suggestion at most (review 16.11.,
     /// A5 and A10):
@@ -406,16 +410,20 @@ public struct AlbumMatcher: Sendable {
         // Smaller albums inside a place collection ("Rom 2024" inside Italien): the user may
         // still pick one under "Anpassen", but Albumist never recommends growing them.
         var parts: [MatchCandidate] = []
-        // A place has only photos with a location: an album's photos without one (camera roll,
-        // messenger) can never be in it and do not count against it (review P1-02).
+        // A place has only photos with a location: in the user's album named exactly like it,
+        // photos without one (camera roll, messenger) can never be in it and do not count
+        // against it (review P1-02). Only there: an album of another name that holds the place
+        // among many such photos ("Alle Fotos", "iPhone-Export") is judged by all its photos
+        // and stays no album of the place (third review 19.11., S6; review 16.11., A1 and A3).
         let placeOnly: Bool
         switch proposal.kind {
         case .placeCollection, .frequentPlace: placeOnly = !unlocated.isEmpty
         default: placeOnly = false
         }
+        let ownName = AlbumTitle.normalized(proposal.title)
         func overlap(_ album: CollectionSnapshot, shared: Int) -> OverlapMetrics {
             var count = album.assetIDs.count
-            if placeOnly {
+            if placeOnly, AlbumTitle.normalized(album.title) == ownName {
                 if albumUnlocated[album.id] == nil {
                     albumUnlocated[album.id] = album.assetIDs.reduce(0) { $0 + (unlocated.contains($1) && !proposal.assetIDs.contains($1) ? 1 : 0) }
                 }

@@ -151,8 +151,9 @@ enum UITestOnboarding {
         var taken: (any XCUIElementSnapshot)?
         var gone = false
         var tries = 0
-        // Three tries, half a second apart; the limit only bounds three slow snapshots.
-        _ = UITestWait.holds(timeout: 60) {
+        // Three tries, half a second apart. The tries end it, not a time (as before the wait
+        // helper): three slow snapshots still get their three tries.
+        _ = UITestWait.holds(timeout: .infinity) {
             tries += 1
             if let snapshot = try? partial.snapshot() { taken = snapshot; return true }
             // The count went away between the tries: the analysis has finished.

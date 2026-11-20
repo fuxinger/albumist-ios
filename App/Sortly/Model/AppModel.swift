@@ -990,7 +990,7 @@ final class AppModel {
         onboardingDone = true
         phase = .ready
         if access.canRead { LibraryChangeWatcher.shared.start() }
-        ContinuedAnalysis.requestNotificationPermission()
+        // Design W1 H1: no notification question here (3B); the ring card offers it once the analysis takes a while.
         startAnalysis(scope: scope, cause: .tap)
     }
 
@@ -1135,7 +1135,7 @@ final class AppModel {
             // it put "Albumist analysiert deine Fotos · Schritt 1 von 7" on the Lock Screen for
             // a few seconds after every check (device test 15.11. 23:16).
             if analysis.kind != .check {
-                ContinuedAnalysis.requestNotificationPermission()
+                // Design W1 H1: notifications are asked for on the ring card, not at the start (3B).
                 ContinuedAnalysis.begin()
             }
             retry.reset()

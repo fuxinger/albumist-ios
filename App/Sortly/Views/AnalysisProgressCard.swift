@@ -32,16 +32,23 @@ struct AnalysisProgressCard: View {
     /// view it was started from holds the card state of that moment).
     @State private var newest = NewestSpoken()
     var state: AnalysisCardState
+    /// "Analyse fertig" was tapped: the page shows the sheet "Analyse".
+    var onOpenFinished: () -> Void = {}
 
     var body: some View {
+        // On the ring card of "Vorschläge" (design wave 1): each part brings the card's margins.
         Group {
             switch state {
             case .quickCheck(let showsPause):
                 quickCheck(showsPause: showsPause)
+                    .padding(.horizontal, Theme.Spacing.l)
+                    .padding(.vertical, Theme.Spacing.s)
             case .finished(let photos, let proposals):
-                AnalysisFinishedView(photos: photos, proposals: proposals)
+                AnalysisFinishedView(photos: photos, proposals: proposals, onOpen: onOpenFinished)
             default:
                 full
+                    .padding(.horizontal, Theme.Spacing.l)
+                    .padding(.vertical, Theme.Spacing.m)
             }
         }
         // B2: said when the step changes, on Pause, waiting and the end; quietly (low priority,
@@ -129,10 +136,10 @@ struct AnalysisProgressCard: View {
     }
 
     /// Heading and Pause (or Fortsetzen); the button moves under the heading when the text is
-    /// large or long (B5).
+    /// large or long (B5). Pause is the round button of draft B (E6), centred beside the heading.
     private var header: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .center) {
                 heading
                 Spacer(minLength: Theme.Spacing.s)
                 control
@@ -176,7 +183,9 @@ struct AnalysisProgressCard: View {
                 .accessibilityLabel("Analyse jetzt erneut versuchen")
                 .accessibilityIdentifier("analysis.retry")
         default:
-            Button { model.pauseAnalysis() } label: { CardTextButton("Pause") }
+            Button { model.pauseAnalysis() } label: { PauseSymbol() }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Pause")
                 .accessibilityIdentifier("analysis.pause")
         }
     }
@@ -418,7 +427,9 @@ struct AnalysisProgressCard: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Theme.Spacing.s)
             if showsPause {
-                Button { model.pauseAnalysis() } label: { CardTextButton("Pause") }
+                Button { model.pauseAnalysis() } label: { PauseSymbol() }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Pause")
                     .accessibilityIdentifier("analysis.pause")
             }
         }
@@ -535,6 +546,24 @@ struct LightSweep: View {
     }
 }
 
+/// Pause as draft B draws it (E6 "Analyse läuft"): the system's pause symbol on a round grey
+/// fill, 44 pt and growing with the text; VoiceOver says "Pause" (the button's label).
+private struct PauseSymbol: View {
+    @ScaledMetric(relativeTo: .body) private var side: CGFloat = 44
+
+    var body: some View {
+        let side = min(self.side, 88)
+        Image(systemName: "pause.fill")
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Color.primary)
+            .frame(width: side, height: side)
+            .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+            .contentShape(Circle())
+            .hoverEffect(.highlight)
+            .accessibilityHidden(true)
+    }
+}
+
 /// A short text action in the card with Apple's minimum tap area (44 pt).
 struct CardTextButton: View {
     var title: LocalizedStringKey
@@ -553,43 +582,35 @@ struct CardTextButton: View {
 
 /// Point 4: a long run finished while the card was on screen. A short check mark and a light
 /// haptic once (not on every return to the overview, not with Reduce Motion: then only the
-/// crossfade of the card).
+/// crossfade of the card). One line of the ring card (draft B): the suggestions wait right
+/// under it on the page, so no button of its own; the line opens the sheet "Analyse", with
+/// how many photos are analysed.
 struct AnalysisFinishedView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var bounce = 0
     var photos: Int
     var proposals: Int
+    var onOpen: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            HStack(spacing: Theme.Spacing.s) {
+        Button(action: onOpen) {
+            RingCardRow(title: Text("Analyse fertig"), chevron: true) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title2)
                     .foregroundStyle(Theme.accent)
                     .symbolEffect(.bounce, value: bounce)
                     .accessibilityHidden(true)
-                Text("Analyse fertig").font(.headline)
-            }
-            // How many photos are analysed says the plain card under it ("Alle 246 Fotos analysiert").
-            Text(String(localized: "\(proposals) Vorschläge warten auf dich."))
-                .font(.subheadline).foregroundStyle(.noteText).monospacedDigit()
-                .fixedSize(horizontal: false, vertical: true)
-            if proposals > 0 {
-                // Opened from the overview's root, as "Ansehen" above: the finish moment goes
-                // away by itself.
-                Button { model.route = .proposals } label: {
-                    Text("Vorschläge prüfen")
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                .accessibilityIdentifier("analysis.review")
+            } detail: {
+                Text(String(localized: "\(proposals) Vorschläge warten auf dich."))
+                    .monospacedDigit()
             }
         }
+        .buttonStyle(RingCardRowButtonStyle())
         .sensoryFeedback(.success, trigger: bounce) { _, new in new > 0 && !reduceMotion }
         .onAppear(perform: play)
         // Finished while the app was in the background: played when it is on screen again.
         .onChange(of: model.isOnScreen) { _, onScreen in if onScreen { play() } }
-        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("analysis.finished")
     }
 

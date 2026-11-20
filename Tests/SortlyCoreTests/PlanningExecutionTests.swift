@@ -503,6 +503,16 @@ struct PlanningExecutionTests {
         #expect(roundTrip == state)
     }
 
+    @Test func aManagedAlbumRecordOfAnEarlierBuildLoadsWithWhatAlbumistAdded() throws {
+        // As this build stores it today (keys sorted, as SortlyStore encodes): the read direction
+        // of the rename, the record must come back whole, not only load.
+        let stored = #"{"addedBySortly":["a-1","a-2"],"albumID":"a1","createdBySortly":false,"lastKnownMembers":["a-1","a-2","mine"],"lastKnownTitle":"Rom","otherSourceIDs":["s2"],"sourceID":"s1"}"#
+        let state = try JSONDecoder().decode(ManagedAlbumState.self, from: Data(stored.utf8))
+        #expect(state == ManagedAlbumState(albumID: "a1", sourceID: SortlyID("s1"), lastKnownTitle: "Rom", lastKnownParentID: nil,
+                                           lastKnownMembers: ["a-1", "a-2", "mine"], addedBySortly: ["a-1", "a-2"], createdBySortly: false)
+            .with(otherSourceIDs: [SortlyID("s2")]))
+    }
+
     @Test func managedAlbumRecordsKeepTheirStoredKeys() throws {
         // The stored names stay when the code's names change (rename to Albumist): a record
         // written by an older build must load, and a new one must load in an older build.
@@ -583,5 +593,13 @@ struct ProposalDisplayOrderTests {
         #expect(ordered.map(\.title) == ["Deutschland", "Dänemark", "Kyoto", "Island"])
         // Same input in another order gives the same result (stable for the card and the preview).
         #expect([big, oldTrip, small, newTrip].inDisplayOrder().map(\.id) == ordered.map(\.id))
+    }
+}
+
+private extension ManagedAlbumState {
+    func with(otherSourceIDs: Set<SortlyID>) -> ManagedAlbumState {
+        var copy = self
+        copy.otherSourceIDs = otherSourceIDs
+        return copy
     }
 }

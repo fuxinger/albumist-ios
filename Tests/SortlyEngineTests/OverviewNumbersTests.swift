@@ -1,0 +1,318 @@
+import Foundation
+import Testing
+@testable import SortlyEngine
+import SortlyCore
+import SortlyStore
+import SortlyWorldMap
+import SortlyTestSupport
+
+/// The numbers of the overview's first card agree with each other and with the analysis card
+/// below it (review P3-03 of 18.11.2026; the ring and the library's lists already agree,
+/// P1-05/P1-06). Counted the way `AppModel.refreshDerived` counts, after a real analysis, and
+/// shown the way `OverviewView` shows it (`SortedCountCard`).
+///
+/// Found on the screens of the review: "82 von 176 sortiert", "57 Fotos von zu Hause" and "Alle
+/// 246 Fotos analysiert" on one screen, 13 photos without a place said nowhere; "0 von 0
+/// sortiert, 0 %" while the analysis ran again after the decisions came back from the backup.
+@Suite("Overview numbers agree")
+struct OverviewNumbersTests {
+    static let map: OfflineWorldMap = try! WorldMapResource.load()
+    static let basel = GeoCoordinate(latitude: 47.5596, longitude: 7.5886)
+    static let salzburg = GeoCoordinate(latitude: 47.8095, longitude: 13.0550)
+    static let today = Fixture.date("2026-11-18 06:00")
+
+    struct World {
+        var store: SortlyStore
+        var pipeline: AnalysisPipeline
+        var settings: OrganizationSettings
+        /// Munich, every day of 2026 until June, and twenty days of September 2025.
+        var home: [AssetID]
+        var homeEarlier: [AssetID]
+        /// A week in Rome, all of it in the user's album "Rom": sorted.
+        var rome: [AssetID]
+        /// Six days in Basel, no album yet: open.
+        var basel: [AssetID]
+        /// One afternoon in Salzburg: too few photos for an album of their own.
+        var salzburg: [AssetID]
+        /// Pictures saved from a messenger and screenshots: no place.
+        var noPlace: [AssetID]
+
+        /// What `AppModel.refreshDerived` derives. `suggestions: false`: as before the first
+        /// suggestions of a run exist (a new database: first start, or after the decisions came
+        /// back from the backup).
+        func derived(scope: OrganizationScope = .all, suggestions: Bool = true) async throws -> DerivedLibraryStatus {
+            DerivedLibraryStatus.derive(
+                facts: try await pipeline.currentFacts(), snapshot: suggestions ? try await pipeline.latestProposals() : nil,
+                settings: settings, overrides: OverrideSet(try await store.overrides()),
+                contents: try await store.results(ContentAnalysis.self, kind: "content"),
+                managed: [], inventory: try await store.loadInventory(), scope: scope, calendar: Fixture.calendar)
+        }
+
+        func ignore(_ ids: [AssetID]) async throws {
+            for id in ids { try await store.addOverride(UserOverride(scope: .asset(id), decision: .ignoreAsset)) }
+        }
+    }
+
+    static func germanSettings() -> OrganizationSettings {
+        var settings = OrganizationSettings()
+        settings.titleLanguage = .german
+        return settings
+    }
+
+    func world(settings: OrganizationSettings = germanSettings(), scope: OrganizationScope = .all) async throws -> World {
+        var lib = LibraryBuilder()
+        let homeEarlier = lib.daily(from: "2025-09-01", to: "2025-09-20", at: Fixture.Places.munichHome, perDay: 1)
+        let home = lib.daily(from: "2026-01-01", to: "2026-06-30", at: Fixture.Places.munichHome, perDay: 1,
+                             skipping: [("2026-05-12", "2026-05-19"), ("2026-03-10", "2026-03-15")])
+        let rome = lib.daily(from: "2026-05-12", to: "2026-05-19", at: Fixture.Places.rome, perDay: 4, hour: 10)
+        let basel = lib.daily(from: "2026-03-10", to: "2026-03-15", at: Self.basel, perDay: 3, hour: 11)
+        let salzburg = lib.daily(from: "2026-04-18", to: "2026-04-18", at: Self.salzburg, perDay: 6, hour: 14)
+        var noPlace: [AssetID] = []
+        for day in 1...8 { noPlace.append(lib.photo(at: Fixture.date(String(format: "2026-02-%02d 09:00", day)), nil)) }
+        for day in 1...5 {
+            noPlace.append(lib.photo(at: Fixture.date(String(format: "2026-06-%02d 18:00", day)), nil, subtypes: .screenshot))
+        }
+        let store = try SortlyStore(url: nil)
+        let albums = [CollectionSnapshot(id: "rom", title: "Rom", assetIDs: Set(rome))]
+        let pipeline = AnalysisPipeline(
+            store: store, reader: InMemoryLibraryReader(assets: lib.assets, inventory: CollectionInventory(albums)),
+            analyzer: FakeContentAnalyzer(), geocoder: FakeGeocoder(), map: Self.map, conditions: FakeConditions(),
+            settings: settings, calendar: Fixture.calendar, time: ManualTime().source, now: { Self.today }
+        )
+        #expect(try await pipeline.run(scope: scope).isComplete)
+        return World(store: store, pipeline: pipeline, settings: settings, home: home, homeEarlier: homeEarlier, rome: rome,
+                     basel: basel, salzburg: salzburg, noPlace: noPlace)
+    }
+
+    /// The card as the overview shows it once the analysis went through.
+    static func card(_ d: DerivedLibraryStatus, _ settings: OrganizationSettings, running: Bool = false) -> SortedCountCard {
+        SortedCountCard.make(.init(progress: d.progress, leftOut: d.leftOut, settings: settings, hasSuggestions: true,
+                                   analysisRunning: running, analysedOnce: true))
+    }
+
+    static func line(_ d: DerivedLibraryStatus) -> String {
+        let p = d.progress
+        return "\(p.fully) von \(p.total) sortiert, nicht mitgezählt \(p.outsideMainAreas) (zu Hause \(d.leftOut.home), "
+            + "kein Album \(d.leftOut.noAlbum)), ignoriert \(p.ignored), Fotos \(d.photos)"
+    }
+
+    // MARK: - Every photo of "Alle N Fotos analysiert" is in the ring or named once
+
+    /// "82 von 176 sortiert" and "Außerdem nicht mitgezählt: 57 Fotos von zu Hause" next to "Alle
+    /// 246 Fotos analysiert": the 13 photos without a place were said nowhere. Now the ring's
+    /// total and the groups it leaves out add up to the analysis card's number, also for
+    /// "Nur 2026" and with ignored photos.
+    @Test(arguments: [OrganizationScope.all, .year(2026)])
+    func theRingAndWhatItLeavesOutAddUpToThePhotosAnalysed(scope: OrganizationScope) async throws {
+        let w = try await world()
+        try await w.ignore(Array(w.basel.prefix(3)))
+        let d = try await w.derived(scope: scope)
+        guard case .ring(let ring) = Self.card(d, w.settings) else {
+            Issue.record("no ring: \(Self.card(d, w.settings)); \(Self.line(d))")
+            return
+        }
+        // `photos` is the number of "Alle 246 Fotos analysiert" / "240 von 246 Fotos analysiert".
+        #expect(ring.total + ring.notCounted.sum == d.photos,
+                "\(ring.total) counted + \(ring.notCounted.sum) left out != \(d.photos) photos; \(Self.line(d))")
+        #expect(ring.fully == w.rome.count)
+        #expect(ring.notCounted.noMainArea == w.noPlace.count, "\(ring.notCounted)")
+        #expect(ring.notCounted.noMainAreaIsNoPlace, "with \"Länder und Orte\" counted they are photos without a place")
+        #expect(ring.notCounted.noAlbum == w.salzburg.count, "\(ring.notCounted)")
+        #expect(ring.notCounted.ignored == 3)
+        #expect(ring.notCounted.home == w.home.count + (scope == .all ? w.homeEarlier.count : 0), "\(ring.notCounted)")
+    }
+
+    /// With "Reisen" as the only main area, a photo from home has a place but fits no main
+    /// area: the group is not called "ohne Ort" then, and the numbers still add up.
+    @Test func withoutCountriesAsAMainAreaTheRestIsNotCalledWithoutAPlace() async throws {
+        var settings = Self.germanSettings()
+        settings.primaryAreas = [.trips]
+        let w = try await world(settings: settings)
+        let d = try await w.derived()
+        guard case .ring(let ring) = Self.card(d, settings) else {
+            Issue.record("no ring: \(Self.card(d, settings)); \(Self.line(d))")
+            return
+        }
+        #expect(ring.total + ring.notCounted.sum == d.photos, "\(ring.notCounted); \(Self.line(d))")
+        #expect(ring.notCounted.noMainArea >= w.home.count + w.noPlace.count, "\(ring.notCounted)")
+        #expect(!ring.notCounted.noMainAreaIsNoPlace, "photos from home have a place")
+    }
+
+    // MARK: - Never "0 von 0 sortiert"
+
+    /// After the decisions came back from the backup (`RestoredFromBackupCard`, UI test 4,
+    /// screenshot 40-restored-card) the database is new and the analysis runs again: the ring said
+    /// "0 von 0 sortiert, 0 %", and once the library was read "0 von N": without suggestions no
+    /// photo can count as sorted yet (an own album counts through the suggestion it fits). The
+    /// same on the first start and after "Analyse neu aufbauen" with nothing counted before.
+    @Test func whileTheAnalysisRunsAgainThereIsNoCountYetNotZeroOfZero() async throws {
+        let settings = Self.germanSettings()
+        let restored = SortedCountCard.make(.init(progress: .init(), settings: settings, hasSuggestions: false,
+                                                  analysisRunning: true, analysedOnce: false))
+        #expect(restored == .counting, "\(restored)")
+        // The library is read, the first suggestions are not made yet: "0 von N" is no count.
+        let w = try await world()
+        let read = try await w.derived(suggestions: false)
+        #expect(read.progress.total > 0 && read.progress.fully == 0, "\(Self.line(read))")
+        for (running, paused) in [(true, false), (false, true), (false, false)] {
+            let card = SortedCountCard.make(.init(progress: read.progress, leftOut: read.leftOut, settings: settings,
+                                                  hasSuggestions: false, analysisRunning: running, analysisPaused: paused,
+                                                  analysedOnce: false))
+            #expect(card == .counting, "running \(running), paused \(paused): \(card)")
+        }
+        // The first suggestions (the early set of trips and places, minutes into a first run):
+        // the count is shown while the run goes on.
+        let first = try await w.derived()
+        let shown = SortedCountCard.make(.init(progress: first.progress, leftOut: first.leftOut, settings: settings,
+                                               hasSuggestions: true, analysisRunning: true, analysedOnce: false))
+        guard case .ring(let ring) = shown else {
+            Issue.record("no ring once the suggestions exist: \(shown)")
+            return
+        }
+        #expect(ring.fully == w.rome.count)
+        // "Analyse neu aufbauen" with a count on screen holds it, as before.
+        let held = RecountState(fully: 32, total: 50)
+        let rebuilding = SortedCountCard.make(.init(progress: .init(), recount: held, settings: settings, hasSuggestions: false,
+                                                    analysisRunning: true, analysedOnce: false))
+        #expect(rebuilding == .recounting(held))
+    }
+
+    /// Every photo the ring would count is ignored (question for Fuchs, 18.11.: "0 von 0
+    /// sortiert, 0 %" or a text?): nothing is left to sort, and the card says so with what it
+    /// leaves out. A check for new photos does not turn it into "Wird gezählt".
+    @Test func everyCountedPhotoIgnoredIsNothingToSortNotZeroOfZero() async throws {
+        let w = try await world()
+        try await w.ignore(w.rome + w.basel)
+        let d = try await w.derived()
+        #expect(d.progress.total == 0, "\(Self.line(d))")
+        let card = Self.card(d, w.settings)
+        guard case .nothingToSort(let notCounted) = card else {
+            Issue.record("\(card); \(Self.line(d))")
+            return
+        }
+        #expect(notCounted.ignored == w.rome.count + w.basel.count)
+        #expect(notCounted.sum == d.photos, "\(notCounted); \(Self.line(d))")
+        #expect(Self.card(d, w.settings, running: true) == card)
+    }
+
+    /// The overview never says "0 von 0 sortiert", in any state of the analysis: either the card
+    /// for an empty library explains it (`EmptyLibraryState`), or the first card has no ring.
+    @Test func theOverviewNeverSaysZeroOfZero() {
+        var said: [String] = []
+        for photos in [0, 4, 300] {
+            for total in Set([0, photos / 2, photos]).sorted() {
+                for proposals in [0, 3] {
+                    for flags in 0..<16 {
+                        let suggestions = proposals > 0 || flags & 1 != 0, running = flags & 2 != 0
+                        let paused = flags & 4 != 0, analysedOnce = flags & 8 != 0
+                        for held in [nil, RecountState(fully: 3, total: 9)] {
+                            var progress = OrganizationStatusResolver.Progress()
+                            progress.total = total
+                            progress.unorganized = total
+                            progress.outsideMainAreas = photos - total
+                            let empty = EmptyLibraryState.evaluate(.init(
+                                photos: photos, photosWithPlace: photos, proposals: proposals, analysisRunning: running,
+                                analysisPaused: paused, analysedOnce: analysedOnce, recounting: held != nil))
+                            guard empty == nil else { continue }
+                            let card = SortedCountCard.make(.init(
+                                progress: progress, recount: held, settings: Self.germanSettings(), hasSuggestions: suggestions,
+                                analysisRunning: running, analysisPaused: paused, analysedOnce: analysedOnce))
+                            if case .ring(let ring) = card, ring.total == 0 {
+                                said.append("photos \(photos), proposals \(proposals), suggestions \(suggestions), running \(running), "
+                                            + "paused \(paused), analysed once \(analysedOnce)")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        #expect(said.isEmpty, "\"0 von 0 sortiert\" in \(said.count) states, e.g. \(said.prefix(3))")
+    }
+
+    // MARK: - The main areas the sentence names are the ones that count
+
+    /// The start lets the user turn "Länder und Orte" and "Reisen" off, but they stay the main
+    /// areas: the ring counted every photo as open for good ("0 von 300 sortiert"), and "Gezählt
+    /// werden nur Fotos, die zu deinen Hauptbereichen passen" named the two areas that were off.
+    /// With no main area turned on, the card says so instead of a ring that can never move.
+    @Test func withNoMainAreaOnTheCardHasNoRing() async throws {
+        var settings = Self.germanSettings()
+        settings.enabledAreas = [.screenshots, .imageCategories]
+        #expect(settings.primaryAreas == [.places, .trips])
+        let w = try await world(settings: settings)
+        let d = try await w.derived()
+        #expect(d.progress.fully == 0 && d.progress.total == d.photos, "\(Self.line(d))")
+        #expect(SortedCountCard.countedAreas(settings).isEmpty)
+        #expect(Self.card(d, settings) == .noMainAreaChosen)
+        // None chosen in the settings ("Zählt als sortiert" all off).
+        var noneChosen = Self.germanSettings()
+        noneChosen.primaryAreas = []
+        #expect(SortedCountCard.countedAreas(noneChosen).isEmpty)
+        #expect(Self.card(d, noneChosen) == .noMainAreaChosen)
+    }
+
+    @Test func theSentenceNamesOnlyTheMainAreasThatAreOn() {
+        var settings = OrganizationSettings()
+        #expect(SortedCountCard.countedAreas(settings) == [.places, .trips])
+        settings.enabledAreas.remove(.trips)
+        #expect(SortedCountCard.countedAreas(settings) == [.places])
+    }
+
+    // MARK: - The overview shows what is decided here
+
+    /// The overview draws the card `SortedCountCard.make` decides, with the same three facts
+    /// about the analysis as the card for an empty library (`EmptyLibraryCard.state(for:)`):
+    /// `theOverviewNeverSaysZeroOfZero` holds only while both read them alike. Its numbers come
+    /// from the card's values, no longer from `model.progress` and `model.leftOut` worked out in
+    /// the view (that is how the photos without a place went unsaid). The card for limited
+    /// access names the photos Albumist sees, not the ring's: with "Nur 2026" those were only
+    /// the photos of 2026 ("sieht nur die 12 Fotos" of 40 shared). The App does not build on
+    /// Linux, so its code is read (`AppSource`).
+    @Test func theOverviewShowsTheCardDecidedHere() throws {
+        let overview = try AppSource.read("App/Sortly/Views/OverviewView.swift")
+        let emptyCard = try AppSource.read("App/Sortly/Views/EmptyLibraryCard.swift")
+        let made = AppSource.calls(of: "SortedCountCard.make(", in: overview)
+        let evaluated = AppSource.calls(of: "EmptyLibraryState.evaluate(", in: emptyCard)
+        #expect(made.count == 1, "\(made)")
+        #expect(evaluated.count == 1, "\(evaluated)")
+        let card = Self.labelled(made.first ?? ""), empty = Self.labelled(evaluated.first ?? "")
+        for label in ["analysisRunning", "analysisPaused", "analysedOnce"] {
+            #expect(card[label] != nil && card[label] == empty[label],
+                    "\(label): \(card[label] ?? "missing") here, \(empty[label] ?? "missing") for the empty library")
+        }
+        let status = AppSource.code(AppSource.body(of: "private var statusCard", in: overview) ?? "")
+        #expect(status.contains("switch sortedCount"), "the first card does not show `SortedCountCard`")
+        for own in ["model.progress", "model.leftOut"] {
+            #expect(!status.contains(own), "the first card reads \(own) itself")
+        }
+        let limited = AppSource.code(AppSource.body(of: ["struct LimitedAccessCard", "var body: some View"], in: overview) ?? "")
+        #expect(limited.contains("model.facts.count"), "limited access does not name the photos Albumist sees")
+        #expect(!limited.contains("progress.allPhotos"), "limited access names the ring's photos")
+    }
+
+    /// The labelled arguments of a call (`label: value`, also inside `.init(…)`), the value with
+    /// its spaces and line breaks made single spaces.
+    static func labelled(_ arguments: String) -> [String: String] {
+        var inner = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        if inner.hasPrefix(".init("), inner.hasSuffix(")") { inner = String(inner.dropFirst(6).dropLast()) }
+        var parts: [String] = [], current = "", depth = 0
+        for character in inner {
+            if "([{".contains(character) { depth += 1 }
+            if ")]}".contains(character) { depth -= 1 }
+            if character == ",", depth == 0 {
+                parts.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        parts.append(current)
+        var result: [String: String] = [:]
+        for part in parts {
+            guard let colon = part.firstIndex(of: ":") else { continue }
+            let label = part[..<colon].trimmingCharacters(in: .whitespacesAndNewlines)
+            result[label] = part[part.index(after: colon)...].split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }
+        return result
+    }
+}

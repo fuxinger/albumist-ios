@@ -11251,12 +11251,12 @@
         }
       }
     },
-    "Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen." : {
+    "Nicht alles ließ sich rückgängig machen. Der unterbrochene Vorgang steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du den Rest rückgängig machen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Not everything could be undone. The interrupted run is now in Settings › History and Undo, where you can undo the rest."
+            "value" : "Not everything could be undone. The interrupted run is now in Albums › History and Undo, where you can undo the rest."
           }
         }
       }
@@ -11361,12 +11361,12 @@
         }
       }
     },
-    "Albumist konnte den unterbrochenen Vorgang gerade nicht rückgängig machen. Er steht jetzt unter Einstellungen › Verlauf und Rückgängig. Dort kannst du ihn rückgängig machen." : {
+    "Albumist konnte den unterbrochenen Vorgang gerade nicht rückgängig machen. Er steht jetzt unter Alben › Verlauf und Rückgängig. Dort kannst du ihn rückgängig machen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist couldn’t undo the interrupted changes just now. They are now under Settings › History and Undo, where you can undo them."
+            "value" : "Albumist couldn’t undo the interrupted changes just now. They are now under Albums › History and Undo, where you can undo them."
           }
         }
       }
@@ -13611,12 +13611,12 @@
         }
       }
     },
-    "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Einstellungen › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen." : {
+    "Der Rest ist angelegt, aber nicht alles hat geklappt. Der Vorgang steht unter Alben › Verlauf und Rückgängig. Dort siehst du, was fehlt, und kannst es mit „Fehlendes erneut versuchen“ nachholen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The rest is done, but not everything worked. The change is listed under Settings › History and Undo. There you can see what is missing and add it with “Try Missing Steps Again”."
+            "value" : "The rest is done, but not everything worked. The change is listed under Albums › History and Undo. There you can see what is missing and add it with “Try Missing Steps Again”."
           }
         }
       }
@@ -13891,12 +13891,12 @@
         }
       }
     },
-    "Der Vorgang bleibt unter Einstellungen › Verlauf und Rückgängig." : {
+    "Der Vorgang bleibt unter Alben › Verlauf und Rückgängig." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The run stays in Settings › History and Undo."
+            "value" : "The run stays in Albums › History and Undo."
           }
         }
       }

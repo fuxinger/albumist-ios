@@ -1,0 +1,348 @@
+import SwiftUI
+import SortlyCore
+
+// The pieces of the tab "Alben" (design 5C, draft E4): albums and folders as photo tiles, the
+// grid they stand in, the section titles, and what a long press on an album shows.
+
+/// What an album shows as its cover (design rules 7 and 9): the photos that can be a big cover,
+/// newest first as Photos picks an album's cover (`PreviewPicker.coverCandidates`: never a
+/// screenshot, a document or a sensitive document; `CoverPhoto` shows the first one that is
+/// sharp on the device), and whether its preview stays hidden: an album of nothing but sensitive
+/// documents shows "Vorschau ausgeblendet", as every preview of them does.
+struct AlbumCover: Equatable {
+    var ids: [AssetID]
+    var hidden: Bool
+
+    @MainActor
+    init(_ album: CollectionSnapshot, model: AppModel, count: Int = 4) {
+        let dates = model.creationDates, ranks = model.previewRanks
+        ids = PreviewPicker.coverCandidates(album.assetIDs, cover: nil, dates: dates, ranks: ranks, count: count)
+        // `newest` is nil only when every photo is a sensitive document; an album of only
+        // screenshots or documents has no candidates either, and shows the calm placeholder.
+        hidden = ids.isEmpty && !album.assetIDs.isEmpty
+            && PreviewPicker.newest(album.assetIDs, dates: dates, ranks: ranks) == nil
+    }
+}
+
+extension CardBadge {
+    /// "Neu" for an album Albumist created, "+12" for the photos it added to one of the user's.
+    init(_ mark: AlbumTabSections.Mark) {
+        switch mark {
+        case .new: self = .new
+        case .added(let count): self = .added(count)
+        }
+    }
+}
+
+// MARK: - Album
+
+/// One album as a photo tile (draft E4): its cover with the round corners of Photos, the name
+/// and the number of photos below it, "Neu" or "+12" on a white ground for an album of
+/// Albumist's. A tap opens the album (`AlbumScreen`). A long press shows it large with "Fotos
+/// ansehen" and, for an album of Albumist's, "Rückgängig machen" with the line that says what it
+/// does: the same item as "…" in the album, which is the main way (decision 17.11.). VoiceOver
+/// has both as actions of the tile.
+struct AlbumTile: View {
+    @Environment(AppModel.self) private var model
+    @Environment(Navigator.self) private var navigator: Navigator?
+    private let album: CollectionSnapshot
+    private let managed: ManagedAlbumState?
+    private let viewPhotos: @MainActor (PhotoViewer.Start) -> Void
+    private let undo: @MainActor (ManagedAlbumState) -> Void
+
+    /// - Parameters:
+    ///   - managed: Albumist's record of the album, when Albumist created or extended it.
+    ///   - viewPhotos: "Fotos ansehen": the screen shows the photos in full screen.
+    ///   - undo: "Rückgängig machen": the screen asks first (`albumUndo`).
+    init(album: CollectionSnapshot, managed: ManagedAlbumState? = nil,
+         viewPhotos: @escaping @MainActor (PhotoViewer.Start) -> Void,
+         undo: @escaping @MainActor (ManagedAlbumState) -> Void = { _ in }) {
+        self.album = album
+        self.managed = managed
+        self.viewPhotos = viewPhotos
+        self.undo = undo
+    }
+
+    var body: some View {
+        let cover = AlbumCover(album, model: model)
+        let mark = managed.flatMap { AlbumTabSections.mark($0) }
+        // Only an album whose changes are still there can be undone: an album of the user's
+        // whose added photos the user took out again has nothing of Albumist's left.
+        let undoable = mark == nil ? nil : managed
+        PhotoCard(coverIDs: cover.ids, title: Text(verbatim: album.title), subtitle: Self.photoCount(album),
+                  badge: mark.map { CardBadge($0) }, hidesPreview: cover.hidden, aspectRatio: 1, style: .tile,
+                  placeholderSymbol: "rectangle.stack")
+            .opens(.album(album.id), on: navigator)
+            .accessibilityActions {
+                if !album.assetIDs.isEmpty {
+                    Button("Fotos ansehen") { showPhotos(cover) }
+                }
+                if let undoable {
+                    Button("Rückgängig machen") { undo(undoable) }
+                }
+            }
+            .contextMenu {
+                if !album.assetIDs.isEmpty {
+                    Button { showPhotos(cover) } label: {
+                        Label("Fotos ansehen", systemImage: "photo")
+                    }
+                    .accessibilityIdentifier("album.viewPhotos")
+                }
+                if let undoable {
+                    Section {
+                        AlbumUndoMenuItem(deletes: model.removalDeletesAlbum(undoable)) { undo(undoable) }
+                    }
+                }
+            } preview: {
+                AlbumPreview(cover: cover, title: album.title, line: Self.line(album, managed: managed))
+            }
+            .accessibilityIdentifier("album.tile")
+    }
+
+    /// The album's photos in full screen, oldest first as in the album, starting at the photo
+    /// the preview showed.
+    private func showPhotos(_ cover: AlbumCover) {
+        let ids = PreviewPicker.chronological(album.assetIDs, dates: model.creationDates)
+        guard let first = cover.ids.first ?? ids.last else { return }
+        viewPhotos(PhotoViewer.Start(id: first, ids: ids))
+    }
+
+    /// "16 Fotos", the line under an album's name.
+    static func photoCount(_ album: CollectionSnapshot) -> Text {
+        let count = album.assetIDs.count
+        return Text("\(count) \(count.formatted()) Fotos")
+    }
+
+    /// The number of photos and, for an album of Albumist's, what Albumist did with it ("16 Fotos ·
+    /// angelegt von Albumist", "57 Fotos · ergänzt von Albumist"): under the large album of a long
+    /// press and under the title of the album.
+    static func line(_ album: CollectionSnapshot, managed: ManagedAlbumState?) -> Text {
+        let count = album.assetIDs.count
+        switch managed.flatMap({ AlbumTabSections.mark($0) }) {
+        case .some(.new): return Text("\(count) \(count.formatted()) Fotos · angelegt von Albumist")
+        case .some(.added): return Text("\(count) \(count.formatted()) Fotos · ergänzt von Albumist")
+        case .none: return photoCount(album)
+        }
+    }
+}
+
+/// "Rückgängig machen" for one of Albumist's albums in a menu (the long press on its tile, "…" in
+/// the album), with the line that says what it does (draft E4, right): an album Albumist created
+/// that holds nothing else goes; from any other album only Albumist's photos come out. What the
+/// menu item starts asks once more (`albumUndo`).
+struct AlbumUndoMenuItem: View {
+    /// The undo deletes the album (`AppModel.removalDeletesAlbum`).
+    var deletes: Bool
+    var action: @MainActor () -> Void
+
+    var body: some View {
+        Button(role: .destructive) {
+            action()
+        } label: {
+            Label("Rückgängig machen", systemImage: "arrow.uturn.backward")
+            // A second Text in the label is the item's second line, as in the suggestion's menu.
+            if deletes {
+                Text("Entfernt nur dieses Album. Deine Fotos bleiben.")
+            } else {
+                Text("Nimmt nur Albumists Fotos heraus. Das Album bleibt.")
+            }
+        }
+        .accessibilityIdentifier("album.undo")
+    }
+}
+
+/// The album large, as a long press shows it (draft E4, right): its cover across, the name and
+/// the line below on the card's own ground. Gets everything it shows handed in: the system draws
+/// it apart from the screen.
+struct AlbumPreview: View {
+    var cover: AlbumCover
+    var title: String
+    var line: Text
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CoverPhoto(ids: cover.ids, aspectRatio: 1.28, cornerRadius: 0, hidesPreview: cover.hidden,
+                       placeholderSymbol: "rectangle.stack")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: title)
+                    .font(.title3.weight(.bold))
+                    .fixedSize(horizontal: false, vertical: true)
+                line
+                    .font(.subheadline)
+                    .foregroundStyle(.noteText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.m)
+            .padding(.bottom, 14)
+        }
+        .frame(width: 320)
+        .background(Theme.card)
+    }
+}
+
+// MARK: - Folder
+
+/// A folder as a tile, as Photos shows folders: the covers of up to four of its albums in a
+/// square (a strip of four at the accessibility text sizes, like an album's wide cover there),
+/// the name and the number of albums in it below. A tap opens it (`FolderScreen`).
+struct FolderTile: View {
+    @Environment(AppModel.self) private var model
+    @Environment(Navigator.self) private var navigator: Navigator?
+    @Environment(\.dynamicTypeSize) private var typeSize
+    var folder: CollectionSnapshot
+
+    var body: some View {
+        let albums = Self.albums(in: folder, inventory: model.inventory)
+        let covers = albums.prefix(4).map { AlbumCover($0, model: model, count: 2) }
+        let count = Text("\(albums.count) Alben")
+        Button {
+            Navigator.push(.folder(folder.id), on: navigator)
+        } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                mosaic(covers)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: folder.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .compactLineLimit(2)
+                    count
+                        .font(.footnote)
+                        .foregroundStyle(.noteText)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("\(Text(verbatim: folder.title)), \(count)"))
+        .accessibilityValue(Text("Ordner"))
+        .accessibilityIdentifier("folder.tile")
+    }
+
+    @ViewBuilder
+    private func mosaic(_ covers: [AlbumCover]) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.photoTile, style: .continuous)
+        if covers.isEmpty {
+            // No album in it: the calm placeholder with the folder's symbol.
+            CoverPhoto(ids: [], aspectRatio: typeSize.isAccessibilitySize ? 3 : 1, cornerRadius: Theme.Radius.photoTile,
+                       placeholderSymbol: "folder")
+        } else if typeSize.isAccessibilitySize {
+            HStack(spacing: 2) {
+                ForEach(0..<4, id: \.self) { cell(covers, $0) }
+            }
+            .clipShape(shape)
+        } else {
+            Grid(horizontalSpacing: 2, verticalSpacing: 2) {
+                GridRow {
+                    cell(covers, 0)
+                    cell(covers, 1)
+                }
+                GridRow {
+                    cell(covers, 2)
+                    cell(covers, 3)
+                }
+            }
+            .clipShape(shape)
+        }
+    }
+
+    /// One album's cover in the mosaic; the calm placeholder where the folder has fewer albums,
+    /// and for an album whose preview is hidden ("Vorschau ausgeblendet" does not fit a quarter).
+    private func cell(_ covers: [AlbumCover], _ index: Int) -> some View {
+        let cover = index < covers.count ? covers[index] : nil
+        return CoverPhoto(ids: cover.map { $0.hidden ? [] : $0.ids } ?? [], aspectRatio: 1, cornerRadius: 0)
+    }
+
+    /// The albums in `folder` at any depth, in the order Photos lists them (folders' albums after
+    /// the folder's own, each level by `AlbumTabSections.order`).
+    static func albums(in folder: CollectionSnapshot, inventory: CollectionInventory) -> [CollectionSnapshot] {
+        var albums: [CollectionSnapshot] = []
+        var queue = [folder]
+        var seen: Set<CollectionID> = [folder.id]
+        while !queue.isEmpty {
+            let current = queue.removeFirst()
+            let children = current.childIDs.compactMap { inventory[$0] }.sorted(by: AlbumTabSections.order)
+            for child in children where seen.insert(child.id).inserted {
+                if child.kind == .folder {
+                    queue.append(child)
+                } else if child.kind != .smartAlbum {
+                    albums.append(child)
+                }
+            }
+        }
+        return albums
+    }
+}
+
+// MARK: - Layout
+
+/// Albums and folders side by side, two in a row as in Photos; one below the other at the
+/// accessibility text sizes (design rule 4).
+struct AlbumGrid<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: Theme.Spacing.l, alignment: .top),
+                            count: typeSize.isAccessibilitySize ? 1 : 2)
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+            content
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+    }
+}
+
+/// A section title of the tab, as in Photos: large and bold, a line below it if there is one,
+/// an action at its end ("Alle 12"). At the accessibility text sizes the action goes below.
+struct AlbumSectionHeader<Trailing: View>: View {
+    private let title: Text
+    private let subtitle: Text?
+    private let trailing: Trailing
+
+    init(_ title: Text, subtitle: Text? = nil, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            AdaptiveStack(verticalAlignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                title
+                    .font(.title2.weight(.bold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                trailing
+            }
+            if let subtitle {
+                subtitle
+                    .font(.subheadline)
+                    .foregroundStyle(.noteText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+    }
+}
+
+extension AlbumSectionHeader where Trailing == EmptyView {
+    init(_ title: Text, subtitle: Text? = nil) {
+        self.init(title, subtitle: subtitle) { EmptyView() }
+    }
+}
+
+extension View {
+    /// Opens `screen` with a tap and as VoiceOver's default action, for a photo card that is
+    /// not a button itself. Until `PhotoCard` opens a card from its own body (second review of
+    /// the components, H2), which then takes over here.
+    @MainActor
+    fileprivate func opens(_ screen: AppScreen, on navigator: Navigator?) -> some View {
+        self
+            .contentShape(Rectangle())
+            .onTapGesture { Navigator.push(screen, on: navigator) }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { Navigator.push(screen, on: navigator) }
+    }
+}

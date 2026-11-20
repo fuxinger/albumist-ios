@@ -2,18 +2,362 @@ import SwiftUI
 import SortlyCore
 import SortlyEngine
 
-/// Existing albums and folders as Photos shows them, plus merge suggestions for albums
-/// that hold mostly the same photos (prompt §3).
+/// The tab "Alben" (design 5C, approved 20.11.2026, draft E4): on top a shelf of what Albumist
+/// created or extended ("Von Albumist", "angelegt oder ergänzt", "Alle 12"), then rows for the
+/// folders Albumist's new albums lie in, "Verlauf und Rückgängig" (moved here from the settings)
+/// and "Ähnliche Alben", then the user's other albums and folders as Photos shows them ("Deine
+/// Alben"). Every album and folder stands once (`AlbumTabSections`). Albums are photo tiles
+/// (covers at least half the screen wide, design rule 6); a long press on one of Albumist's has
+/// "Rückgängig machen", which undoes only that album (`albumUndo`).
+///
+/// Everything here is pushed by value (`AppScreen`): an album, a folder, the list of all of
+/// Albumist's albums, the history, the similar albums, and the preview of an undo.
 struct AlbumsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(Navigator.self) private var navigator: Navigator?
+    @State private var viewing: PhotoViewer.Start?
+    @State private var undoing: ManagedAlbumState?
+
+    var body: some View {
+        let sections = AlbumTabSections(inventory: model.inventory, managed: model.managedAlbums, history: model.history,
+                                        undone: model.undonePlans, moreHistory: model.historyHasMore,
+                                        interrupted: model.interruptedPlan != nil, similar: model.mergeSuggestions.count)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if !sections.albumistAlbums.isEmpty {
+                    AlbumSectionHeader(Text("Von Albumist"), subtitle: Text("angelegt oder ergänzt")) {
+                        if sections.showsAll { allButton(count: sections.albumistAlbums.count) }
+                    }
+                    .padding(.top, Theme.Spacing.s)
+                    CardShelf {
+                        ForEach(sections.shelf) { album in
+                            AlbumTile(album: album.collection, managed: album.state,
+                                      viewPhotos: { viewing = $0 }, undo: { undoing = $0 })
+                        }
+                    }
+                    .padding(.top, Theme.Spacing.m)
+                }
+
+                AlbumRowsCard(rows: sections.rows)
+                    .padding(.top, sections.albumistAlbums.isEmpty ? Theme.Spacing.s : Theme.Spacing.xl)
+
+                // Left out while every album is Albumist's: "Noch keine Alben" under the shelf read
+                // as wrong (UI run 44570945716). With limited access it always explains why.
+                if sections.showsYourAlbums || model.access == .limited {
+                    AlbumSectionHeader(Text("Deine Alben"))
+                        .padding(.top, 28)
+                        .padding(.bottom, Theme.Spacing.m)
+                    if model.access == .limited {
+                        limitedNote
+                    } else if sections.saysNoAlbums {
+                        Text("Noch keine Alben")
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, Theme.Spacing.l)
+                    }
+                    AlbumGrid {
+                        ForEach(sections.yours) { collection in
+                            if collection.kind == .folder {
+                                FolderTile(folder: collection)
+                            } else {
+                                AlbumTile(album: collection, viewPhotos: { viewing = $0 })
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, Theme.Spacing.xl)
+        }
+        .background(Theme.background)
+        .navigationTitle("Alben")
+        .refreshable { await model.refreshDerived() }
+        .albumUndo($undoing)
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
+        }
+    }
+
+    /// "Alle 12" beside "Von Albumist": every album Albumist created or extended.
+    private func allButton(count: Int) -> some View {
+        Button {
+            Navigator.push(.managedAlbums, on: navigator)
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                Text("Alle \(count)")
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .accessibilityHidden(true)
+            }
+            .font(.callout.weight(.medium))
+            .foregroundStyle(Theme.accent)
+            .minimumHitTarget()
+        }
+        .accessibilityLabel(Text("Alle \(count) Alben anzeigen"))
+        .accessibilityIdentifier("albums.managed")
+    }
+
+    /// iOS shows an app no albums at all while only some photos are shared.
+    private var limitedNote: some View {
+        Card {
+            Text("Deine Alben sind nicht sichtbar, solange du Albumist nur ausgewählte Fotos freigibst. So regelt iOS das.")
+                .font(.subheadline)
+                .foregroundStyle(.noteText)
+                .fixedSize(horizontal: false, vertical: true)
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                Button("Alle Fotos erlauben") { openURL(url) }
+                    .font(.subheadline.weight(.semibold))
+                    .minimumHitTarget()
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+    }
+}
+
+/// The rows between the shelf and "Deine Alben" (draft E4), on one card: "Ordner „Reisen“" for
+/// each folder Albumist's new albums lie in (with 40 trips a shelf finds nothing), "Verlauf und
+/// Rückgängig", and "Ähnliche Alben" while there are any. Plain numbers at the end, as in the
+/// rows of Photos; VoiceOver says what they count.
+private struct AlbumRowsCard: View {
+    var rows: [AlbumTabSections.Row]
+    @Environment(\.colorSchemeContrast) private var contrast
+    @ScaledMetric(relativeTo: .body) private var symbolWidth: CGFloat = 28
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.largeCard, style: .continuous)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 {
+                    Divider()
+                        .padding(.leading, Theme.Spacing.l + symbolWidth + Theme.Spacing.m)
+                }
+                link(row)
+            }
+        }
+        .background(Theme.card, in: shape)
+        .clipShape(shape)
+        // White on light grey is only 1.1:1; with Increase Contrast the card gets an edge (as `Card`).
+        .overlay {
+            if contrast == .increased {
+                shape.strokeBorder(Color(uiColor: .separator), lineWidth: 1)
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+    }
+
+    @ViewBuilder
+    private func link(_ row: AlbumTabSections.Row) -> some View {
+        switch row {
+        case .folder(let folder, let albums):
+            let title = Text("Ordner „\(folder.title)“")
+            PushLink(.folder(folder.id), chevron: false) {
+                line(symbol: "folder", title: title, value: Text(albums.formatted()))
+            }
+            .accessibilityLabel(title)
+            .accessibilityValue(Text("\(albums) Alben"))
+            .accessibilityIdentifier("albums.folders")
+        case .history(let changes, let more, let interrupted):
+            let shown = changes.formatted() + (more ? "+" : "")
+            PushLink(.history, chevron: false) {
+                line(symbol: "clock.arrow.circlepath", title: Text("Verlauf und Rückgängig"),
+                     value: interrupted ? Text("Unterbrochen") : changes > 0 ? Text(verbatim: shown) : nil)
+            }
+            .accessibilityLabel(Text("Verlauf und Rückgängig"))
+            .accessibilityValue(interrupted ? Text("Unterbrochen")
+                                : more ? Text("Mehr als \(changes) Änderungen") : Text("\(changes) Änderungen"))
+            .accessibilityIdentifier("albums.history")
+        case .similar(let count):
+            PushLink(.similarAlbums, chevron: false) {
+                line(symbol: "arrow.triangle.merge", title: Text("Ähnliche Alben"), value: Text(count.formatted()))
+            }
+            .accessibilityLabel(Text("Ähnliche Alben"))
+            .accessibilityValue(Text("\(count) Vorschläge"))
+            .accessibilityIdentifier("albums.similar")
+        }
+    }
+
+    /// One row: the symbol in the accent, the title, the number, a chevron; 52 pt high or more.
+    private func line(symbol: String, title: Text, value: Text?) -> some View {
+        HStack(spacing: Theme.Spacing.m) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundStyle(Theme.accent)
+                .frame(width: symbolWidth)
+                .accessibilityHidden(true)
+            title
+                .font(.body)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let value {
+                value
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.vertical, Theme.Spacing.s)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+    }
+}
+
+/// A folder's albums and folders as tiles (draft E4), folders first, then by name as in Photos.
+/// Albumist's albums carry "Neu" or "+12", and their long press has "Rückgängig machen". Shown as
+/// the folder is now; when it is gone, the screen says so.
+struct FolderScreen: View {
+    @Environment(AppModel.self) private var model
+    var id: CollectionID
+    @State private var viewing: PhotoViewer.Start?
+    @State private var undoing: ManagedAlbumState?
+    @State private var lastTitle = ""
+
+    var body: some View {
+        Group {
+            if let folder = model.inventory[id] {
+                let children = folder.childIDs.compactMap { model.inventory[$0] }
+                    .filter { $0.kind != .smartAlbum }
+                    .sorted(by: AlbumTabSections.order)
+                // The first record of an album, as the undo reads it (`AlbumTabSections`).
+                let managed = Dictionary(model.managedAlbums.map { ($0.albumID, $0) }, uniquingKeysWith: { first, _ in first })
+                ScrollView {
+                    if children.isEmpty {
+                        Text("Leerer Ordner")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Theme.Spacing.l)
+                    }
+                    AlbumGrid {
+                        ForEach(children) { child in
+                            if child.kind == .folder {
+                                FolderTile(folder: child)
+                            } else {
+                                AlbumTile(album: child, managed: managed[child.id],
+                                          viewPhotos: { viewing = $0 }, undo: { undoing = $0 })
+                            }
+                        }
+                    }
+                    .padding(.vertical, Theme.Spacing.l)
+                }
+                .navigationTitle(folder.title)
+            } else {
+                ContentUnavailableView("Den Ordner „\(lastTitle)“ gibt es nicht mehr.", systemImage: "folder")
+            }
+        }
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: model.inventory[id]?.title, initial: true) { _, title in
+            if let title { lastTitle = title }
+        }
+        .albumUndo($undoing)
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
+        }
+    }
+}
+
+/// Every photo of an album, oldest first like an album in Photos; a tap opens it large (design
+/// review W12: only 200 photos with "+N" and taps did nothing). Under the title the number of
+/// photos and, for an album of Albumist's, what Albumist did with it; at the top right "…" with
+/// "Rückgängig machen" (decision 17.11.: the main way; the long press on the tile is the
+/// shortcut). Shown as the album is now: after an undo deleted it, the screen says so.
+struct AlbumScreen: View {
+    @Environment(AppModel.self) private var model
+    var id: CollectionID
+    @State private var viewing: PhotoViewer.Start?
+    @State private var undoing: ManagedAlbumState?
+    @State private var lastTitle = ""
+    @Namespace private var zoom
+
+    var body: some View {
+        Group {
+            if let album = model.inventory[id] {
+                photos(album)
+            } else {
+                ContentUnavailableView("Das Album „\(lastTitle)“ gibt es nicht mehr.", systemImage: "rectangle.stack")
+            }
+        }
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let state = undoable {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        AlbumUndoMenuItem(deletes: model.removalDeletesAlbum(state)) { undoing = state }
+                    } label: {
+                        Label("Weitere Aktionen", systemImage: "ellipsis")
+                    }
+                    .accessibilityIdentifier("album.more")
+                }
+            }
+        }
+        .onChange(of: model.inventory[id]?.title, initial: true) { _, title in
+            if let title { lastTitle = title }
+        }
+        .albumUndo($undoing)
+        .fullScreenCover(item: $viewing) { start in
+            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
+                .navigationTransition(.zoom(sourceID: start.id, in: zoom))
+        }
+    }
+
+    /// Albumist's record of the album while something of Albumist's is in it (an album of the
+    /// user's whose added photos the user took out again has nothing left to undo).
+    private var undoable: ManagedAlbumState? {
+        guard model.inventory[id] != nil,
+              let state = model.managedAlbums.first(where: { $0.albumID == id }),
+              AlbumTabSections.mark(state) != nil else { return nil }
+        return state
+    }
+
+    private func photos(_ album: CollectionSnapshot) -> some View {
+        let ids = PreviewPicker.chronological(album.assetIDs, dates: model.creationDates)
+        let managed = model.managedAlbums.first { $0.albumID == album.id }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                AlbumTile.line(album, managed: managed)
+                    .font(.subheadline)
+                    .foregroundStyle(.noteText)
+                if !album.isEditableAlbum {
+                    Label("Dieses Album kann Albumist nicht verändern.", systemImage: "lock")
+                        .font(.footnote).foregroundStyle(.noteText)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
+                    ForEach(ids, id: \.self) { photo in
+                        Button {
+                            viewing = PhotoViewer.Start(id: photo, ids: ids)
+                        } label: {
+                            AssetThumbnail(id: photo, side: 110)
+                                .aspectRatio(1, contentMode: .fill)
+                                .matchedTransitionSource(id: photo, in: zoom)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text(model.creationDates[photo]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
+                        .accessibilityIdentifier("album.photo")
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
+            }
+            .padding(Theme.Spacing.l)
+        }
+        .navigationTitle(album.title)
+    }
+}
+
+/// Albums that hold mostly the same photos, with the offer to merge them (prompt §3; the row
+/// "Ähnliche Alben" in the tab "Alben"). A tap makes the merge plan and shows it in the preview.
+struct SimilarAlbumsView: View {
+    @Environment(AppModel.self) private var model
     /// The merge preview is pushed onto the tab's path (`AppScreen`), not presented with
     /// `navigationDestination(isPresented:)`.
     @Environment(Navigator.self) private var navigator: Navigator?
-    /// The suggestion whose merge plan is being prepared: its row shows a spinner and the
-    /// rows do not take a second tap meanwhile (design review N13). Albums and folders do not
-    /// open meanwhile either: the plan would be pushed above them (a destination link moves no
-    /// `Navigator.mark`). Their hint, and that of the other suggestions, says why they wait.
+    /// The suggestion whose merge plan is being prepared: its row shows a spinner and the rows
+    /// do not take a second tap meanwhile (design review N13); the others say why they wait.
     @State private var preparing: [CollectionID]?
     /// A merge plan that was ready while another tab was chosen: offered again when this tab
     /// shows (`showWaiting()`).
@@ -27,11 +371,7 @@ struct AlbumsView: View {
 
     private var suggestions: [AlbumOverlapAnalyzer.MergeSuggestion] { model.mergeSuggestions }
 
-    static func order(_ a: CollectionSnapshot, _ b: CollectionSnapshot) -> Bool { AlbumTabSections.order(a, b) }
-
     var body: some View {
-        // Each album once: "Deine Alben" leaves out Albumist's albums listed above (review P3-16).
-        let sections = AlbumTabSections(inventory: model.inventory, managed: model.managedAlbums)
         List {
             if !suggestions.isEmpty {
                 Section {
@@ -56,72 +396,24 @@ struct AlbumsView: View {
                         }
                         .disabled(preparing != nil)
                         // The row being prepared says so with its spinner.
-                        .accessibilityHint(preparing == suggestion.albumIDs ? Text(verbatim: "") : waitHint)
+                        .accessibilityHint(preparing == nil || preparing == suggestion.albumIDs ? Text(verbatim: "") : Text("Vorschau wird vorbereitet"))
+                        .accessibilityIdentifier("merge.suggestion")
                     }
-                } header: {
-                    Text("Ähnliche Alben")
                 } footer: {
                     Text("Albumist ergänzt das größte Album um die fehlenden Fotos. Die anderen Alben bleiben erhalten.")
                 }
             }
-
-            if !sections.fromAlbumist.isEmpty {
-                Section {
-                    ForEach(sections.fromAlbumist) { collection in
-                        CollectionRow(collection: collection)
-                            .disabled(preparing != nil)
-                            .accessibilityHint(waitHint)
-                    }
-                } header: {
-                    Text("Von Albumist angelegt oder ergänzt")
-                } footer: {
-                    let root = model.settings.rootFolderTitle.trimmingCharacters(in: .whitespaces)
-                    if root.isEmpty {
-                        Text("Neue Alben liegen in Fotos unter Sammlungen › Alben.")
-                    } else {
-                        Text("Neue Alben liegen in Fotos im Ordner „\(root)“.")
-                    }
-                }
-            }
-
-            // Left out while every album is Albumist's: "Noch keine Alben" under the list above
-            // read as wrong (UI run 44570945716). With limited access it always explains why.
-            if sections.showsYourAlbums || model.access == .limited {
-                Section("Deine Alben") {
-                    if model.access == .limited {
-                        // iOS shows an app no albums at all while only some photos are shared.
-                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                            Text("Deine Alben sind nicht sichtbar, solange du Albumist nur ausgewählte Fotos freigibst. So regelt iOS das.")
-                                .font(.subheadline).foregroundStyle(.noteText)
-                                .fixedSize(horizontal: false, vertical: true)
-                            if let url = URL(string: UIApplication.openSettingsURLString) {
-                                Button("Alle Fotos erlauben") { openURL(url) }
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    } else if sections.saysNoAlbums {
-                        Text("Noch keine Alben").foregroundStyle(.secondary)
-                    }
-                    ForEach(sections.yours) { collection in
-                        CollectionRow(collection: collection)
-                            .disabled(preparing != nil)
-                            .accessibilityHint(waitHint)
-                    }
-                }
+        }
+        .overlay {
+            if suggestions.isEmpty {
+                ContentUnavailableView("Keine ähnlichen Alben", systemImage: "rectangle.stack")
             }
         }
-        .navigationTitle("Alben")
+        .navigationTitle("Ähnliche Alben")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear { showWaiting() }
         // The tab shows again (`Navigator.appearances`): a result that waited is offered now.
         .onChange(of: navigator?.appearances) { showWaiting() }
-        .refreshable { await model.refreshDerived() }
-    }
-
-    /// Why albums, folders and the other suggestions wait while a merge preview is prepared
-    /// (VoiceOver said only "dimmed").
-    private var waitHint: Text {
-        preparing == nil ? Text(verbatim: "") : Text("Vorschau wird vorbereitet")
     }
 
     /// Makes the merge plan of `suggestion`; the row shows a spinner meanwhile.
@@ -166,106 +458,5 @@ struct AlbumsView: View {
         guard let ready = waiting, navigator?.showing == true else { return }
         waiting = nil
         offer(ready, attempt: 1)
-    }
-}
-
-/// One album or folder; folders open their children.
-struct CollectionRow: View {
-    @Environment(AppModel.self) private var model
-    var collection: CollectionSnapshot
-
-    var body: some View {
-        if collection.kind == .folder {
-            NavigationLink {
-                FolderView(folder: collection)
-            } label: {
-                label(symbol: "folder", detail: Text("\(collection.childIDs.count) Einträge"))
-            }
-        } else {
-            NavigationLink {
-                AlbumDetailView(album: collection)
-            } label: {
-                label(symbol: collection.kind == .restrictedAlbum ? "person.2" : "rectangle.stack",
-                      detail: Text("\(collection.assetIDs.count) \(collection.assetIDs.count.formatted()) Fotos"))
-            }
-        }
-    }
-
-    private func label(symbol: String, detail: Text) -> some View {
-        HStack(spacing: Theme.Spacing.m) {
-            if collection.kind == .folder {
-                IconTile(systemName: symbol, tint: Theme.tint(for: .neutral))
-            } else {
-                // The newest photo, as Photos shows albums (design review N4), but never a
-                // sensitive document such as a bank card (`PreviewRank`).
-                CoverThumbnail(id: PreviewPicker.newest(collection.assetIDs, dates: model.creationDates, ranks: model.previewRanks),
-                               side: 44, hidden: !collection.assetIDs.isEmpty)
-                    .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(collection.title).font(.body)
-                detail.font(.footnote).foregroundStyle(.noteText).monospacedDigit()
-            }
-        }
-    }
-}
-
-struct FolderView: View {
-    @Environment(AppModel.self) private var model
-    var folder: CollectionSnapshot
-
-    var body: some View {
-        List {
-            let children = folder.childIDs.compactMap { model.inventory[$0] }.sorted(by: AlbumsView.order)
-            if children.isEmpty { Text("Leerer Ordner").foregroundStyle(.secondary) }
-            ForEach(children) { CollectionRow(collection: $0) }
-        }
-        .navigationTitle(folder.title)
-    }
-}
-
-/// Every photo of an album, oldest first like an album in Photos; a tap opens it large
-/// (design review W12: only 200 photos with "+N" and taps did nothing).
-struct AlbumDetailView: View {
-    @Environment(AppModel.self) private var model
-    var album: CollectionSnapshot
-    @State private var viewing: PhotoViewer.Start?
-    @Namespace private var zoom
-
-    var body: some View {
-        let ids = PreviewPicker.chronological(album.assetIDs, dates: model.creationDates)
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                if !album.isEditableAlbum {
-                    Label("Dieses Album kann Albumist nicht verändern.", systemImage: "lock")
-                        .font(.footnote).foregroundStyle(.noteText)
-                }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 3)], spacing: 3) {
-                    ForEach(ids, id: \.self) { id in
-                        Button {
-                            viewing = PhotoViewer.Start(id: id, ids: ids)
-                        } label: {
-                            AssetThumbnail(id: id, side: 110)
-                                .aspectRatio(1, contentMode: .fill)
-                                .matchedTransitionSource(id: id, in: zoom)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(Text(model.creationDates[id]?.formatted(date: .abbreviated, time: .shortened) ?? String(localized: "Foto")))
-                        .accessibilityIdentifier("album.photo")
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
-            }
-            .padding(Theme.Spacing.l)
-        }
-        .background(Theme.background)
-        .navigationTitle(album.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .fullScreenCover(item: $viewing) { start in
-            PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
-                .navigationTransition(.zoom(sourceID: start.id, in: zoom))
-        }
     }
 }

@@ -3961,6 +3961,26 @@
         }
       }
     },
+    "Ordner „%@“" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Folder “%@”"
+          }
+        }
+      }
+    },
+    "Den Ordner „%@“ gibt es nicht mehr." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The folder “%@” no longer exists."
+          }
+        }
+      }
+    },
     "Originale bearbeitet" : {
       "localizations" : {
         "en" : {
@@ -4217,6 +4237,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Undo"
+          }
+        }
+      }
+    },
+    "Fotos ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View Photos"
+          }
+        }
+      }
+    },
+    "Entfernt nur dieses Album. Deine Fotos bleiben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removes only this album. Your photos stay."
+          }
+        }
+      }
+    },
+    "Nimmt nur Albumists Fotos heraus. Das Album bleibt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removes only Albumist’s photos. The album stays."
           }
         }
       }
@@ -5036,7 +5086,17 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Similar albums"
+            "value" : "Similar Albums"
+          }
+        }
+      }
+    },
+    "Keine ähnlichen Alben" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Similar Albums"
           }
         }
       }
@@ -5501,6 +5561,126 @@
         }
       }
     },
+    "%lld %@ Fotos · angelegt von Albumist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Foto · angelegt von Albumist"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Fotos · angelegt von Albumist"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ photo · created by Albumist"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ photos · created by Albumist"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld %@ Fotos · ergänzt von Albumist" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Foto · ergänzt von Albumist"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ Fotos · ergänzt von Albumist"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%#@photos@"
+          },
+          "substitutions" : {
+            "photos" : {
+              "argNum" : 1,
+              "formatSpecifier" : "lld",
+              "variations" : {
+                "plural" : {
+                  "one" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ photo · extended by Albumist"
+                    }
+                  },
+                  "other" : {
+                    "stringUnit" : {
+                      "state" : "translated",
+                      "value" : "%2$@ photos · extended by Albumist"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "Albumists Fotos herausnehmen" : {
       "localizations" : {
         "en" : {
@@ -5517,6 +5697,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tap an album to undo Albumist's changes to it. Photos you added yourself stay in it. Your originals always stay in your library."
+          }
+        }
+      }
+    },
+    "Halte ein Album gedrückt oder tippe im Album auf „…“, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touch and hold an album, or tap “…” in the album, to undo Albumist’s changes to it. Photos you added yourself stay in it."
           }
         }
       }
@@ -5627,6 +5817,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Created or Extended by Albumist"
+          }
+        }
+      }
+    },
+    "Von Albumist" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "From Albumist"
+          }
+        }
+      }
+    },
+    "angelegt oder ergänzt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "created or extended"
+          }
+        }
+      }
+    },
+    "Alle %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "See All %lld"
           }
         }
       }
@@ -11207,6 +11427,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "History and Undo"
+          }
+        }
+      }
+    },
+    "%lld Änderungen" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Änderung"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Änderungen"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld change"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld changes"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Mehr als %lld Änderungen" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Mehr als %lld Änderung"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Mehr als %lld Änderungen"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "More than %lld change"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "More than %lld changes"
+                }
+              }
+            }
           }
         }
       }

@@ -66,6 +66,57 @@ final class SortlyFlowUITests: XCTestCase {
         return bar.exists && bar.isHittable
     }
 
+    /// The actions of a suggestion besides its two buttons ("Album anlegen", "Nicht jetzt"): in
+    /// the "…" menu at the top right since review P3-06.
+    private static let menuActions = ["Anpassen", "Auswählen und später anlegen", "Reise teilen oder zusammenlegen",
+                                      "Keine Reise, hier bin ich öfter"]
+
+    /// The "…" button at the top right of a suggestion, by its identifier or, where the toolbar
+    /// does not pass that on, by its name.
+    private func moreActionsButton() -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@", "proposal.more", "Weitere Aktionen")).firstMatch
+    }
+
+    /// An item of the open "…" menu, by its identifier or its title.
+    private func menuItem(_ identifier: String, _ title: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@", identifier, title)).firstMatch
+    }
+
+    /// Taps an item of the open menu where it is: `tap(_:_:)` swipes to bring an element into
+    /// view, and a swipe would close the menu. A missing item closes the menu again.
+    @discardableResult
+    private func tapMenuItem(_ item: XCUIElement, _ step: String) -> Bool {
+        guard item.waitForExistence(timeout: 5) else {
+            print("UI_STEP_MISSING \(step)")
+            shot("x-missing-" + step.replacingOccurrences(of: " ", with: "-"))
+            XCTFail("Missing: \(step)")
+            // A tap at the left edge closes the menu; if it reached the page, it hits no button.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5)).tap()
+            return false
+        }
+        UITestOnboarding.clock("tap \(step)")
+        item.tap()
+        print("UI_STEP_OK \(step)")
+        return true
+    }
+
+    /// Review P3-06 (screenshot ui-08c-trip-detail): a suggestion showed up to six actions in a
+    /// column, the last half behind the tab bar. Its page now has "Nicht jetzt" beside the
+    /// primary button and none of the other actions, and the "…" menu at the top right is there
+    /// to tap.
+    private func checkTwoActionsAndMenu(_ what: String) {
+        let onPage = Self.menuActions.filter { app.buttons.matching(NSPredicate(format: "label == %@", $0)).firstMatch.exists }
+        let more = moreActionsButton()
+        let menu = more.waitForExistence(timeout: 5) && more.isHittable
+        let notNow = app.buttons.matching(NSPredicate(format: "label == %@", "Nicht jetzt")).firstMatch.exists
+        let shown = onPage.isEmpty && menu && notNow
+        print(shown ? "UI_STEP_OK \(what) shows two actions and the menu"
+                    : "UI_STEP_MISSING \(what) shows two actions and the menu (on the page \(onPage), menu \(menu), Nicht jetzt \(notNow))")
+        XCTAssertTrue(onPage.isEmpty, "The \(what) shows \(onPage) on the page instead of in the \"…\" menu")
+        XCTAssertTrue(menu, "The \(what) has no \"…\" menu to tap at the top right")
+        XCTAssertTrue(notNow, "The \(what) shows no \"Nicht jetzt\"")
+    }
+
     private func anything(_ text: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
@@ -542,6 +593,7 @@ final class SortlyFlowUITests: XCTestCase {
                 print(opened ? "UI_STEP_OK trip detail opened" : "UI_STEP_MISSING trip detail opened")
                 XCTAssertTrue(opened, "Tapping a trip suggestion did not open its detail")
                 shot("08c-trip-detail")
+                checkTwoActionsAndMenu("trip")
                 back(); sleep(1)
                 shot("08d-back-to-trips")
             }
@@ -976,9 +1028,20 @@ final class SortlyFlowUITests: XCTestCase {
             var swipes = 0
             while !(row.exists && row.isHittable) && swipes < 4 { app.swipeUp(); swipes += 1; sleep(1) }
             guard tap(row, "open trip for " + step, timeout: 10) else { return false }
-            let reshape = app.buttons["proposal.reshapeTrip"]
-            if reshape.waitForExistence(timeout: 5) && !reshape.isHittable { app.swipeUp(); sleep(1) }
-            return tap(reshape, "open trip workshop for " + step, timeout: 5)
+            // Review P3-06: the workshop is in the "…" menu at the top right of the trip.
+            guard tap(moreActionsButton(), "more actions of the trip for " + step, timeout: 5) else { return false }
+            let reshape = menuItem("proposal.reshapeTrip", "Reise teilen oder zusammenlegen")
+            if step == "split" {
+                // The open menu holds the trip's other actions too: "Anpassen" is in every
+                // suggestion's. Both can be tapped before the picture is taken.
+                UITestWait.until("trip menu lists its actions", timeout: 5) {
+                    reshape.exists && reshape.isHittable && menuItem("proposal.adjust", "Anpassen").isHittable
+                }
+                // pacing: the menu's opening animation, before the picture
+                sleep(1)
+                shot("59-trip-menu")
+            }
+            return tapMenuItem(reshape, "open trip workshop for " + step)
         }
         func finish(_ step: String, shotName: String) {
             let done = app.buttons["workshop.done"]
@@ -1673,9 +1736,11 @@ final class SortlyFlowUITests: XCTestCase {
 
         // "Anpassen" has the same name under "Titel", and a name changed there is in the field
         // afterwards, also when "Abbrechen" closes it (owner's device test 18.11.: "Dahoam"
-        // typed in the suggestion, "Titel" in "Anpassen" was empty).
+        // typed in the suggestion, "Titel" in "Anpassen" was empty). "Anpassen" is in the "…"
+        // menu at the top right (review P3-06).
         let typed = field.value as? String ?? ""
-        if tap(app.buttons["Anpassen"], "open Anpassen with the typed name", timeout: 5) {
+        if tap(moreActionsButton(), "more actions of the personal place", timeout: 5),
+           tapMenuItem(menuItem("proposal.adjust", "Anpassen"), "open Anpassen with the typed name") {
             let title = app.textFields["adjust.titleField"]
             let there = title.waitForExistence(timeout: 5) ? (title.value as? String ?? "") : "-"
             print("UI_FACT name in the suggestion '\(typed)', in Anpassen '\(there)'")

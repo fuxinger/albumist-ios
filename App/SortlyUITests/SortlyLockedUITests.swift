@@ -72,8 +72,8 @@ final class SortlyLockedUITests: XCTestCase {
     }
 
     /// Opens the suggestions and selects the recommended ones, or else one suggestion for a
-    /// new album with its own "Auswählen und später anlegen"; true when something is then
-    /// ready to be created.
+    /// new album with its own "Auswählen und später anlegen" (in the "…" menu at the top right
+    /// since review P3-06); true when something is then ready to be created.
     private func selectRecommended(_ step: String) -> Bool {
         let review = reviewSuggestionsButton()
         guard review.waitForExistence(timeout: 20) else { return false }
@@ -87,8 +87,28 @@ final class SortlyLockedUITests: XCTestCase {
             print("UI_FACT locked: no recommended ones, a row for a new album \(row.exists)")
             if row.exists {
                 row.tap(); sleep(2)
-                let later = button("Auswählen und später anlegen")
-                if later.waitForExistence(timeout: 5) { tap(later, "select one suggestion (locked)"); sleep(1) }
+                // By identifier, or by name where the menu does not pass the identifier on.
+                func named(_ identifier: String, _ label: String) -> XCUIElement {
+                    app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@", identifier, label)).firstMatch
+                }
+                let more = named("proposal.more", "Weitere Aktionen")
+                if more.waitForExistence(timeout: 5) {
+                    more.tap()
+                    // A menu item is tapped where it is: a swipe would close the menu.
+                    let later = named("proposal.selectLater", "Auswählen und später anlegen")
+                    if later.waitForExistence(timeout: 5) {
+                        later.tap()
+                        print("UI_STEP_OK select one suggestion (locked)")
+                        sleep(1)
+                    } else {
+                        // Not offered for this suggestion: a tap at the left edge closes the menu
+                        // (if it reached the page, it hits no button there).
+                        print("UI_FACT locked: no \"Auswählen und später anlegen\" in the menu")
+                        app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5)).tap()
+                        // "Anpassen" is in every suggestion's menu and nowhere on its page.
+                        UITestWait.until("menu closed (locked)", timeout: 5) { !named("proposal.adjust", "Anpassen").exists }
+                    }
+                }
                 // The detail goes back to the list by itself after the choice; if not, back.
                 if app.navigationBars["Vorschlag"].exists { back(); sleep(1) }
             }

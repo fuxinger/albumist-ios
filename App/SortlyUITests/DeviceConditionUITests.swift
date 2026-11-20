@@ -1737,8 +1737,7 @@ final class DeviceConditionUITests: XCTestCase {
             let parts = line.split(separator: " ")
             guard parts.count == 2, let end = Double(parts[0]), let ms = Int(parts[1]) else { return nil }
             let stall = (end: Date(timeIntervalSince1970: end), ms: ms)
-            let start = stall.end.addingTimeInterval(-Double(ms) / 1000)
-            return start <= to && stall.end >= from ? stall : nil
+            return PauseCountCheck.overlaps(stallEnd: stall.end, ms: ms, from: from, to: to) ? stall : nil
         }
     }
 

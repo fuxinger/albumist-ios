@@ -1784,38 +1784,42 @@ final class SortlyFlowUITests: XCTestCase {
     private func ensureAlbumForSweep() { ensureAlbum(for: "the sweep") }
 
     /// An album with photos on the Alben tab: makes "Testalbum Rundgang" through a manual plan
-    /// when the tab says it has none. Every test starts on a fresh library, so a test that needs
-    /// an album makes its own instead of relying on what another test left behind.
+    /// when the tab has none with photos. The tests of a group share one simulator, and what an
+    /// earlier test left there depends on the grouping, so a test that needs an album makes
+    /// its own instead of relying on another test.
     private func ensureAlbum(for purpose: String) {
         guard tap(tabButton("Alben"), "albums tab before \(purpose)") else { return }
         let empty = app.staticTexts["Noch keine Alben"]
-        let album = app.descendants(matching: .any)
+        let anyAlbum = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label MATCHES %@", "(.*, )?[0-9]+ Fotos?")).firstMatch
+        // An album with photos (an empty Albumist album has happened, UI run 43949880264).
+        let album = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label MATCHES %@", "(.*[^0-9.])?[1-9][0-9.]* Fotos?")).firstMatch
         // The tab shows its rows or says it has none.
-        let shown = UITestWait.holds(timeout: 10) { empty.exists || album.exists }
+        let shown = UITestWait.holds(timeout: 10) { empty.exists || anyAlbum.exists }
         if !shown {
             print("UI_STEP_MISSING albums tab before \(purpose)")
             XCTFail("The albums tab showed neither an album row nor \"Noch keine Alben\" before \(purpose)")
         }
-        let made = empty.exists
-        print("UI_FACT albums tab empty before \(purpose) \(made)")
+        let made = empty.exists || !album.exists
+        print("UI_FACT albums tab without an album with photos before \(purpose) \(made)")
         if made, openManualPlan("Testalbum Rundgang"),
-           tap(app.buttons["plan.apply"], "apply the sweep's album", timeout: 30) {
+           tap(app.buttons["plan.apply"], "apply the album for \(purpose)", timeout: 30) {
             let done = button("Rückgängig machen").waitForExistence(timeout: 900)
             let doneAt = Date()
-            print(done ? "UI_STEP_OK album for the sweep" : "UI_STEP_MISSING album for the sweep")
-            XCTAssertTrue(done, "The sweep's album was not created")
+            print(done ? "UI_STEP_OK album for \(purpose)" : "UI_STEP_MISSING album for \(purpose)")
+            XCTAssertTrue(done, "The album for \(purpose) was not created")
             // The plan ran from the "Zu Album hinzufügen" sheet: start the app again, as
             // applyRecommended does, so no sheet is left over the tab bar; with its pacing (the
             // app stores the finished plan after the result shows, no element says when), so the
             // restart does not cut the plan off.
             UITestWait.atLeast(2, since: doneAt)
             launch()
-            UITestWait.appears(app.tabBars.firstMatch, "tab bar after the sweep's album", timeout: 60)
+            UITestWait.appears(app.tabBars.firstMatch, "tab bar after the album for \(purpose)", timeout: 60)
             // Evidence that it was stored: no "wurde unterbrochen" card for it after the restart.
             let cut = anything("wurde unterbrochen").waitForExistence(timeout: 5)
-            print("UI_FACT sweep album plan interrupted by the restart \(cut)")
-            XCTAssertFalse(cut, "The sweep's album plan shows as interrupted after the restart")
+            print("UI_FACT album plan for \(purpose) interrupted by the restart \(cut)")
+            XCTAssertFalse(cut, "The album plan for \(purpose) shows as interrupted after the restart")
         }
         tap(tabButton("Übersicht"), "overview before \(purpose)")
         _ = app.navigationBars["Übersicht"].waitForExistence(timeout: 10)

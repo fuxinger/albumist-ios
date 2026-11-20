@@ -76,10 +76,9 @@ struct PauseCountCheckTests {
         #expect(reacted == t(-0.09))
         let window = PauseCountCheck.stallWindow(tapStarted: tapStarted, tapped: tapped, reacted: reacted)
         let stallEnd = reacted.addingTimeInterval(-1.5)
-        let stallStart = stallEnd.addingTimeInterval(-3.16)
         // The old window (the tap's start to a second after it returned) counted it.
-        #expect(stallStart <= tapped.addingTimeInterval(1) && stallEnd >= tapStarted)
-        #expect(!(stallStart <= window.to && stallEnd >= window.from))
+        #expect(PauseCountCheck.overlaps(stallEnd: stallEnd, ms: 3160, from: tapStarted, to: tapped.addingTimeInterval(1)))
+        #expect(!PauseCountCheck.overlaps(stallEnd: stallEnd, ms: 3160, from: window.from, to: window.to))
     }
 
     /// A touch that waited for a stall is taken right after it: such a stall ends at the
@@ -87,11 +86,9 @@ struct PauseCountCheckTests {
     @Test func aStallThatHeldTheTouchStillCounts() {
         let reacted = t(-0.2)
         let window = PauseCountCheck.stallWindow(tapStarted: t(-8), tapped: tapped, reacted: reacted)
-        let held = (start: reacted.addingTimeInterval(-1.4), end: reacted.addingTimeInterval(-0.01))
-        #expect(held.start <= window.to && held.end >= window.from)
-        let after = (start: reacted.addingTimeInterval(0.5), end: reacted.addingTimeInterval(1.8))
-        #expect(after.start <= window.to && after.end >= window.from)
-        #expect(window.to == reacted.addingTimeInterval(1))
+        #expect(PauseCountCheck.overlaps(stallEnd: reacted.addingTimeInterval(-0.01), ms: 1390, from: window.from, to: window.to))
+        #expect(PauseCountCheck.overlaps(stallEnd: reacted.addingTimeInterval(1.8), ms: 1300, from: window.from, to: window.to))
+        #expect(window.to == tapped.addingTimeInterval(1))
     }
 
     /// "Wird angehalten" is the reaction when it comes first; without any reacting line in the
@@ -108,5 +105,17 @@ struct PauseCountCheckTests {
         #expect(window.from == t(-7) && window.to == t(1))
         // Never before the tap's start.
         #expect(PauseCountCheck.stallWindow(tapStarted: t(-0.3), tapped: tapped, reacted: t(-0.2)).from == t(-0.3))
+    }
+
+    /// A hold the Pause causes after the card reacted keeps XCTest's tap waiting: the window
+    /// still ends a second after the tap returned, so such a hold counts (second review).
+    @Test func aHoldAfterTheReactionStillCountsUntilTheTapReturned() {
+        let reacted = t(-4.2)
+        let window = PauseCountCheck.stallWindow(tapStarted: t(-5), tapped: tapped, reacted: reacted)
+        #expect(window.to == t(1))
+        // Starts 1.2 s after the reaction, lasts 3 s, ends just before the tap returned.
+        #expect(PauseCountCheck.overlaps(stallEnd: t(-0.01), ms: 3000, from: window.from, to: window.to))
+        // A record line later than the tap's return (the card's render after it) moves the end.
+        #expect(PauseCountCheck.stallWindow(tapStarted: t(-5), tapped: tapped, reacted: t(0.3)).to == t(1.3))
     }
 }

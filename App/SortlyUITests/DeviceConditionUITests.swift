@@ -1794,7 +1794,8 @@ final class DeviceConditionUITests: XCTestCase {
         var stopped = max(0, (fromLooks ?? tapStarted).timeIntervalSince(tapped))
         var limit = (resumeShown ?? 0) + 0.5
         var measure = "test's looks"
-        if let lines = readProgressRecord(from: tapStarted, to: lookedUntil)?.lines,
+        let recordLines = readProgressRecord(from: tapStarted, to: lookedUntil)?.lines
+        if let lines = recordLines,
            let record = PauseCountCheck.afterPausedInRecord(lines) {
             stopped = max(0, (record.lastMove ?? record.paused).timeIntervalSince(tapped))
             limit = max(0, record.paused.timeIntervalSince(tapped)) + 0.5
@@ -1804,11 +1805,18 @@ final class DeviceConditionUITests: XCTestCase {
         let firstShows = firstLook.map { $0.line.hasPrefix("Wird angehalten") || $0.line.hasPrefix("Analyse pausiert") } ?? false
         XCTAssertTrue(firstShows, "The first look after Pause still read '\(firstLook?.line ?? "")'")
         // Pause under 1 s: the app's main thread (which changes the card in the tap's own call)
-        // was not held for 1 s or more from the start of the tap until 1 s after it. XCTest's
-        // tap itself also waits for the app to settle (7.15 s in stress run 43833158673); only
-        // when the app's stall file cannot be read is that time the measure.
-        if let stalls = mainStallsOverlapping(tapStarted, tapped.addingTimeInterval(1)) {
-            print("UI_TIMING stress pause: main-thread stalls around the tap \(stalls.map { "\($0.ms) ms" })")
+        // was not held for 1 s or more around the moment the card reacted (from the app's
+        // record; `PauseCountCheck.stallWindow`), else from the start of the tap until 1 s after
+        // it. XCTest's tap itself also waits for the app to settle (7.15 s in stress run
+        // 43833158673, 19.47 s in 44777843545); only when the app's stall file cannot be read
+        // is that time the measure. Stalls during that wait are printed, not counted.
+        let cardReacted = recordLines.flatMap { PauseCountCheck.reactedInRecord($0) }
+        let window = PauseCountCheck.stallWindow(tapStarted: tapStarted, tapped: tapped, reacted: cardReacted)
+        if let before = mainStallsOverlapping(tapStarted, window.from), !before.isEmpty, window.from > tapStarted {
+            print("UI_FACT stress pause: main-thread stalls in XCTest's wait before the touch \(before.map { "\($0.ms) ms" }) (not the Pause's)")
+        }
+        if let stalls = mainStallsOverlapping(window.from, window.to) {
+            print("UI_TIMING stress pause: main-thread stalls around the tap \(stalls.map { "\($0.ms) ms" }) (card reacted \(s(cardReacted?.timeIntervalSince(tapped))) s)")
             XCTAssertTrue(stalls.allSatisfy { $0.ms < 1000 }, "The main thread was held \(stalls.map(\.ms).max() ?? 0) ms around the Pause tap")
         } else {
             print("UI_FACT stress pause: the app's stall file cannot be read; the tap's own time is the measure")

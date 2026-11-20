@@ -26,6 +26,28 @@ enum PauseCountCheck {
     /// on, `AnalysisProgressCard.control`), the count then, and the last time the count moved
     /// after it with the photos it moved by (`lastMove` nil: it did not move). Any line counts,
     /// also one that runs again without Fortsetzen. Nil when no line says paused.
+    /// When the app took the Pause touch, from its record: the first line after the tap's start
+    /// that says "Wird angehalten" or "Analyse pausiert" (Pause changes the card in the touch's
+    /// own call). Nil when no line says either.
+    static func reactedInRecord(_ lines: [(at: Date, line: String?)]) -> Date? {
+        lines.first { row in
+            guard let line = row.line else { return false }
+            return line.hasPrefix("Wird angehalten") || line.hasPrefix("Analyse pausiert")
+        }?.at
+    }
+
+    /// Where a main-thread stall counts as holding the Pause (test12: under 1 s). With the app's
+    /// record: from a second before the card reacted to a second after it. A touch that waited
+    /// for a stall is taken right after it ends, so a stall that ended earlier did not hold it.
+    /// XCTest's tap first waits for the app to go idle (19.47 s in stress run 44777843545 on a
+    /// Mac at load 360–500, where a 3.2 s stall ended about 1.5 s before the card reacted and
+    /// was counted although the Pause itself reacted at once); a stall in that wait comes before
+    /// the touch. Without the record: from the tap's start to a second after it returned.
+    static func stallWindow(tapStarted: Date, tapped: Date, reacted: Date?) -> (from: Date, to: Date) {
+        guard let reacted else { return (tapStarted, tapped.addingTimeInterval(1)) }
+        return (max(tapStarted, reacted.addingTimeInterval(-1)), reacted.addingTimeInterval(1))
+    }
+
     static func afterPausedInRecord(_ lines: [(at: Date, line: String?)]) -> (paused: Date, count: Int, lastMove: Date?, more: Int)? {
         guard let first = lines.firstIndex(where: { $0.line?.hasPrefix("Analyse pausiert") ?? false }),
               let line = lines[first].line, let count = done(in: line) else { return nil }

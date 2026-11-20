@@ -951,7 +951,10 @@ final class AppModel {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try? folder.setResourceValues(values)
-        let url = base.appendingPathComponent("sortly.sqlite")
+        // Before anything opens it: a database an older build wrote under an earlier file name
+        // moves to the current name once (the rename to Albumist); if that move fails, the
+        // earlier file opens as it is, never a new empty database next to it.
+        let url = DatabaseFile.prepare(in: base).url
         for suffix in ["", "-wal", "-shm"] {
             let path = url.path + suffix
             if FileManager.default.fileExists(atPath: path) {

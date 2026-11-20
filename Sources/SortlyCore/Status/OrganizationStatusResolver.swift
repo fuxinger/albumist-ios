@@ -20,6 +20,21 @@ public struct AssetOrganizationState: Hashable, Sendable, Codable {
         self.isIgnored = isIgnored
         self.isExcluded = isExcluded
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case assetID, areas, isUncertain, isIgnored, isExcluded
+    }
+
+    /// A state encoded before `isIgnored` and `isExcluded` existed reads them as `false` (its
+    /// areas still say "ignored" or "excluded"). Nothing stores states today; this keeps it so.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        assetID = try c.decode(AssetID.self, forKey: .assetID)
+        areas = try c.decode([OrganizationArea: AreaStatus].self, forKey: .areas)
+        isUncertain = try c.decode(Bool.self, forKey: .isUncertain)
+        isIgnored = try c.decodeIfPresent(Bool.self, forKey: .isIgnored) ?? false
+        isExcluded = try c.decodeIfPresent(Bool.self, forKey: .isExcluded) ?? false
+    }
 }
 
 /// Facts the resolver needs about an asset in one area. Produced by the analysis layer.
@@ -113,10 +128,31 @@ public struct OrganizationStatusResolver: Sendable {
         state.isIgnored || state.areas.values.contains(.ignored)
     }
 
-    /// The statuses of the main areas the state has. A state has only the areas that are on
-    /// (`LibraryStatus`), so these are the counted main areas (`SortedCountCard.countedAreas`).
-    private func mainStatuses(_ state: AssetOrganizationState) -> [AreaStatus] {
-        state.areas.filter { primaryAreas.contains($0.key) }.map(\.value)
+    /// What `overall`, `isOutsideMainAreas` and `ringPart` read from a state, in one pass over
+    /// its areas (`ringPart` asks both for every photo of the library). The main areas are those
+    /// the state has: a state has only the areas that are on (`LibraryStatus`), so these are the
+    /// counted main areas (`SortedCountCard.countedAreas`).
+    private struct Reading {
+        var excluded: Bool
+        var ignored: Bool
+        /// Main areas that apply (neither `.notApplicable` nor `.analysisImpossible`).
+        var relevant = 0
+        /// Of them, sorted (`.organized`, `.preExisting`).
+        var done = 0
+        /// Of them, one still `.analysisPending`.
+        var pending = false
+    }
+
+    private func read(_ state: AssetOrganizationState) -> Reading {
+        var r = Reading(excluded: state.isExcluded, ignored: state.isIgnored)
+        for (area, status) in state.areas {
+            if status == .excluded { r.excluded = true } else if status == .ignored { r.ignored = true }
+            guard primaryAreas.contains(area), status != .notApplicable, status != .analysisImpossible else { continue }
+            r.relevant += 1
+            if status == .organized || status == .preExisting { r.done += 1 }
+            if status == .analysisPending { r.pending = true }
+        }
+        return r
     }
 
     /// No main area applies to this photo, and the user did not ignore or exclude it. Also when
@@ -124,26 +160,30 @@ public struct OrganizationStatusResolver: Sendable {
     /// to sort towards, so no photo is open (finding N-01; the overview says "Kein Bereich zählt
     /// als sortiert"). Before, such a photo was "Nicht sortiert" in the lists and the photo info.
     public func isOutsideMainAreas(_ state: AssetOrganizationState) -> Bool {
-        guard !Self.isExcluded(state), !Self.isIgnored(state) else { return false }
-        return mainStatuses(state).allSatisfy { $0 == .notApplicable || $0 == .analysisImpossible }
+        Self.isOutsideMainAreas(read(state))
+    }
+
+    private static func isOutsideMainAreas(_ r: Reading) -> Bool {
+        !r.excluded && !r.ignored && r.relevant == 0
     }
 
     public func overall(_ state: AssetOrganizationState) -> OverallStatus {
-        if Self.isExcluded(state) { return .excluded }
-        if Self.isIgnored(state) { return .ignored }
-        let statuses = mainStatuses(state)
-        let relevant = statuses.filter { $0 != .notApplicable && $0 != .analysisImpossible }
-        if relevant.isEmpty {
+        Self.overall(read(state))
+    }
+
+    private static func overall(_ r: Reading) -> OverallStatus {
+        if r.excluded { return .excluded }
+        if r.ignored { return .ignored }
+        if r.relevant == 0 {
             // Nothing the user cares about applies – counts as organized, never as an open task.
             // Also with no main area counted (none chosen or none on): it was `.unorganized`
             // then, and every photo, ignored ones too, showed as "Nicht sortiert" next to "Kein
             // Bereich zählt als sortiert" (finding N-01). `ringPart` says `.outsideMainAreas`.
             return .fullyOrganized
         }
-        let done = relevant.filter { $0 == .organized || $0 == .preExisting }.count
-        if relevant.contains(.analysisPending) && done == 0 { return .pending }
-        if done == relevant.count { return .fullyOrganized }
-        return done > 0 ? .partiallyOrganized : .unorganized
+        if r.pending && r.done == 0 { return .pending }
+        if r.done == r.relevant { return .fullyOrganized }
+        return r.done > 0 ? .partiallyOrganized : .unorganized
     }
 
     /// Where a photo stands in the ring ("32 von 50 sortiert"). The one definition of "sorted"
@@ -183,12 +223,13 @@ public struct OrganizationStatusResolver: Sendable {
     /// The photo's part of the ring. `inScope`: the photo is in the part of the library the
     /// ring counts (`OrganizationScope`); the ring only ever sees such photos.
     public func ringPart(_ state: AssetOrganizationState, inScope: Bool = true) -> RingPart {
-        let status = overall(state)
+        let reading = read(state)
+        let status = Self.overall(reading)
         // The user's choice comes first: an ignored photo stays in "Ignoriert" wherever it is.
         if status == .excluded { return .excluded }
         if status == .ignored { return .ignored }
         if !inScope { return .outsideScope }
-        if isOutsideMainAreas(state) { return .outsideMainAreas }
+        if Self.isOutsideMainAreas(reading) { return .outsideMainAreas }
         switch status {
         case .fullyOrganized: return .sorted
         case .partiallyOrganized: return .partlySorted

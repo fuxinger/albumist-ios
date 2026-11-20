@@ -13,6 +13,8 @@ struct LibraryView: View {
     /// The photo zooms out of its thumbnail and back into it.
     @Namespace private var zoom
     @State private var addingToAlbum: [AssetID]?
+    /// "Einstellungen öffnen" in an empty list when no main area counts (as on the overview).
+    @State private var showSettings = false
     /// Thumbnails shown so far; more on request, so large libraries stay smooth and every
     /// photo can still be reached.
     @State private var shown = Self.page
@@ -77,6 +79,9 @@ struct LibraryView: View {
             PhotoViewer(ids: start.ids, current: start.id, showsInfo: true)
                 .navigationTransition(.zoom(sourceID: start.id, in: zoom))
         }
+        .sheet(isPresented: $showSettings) {
+            NavigationRoot { SettingsView() }
+        }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {
                 // Animated like the other ways out, so the tab bar does not snap back.
@@ -105,8 +110,20 @@ struct LibraryView: View {
             // Photos with a suggestion: show the suggestions themselves, ready to open.
             proposalList
         } else if members.isEmpty {
-            ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
-                                   description: Text(emptyDescription))
+            if SortedCountCard.EmptyList.make(bucket, settings: model.settings) == .noMainAreaChosen {
+                // Nothing counts as sorted: the way to change that, as on the overview's card.
+                ContentUnavailableView {
+                    Label(emptyTitle, systemImage: "circle.dashed")
+                } description: {
+                    Text(emptyDescription)
+                } actions: {
+                    Button("Einstellungen öffnen") { showSettings = true }
+                        .accessibilityIdentifier("library.openSettings")
+                }
+            } else {
+                ContentUnavailableView(emptyTitle, systemImage: "photo.on.rectangle",
+                                       description: Text(emptyDescription))
+            }
         } else {
             grid(members)
             if members.count > shown {

@@ -539,6 +539,17 @@ struct OverviewNumbersTests {
         let done = try #require(reasonCode.range(of: "case .fullyOrganized"))
         #expect(asks.lowerBound < done.lowerBound)
         #expect(reason.contains("\"\(hint)\""), "\(reason)")
+        // The empty list offers the way out the overview's card offers ("Einstellungen öffnen",
+        // `OverviewView` `.noMainAreaChosen`), and opens the settings with it.
+        let overview = try AppSource.read("App/Sortly/Views/OverviewView.swift")
+        #expect(Self.caseBody(".noMainAreaChosen", in: overview).contains("\"Einstellungen öffnen\""))
+        let content = try #require(AppSource.body(of: "private func content", in: library))
+        let chosen = try #require(content.range(of: "== .noMainAreaChosen"), "the empty list has no branch for it")
+        let button = try #require(content.range(of: "Button(\"Einstellungen öffnen\") { showSettings = true }"),
+                                  "the empty list offers no way to the settings")
+        #expect(chosen.lowerBound < button.lowerBound)
+        let sheet = AppSource.code(AppSource.body(of: ".sheet(isPresented: $showSettings)", in: library) ?? "")
+        #expect(sheet.contains("SettingsView()"), "\(sheet)")
     }
 
     @Test func theSentenceNamesOnlyTheMainAreasThatAreOn() {

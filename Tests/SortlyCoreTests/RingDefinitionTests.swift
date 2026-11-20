@@ -263,6 +263,22 @@ struct RingDefinitionTests {
         #expect(lists[.all].count == all.count)
     }
 
+    /// The new fields read as `false` from a state encoded without them, and round-trip.
+    @Test func stateDecodesWithoutTheNewFields() throws {
+        let resolver = OrganizationStatusResolver(primaryAreas: [.places])
+        let ignored = resolver.state(for: "i", facts: [.places: AreaFacts(proposed: true)], ignored: true)
+        let data = try JSONEncoder().encode(ignored)
+        #expect(try JSONDecoder().decode(AssetOrganizationState.self, from: data) == ignored)
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["isIgnored"] as? Bool == true)
+        object["isIgnored"] = nil
+        object["isExcluded"] = nil
+        let old = try JSONDecoder().decode(AssetOrganizationState.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(!old.isIgnored && !old.isExcluded)
+        #expect(old.areas == ignored.areas && old.assetID == ignored.assetID)
+        #expect(resolver.overall(old) == .ignored, "its areas still say it")
+    }
+
     /// Random small libraries in which no main area counts (none chosen, or the chosen ones
     /// absent from the states because they are off): no photo is counted, the lists "Sortiert"
     /// and "Nicht sortiert" stay empty, and every photo is outside the main areas, ignored or

@@ -57,7 +57,12 @@
   erkannten Zuhauses entstehen abseits des Haupt-Strangs erst, wenn die Jahreswahl im Atlas oder „Dein Zuhause“
   und die Einstellungen sie brauchen, einmal je Stand der Fotodaten, nie beim Auffrischen (zweite Prüfung: sonst
   kosteten sie bei jedem Auffrischen Akku, bei 50.000 Fotos 240 und 299 ms); bis dahin zeigen Atlas und „Dein
-  Zuhause“ kurz, dass sie laden. „Seit wann wohnst du dort?“ rechnet seinen Vorschlag im Hintergrund, der gewählte
+  Zuhause“ kurz, dass sie laden. Neue Fotodaten brechen eine solche Rechnung ab, statt sie zu Ende laufen zu lassen.
+  Ein Auffrischen mit unveränderten Fotodaten behält sie, solange ein Bildschirm sie hat (kein Kreisel, „Stimmt“ und
+  der VoiceOver-Fokus bleiben); dafür vergleicht es die Fotodaten abseits des Haupt-Strangs, nur dann (bei 50.000
+  Fotos 95–149 ms). Ändern sich die Fotodaten, etwa während einer Analyse, wird beides neu gerechnet, wenn ein
+  Bildschirm es braucht. „Teilen“ im Atlas teilt die Karte, wie sie beim Tippen war, auch wenn die Übersicht
+  währenddessen aufgefrischt wird. „Seit wann wohnst du dort?“ rechnet seinen Vorschlag im Hintergrund, der gewählte
   Ort zeigt solange einen Kreisel. Vorher bei 50.000 Fotos auf Linux auf dem Haupt-Strang: Jahr im Atlas 75 ms,
   erstes Foto nach jeder Änderung 97 ms, je bei 100.000 Fotos das Doppelte. Die Orte in „Dein Zuhause“ und der
   Status für die Suche liefen schon abseits. Noch auf dem Haupt-Strang (bekannt und hingenommen): die Fotos eines

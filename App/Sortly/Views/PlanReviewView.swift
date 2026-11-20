@@ -19,8 +19,11 @@ import SortlyEngine
 struct PlanReviewView: View {
     @Environment(AppModel.self) private var model
     @Environment(Purchases.self) private var purchases
-    /// A plan built elsewhere (album merge); otherwise the accepted proposals are planned.
+    /// A plan built elsewhere (an album merge, a removal, one suggestion right away).
     var prebuilt: ChangePlan? = nil
+    /// Otherwise the picks the preview plans ("Dein Startpaket", "N Alben anlegen", "Ergänzen …"
+    /// in a list): exactly these (`AppModel.buildPlan(for:)`); leaving gives them back.
+    var selection: AppModel.PreviewSelection? = nil
     @State private var loading = true
     /// Albums of the plan that is running, for the "photos fly into albums" show.
     @State private var show: [SortingShow.Album]?
@@ -28,11 +31,8 @@ struct PlanReviewView: View {
     @State private var facts: PlanReviewFacts?
     /// The plan and album list `facts` were made for.
     @State private var factsMadeFor: FactsKey?
-    /// Suggestions were selected when the facts were made ("Auswahl aufheben" is offered).
-    @State private var hasSelection = false
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dismiss) private var dismiss
     /// At the accessibility text sizes and in landscape on an iPhone the bar is compact (`compactBar`).
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -127,7 +127,13 @@ struct PlanReviewView: View {
                 // every screen that reads `execution`.
                 if model.execution.finished != nil { model.execution.finished = nil }
                 if model.execution.failure != nil { model.execution.failure = nil }
-                if let prebuilt { model.plan = prebuilt } else { await model.buildPlan() }
+                if let prebuilt {
+                    model.plan = prebuilt
+                } else if let selection {
+                    await model.buildPlan(for: selection)
+                } else {
+                    model.plan = nil
+                }
             }
             loading = false
         }
@@ -183,8 +189,9 @@ struct PlanReviewView: View {
         guard let plan = model.plan else { return }
         let key = factsKey
         let inventory = model.inventory
+        // The albums in the order of the suggestions the preview plans.
         let order = MainThreadWatch.shared.section("plan review: order") {
-            model.acceptedProposals.inDisplayOrder().map(\.id)
+            selection.map { model.plannedProposals(in: $0).map(\.id) } ?? []
         }
         // Covers and the sorting show leave sensitive documents out (`PreviewRank`).
         let ranks = model.previewRanks
@@ -194,7 +201,6 @@ struct PlanReviewView: View {
         guard !Task.isCancelled else { return }
         facts = made
         factsMadeFor = key
-        hasSelection = !order.isEmpty
     }
 
     // MARK: Plan
@@ -257,15 +263,6 @@ struct PlanReviewView: View {
                 freeAlbumNote(facts)
             }
             .padding(.horizontal, Theme.Spacing.l)
-        }
-        if prebuilt == nil && hasSelection {
-            // The way out: nothing selected, back to the open suggestions.
-            Button("Auswahl aufheben") {
-                model.clearSelection()
-                dismiss()
-            }
-            .font(.subheadline.weight(.semibold))
-            .frame(maxWidth: .infinity, minHeight: 44)
         }
     }
 
@@ -397,11 +394,11 @@ struct PlanReviewView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// "Die ersten N jetzt anlegen", only for plans built from accepted suggestions.
+    /// "Die ersten N jetzt anlegen", only for a preview of picked suggestions.
     private var limitToFreeAlbums: (() -> Void)? {
-        guard prebuilt == nil, purchases.remainingFreeAlbums > 0 else { return nil }
+        guard prebuilt == nil, let selection, purchases.remainingFreeAlbums > 0 else { return nil }
         let free = purchases.remainingFreeAlbums
-        return { Task { await model.keepFirstAccepted(free) } }
+        return { Task { await model.keepFirst(free, in: selection) } }
     }
 
     /// The button says what it does, one verb after "Jetzt" (design W1, Punkt 2; design review

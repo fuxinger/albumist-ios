@@ -28,10 +28,12 @@ enum AppScreen: Hashable {
     case proposals
     case areaProposals(OrganizationArea)
     case proposal(ProposalRef)
-    /// The preview of the selected suggestions.
-    case plan
-    /// The preview of the starter set; leaving it ends the preview selection (`OverviewView`).
-    case starterPlan
+    /// The preview of suggestions picked for it ("N Alben anlegen" in a list, "Ergänzen …" on a
+    /// card there): it plans exactly these picks (`AppModel.buildPlan(for:)`), and leaving it
+    /// gives them back.
+    case plan(AppModel.PreviewSelection)
+    /// The preview of the starter set, with the set's picks; leaving it gives them back.
+    case starterPlan(AppModel.PreviewSelection)
     /// The preview of a plan made elsewhere: an album merge, a removal, one suggestion right
     /// away, "Fehlendes erneut versuchen", "Zu Album hinzufügen".
     case prebuiltPlan(PlanToken)
@@ -48,10 +50,15 @@ enum AppScreen: Hashable {
     /// The suggestions to merge albums that hold mostly the same photos (row "Ähnliche Alben").
     case similarAlbums // Design W1 H5
 
-    /// The same screen as `other`: equal, or the same suggestion opened from a list and from
-    /// Siri, Shortcuts or Spotlight.
+    /// The same screen as `other`: equal, the same suggestion opened from a list and from
+    /// Siri, Shortcuts or Spotlight, or a second preview of picks over one (each tap picks
+    /// anew, so a second tap on "N Alben anlegen" would otherwise push a second preview).
     func isSame(as other: AppScreen) -> Bool {
         if self == other { return true }
+        switch (self, other) {
+        case (.plan, .plan), (.starterPlan, .starterPlan): return true
+        default: break
+        }
         guard let id = suggestionID else { return false }
         return id == other.suggestionID
     }
@@ -70,7 +77,7 @@ enum AppScreen: Hashable {
         case .proposals: ProposalListView(area: nil)
         case .areaProposals(let area): ProposalListView(area: area)
         case .proposal(let ref): ProposalScreen(ref: ref)
-        case .plan, .starterPlan: PlanReviewView()
+        case .plan(let selection), .starterPlan(let selection): PlanReviewView(selection: selection)
         case .prebuiltPlan(let token): PlanReviewView(prebuilt: token.plan)
         case .receipt(let token): PlanReceiptView(plan: token.plan)
         case .atlas: AtlasView()

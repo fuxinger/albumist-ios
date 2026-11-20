@@ -26,8 +26,6 @@ struct StartSections: View {
     @State private var visit = StartVisit()
     /// The suggestion whose preview ("Ergänzen …") is being made.
     @State private var previewing: SortlyID?
-    /// The starter set is selected only while its preview is open.
-    @State private var starterSelection: AppModel.PreviewSelection?
 
     /// At the accessibility text sizes a row is one column of whole cards (draft E7): three of
     /// them, "Alle 41" shows the rest.
@@ -50,13 +48,6 @@ struct StartSections: View {
             visit = fresh
         }
         .onChange(of: page) { _, shown in visit.saw(shown) }
-        .onChange(of: navigator?.path.contains(.starterPlan) ?? false) { _, showing in
-            // Back without creating: the starter set is not selected any more.
-            if !showing, let selection = starterSelection {
-                model.endPreview(selection)
-                starterSelection = nil
-            }
-        }
     }
 
     /// How many albums "Dein Startpaket" may hold now (`StartPage.starterSetLimit`).
@@ -68,6 +59,19 @@ struct StartSections: View {
     private func makePage(for visit: StartVisit, starterSetSize: Int) -> StartPage {
         model.startPage(visit: visit, libraryHint: libraryHint, starterSetSize: starterSetSize,
                         analysedOnce: analysedOnce, showsMosaic: showsMosaic)
+    }
+
+    /// "Dein Startpaket": the preview of the set, each album picked for the preview only.
+    /// Leaving it without creating gives every pick back (`AppModel.endPreview`), whichever way
+    /// it goes: Back, the tab tapped again, this page going along. A second tap pushes nothing.
+    private func openStarterPreview(_ set: [AlbumProposal]) {
+        guard !set.isEmpty, let navigator else { return }
+        let selection = model.selectForPreview(set.map { ($0, model.recommendedDecision(for: $0)) })
+        guard navigator.push(.starterPlan(selection)) else {
+            model.endPreview(selection)
+            return
+        }
+        navigator.onLeave(.starterPlan(selection)) { [model] in model.endPreview(selection) }
     }
 
     @ViewBuilder
@@ -84,10 +88,7 @@ struct StartSections: View {
             bigCards(Text("Neue Reisen"), ids: ids, page: page, proposals: proposals)
                 .accessibilityIdentifier("startPage.newTrips")
         case .starterSet:
-            StarterSetCard(set: starterSet) {
-                starterSelection = model.selectForPreview(starterSet.map { ($0, model.recommendedDecision(for: $0)) })
-                Navigator.push(.starterPlan, on: navigator)
-            }
+            StarterSetCard(set: starterSet) { openStarterPreview(starterSet) }
             .padding(.horizontal, Theme.Spacing.l)
         case .row(let row):
             self.row(row, page: page, proposals: proposals)

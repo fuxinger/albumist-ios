@@ -617,9 +617,10 @@ final class AppModel {
     @ObservationIgnored private var executionClaimed = false
     /// A plan has its claim: it runs, or is about to (`execution.isRunning` follows after an await).
     var isExecutionClaimed: Bool { executionClaimed }
-    /// Decisions that exist only for an open preview: kept in memory, never written to disk.
-    /// Value: what was stored before the preview (nil = undecided).
-    @ObservationIgnored private var previewOnly: [SortlyID: ProposalDecision?] = [:]
+    /// The picks of the previews opened straight from a button (`PreviewPicks`): decisions that
+    /// exist only while their preview is open, kept in memory, never written to disk; each
+    /// preview plans exactly its own (`buildPlan(for:)`).
+    @ObservationIgnored private var previewPicks = PreviewPicks()
 
     private enum Key {
         static let settings = "user.settings"
@@ -2074,94 +2075,67 @@ final class AppModel {
             .prefix(limit)).inDisplayOrder()
     }
 
-    /// "Die ersten N jetzt anlegen": keeps the biggest accepted suggestions within the free
-    /// albums; the others go back to the open list (nothing is lost) and the plan is rebuilt.
-    func keepFirstAccepted(_ limit: Int) async {
-        let accepted = acceptedProposals.sorted { ($0.assetIDs.count, $1.title) > ($1.assetIDs.count, $0.title) }
-        for p in accepted.dropFirst(max(0, limit)) { decisions[p.id] = nil }
-        persistDecisions()
-        await buildPlan()
+    /// "Die ersten N jetzt anlegen": the preview keeps its biggest suggestions within the free
+    /// albums; the others are given back as if never picked (nothing is lost: they show what
+    /// they showed before) and the plan is made again.
+    func keepFirst(_ limit: Int, in selection: PreviewSelection) async {
+        let planned = plannedProposals(in: selection).sorted { ($0.assetIDs.count, $1.title) > ($1.assetIDs.count, $0.title) }
+        let others = Set(planned.dropFirst(max(0, limit)).map(\.id))
+        show(previewPicks.giveBack(selection, only: others, shown: decisions))
+        await buildPlan(for: selection)
     }
 
     func accept(_ proposals: [AlbumProposal]) {
         for p in proposals { setDecision(recommendedDecision(for: p), for: p) }
     }
 
-    /// Decisions set only for a preview opened straight from a button ("Dein Startpaket",
-    /// "Album anlegen"). Two previews can select the same suggestion, also with different
-    /// picks (one on each tab), and end in any order (`previewPicks`).
-    struct PreviewSelection {
-        fileprivate let id = UUID()
-        fileprivate let picks: [(proposal: SortlyID, chosen: ProposalDecision)]
-    }
-
-    /// The picks of the open previews per suggestion, the latest last: the suggestion shows the
-    /// latest. They start anew with each preview-only mark (`previewOnly`): a preview that was
-    /// open when the user chose on purpose has nothing to give back any more.
-    @ObservationIgnored private var previewPicks: [SortlyID: [(selection: UUID, chosen: ProposalDecision)]] = [:]
+    /// The picks of one preview opened straight from a button ("Dein Startpaket", "N Alben
+    /// anlegen", "Ergänzen …", "Anlegen", "Album anlegen"): its route carries it, and the
+    /// preview plans exactly these picks (`buildPlan(for:)`).
+    typealias PreviewSelection = PreviewPicks.Selection
 
     /// Selects suggestions for a preview. Leaving the preview without creating anything must
     /// undo this with `endPreview(_:)`: nothing may stay selected that the user never chose
-    /// (Fuchs, 14.11.: "Ich hatte aber noch nichts ausgewählt").
+    /// (Fuchs, 14.11.: "Ich hatte aber noch nichts ausgewählt"). In memory only: if the app is
+    /// closed during the preview, nothing stays selected.
     func selectForPreview(_ items: [(AlbumProposal, ProposalDecision)]) -> PreviewSelection {
-        let selection = PreviewSelection(picks: items.map { (proposal: $0.0.id, chosen: $0.1) })
-        // In memory only: if the app is closed during the preview, nothing stays selected.
-        for (id, chosen) in selection.picks {
-            if previewOnly[id] == nil {
-                previewOnly[id] = .some(decisions[id])
-                previewPicks[id] = []
-            }
-            previewPicks[id, default: []].append((selection: selection.id, chosen: chosen))
-            decisions[id] = chosen
-        }
+        let (selection, changes) = previewPicks.select(items.map { PreviewPicks.Pick($0.0.id, $0.1) }, shown: decisions)
+        show(changes)
         return selection
     }
 
     /// Back from a preview: a suggestion that still shows its pick shows the pick of the latest
-    /// preview still open for it, or, with none left, what was there before them all; the mark
-    /// goes with the last of them. In any order: back from "Album anlegen" inside the starter
-    /// set's preview, the suggestion is the starter set's pick again, and leaving the starter set
-    /// then gives it back (it stayed "Ausgewählt" and was saved); with the starter set left
-    /// first, "Album anlegen" keeps its own pick until it ends, then gives back what was there
-    /// before both. Chosen on purpose meanwhile (the mark is gone), applied (cleared by the
-    /// execution) or changed some other way ("passt nicht", "Die ersten N jetzt anlegen"):
-    /// stays as it is.
+    /// preview still open for it, or, with none left, what was there before them all
+    /// (`PreviewPicks.giveBack`). In any order: back from "Album anlegen" inside the starter
+    /// set's preview, the suggestion is the starter set's pick again, and leaving the starter
+    /// set then gives back what was there before both. Chosen on purpose meanwhile, applied
+    /// (cleared by the execution) or set back by a recheck: stays as it is.
     func endPreview(_ selection: PreviewSelection) {
-        for (id, chosen) in selection.picks.reversed() {
-            guard var picks = previewPicks[id],
-                  let index = picks.lastIndex(where: { $0.selection == selection.id }) else { continue }
-            picks.remove(at: index)
-            previewPicks[id] = picks.isEmpty ? nil : picks
-            guard let before = previewOnly[id] else { continue }
-            if decisions[id] == chosen { decisions[id] = picks.last?.chosen ?? before }
-            if picks.isEmpty { previewOnly[id] = nil }
-        }
+        show(previewPicks.giveBack(selection, shown: decisions))
     }
 
-    /// "Auswahl aufheben" on the preview: every selected suggestion goes back to the open list.
-    func clearSelection() {
-        for (id, decision) in decisions where decision.isAccepted { decisions[id] = nil }
-        previewOnly.removeAll()
-        persistDecisions()
+    /// The suggestions the preview of `selection` plans, in the app's order of suggestions:
+    /// exactly its picks that still stand. A suggestion chosen under "Anpassen", or left
+    /// selected by an older version's basket, joins no preview it was not picked for (second
+    /// review of design wave 1, 20.11.).
+    func plannedProposals(in selection: PreviewSelection) -> [AlbumProposal] {
+        let planned = previewPicks.planned(in: selection, shown: decisions)
+        return proposals.filter { planned[$0.id] != nil }.inDisplayOrder()
+    }
+
+    /// Shows what a call to `previewPicks` changed.
+    private func show(_ changes: [PreviewPicks.Change]) {
+        for change in changes { decisions[change.proposal] = change.decision }
     }
 
     var acceptedProposals: [AlbumProposal] {
         proposals.filter { decisions[$0.id]?.isAccepted == true }
     }
 
-    /// Selected suggestions that still change something in Photos: an album that is kept
-    /// as it is needs nothing, so it does not count on the "N ausgewählte Alben anlegen" button.
-    var proposalsToApply: [AlbumProposal] {
-        proposals.filter { p in
-            guard let decision = decisions[p.id] else { return false }
-            return decision.isAccepted && !decision.isKeepExisting
-        }
-    }
-
     func setDecision(_ decision: ProposalDecision, for proposal: AlbumProposal) {
         let wasRejected = decisions[proposal.id] == .reject
         decisions[proposal.id] = decision
-        previewOnly[proposal.id] = nil // chosen on purpose now
+        previewPicks.unmark(proposal.id) // chosen on purpose now
         persistDecisions()
         if decision == .reject {
             let override = UserOverride(scope: .source(proposal.id), decision: .rejectProposal)
@@ -2578,7 +2552,7 @@ final class AppModel {
         guard !ids.isEmpty else { return }
         for id in ids {
             decisions[id] = nil
-            previewOnly[id] = nil
+            previewPicks.unmark(id)
         }
         persistDecisions()
     }
@@ -2603,21 +2577,22 @@ final class AppModel {
 
     /// What may be written to disk: preview-only selections are replaced by what was there before.
     private func storedDecisions(_ current: [SortlyID: ProposalDecision]) -> [SortlyID: ProposalDecision] {
-        var result = current
-        for (id, previous) in previewOnly { result[id] = previous }
-        return result
+        previewPicks.stored(current)
     }
 
     // MARK: Plan and execution
 
-    func buildPlan() async {
+    /// The plan of a preview of suggestions: exactly the picks of `selection` that still stand
+    /// (`PreviewPicks.planned`), each as the preview picked it.
+    func buildPlan(for selection: PreviewSelection) async {
         guard let store else { return }
         // The user's latest changes in Photos count before anything is planned.
         guard let current = await reconcileManagedAlbums() else { return }
         do {
             let overrides = try await planningOverrides(store)
-            let confirmed = acceptedProposals.map { proposal in
-                var decision = decisions[proposal.id] ?? .undecided
+            let planned = previewPicks.planned(in: selection, shown: decisions)
+            let confirmed = proposals.compactMap { proposal -> ConfirmedProposal? in
+                guard var decision = planned[proposal.id] else { return nil }
                 if case .createNew(nil, let path) = decision, let title = userTitles[proposal.id], !title.isEmpty {
                     decision = .createNew(title: title, folderPath: path)
                 }
@@ -2855,7 +2830,7 @@ final class AppModel {
                 // those of this plan whose steps never ran (review of 6c6ef79).
                 for id in result.appliedSources where newDecisions[id]?.isAccepted == true {
                     newDecisions[id] = nil
-                    previewOnly[id] = nil
+                    previewPicks.unmark(id)
                 }
             } else if let original = result.reverts, result.status == .completed, let executed = try await store.plan(original) {
                 // A completed undo (its free albums came back above, audit 2, 6.3).
@@ -2873,7 +2848,7 @@ final class AppModel {
             // by an album list that may lack albums (limited access, iCloud sync).
             for id in ProposalDecision.keepsOfAlbumsDeleted(by: result, in: newDecisions) {
                 newDecisions[id] = nil
-                previewOnly[id] = nil
+                previewPicks.unmark(id)
             }
             var done = result
             done.finalizedAt = Date()
@@ -3103,7 +3078,7 @@ final class AppModel {
         // The selection before: a completed undo gives it back to the suggestions the plan
         // carried out (they leave it with the plan's results).
         let selection = decisions
-        let previews = previewOnly
+        let previews = previewPicks
         do {
             let settled = try await ChangeExecutor(library: library, store: store).reconcileInterrupted(interrupted)
             let way = InterruptedPlanUndo(settled: settled, current: try await library.currentInventory())
@@ -3124,7 +3099,7 @@ final class AppModel {
             case .undone:
                 for id in way.selectionToRestore(after: outcome) {
                     decisions[id] = selection[id]
-                    previewOnly[id] = previews[id]
+                    previewPicks.restore(id, from: previews)
                 }
                 persistDecisions()
             case .partlyUndone:

@@ -219,11 +219,11 @@ struct ProposalListView: View {
             let chosen = model.decision(for: proposal)
             return (proposal, chosen.isAccepted ? chosen : model.recommendedDecision(for: proposal))
         })
-        guard navigator.push(.plan) else {
+        guard navigator.push(.plan(selection)) else {
             model.endPreview(selection)
             return
         }
-        navigator.onLeave(.plan) { [model] in model.endPreview(selection) }
+        navigator.onLeave(.plan(selection)) { [model] in model.endPreview(selection) }
     }
 }
 

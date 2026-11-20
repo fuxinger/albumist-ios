@@ -107,6 +107,11 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 20.11.: Eine Vorschau zeigt und legt genau an, was für sie gewählt wurde (zweite Prüfung von Welle 1):
+  „N Alben anlegen“, „Dein Startpaket“ und „Ergänzen …“ planen nur ihre eigenen Vorschläge. Ein unter
+  „Anpassen“ gewählter Vorschlag, der noch nicht angelegt ist, kam vorher in jede solche Vorschau, auch
+  ohne Haken; er behält seine Wahl jetzt für seinen eigenen Knopf. „Die ersten N jetzt anlegen“ gibt die
+  übrigen so zurück, wie sie vorher waren. „Auswahl aufheben“ entfällt: Zurück gibt seit Welle 1 dasselbe zurück.
 - 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
   zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
   kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht

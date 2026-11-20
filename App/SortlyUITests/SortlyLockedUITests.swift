@@ -2,12 +2,18 @@ import XCTest
 import UIKit
 
 /// The locked path of the one-time purchase, end to end (on the demo library, created first
-/// when the test runs alone). The app starts with `-SortlyUITestLocked`
-/// and one free album left: a plan with more albums shows the unlock card instead of
-/// "Alben jetzt anlegen", "Die ersten 1 jetzt kostenlos anlegen" shrinks the plan to the free
-/// album, it runs, and afterwards no free album is left. The purchase sheet itself is not
-/// opened here (no App Store account on the CI simulator); buying, restoring, Ask to Buy,
-/// failures and refunds are tested with StoreKit in PurchaseStoreKitTests.
+/// when the test runs alone). The app starts with `-SortlyUITestLocked`.
+///
+/// - test7, one free album left: a plan with more albums shows the unlock card instead of
+///   "Jetzt anlegen", its "Freischalten …" opens the purchase sheet, "Die ersten 1 jetzt
+///   kostenlos anlegen" shrinks the plan to the free album, it runs, and afterwards no free
+///   album is left.
+/// - test8, no free album left: "Anlegen" on a card opens the purchase sheet instead of making
+///   the album (design E6 "Freie Alben verbraucht"); closed, the suggestion is still open.
+///
+/// The sheet is opened and closed, nothing is bought (no App Store account on the CI
+/// simulator); buying, restoring, Ask to Buy, failures and refunds are tested with StoreKit in
+/// PurchaseStoreKitTests.
 @MainActor
 final class SortlyLockedUITests: XCTestCase {
     private var app = XCUIApplication()
@@ -35,11 +41,6 @@ final class SortlyLockedUITests: XCTestCase {
         element.tap()
         print("UI_STEP_OK \(step)")
         return true
-    }
-
-    /// "16 Vorschläge prüfen" or "1 Vorschlag prüfen".
-    private func reviewSuggestionsButton() -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label MATCHES %@", ".*[0-9.]+ Vorschl(ag|äge) prüfen.*")).firstMatch
     }
 
     /// What is on screen, as base64 chunks in the log (artifacts are not reachable everywhere).
@@ -80,79 +81,35 @@ final class SortlyLockedUITests: XCTestCase {
         return reached
     }
 
-    /// The number on "N Vorschläge prüfen", 0 without the button.
-    private func openSuggestionCount() -> Int {
-        let review = reviewSuggestionsButton()
-        guard review.exists, let match = review.label.firstMatch(of: #/(\d+)/#) else { return 0 }
-        return Int(match.1) ?? 0
+    /// The start page offers a preview of several suggestions: "Dein Startpaket" (while nothing
+    /// is made and enough free albums are left) or "Alle N" of an area, whose list ticks.
+    private func offersSeveral() -> Bool {
+        UITestScreens.StartPage.starterSet(app).exists
+            || app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "startPage.all.")).firstMatch.exists
     }
 
-    /// Opens the suggestions and selects the recommended ones, or else one suggestion for a
-    /// new album with its own "Auswählen und später anlegen" (in the "…" menu at the top right
-    /// since review P3-06); true when something is then ready to be created.
-    private func selectRecommended(_ step: String) -> Bool {
-        let review = reviewSuggestionsButton()
-        guard review.waitForExistence(timeout: 20) else { return false }
-        tap(review, step)
-        let list = app.navigationBars["Vorschläge"]
-        let detail = app.navigationBars["Vorschlag"]
-        UITestWait.appears(list, "suggestions list (locked)", timeout: 10)
-        shot("71-locked-suggestions")
-        if button("empfohlene auswählen").waitForExistence(timeout: 5) {
-            button("empfohlene auswählen").tap()
-            // The list offers "N ausgewählte Alben anlegen" once something is selected; whether
-            // it is, the return below says.
-            _ = button("ausgewählte Alben anlegen").waitForExistence(timeout: 5)
-        } else {
-            let row = app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "Neues Album")).firstMatch
-            print("UI_FACT locked: no recommended ones, a row for a new album \(row.exists)")
-            if row.exists {
-                row.tap()
-                UITestWait.appears(detail, "one suggestion opened (locked)", timeout: 10)
-                // By identifier, or by the start of the name where the menu does not pass the
-                // identifier on (an item with a second line is named with both).
-                func named(_ identifier: String, _ label: String) -> XCUIElement {
-                    app.buttons.matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", identifier, label)).firstMatch
-                }
-                let more = named("proposal.more", "Weitere Aktionen")
-                if more.waitForExistence(timeout: 5) {
-                    more.tap()
-                    // A menu item is tapped where it is: a swipe would close the menu.
-                    let later = named("proposal.selectLater", "Auswählen und später anlegen")
-                    if later.waitForExistence(timeout: 5) {
-                        later.tap()
-                        print("UI_STEP_OK select one suggestion (locked)")
-                        // The detail goes back to the list by itself after the choice.
-                        _ = UITestWait.holds(timeout: 5) { !detail.exists }
-                    } else {
-                        // Not offered for this suggestion: a tap at the left edge closes the menu
-                        // (if it reached the page, it hits no button there).
-                        print("UI_FACT locked: no \"Auswählen und später anlegen\" in the menu")
-                        app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5)).tap()
-                        // "Anpassen" is in every suggestion's menu and nowhere on its page.
-                        UITestWait.until("menu closed (locked)", timeout: 5) { !named("proposal.adjust", "Anpassen").exists }
-                    }
-                }
-                // If not, back.
-                if detail.exists {
-                    back()
-                    UITestWait.disappears(detail, "suggestion closed (locked)", timeout: 10)
-                }
-            }
-        }
-        back()
-        // Gone first: the list has its own "ausgewählte Alben anlegen" at the bottom.
-        UITestWait.disappears(list, "suggestions list closed (locked)", timeout: 10)
-        return button("ausgewählte Alben anlegen").waitForExistence(timeout: 10)
+    /// The start page with nothing running (its line about the analysis, no "Pause").
+    @discardableResult
+    private func waitForIdleStartPage(_ step: String) -> Bool {
+        let idle = UITestWait.holds(timeout: 120) { UITestScreens.Analysis.isIdle(app) }
+        print(idle ? "UI_STEP_OK \(step)" : "UI_STEP_MISSING \(step)")
+        return idle
     }
 
-    /// Takes back the newest plans in "Verlauf und Rückgängig" (at most `limit`), so their
-    /// suggestions are open again. Returns how many were taken back.
+    /// Starts the locked app with `free` free albums left.
+    private func launchLocked(freeAlbumsLeft free: Int) {
+        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked",
+                               "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "\(free)"] + UITestStalls.arguments(besides: [])
+        UITestAppEnd.launch(app)
+    }
+
+    /// Takes back the newest plans in "Verlauf und Rückgängig" (in the tab "Alben" since 5C, at
+    /// most `limit`), so their suggestions are open again. Returns how many were taken back; the
+    /// start page shows again afterwards.
     private func takeBackNewestPlans(limit: Int) -> Int {
-        guard tap(app.buttons["Einstellungen"], "settings (locked)"),
-              tap(app.buttons["settings.history"], "history (locked)", timeout: 5) else { return 0 }
+        guard tap(app.tabBars.buttons["Alben"], "albums tab (locked)") else { return 0 }
         let history = app.navigationBars["Verlauf und Rückgängig"]
-        UITestWait.appears(history, "history screen (locked)", timeout: 10)
+        guard UITestScreens.Albums.openHistory(app, "history screen (locked)") else { return 0 }
         // Its rows (not asserted: an empty history has none, and then nothing is taken back).
         _ = app.buttons.matching(identifier: "history.row").firstMatch.waitForExistence(timeout: 5)
         var undone = 0
@@ -191,17 +148,15 @@ final class SortlyLockedUITests: XCTestCase {
         }
         print("UI_FACT locked: plans taken back to have suggestions again: \(undone)")
         back()
-        UITestWait.appears(app.navigationBars["Einstellungen"], "back on the settings (locked)", timeout: 10)
-        tap(button("Fertig"), "close settings (locked)")
-        UITestWait.disappears(app.navigationBars["Einstellungen"], "settings closed (locked)", timeout: 20)
+        UITestWait.disappears(history, "history closed (locked)", timeout: 10)
+        tap(app.tabBars.buttons["Vorschläge"], "start page after taking back (locked)")
         return undone
     }
 
-    /// Ends the app and starts it again with the same arguments, then waits for the overview.
+    /// Ends the app and starts it again with the same arguments, then waits for the start page.
     private func relaunch() {
         UITestAppEnd.launch(app)  // ends it first
-        let idle = anything("Fotos analysiert").waitForExistence(timeout: 120) || anything("Analyse aktuell").exists
-        print(idle ? "UI_STEP_OK locked overview after relaunch" : "UI_STEP_MISSING locked overview after relaunch")
+        waitForIdleStartPage("locked start page after relaunch")
     }
 
     /// The number of a row made of a title and a number, maybe with a word after it: the plan's
@@ -236,7 +191,7 @@ final class SortlyLockedUITests: XCTestCase {
     }
 
     /// "Noch kostenlos: N Alben" in Settings (SettingsView, section "Vollversion"), opened from
-    /// the overview and closed again. nil when it cannot be read.
+    /// the start page and closed again. nil when it cannot be read.
     private func freeAlbumsLeftInSettings() -> Int? {
         guard tap(app.buttons["Einstellungen"], "settings for the free albums (locked)") else { return nil }
         UITestWait.appears(app.navigationBars["Einstellungen"], "settings open for the free albums (locked)", timeout: 10)
@@ -270,7 +225,7 @@ final class SortlyLockedUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(900)
         var streak = 0
         while Date() < deadline && streak < 3 {
-            let ready = anything("Fotos analysiert").exists && !app.buttons["Pause"].exists
+            let ready = UITestScreens.Analysis.isIdle(app)
                 && !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists
             streak = ready ? streak + 1 : 0
             // pacing: the poll's interval, kept: "three checks in a row" means the library stayed
@@ -285,38 +240,30 @@ final class SortlyLockedUITests: XCTestCase {
     func test7_LockedPlanOffersTheFreeAlbumsLeft() {
         continueAfterFailure = true
         prepareLibrary()
-        app.launchArguments = ["-AppleLanguages", "(de)", "-AppleLocale", "de_DE", "-SortlyUITestUnlocked",
-                               "-SortlyUITestLocked", "-SortlyUITestFreeAlbumsLeft", "1"] + UITestStalls.arguments(besides: [])
-        UITestAppEnd.launch(app)
+        launchLocked(freeAlbumsLeft: 1)
         // A cut-off test 1 left the app at its welcome screen (run 43816787321).
         if !UITestOnboarding.fullFlowReachedItsEnd { UITestOnboarding.completeIfNeeded(app, in: "test7") }
-        // The overview is idle (the earlier runs analysed the demo library).
-        let idle = anything("Fotos analysiert").waitForExistence(timeout: 120) || anything("Analyse aktuell").exists
-        print(idle ? "UI_STEP_OK locked overview" : "UI_STEP_MISSING locked overview")
+        // The start page is idle (the earlier runs analysed the demo library).
+        waitForIdleStartPage("locked start page")
 
-        // Something to apply: a selection left by the earlier runs, else the recommended ones.
-        // After a complete flow nearly every suggestion is created (run 43796844064: "1
-        // Vorschlag prüfen", nothing recommendable), so the test takes back the newest plans
-        // and creates from those suggestions instead of skipping the locked path.
-        let apply = button("ausgewählte Alben anlegen")
-        if !apply.waitForExistence(timeout: 5) && !selectRecommended("open suggestions (locked)") {
-            print("UI_FACT locked: nothing recommendable left, taking back the newest plans")
-            let before = openSuggestionCount()
+        // Something to apply: several suggestions as one preview ("Dein Startpaket", or the
+        // ticks of an area's list; the basket of before is gone). After a complete flow nearly
+        // every suggestion is created (run 43796844064: one suggestion open, nothing
+        // recommendable), so the test takes back the newest plans and creates from those
+        // suggestions instead of skipping the locked path.
+        if !UITestWait.holds(timeout: 5, { offersSeveral() }) {
+            print("UI_FACT locked: no preview of several suggestions on the start page, taking back the newest plans")
             // Four: the newest plans need not come from suggestions (flow test 5 cuts off a
             // new album of two photos when nothing recommended is left, and keeps and retries
             // it: two plans whose undo brings no suggestion back, UI run 43949880264).
             if takeBackNewestPlans(limit: 4) > 0 {
                 // The suggestions of the plans taken back return once the undo is stored and
-                // matched again; the count on the overview says when (run 43804947107 went on
-                // at once and found the one suggestion that was there before).
-                var after = 0
-                // Not asserted here: the relaunch below and the selection after it decide.
-                _ = UITestWait.holds(timeout: 120) {
-                    after = openSuggestionCount()
-                    return after > before
-                }
-                print("UI_FACT locked: open suggestions \(before) before taking back, \(after) after")
-                shot("70-locked-overview-after-takeback")
+                // matched again; the start page says when (run 43804947107 went on at once and
+                // found the one suggestion that was there before). Not asserted here: the
+                // relaunch below and the preview after it decide.
+                let back = UITestWait.holds(timeout: 120) { offersSeveral() }
+                print("UI_FACT locked: several suggestions offered after taking back: \(back)")
+                shot("70-locked-start-after-takeback")
                 // Every undo gave its albums back to the free count (AppModel.finalize:
                 // returnUsage, also for plans of earlier runs: FreeAlbumLedger.giveBack lowers
                 // the old total), so more would be free now and the plan would rarely need the
@@ -327,19 +274,19 @@ final class SortlyLockedUITests: XCTestCase {
                 // is never given back, so one free album should be left; not taken for granted
                 // all the same: the count is read in Settings below.
                 relaunch()
-                _ = selectRecommended("open suggestions after taking back (locked)")
             }
         }
-        let ready = apply.waitForExistence(timeout: 10)
-        print(ready ? "UI_STEP_OK something to create (locked)" : "UI_STEP_MISSING something to create (locked)")
-        XCTAssertTrue(ready, "The locked run found nothing to create, not even after taking plans back")
-        guard ready else { return }
         // Read, not assumed (see the relaunch above).
         let free = freeAlbumsLeftInSettings()
         XCTAssertNotNil(free, "Settings shows no readable \"Noch kostenlos\"")
         let left = free ?? 1
-        guard tap(apply, "open plan (locked)", timeout: 20) else { return }
-        guard UITestWait.appears(app.navigationBars["Vorschau"], "plan screen (locked)", timeout: 30) else { return }
+        // One free album: no "Dein Startpaket" (it needs three), so an area's list with "Alle
+        // auswählen" and "N Alben anlegen".
+        let ready = UITestScreens.StartPage.openPlan(app, "open plan (locked)")
+        print(ready ? "UI_STEP_OK something to create (locked)" : "UI_STEP_MISSING something to create (locked)")
+        XCTAssertTrue(ready, "The locked run found nothing to create, not even after taking plans back")
+        guard ready else { return }
+        shot("71-locked-preview")
 
         // The unlock card comes exactly when the plan needs more albums than are free
         // (PlanReviewView: !purchases.allows(albums: facts.freeAlbumUse)). freeAlbumUse of a
@@ -360,13 +307,20 @@ final class SortlyLockedUITests: XCTestCase {
         }
         if cardShown {
             print("UI_STEP_OK unlock card")
-            // At the top of the plan, where "Alben jetzt anlegen" would be in reach otherwise.
+            // At the top of the plan, where "Jetzt anlegen" would be in reach otherwise.
             expectInReach(unlock, "unlock card (locked)")
             shot("74-locked-plan-unlock")
-            XCTAssertFalse(app.buttons["plan.apply"].exists, "A plan over the free albums offered \"Alben jetzt anlegen\"")
-            // With or without a price from StoreKit (W7: "Preis wird geladen …" until it is there).
-            XCTAssertTrue(app.buttons["unlock.buy"].exists, "No unlock button")
-            XCTAssertTrue(button("Kauf wiederherstellen").exists, "No restore button")
+            XCTAssertFalse(app.buttons["plan.apply"].exists, "A plan over the free albums offered \"Jetzt anlegen\"")
+            // "Freischalten …" opens the purchase sheet (design E6): the price (or "Preis wird
+            // geladen …" until StoreKit has it, W7), "Kauf wiederherstellen", "Code einlösen",
+            // and "Schließen" back to the plan.
+            let open = app.buttons["unlock.open"]
+            XCTAssertTrue(open.exists, "The unlock card has no \"Freischalten …\" (unlock.open)")
+            if tap(open, "open the purchase sheet from the plan (locked)", timeout: 5) {
+                shot("74b-locked-purchase-sheet")
+                UITestScreens.Purchase.expectOffersAndClose(app, "purchase sheet of the plan (locked)")
+                XCTAssertTrue(unlock.waitForExistence(timeout: 5), "The plan lost its unlock card after the purchase sheet was closed")
+            }
             guard tap(button("jetzt kostenlos anlegen"), "keep the free albums only") else { return }
         } else {
             print("UI_FACT locked: the plan has \(planned) albums, they fit the \(left) free ones")
@@ -374,7 +328,7 @@ final class SortlyLockedUITests: XCTestCase {
         let start = app.buttons["plan.apply"]
         // Waited for (also after "jetzt kostenlos anlegen", which had a fixed 3 s before).
         UITestWait.appears(start, "the plan within the free albums can be applied (locked)", timeout: 23)
-        expectInReach(start, "\"Alben jetzt anlegen\" (locked)")
+        expectInReach(start, "\"Jetzt anlegen\" (locked)")
         shot("75-locked-plan-free")
         // What is free afterwards: the free albums less what this plan uses ("Die ersten N"
         // made the plan anew, so its summary is read again).
@@ -387,5 +341,80 @@ final class SortlyLockedUITests: XCTestCase {
         let done = button("Rückgängig machen").waitForExistence(timeout: 300)
         print(done ? "UI_STEP_OK locked plan finished" : "UI_STEP_MISSING locked plan finished")
         XCTAssertTrue(done, "The plan within the free albums did not finish")
+    }
+
+    /// A card whose action is "Anlegen": on the start page (`suggestion.card.create`), else in an
+    /// area's list (`suggestion.row` whose button says „Name“ anlegen).
+    private func cardThatCreates() -> XCUIElement? {
+        if let card = UITestScreens.Cards.first(app, action: "create", swipes: 4, timeout: 5) { return card }
+        guard UITestScreens.StartPage.openList(app, "a list for a card with Anlegen (locked)", timeout: 5) else { return nil }
+        let card = UITestScreens.SuggestionList.cards(app).containing(UITestScreens.Cards.saying("anlegen")).firstMatch
+        var swipes = 0
+        while !card.waitForExistence(timeout: 2) && swipes < 6 {
+            app.swipeUp()
+            swipes += 1
+        }
+        return card.exists ? card : nil
+    }
+
+    /// No free album left: "Anlegen" on a card opens the purchase sheet instead of making the
+    /// album (design E6 "Freie Alben verbraucht": its own sheet, also when "Anlegen" reaches the
+    /// limit), and the sheet says that the suggestion stays open. Closed with "Schließen",
+    /// nothing was made: no banner, and the card still offers "Anlegen".
+    func test8_CardWithoutFreeAlbumsOpensThePurchaseSheet() {
+        continueAfterFailure = true
+        prepareLibrary()
+        launchLocked(freeAlbumsLeft: 0)
+        if !UITestOnboarding.fullFlowReachedItsEnd { UITestOnboarding.completeIfNeeded(app, in: "test8") }
+        waitForIdleStartPage("locked start page without free albums")
+
+        // After a complete flow most suggestions are made: the newest plans are taken back then.
+        var found = cardThatCreates()
+        if found == nil {
+            print("UI_FACT locked: no card with \"Anlegen\", taking back the newest plans")
+            if takeBackNewestPlans(limit: 2) > 0 {
+                _ = UITestWait.holds(timeout: 120) {
+                    offersSeveral() || UITestScreens.Cards.cards(app, action: "create").firstMatch.exists
+                }
+                relaunch()
+                found = cardThatCreates()
+            }
+        }
+        guard let card = found else {
+            print("UI_STEP_MISSING a card with Anlegen (locked)")
+            XCTFail("No card with \"Anlegen\" on the start page or in a list, not even after taking plans back")
+            return
+        }
+        let identifier = card.identifier
+        let name = card.buttons["photoCard.body"].label
+        // The album's name as its button says it; the card is found by it afterwards.
+        let title = UITestScreens.Cards.albumName(of: card) ?? name
+        print("UI_FACT locked: card '\(name)' (\(identifier))")
+        shot("76-locked-card")
+        guard UITestScreens.Cards.tapAction(of: card, in: app, "Anlegen without free albums (locked)") else { return }
+
+        // The sheet instead of the album, saying why and that the suggestion stays.
+        guard UITestWait.appears(UITestScreens.Purchase.sheet(app), "purchase sheet after Anlegen (locked)", timeout: 15) else { return }
+        shot("77-locked-card-purchase-sheet")
+        let why = anything("kostenlosen Alben sind angelegt").waitForExistence(timeout: 3)
+        print(why ? "UI_STEP_OK the sheet says the free albums are used up" : "UI_STEP_MISSING the sheet says the free albums are used up")
+        XCTAssertTrue(why, "The purchase sheet after \"Anlegen\" does not say that the free albums are used up")
+        let stays = anything("Der Vorschlag bleibt offen").exists
+        print(stays ? "UI_STEP_OK the sheet says the suggestion stays open" : "UI_STEP_MISSING the sheet says the suggestion stays open")
+        XCTAssertTrue(stays, "The purchase sheet after \"Anlegen\" does not say \"Der Vorschlag bleibt offen und läuft dir nicht weg.\"")
+        guard UITestScreens.Purchase.expectOffersAndClose(app, "purchase sheet after Anlegen (locked)") else { return }
+
+        // Nothing was made: no banner "angelegt", and the suggestion still offers "Anlegen".
+        UITestWait.never("an album is made without free albums (banner)", for: 3) { UITestScreens.QuickCreate.banner(app).exists }
+        let again = UITestScreens.Cards.card(app, identifier: identifier, titled: title)
+        let stayed = again.waitForExistence(timeout: 10)
+        print(stayed ? "UI_STEP_OK the suggestion stayed open (locked)" : "UI_STEP_MISSING the suggestion stayed open (locked)")
+        XCTAssertTrue(stayed, "The suggestion '\(name)' is gone after the purchase sheet was closed")
+        if stayed {
+            let cardButton = UITestScreens.Cards.action(of: again)
+            XCTAssertTrue(UITestScreens.Cards.button(cardButton, says: "anlegen"),
+                          "The suggestion '\(name)' no longer offers \"Anlegen\" after the purchase sheet was closed ('\(cardButton.label)')")
+        }
+        shot("78-locked-card-after-sheet")
     }
 }

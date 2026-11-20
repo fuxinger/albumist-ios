@@ -1151,9 +1151,22 @@ final class AccessibilityUITests: XCTestCase {
         var swipes = 0
         var unmoved = 0
         var stuck = false
+        // The direction of the last swipe: up (+1) for an element under the tab bar or below the
+        // screen, down (-1) for one under the navigation bar.
+        var lastDirection = 0
+        var overshot = false
         while swipes < 10 {
             let before = element.frame
-            if underBar() { app.swipeDown() } else if underTabs() || !element.isHittable { app.swipeUp() } else { break }
+            let direction: Int
+            if underBar() { direction = -1 } else if underTabs() || !element.isHittable { direction = 1 } else { break }
+            // The last swipe took the element past the band between the bars to the other bar: a
+            // swipe scrolls further than that band is tall, so further swipes only sent it back
+            // and forth (UI runs 44630953220 and job 136352444079: ten swipes, then one short drag
+            // of `tapClearOfBars` brought it clear, 30-50 s per such tap in the accessibility and
+            // contrast walks). The short drags below take over at once.
+            if lastDirection != 0, direction != lastDirection { overshot = true; break }
+            if direction < 0 { app.swipeDown() } else { app.swipeUp() }
+            lastDirection = direction
             swipes += 1
             // The list is at its end: two swipes in a row did not move the element (accessibility
             // run 44202318875: ten swipes, the row stayed at y 500-765 under the tab bar from 584).
@@ -1161,7 +1174,7 @@ final class AccessibilityUITests: XCTestCase {
             if unmoved >= 2 { stuck = true; break }
         }
         if tabs.exists, swipes > 0 || element.frame.maxY > tabs.frame.minY {
-            print("UI_FACT tap \(step): element \(element.frame), tab bar \(tabs.frame), \(swipes) swipes\(stuck ? ", it no longer moves" : "")")
+            print("UI_FACT tap \(step): element \(element.frame), tab bar \(tabs.frame), \(swipes) swipes\(stuck ? ", it no longer moves" : "")\(overshot ? ", the last one took it past the band between the bars" : "")")
         }
         // An element under a bar with at least 30 pt clear of both bars is tapped there, not on
         // its centre, which the bar takes: in accessibility run 44202318875 (test3) the tap meant

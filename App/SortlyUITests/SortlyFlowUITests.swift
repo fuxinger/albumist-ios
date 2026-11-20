@@ -169,8 +169,7 @@ final class SortlyFlowUITests: XCTestCase {
         let bar = app.navigationBars.firstMatch
         var swipes = 0
         while swipes < 8 {
-            let underBar = bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY
-            if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
+            if UITestWait.underNavigationBar(element, bar) { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
         UITestOnboarding.clock("tap \(step)")
@@ -392,7 +391,15 @@ final class SortlyFlowUITests: XCTestCase {
         let started = Date()
         launch(["-SortlyUITestFastStart"])
         let noAccess = app.buttons["access.continue"]
-        if noAccess.waitForExistence(timeout: 5) {
+        // The first screen: the overview, "Kein Zugriff" or the welcome screen, within the 5 s
+        // the wait for "Kein Zugriff" alone had. The app picks it once when it has loaded
+        // (`AppModel.phase`), so the overview never turns into one of the others and the wait
+        // ends when it shows: the 5 s for "Kein Zugriff" alone ran out in every test that found
+        // the overview (all but the group's first).
+        _ = UITestWait.holds(timeout: 5) {
+            app.tabBars.firstMatch.exists || noAccess.exists || button("Los geht").exists
+        }
+        if noAccess.exists {
             // Photo access is not granted (the CI grant did not hold, or a test took it away):
             // with the introduction done the app shows "Kein Zugriff auf deine Fotos" (W4).
             noAccess.tap()
@@ -412,11 +419,22 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Analyse starten"), "start analysis (prepare)", timeout: 20)
             declineNotificationsIfAsked()
         }
+        // "Beispiel-Mediathek anlegen" is tapped (once) when it shows in the first 3 s of the
+        // wait below (its checks at about 0 and 2 s), the 3 s its own wait had, instead of that
+        // wait, which a seeded library waited out in every test. Looked for only in those 3 s:
+        // while the analysis runs every query slows the app down (see `analysisIdle`); the
+        // condition still says when it is there.
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists { demo.tap() }
+        let demoUntil = Date().addingTimeInterval(3)
+        var demoTapped = false
         let ready = waitStable("demo library analysed", timeout: 900) {
-            anything("Fotos analysiert").exists && !app.buttons["Pause"].exists && !anything("Beispielfotos werden angelegt").exists
-                && !button("Beispiel-Mediathek anlegen").exists
+            if !demoTapped, Date() < demoUntil, demo.exists, !anything("Beispielfotos werden angelegt").exists {
+                demoTapped = true
+                demo.tap()
+                return false
+            }
+            return anything("Fotos analysiert").exists && !app.buttons["Pause"].exists && !anything("Beispielfotos werden angelegt").exists
+                && !demo.exists
         }
         print(ready ? "UI_STEP_OK prepared" : "UI_STEP_MISSING prepared")
         XCTAssertTrue(ready, "The demo library was not created and analysed")

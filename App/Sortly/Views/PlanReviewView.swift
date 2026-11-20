@@ -34,8 +34,9 @@ struct PlanReviewView: View {
     @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
-    /// At the accessibility text sizes only the button stays at the bottom (`applyBar`).
+    /// At the accessibility text sizes and in landscape on an iPhone the bar is compact (`compactBar`).
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     /// The screen loads once; coming back from another tab keeps the result and its undo.
     @State private var didLoad = false
     private static let top = "plan.top"
@@ -244,12 +245,12 @@ struct PlanReviewView: View {
             }
         }
 
-        // At the accessibility text sizes the bar holds the button alone, so that it leaves room
-        // for the plan on a small iPhone; the promise and the notes stand here, at its end.
-        if obstacle == nil && typeSize.isAccessibilitySize {
+        // Where room is short the bar holds the button and what explains it (`compactBar`); the
+        // promise and the free albums left stand here, at the end of the plan.
+        if obstacle == nil && compactBar {
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 promise(summary)
-                applyNotes(facts)
+                freeAlbumNote(facts)
             }
             .padding(.horizontal, Theme.Spacing.l)
         }
@@ -294,9 +295,11 @@ struct PlanReviewView: View {
     /// so it ends above the tab bar.
     private func applyBar(_ plan: ChangePlan, _ facts: PlanReviewFacts, scrollToTop: @escaping () -> Void) -> some View {
         VStack(spacing: Theme.Spacing.s) {
-            if !typeSize.isAccessibilitySize { promise(facts.summary) }
+            if !compactBar { promise(facts.summary) }
             applyButton(plan, facts, scrollToTop: scrollToTop)
-            if !typeSize.isAccessibilitySize { applyNotes(facts) }
+            // Why the button waits and that iOS asks next: beside it at every size (P3-07).
+            applyNotes(facts)
+            if !compactBar { freeAlbumNote(facts) }
         }
         .multilineTextAlignment(.center)
         // As the onboarding's button: clear of the tab bar, which takes taps a little above it.
@@ -304,6 +307,18 @@ struct PlanReviewView: View {
         .padding(.vertical, Theme.Spacing.m)
         .frame(maxWidth: .infinity)
         .background(Theme.background)
+        // A container of its own: an identifier on a plain container is handed down to every
+        // element inside (`EmptyLibraryCard`), and the button keeps "plan.apply". The
+        // accessibility test counts rows passing under the bar as cut, as under the tab bar.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("plan.bar")
+    }
+
+    /// Where room is short the bar holds the button and what explains it, nothing more: at the
+    /// accessibility text sizes, and in landscape on an iPhone, where the whole bar could fill
+    /// most of the room between the navigation bar and the tab bar (second review of P3-05).
+    private var compactBar: Bool {
+        typeSize.isAccessibilitySize || verticalSizeClass == .compact
     }
 
     /// Runs the plan, with the sorting show when photos go into albums.
@@ -327,11 +342,12 @@ struct PlanReviewView: View {
         .accessibilityIdentifier("plan.apply")
     }
 
-    /// What the button needs said: why it waits, that iOS asks next, the free albums it uses.
+    /// What the button needs said beside it at every size: why it waits, and that iOS asks
+    /// next (second review of P3-05: at the accessibility sizes both stood at the end of the
+    /// plan, and a removal could be started without the iOS question announced).
     @ViewBuilder
     private func applyNotes(_ facts: PlanReviewFacts) -> some View {
         let summary = facts.summary
-        let albums = facts.freeAlbumUse
         if facts.isBlocking {
             Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")
                 .font(.footnote).foregroundStyle(.noteText)
@@ -345,6 +361,13 @@ struct PlanReviewView: View {
                 .font(.footnote).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// The free albums this plan leaves: under the button, or at the end of the plan where
+    /// room is short (`compactBar`).
+    @ViewBuilder
+    private func freeAlbumNote(_ facts: PlanReviewFacts) -> some View {
+        let albums = facts.freeAlbumUse
         if !purchases.isUnlocked && !Purchases.unlockedForUITests && albums > 0 && purchases.allows(albums: albums) {
             Text("Kostenlos. Danach hast du noch \(purchases.remainingFreeAlbums - albums) von \(Purchases.freeAlbumLimit) Gratis-Alben.")
                 .font(.footnote).foregroundStyle(.noteText)

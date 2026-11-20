@@ -34,7 +34,8 @@ import UIKit
 /// - findings on disabled controls (WCAG 1.4.3 exempts inactive components)
 /// - findings on or under the system's Liquid Glass bars (navigation bar, tab bar, toolbar,
 ///   bottom search field): XCTest cannot measure text on glass (Apple's own "Fertig" button
-///   fails there), and content scrolling under a bar is cut by design
+///   fails there), and content scrolling under a bar is cut by design; so is content under
+///   the preview's own opaque bar with "Alben jetzt anlegen" ("plan.bar", review P3-05)
 /// - contrast findings without an element on screens with such a bar: XCTest found text it
 ///   cannot attribute (text inside a combined row), which in the UI flow was always a row
 ///   passing under the tab bar
@@ -457,7 +458,8 @@ final class AccessibilityUITests: XCTestCase {
     }
 
     /// Frames of the system's Liquid Glass chrome: navigation bars, tab bar, toolbars and
-    /// search fields (in iOS 26 a sheet's search field floats at the bottom like a toolbar).
+    /// search fields (in iOS 26 a sheet's search field floats at the bottom like a toolbar),
+    /// and the preview's own bar at the bottom ("plan.bar").
     private func chromeFrames() -> [CGRect] {
         var frames: [CGRect] = []
         // The keyboard covers content like a bar does.
@@ -477,6 +479,13 @@ final class AccessibilityUITests: XCTestCase {
         }
         for field in app.searchFields.allElementsBoundByIndex where field.exists {
             frames.append(field.frame.insetBy(dx: -8, dy: -8))
+        }
+        // The preview's own bar with "Alben jetzt anlegen" (`PlanReviewView.applyBar`, review
+        // P3-05): opaque, so a row passing under it is cut by design, as under the tab bar. Its
+        // own texts and button are in the styles audited on every other screen
+        // (`PrimaryButtonStyle`, `.noteText`), and the English run still reads their words.
+        for bar in app.descendants(matching: .any).matching(identifier: "plan.bar").allElementsBoundByIndex where bar.exists {
+            frames.append(bar.frame)
         }
         // Only real bars count: at the top or bottom edge and not taller than the keyboard
         // (45 % of the screen). Anything else would exempt the middle of the screen.
@@ -579,7 +588,7 @@ final class AccessibilityUITests: XCTestCase {
             } else if type == .contrast && !element.isEnabled {
                 reason = "disabled control (WCAG exempt)"
             } else if frames.contains(where: { frame in chrome.contains { $0.intersects(frame) } }) {
-                reason = "on or under a system Liquid Glass bar"
+                reason = "on or under a system Liquid Glass bar or the preview's own bar"
             } else if Self.isEmojiOnly(label) {
                 reason = "emoji only (a flag is a picture, not text)"
             } else if pictureFrames.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(frame) }) {

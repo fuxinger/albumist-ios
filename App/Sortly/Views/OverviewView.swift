@@ -408,8 +408,9 @@ struct OverviewView: View {
                 .accessibilityValue(UITestSupport.isRunning ? "image loads: \(ImageLoadStats.summary)" : "")
                 if let date = model.analysis.lastRun {
                     // „Gerade eben geprüft“ in the first minute, not „Zuletzt geprüft jetzt“ (P3-18);
-                    // drawn again every minute, so neither stays after the minute has passed.
-                    TimelineView(.everyMinute) { context in
+                    // drawn again a minute after the check and every minute from there, so neither
+                    // stays after its minute has passed (`.everyMinute` follows the clock's minute).
+                    TimelineView(.periodic(from: date, by: LastCheck.justNowSpan)) { context in
                         switch LastCheck(date, now: context.date) {
                         case .justNow: Text("Gerade eben geprüft")
                         case .earlier(let checked): Text("Zuletzt geprüft \(checked.formatted(.relative(presentation: .named)))")

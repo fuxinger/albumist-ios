@@ -27,11 +27,15 @@ struct LastCheckTextTests {
         #expect(LastCheck(Self.checked, now: Self.checked.addingTimeInterval(-5)) == .justNow)
     }
 
-    /// The overview shows it, refreshed every minute, and never the relative date of "now".
+    /// The overview shows it, and never the relative date of "now". It is drawn again a minute
+    /// after the check and every minute from there (second review of P3-18: `.everyMinute` ticks
+    /// at the turn of the clock's minute, so „Gerade eben geprüft“ stayed up to two minutes).
     @Test func theOverviewSaysJustNow() throws {
         let overview = AppSource.code(try AppSource.read("App/Sortly/Views/OverviewView.swift"), keepStrings: true)
         #expect(overview.contains("LastCheck(date, now: context.date)"), "the overview does not decide with LastCheck")
-        #expect(overview.contains("TimelineView(.everyMinute)"), "the text does not follow the clock")
+        let fromTheCheck = overview.contains("TimelineView(.periodic(from: date, by: LastCheck.justNowSpan))")
+        let byTheClock = overview.contains(".everyMinute")
+        #expect(fromTheCheck && !byTheClock, "the text is not drawn again when the first minute after the check has passed")
         #expect(overview.contains("Text(\"Gerade eben geprüft\")"))
         let catalog = try String(contentsOf: AppSource.root.appendingPathComponent("App/Sortly/Resources/Localizable.xcstrings"), encoding: .utf8)
         let data = try #require(catalog.data(using: .utf8))

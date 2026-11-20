@@ -92,10 +92,11 @@ public struct LocalDay: Hashable, Comparable, Sendable, Codable, CustomStringCon
 
 // MARK: - Trip geometry (where the photos of one trip were, day by day)
 
-/// How many photos of a trip were taken on one local day ("Meiste Fotos an einem Tag").
+/// How many photos of a trip on the map were taken on one local day ("Meiste Fotos an einem Tag").
 public struct TripDay: Hashable, Sendable, Codable {
     public var day: LocalDay
-    /// All the trip's photos of that day, with and without a location.
+    /// The trip's photos of that day on the map (`TripGeometry.build`): with a location, not taken
+    /// in flight, no screenshot, not at home. A photo the map does not draw counts in no record.
     public var photoCount: Int
     /// The place of most of that day's photos, if one has `TripGeometry.minimumPhotosPerPlace`.
     public var placeIndex: Int?
@@ -149,9 +150,11 @@ public struct TripPlace: Hashable, Sendable, Codable {
     /// `TripGeometry.coverCandidateLimit`. The app shows only those it has sharp on the iPhone
     /// and never loads one from iCloud.
     public var coverCandidates: [AssetID]
-    /// Metres above sea level, when at least `TripGeometry.minimumPhotosPerPlace` of its photos
-    /// carry an altitude, all below `AirborneFilter.maximumAltitude` and agreeing within
-    /// `TripGeometry.altitudeSpreadMeters`: their mean. `nil` otherwise (no "Höchstes Foto" from it).
+    /// Metres above sea level: the mean of its highest photos that agree, those within
+    /// `TripGeometry.altitudeSpreadMeters` below the highest one that has at least
+    /// `TripGeometry.minimumPhotosPerPlace - 1` others that close. A summit with photos on the way
+    /// up is as high as the photos at its top; altitudes above `AirborneFilter.maximumAltitude`
+    /// (from planes) count as none. `nil` without such photos (no "Höchstes Foto" from it).
     public var altitude: Double?
 
     public init(coordinate: GeoCoordinate, name: String?, countryKey: String?, photoCount: Int, days: [LocalDay], coverCandidates: [AssetID],
@@ -167,7 +170,10 @@ public struct TripPlace: Hashable, Sendable, Codable {
 }
 
 /// One stop of the route: a visit to a place of the trip, in time order. A place visited twice
-/// (back to the hotel) appears twice, never twice in a row.
+/// (back to the hotel) appears twice, never twice in a row. Photos taken in turn in two places
+/// that nothing could travel between in the time (`AirborneFilter.maximumFlightSpeed`: two
+/// cameras in one library) are no way anyone went: the route passes each place of such a run
+/// once, at its first visit in the run.
 public struct RoutePoint: Hashable, Sendable, Codable {
     public var placeIndex: Int
     /// First and last photo of this visit.
@@ -187,10 +193,13 @@ public struct RoutePoint: Hashable, Sendable, Codable {
 /// The straight line from one route point to the next: we know where photos were taken, not
 /// which roads were driven (concept §4.3, "Ehrliche Linien").
 public struct RouteLeg: Hashable, Sendable, Codable {
-    /// Great-circle length.
+    /// Great-circle length. On a route cut to `TripGeometry.maxRoutePoints`: the lengths of all
+    /// the legs between the visits it stands for added up (the visits the cut left out, an
+    /// excursion from its first point and back), so `TripGeometry.metersOnSite` counts every leg.
     public var meters: Double
     /// Longer than `TripGeometry.gapMeters` with no photo for over `TripGeometry.gapDuration`:
     /// drawn grey and dotted with the label "ohne Fotos", so it does not read as a part of the trip.
+    /// On a cut route: when more than half of its metres were.
     public var withoutPhotos: Bool
 
     public init(meters: Double, withoutPhotos: Bool) {
@@ -220,18 +229,22 @@ public struct TripGeometry: Hashable, Sendable, Codable, Identifiable {
     public static let altitudeSpreadMeters = 150.0
 
     public var id: SortlyID
-    /// First and last photo of the trip.
+    /// First and last dated photo of the trip, as its album shows them (those not on the map too).
     public var start: Date
     public var end: Date
-    /// The time zone most of the trip's photos were taken in (from their places), if known.
+    /// The time zone most of the trip's photos on the map were taken in (from their clocks and
+    /// places), if known.
     public var timeZoneIdentifier: String?
-    /// First and last local day, in `timeZoneIdentifier` (else the device's time zone).
+    /// First and last local day of its dated photos, as its album shows them: each on the clock
+    /// where it was taken, else in its place's zone, else in `timeZoneIdentifier` (else the
+    /// device's time zone).
     public var firstDay: LocalDay
     public var lastDay: LocalDay
-    /// All photos of the trip (with and without location), as its album shows them.
+    /// Every photo of the trip once (an asset id listed twice counts once), as its album shows
+    /// them: on the map, and without a location or date, screenshots, taken in flight or at home.
     public var photoCount: Int
-    /// Every local day with photos, oldest first. A photo without a place counts in the time zone
-    /// of the trip (`timeZoneIdentifier`).
+    /// Every local day with photos on the map (`TripDay`), oldest first, each photo on its day as
+    /// for `firstDay`. A day with photos only off the map (at home, without a location) has none.
     public var dayCounts: [TripDay]
     /// Oldest first.
     public var dayPlaces: [DayPlace]
@@ -242,10 +255,13 @@ public struct TripGeometry: Hashable, Sendable, Codable, Identifiable {
     public var legs: [RouteLeg]
     /// The place with the most photos: where the trip's arc ends and its pin stands. `nil` when no
     /// place has `minimumPhotosPerPlace` photos of one day; `destination` is then the medoid of
-    /// the trip's photos (a real photo location, but no place: no record comes from it).
+    /// the trip's photos on the map (a real photo location, but no place: no record comes from
+    /// it). Without a photo on the map, the trip's centre (`Trip.centroid`), unless one of its
+    /// photos is at home: that centre may be home, so it is then 0, 0 (not `isPlausible`).
     public var destinationIndex: Int?
     public var destination: GeoCoordinate
-    /// Photos with a location per country key (ISO code or "disputed-<id>"), photos in flight left out.
+    /// Photos on the map per country key (ISO code or "disputed-<id>"): none in flight, at home or
+    /// without a location.
     public var countryPhotos: [String: Int]
     /// The country key with the most photos (ties: the smaller key).
     public var mainCountryKey: String?
@@ -278,7 +294,8 @@ public struct TripGeometry: Hashable, Sendable, Codable, Identifiable {
     public var days: Int { firstDay.days(to: lastDay) + 1 }
 
     /// "vor Ort": the legs between the places, in time order (not between all photo points, or
-    /// GPS jitter would make the number grow).
+    /// GPS jitter would make the number grow), those a cut to `maxRoutePoints` left out too
+    /// (`RouteLeg.meters`).
     public var metersOnSite: Double { legs.reduce(0) { $0 + $1.meters } }
 
     /// The route's coordinates, in time order.

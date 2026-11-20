@@ -6,13 +6,18 @@ extension TripGeometry {
     /// distinct places with their names, the route between them (at most `maxRoutePoints`), the
     /// legs "ohne Fotos", the place its arc points to, its countries and its photos per day.
     ///
-    /// Only photos with a usable location and a date, not taken in flight and no screenshot, are
-    /// drawn on the map; their place is their GPS place (`AssetFacts.gpsPlace`), never one guessed
-    /// from the content. Every photo counts in `photoCount`, every dated one in `dayCounts`.
+    /// Only photos with a usable location and a date, not taken in flight, no screenshot and not
+    /// at home (`AssetFacts.atHome`, concept §8: everyday photos at home never appear on the map,
+    /// not even one the trip detection put in a trip) are drawn on the map: day places, places,
+    /// route, destination, covers, countries and photos per day come from them alone. Their place
+    /// is their GPS place (`AssetFacts.gpsPlace`), never one guessed from the content. Every photo
+    /// counts in `photoCount` and every dated one in the trip's days (`start` to `end`, `firstDay`
+    /// to `lastDay`), as its album shows them.
     ///
     /// - Parameters:
     ///   - facts: the trip's photos (those whose `tripID` is the trip's), in any order, maybe none.
-    ///     The same facts in any order give the same geometry.
+    ///     The same facts in any order give the same geometry. A photo listed twice counts once
+    ///     (`eachPhotoOnce`).
     ///   - airborne: photos taken in flight (`AirborneFilter.airborne`): left out of places,
     ///     route and countries, counted in `airborneCount`.
     ///   - altitudes: metres above sea level by photo, where the iPhone stored one (`TripPlace.altitude`).
@@ -31,10 +36,12 @@ extension TripGeometry {
 ///
 /// Each fact is read once, into plain values (only the few best covers of a place are read again,
 /// for their `PreviewRank`): the steps after read a photo many times, and the trips of a library
-/// hold tens of thousands of photos (concept §9: the whole map of 50,000 photos in 300 ms).
+/// hold tens of thousands of photos (concept §9: the whole map of 50,000 photos in 300 ms). Every
+/// step is about linear in the photos, so one trip holding all of them costs what the trips of a
+/// library do.
 enum TripGeometryBuilder {
     /// A photo the geometry is drawn from: a usable location and a date, not taken in flight, no
-    /// screenshot.
+    /// screenshot, not at home.
     struct Photo {
         /// Into the photos' `Source`s, which keep the order the facts came in.
         var source: Int
@@ -112,9 +119,14 @@ enum TripGeometryBuilder {
         var last: Int
     }
 
+    /// No place on Earth (`GeoCoordinate.isPlausible` is false for it): the destination of a trip
+    /// with no photo on the map whose centre may be home (`build`).
+    static let nowhere = GeoCoordinate(latitude: 0, longitude: 0)
+
     static func build(trip: Trip, facts: [AssetFacts], airborne: Set<AssetID>, altitudes: [AssetID: Double],
                       deviceTimeZone: TimeZone) -> TripGeometry {
-        // Every dated photo with the zone of its place, for its day; the photos on the map with
+        let facts = eachPhotoOnce(facts)
+        // Every dated photo with the zone of its clock, for its day; the photos on the map with
         // what the later steps need of them.
         var dated: [(date: Date, zone: Int, photo: Int)] = []
         var photos: [Photo] = []
@@ -126,9 +138,11 @@ enum TripGeometryBuilder {
         var countries = NameCounter()
         var start = trip.start, end = trip.end
         var airborneCount = 0
+        var someAtHome = false
         for (index, fact) in facts.enumerated() {
             let inFlight = !airborne.isEmpty && airborne.contains(fact.id)
             if inFlight { airborneCount += 1 }
+            if fact.atHome { someAtHome = true }
             guard let date = fact.asset.creationDate else { continue }
             if dated.isEmpty || date < start { start = date }
             if dated.isEmpty || date > end { end = date }
@@ -137,7 +151,7 @@ enum TripGeometryBuilder {
             // The clock where it was taken, as the app counts its days and months
             // (`AssetFacts.timeZone`, review P1-15), else its place's zone.
             if let identifier = fact.timeZone?.identifier ?? place?.timeZoneIdentifier { zone = zones.number(identifier) }
-            guard !inFlight, !fact.asset.isScreenshotLike, let coordinate = fact.asset.usableLocation else {
+            guard !inFlight, !fact.atHome, !fact.asset.isScreenshotLike, let coordinate = fact.asset.usableLocation else {
                 dated.append((date, zone, -1))
                 continue
             }
@@ -162,13 +176,23 @@ enum TripGeometryBuilder {
             tripZone = z
         }
 
-        // Every dated photo's local day: in the zone of its place, else in the trip's.
+        // Every dated photo's local day: on its clock, else in the zone of its place, else in the
+        // trip's. The trip's first and last day are those of all of them (its album's), its
+        // photos per day those on the map.
         var days = LocalDayFinder(zones: timeZones, fallback: tripZone.flatMap { timeZones[$0] } ?? deviceTimeZone)
         var photosPerDay: [LocalDay: Int] = [:]
-        var run = (day: LocalDay(year: 0, month: 0, day: 0), count: 0)
+        var firstDay: LocalDay?, lastDay: LocalDay?
+        var previous = LocalDay(year: 0, month: 0, day: 0)
+        var run = (day: previous, count: 0)
         for entry in dated {
             let day = days.day(entry.date, zone: entry.zone)
-            if entry.photo >= 0 { photos[entry.photo].day = day }
+            if day != previous {
+                previous = day
+                if firstDay.map({ day < $0 }) ?? true { firstDay = day }
+                if lastDay.map({ day > $0 }) ?? true { lastDay = day }
+            }
+            guard entry.photo >= 0 else { continue }
+            photos[entry.photo].day = day
             // The photos of one day mostly come one after another: one count per run of them.
             if day == run.day {
                 run.count += 1
@@ -199,14 +223,17 @@ enum TripGeometryBuilder {
         }
 
         let coordinates = places.map { $0.coordinate }
-        let visits = route(placeOfPhoto: placeOfPhoto, coordinates: coordinates)
+        let (visits, legs) = route(placeOfPhoto: placeOfPhoto, photos: photos, coordinates: coordinates)
         let routePoints = visits.map {
             RoutePoint(placeIndex: $0.place, arrival: photos[$0.first].date, departure: photos[$0.last].date, day: photos[$0.first].day)
         }
 
         // The arc's end: the place with the most photos, ties to the earlier first day, then the
-        // lower index. Without a place, the photo the trip's photos gather around (as a day's
-        // point); without a photo on the map, the trip's centre.
+        // lower index. Without a place, the photo the trip's photos on the map gather around (as a
+        // day's point). Without a photo on the map, the trip's centre, unless one of its photos is
+        // at home: the centre the trip detection worked out from its photos may then be home
+        // (concept §8), so the destination is no place on Earth (`nowhere`); the composer shows no
+        // trip without a photo on the map anyway (`MapSummary.isDrawn`).
         func isBetterDestination(_ a: TripPlace, than b: TripPlace) -> Bool {
             if a.photoCount != b.photoCount { return a.photoCount > b.photoCount }
             guard let dayA = a.days.first, let dayB = b.days.first else { return false }
@@ -216,7 +243,8 @@ enum TripGeometryBuilder {
         for p in places.indices where destinationIndex.map({ isBetterDestination(places[p], than: places[$0]) }) ?? true {
             destinationIndex = p
         }
-        let destination = destinationIndex.map { places[$0].coordinate } ?? GeoMath.dayPoint(photos.map { $0.coordinate }) ?? trip.centroid
+        let destination = destinationIndex.map { places[$0].coordinate } ?? GeoMath.dayPoint(photos.map { $0.coordinate })
+            ?? (someAtHome ? nowhere : trip.centroid)
 
         // Per day, the place holding most of its photos on the map, ties to the lower index: a
         // day's photos in places are those of its day places.
@@ -232,23 +260,63 @@ enum TripGeometryBuilder {
 
         return TripGeometry(
             id: trip.id, start: start, end: end, timeZoneIdentifier: tripZone.map { zones.identifiers[$0] },
-            firstDay: dayCounts.first?.day ?? days.day(trip.start, zone: -1), lastDay: dayCounts.last?.day ?? days.day(trip.end, zone: -1),
+            firstDay: firstDay ?? days.day(trip.start, zone: -1), lastDay: lastDay ?? days.day(trip.end, zone: -1),
             photoCount: facts.count, dayCounts: dayCounts, dayPlaces: dayPlaces, places: places, route: routePoints,
-            legs: legs(visits, photos: photos, coordinates: coordinates), destinationIndex: destinationIndex, destination: destination,
+            legs: legs, destinationIndex: destinationIndex, destination: destination,
             countryPhotos: countryPhotos, mainCountryKey: countryPhotos.max { ($0.value, $1.key) < ($1.value, $0.key) }?.key,
             airborneCount: airborneCount)
     }
 
-    /// Time order; equal times by id, then by location, then by day, so the order never depends
-    /// on the order the facts came in (even with one id twice). Photos equal in all of these are
-    /// alike to every later step.
+    /// Time order, equal times by id: one order, whatever order the facts came in (`build` holds
+    /// each id once).
     static func precedes(_ a: Photo, _ b: Photo, sources: [Source]) -> Bool {
         if a.date != b.date { return a.date < b.date }
-        let idA = sources[a.source].id, idB = sources[b.source].id
-        if idA != idB { return idA < idB }
-        if a.coordinate.latitude != b.coordinate.latitude { return a.coordinate.latitude < b.coordinate.latitude }
-        if a.coordinate.longitude != b.coordinate.longitude { return a.coordinate.longitude < b.coordinate.longitude }
-        return dayKey(a.day) < dayKey(b.day)
+        return sources[a.source].id < sources[b.source].id
+    }
+
+    // MARK: A photo listed twice
+
+    /// `facts` with each photo (asset id) once, in the order they came: a library may list one
+    /// twice, maybe in two states of the analysis, and it must count once in every number (concept
+    /// §5: a single photo makes no place, no record and no country). Of two facts of one photo the
+    /// one `isKept(_:over:)` prefers stays, so the choice never depends on their order. Facts
+    /// with no id twice, as a library mostly gives them, come back as they are.
+    static func eachPhotoOnce(_ facts: [AssetFacts]) -> [AssetFacts] {
+        var seen = Set<AssetID>(minimumCapacity: facts.count)
+        guard !facts.allSatisfy({ seen.insert($0.id).inserted }) else { return facts }
+        var position: [AssetID: Int] = [:]
+        var result: [AssetFacts] = []
+        for fact in facts {
+            if let p = position[fact.id] {
+                if isKept(fact, over: result[p]) { result[p] = fact }
+            } else {
+                position[fact.id] = result.count
+                result.append(fact)
+            }
+        }
+        return result
+    }
+
+    /// Whether `build` keeps `a` rather than `b`, two facts of one photo: the one at home when only
+    /// one is (privacy first: a photo either calls at home is never drawn), else the one whose
+    /// `duplicateKey` comes first. Two facts with equal keys are alike to every step of `build`,
+    /// so either gives the same geometry.
+    static func isKept(_ a: AssetFacts, over b: AssetFacts) -> Bool {
+        if a.atHome != b.atHome { return a.atHome }
+        return duplicateKey(a).lexicographicallyPrecedes(duplicateKey(b))
+    }
+
+    /// Everything `build` reads of a fact besides its id and whether it is at home, as text in a
+    /// fixed order (any fixed order will do): its date, location, whether it is a screenshot, its
+    /// clock, its GPS place's names and zone, what makes it a cover and its preview rank.
+    static func duplicateKey(_ fact: AssetFacts) -> [String] {
+        let asset = fact.asset, place = fact.gpsPlace
+        return [asset.creationDate.map { "\($0.timeIntervalSinceReferenceDate)" } ?? "",
+                asset.usableLocation.map { "\($0.latitude) \($0.longitude)" } ?? "",
+                asset.isScreenshotLike ? "screenshot" : "", fact.timeZone?.identifier ?? "",
+                place?.isoCountryCode ?? "", place?.disputedArea ?? "", place?.country ?? "", place?.administrativeArea ?? "",
+                place?.subAdministrativeArea ?? "", place?.locality ?? "", place?.areaOfInterest ?? "", place?.timeZoneIdentifier ?? "",
+                "\(asset.kind.rawValue) \(asset.isFavorite) \(asset.pixelWidth) \(asset.pixelHeight)", "\(PreviewRank(fact).rawValue)"]
     }
 
     /// `day` as one number in the same order, cheaper to compare than its three parts.
@@ -328,26 +396,86 @@ enum TripGeometryBuilder {
     /// same day merge too: two groups of one day whose running centres drifted within the
     /// radius are one place, not a zig-zag of the route inside one town.
     ///
-    /// A day place is compared with every place before it: places lie 3 km apart, so a trip has
-    /// a few dozen, a few hundred on a long road trip.
+    /// A day place is compared only with the places near it (`PlaceGrid`), not with every place
+    /// before it: a trip has a few dozen places, but one the trip detection made of years of
+    /// photos has thousands. The nearest by the same measure, ties to the lower index, so the
+    /// places are those of comparing each.
     static func mergedPlaces(_ groups: [DayGroup]) -> (placeOfGroup: [Int], count: Int) {
-        var founders: [UnitVector] = []
+        var grid = PlaceGrid()
         var placeOfGroup: [Int] = []
         placeOfGroup.reserveCapacity(groups.count)
         for group in groups {
             let point = UnitVector(group.coordinate)
-            var nearest = -1, nearestChord = Double.infinity
-            for p in founders.indices {
-                let chord = point.chordSquared(to: founders[p])
-                if chord <= placeChordSquared && chord < nearestChord { (nearest, nearestChord) = (p, chord) }
+            if let place = grid.nearest(to: point) {
+                placeOfGroup.append(place)
+            } else {
+                placeOfGroup.append(grid.add(point))
             }
-            if nearest < 0 {
-                founders.append(point)
-                nearest = founders.count - 1
-            }
-            placeOfGroup.append(nearest)
         }
-        return (placeOfGroup, founders.count)
+        return (placeOfGroup, grid.count)
+    }
+
+    /// The first day places of a trip's places (their founders, `mergedPlaces`), on a grid of
+    /// cubes over the space the unit sphere lies in, each as wide as the place radius in a
+    /// straight line (`placeChordSquared`). Two points within the radius differ by less than
+    /// that along each axis, so they lie in the same cube or in neighbouring ones: a point is
+    /// compared with the founders of 27 cubes, whatever lies elsewhere. In space, not in latitude
+    /// and longitude, so the antimeridian and the poles are no different.
+    struct PlaceGrid {
+        /// A cube's edge: a little longer than the radius as a straight line, so that rounding
+        /// never puts two points within the radius more than one cube apart.
+        static let edge = placeChordSquared.squareRoot() * (1 + 1e-6)
+        /// Cubes on either side of the centre along an axis (the sphere reaches 1 from it), with
+        /// room for the neighbours of the outermost: a cube's number is `(x, y, z)` in one `Int`.
+        static let reach = Int((1 / edge).rounded(.up)) + 2
+
+        /// The founders' points, by place.
+        private(set) var founders: [UnitVector] = []
+        /// The places whose founder lies in a cube, lowest first, by the cube's number.
+        private var cubes: [Int: [Int]] = [:]
+
+        var count: Int { founders.count }
+
+        /// The nearest place whose founder lies within the radius of `point`, ties to the lower
+        /// index; nil without one.
+        func nearest(to point: UnitVector) -> Int? {
+            let x = Self.cube(point.x), y = Self.cube(point.y), z = Self.cube(point.z)
+            var nearest = -1, nearestChord = Double.infinity
+            for dx in -1...1 {
+                for dy in -1...1 {
+                    for dz in -1...1 {
+                        guard let places = cubes[Self.number(x + dx, y + dy, z + dz)] else { continue }
+                        for p in places {
+                            let chord = point.chordSquared(to: founders[p])
+                            if chord <= placeChordSquared && (chord < nearestChord || (chord == nearestChord && p < nearest)) {
+                                (nearest, nearestChord) = (p, chord)
+                            }
+                        }
+                    }
+                }
+            }
+            return nearest >= 0 ? nearest : nil
+        }
+
+        /// A new place founded at `point`; its index.
+        mutating func add(_ point: UnitVector) -> Int {
+            founders.append(point)
+            cubes[Self.number(Self.cube(point.x), Self.cube(point.y), Self.cube(point.z)), default: []].append(founders.count - 1)
+            return founders.count - 1
+        }
+
+        /// The cube along one axis that `value` (-1 to 1) lies in. A point that is none on the
+        /// sphere (no usable location gives one) lies in a cube of the grid too: it is within the
+        /// radius of nothing and founds a place, as comparing each would have it.
+        static func cube(_ value: Double) -> Int {
+            guard value.isFinite else { return 0 }
+            return Int((min(1, max(-1, value)) / edge).rounded(.down))
+        }
+
+        static func number(_ x: Int, _ y: Int, _ z: Int) -> Int {
+            let span = 2 * reach + 1
+            return ((x + reach) * span + (y + reach)) * span + (z + reach)
+        }
     }
 
     /// One distinct place of the trip from its photos (indices into `photos`, time order) and its
@@ -398,38 +526,103 @@ enum TripGeometryBuilder {
                          altitude: altitudes.isEmpty ? nil : altitude(of: members.map { sources[photos[$0].source].id }, altitudes: altitudes))
     }
 
-    /// The place's height (`TripPlace.altitude`): the mean of its photos' altitudes when at least
-    /// `TripGeometry.minimumPhotosPerPlace` carry one, none above `AirborneFilter.maximumAltitude`
-    /// (concept §5: higher ones are from planes) and all within `TripGeometry.altitudeSpreadMeters`
-    /// of each other ("nur, wenn die Höhen der Fotos zusammenpassen"); else none, and no "Höchstes
-    /// Foto" from it. Added up in time order, so the mean does not depend on the input order.
+    /// The place's height (`TripPlace.altitude`): the mean of its highest photos that agree, those
+    /// within `TripGeometry.altitudeSpreadMeters` below the highest one that has at least
+    /// `TripGeometry.minimumPhotosPerPlace - 1` others that close ("nur, wenn die Höhen der Fotos
+    /// zusammenpassen"); else none, and no "Höchstes Foto" from it. A summit is one place with
+    /// the way up to it (3 km), so the photos on the way up must not take its height away, and a
+    /// single photo with a wrong altitude makes none. Altitudes above
+    /// `AirborneFilter.maximumAltitude` are from planes (concept §5) and count as none. Added up
+    /// from the lowest, so the mean does not depend on the input order.
     static func altitude(of ids: [AssetID], altitudes: [AssetID: Double]) -> Double? {
         guard !altitudes.isEmpty else { return nil }
-        let values = ids.compactMap { altitudes[$0] }.filter { $0.isFinite }
-        guard values.count >= TripGeometry.minimumPhotosPerPlace, let lowest = values.min(), let highest = values.max(),
-              highest <= AirborneFilter.maximumAltitude, highest - lowest <= TripGeometry.altitudeSpreadMeters else { return nil }
-        return values.reduce(0, +) / Double(values.count)
+        let values = ids.compactMap { altitudes[$0] }.filter { $0.isFinite && $0 <= AirborneFilter.maximumAltitude }.sorted()
+        let minimum = TripGeometry.minimumPhotosPerPlace
+        guard values.count >= minimum else { return nil }
+        // From the highest down: the values from `low` to `high` lie within the spread, and as
+        // `high` comes down, `low` can only come down too.
+        var low = values.count - 1
+        for high in stride(from: values.count - 1, through: minimum - 1, by: -1) {
+            low = min(low, high)
+            while low > 0 && values[high] - values[low - 1] <= TripGeometry.altitudeSpreadMeters { low -= 1 }
+            if high - low + 1 >= minimum { return values[low...high].reduce(0, +) / Double(high - low + 1) }
+        }
+        return nil
     }
 
     // MARK: Route
 
-    /// The visits (`RoutePoint`): the photos on the map in time order, each at the trip place of
-    /// its day place (photos in no place are skipped), consecutive photos at one place one visit.
-    /// A → B → A in one day are three visits. More than `TripGeometry.maxRoutePoints`: simplified.
-    static func route(placeOfPhoto: [Int], coordinates: [GeoCoordinate]) -> [Visit] {
+    /// The route (`RoutePoint`) and its legs.
+    ///
+    /// The visits: the photos on the map in time order, each at the trip place of its day place
+    /// (photos in no place are skipped), consecutive photos at one place one visit. A → B → A in
+    /// one day are three visits.
+    ///
+    /// Nothing travels faster than a plane (`AirborneFilter.maximumFlightSpeed`): a visit no one
+    /// could have reached from the one before (`isNoTravel`) was taken at the same time as it,
+    /// somewhere else, by a second camera in the library (an iCloud Shared Library) or with a
+    /// wrong location. The order of such a run of visits is no way anyone went, so the route
+    /// passes each of the run's places once, at its first visit in the run: photos taken in turn
+    /// in two places add no point and no kilometre, whichever of them came last.
+    ///
+    /// The legs are those between all the visits (`legs`). More than `TripGeometry.maxRoutePoints`
+    /// visits are then cut (`simplified`), each leg of the cut route carrying the legs it stands
+    /// for (`cutLegs`): "vor Ort" counts every leg, the cut changes only what is drawn.
+    static func route(placeOfPhoto: [Int], photos: [Photo], coordinates: [GeoCoordinate]) -> (visits: [Visit], legs: [RouteLeg]) {
         var visits: [Visit] = []
-        for (i, place) in placeOfPhoto.enumerated() where place >= 0 {
-            if let last = visits.last, last.place == place {
-                visits[visits.count - 1].last = i
+        // The visit before (kept or not); the runs of visits taken at the same time, numbered,
+        // and per place the last run it was kept in.
+        var previous: Visit?
+        var run = 0
+        var keptInRun = [Int](repeating: -1, count: coordinates.count)
+        func add(_ visit: Visit) {
+            defer { previous = visit }
+            guard let before = previous else {
+                visits.append(visit)
+                keptInRun[visit.place] = run
+                return
+            }
+            if isNoTravel(from: photos[before.last], to: photos[visit.first]) {
+                // In the run of the visit before: its place once.
+                guard keptInRun[visit.place] != run else { return }
+                visits.append(visit)
             } else {
-                visits.append(Visit(place: place, first: i, last: i))
+                // Travelled: a new run, from the route's last point when it is here already.
+                run += 1
+                if visits[visits.count - 1].place == visit.place {
+                    visits[visits.count - 1].last = visit.last
+                } else {
+                    visits.append(visit)
+                }
+            }
+            keptInRun[visit.place] = run
+        }
+        var current: Visit?
+        for (i, place) in placeOfPhoto.enumerated() where place >= 0 {
+            if let visit = current, visit.place == place {
+                current?.last = i
+            } else {
+                if let visit = current { add(visit) }
+                current = Visit(place: place, first: i, last: i)
             }
         }
-        guard visits.count > TripGeometry.maxRoutePoints else { return visits }
-        return simplified(visits, coordinates: coordinates, limit: TripGeometry.maxRoutePoints)
+        if let visit = current { add(visit) }
+
+        let legs = legs(visits, photos: photos, coordinates: coordinates)
+        guard visits.count > TripGeometry.maxRoutePoints else { return (visits, legs) }
+        let cut = simplified(visits, coordinates: coordinates, limit: TripGeometry.maxRoutePoints)
+        return (cut.visits, cutLegs(legs, startingAt: cut.starts))
     }
 
-    /// At most `limit` visits of `visits` (concept §9), the first and last always among them.
+    /// Whether nothing could have gone from where `a` was taken to where `b` was in the time
+    /// between them (`b` not before `a`), not even a plane (`AirborneFilter.maximumFlightSpeed`,
+    /// as the crow flies): they were taken at the same time in two places.
+    static func isNoTravel(from a: Photo, to b: Photo) -> Bool {
+        GeoMath.distance(a.coordinate, b.coordinate) > AirborneFilter.maximumFlightSpeed * b.date.timeIntervalSince(a.date)
+    }
+
+    /// At most `limit` visits of `visits` (concept §9), the first and last always among them,
+    /// and where each of them starts in `visits` (`cutLegs`).
     ///
     /// Douglas–Peucker on the sphere: the visits that stand out most from the line through their
     /// neighbours stay. Unlike dropping the visits that change the outline least (Visvalingam),
@@ -440,20 +633,43 @@ enum TripGeometryBuilder {
     /// inner visits that keep up longest stay (a tie at the cut drops all tied, so never more).
     /// Visits of one place that come next to each other then become one visit, from the first's
     /// arrival to the last's departure.
-    static func simplified(_ visits: [Visit], coordinates: [GeoCoordinate], limit: Int) -> [Visit] {
-        guard visits.count > limit, limit >= 2 else { return visits }
+    static func simplified(_ visits: [Visit], coordinates: [GeoCoordinate], limit: Int) -> (visits: [Visit], starts: [Int]) {
+        guard visits.count > limit, limit >= 2 else { return (visits, Array(visits.indices)) }
         let points = visits.map { UnitVector(coordinates[$0.place]) }
         let keep = significance(points, depthLimit: limit - 1)
         let cut = keep[1..<(visits.count - 1)].sorted(by: >)[limit - 2]
         var result: [Visit] = []
+        var starts: [Int] = []
         for (i, visit) in visits.enumerated() where i == 0 || i == visits.count - 1 || keep[i] > cut {
             if let last = result.last, last.place == visit.place {
                 result[result.count - 1].last = visit.last
             } else {
                 result.append(visit)
+                starts.append(i)
             }
         }
-        return result
+        return (result, starts)
+    }
+
+    /// The legs of a cut route from the legs between all its visits (`legs[i]` from visit `i` to
+    /// `i + 1`) and the visit each point of the cut route starts at (`simplified`).
+    ///
+    /// A point's leg stands for the legs from its first visit up to the next point's: the way
+    /// over the visits the cut left out, and an excursion from the point back to it (a hotel
+    /// left for the day). The last point's own excursions go with the last leg. So the cut route
+    /// keeps the metres of every leg ("vor Ort"), each in the leg drawn in its place. A leg is
+    /// "ohne Fotos" when more than half of its metres were.
+    static func cutLegs(_ legs: [RouteLeg], startingAt starts: [Int]) -> [RouteLeg] {
+        guard starts.count >= 2 else { return [] }
+        return (0..<(starts.count - 1)).map { j in
+            let upTo = j + 2 < starts.count ? starts[j + 1] : legs.count
+            var meters = 0.0, withoutPhotos = 0.0
+            for leg in legs[starts[j]..<upTo] {
+                meters += leg.meters
+                if leg.withoutPhotos { withoutPhotos += leg.meters }
+            }
+            return RouteLeg(meters: meters, withoutPhotos: withoutPhotos > meters / 2)
+        }
     }
 
     /// A deviation smaller than this (radians, 1 m on the Earth) keeps no visit: it is no turn

@@ -42,6 +42,11 @@ enum AppScreen: Hashable {
     case route(AppModel.Route)
     case managedAlbums
     case history
+    /// An album or folder of the "Alben" tab, by id: shown as it is now; pushes the removal preview itself.
+    case album(CollectionID) // Design W1 H5
+    case folder(CollectionID) // Design W1 H5
+    /// The suggestions to merge albums that hold mostly the same photos (row "Ähnliche Alben").
+    case similarAlbums // Design W1 H5
 
     /// The same screen as `other`: equal, or the same suggestion opened from a list and from
     /// Siri, Shortcuts or Spotlight.
@@ -73,6 +78,9 @@ enum AppScreen: Hashable {
         case .route(let route): RouteDestination(route: route)
         case .managedAlbums: ManagedAlbumsView()
         case .history: HistoryView()
+        case .album(let id): AlbumScreen(id: id) // Design W1 H5
+        case .folder(let id): FolderScreen(id: id) // Design W1 H5
+        case .similarAlbums: SimilarAlbumsView() // Design W1 H5
         }
     }
 }

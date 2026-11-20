@@ -1036,24 +1036,56 @@ class HostGrantTests(unittest.TestCase):
         self.assertEqual(done, ["grant", ("/D/a", "granted"), "grant", "grant", ("/D/b", "failed")])
 
     def test_the_answer_is_written_only_into_a_test_file_of_this_simulator(self):
-        with tempfile.TemporaryDirectory() as root:
-            folder = os.path.join(root, "Devices", "U", "data", "tmp")
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"HOME": root}):
+            devices = os.path.join(root, "Library", "Developer", "CoreSimulator", "Devices")
+            folder = os.path.join(devices, "U", "data", "tmp")
             os.makedirs(folder)
             good = os.path.join(folder, "uitest-host-answer-0F-9")
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertTrue(ui_tests.write_host_answer("U", good, "granted"))
                 with open(good, encoding="utf-8") as answer:
                     self.assertEqual(answer.read(), "granted\n")
-                other = os.path.join(root, "Devices", "V", "tmp")
+                other = os.path.join(devices, "V", "tmp")
                 os.makedirs(other)
+                # A folder that only names this simulator: not under ~/Library/Developer/CoreSimulator.
+                fake = os.path.join(root, "elsewhere", "Devices", "U", "data", "tmp")
+                os.makedirs(fake)
                 for path in (os.path.join(other, "uitest-host-answer-1"),          # another simulator
                              os.path.join(folder, "Sortly.sqlite"),                # not an answer file
                              os.path.join(folder, "..", "uitest-host-answer-1"),   # climbs out
                              os.path.join(folder, "missing", "uitest-host-answer-1"),
+                             os.path.join(fake, "uitest-host-answer-1"),           # outside, "/Devices/U/" in it
                              "uitest-host-answer-1"):
                     self.assertFalse(ui_tests.write_host_answer("U", path, "granted"), path)
             self.assertEqual(sorted(os.listdir(folder)), ["uitest-host-answer-0F-9"])
             self.assertEqual(os.listdir(other), [])
+            self.assertEqual(os.listdir(fake), [])
+
+    def test_the_answer_follows_no_link_out_of_the_simulator(self):
+        """A folder of the simulator that is a link to elsewhere, and a link planted at the name
+        of the half-written file: neither makes the Mac write outside the simulator's folder."""
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"HOME": root}):
+            folder = os.path.join(root, "Library", "Developer", "CoreSimulator", "Devices", "U", "data", "tmp")
+            os.makedirs(folder)
+            outside = os.path.join(root, "outside")
+            os.makedirs(outside)
+            victim = os.path.join(outside, "victim")
+            with open(victim, "w", encoding="utf-8") as f:
+                f.write("keep\n")
+            os.symlink(outside, os.path.join(folder, "link"))
+            os.symlink(victim, os.path.join(folder, ".uitest-host-answer-2.partial"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertFalse(ui_tests.write_host_answer("U", os.path.join(folder, "link", "uitest-host-answer-1"), "granted"))
+                self.assertTrue(ui_tests.write_host_answer("U", os.path.join(folder, "uitest-host-answer-2"), "granted"))
+            self.assertEqual(sorted(os.listdir(outside)), ["victim"])
+            with open(victim, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "keep\n")
+            answer = os.path.join(folder, "uitest-host-answer-2")
+            self.assertFalse(os.path.islink(answer))
+            with open(answer, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "granted\n")
+            # No half-written file is left behind (the planted link stays as it was).
+            self.assertEqual(sorted(os.listdir(folder)), [".uitest-host-answer-2.partial", "link", "uitest-host-answer-2"])
 
 
 class HostTerminateTests(unittest.TestCase):

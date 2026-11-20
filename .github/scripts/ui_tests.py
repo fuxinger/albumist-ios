@@ -110,6 +110,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -890,26 +891,42 @@ def grant_photos(udid: str, run=sh, tries: int = GRANT_TRIES, timeout: float = G
 # three requests for iOS to end the app (UI runs 44617747359, 44630953220 and job 136352444126:
 # 9 of 9 requests, the app was never ended by a grant), about 9.5 minutes of the device group.
 # With the answer the test goes on as soon as the grant is done (or has failed). Only a file
-# of this simulator's test runner is written (its Devices/UDID folder, the name the test gives
-# it), never anything else the log names.
+# of this simulator's test runner is written (inside its folder under SIMULATOR_DEVICES, links
+# resolved, the name the test gives it), never anything else the log names: a path that only
+# contains "/Devices/<UDID>/", a folder that is a link to elsewhere and a link planted at the
+# half-written file's name are all refused or not followed.
 HOST_ANSWER_NAME = re.compile(r"^uitest-host-answer-[A-Za-z0-9-]{1,64}$")
+# Where CoreSimulator keeps the simulators (read at each call: `~` is the runner's home).
+SIMULATOR_DEVICES = "~/Library/Developer/CoreSimulator/Devices"
 
 
 def write_host_answer(udid: str, path: str, answer: str) -> bool:
     """Writes `answer` ("granted" or "failed") to the test's answer file `path`; True when written."""
     folder, name = os.path.split(path)
-    if not os.path.isabs(path) or f"/Devices/{udid}/" not in path or ".." in path.split("/") \
-            or not HOST_ANSWER_NAME.match(name) or not os.path.isdir(folder):
+    device = os.path.realpath(os.path.join(os.path.expanduser(SIMULATOR_DEVICES), udid))
+    real_folder = os.path.realpath(folder) if folder else ""
+    if not os.path.isabs(path) or ".." in path.split("/") or not HOST_ANSWER_NAME.match(name) \
+            or not udid or "/" in udid or not real_folder.startswith(device + "/") or not os.path.isdir(real_folder):
         print(f"UI_HOST answer not written: {path[:200]} is no answer file of this simulator's tests", flush=True)
         return False
+    partial = None
     try:
-        partial = os.path.join(folder, f".{name}.partial")
-        with open(partial, "w", encoding="utf-8") as out:
+        # A new file of its own (mkstemp: a random name, O_EXCL, so a planted link is never
+        # followed), then renamed over the answer file.
+        handle, partial = tempfile.mkstemp(dir=real_folder, prefix=f".{name}.", suffix=".partial")
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
             out.write(answer + "\n")
-        os.replace(partial, path)
+        os.replace(partial, os.path.join(real_folder, name))
+        partial = None
     except OSError as error:
         print(f"UI_HOST answer not written ({error}); the test waits as before", flush=True)
         return False
+    finally:
+        if partial is not None:
+            try:
+                os.unlink(partial)
+            except OSError:
+                pass
     print(f"UI_HOST answer '{answer}' written for the test", flush=True)
     return True
 

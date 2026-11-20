@@ -503,6 +503,17 @@ struct PlanningExecutionTests {
         #expect(roundTrip == state)
     }
 
+    @Test func managedAlbumRecordsKeepTheirStoredKeys() throws {
+        // The stored names stay when the code's names change (rename to Albumist): a record
+        // written by an older build must load, and a new one must load in an older build.
+        let state = ManagedAlbumState(albumID: "a1", sourceID: SortlyID("s1"), lastKnownTitle: "Rom", lastKnownParentID: nil,
+                                      lastKnownMembers: ["a-1", "a-2"], addedBySortly: ["a-1"], createdBySortly: true)
+        let json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])
+        #expect(Set(json.keys) == ["albumID", "sourceID", "lastKnownTitle", "lastKnownMembers", "addedBySortly", "createdBySortly", "otherSourceIDs"])
+        #expect(json["addedBySortly"] as? [String] == ["a-1"])
+        #expect(json["createdBySortly"] as? Bool == true)
+    }
+
     @Test func deletedManagedAlbumIsNotSuggestedAgain() async throws {
         let state = ManagedAlbumState(albumID: "gone", sourceID: SortlyID("trip-1"), lastKnownTitle: "Rom", lastKnownParentID: nil,
                                       lastKnownMembers: ids("a", 0..<3), addedBySortly: ids("a", 0..<3), createdBySortly: true)

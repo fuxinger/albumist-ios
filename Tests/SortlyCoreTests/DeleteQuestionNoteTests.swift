@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SortlyCore
 import SortlyTestSupport
@@ -250,18 +251,27 @@ struct DeleteQuestionNoteTests {
     }
 
     /// Photos takes long to list the albums: the dialog does not wait for it. After the limit
-    /// the answer is the safe side (SHOULD-2).
+    /// the read is cancelled and the answer is the safe side (SHOULD-2). Told by the answer, not
+    /// by the clock (the parallel suite starved a timer for 28 s): the list, had it been waited
+    /// for, says the user's own photo keeps "Rom", so nothing would be announced.
     @Test func aSlowAlbumListIsNotWaitedFor() async {
+        let cancelled = Mutex(false)
         let slow = DeleteQuestion(listAlbums: {
-            try await Task.sleep(for: .seconds(60))
+            do {
+                try await Task.sleep(for: .seconds(300))
+            } catch {
+                cancelled.withLock { $0 = true }
+                throw error
+            }
             return CollectionInventory([CollectionSnapshot(id: "a1", title: "Rom", assetIDs: ["x", "own"])])
         }, lookUp: { _ in nil }, limit: .milliseconds(50))
-        let clock = ContinuousClock()
-        let started = clock.now
-        let answer = await slow.undo(Self.madeRome, albums: [], waiting: [], earlierUndos: [], cached: CollectionInventory([Self.rome]))
-        // Far below the slow list's minute; not tighter, the parallel suite can starve a timer.
-        #expect(clock.now - started < .seconds(20))
+        let records = ManagedAlbumTracker().record(Self.madeRome, into: [], inventory: CollectionInventory([Self.rome]))
+        let answer = await slow.undo(Self.madeRome, albums: records, waiting: [], earlierUndos: [],
+                                     cached: CollectionInventory([CollectionSnapshot(id: "a1", title: "Rom", assetIDs: ["x", "own"])]))
         #expect(answer)
+        // The read is told to stop (it may take a moment to hear it).
+        for _ in 0..<2_000 where !cancelled.withLock({ $0 }) { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(cancelled.withLock { $0 })
     }
 
     /// An interrupted removal from "Alben von Albumist" is called one: "Entfernen wurde

@@ -151,6 +151,17 @@ class SelectionRuleTests(unittest.TestCase):
                        "}\n")
                 self.assertEqual(self.found(src), [])
 
+    def test_a_long_bar_list_does_not_make_the_pattern_backtrack(self):
+        # CodeQL alert 10: `.toolbar(,for:.0` and many ` .0` took exponential time.
+        import time
+        text = ".toolbar(,for:.0" + " .0" * 40
+        started = time.monotonic()
+        selection_rule.TAB_BAR_VISIBILITY.search(text)
+        self.assertLess(time.monotonic() - started, 1.0)
+        bars = selection_rule.TAB_BAR_VISIBILITY.search(".toolbarVisibility(x ? .hidden : .automatic, for: .tabBar, .bottomBar,)")
+        self.assertIsNotNone(bars)
+        self.assertEqual(bars.group(2), ".tabBar, .bottomBar")
+
     def test_the_apps_selections_keep_their_actions_in_view(self):
         found = selection_rule.offenders(REPO)
         self.assertEqual(found, [], "\n".join(f"{path}:{line} {view}: {advice}" for path, line, view, advice in found))

@@ -35,8 +35,9 @@ DECLARATION = re.compile(
 SELECTION_STATE = re.compile(r"@State\s+(?:(?:private|fileprivate)\s+)?var\s+(selecting|isSelecting)\b")
 BOTTOM_BAR = re.compile(r"\bplacement\s*:\s*\.bottomBar\b")
 # `.toolbarVisibility(…, for: …)` or the older `.toolbar(…, for: …)`, for one bar or several.
+# The bar list has one way to match each text, so no input makes it backtrack (CodeQL alert 10).
 TAB_BAR_VISIBILITY = re.compile(
-    r"\.toolbar(?:Visibility)?\s*\(\s*((?:[^(),]|\([^()]*\))*?)\s*,\s*for\s*:\s*((?:\s*\.\w+\s*,?)+)\)")
+    r"\.toolbar(?:Visibility)?\s*\(\s*((?:[^(),]|\([^()]*\))*?)\s*,\s*for\s*:\s*(\.\w+(?:\s*,\s*\.\w+)*)\s*,?\s*\)")
 # `condition ? whenTrue : whenFalse`
 TERNARY = re.compile(r"^(.*?)\?(.*?):(.*)$", re.DOTALL)
 # Views whose bottom bar is never under the tab bar, and why.

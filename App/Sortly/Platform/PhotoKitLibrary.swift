@@ -248,11 +248,11 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
             }
             var out = LibraryChanges(mark: now)
             var known = true
-            history.enumerateChanges { change, stop in
+            // `enumerateChanges(_:)` is not in the Swift interface; the fetch result is a Sequence.
+            changes: for change in history {
                 if beat.isCancelled {
                     known = false
-                    stop.pointee = true
-                    return
+                    break changes
                 }
                 do {
                     // Oldest first: a photo deleted after a change counts as deleted, one added
@@ -268,8 +268,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                     if out.assets.count + out.deleted.count > limit {
                         // More than the caller reads one by one: stop here, without holding the rest.
                         out = LibraryChanges(mark: out.mark, tooMany: true)
-                        stop.pointee = true
-                        return
+                        break changes
                     }
                     var named = !changed.isEmpty || !deleted.isEmpty
                     for type in [PHObjectType.assetCollection, .collectionList] {
@@ -287,7 +286,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
                     if !named { out.other = true }
                 } catch {
                     known = false
-                    stop.pointee = true
+                    break changes
                 }
                 beat.beat()
             }

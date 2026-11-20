@@ -1082,11 +1082,11 @@ final class DeviceConditionUITests: XCTestCase {
         idleCounts = nil
         let calm = waitStable("check again online finished", timeout: 300) { analysisIdle && !app.alerts.firstMatch.exists }
         XCTAssertTrue(calm, "Online \"Neu prüfen\" did not finish")
-        let counts = analysedPhotos()
+        let online = analysedPhotos()
         UITestScreens.Analysis.openSheet(app)
         let note = anything("Fotos konnten noch nicht gelesen werden")
         let noteLabel = note.exists ? ((try? note.snapshot())?.label ?? "") : ""
-        print("UI_FACT online after Neu prüfen: \(String(describing: counts)), unreadable note: \(note.exists ? noteLabel : "gone")")
+        print("UI_FACT online after Neu prüfen: \(String(describing: online)), unreadable note: \(note.exists ? noteLabel : "gone")")
         if note.exists {
             XCTAssertTrue(noteLabel.contains("später noch einmal"), "The unreadable note does not say that Albumist tries again later")
         }

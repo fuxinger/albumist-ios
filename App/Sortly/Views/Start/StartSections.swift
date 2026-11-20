@@ -279,12 +279,9 @@ struct StartProposalCard: View {
     var body: some View {
         PhotoCard(coverIDs: covers, title: Text(verbatim: text.title), subtitle: subtitle,
                   hidesPreview: text.hidesPreview, aspectRatio: style == .large ? 2 : 3.0 / 2.0, style: style,
-                  placeholderSymbol: proposal.kind.area.symbol) {
+                  placeholderSymbol: proposal.kind.area.symbol, onOpen: onOpen) {
             button
         }
-        // Touch opens the suggestion from the photo and the text; the card's own way to open it
-        // for every input comes with the next components (handoff H2).
-        .onTapGesture(perform: onOpen)
         .accessibilityIdentifier("suggestion.card.\(made ? "made" : kind)")
     }
 

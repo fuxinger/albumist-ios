@@ -1,4 +1,3 @@
-import StoreKit
 import SwiftUI
 import SortlyCore
 import SortlyEngine
@@ -827,36 +826,28 @@ struct FullAccessCard: View {
     }
 }
 
-/// Shown when a plan needs more albums than are still free.
+/// Shown when a plan needs more albums than are still free: how many, and "Freischalten …",
+/// which opens the purchase sheet (design E6: the sheet "Anlegen" on a card opens too, with the
+/// price, "Kauf wiederherstellen" and "Code einlösen"). Or the free albums first.
 struct UnlockCard: View {
     @Environment(Purchases.self) private var purchases
     var albumsInPlan: Int
-    /// Shrinks the plan to the albums that are still free ("Die ersten N jetzt anlegen").
+    /// Shrinks the plan to the albums that are still free ("Die ersten N jetzt kostenlos anlegen").
     var onLimit: (() -> Void)? = nil
-    @State private var redeeming = false
+    @State private var buying = false
 
     var body: some View {
         Card {
             Label("Albumist freischalten", systemImage: "lock.open").font(.headline)
-            Text("Für diese Auswahl brauchst du \(albumsInPlan) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums). Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.")
+            // Two lines (decision 8A); what the purchase gives is said on the sheet.
+            Text("Für diese Auswahl brauchst du \(albumsInPlan) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums).")
                 .font(.subheadline).foregroundStyle(.noteText)
-            // Without a price: "Preis wird geladen …", not tappable (plugin review W7).
-            UnlockButton(prominent: true)
-            // Text buttons with a 44 pt tap area (design review W9: the bare text was ~20 pt).
-            HStack {
-                Button { Task { await purchases.restore() } } label: {
-                    Text("Kauf wiederherstellen").minimumHitTarget()
-                }
-                .disabled(purchases.isPurchasing)
-                Spacer()
-                Button { redeeming = true } label: {
-                    Text("Code einlösen").minimumHitTarget()
-                }
-            }
-            .font(.subheadline)
-            .offerCodeRedemption(isPresented: $redeeming) { _ in
-                Task { await purchases.refreshEntitlements(mayLock: false) }
-            }
+                .fixedSize(horizontal: false, vertical: true)
+            // "…": the purchase sheet opens first. The one filled button here: the bar with
+            // "Jetzt anlegen" is not shown while the plan needs more albums than are free.
+            Button("Freischalten …") { buying = true }
+                .buttonStyle(PrimaryButtonStyle())
+                .accessibilityIdentifier("unlock.open")
             if let onLimit {
                 Button("Die ersten \(purchases.remainingFreeAlbums) jetzt kostenlos anlegen", action: onLimit)
                     .buttonStyle(SecondaryButtonStyle())
@@ -866,11 +857,12 @@ struct UnlockCard: View {
                 Text("Tipp: Du kannst auch weniger Vorschläge auf einmal auswählen.")
                     .font(.footnote).foregroundStyle(.noteText)
             }
-            if let error = purchases.lastError {
-                ErrorNote(text: error)
-            }
         }
-        // The price comes from StoreKit; a start without network is made up for here.
+        .sheet(isPresented: $buying) {
+            // Closes by itself once Albumist is unlocked; the preview then offers its button.
+            UnlockSheet(reason: .preview(needed: albumsInPlan))
+        }
+        // The price comes from StoreKit: loaded before the sheet asks for it.
         .task { await purchases.loadProductIfNeeded() }
     }
 }

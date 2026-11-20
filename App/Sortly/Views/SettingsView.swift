@@ -101,7 +101,7 @@ struct SettingsView: View {
                             Text("Städte als eigene Alben")
                             Text("Zum Beispiel Rom und Florenz zusätzlich zu Italien.")
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.noteText)
                         }
                     }
                 }
@@ -210,7 +210,7 @@ struct SettingsView: View {
                 LabeledContent("Version", value: AppInfo.version)
                 DiagnosticShareRow()
                 Text("Kartendaten: Natural Earth (gemeinfrei). Ortsnamen online: Apple.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.noteText)
             } header: {
                 Text("Über")
             } footer: {
@@ -340,12 +340,12 @@ struct HistoryRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text((plan.confirmedAt ?? plan.createdAt).formatted(date: .abbreviated, time: .shortened))
                     Text(Counted.historyLine(plan.appliedSummary))
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(.noteText)
                 }
                 Spacer()
                 if model.undonePlans.contains(plan.id) {
                     Text("Rückgängig gemacht")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.subheadline).foregroundStyle(.noteText)
                 }
             }
         }
@@ -372,7 +372,7 @@ struct InterruptedHistoryRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text((plan.confirmedAt ?? plan.createdAt).formatted(date: .abbreviated, time: .shortened))
                 Text("Unterbrochen: \(done) von \(plan.steps.count) Schritten erledigt")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.noteText)
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: Theme.Spacing.l) { buttons }
@@ -385,7 +385,7 @@ struct InterruptedHistoryRow: View {
             // asks right after the button (P3-07).
             if plan.deletesCollections {
                 DeleteQuestionNote.text
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }

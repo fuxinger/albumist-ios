@@ -89,6 +89,7 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 20.11.: Kleine graue Texte (Fußnoten, Zahlen, Erklärungen auf Karten und in Listen) sind gut lesbar und bleiben doch heller als der Haupttext: das neue Grau `.noteText` (`Theme.noteText`, hell 5,9:1 auf weißen Karten statt 3,4:1, überall mindestens 4,6:1; dunkel 7,5:1 auf Karten, mindestens 4,7:1; mit erhöhtem Kontrast deutlich stärker) an 145 Stellen in 21 Dateien statt des System-Graus. Das dunklere `Theme.secondaryText` bleibt für Text auf dem Farbschein der Fotos. `secondary_text_rule.py` lehnt neues kleines System-Grau ab (P3-14).
 - 20.11.: Auswählen wie in Fotos: Solange Fotos ausgewählt werden, ist die Tab-Leiste ausgeblendet. „N aus Vorschlag
   entfernen“ lag hinter der Tab-Leiste und lässt sich jetzt antippen; in der Mediathek stehen „Zu Album hinzufügen“,
   die Zahl der ausgewählten Fotos und „Ignorieren“ in der Leiste unten statt in einer eigenen Leiste über den Tabs (P3-01 = G3-04).

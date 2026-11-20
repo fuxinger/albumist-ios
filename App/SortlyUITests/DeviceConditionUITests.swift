@@ -327,16 +327,25 @@ final class DeviceConditionUITests: XCTestCase {
         let started = Date()
         start()
         onboardIfNeeded()
+        // "Beispiel-Mediathek anlegen" is tapped (once) when it shows in the first 3 s of the
+        // wait below (its checks at about 0 and 2 s). It used to get a wait of its own of the
+        // same 3 s before it, which a seeded library (every test after the group's first)
+        // waited out: the button shows only on an empty library. Looked for only in those 3 s:
+        // a query more in every check of the analysis would slow the app down.
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: 3), !anything("Beispielfotos werden angelegt").exists {
-            UITestOnboarding.clock("tap demo library")
-            demo.tap()
-        }
+        let demoUntil = Date().addingTimeInterval(3)
+        var demoTapped = false
         // UI run 44144000817: test07 waited the full 900 s right after test05 and nothing said
-        // what the overview showed. The state is now printed every 60 s and at the end, with a
-        // screenshot when it never got ready.
+        // what the start page showed. The state is now printed every 60 s and at the end, with
+        // a screenshot when it never got ready.
         var lastState = Date.distantPast
         let ready = waitStable("demo library analysed", timeout: 900) {
+            if !demoTapped, Date() < demoUntil, demo.exists, !anything("Beispielfotos werden angelegt").exists {
+                demoTapped = true
+                UITestOnboarding.clock("tap demo library")
+                demo.tap()
+                return false
+            }
             let met = analysisIdle && !anything("Beispielfotos werden angelegt").exists && (analysedPhotos()?.total ?? 0) >= 200
             if !met && Date().timeIntervalSince(lastState) >= 60 {
                 lastState = Date()

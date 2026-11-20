@@ -8,7 +8,8 @@ import SortlyEngine
 /// and "Ähnliche Alben", then the user's other albums and folders as Photos shows them ("Deine
 /// Alben"). Every album and folder stands once (`AlbumTabSections`). Albums are photo tiles
 /// (covers at least half the screen wide, design rule 6); a long press on one of Albumist's has
-/// "Rückgängig machen", which undoes only that album (`albumUndo`).
+/// "Rückgängig machen", which undoes only that album (`albumUndo`), as a note under the shelf
+/// says.
 ///
 /// Everything here is pushed by value (`AppScreen`): an album, a folder, the list of all of
 /// Albumist's albums, the history, the similar albums, and the preview of an undo.
@@ -48,10 +49,12 @@ struct AlbumsView: View {
                         }
                     }
                     .padding(.top, Theme.Spacing.m)
+                    undoNote
+                        .padding(.top, Theme.Spacing.s)
                 }
 
                 AlbumRowsCard(rows: sections.rows)
-                    .padding(.top, shelf.isEmpty ? Theme.Spacing.s : Theme.Spacing.xl)
+                    .padding(.top, shelf.isEmpty ? Theme.Spacing.s : Theme.Spacing.m)
 
                 // Left out while every album is Albumist's: "Noch keine Alben" under the shelf read
                 // as wrong (UI run 44570945716). With limited access it always explains why.
@@ -105,6 +108,16 @@ struct AlbumsView: View {
         }
         .accessibilityLabel(Text("Alle \(count) Alben anzeigen"))
         .accessibilityIdentifier("albums.managed")
+    }
+
+    /// Under the shelf, how to undo one of the albums, and in "Mehr erfahren" where they are in
+    /// Photos: "Alle N" leads to the same words only from three albums on (second review of
+    /// wave 1).
+    private var undoNote: some View {
+        LearnMore(short: Text("Halte ein Album gedrückt oder tippe im Album auf „…“, um es rückgängig zu machen."),
+                  full: Text("\(ManagedAlbumsView.howToUndo) \(ManagedAlbumsView.place(root: model.settings.rootFolderTitle))"),
+                  title: Text("Alben von Albumist"))
+            .padding(.horizontal, Theme.Spacing.l)
     }
 
     /// iOS shows an app no albums at all while only some photos are shared.

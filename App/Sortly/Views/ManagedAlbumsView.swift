@@ -46,18 +46,26 @@ struct ManagedAlbumsView: View {
     /// How to undo, and where the albums are in Photos (iOS opens Photos, not one album).
     private var footer: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Halte ein Album gedrückt oder tippe im Album auf „…“, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin.")
-            let root = model.settings.rootFolderTitle.trimmingCharacters(in: .whitespaces)
-            if root.isEmpty {
-                Text("Neue Alben liegen in Fotos unter Sammlungen › Alben.")
-            } else {
-                Text("Neue Alben liegen in Fotos im Ordner „\(root)“.")
-            }
+            Self.howToUndo
+            Self.place(root: model.settings.rootFolderTitle)
         }
         .font(.footnote)
         .foregroundStyle(.noteText)
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, Theme.Spacing.l)
+    }
+
+    /// How to undo one of Albumist's albums: here, and behind "Mehr erfahren" under the shelf.
+    static var howToUndo: Text {
+        Text("Halte ein Album gedrückt oder tippe im Album auf „…“, um Albumists Änderungen daran rückgängig zu machen. Fotos, die du selbst hinzugefügt hast, bleiben drin.")
+    }
+
+    /// Where Albumist's new albums are in Photos: at the top level, or in the folder set for them
+    /// (`root`, the settings' folder for new albums).
+    static func place(root: String) -> Text {
+        let root = root.trimmingCharacters(in: .whitespaces)
+        return root.isEmpty ? Text("Neue Alben liegen in Fotos unter Sammlungen › Alben.")
+                            : Text("Neue Alben liegen in Fotos im Ordner „\(root)“.")
     }
 }
 

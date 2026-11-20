@@ -1,6 +1,6 @@
 # Befunde: Stand der Arbeit
 
-Stand: **19.11.2026, 23:40 Uhr**, `main` 31ec24c (PR #11 zusammengeführt, TestFlight-Lauf für den nächsten Build läuft).
+Stand: **20.11.2026, 01:45 Uhr**, `main` 31ec24c (PR #11 zusammengeführt, TestFlight-Lauf für den nächsten Build läuft). PR #12 offen (Mac-Lauf grün, wartet auf deine Entscheidung zum Code-Scanning-Alarm).
 Davor Build 38 = PR #10 (5f9ad8a).
 
 Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergessen wird:
@@ -13,9 +13,9 @@ Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergesse
 
 | Status | Große Analyse | Prüfung von außen | Zusammen |
 |---|---:|---:|---:|
-| ✅ erledigt | 40 | 31 | 71 |
-| 🔧 in Arbeit | 2 | 0 | 2 |
-| 📋 geplant (offen, noch nicht begonnen) | 24 | 4 | 28 |
+| ✅ erledigt | 41 | 31 | 72 |
+| 🔧 in Arbeit | 13 | 3 | 16 |
+| 📋 geplant (offen, noch nicht begonnen) | 12 | 1 | 13 |
 | ⏸ bewusst verschoben | 0 | 2 | 2 |
 | 👤 braucht Fuchs | 13 | 1 | 14 |
 | 📱 nur am iPhone prüfbar | 2 | 1 | 3 |
@@ -53,7 +53,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P1-04 | Jahreszeiten auf der Südhalbkugel | ✅ | f44c59c; `NamingTests`; DECISIONS „Jahreszeiten mit Halbkugel“ |
 | P1-05 | „Ignorieren“ macht den Ring schlechter, 100 % nie erreichbar | ✅ | 0a9f2d1, a3ba7ea; `RingDefinitionTests`; Entscheidung 1 |
 | P1-06 | Liste „Sortiert“ zeigt andere Zahl als der Ring | ✅ | 0a9f2d1, a3ba7ea; `RingAndListTests`; Entscheidung 2 |
-| P1-07 | Wechsel auf „Ausgewählte Fotos“ und zurück wirft die ganze Analyse weg | 📋 | e2af540 beschreibt nur den Weg (KNOWN_LIMITATIONS: Migration und App-Teil nötig) |
+| P1-07 | Wechsel auf „Ausgewählte Fotos“ und zurück wirft die ganze Analyse weg | 🔧 | in Arbeit 20.11. (Zweig `fix/reselect`): bei „Ausgewählte Fotos“ nichts löschen |
 | P1-08 | Dreimal unlesbares Foto wird nie wieder versucht, Text verspricht „später noch einmal“ | ✅ | `main` 5f9ad8a: 6ed182e, e5c8635, afee52b (nach einer Woche neu versucht, der Text stimmt jetzt); Tests `NeverDoneTests.aPhotoGivenUpAsUnreadableIsTriedAgainAWeekLater` u. a. Wortlaut „N nicht lesbar“ kommt als Entwurf |
 | P1-09 | Fotos auf See oder an der Grenze ohne Online-Ortssuche bleiben für immer „offen“ | ✅ | `main` 5f9ad8a: 8f8a5f4, d62de37; Tests `NeverDoneTests.photosThatCannotGetACountryAreNotCountedAsWaiting` u. a. |
 | P1-10 | Das eigene Zuhause wird als „Häufiger Ort in München“ vorgeschlagen | 👤 | Entscheidung 7 (Album fürs Zuhause?) offen; Zuhause-Erkennung ist repariert (G1-02) |
@@ -61,14 +61,14 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P1-12 | Nach Sprachwechsel bleiben Ländernamen in der alten Sprache (⊂ G1-03) | ✅ | 6933ba5, 638ff85, daff055; `AlbumNameLanguageTests`. Rest Städte: G1-03 |
 | P1-13 | Suche liest „seit/vor/nach 2024“ als genau 2024 (⊂ G1-06) | ✅ | e17d5e3, 60c8974, fcccf28; `SearchDateRangeTests`. Rest „Winter 2024“: G1-06 |
 | P1-14 | Drei Fotos von zu Hause teilen eine Reise in zwei Alben | ✅ | 8118fcb, f103cf5, 71332f6; `TripHomeInterludeTests` |
-| P1-15 | Tage und Monate hängen an der Zeitzone, auf die das Gerät gerade gestellt ist | 🔧 | entschieden 19.11. (Karte „Ortszeit wie in Apple Fotos“); Zweig `fix/ortszeit`, erst roter Test, dann Umbau und Zweitprüfung |
+| P1-15 | Tage und Monate hängen an der Zeitzone, auf die das Gerät gerade gestellt ist | 🔧 | fertig und zweitgeprüft, in PR #12 (offen, Mac-Lauf grün) |
 
 ### Prüfer 2: Schutz der Fotos
 
 | Nr. | Worum es geht | Status | Beleg |
 |---|---|---|---|
 | P2-01 | Abbruch im falschen Moment: „Alles zurücknehmen“ lässt still etwas zurück | ✅ | 92ce693, bbcac5f; `UndoHardeningTests`, `InterruptionWaysOutTests` |
-| P2-02 | Vorschau verspricht einen Namens-Zusatz, den es nicht gibt | 📋 | Satz steht noch in `PlanReviewView.swift:490` |
+| P2-02 | Vorschau verspricht einen Namens-Zusatz, den es nicht gibt | 🔧 | fertig, in PR #12 (offen): Hinweis sagt „Danach hast du zwei Alben mit diesem Namen“ |
 | P2-03 | Ortsnamen: Koordinaten gehen ab Werk an Apple, Start sagt „Nichts wird hochgeladen“ (= G2-02, G3-03) | ✅ | 752ba07, 8dbc5cc, 89bca6e; `PromiseWordingTests`; Entscheidung 3 |
 | P2-04 | IBAN und Kartennummern bei unüblicher Schreibweise lesbar, Ausweis-Rückseite gespeichert (⊂ G2-03) | ✅ | 91f59c7, 3adf0ac, b2322be, 7655f45; `TextMinimizerTests` |
 | P2-05 | Beispielfotos löschen: keine zweite Prüfung im Lösch-Block | ✅ | 23abd80; `SampleLibraryTests`; DECISIONS |
@@ -81,13 +81,13 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 
 | Nr. | Worum es geht | Status | Beleg |
 |---|---|---|---|
-| P3-01 | Knopf „aus Vorschlag entfernen“ liegt hinter der Tab-Leiste (= G3-04) | 📋 | noch `.bottomBar` in `ProposalViews.swift:942`; ob antippbar: Fuchs-Test am iPhone |
+| P3-01 | Knopf „aus Vorschlag entfernen“ liegt hinter der Tab-Leiste (= G3-04) | 🔧 | in Arbeit 20.11. (Zweig `fix/tabbar`): Tab-Leiste im Auswahlmodus aus, wie in Apple Fotos |
 | P3-02 | „Nichts wird hochgeladen“ passt nicht zum Ortsnamen-Schalter (= P2-03) | ✅ | wie P2-03 |
 | P3-03 | Zu viele und widersprüchliche Zahlen zu „sortiert“ („0 von 0 sortiert“) | 📋 | Ring und Liste stimmen jetzt (P1-05/P1-06), der Rest der Übersicht nicht |
 | P3-04 | Erster Start zu lang: 4 Bildschirme, bis zu 7 Schalter, 150 Wörter | 📋 | löst das beschlossene Bedienungs-Paket A, noch nicht gebaut |
 | P3-05 | „Alben jetzt anlegen“ erst nach Scrollen sichtbar (= G3-05) | 📋 | `PlanReviewView.swift` unverändert |
 | P3-06 | Ein Vorschlag hat bis zu sechs Aktionen | 📋 | offen |
-| P3-07 | Rückgängig später schwer zu finden, iOS-Löschfrage kommt unangekündigt (= G3-09) | 📋 | `PlanReceiptView` unverändert; TEST_PLAN C4 |
+| P3-07 | Rückgängig später schwer zu finden, iOS-Löschfrage kommt unangekündigt (= G3-09) | 🔧 | in Arbeit 20.11. (Zweig `fix/iosnote`): jede Rückfrage kündigt die Frage von iOS an; der Weg zu Rückgängig kommt mit Paket B |
 | P3-08 | Analyse-Karte zeigt neun Dinge auf einmal | 📋 | offen |
 | P3-09 | Mehrere Wörter für dieselbe Sache | 📋 | offen |
 | P3-10 | Englisch mit Fehlern, z. B. „Safe“ statt „Certain“ (= G3-10) | ✅ | PR #11 (31ec24c): b5f7cee, `english_rule.py` |
@@ -95,7 +95,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P3-12 | Größte Schrift: Symbol überlappt Text in der Suche (= G3-07) | ✅ | PR #11 (31ec24c): fc41e52, `layout_rule.py` |
 | P3-13 | Suche meldet „nicht erkannt“ neben einem Treffer-Vorschlag (= G3-06) | ✅ | PR #11 (31ec24c): 836c083 |
 | P3-14 | Kleine graue Texte auf weißen Karten zu blass | 📋 | offen |
-| P3-15 | Titel bleibt „Vorschau“ auch während Sortier-Show und „Fertig“ | 📋 | `PlanReviewView.swift:95` |
+| P3-15 | Titel bleibt „Vorschau“ auch während Sortier-Show und „Fertig“ | 🔧 | fertig, in PR #12 (offen): Titel folgt dem Schritt (`PlanReviewPhase`) |
 | P3-16 | Im Tab „Alben“ stehen Alben doppelt (= G3-02) | ✅ | PR #11 (31ec24c): `AlbumTabSections`, DeviceCondition test07 |
 | P3-17 | „Ordner für neue Alben“ schon bei normaler Schrift abgeschnitten (= G3-08) | ✅ | PR #11 (31ec24c): ab98c57, `checkFullyShown` |
 | P3-18 | Sammlung kleiner Punkte (an Bildschirmfotos belegt) | 📋 | offen |
@@ -105,14 +105,14 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | Nr. | Worum es geht | Status | Beleg |
 |---|---|---|---|
 | P4-01 | „Ignorieren“ wirkt erst nach kompletter Neuberechnung (= G4-02) | ✅ | f42c48f, d71fcea (PR #7) |
-| P4-02 | `refreshDerived` liest alles neu, einen Teil doppelt, der Start wartet darauf | 📋 | IMPROVEMENTS „Nach Analyse und Start nichts doppelt lesen“ (💡) |
-| P4-03 | Jeder Analyse-Lauf liest die ganze Mediathek neu, auch ohne Änderung | 📋 | IMPROVEMENTS „Nur geänderte Fotos neu einlesen“ (💡) |
+| P4-02 | `refreshDerived` liest alles neu, einen Teil doppelt, der Start wartet darauf | 🔧 | fertig und zweitgeprüft, in PR #12 (offen) |
+| P4-03 | Jeder Analyse-Lauf liest die ganze Mediathek neu, auch ohne Änderung | 🔧 | fertig, zwei Zweitprüfungen ohne schweren Fehler, alle Punkte umgesetzt; kommt nach PR #12 als PR #13 |
 | P4-04 | Mediathek-Tab filtert und sortiert alle Fotos auf dem Haupt-Strang (= G4-01) | ✅ | 2960726, d71fcea (PR #7) |
 | P4-05 | Am echten iPhone wird nichts gemessen, Diagnosebericht ohne Zeiten und Hänger | ✅ | `main` 5f9ad8a: Akku je 1.000 Fotos und MetricKit im Diagnosebericht (a4fc303, 68aec4c, ed66efd, 9e06bef); erste echte Zahlen mit dem nächsten Build (P4-08) |
-| P4-06 | Speicher: mehrere volle Kopien, keine Reaktion auf Speicherwarnungen | 📋 | kein `didReceiveMemoryWarning` im Code |
-| P4-07 | „Pause in unter 1 Sekunde“ gilt nur für die Anzeige, nicht für die Arbeit | 📋 | offen |
+| P4-06 | Speicher: mehrere volle Kopien, keine Reaktion auf Speicherwarnungen | 🔧 | fertig und zweitgeprüft, in PR #12 (offen) |
+| P4-07 | „Pause in unter 1 Sekunde“ gilt nur für die Anzeige, nicht für die Arbeit | 🔧 | fertig und zweitgeprüft, in PR #12 (offen) |
 | P4-08 | Erstes Lesen und Bilderkennung nur im Simulator gemessen (7,3 h für 50.000) | 📱 | braucht Messung am iPhone (kommt mit P4-05) |
-| P4-09 | Weitere Rechnungen über alle Fotos auf dem Haupt-Strang | 📋 | offen (niedrig) |
+| P4-09 | Weitere Rechnungen über alle Fotos auf dem Haupt-Strang | 🔧 | teilweise in PR #12 (offen): Zuhause-Kandidaten erst bei Bedarf, Vorberechnungen abseits des Haupt-Strangs |
 | P4-10 | Schutz gegen veraltete Ergebnisse deckt nur die letzte Zuweisung (= G4-03) | ✅ | `main` 5f9ad8a: c7a21f9 und Folge-Commits (f4ce44e, 00c33c5); Tests `TripChangeLedgerTests` |
 | P4-11 | Foto-Ansicht blättert über bis zu 3.000 Seiten | ✅ | PR #11 (31ec24c): `PageWindow` |
 | P4-12 | Dauer-Animationen: Kosten für Akku und Wärme unbekannt | 📱 | erst am iPhone messen; Akku-Zahl kommt mit `feat/battery` |
@@ -129,13 +129,13 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P5-05 | Bedienungs-Durchgang wartet vor allem, Demo-Mediathek wird in jeder Gruppe neu analysiert | 📋 | Stufe 1 und 2 aus dem Plan von Prüfer 5 noch offen |
 | P5-06 | 8 von 15 roten Durchgängen waren kein App-Fehler | ✅ | `main` 5f9ad8a: bedingte Wartezeiten (90c79c1), Home-Druck mit drei Wegen, jede Wiederholung gezählt; UI-Lauf 44529147724 auf PR #10 im ersten Versuch grün |
 | P5-07 | Geplanter Umbau bringt nur 60 statt 84 Min. und macht die Bau-Strecke größer | 📋 | Stufe 4 (Tor vereinfachen, rund 1.400 Zeilen weg) offen |
-| P5-08 | Das neue Tor hat eigene Lücken (a bis f) | 📋 | (a) „force“ weg, (b) = G5-04 erledigt, (e) = P5-02; (d) teilweise in PR #11 (keine Antwort der Log-Schnittstelle = kein Urteil); (c), (f) offen |
+| P5-08 | Das neue Tor hat eigene Lücken (a bis f) | ✅ | (a) „force“ weg, (b) = G5-04, (c) nur die Dateien der UI-Workflows zählen (IMPROVEMENTS), (d) keine Antwort der Log-Schnittstelle = kein Urteil (PR #11), (e) = P5-02, (f) = P5-03 (Release-Probelauf in jedem TestFlight-Lauf) |
 | P5-09 | Tests laufen fast nie von selbst, Hauptzweig nicht geschützt (≈ G6-05) | 👤 | GitHub meldet am 19.11. „Branch not protected“: Schutz für `main` einschalten |
 | P5-10 | Läufe für Build 36 prüften einen zusammengeführten Stand, nicht den ausgelieferten | ✅ | 3bad601 (TestFlight-Lauf testet seinen eigenen Commit), `archive_check.py` |
 | P5-11 | 3 von 11 eingebauten Fehlern blieben in den schnellen Tests unentdeckt | ✅ | PR #11 (31ec24c): 7f1df09, `SeededFaultTests` |
 | P5-12 | Schlüssel und fremde Pull Requests: drei offene Punkte | 👤 | CodeQL läuft wieder grün; offen: Dependabot (jetzt PR #8) und Freigabe für fremde Mitwirkende in den Einstellungen |
 | P5-13 | Regel „nie still wiederholen“ gebrochen, Test vor dem Build gelockert | ✅ | PR #11 (31ec24c): Lint-Schritt „Zeitgrenze nur mit Eintrag lockern“ |
-| P5-14 | Kleinere Punkte in den schnellen Tests (Dateinamen, Zeitmessungen, Zufall) | 📋 | teilweise in PR #11 (31ec24c): fester Zufall, Zählung statt Zeit; Dateinamen nach Thema in PR #12 |
+| P5-14 | Kleinere Punkte in den schnellen Tests (Dateinamen, Zeitmessungen, Zufall) | 🔧 | fester Zufall und Zählung statt Zeit in PR #11 (31ec24c); Dateinamen nach Thema in PR #12 (offen) |
 | P5-15 | Alter Upload-Ablauf auf `main` lädt ungetestete Stände hoch (= P6-01, G5-01) | ✅ | 8b5afbd (PR #5, 6cdefb3); `test_workflows.py` |
 
 ### Prüfer 6: Vorgaben und Arbeitsweise
@@ -170,18 +170,18 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | G3-01 | Länderliste im Atlas bei größter Schrift zerstückelt (= P3-11) | ✅ | PR #11 (31ec24c): = P3-11 |
 | G3-02 | Alben im Tab „Alben“ doppelt (= P3-16) | ✅ | PR #11 (31ec24c): = P3-16 |
 | G3-03 | Start sagt „Nichts wird hochgeladen“ (= G2-02) | ✅ | wie G2-02 |
-| G3-04 | Entfernen-Knopf hinter der Tab-Leiste (= P3-01) | 📋 | offen; ob antippbar, zeigt nur dein Test am iPhone |
+| G3-04 | Entfernen-Knopf hinter der Tab-Leiste (= P3-01) | 🔧 | = P3-01, in Arbeit |
 | G3-05 | „Alben anlegen“ erst nach Scrollen sichtbar (= P3-05) | 📋 | offen |
 | G3-06 | Suche zeigt „nicht erkannt“ neben dem Vorschlag „Italien“ (= P3-13) | ✅ | PR #11 (31ec24c): = P3-13 |
 | G3-07 | Symbol über dem Wort bei größter Schrift (= P3-12) | ✅ | PR #11 (31ec24c): = P3-12 |
 | G3-08 | Ordner-Beschriftung abgeschnitten (= P3-17) | ✅ | PR #11 (31ec24c): = P3-17 |
-| G3-09 | Rückgängig kündigt die iOS-Löschfrage nicht an (= P3-07) | 📋 | offen |
+| G3-09 | Rückgängig kündigt die iOS-Löschfrage nicht an (= P3-07) | 🔧 | = P3-07, in Arbeit |
 | G3-10 | Englisch „SAFE“ missverständlich (= P3-10) | ✅ | PR #11 (31ec24c): = P3-10 |
 | G4-01 | Mediathek sortiert auf der Oberfläche (= P4-04) | ✅ | 2960726, d71fcea |
 | G4-02 | „Rückgängig“ nach Ignorieren kommt spät (= P4-01) | ✅ | f42c48f, d71fcea |
 | G4-03 | Kurze Zwischenstände bei gleichzeitigen Neuberechnungen (= P4-10) | ✅ | = P4-10, `main` 5f9ad8a |
 | G4-04 | Schneller Wechsel „dieses Jahr“/„alle“ speichert vielleicht den alten Umfang | 📱 | im Code kein Weg gefunden, nur am iPhone klärbar (TEST_PLAN F4) |
-| G4-05 | Suche während eines Index-Neubaus nutzt einmal den alten Stand | 📋 | offen (niedrig); `fix/celebration` lässt ihn bewusst stehen |
+| G4-05 | Suche während eines Index-Neubaus nutzt einmal den alten Stand | 🔧 | fertig, in PR #12 (offen) |
 | G5-01 = G6-01 | Alter Upload-Weg auf dem Hauptzweig (= P5-15) | ✅ | 8b5afbd (PR #5) |
 | G5-02 = G6-02 | Notfall-Schalter „force“ noch drin (⊂ P5-02) | ✅ | 51e72f3, 4589064; `test_workflows.py`; DECISIONS „Kein Notfall-Upload ohne Tests“ |
 | G5-03 = G6-03 | 10.000-Fotos-Test vor jedem Upload Pflicht | ✅ | PR #7 (`testflight.yml` ruft `ui-stress.yml`), 7078f50; Entscheidung 4 |

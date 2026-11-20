@@ -20,7 +20,11 @@ public struct ManagedAlbumState: Hashable, Sendable, Codable {
     public var allSourceIDs: Set<SortlyID> { otherSourceIDs.union([sourceID]) }
 
     enum CodingKeys: String, CodingKey {
-        case albumID, sourceID, lastKnownTitle, lastKnownParentID, lastKnownMembers, addedBySortly, createdBySortly, otherSourceIDs
+        case albumID, sourceID, lastKnownTitle, lastKnownParentID, lastKnownMembers, otherSourceIDs
+        // Stored keys (database and safety backup) keep the old working name: records on devices
+        // carry them. The rename to Albumist (tools/rename_albumist.py) changes the case names only.
+        case addedBySortly = "addedBySortly"
+        case createdBySortly = "createdBySortly"
     }
 
     public init(

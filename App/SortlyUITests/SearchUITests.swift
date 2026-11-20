@@ -206,8 +206,14 @@ final class SortlySearchUITests: XCTestCase {
         continueAfterFailure = true
         launch()
 
-        // Fresh simulator (run alone): onboarding and the demo library first.
-        if button("Los geht").waitForExistence(timeout: 15) {
+        // Fresh simulator (run alone): onboarding and the demo library first. One wait for the
+        // first screen (the app picks it once when it has loaded, `AppModel.phase`): waiting 15 s
+        // for the welcome screen alone ran out on every simulator that was onboarded already.
+        let welcome = button("Los geht")
+        _ = UITestWait.holds(timeout: 15) {
+            welcome.exists || app.tabBars.firstMatch.exists || app.buttons["access.continue"].exists
+        }
+        if welcome.exists {
             tap(button("Los geht"), "welcome")
             tap(button("Weiter"), "areas")
             if app.buttons["access.continue"].waitForExistence(timeout: 5) {
@@ -219,7 +225,12 @@ final class SortlySearchUITests: XCTestCase {
             allowNotificationsIfAsked()
         }
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: 10) {
+        // The demo card is drawn in the same body as the overview's title (OverviewView, a plain
+        // VStack), so once "Übersicht" is there the card is there too or does not come: the old
+        // 10 s only when neither shows.
+        let overview = app.navigationBars["Übersicht"]
+        _ = UITestWait.holds(timeout: 10) { demo.exists || overview.exists }
+        if demo.exists {
             tap(demo, "seed demo library")
             waitStable("demo library created", timeout: 600) {
                 !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists

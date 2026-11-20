@@ -200,23 +200,37 @@ struct AtlasView: View {
     @State private var story: String?
     @State private var storyScope: PhotoStory.Scope = .trips
     @State private var writing = false
-    @State private var sharing = false
+    /// The atlas shared, captured when "Teilen" is tapped: a refresh meanwhile (it empties the
+    /// atlas of each year for a moment) does not change the card that is shared.
+    @State private var sharing: SharedAtlas?
     /// nil = all years.
     @State private var year: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    private var atlas: TravelAtlas { model.travelAtlas(year: year) }
+    /// `nil` while the atlas of each year is made, the first time a year is chosen after the
+    /// facts changed (`AppModel.travelAtlas(year:)`, a fraction of a second).
+    private var atlas: TravelAtlas? {
+        guard let year else { return model.travelAtlas() }
+        return model.travelAtlas(year: year)
+    }
 
     var body: some View {
         let atlas = atlas
-        let order = atlas.countriesByFirstVisit
+        let order = atlas?.countriesByFirstVisit ?? []
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                 if model.atlasYears.count > 1 { yearPicker }
-                AtlasContent(atlas: atlas, outlines: outlines, revealed: min(revealed, order.count))
-                if SmartAssistant.isAvailable && !model.facts.isEmpty {
-                    storySection(atlas)
+                if let atlas {
+                    AtlasContent(atlas: atlas, outlines: outlines, revealed: min(revealed, order.count))
+                    if SmartAssistant.isAvailable && !model.facts.isEmpty {
+                        storySection(atlas)
+                    }
+                } else {
+                    // Not "0 Länder" for a year still being made.
+                    ProgressView()
+                        .accessibilityLabel(Text("Jahr wird geladen"))
+                        .frame(maxWidth: .infinity, minHeight: 240)
                 }
             }
             .padding(.horizontal, Theme.Spacing.l)
@@ -226,17 +240,20 @@ struct AtlasView: View {
         .navigationTitle("Reise-Atlas")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { sharing = true } label: { Image(systemName: "square.and.arrow.up") }
+                Button {
+                    if let atlas { sharing = SharedAtlas(atlas: atlas, sortedPhotos: model.progress.fully) }
+                } label: { Image(systemName: "square.and.arrow.up") }
                     .accessibilityLabel("Reise-Atlas teilen")
                     .disabled(order.isEmpty)
             }
         }
         .onChange(of: year) {
-            // Switching the year shows the result at once (no fill animation).
-            revealed = atlas.countriesByFirstVisit.count
+            // Switching the year shows the result at once (no fill animation), also a year whose
+            // atlas is still being made.
+            revealed = .max
         }
-        .sheet(isPresented: $sharing) {
-            ShareCardSheet(atlas: atlas, sortedPhotos: model.progress.fully, map: model.worldMap)
+        .sheet(item: $sharing) { shared in
+            ShareCardSheet(atlas: shared.atlas, sortedPhotos: shared.sortedPhotos, map: model.worldMap)
         }
         .task {
             outlines = await AtlasOutlines.shared.load(from: model.worldMap)
@@ -252,6 +269,13 @@ struct AtlasView: View {
             }
         }
     }
+}
+
+/// The atlas and the sorted count as they were when "Teilen" was tapped (`AtlasView.sharing`).
+struct SharedAtlas: Identifiable {
+    let id = UUID()
+    var atlas: TravelAtlas
+    var sortedPhotos: Int
 }
 
 extension AtlasView {

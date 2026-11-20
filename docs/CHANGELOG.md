@@ -89,6 +89,32 @@
   von zu Hause“ statt „1354“ neben „82 von 1.176“ (Übersicht, Prüfbericht, Vorschläge und ihre
   Begründungen, Mediathek, Belege, Suche, Länder, Reise-Werkstatt, Siri). „1 Foto“ bleibt Einzahl;
   die Suche sagt auf Englisch „1 result“ statt „1 results“.
+- 20.11.: Große Mediatheken: Weniger Rechnungen über alle Fotos auf dem Haupt-Strang, wenn ein Bildschirm sie
+  braucht (Fable P4-09). Die Fotodaten nach Kennung (Foto-Ansicht, Treffer der Suche) entstehen beim Auffrischen der
+  Übersicht abseits des Haupt-Strangs und kommen mit den Fotodaten; sie sind keine zweite Kopie aller Fotodaten
+  mehr, sondern ein Verweis je Foto, und bleiben bei einer Speicherwarnung. Der Atlas jedes Jahres und der Name des
+  erkannten Zuhauses entstehen abseits des Haupt-Strangs erst, wenn die Jahreswahl im Atlas oder „Dein Zuhause“
+  und die Einstellungen sie brauchen, einmal je Stand der Fotodaten, nie beim Auffrischen (zweite Prüfung: sonst
+  kosteten sie bei jedem Auffrischen Akku, bei 50.000 Fotos 240 und 299 ms); bis dahin zeigen Atlas und „Dein
+  Zuhause“ kurz, dass sie laden. Neue Fotodaten brechen eine solche Rechnung ab, statt sie zu Ende laufen zu lassen.
+  Ein Auffrischen mit unveränderten Fotodaten behält sie, sobald ein Bildschirm sie einmal gebraucht hat, bis sich
+  die Fotodaten ändern (kein Kreisel, „Stimmt“ und der VoiceOver-Fokus bleiben); nur dann vergleicht es die
+  Fotodaten abseits des Haupt-Strangs (bei 50.000 Fotos 95–149 ms) und rechnet bei Gleichheit nichts neu, was nur
+  aus den Fotodaten entsteht (Vorschau-Ränge, Atlas aller Jahre, Fotodaten nach Kennung). Ändern sich die Fotodaten, etwa während einer Analyse, wird beides neu gerechnet, wenn ein
+  Bildschirm es braucht. „Teilen“ im Atlas teilt die Karte, wie sie beim Tippen war, auch wenn die Übersicht
+  währenddessen aufgefrischt wird. „Seit wann wohnst du dort?“ rechnet seinen Vorschlag im Hintergrund, der gewählte
+  Ort zeigt solange einen Kreisel. Vorher bei 50.000 Fotos auf Linux auf dem Haupt-Strang: Jahr im Atlas 75 ms,
+  erstes Foto nach jeder Änderung 97 ms, je bei 100.000 Fotos das Doppelte. Die Orte in „Dein Zuhause“ und der
+  Status für die Suche liefen schon abseits. Noch auf dem Haupt-Strang (bekannt und hingenommen): die Fotos eines
+  Landes beim ersten Öffnen im Atlas (`CountryPhotos.collect`, danach gemerkt), die Aufnahmedaten nach einer
+  Speicherwarnung (beim nächsten Gebrauch neu), die Vorschau-Ränge als Rückfall, falls sie nicht mit den Fotodaten
+  kamen, und mit Apple Intelligence die Jahre der Foto-Geschichte bei jedem Zeichnen des Atlas
+  (`PhotoStory.availableYears`).
+- 20.11.: Auffrischen der Übersicht: Alles, was es zeigt, kommt in einem Paket aus der Analyse (`DerivedRefresh`)
+  und wird zusammen zugewiesen, nur wenn der Aufruf neuer ist als der gezeigte Stand: ein älterer Aufruf legt nie
+  seinen Stand über einen neueren, und scheitert der neuere, zeigt der ältere seinen (zweite Prüfung; vorher blieb
+  dann der alte Stand bis zum nächsten Auffrischen). Ein älterer Aufruf, der scheitert, zeigt keinen Fehler über dem
+  neueren Stand (Fable P4-10 = G4-03, mit Tests zweier überlappender Aufrufe).
 - 18.11. (Entscheidungen Fuchs 1 und 2, Fable P1-05/P1-06): Eine Bedeutung für „sortiert“.
   Ignorierte Fotos zählen im Ring nicht mehr mit (weder sortiert noch offen); der Ring erreicht
   100 %, sobald alles nicht Ignorierte sortiert ist, und „Ignorieren“ vergrößert nie die Zahl

@@ -18,6 +18,10 @@ enum Theme {
         static let card: CGFloat = 20
         static let tile: CGFloat = 10
         static let button: CGFloat = 16
+        /// A `PhotoCard` across the page and one of two side by side (the drafts' 26 and 22 pt:
+        /// the smaller card, the smaller corner).
+        static let largeCard: CGFloat = 26
+        static let compactCard: CGFloat = 22
     }
 
     /// Named asset instead of `Color.accentColor`, so off-screen renders (share image) keep the teal too.
@@ -94,6 +98,22 @@ enum Theme {
 }
 
 enum OrganizationAreaStyle { case trips, places, documents, neutral }
+
+extension Font {
+    /// Big numbers ("10 neue Alben", the counts of the map): SF Pro in its expanded width with
+    /// monospaced digits, Apple's own type for figures (DS-11; no font of our own). Grows with
+    /// Dynamic Type like `style`; a number that counts keeps its width.
+    static func wideNumber(_ style: Font.TextStyle, weight: Font.Weight = .bold) -> Font {
+        .system(style, weight: weight).width(.expanded).monospacedDigit()
+    }
+}
+
+extension Text {
+    /// A big number in the wide figures (`Font.wideNumber`), e.g. `Text(count, format: .number).wideNumber(.largeTitle)`.
+    func wideNumber(_ style: Font.TextStyle = .largeTitle, weight: Font.Weight = .bold) -> Text {
+        font(.wideNumber(style, weight: weight))
+    }
+}
 
 extension ShapeStyle where Self == Color {
     /// The one style for small secondary text on cards, list rows and the grouped background:

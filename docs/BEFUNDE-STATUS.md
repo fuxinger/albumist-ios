@@ -1,6 +1,6 @@
 # Befunde: Stand der Arbeit
 
-Stand: **20.11.2026, 01:45 Uhr**, `main` 31ec24c (PR #11 zusammengeführt, TestFlight-Lauf für den nächsten Build läuft). PR #12 offen (Mac-Lauf grün, wartet auf deine Entscheidung zum Code-Scanning-Alarm).
+Stand: **20.11.2026, 03:45 Uhr**, `main` 31ec24c (Build 39). PR #12 alles grün, wartet nur auf deine Entscheidung zum Code-Scanning-Alarm; danach PR #13 (P4-03, P1-07, P3-01, P3-07) und PR #14 (P5-05 Teil 1).
 Davor Build 38 = PR #10 (5f9ad8a).
 
 Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergessen wird:
@@ -11,13 +11,15 @@ Diese Liste enthält **jeden** Befund aus zwei Prüfungen, damit keiner vergesse
 
 ## Zahlen
 
+Nachgezählt 20.11. 03:45 Uhr: Die Spalte „Prüfung von außen“ zählte Z3 (braucht dein OK) seit dem 19.11. als erledigt; richtig sind 30 erledigt und 2 für dich, zusammen 71 statt 72.
+
 | Status | Große Analyse | Prüfung von außen | Zusammen |
 |---|---:|---:|---:|
-| ✅ erledigt | 41 | 31 | 72 |
-| 🔧 in Arbeit | 13 | 3 | 16 |
-| 📋 geplant (offen, noch nicht begonnen) | 12 | 1 | 13 |
+| ✅ erledigt | 41 | 30 | 71 |
+| 🔧 in Arbeit | 15 | 3 | 18 |
+| 📋 geplant (offen, noch nicht begonnen) | 10 | 1 | 11 |
 | ⏸ bewusst verschoben | 0 | 2 | 2 |
-| 👤 braucht Fuchs | 13 | 1 | 14 |
+| 👤 braucht Fuchs | 13 | 2 | 15 |
 | 📱 nur am iPhone prüfbar | 2 | 1 | 3 |
 | **Summe** | **81** | **39** | **120** |
 
@@ -53,7 +55,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P1-04 | Jahreszeiten auf der Südhalbkugel | ✅ | f44c59c; `NamingTests`; DECISIONS „Jahreszeiten mit Halbkugel“ |
 | P1-05 | „Ignorieren“ macht den Ring schlechter, 100 % nie erreichbar | ✅ | 0a9f2d1, a3ba7ea; `RingDefinitionTests`; Entscheidung 1 |
 | P1-06 | Liste „Sortiert“ zeigt andere Zahl als der Ring | ✅ | 0a9f2d1, a3ba7ea; `RingAndListTests`; Entscheidung 2 |
-| P1-07 | Wechsel auf „Ausgewählte Fotos“ und zurück wirft die ganze Analyse weg | 🔧 | in Arbeit 20.11. (Zweig `fix/reselect`): bei „Ausgewählte Fotos“ nichts löschen |
+| P1-07 | Wechsel auf „Ausgewählte Fotos“ und zurück wirft die ganze Analyse weg | 🔧 | fertig 20.11., drei Prüfungen, zuletzt ohne Befund; Reisen, Orte und ihre Namen bleiben über mehrere Auswahlen; Rückgängig braucht vollen Zugriff; kommt als PR #13 |
 | P1-08 | Dreimal unlesbares Foto wird nie wieder versucht, Text verspricht „später noch einmal“ | ✅ | `main` 5f9ad8a: 6ed182e, e5c8635, afee52b (nach einer Woche neu versucht, der Text stimmt jetzt); Tests `NeverDoneTests.aPhotoGivenUpAsUnreadableIsTriedAgainAWeekLater` u. a. Wortlaut „N nicht lesbar“ kommt als Entwurf |
 | P1-09 | Fotos auf See oder an der Grenze ohne Online-Ortssuche bleiben für immer „offen“ | ✅ | `main` 5f9ad8a: 8f8a5f4, d62de37; Tests `NeverDoneTests.photosThatCannotGetACountryAreNotCountedAsWaiting` u. a. |
 | P1-10 | Das eigene Zuhause wird als „Häufiger Ort in München“ vorgeschlagen | 👤 | Entscheidung 7 (Album fürs Zuhause?) offen; Zuhause-Erkennung ist repariert (G1-02) |
@@ -81,20 +83,20 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 
 | Nr. | Worum es geht | Status | Beleg |
 |---|---|---|---|
-| P3-01 | Knopf „aus Vorschlag entfernen“ liegt hinter der Tab-Leiste (= G3-04) | 🔧 | in Arbeit 20.11. (Zweig `fix/tabbar`): Tab-Leiste im Auswahlmodus aus, wie in Apple Fotos |
+| P3-01 | Knopf „aus Vorschlag entfernen“ liegt hinter der Tab-Leiste (= G3-04) | 🔧 | fertig 20.11., zweite Prüfung ohne Muss-Punkt: Tab-Leiste im Auswahlmodus aus, Aktionen unten wie in Apple Fotos; neue CI-Regel; Bildschirmfotos für dich vor dem Zusammenführen; kommt als PR #13 |
 | P3-02 | „Nichts wird hochgeladen“ passt nicht zum Ortsnamen-Schalter (= P2-03) | ✅ | wie P2-03 |
 | P3-03 | Zu viele und widersprüchliche Zahlen zu „sortiert“ („0 von 0 sortiert“) | 📋 | Ring und Liste stimmen jetzt (P1-05/P1-06), der Rest der Übersicht nicht |
 | P3-04 | Erster Start zu lang: 4 Bildschirme, bis zu 7 Schalter, 150 Wörter | 📋 | löst das beschlossene Bedienungs-Paket A, noch nicht gebaut |
 | P3-05 | „Alben jetzt anlegen“ erst nach Scrollen sichtbar (= G3-05) | 📋 | `PlanReviewView.swift` unverändert |
 | P3-06 | Ein Vorschlag hat bis zu sechs Aktionen | 📋 | offen |
-| P3-07 | Rückgängig später schwer zu finden, iOS-Löschfrage kommt unangekündigt (= G3-09) | 🔧 | in Arbeit 20.11. (Zweig `fix/iosnote`): jede Rückfrage kündigt die Frage von iOS an; der Weg zu Rückgängig kommt mit Paket B |
+| P3-07 | Rückgängig später schwer zu finden, iOS-Löschfrage kommt unangekündigt (= G3-09) | 🔧 | fertig 20.11., drei Prüfungen, zuletzt ohne Muss-Punkt: jede Rückfrage kündigt die Frage von iOS an (Alben frisch gelesen, höchstens 3 s, sonst sicher angekündigt); kommt als PR #13 |
 | P3-08 | Analyse-Karte zeigt neun Dinge auf einmal | 📋 | offen |
 | P3-09 | Mehrere Wörter für dieselbe Sache | 📋 | offen |
 | P3-10 | Englisch mit Fehlern, z. B. „Safe“ statt „Certain“ (= G3-10) | ✅ | PR #11 (31ec24c): b5f7cee, `english_rule.py` |
 | P3-11 | Größte Schrift: Länderliste im Reise-Atlas wird zerhackt (= G3-01) | ✅ | PR #11 (31ec24c): f3c061a, `checkAtlasRows` |
 | P3-12 | Größte Schrift: Symbol überlappt Text in der Suche (= G3-07) | ✅ | PR #11 (31ec24c): fc41e52, `layout_rule.py` |
 | P3-13 | Suche meldet „nicht erkannt“ neben einem Treffer-Vorschlag (= G3-06) | ✅ | PR #11 (31ec24c): 836c083 |
-| P3-14 | Kleine graue Texte auf weißen Karten zu blass | 📋 | offen |
+| P3-14 | Kleine graue Texte auf weißen Karten zu blass | 🔧 | in Arbeit 20.11. (Zweig `fix/contrast`): ein gemeinsamer Stil mit `Theme.secondaryText` und eine CI-Regel |
 | P3-15 | Titel bleibt „Vorschau“ auch während Sortier-Show und „Fertig“ | 🔧 | fertig, in PR #12 (offen): Titel folgt dem Schritt (`PlanReviewPhase`) |
 | P3-16 | Im Tab „Alben“ stehen Alben doppelt (= G3-02) | ✅ | PR #11 (31ec24c): `AlbumTabSections`, DeviceCondition test07 |
 | P3-17 | „Ordner für neue Alben“ schon bei normaler Schrift abgeschnitten (= G3-08) | ✅ | PR #11 (31ec24c): ab98c57, `checkFullyShown` |
@@ -126,7 +128,7 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | P5-02 | Schalter „force“ lädt ohne Test hoch, Apple-Schlüssel ungeschützt (⊂ G5-02) | ✅ | „force“ weg (51e72f3), Umgebung `testflight-upload` von dir eingerichtet (19.11.), Upload ohne Klick nur von `main`; Beleg: TestFlight-Lauf 44541589587, Build 38 (Tag `build-38`), alle Tore grün beim ersten Versuch |
 | P5-03 | Getestet wird nur die Debug-Fassung, die ausgelieferte Release-Fassung nie | ✅ | Rauchtest des Release-Builds vor dem Upload auf `main` (8304617, d159140); Beleg: TestFlight-Lauf 44541589587, Job „Release build smoke test (UI)“ grün vor dem Upload von Build 38 |
 | P5-04 | Kein Zeitplan läuft (Nachtlauf, Härtetest, Abholen der Abstürze) | 📋 | Abläufe seit 19.11. auf `main` (da79816); erster Zeitplan-Lauf grün: „TestFlight feedback“ 19.11. 16:31 Uhr (Lauf 44555688794); Nachtlauf und Härtetest am 20.11. früh prüfen |
-| P5-05 | Bedienungs-Durchgang wartet vor allem, Demo-Mediathek wird in jeder Gruppe neu analysiert | 📋 | Stufe 1 und 2 aus dem Plan von Prüfer 5 noch offen |
+| P5-05 | Bedienungs-Durchgang wartet vor allem, Demo-Mediathek wird in jeder Gruppe neu analysiert | 🔧 | Stufe 2, Teil 1 fertig 20.11. (Zweig `fix/sleeps`, zweite Prüfung bestanden): 61 von 70 festen Pausen in 4 Test-Dateien durch echtes Warten ersetzt; Teil 2 (Geräte-Tests) in Arbeit; Rest und Stufe 1 offen |
 | P5-06 | 8 von 15 roten Durchgängen waren kein App-Fehler | ✅ | `main` 5f9ad8a: bedingte Wartezeiten (90c79c1), Home-Druck mit drei Wegen, jede Wiederholung gezählt; UI-Lauf 44529147724 auf PR #10 im ersten Versuch grün |
 | P5-07 | Geplanter Umbau bringt nur 60 statt 84 Min. und macht die Bau-Strecke größer | 📋 | Stufe 4 (Tor vereinfachen, rund 1.400 Zeilen weg) offen |
 | P5-08 | Das neue Tor hat eigene Lücken (a bis f) | ✅ | (a) „force“ weg, (b) = G5-04, (c) nur die Dateien der UI-Workflows zählen (IMPROVEMENTS), (d) keine Antwort der Log-Schnittstelle = kein Urteil (PR #11), (e) = P5-02, (f) = P5-03 (Release-Probelauf in jedem TestFlight-Lauf) |
@@ -170,12 +172,12 @@ Die Zusatzfunde Z1 bis Z3 sind nicht mitgezählt (2 erledigt, 1 braucht Fuchs).
 | G3-01 | Länderliste im Atlas bei größter Schrift zerstückelt (= P3-11) | ✅ | PR #11 (31ec24c): = P3-11 |
 | G3-02 | Alben im Tab „Alben“ doppelt (= P3-16) | ✅ | PR #11 (31ec24c): = P3-16 |
 | G3-03 | Start sagt „Nichts wird hochgeladen“ (= G2-02) | ✅ | wie G2-02 |
-| G3-04 | Entfernen-Knopf hinter der Tab-Leiste (= P3-01) | 🔧 | = P3-01, in Arbeit |
+| G3-04 | Entfernen-Knopf hinter der Tab-Leiste (= P3-01) | 🔧 | = P3-01, fertig, kommt als PR #13 |
 | G3-05 | „Alben anlegen“ erst nach Scrollen sichtbar (= P3-05) | 📋 | offen |
 | G3-06 | Suche zeigt „nicht erkannt“ neben dem Vorschlag „Italien“ (= P3-13) | ✅ | PR #11 (31ec24c): = P3-13 |
 | G3-07 | Symbol über dem Wort bei größter Schrift (= P3-12) | ✅ | PR #11 (31ec24c): = P3-12 |
 | G3-08 | Ordner-Beschriftung abgeschnitten (= P3-17) | ✅ | PR #11 (31ec24c): = P3-17 |
-| G3-09 | Rückgängig kündigt die iOS-Löschfrage nicht an (= P3-07) | 🔧 | = P3-07, in Arbeit |
+| G3-09 | Rückgängig kündigt die iOS-Löschfrage nicht an (= P3-07) | 🔧 | = P3-07, fertig, kommt als PR #13 |
 | G3-10 | Englisch „SAFE“ missverständlich (= P3-10) | ✅ | PR #11 (31ec24c): = P3-10 |
 | G4-01 | Mediathek sortiert auf der Oberfläche (= P4-04) | ✅ | 2960726, d71fcea |
 | G4-02 | „Rückgängig“ nach Ignorieren kommt spät (= P4-01) | ✅ | f42c48f, d71fcea |

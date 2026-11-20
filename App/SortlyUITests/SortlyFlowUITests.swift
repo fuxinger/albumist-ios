@@ -391,11 +391,12 @@ final class SortlyFlowUITests: XCTestCase {
         let started = Date()
         launch(["-SortlyUITestFastStart"])
         let noAccess = app.buttons["access.continue"]
-        // The first screen: the overview, "Kein Zugriff" or the welcome screen. The app picks it
-        // once when it has loaded (`AppModel.phase`), so the overview never turns into one of
-        // the others. A wait of 5 s for "Kein Zugriff" alone ran out in every test that found
+        // The first screen: the overview, "Kein Zugriff" or the welcome screen, within the 5 s
+        // the wait for "Kein Zugriff" alone had. The app picks it once when it has loaded
+        // (`AppModel.phase`), so the overview never turns into one of the others and the wait
+        // ends when it shows: the 5 s for "Kein Zugriff" alone ran out in every test that found
         // the overview (all but the group's first).
-        _ = UITestWait.holds(timeout: 20) {
+        _ = UITestWait.holds(timeout: 5) {
             app.tabBars.firstMatch.exists || noAccess.exists || button("Los geht").exists
         }
         if noAccess.exists {
@@ -418,12 +419,13 @@ final class SortlyFlowUITests: XCTestCase {
             tap(button("Analyse starten"), "start analysis (prepare)", timeout: 20)
             declineNotificationsIfAsked()
         }
-        // "Beispiel-Mediathek anlegen" is tapped (once) when it shows in the first 30 s of the
-        // wait below, instead of a wait of 3 s of its own that a seeded library waited out in
-        // every test. Looked for only in those 30 s: while the analysis runs every query slows
-        // the app down (see `analysisIdle`); the condition still says when it is there.
+        // "Beispiel-Mediathek anlegen" is tapped (once) when it shows in the first 3 s of the
+        // wait below (its checks at about 0 and 2 s), the 3 s its own wait had, instead of that
+        // wait, which a seeded library waited out in every test. Looked for only in those 3 s:
+        // while the analysis runs every query slows the app down (see `analysisIdle`); the
+        // condition still says when it is there.
         let demo = button("Beispiel-Mediathek anlegen")
-        let demoUntil = Date().addingTimeInterval(30)
+        let demoUntil = Date().addingTimeInterval(3)
         var demoTapped = false
         let ready = waitStable("demo library analysed", timeout: 900) {
             if !demoTapped, Date() < demoUntil, demo.exists, !anything("Beispielfotos werden angelegt").exists {

@@ -307,13 +307,13 @@ final class DeviceConditionUITests: XCTestCase {
         let started = Date()
         start()
         onboardIfNeeded()
-        // "Beispiel-Mediathek anlegen" is tapped (once) when it shows in the first 30 s of the
-        // wait below. It used to get a wait of its own of 3 s before it, which a seeded library
-        // (every test after the group's first) waited out: the button shows only on an empty
-        // library. Looked for only in those 30 s: a query more in every check of the analysis
-        // would slow the app down.
+        // "Beispiel-Mediathek anlegen" is tapped (once) when it shows in the first 3 s of the
+        // wait below (its checks at about 0 and 2 s). It used to get a wait of its own of the
+        // same 3 s before it, which a seeded library (every test after the group's first)
+        // waited out: the button shows only on an empty library. Looked for only in those 3 s:
+        // a query more in every check of the analysis would slow the app down.
         let demo = button("Beispiel-Mediathek anlegen")
-        let demoUntil = Date().addingTimeInterval(30)
+        let demoUntil = Date().addingTimeInterval(3)
         var demoTapped = false
         // UI run 44144000817: test07 waited the full 900 s right after test05 and nothing said
         // what the overview showed. The state is now printed every 60 s and at the end, with a

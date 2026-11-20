@@ -3248,15 +3248,11 @@ final class AppModel {
         // What the user changed by hand since counts first: a photo they took out and put back
         // is theirs now and stays.
         guard let current = await reconcileManagedAlbums() else { return }
-        var owned: [CollectionID: Set<AssetID>] = [:]
-        for state in managedAlbums { owned[state.albumID, default: []].formUnion(state.addedBySortly) }
         // Undos of this plan that did not get everything back (plugin review W1): an album one
         // of them brought back gets the photos still missing, never a second album.
         let earlier: [ChangePlan]
         do { earlier = try await store.reverts(of: executed.id) } catch { message = .failure(error.localizedDescription); return }
-        // An album another plan made, left with only this plan's photos, goes too (plugin review N5).
-        let created: Set<CollectionID> = Set(managedAlbums.filter { $0.createdBySortly }.map { $0.albumID })
-        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, createdByAlbumist: created, earlierUndos: earlier)
+        let undoPlan = plannedUndo(of: executed, current: current, earlier: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
             message = AppMessage(title: interruptedPlan?.reverts != nil
@@ -3274,6 +3270,40 @@ final class AppModel {
            let said = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false) {
             message = said
         }
+    }
+
+    /// The undo of `executed` from the album records as they are now: the user's own photos and
+    /// albums stay (`UndoPlanner`).
+    private func plannedUndo(of executed: ChangePlan, current: CollectionInventory, earlier: [ChangePlan]) -> ChangePlan {
+        var owned: [CollectionID: Set<AssetID>] = [:]
+        for state in managedAlbums { owned[state.albumID, default: []].formUnion(state.addedBySortly) }
+        // An album another plan made, left with only this plan's photos, goes too (plugin review N5).
+        let created: Set<CollectionID> = Set(managedAlbums.filter { $0.createdBySortly }.map { $0.albumID })
+        return UndoPlanner().undoPlan(for: executed, current: current, owned: owned, createdByAlbumist: created, earlierUndos: earlier)
+    }
+
+    // MARK: Announcing the iOS question (review 18.11., P3-07)
+    //
+    // iOS asks once more before Albumist deletes albums or folders ("delete 15 albums and 9
+    // folders"). The confirmation before says so (`DeleteQuestionNote`), but only when the
+    // change really deletes one: worked out from the albums as Albumist knows them now,
+    // without asking Photos.
+
+    /// Whether taking back `executed` ("Rückgängig machen", "Rest rückgängig machen") deletes
+    /// an album or folder.
+    func undoDeletesCollections(_ executed: ChangePlan) -> Bool {
+        plannedUndo(of: executed, current: inventory, earlier: []).deletesCollections
+    }
+
+    /// Whether "Alles zurücknehmen" for the interrupted plan deletes an album or folder.
+    var interruptedUndoDeletesCollections: Bool {
+        guard let interrupted = interruptedPlan, interrupted.reverts == nil else { return false }
+        return InterruptedPlanUndo.deletesCollections(interrupted: interrupted, current: inventory)
+    }
+
+    /// Whether taking Albumist's changes back out of one album deletes the album.
+    func removalDeletesAlbum(_ state: ManagedAlbumState) -> Bool {
+        ManagedAlbumTracker().removalPlan(for: state, current: inventory).deletesCollections
     }
 
     /// What an undo left in Photos because Albumist cannot prove it was its own doing

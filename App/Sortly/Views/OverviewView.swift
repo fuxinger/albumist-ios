@@ -511,6 +511,9 @@ struct InterruptedPlanCard: View {
     @Environment(AppModel.self) private var model
     var plan: ChangePlan
     @State private var confirmUndo = false
+    /// "Alles zurücknehmen" deletes albums or folders: the confirmation says that iOS asks
+    /// next (P3-07). Worked out once on the tap, not while the dialog is drawn.
+    @State private var undoDeletes = false
 
     var body: some View {
         let done = plan.steps.filter { if case .succeeded = $0.state { true } else { false } }.count
@@ -537,7 +540,10 @@ struct InterruptedPlanCard: View {
                     .buttonStyle(PrimaryButtonStyle())
                     .accessibilityIdentifier("interrupted.resume")
                 if !isUndo {
-                    Button("Alles zurücknehmen") { confirmUndo = true }
+                    Button("Alles zurücknehmen") {
+                        undoDeletes = model.interruptedUndoDeletesCollections
+                        confirmUndo = true
+                    }
                         .buttonStyle(SecondaryButtonStyle())
                         .accessibilityIdentifier("interrupted.undo")
                 }
@@ -550,9 +556,16 @@ struct InterruptedPlanCard: View {
                     .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("interrupted.keep")
-                Text("Deine Fotos bleiben in jedem Fall unverändert.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Group {
+                    // "Rest zurücknehmen" deletes albums: iOS asks right after it (P3-07).
+                    if isUndo && plan.deletesCollections {
+                        DeleteQuestionNote.text
+                    } else {
+                        Text("Deine Fotos bleiben in jedem Fall unverändert.")
+                    }
+                }
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
             if let failure = model.execution.failure {
                 ErrorNote(text: failure)
@@ -563,7 +576,8 @@ struct InterruptedPlanCard: View {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
-            Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt. Deine Fotos bleiben unverändert.")
+            DeleteQuestionNote.undoMessage(Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt."),
+                                           deletes: undoDeletes)
         }
     }
 }

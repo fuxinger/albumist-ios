@@ -101,6 +101,27 @@ public struct InterruptedPlanUndo: Sendable {
         self.undo = undo
     }
 
+    /// Whether "Alles zurücknehmen" for `interrupted` would delete albums or folders in Photos,
+    /// said before it runs (iOS asks once more, review 18.11., P3-07). Worked out from the
+    /// library as Albumist knows it, without asking Photos: a step the interruption left open
+    /// counts as done when the album it made is there under the id written down for it, as
+    /// `ChangeExecutor.reconcileInterrupted` settles it when the undo runs.
+    public static func deletesCollections(interrupted: ChangePlan, current: CollectionInventory) -> Bool {
+        var settled = interrupted
+        for index in settled.steps.indices {
+            guard case .running = settled.steps[index].state else { continue }
+            switch settled.steps[index].operation {
+            case .createAlbum(let key, _, _), .createFolder(let key, _, _):
+                guard let made = settled.resolvedKeys[key] ?? settled.record?.maybeCreated[key], current[made] != nil else { continue }
+                settled.resolvedKeys[key] = made
+                settled.steps[index].state = .succeeded(createdID: made, verifiedAt: .distantPast)
+            default:
+                continue
+            }
+        }
+        return InterruptedPlanUndo(settled: settled, current: current).undo?.deletesCollections ?? false
+    }
+
     /// Whether the plan is cancelled once the undo ran: only after this undo completed (nothing
     /// of the plan is left in Photos) or when there was nothing to take back, and never while
     /// something the undo cannot take back may be left (`remainder`). `result` is the undo as

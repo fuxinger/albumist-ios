@@ -183,16 +183,28 @@ final class SortlySearchUITests: XCTestCase {
         continueAfterFailure = true
         launch()
 
-        // Fresh simulator (run alone): onboarding and the demo library first. After "Los geht’s"
-        // only the access page (design wave 1): the analysis starts by itself with access.
-        if app.buttons["onboarding.letsGo"].waitForExistence(timeout: 15) {
-            tap(app.buttons["onboarding.letsGo"], "welcome")
+        // Fresh simulator (run alone): onboarding and the demo library first. One wait for the
+        // first screen (the app picks it once when it has loaded, `AppModel.phase`): waiting 15 s
+        // for the welcome screen alone ran out on every simulator that was onboarded already.
+        // After "Los geht’s" only the access page (design wave 1): the analysis starts by itself
+        // with access.
+        let welcome = app.buttons["onboarding.letsGo"]
+        _ = UITestWait.holds(timeout: 15) {
+            welcome.exists || app.tabBars.firstMatch.exists || app.buttons["access.continue"].exists
+        }
+        if welcome.exists {
+            tap(welcome, "welcome")
             let tabs = UITestOnboarding.passAccessPage(app)
             print(tabs ? "UI_STEP_OK access page" : "UI_STEP_MISSING access page")
             XCTAssertTrue(tabs, "The onboarding did not reach the tabs after the access page")
         }
         let demo = button("Beispiel-Mediathek anlegen")
-        if demo.waitForExistence(timeout: 10) {
+        // The demo card is drawn in the same body as the start page's title (OverviewView, a
+        // plain VStack), so once "Vorschläge" is there the card is there too or does not come:
+        // the old 10 s only when neither shows.
+        let startPage = app.navigationBars["Vorschläge"]
+        _ = UITestWait.holds(timeout: 10) { demo.exists || startPage.exists }
+        if demo.exists {
             tap(demo, "seed demo library")
             waitStable("demo library created", timeout: 600) {
                 !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists

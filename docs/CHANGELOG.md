@@ -115,6 +115,12 @@
 - 20.11.: Jede Vorschau behält ihren eigenen Plan. Eine Entfernung, die man unter „Alben“ ansah, ersetzte vorher den
   Plan einer Vorschau, die auf einem anderen Tab offen war; die zeigte dann die Entfernung. Ein Plan, der gelaufen ist,
   wird nicht noch einmal angeboten.
+- 20.11.: Eine Vorschau, die offen blieb, während auf einem anderen Tab Alben angelegt wurden, bietet ihren alten
+  Plan nicht mehr an (zweite Prüfung der Vorschau-Auswahl): „Jetzt anlegen“ legte vorher ein Album ein zweites Mal an,
+  das „Album anlegen“ inzwischen angelegt hatte. Eine Vorschau gewählter Vorschläge macht ihren Plan neu, ohne das
+  schon Angelegte; eine Vorschau, deren Plan anderswo entstand, sagt „Inzwischen hat sich etwas geändert“. Wer einen
+  unterbrochenen Vorgang rückgängig macht, bekommt keine Auswahl einer Vorschau zurück, die inzwischen zu ist; „Passt
+  nicht zu diesem Album“ nimmt das Album auch aus einer offenen Vorschau.
 - 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
   zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
   kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht

@@ -157,12 +157,63 @@ struct PreviewPicksTests {
         // Applied, then undone: the suggestion is picked for the open preview again.
         shown.decisions[Self.a] = nil
         picks.unmark(Self.a)
-        shown.decisions[Self.a] = selectionBefore[Self.a]
-        picks.restore(Self.a, from: earlier)
+        shown.decisions[Self.a] = picks.restore(Self.a, shownBefore: selectionBefore[Self.a], from: earlier)
+        #expect(shown.decisions[Self.a] == Self.create)
         #expect(picks.planned(in: selection, shown: shown.decisions) == [Self.a: Self.create])
         #expect(picks.stored(shown.decisions).isEmpty)
         shown.apply(picks.giveBack(selection, shown: shown.decisions))
         #expect(shown.decisions.isEmpty)
+    }
+
+    /// The preview ended while the undo ran (popped to the root): it gave its pick back, and
+    /// the completed undo does not bring the pick back without a preview to give it back again
+    /// (second review of the preview picks).
+    @Test func aCompletedUndoDoesNotBringBackThePickOfAPreviewThatEnded() {
+        var picks = PreviewPicks()
+        var shown = Shown(decisions: [Self.a: Self.extendX])
+        let (selection, changes) = picks.select([.init(Self.a, Self.create)], shown: shown.decisions)
+        shown.apply(changes)
+        let earlier = picks
+        let selectionBefore = shown.decisions
+        shown.apply(picks.giveBack(selection, shown: shown.decisions))
+        #expect(shown.decisions[Self.a] == Self.extendX)
+        // The undo stored the plan's results meanwhile, then took it back.
+        shown.decisions[Self.a] = nil
+        picks.unmark(Self.a)
+        shown.decisions[Self.a] = picks.restore(Self.a, shownBefore: selectionBefore[Self.a], from: earlier)
+        #expect(shown.decisions[Self.a] == Self.extendX, "what was there before the preview, not its pick")
+        #expect(picks.planned(in: selection, shown: shown.decisions).isEmpty)
+        #expect(picks.stored(shown.decisions) == [Self.a: Self.extendX])
+        #expect(picks.giveBack(selection, shown: shown.decisions).isEmpty)
+    }
+
+    /// A preview opened while the undo ran keeps its pick; it gives back what the undo brought
+    /// back, not the empty state the plan's results left for a moment.
+    @Test func aPreviewOpenedDuringTheUndoKeepsItsPick() {
+        var picks = PreviewPicks()
+        var shown = Shown(decisions: [Self.a: Self.extendX])
+        let earlier = picks
+        let selectionBefore = shown.decisions
+        shown.decisions[Self.a] = nil
+        picks.unmark(Self.a)
+        let (later, changes) = picks.select([.init(Self.a, Self.create)], shown: shown.decisions)
+        shown.apply(changes)
+        shown.decisions[Self.a] = picks.restore(Self.a, shownBefore: selectionBefore[Self.a], from: earlier)
+        #expect(shown.decisions[Self.a] == Self.create)
+        #expect(picks.planned(in: later, shown: shown.decisions) == [Self.a: Self.create])
+        #expect(picks.stored(shown.decisions) == [Self.a: Self.extendX])
+        shown.apply(picks.giveBack(later, shown: shown.decisions))
+        #expect(shown.decisions[Self.a] == Self.extendX)
+    }
+
+    /// Without any preview the undo gives back what the suggestion showed before the plan.
+    @Test func aCompletedUndoWithoutPreviewsGivesBackWhatWasShown() {
+        var picks = PreviewPicks()
+        let earlier = picks
+        picks.unmark(Self.a)
+        #expect(picks.restore(Self.a, shownBefore: Self.extendX, from: earlier) == Self.extendX)
+        #expect(picks.restore(Self.b, shownBefore: nil, from: earlier) == nil)
+        #expect(picks.stored([Self.a: Self.extendX]) == [Self.a: Self.extendX])
     }
 
     @Test func aSelectionIsOnlyEqualToItself() {

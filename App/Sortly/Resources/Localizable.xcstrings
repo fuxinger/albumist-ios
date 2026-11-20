@@ -4671,6 +4671,26 @@
         }
       }
     },
+    "Inzwischen hat sich etwas geändert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Something changed in the meantime"
+          }
+        }
+      }
+    },
+    "Während diese Vorschau offen war, hat Albumist Alben geändert. Öffne sie noch einmal, dann zeigt sie den neuen Stand." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist changed albums while this preview was open. Open it again to see what it would change now."
+          }
+        }
+      }
+    },
     "Noch %lld Alben kostenlos." : {
       "localizations" : {
         "en" : {

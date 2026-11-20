@@ -142,10 +142,28 @@ public struct PreviewPicks: Sendable {
         return result
     }
 
-    /// Takes the picks of `id` back from `earlier`: a completed undo gives the suggestions the
-    /// selection they had before the plan (`InterruptedPlanUndo.selectionToRestore`).
-    public mutating func restore(_ id: SortlyID, from earlier: PreviewPicks) {
-        marks[id] = earlier.marks[id]
-        open[id] = earlier.open[id]
+    /// A completed undo gives a suggestion back what it had before the plan
+    /// (`InterruptedPlanUndo.selectionToRestore`); returns what it shows now. `earlier` and
+    /// `shownBefore` are the picks and the decision from when the undo started.
+    ///
+    /// Only previews still open get their picks back: one that ended meanwhile gave its pick
+    /// back already, and nothing would give it back again (second review of the preview
+    /// picks). Previews opened meanwhile keep theirs, the latest last; they give back what the
+    /// suggestion had before the plan, not the empty state its results left for a moment.
+    public mutating func restore(_ id: SortlyID, shownBefore: ProposalDecision?, from earlier: PreviewPicks) -> ProposalDecision? {
+        let now = open[id] ?? []
+        let stillOpen = Set(now.map(\.selection))
+        let then = earlier.open[id] ?? []
+        let known = Set(then.map(\.selection))
+        let entries = then.filter { stillOpen.contains($0.selection) } + now.filter { !known.contains($0.selection) }
+        open[id] = entries.isEmpty ? nil : entries
+        // What the suggestion had before the picks live then, or, with none, what it showed.
+        let base: ProposalDecision? = if let mark = earlier.marks[id] { mark } else { shownBefore }
+        guard let latest = entries.last(where: \.live) else {
+            marks[id] = nil
+            return base
+        }
+        marks[id] = .some(base)
+        return latest.chosen
     }
 }

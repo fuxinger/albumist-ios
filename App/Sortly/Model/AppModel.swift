@@ -562,6 +562,9 @@ final class AppModel {
     @ObservationIgnored private var factsVersion = 0
     @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
     var execution = ExecutionState()
+    /// The runs that ended since launch, of any plan, also an undo and a quick create: a
+    /// preview whose plan was made before the last of them makes it again (`PlanFreshness`).
+    private(set) var runsEnded = 0
     /// A constant: views observe its properties, not the model (see `ExecutionProgress`).
     let executionProgress = ExecutionProgress()
     var message: AppMessage?
@@ -2526,18 +2529,16 @@ final class AppModel {
         do {
             try await store.addOverride(UserOverride(scope: .albumForSource(album, proposal.id), decision: .notMatchingAlbum))
             saveSafetyBackup()
-            switch decisions[proposal.id] {
-            case .extendExisting(album)?, .keepExisting(album)?:
+            let usesAlbum = switch decisions[proposal.id] {
+            case .extendExisting(album)?, .keepExisting(album)?: true
+            case .renameExisting(let id, _, _)?, .moveExisting(let id, _, _)?: id == album
+            default: false
+            }
+            if usesAlbum {
                 decisions[proposal.id] = nil
+                // Settled: a preview open for it neither plans that album nor gives it back.
+                previewPicks.unmark(proposal.id)
                 persistDecisions()
-            case .renameExisting(let id, _, _)? where id == album:
-                decisions[proposal.id] = nil
-                persistDecisions()
-            case .moveExisting(let id, _, _)? where id == album:
-                decisions[proposal.id] = nil
-                persistDecisions()
-            default:
-                break
             }
             if let rematched = try await pipeline?.rematch() { snapshot = rematched }
         } catch {
@@ -2755,6 +2756,7 @@ final class AppModel {
         await reloadInterruptedPlan()
         keepAwake.end()
         execution.isRunning = false
+        runsEnded += 1
         // A run that ended early by itself keeps its wait here too (like `releaseExecution`):
         // only a try that came due during the plan starts now (second review of the PhotoKit
         // limits, 5).
@@ -3102,8 +3104,7 @@ final class AppModel {
                 }
             case .undone:
                 for id in way.selectionToRestore(after: outcome) {
-                    decisions[id] = selection[id]
-                    previewPicks.restore(id, from: previews)
+                    decisions[id] = previewPicks.restore(id, shownBefore: selection[id], from: previews)
                 }
                 persistDecisions()
             case .partlyUndone:

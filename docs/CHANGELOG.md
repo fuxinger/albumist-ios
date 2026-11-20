@@ -96,8 +96,10 @@
   Vorschläge gibt und die Analyse läuft (erster Start, nach dem Zurückholen aus der Sicherung), „Noch nicht gezählt“
   ohne Drehen, solange sie dabei pausiert, wartet oder vorzeitig endete, „Nichts zu sortieren“, wenn nichts
   mitzuzählen bleibt (etwa alles ignoriert), und „Kein Bereich zählt als sortiert“, wenn kein Hauptbereich
-  eingeschaltet ist. „Gezählt werden nur …“ nennt nur eingeschaltete Hauptbereiche; „Nur ausgewählte Fotos“ nennt
-  auch mit „Nur 2026“ alle freigegebenen Fotos (P3-03).
+  eingeschaltet ist. Auch „Wird neu gezählt“ dreht nur, solange die Analyse arbeitet; sonst steht die letzte Zahl
+  still: „Zuletzt 82 von 176 sortiert“, darunter „Wird weitergezählt, sobald die Analyse weiterläuft.“ „Gezählt
+  werden nur …“ nennt nur eingeschaltete Hauptbereiche; „Nur ausgewählte Fotos“ nennt auch mit „Nur 2026“ alle
+  freigegebenen Fotos (P3-03).
 - 20.11.: Kleine graue Texte (Fußnoten, Zahlen, Erklärungen auf Karten und in Listen) sind gut lesbar und bleiben doch heller als der Haupttext: das neue Grau `.noteText` (`Theme.noteText`, hell 5,9:1 auf weißen Karten statt 3,4:1, überall mindestens 4,6:1; dunkel 7,5:1 auf Karten, mindestens 4,7:1; mit erhöhtem Kontrast deutlich stärker) an 145 Stellen in 21 Dateien statt des System-Graus. Das dunklere `Theme.secondaryText` bleibt für Text auf dem Farbschein der Fotos. `secondary_text_rule.py` lehnt neues kleines System-Grau ab (P3-14).
 - 20.11.: Auswählen wie in Fotos: Solange Fotos ausgewählt werden, ist die Tab-Leiste ausgeblendet. „N aus Vorschlag
   entfernen“ lag hinter der Tab-Leiste und lässt sich jetzt antippen; in der Mediathek stehen „Zu Album hinzufügen“,

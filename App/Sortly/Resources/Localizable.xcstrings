@@ -4511,6 +4511,16 @@
         }
       }
     },
+    "Wird weitergezählt, sobald die Analyse weiterläuft." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Counting resumes once the analysis continues."
+          }
+        }
+      }
+    },
     "z. B. Bei Oma, Garten, Ferienhaus" : {
       "localizations" : {
         "en" : {
@@ -8069,6 +8079,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Recounting"
+          }
+        }
+      }
+    },
+    "Zuletzt %@ von %@ sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last count: %1$@ of %2$@ sorted"
           }
         }
       }

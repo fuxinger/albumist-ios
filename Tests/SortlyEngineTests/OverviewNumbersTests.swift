@@ -260,31 +260,57 @@ struct OverviewNumbersTests {
     @Test func notCountedYetWhileTheAnalysisDoesNotRun() async throws {
         let w = try await world()
         let read = try await w.derived(suggestions: false)
-        func card(running: Bool, paused: Bool, _ analysisCard: AnalysisCardState?) -> SortedCountCard {
-            SortedCountCard.make(.init(progress: read.progress, leftOut: read.leftOut, settings: w.settings, hasSuggestions: false,
-                                       analysisRunning: running, analysisPaused: paused, analysedOnce: false,
-                                       analysisCard: analysisCard))
+        for (what, running, paused, analysisCard) in Self.working + Self.standing {
+            let shown = SortedCountCard.make(.init(
+                progress: read.progress, leftOut: read.leftOut, settings: w.settings, hasSuggestions: false,
+                analysisRunning: running, analysisPaused: paused, analysedOnce: false, analysisCard: analysisCard))
+            let works = Self.working.contains { $0.what == what }
+            #expect(shown == (works ? .counting : .notCountedYet), "\(what): \(shown)")
         }
-        let works: [(String, SortedCountCard)] = [
-            ("running", card(running: true, paused: false, .running(nil, slower: nil, appleWait: false, catchingUp: nil))),
-            ("running slower, after a pause", card(running: true, paused: true, .running(nil, slower: .warm, appleWait: false, catchingUp: nil))),
-            ("running, card not drawn yet", card(running: true, paused: false, nil)),
-        ]
-        for (what, shown) in works { #expect(shown == .counting, "\(what): \(shown)") }
-        let stands: [(String, SortedCountCard)] = [
-            ("paused by the user", card(running: false, paused: true, .paused(nil))),
-            ("paused, after a new launch", card(running: false, paused: false, .paused(nil))),
-            ("pausing", card(running: true, paused: false, .pausing(nil, longer: false))),
-            ("waiting for the device to cool", card(running: true, paused: false, .waiting(.cooling, nil))),
-            ("waiting to charge", card(running: true, paused: false, .waiting(.charging, nil))),
-            ("Photos does not answer, still running", card(running: true, paused: false, .waiting(.photos, nil))),
-            ("Photos did not answer, next try later", card(running: false, paused: true, .waiting(.photos, nil))),
-            ("Albumist was busy, next try later", card(running: false, paused: true, .waiting(.busy, nil))),
-            ("ended early, goes on at the next start", card(running: false, paused: true, nil)),
-            ("ended on an error", card(running: false, paused: false, nil)),
-        ]
-        for (what, shown) in stands { #expect(shown == .notCountedYet, "\(what): \(shown)") }
     }
+
+    /// The same for a count held while it is made anew ("Analyse neu aufbauen", photos waiting
+    /// for their labels): "Wird neu gezählt" turns only while the analysis works. The hold ends
+    /// only with new suggestions or a run that went through (`RecountState.next`), so a Pause
+    /// kept the spinner turning beside "Zuletzt 82 von 176 sortiert" for as long as it lasted.
+    /// Now the held count stands still: "Zuletzt 82 von 176 sortiert. Wird weitergezählt,
+    /// sobald die Analyse weiterläuft." (third look at P3-03).
+    @Test func aHeldCountStandsStillWhileTheAnalysisDoesNotWork() {
+        for held in [RecountState(fully: 82, total: 176), RecountState(fully: 82, total: 176, labels: true)] {
+            for (what, running, paused, analysisCard) in Self.working + Self.standing {
+                for once in [false, true] {
+                    let shown = SortedCountCard.make(.init(
+                        progress: .init(), recount: held, settings: Self.germanSettings(), hasSuggestions: false,
+                        analysisRunning: running, analysisPaused: paused, analysedOnce: once, analysisCard: analysisCard))
+                    let works = Self.working.contains { $0.what == what }
+                    #expect(shown == (works ? .recounting(held) : .recountWaiting(held)),
+                            "\(what), labels \(held.isForLabels), analysed once \(once): \(shown)")
+                }
+            }
+        }
+    }
+
+    /// The analysis works: it runs, and its card says so (or is not drawn yet).
+    static let working: [(what: String, running: Bool, paused: Bool, card: AnalysisCardState?)] = [
+        ("running", true, false, .running(nil, slower: nil, appleWait: false, catchingUp: nil)),
+        ("running slower, after a pause", true, true, .running(nil, slower: .warm, appleWait: false, catchingUp: nil)),
+        ("running, card not drawn yet", true, false, nil),
+    ]
+
+    /// The analysis does not work: paused by the user (also after a new launch), pausing, waiting
+    /// for the device or for Photos, ended early or on an error.
+    static let standing: [(what: String, running: Bool, paused: Bool, card: AnalysisCardState?)] = [
+        ("paused by the user", false, true, .paused(nil)),
+        ("paused, after a new launch", false, false, .paused(nil)),
+        ("pausing", true, false, .pausing(nil, longer: false)),
+        ("waiting for the device to cool", true, false, .waiting(.cooling, nil)),
+        ("waiting to charge", true, false, .waiting(.charging, nil)),
+        ("Photos does not answer, still running", true, false, .waiting(.photos, nil)),
+        ("Photos did not answer, next try later", false, true, .waiting(.photos, nil)),
+        ("Albumist was busy, next try later", false, true, .waiting(.busy, nil)),
+        ("ended early, goes on at the next start", false, true, nil),
+        ("ended on an error", false, false, nil),
+    ]
 
     /// The states of the analysis the overview can meet: whether it runs, the "paused" fact of
     /// `EmptyLibraryState` (the last report paused, or a run that goes on by itself; a run that
@@ -342,8 +368,8 @@ struct OverviewNumbersTests {
                             if wentThrough && (card == .counting || card == .notCountedYet) {
                                 problems.append("no count after the analysis went through · " + state)
                             }
-                            if card == .counting && !input.analysisWorks { problems.append("spinner while not working · " + state) }
-                            if card == .notCountedYet && input.analysisWorks { problems.append("no spinner while working · " + state) }
+                            if Self.spins(card) && !input.analysisWorks { problems.append("spinner while not working · " + state) }
+                            if Self.standsStill(card) && input.analysisWorks { problems.append("no spinner while working · " + state) }
                         }
                     }
                 }
@@ -351,7 +377,24 @@ struct OverviewNumbersTests {
         }
         #expect(problems.isEmpty, "\(problems.count) states, e.g. \(problems.prefix(3))")
         // The grid reaches every card the overview can show here (no main area is another test).
-        #expect(seen.isSuperset(of: ["counting", "notCountedYet", "recounting", "nothingToSort", "ring"]), "\(seen.sorted())")
+        #expect(seen.isSuperset(of: ["counting", "notCountedYet", "recounting", "recountWaiting", "nothingToSort", "ring"]),
+                "\(seen.sorted())")
+    }
+
+    /// The cards with a spinner ("Wird gezählt", "Wird neu gezählt").
+    static func spins(_ card: SortedCountCard) -> Bool {
+        switch card {
+        case .counting, .recounting: true
+        case .notCountedYet, .recountWaiting, .noMainAreaChosen, .nothingToSort, .ring: false
+        }
+    }
+
+    /// The cards that say a count waits for the analysis, without a spinner.
+    static func standsStill(_ card: SortedCountCard) -> Bool {
+        switch card {
+        case .notCountedYet, .recountWaiting: true
+        case .counting, .recounting, .noMainAreaChosen, .nothingToSort, .ring: false
+        }
     }
 
     // MARK: - The main areas the sentence names are the ones that count
@@ -412,10 +455,15 @@ struct OverviewNumbersTests {
         for own in ["model.progress", "model.leftOut"] {
             #expect(!status.contains(own), "the first card reads \(own) itself")
         }
-        // "Noch nicht gezählt" has no spinner: the analysis does not run then.
-        let notYet = Self.caseBody(".notCountedYet", in: status)
-        #expect(!notYet.isEmpty && !notYet.contains("ProgressView"), "\(notYet)")
-        #expect(Self.caseBody(".counting", in: status).contains("ProgressView"))
+        // "Noch nicht gezählt" and the held count waiting have no spinner: the analysis does not
+        // work then.
+        for still in [".notCountedYet", ".recountWaiting"] {
+            let body = Self.caseBody(still, in: status)
+            #expect(!body.isEmpty && !body.contains("ProgressView"), "\(still): \(body)")
+        }
+        for turning in [".counting", ".recounting"] {
+            #expect(Self.caseBody(turning, in: status).contains("ProgressView"), "\(turning)")
+        }
         // The groups in the core's order, and only the last one said with a clause (a comma
         // inside the group): "…, 3 ignorierte Fotos und 6 Fotos, für die sich kein eigenes
         // Album lohnt." (`theGroupSaidWithAClauseComesLast`).

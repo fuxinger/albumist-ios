@@ -191,6 +191,26 @@ struct OverviewView: View {
                     }
                     .accessibilityElement(children: .combine)
                 }
+            case .recountWaiting(let recount):
+                // The same held count while the analysis does not work (paused, waiting for the
+                // device or for Photos, ended early): it stands still, nothing turns, the card
+                // below says why (third look at P3-03).
+                layout {
+                    Image(systemName: "hourglass")
+                        .font(.largeTitle)
+                        .foregroundStyle(.noteText)
+                        .frame(width: side, height: side)
+                        .accessibilityHidden(true) // the held count beside it says it
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("Zuletzt \(recount.fully.formatted()) von \(recount.total.formatted()) sortiert")
+                            .font(.headline)
+                            .monospacedDigit()
+                        Text("Wird weitergezählt, sobald die Analyse weiterläuft.")
+                            .font(.subheadline)
+                            .foregroundStyle(.noteText)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
             case .noMainAreaChosen:
                 // No main area counts (none chosen, or the chosen ones turned off): the ring
                 // stayed at "0 von 300 sortiert" for good.

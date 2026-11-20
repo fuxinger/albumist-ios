@@ -24,7 +24,11 @@ import SortlyCore
 ///   run: paused by the user, waiting for the device or for Photos, ended early (also across
 ///   launches until it goes on). A spinner then turned for as long as the pause lasted, right
 ///   above the paused analysis card (second review of P3-03).
-/// - `recounting`: a count held while it is made anew (`RecountState`), as before.
+/// - `recounting` ("Wird neu gezählt", with a spinner): a count held while it is made anew
+///   (`RecountState`), as before, while the analysis works.
+/// - `recountWaiting` ("Zuletzt 82 von 176 sortiert", no spinner): the same held count while the
+///   analysis does not work. The hold ends only with new suggestions or a run that went through
+///   (`RecountState.next`), so a Pause kept the spinner turning for as long as it lasted.
 /// - `noMainAreaChosen`: no main area counts (none chosen in the settings, or the chosen ones
 ///   turned off, which the start allows): every photo stayed open for good ("0 von 300").
 /// - `nothingToSort` ("Nichts zu sortieren"): counted, and every photo is left out, for example
@@ -34,6 +38,7 @@ public enum SortedCountCard: Equatable, Sendable {
     case counting
     case notCountedYet
     case recounting(RecountState)
+    case recountWaiting(RecountState)
     case noMainAreaChosen
     case nothingToSort(NotCounted)
     case ring(Ring)
@@ -173,7 +178,8 @@ public enum SortedCountCard: Equatable, Sendable {
         }
 
         /// The analysis works right now: it runs, and its card neither waits (for the device to
-        /// cool or charge, for Photos) nor pauses. Only then does the first card show a spinner.
+        /// cool or charge, for Photos) nor pauses. Only then does the first card show a spinner
+        /// ("Wird gezählt", "Wird neu gezählt").
         public var analysisWorks: Bool {
             guard analysisRunning else { return false }
             switch analysisCard {
@@ -187,7 +193,8 @@ public enum SortedCountCard: Equatable, Sendable {
         let counted = countedAreas(input.settings)
         // Nothing can ever be sorted: no ring that stays at 0 % and no count to hold.
         if counted.isEmpty { return .noMainAreaChosen }
-        if let held = input.recount { return .recounting(held) }
+        // A spinner only while the analysis works, for a held count too.
+        if let held = input.recount { return input.analysisWorks ? .recounting(held) : .recountWaiting(held) }
         let p = input.progress
         let wentThrough = !input.analysisRunning && !input.analysisPaused && input.analysedOnce
         // Once the analysis went through, a library without photos or suggestions has the card

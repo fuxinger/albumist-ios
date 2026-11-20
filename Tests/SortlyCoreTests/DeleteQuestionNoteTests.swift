@@ -235,6 +235,39 @@ struct DeleteQuestionNoteTests {
         #expect(await Self.question(listed: CollectionInventory(), found: [empty]).interruptedUndo(cutOff, cached: CollectionInventory()))
     }
 
+    /// Fourth review, NIT-1: a look-up that fails is not "gone". The answer is the safe side,
+    /// since the album may still be there and be deleted.
+    @Test func aFailedLookUpTakesTheSafeSide() async {
+        let records = ManagedAlbumTracker().record(Self.madeRome, into: [], inventory: CollectionInventory([Self.rome]))
+        let failing = DeleteQuestion(listAlbums: { CollectionInventory() },
+                                     lookUp: { _ in throw CancellationError() })
+        #expect(await failing.undo(Self.madeRome, albums: records, waiting: [], earlierUndos: [], cached: CollectionInventory()))
+    }
+
+    /// Fourth review, NIT-2: the undo completes the list for every album Albumist keeps a
+    /// record of, not only those of this plan. "Bern" (b1) was made by an earlier plan with y;
+    /// the user took y out; this plan put z in it. Undone, b1 is empty and Albumist's own, so it
+    /// is deleted, also while the list lacks it for a while (iCloud).
+    @Test func anAlbumOfAnotherPlanTheListLacksIsLookedUpToo() async {
+        let madeBern = Self.plan([
+            PlanStep(id: "0", operation: .createAlbum(key: "B", title: "Bern", parent: .topLevel), sourceID: nil, state: .succeeded(createdID: "b1", verifiedAt: Date())),
+            PlanStep(id: "1", operation: .addAssets(album: .planned("B"), assets: ["y"]), sourceID: nil, state: Self.done),
+        ], resolved: ["B": "b1"])
+        let addedZ = Self.plan([
+            PlanStep(id: "0", operation: .addAssets(album: .existing("b1"), assets: ["z"]), sourceID: nil, state: Self.done),
+        ])
+        let bernBefore = CollectionSnapshot(id: "b1", title: "Bern", assetIDs: ["y"])
+        let bernNow = CollectionSnapshot(id: "b1", title: "Bern", assetIDs: ["z"])
+        var records = ManagedAlbumTracker().record(madeBern, into: [], inventory: CollectionInventory([bernBefore]))
+        records = ManagedAlbumTracker().record(addedZ, into: records, inventory: CollectionInventory([bernNow]))
+        // With the album in the list, the undo deletes it.
+        #expect(await Self.question(listed: CollectionInventory([bernNow]))
+            .undo(addedZ, albums: records, waiting: [], earlierUndos: [], cached: CollectionInventory()))
+        // The list lacks it for a while; looked up on its own, it is still there.
+        #expect(await Self.question(listed: CollectionInventory(), found: [bernNow])
+            .undo(addedZ, albums: records, waiting: [], earlierUndos: [], cached: CollectionInventory()))
+    }
+
     /// Photos could not be read: the safe side, iOS may ask whenever the plan made an album or
     /// folder (NIT-2), and never for a plan that made none and deletes nothing.
     @Test func withoutTheAlbumListTheAnswerIsTheSafeSide() async {

@@ -583,12 +583,15 @@ final class DeviceConditionUITests: XCTestCase {
     }
 
     /// Taps the button of an open dialog (another button with the same label can sit behind it).
+    /// Only an enabled one: the button that opens the dialog has the same label and is disabled
+    /// while the app checks whether iOS will ask (up to 3 s, review of P3-07); tapped then, the
+    /// dialog that opens after it was never confirmed.
     @discardableResult
     private func confirm(_ label: String, _ step: String) -> Bool {
         let deadline = Date().addingTimeInterval(8)
         while Date() < deadline {
             let candidates = app.buttons.matching(NSPredicate(format: "label == %@", label)).allElementsBoundByIndex
-            if let hit = candidates.last(where: { $0.exists && $0.isHittable }) {
+            if let hit = candidates.last(where: { $0.exists && $0.isEnabled && $0.isHittable }) {
                 hit.tap()
                 print("UI_STEP_OK \(step)")
                 return true

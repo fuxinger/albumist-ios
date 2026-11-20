@@ -37,7 +37,11 @@ public struct DeleteQuestion: Sendable {
             let records = waiting.reduce(albums) { ManagedAlbumTracker().record($1, into: $0, inventory: current) }
             return UndoPlanner().undoPlan(for: executed, albums: records, current: current, earlierUndos: earlierUndos).deletesCollections
         }
-        if let current = await read(adding: made) { return deletes(current) }
+        // Every album Albumist keeps a record of is looked up when the list lacks it, as the
+        // undo's own check completes the list (fourth review, NIT-2: an album an earlier plan
+        // made that this undo empties and deletes).
+        let recorded = Set(albums.map(\.albumID)).union(waiting.flatMap(\.collectionsMade))
+        if let current = await read(adding: made.union(recorded)) { return deletes(current) }
         return deletes(cached) || !made.isEmpty
     }
 
@@ -61,11 +65,11 @@ public struct DeleteQuestion: Sendable {
         return await Self.within(limit) {
             guard var current = try? await listAlbums() else { return nil }
             for id in made.sorted() where current[id] == nil {
-                guard let found = try? await lookUp(id) else {
-                    if Task.isCancelled { return nil }
-                    continue
-                }
-                current.upsert(found)
+                // A look-up that fails is no answer: the safe side (fourth review, NIT-1).
+                let found: CollectionSnapshot?
+                do { found = try await lookUp(id) } catch { return nil }
+                if Task.isCancelled { return nil }
+                if let found { current.upsert(found) }
             }
             return Task.isCancelled ? nil : current
         }

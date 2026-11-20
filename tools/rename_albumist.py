@@ -190,12 +190,13 @@ def rename_text(text: str, repo_renamed: bool = False) -> TextResult:
     spans = protected_spans(text, repo_renamed)
     out, last = [], 0
     replaced, kept = collections.Counter(), []
+    lines = None
     for m in WORD.finditer(text):
         key = next((k for s, e, k in spans if s < m.end() and m.start() < e), None)
-        line = text.count("\n", 0, m.start()) + 1
         if key:
-            line_text = text.splitlines()[line - 1].strip()
-            kept.append((line, key, line_text))
+            lines = lines or text.split("\n")
+            line = text.count("\n", 0, m.start()) + 1
+            kept.append((line, key, lines[line - 1].strip()))
             continue
         new = map_word(m.group(0))
         out.append(text[last:m.start()])

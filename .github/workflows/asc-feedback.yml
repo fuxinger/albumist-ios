@@ -10,14 +10,26 @@ name: TestFlight feedback
 # ASC_FEEDBACK_KEY_P8 (docs/launch/FREIGABE_EINRICHTEN.md, optional step). Without them the run
 # stops after one quick check.
 #
-# The schedule and the default are "counts": the job summary shows only how many feedback and
-# crash submissions each build has. No comment, device data, screenshot or crash log is fetched,
-# written or uploaded. "full" (comments, screenshots, crash logs in report.md inside an artifact
-# kept 7 days; the job summary, kept ~90 days, still shows only the counts) is refused by the
-# script itself unless the GitHub API reports this repository as private: while it is public,
-# anyone can read job summaries and any signed-in GitHub user can download artifacts, and
-# screenshots of a photo app may show the testers' own photos. The artifact is only uploaded
-# when the script says it ran full (step output mode=full), never because of the input alone.
+# Three modes. "encrypted" is the schedule and the default: comments, device data, screenshots and
+# crash logs of the last 14 days are packed into one tar under $RUNNER_TEMP and encrypted with
+# openssl cms (RSA-OAEP SHA-256, AES-256-CBC) to the certificate .github/feedback-recipient.pem.
+# The script refuses (exit 5) before fetching anything unless that certificate's SHA-256 equals
+# the value pinned in asc_feedback.py (RECIPIENT_SHA256), so a swapped certificate in a pull
+# request fails instead of sending the feedback to someone else. The plaintext is overwritten and
+# deleted by the script before this step ends (and removed again below if the step was killed);
+# only the .cms file is uploaded (artifact testflight-feedback-encrypted, 14 days), so this mode
+# is allowed while the repository is public. Its private key is never in the repository or on a
+# runner; tools/feedback_inbox.py decrypts a downloaded artifact locally into a Markdown inbox
+# and de-duplicates by submission id (every run sends the whole 14 days again).
+# "counts": the job summary shows only how many feedback and crash submissions each build has.
+# No comment, device data, screenshot or crash log is fetched, written or uploaded.
+# "full" (comments, screenshots, crash logs in report.md inside a plain artifact kept 7 days) is
+# refused by the script itself unless the GitHub API reports this repository as private: while it
+# is public, anyone can read job summaries and any signed-in GitHub user can download artifacts,
+# and screenshots of a photo app may show the testers' own photos.
+# In every mode the job summary (kept ~90 days) shows only the counts. An artifact is only
+# uploaded when the script says so (step output mode=full or mode=encrypted, written after the
+# file is checked), never because of the input alone.
 # API calls never follow redirects (asc_feedback.py).
 # GitHub turns the schedule off after 60 days without activity in a public repository; then
 # Actions > TestFlight feedback > "Enable workflow".
@@ -30,10 +42,10 @@ on:
   workflow_dispatch:
     inputs:
       report:
-        description: 'Inhalt: counts = nur Anzahlen je Build; full = Kommentare, Screenshots, Absturzprotokolle (nur bei privatem Repository)'
+        description: 'Inhalt: encrypted = alles der letzten 14 Tage, verschlüsselt (tools/feedback_inbox.py); counts = nur Anzahlen je Build; full = Kommentare, Screenshots, Absturzprotokolle unverschlüsselt (nur bei privatem Repository)'
         type: choice
-        options: [counts, full]
-        default: counts
+        options: [encrypted, counts, full]
+        default: encrypted
 
 permissions:
   contents: read
@@ -64,6 +76,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.secrets.outputs.ready == 'true'
         with:
+          # Cone mode: also the files right in .github/, among them feedback-recipient.pem.
           sparse-checkout: .github/scripts
           persist-credentials: false
       - name: App Store Connect key
@@ -84,13 +97,25 @@ jobs:
           KEY_PATH: ${{ runner.temp }}/asc/AuthKey.p8
           # Read by the script to ask GitHub whether the repository is private (mode full only).
           GH_TOKEN: ${{ github.token }}
-          MODE: ${{ inputs.report || 'counts' }}
+          MODE: ${{ inputs.report || 'encrypted' }}
         run: |
           python3 .github/scripts/asc_feedback.py --bundle-id app.albumist.ios \
-            --out "$RUNNER_TEMP/feedback" --summary "$GITHUB_STEP_SUMMARY" --mode "$MODE"
-      - name: Remove key
+            --out "$RUNNER_TEMP/feedback" --encrypted-out "$RUNNER_TEMP/feedback-encrypted" \
+            --recipient .github/feedback-recipient.pem --days 14 \
+            --summary "$GITHUB_STEP_SUMMARY" --mode "$MODE"
+      - name: Remove key and plaintext
         if: always()
-        run: rm -rf "$RUNNER_TEMP/asc"
+        # The script wipes its plaintext folder itself; this only catches a killed step.
+        run: rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP"/feedback-plain-*
+      - name: Keep the encrypted report
+        if: always() && steps.fetch.outputs.mode == 'encrypted'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testflight-feedback-encrypted
+          path: ${{ runner.temp }}/feedback-encrypted/*.cms
+          retention-days: 14
+          if-no-files-found: error
+          overwrite: true
       - name: Keep report, screenshots and crash logs
         if: always() && steps.fetch.outputs.mode == 'full'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

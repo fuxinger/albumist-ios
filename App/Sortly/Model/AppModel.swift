@@ -2883,8 +2883,8 @@ final class AppModel {
     /// branch: an interrupted undo was called "Anlegen" too).
     private var interruptedPlanFirst: String {
         interruptedPlan?.reverts != nil
-            ? String(localized: "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
-            : String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide in der Übersicht, wie es weitergeht; danach geht es hier weiter.")
+            ? String(localized: "Ein früheres Rückgängigmachen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter.")
+            : String(localized: "Ein früheres Anlegen wurde unterbrochen. Entscheide auf der Seite „Vorschläge“, wie es weitergeht; danach geht es hier weiter.")
     }
 
     /// The plan offered to continue, take back or keep, read again from the store after every

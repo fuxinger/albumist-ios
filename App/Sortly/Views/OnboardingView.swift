@@ -194,27 +194,6 @@ private struct WelcomePage: View {
     }
 }
 
-/// The app's icon as the Home Screen shows it (an app cannot draw its own `AppIcon` set, so the
-/// same artwork is in the image set `AppIconImage`, light and dark): the rounded square of iOS,
-/// a soft shadow and a hairline edge that keeps its shape on the light background. Decorative:
-/// the name below says what it is.
-private struct AppIconImage: View {
-    var side: CGFloat
-
-    var body: some View {
-        // iOS rounds an icon's corners by about 22.4 % of its side (continuous corners).
-        let shape = RoundedRectangle(cornerRadius: side * 0.2237, style: .continuous)
-        Image("AppIconImage")
-            .resizable()
-            .interpolation(.high)
-            .frame(width: side, height: side)
-            .clipShape(shape)
-            .overlay { shape.strokeBorder(Color.black.opacity(0.06), lineWidth: 0.5) }
-            .shadow(color: Color(red: 10 / 255, green: 60 / 255, blue: 70 / 255).opacity(0.18), radius: 15, y: 12)
-            .accessibilityHidden(true)
-    }
-}
-
 /// One onboarding page: the content scrolls when it does not fit (large text, small iPhones)
 /// and is centered when it does; the button stays at the bottom.
 private struct OnboardingPage<Content: View, Footer: View>: View {

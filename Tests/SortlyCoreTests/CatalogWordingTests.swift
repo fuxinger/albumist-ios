@@ -59,6 +59,9 @@ struct CatalogWordingTests {
         ("\\bprobelauf\\b", "Albumist arbeitet mit"),
         ("\\banfangen mit\\b", "Albumist arbeitet mit"),
         ("\\baufheben\\b(?<!auswahl aufheben)|\\baufgehoben\\b", "rückgängig machen („Auswahl aufheben“ stays, as in iOS)"),
+        // The tab „Übersicht“ is „Vorschläge“ since design wave 1 (6B): texts still sent the user
+        // there (handoff of the frame, 20.11.).
+        ("\\bübersicht\\b", "auf der Seite „Vorschläge“"),
     ]
 
     static let forbiddenEnglish: [(pattern: String, instead: String)] = [
@@ -67,6 +70,7 @@ struct CatalogWordingTests {
         ("^not sorted$", "Unsorted"),
         ("\\bmain (area|areas|sorting)\\b", "Counts as Sorted, areas"),
         ("\\btest run\\b", "Albumist works with"),
+        ("\\boverview\\b", "on the Suggestions page"),
     ]
 
     /// Texts of files that other work changes at the same time: to be reworded there, then

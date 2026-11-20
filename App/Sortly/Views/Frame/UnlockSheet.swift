@@ -1,6 +1,5 @@
 import StoreKit
 import SwiftUI
-import UIKit
 import SortlyCore
 
 /// "Albumist freischalten" as a sheet of its own (design E6 "Freie Alben verbraucht", spec:
@@ -111,41 +110,5 @@ struct UnlockSheet: View {
         case .preview(let needed):
             Text("Für diese Auswahl brauchst du \(needed) Alben. Kostenlos sind noch \(purchases.remainingFreeAlbums). Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.")
         }
-    }
-}
-
-/// The app's own icon as on the Home Screen, read from the app's bundle. A calm accent tile with
-/// the albums symbol if iOS does not hand it out.
-private struct AppIconImage: View {
-    var side: CGFloat
-
-    var body: some View {
-        Group {
-            if let icon = Self.primaryIcon() {
-                Image(uiImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-            } else {
-                Theme.accent.overlay {
-                    Image(systemName: "rectangle.stack.fill")
-                        .font(.system(size: side * 0.42, weight: .semibold))
-                        .foregroundStyle(Theme.onAccent)
-                }
-            }
-        }
-        .frame(width: side, height: side)
-        .clipShape(RoundedRectangle(cornerRadius: side * 0.225, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
-        .accessibilityHidden(true)
-    }
-
-    /// The primary icon Xcode writes into the bundle (`CFBundleIcons`).
-    private static func primaryIcon() -> UIImage? {
-        guard let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
-              let primary = icons["CFBundlePrimaryIcon"] as? [String: Any] else { return nil }
-        if let files = primary["CFBundleIconFiles"] as? [String], let name = files.last, let image = UIImage(named: name) {
-            return image
-        }
-        return (primary["CFBundleIconName"] as? String).flatMap { UIImage(named: $0) }
     }
 }

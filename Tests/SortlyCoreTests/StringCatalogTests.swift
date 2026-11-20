@@ -46,7 +46,6 @@ struct StringCatalogTests {
     /// Counts that can be 1 and were singled out by the design review.
     static let countStrings = [
         "%lld %@ Fotos und Videos",
-        "%lld Vorschläge für %lld %@ Fotos und Videos",
         "Erledigt: %lld von %lld Schritten",
         "Unterbrochen: %lld von %lld Schritten erledigt",
         "%lld von %lld Schritten",

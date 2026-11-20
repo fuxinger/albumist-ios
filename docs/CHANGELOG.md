@@ -62,7 +62,11 @@
     persönlichen Vorschlag legt „Album anlegen“ nichts sofort an; ein nach „Anpassen“ getippter Name gilt;
     Umbenennen und Verschieben eines eigenen Albums heißen so; „Alle auswählen“ lässt „Nicht jetzt“ aus;
     VoiceOver nennt bei Häkchen und Knöpfen das Album.
-  - Vorschau: der Knopf sagt mit einem Wort nach „Jetzt“, was er tut; das Ergebnis einer Entfernung heißt so.
+  - Vorschau: der Knopf sagt mit einem Wort nach „Jetzt“, was er tut. Das Ergebnis sagt groß, was geschah
+    („10 neue Alben“, darunter „mit 342 Fotos“; nach einer Entfernung „1 Album entfernt“), und unter
+    „Rückgängig machen“, was der Knopf tut.
+  - Kaufen: Sind die freien Alben verbraucht, öffnet „Anlegen“ auf einer Karte ein eigenes Kaufblatt mit dem
+    App-Symbol (hell und dunkel, wie auf der Willkommensseite), „Kauf wiederherstellen“ und „Code einlösen“.
   - Fotokarten: Titelbilder nur scharf und nur vom iPhone, sonst eine ruhige Fläche in den Farben des Fotos;
     antwortet Fotos gerade nicht, fragt die Karte kurz darauf noch einmal. Karten-Regal mit gleich hohen
     Karten (bei großer Schrift weniger und breitere), Startpaket-Mosaik; Hilfetexte zwei Zeilen, der Rest
@@ -71,6 +75,10 @@
     Verlauf und Ähnliche Alben; lang drücken oder „…“ im Album macht nur dieses Album rückgängig. „Verlauf
     und Rückgängig“ ist von den Einstellungen in den Tab Alben gezogen.
   - Einführung: das App-Symbol, die vier Versprechen, dann gleich die Analyse.
+  - Texte: Meldungen, die „in der Übersicht“ sagten, nennen jetzt die Seite „Vorschläge“ (auch Siri und
+    Kurzbefehle); unbenutzte Texte sind aus dem Katalog entfernt.
+  - Bedienungstests gehen über die neuen Bildschirme, dazu eigene für den Rahmen (Tabs in beiden Sprachen,
+    die Filter von „Unsortiert“, „Anlegen“ auf der Karte mit „Widerrufen“, das Kaufblatt).
 - 20.11. (P3-09, P3-18, Entscheidung Fuchs 17.11. „Unsortiert“): Ein Wort für eine Sache.
   „Rückgängig machen“ für alles, was Albumist angelegt hat („Alles rückgängig machen“, „Rest
   rückgängig machen“, in der Reise-Werkstatt statt „Aufheben“, auch die Meldungen nach einem

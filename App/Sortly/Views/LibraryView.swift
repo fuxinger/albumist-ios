@@ -79,8 +79,11 @@ struct LibraryView: View {
         }
         .sheet(isPresented: Binding(get: { addingToAlbum != nil }, set: { if !$0 { addingToAlbum = nil } })) {
             AddToAlbumSheet(assets: addingToAlbum ?? []) {
-                selection = []
-                selecting = false
+                // Animated like the other ways out, so the tab bar does not snap back.
+                withAnimation {
+                    selection = []
+                    selecting = false
+                }
             }
         }
         .refreshable { await model.refreshDerived() }
@@ -232,9 +235,14 @@ struct LibraryView: View {
         }
         ToolbarSpacer(.flexible, placement: .bottomBar)
         ToolbarItem(placement: .bottomBar) {
+            // The bar keeps its height, so the count stays on one line and stops growing at the
+            // first accessibility size; the large content viewer shows it in full.
             Text("\(selection.count) ausgewählt")
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
+                .lineLimit(1)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .accessibilityShowsLargeContentViewer()
         }
         .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible, placement: .bottomBar)

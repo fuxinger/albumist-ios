@@ -34,7 +34,11 @@ DECLARATION = re.compile(
     re.MULTILINE)
 SELECTION_STATE = re.compile(r"@State\s+(?:(?:private|fileprivate)\s+)?var\s+(selecting|isSelecting)\b")
 BOTTOM_BAR = re.compile(r"\bplacement\s*:\s*\.bottomBar\b")
-TAB_BAR_VISIBILITY = re.compile(r"\.toolbarVisibility\s*\(\s*((?:[^()]|\([^()]*\))*?)\s*,\s*for\s*:\s*\.tabBar\s*\)")
+# `.toolbarVisibility(…, for: …)` or the older `.toolbar(…, for: …)`, for one bar or several.
+TAB_BAR_VISIBILITY = re.compile(
+    r"\.toolbar(?:Visibility)?\s*\(\s*((?:[^(),]|\([^()]*\))*?)\s*,\s*for\s*:\s*((?:\s*\.\w+\s*,?)+)\)")
+# `condition ? whenTrue : whenFalse`
+TERNARY = re.compile(r"^(.*?)\?(.*?):(.*)$", re.DOTALL)
 # Views whose bottom bar is never under the tab bar, and why.
 NO_TAB_BAR: dict[str, str] = {}
 
@@ -45,32 +49,60 @@ HIDE_TAB_BAR = ("Hide the tab bar while selecting, or the bottom bar lies behind
 
 
 def views(code: str):
-    """(name, start offset, code) of each top-level type in `code`."""
+    """(name, [(start offset, code)]) of each top-level type in `code`, its extensions in the same
+    file included, so a toolbar moved into an extension still counts for its view (second
+    review of P3-01)."""
     starts = [(m.start(), m.group(1)) for m in DECLARATION.finditer(code)]
+    parts: dict[str, list[tuple[int, str]]] = {}
     for index, (start, name) in enumerate(starts):
         end = starts[index + 1][0] if index + 1 < len(starts) else len(code)
-        yield name, start, code[start:end]
+        parts.setdefault(name, []).append((start, code[start:end]))
+    yield from parts.items()
+
+
+def first(pattern, parts):
+    """(offset in the file, match) of the first match of `pattern` in the parts, or None."""
+    for start, body in parts:
+        match = pattern.search(body)
+        if match:
+            return start + match.start(), match
+    return None
+
+
+def hides_while(argument: str, state) -> bool:
+    """Whether the visibility `argument` is `.hidden` while selecting: with a selection mode the
+    `.hidden` branch is the one taken while `state` is true, never a tab bar hidden for good."""
+    if state is None:
+        return ".hidden" in argument
+    ternary = TERNARY.match(argument)
+    if not ternary:
+        return False
+    condition, when_true, when_false = (part.strip() for part in ternary.groups())
+    if re.fullmatch(rf"\(?\s*{state}\s*\)?", condition):
+        return ".hidden" in when_true and ".hidden" not in when_false
+    if re.fullmatch(rf"!\s*\(?\s*{state}\s*\)?", condition):
+        return ".hidden" in when_false and ".hidden" not in when_true
+    return False
 
 
 def offenders_in(text: str):
     """(line, view, advice) for each view in the Swift source `text` that breaks a rule."""
     code = code_only(text)
     found = []
-    for name, start, body in views(code):
+    for name, parts in views(code):
         if name in NO_TAB_BAR:
             continue
-        state = SELECTION_STATE.search(body)
-        bar = BOTTOM_BAR.search(body)
+        state = first(SELECTION_STATE, parts)
+        bar = first(BOTTOM_BAR, parts)
         if not state and not bar:
             continue
-        line = code.count("\n", 0, start + (bar or state).start()) + 1
+        line = code.count("\n", 0, (bar or state)[0]) + 1
         if state and not bar:
             found.append((line, name, ACTIONS_IN_BOTTOM_BAR))
-        hides = False
-        for visibility in TAB_BAR_VISIBILITY.finditer(body):
-            argument = visibility.group(1)
-            if ".hidden" in argument and (not state or re.search(rf"\b{state.group(1)}\b", argument)):
-                hides = True
+        selecting = state[1].group(1) if state else None
+        hides = any(".tabBar" in re.findall(r"\.\w+", visibility.group(2))
+                    and hides_while(visibility.group(1), selecting)
+                    for _, body in parts for visibility in TAB_BAR_VISIBILITY.finditer(body))
         if not hides:
             found.append((line, name, HIDE_TAB_BAR))
     return found

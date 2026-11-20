@@ -1780,7 +1780,9 @@ final class SortlyFlowUITests: XCTestCase {
         shot("08f-photo-taken-out")
 
         back()
-        let detailSays = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Alle \(before - 1) Foto")).firstMatch
+        // "Alle 2 Fotos ansehen", or "1 Foto ansehen" when one photo is left (the singular has no "Alle").
+        let detailSays = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@",
+                                                          "Alle \(before - 1) Foto", "\(before - 1) Foto ")).firstMatch
         UITestWait.appears(detailSays, "suggestion says \(before - 1) photos", timeout: 5)
     }
 }

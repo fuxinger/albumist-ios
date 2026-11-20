@@ -146,7 +146,9 @@
   steht kein Foto mehr unter „Nicht sortiert“: vorher zeigten die Mediathek, die Suche „nicht sortiert“ und die
   Foto-Infos jedes Foto als nicht sortiert, auch ignorierte, während die Übersicht „Kein Bereich zählt als sortiert“
   sagte. Jetzt heißen solche Fotos in den Infos „Nicht mitgezählt“; ignorierte und ausgeschlossene Fotos bleiben unter
-  „Ignoriert“ und „Ausgeschlossen“ und lassen sich wieder „Nicht mehr ignorieren“, auch wenn jeder Bereich aus ist (N-01).
+  „Ignoriert“ und „Ausgeschlossen“ und lassen sich wieder „Nicht mehr ignorieren“, auch wenn jeder Bereich aus ist. Die
+  leeren Listen „Nicht sortiert“ und „Sortiert“ sagen dann „Kein Bereich zählt als sortiert“ mit dem Hinweis auf die
+  Einstellungen statt „Alles sortiert“, und die Foto-Infos nennen denselben Hinweis als Grund (N-01).
 - 20.11.: Kleine graue Texte (Fußnoten, Zahlen, Erklärungen auf Karten und in Listen) sind gut lesbar und bleiben doch heller als der Haupttext: das neue Grau `.noteText` (`Theme.noteText`, hell 5,9:1 auf weißen Karten statt 3,4:1, überall mindestens 4,6:1; dunkel 7,5:1 auf Karten, mindestens 4,7:1; mit erhöhtem Kontrast deutlich stärker) an 145 Stellen in 21 Dateien statt des System-Graus. Das dunklere `Theme.secondaryText` bleibt für Text auf dem Farbschein der Fotos. `secondary_text_rule.py` lehnt neues kleines System-Grau ab (P3-14).
 - 20.11.: Auswählen wie in Fotos: Solange Fotos ausgewählt werden, ist die Tab-Leiste ausgeblendet. „N aus Vorschlag
   entfernen“ lag hinter der Tab-Leiste und lässt sich jetzt antippen; in der Mediathek stehen „Zu Album hinzufügen“,

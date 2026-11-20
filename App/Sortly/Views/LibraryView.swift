@@ -274,20 +274,29 @@ struct LibraryView: View {
         if b == .suggestions { selecting = false }
     }
 
+    /// With no main area counted, "Nicht sortiert" and "Sortiert" say what the overview says,
+    /// not "Alles sortiert" (`SortedCountCard.EmptyList`, finding N-01).
     private var emptyTitle: LocalizedStringKey {
-        bucket == .unorganized ? "Alles sortiert" : "Keine Fotos"
+        switch SortedCountCard.EmptyList.make(bucket, settings: model.settings) {
+        case .noMainAreaChosen: "Kein Bereich zählt als sortiert"
+        case .allSorted: "Alles sortiert"
+        case .noPhotos: "Keine Fotos"
+        }
     }
 
     private var emptyDescription: LocalizedStringKey {
-        switch bucket {
-        case .unorganized:
+        switch SortedCountCard.EmptyList.make(bucket, settings: model.settings) {
+        case .noMainAreaChosen:
+            return "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen."
+        case .allSorted:
             // "Nur 2026": the list holds what the ring counts, the photos of that year.
             if case .year(let year) = model.analysisScope {
                 return "Alle gezählten Fotos aus \(String(year)) liegen in passenden Alben."
             }
             return "Alle gezählten Fotos liegen in passenden Alben."
-        case .ignored: return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen."
-        default: return "In diesem Bereich gibt es gerade nichts."
+        case .noPhotos:
+            if bucket == .ignored { return "Fotos, die du ignorierst, tauchen hier auf und werden nicht mehr vorgeschlagen." }
+            return "In diesem Bereich gibt es gerade nichts."
         }
     }
 }
@@ -456,6 +465,11 @@ struct AssetDetailView: View {
 
     private var reasonText: LocalizedStringKey? {
         guard let state = model.states[facts.id] else { return "Die Analyse ist für dieses Foto noch nicht fertig." }
+        // No main area counts: the ring counts no photo ("Nicht mitgezählt" above), as the
+        // overview says (finding N-01). Ignored and excluded photos say so below.
+        if SortedCountCard.photoInfoNamesNoMainArea(state, settings: model.settings) {
+            return "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen."
+        }
         switch model.resolver.overall(state) {
         case .fullyOrganized: return nil
         case .ignored: return "Du hast dieses Foto ignoriert."

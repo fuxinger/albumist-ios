@@ -487,6 +487,60 @@ struct OverviewNumbersTests {
         }
     }
 
+    /// With no main area counted, "Nicht sortiert" and "Sortiert" are empty (finding N-01). They
+    /// said "Alles sortiert – Alle Fotos liegen in deinen Hauptbereichen." and "Keine Fotos"; now
+    /// both say what the overview says, and so does the photo info of a photo the ring does not
+    /// count for that reason. Ignored and excluded photos keep their own words.
+    @Test func withNoCountedAreaTheListsAndThePhotoInfoSayWhy() {
+        var noneOn = Self.germanSettings()
+        noneOn.enabledAreas = [.screenshots, .imageCategories]
+        var noneChosen = Self.germanSettings()
+        noneChosen.primaryAreas = []
+        for settings in [noneOn, noneChosen] {
+            #expect(SortedCountCard.EmptyList.make(.unorganized, settings: settings) == .noMainAreaChosen)
+            #expect(SortedCountCard.EmptyList.make(.organized, settings: settings) == .noMainAreaChosen)
+            for other in [InboxBucket.ignored, .excluded, .uncertain, .all] {
+                #expect(SortedCountCard.EmptyList.make(other, settings: settings) == .noPhotos, "\(other)")
+            }
+        }
+        let counted = Self.germanSettings()
+        #expect(SortedCountCard.EmptyList.make(.unorganized, settings: counted) == .allSorted)
+        #expect(SortedCountCard.EmptyList.make(.organized, settings: counted) == .noPhotos)
+
+        // The photo info.
+        let resolver = OrganizationStatusResolver(primaryAreas: noneChosen.primaryAreas)
+        let plain = resolver.state(for: "p", facts: [.places: AreaFacts(proposed: true)])
+        let ignored = resolver.state(for: "i", facts: [.places: AreaFacts()], ignored: true)
+        let excluded = resolver.state(for: "e", facts: [:], excluded: true)
+        #expect(SortedCountCard.photoInfoNamesNoMainArea(plain, settings: noneChosen))
+        #expect(SortedCountCard.photoInfoNamesNoMainArea(plain, settings: noneOn))
+        #expect(!SortedCountCard.photoInfoNamesNoMainArea(ignored, settings: noneChosen))
+        #expect(!SortedCountCard.photoInfoNamesNoMainArea(excluded, settings: noneChosen))
+        #expect(!SortedCountCard.photoInfoNamesNoMainArea(plain, settings: counted))
+    }
+
+    /// The library tab shows `SortedCountCard.EmptyList` and the photo info asks
+    /// `photoInfoNamesNoMainArea` first, with the overview's words (the app does not build on
+    /// Linux, so this reads its code).
+    @Test func theLibraryShowsTheWordsDecidedHere() throws {
+        let library = try AppSource.read("App/Sortly/Views/LibraryView.swift")
+        let hint = "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen."
+        let title = try #require(AppSource.body(of: "private var emptyTitle", in: library))
+        let description = try #require(AppSource.body(of: "private var emptyDescription", in: library))
+        #expect(AppSource.code(title + description).contains("SortedCountCard.EmptyList.make(bucket"),
+                "the empty lists decide themselves")
+        #expect(title.contains("\"Kein Bereich zählt als sortiert\""), "\(title)")
+        #expect(description.contains("\"\(hint)\""), "\(description)")
+        let reason = try #require(AppSource.body(of: "private var reasonText", in: library))
+        let reasonCode = AppSource.code(reason)
+        let asks = try #require(reasonCode.range(of: "SortedCountCard.photoInfoNamesNoMainArea("),
+                                "the photo info does not name the missing main area")
+        // Asked before the switch that returns nothing for a photo that counts as done.
+        let done = try #require(reasonCode.range(of: "case .fullyOrganized"))
+        #expect(asks.lowerBound < done.lowerBound)
+        #expect(reason.contains("\"\(hint)\""), "\(reason)")
+    }
+
     @Test func theSentenceNamesOnlyTheMainAreasThatAreOn() {
         var settings = OrganizationSettings()
         #expect(SortedCountCard.countedAreas(settings) == [.places, .trips])

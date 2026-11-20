@@ -219,3 +219,39 @@ public enum SortedCountCard: Equatable, Sendable {
         settings.primaryAreas.intersection(settings.enabledAreas)
     }
 }
+
+// MARK: The library's lists and the photo info when no main area counts
+
+extension SortedCountCard {
+    /// What an empty list of the library tab says (`LibraryView.emptyTitle`, `emptyDescription`).
+    /// With no main area counted, "Nicht sortiert" and "Sortiert" are empty because nothing can
+    /// be sorted (finding N-01): they say what the overview says ("Kein Bereich zählt als
+    /// sortiert", "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche
+    /// zählen."), not "Alles sortiert".
+    public enum EmptyList: Equatable, Sendable {
+        /// "Kein Bereich zählt als sortiert" with the hint to the settings.
+        case noMainAreaChosen
+        /// "Alles sortiert": "Alle Fotos liegen in deinen Hauptbereichen." (with "Nur 2026"
+        /// "Alle Fotos aus 2026 …").
+        case allSorted
+        /// "Keine Fotos" with the list's own line.
+        case noPhotos
+
+        public static func make(_ bucket: InboxBucket, settings: OrganizationSettings) -> EmptyList {
+            let noneCounts = SortedCountCard.countedAreas(settings).isEmpty
+            switch bucket {
+            case .unorganized, .organized: return noneCounts ? .noMainAreaChosen : bucket == .unorganized ? .allSorted : .noPhotos
+            default: return .noPhotos
+            }
+        }
+    }
+
+    /// The photo info gives the hint to the settings as its "why" ("Wähle in den Einstellungen
+    /// unter „Zählt als sortiert“, welche Bereiche zählen."): no main area counts, so the ring
+    /// does not count the photo ("Nicht mitgezählt"), and the user did not ignore or exclude it
+    /// (those say so themselves). Finding N-01.
+    public static func photoInfoNamesNoMainArea(_ state: AssetOrganizationState, settings: OrganizationSettings) -> Bool {
+        countedAreas(settings).isEmpty && !OrganizationStatusResolver.isIgnored(state)
+            && !OrganizationStatusResolver.isExcluded(state)
+    }
+}

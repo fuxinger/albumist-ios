@@ -23,6 +23,9 @@ import UIKit
 /// - a country row of the atlas at the largest text size taller than its words need (a name
 ///   or year broken mid-word, review P3-11, `checkAtlasRows`), and the folder label in the
 ///   settings cut on one line at any size (P3-17, `checkFullyShown`)
+/// - the "+N" of a suggestion's mosaic cut to "+…" (P3-18, `checkMoreCountShown`), and
+///   "Animation überspringen" off screen or behind the tab bar while the sorting show runs
+///   (P3-18, `expectSkipInReach`)
 ///
 /// Also failing: an audit that does not complete in two attempts ("Audit failed to complete in
 /// time", each attempt printed as `A11Y_AUDIT_ERROR`): the screen would otherwise pass unchecked.
@@ -116,6 +119,8 @@ final class AccessibilityUITests: XCTestCase {
         var sortingShow: String
         /// The receipt's share button, there once the receipt is loaded (PlanReceiptView).
         var shareReceipt: String
+        /// A pattern: the button around a suggestion's mosaic, with the number of its photos.
+        var allPhotos: String
 
         static let german = Words(overviewTab: "Übersicht", libraryTab: "Mediathek", albumsTab: "Alben",
                                   settings: "Einstellungen", done: "Fertig", reviewSuggestions: ".*[0-9.]+ Vorschl(ag|äge) prüfen.*",
@@ -126,7 +131,7 @@ final class AccessibilityUITests: XCTestCase {
                                   receiptTitle: "Änderungen", historyTitle: "Verlauf und Rückgängig",
                                   folderLabel: "Ordner für neue Alben", planLoading: "Plan wird erstellt",
                                   photoLoading: "Foto wird geladen", sortingShow: "Fotos werden einsortiert",
-                                  shareReceipt: "Liste teilen")
+                                  shareReceipt: "Liste teilen", allPhotos: "(Alle )?[0-9.]+ Fotos? ansehen")
         static let english = Words(overviewTab: "Overview", libraryTab: "Library", albumsTab: "Albums",
                                    settings: "Settings", done: "Done", reviewSuggestions: ".*Review [0-9,]+ [Ss]uggestions?.*",
                                    suggestionTitle: "Suggestion", suggestionsTitle: "Suggestions", rowMarker: "photo",
@@ -136,7 +141,7 @@ final class AccessibilityUITests: XCTestCase {
                                    receiptTitle: "Changes", historyTitle: "History and Undo",
                                    folderLabel: "Folder for New Albums", planLoading: "Creating plan",
                                    photoLoading: "Loading photo", sortingShow: "Sorting photos",
-                                   shareReceipt: "Share List")
+                                   shareReceipt: "Share List", allPhotos: "See (All )?[0-9,]+ Photos?")
     }
 
     // MARK: Tests
@@ -316,6 +321,7 @@ final class AccessibilityUITests: XCTestCase {
                 print(detailShown ? "UI_STEP_OK \(tag) suggestion opened" : "UI_STEP_MISSING \(tag) suggestion opened")
                 XCTAssertTrue(detailShown, "Not opened: \(tag) suggestion (the tap landed elsewhere)")
                 check("\(tag) suggestion detail", english: english)
+                checkMoreCountShown("\(tag) suggestion detail", w)
                 if !short {
                     app.swipeUp()
                     check("\(tag) suggestion detail lower", english: english)
@@ -352,7 +358,10 @@ final class AccessibilityUITests: XCTestCase {
                     // The sorting show; with Reduce Motion one album at a time, cross-faded. The
                     // first picture once the show is on screen (not asserted: a short plan may
                     // be past it already), the second a set time later to catch a later album.
-                    _ = anything(exactly: w.sortingShow).waitForExistence(timeout: 5)
+                    // Its button first: on screen without scrolling (review P3-18).
+                    if anything(exactly: w.sortingShow).waitForExistence(timeout: 5) {
+                        expectSkipInReach("\(tag) sorting show", w)
+                    }
                     shot("a11y-\(slug(tag))-sorting-show-1")
                     // pacing: the second picture of the show, 1.5 s after the first; the time
                     // between them is the point (another album on screen), there is no state.
@@ -685,12 +694,12 @@ final class AccessibilityUITests: XCTestCase {
         let type = issue.auditType
         let summary = issue.compactDescription
         var reason: String?
-        var where_ = "-"
+        var place = "-"
         var label = "-"
         if let element = issue.element {
             let frame = element.frame
             label = element.label
-            where_ = "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)) type \(element.elementType.rawValue) id '\(element.identifier)'"
+            place = "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height)) type \(element.elementType.rawValue) id '\(element.identifier)'"
             // The same element before the audit: same label, column and size (a scroll only moves it up or down).
             let before = (framesBeforeAudit[label] ?? []).filter {
                 abs($0.minX - frame.minX) < 1 && abs($0.width - frame.width) < 1 && abs($0.height - frame.height) < 1
@@ -723,7 +732,7 @@ final class AccessibilityUITests: XCTestCase {
                 reason = "no element, screen has content passing under a system bar"
             }
         }
-        let line = "\(screen) | audit \(Self.name(of: type)) | \(summary) | label '\(label)' | \(where_)"
+        let line = "\(screen) | audit \(Self.name(of: type)) | \(summary) | label '\(label)' | \(place)"
         if let reason {
             print("A11Y_WARN \(line) | \(reason)")
         } else if type == .contrast {
@@ -942,6 +951,77 @@ final class AccessibilityUITests: XCTestCase {
         } else {
             print("A11Y_FAIL \(screen) | label cut | label '\(text)' | \(Int(frame.width))x\(Int(frame.height)), needs \(Int(needed)) pt on one line")
             XCTFail("\(screen): the label '\(text)' is cut: \(Int(frame.width)) pt wide on one line, it needs \(Int(needed)) pt")
+        }
+    }
+
+    /// The mosaic's "+N" is shown in full, not as "+…" (review P3-18, `ui-a11y-xxxl-suggestion-
+    /// detail`: "+…" instead of "+24" at the largest text; the audit did not see it, VoiceOver
+    /// reads the button around the mosaic by its own label). The count stands in one line, so
+    /// its height tells the size it is drawn in (SF semibold, like `.headline`), and its width
+    /// has to hold the whole count in that size. When the button counts more photos than the
+    /// mosaic has tiles (8 on a suggestion), the count has to be there.
+    private func checkMoreCountShown(_ screen: String, _ w: Words) {
+        let more = app.staticTexts.matching(identifier: "thumbnails.more").firstMatch
+        guard more.waitForExistence(timeout: 5) else {
+            let grid = app.buttons.matching(NSPredicate(format: "label MATCHES %@", w.allPhotos)).firstMatch
+            let total = grid.exists ? Int(grid.label.filter(\.isNumber)) ?? 0 : 0
+            if total > 8 {
+                print("UI_STEP_MISSING \(screen) \"+N\" of the mosaic (\(total) photos)")
+                XCTFail("\(screen): the mosaic of \(total) photos shows no \"+N\"")
+            } else {
+                print("UI_FACT \(screen): no \"+N\" in the mosaic (\(grid.exists ? "\(total) photos" : "no mosaic found"))")
+            }
+            return
+        }
+        let frame = more.frame
+        let label = more.label
+        guard frame.height >= 1, frame.width >= 1, app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else {
+            print("UI_STEP_MISSING \(screen) \"+N\" on screen (\(frame))")
+            XCTFail("\(screen): the mosaic's \"\(label)\" is not on screen (\(frame))")
+            return
+        }
+        let unit = UIFont.systemFont(ofSize: 100, weight: .semibold)
+        let size = frame.height / unit.lineHeight * 100
+        let needed = (label as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: size, weight: .semibold)]).width
+        if frame.width + 3 >= needed {
+            print("UI_STEP_OK \(screen) \"\(label)\" shown in full (\(Int(frame.width))x\(Int(frame.height)), needs \(Int(needed)) at \(Int(size)) pt)")
+        } else {
+            print("A11Y_FAIL \(screen) | count cut | label '\(label)' | \(Int(frame.width))x\(Int(frame.height)), needs \(Int(needed)) pt at \(Int(size)) pt")
+            XCTFail("\(screen): the mosaic's \"\(label)\" is cut: \(Int(frame.width)) pt wide, it needs \(Int(needed)) pt at \(Int(size)) pt")
+        }
+    }
+
+    /// "Animation überspringen" is on screen while the sorting show runs, without scrolling,
+    /// below the navigation bar and clear of the tab bar (review P3-18, `ui-a11y-xxxl-sorting-
+    /// show-1`: at the largest text it lay below the visible part of the screen). Content under
+    /// the tab bar counts as hittable for XCUITest, so the frame is read too, as for the plan's
+    /// button (`expectApplyInReach`). A show that ends while this waits (a short plan) is said,
+    /// not failed: the result has replaced it, its button is gone with it.
+    private func expectSkipInReach(_ step: String, _ w: Words) {
+        let skip = app.buttons["show.skip"]
+        let show = anything(exactly: w.sortingShow)
+        let bar = app.navigationBars.firstMatch
+        let tabs = app.tabBars.firstMatch
+        var ended = false
+        let start = Date()
+        let settled = UITestWait.holds(timeout: 10) {
+            if skip.exists && skip.isHittable && app.frame.contains(skip.frame)
+                && (!bar.exists || skip.frame.minY >= bar.frame.maxY - 1)
+                && (!tabs.exists || skip.frame.maxY <= tabs.frame.minY + 1) {
+                return true
+            }
+            ended = !show.exists && !skip.exists
+            return ended
+        }
+        print("UI_TIMING wait \(step): skip button in reach \(String(format: "%.1f", Date().timeIntervalSince(start))) s")
+        if settled && !ended {
+            print("UI_STEP_OK \(step): skip button in reach without scrolling (\(skip.frame))")
+        } else if ended {
+            print("UI_FACT \(step): the show ended before its button was measured")
+        } else {
+            let place = skip.exists ? "\(skip.frame)" : "missing"
+            print("A11Y_FAIL \(step) | skip button out of reach | button \(place), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
+            XCTFail("\(step): \"Animation überspringen\" is not on screen without scrolling: button \(place), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
         }
     }
 

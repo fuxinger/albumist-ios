@@ -8,7 +8,8 @@ import SortlyCore
 /// step has really finished. With fast work it lasts about 2 s for one album and about 5–7 s
 /// for many; when the work is slower, it waits on the next album and photos fly for nearly
 /// every one. A backlog of finished albums is riffled through. "Animation überspringen" ends the show
-/// at once. With Reduce Motion only the current album is shown and cross-fades; nothing flies.
+/// at once and stays on screen at every text size: the scene gives way to it (`sceneScale`).
+/// With Reduce Motion only the current album is shown and cross-fades; nothing flies.
 struct SortingShow: View {
     struct Album: Identifiable, Equatable {
         /// Index of the album's last "add photos" step in the plan.
@@ -36,6 +37,8 @@ struct SortingShow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    /// Compact on an iPhone turned sideways: the counts stand beside the scene and the button.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var current = 0
     @State private var landed: Set<Int> = []
     /// Distinct photos sorted so far (a photo in two albums counts once, like the result card).
@@ -43,9 +46,32 @@ struct SortingShow: View {
     @State private var flights: [Flight] = []
     @State private var pop = false
     @State private var landings = 0
-    @State private var width: CGFloat = 360
+    /// The width the scene has on screen.
+    @State private var available: CGFloat = 360
+    /// The height the screen shows of the scroll view the show stands in: between the
+    /// navigation bar and the tab bar (`containerRelativeFrame`). Nil until measured.
+    @State private var room: CGFloat?
+    @State private var headerHeight: CGFloat = 0
+    @State private var skipHeight: CGFloat = 0
 
     private let sceneHeight: CGFloat = 360
+    /// Padding around the show that is not its own: the screen's content padding above and
+    /// below it (`PlanReviewView`, Theme.Spacing.l) and the show's own top padding.
+    private static let reserve = 2 * Theme.Spacing.l + Theme.Spacing.m
+    private var sideBySide: Bool { verticalSizeClass == .compact }
+    /// The scene's own size, 1 where the screen has room for it. It gives way to the counts and
+    /// the button, which keep their text size, so "Animation überspringen" stays on screen at
+    /// every size (review P3-18: at the largest text it lay below the tab bar on the small
+    /// iPhone, and there even at the default size). The scene is drawn at its full size and
+    /// scaled, so the flights keep their paths.
+    private var sceneScale: CGFloat {
+        guard let room else { return 1 }
+        var free = room - Self.reserve - skipHeight - Theme.Spacing.l
+        if !sideBySide { free -= headerHeight + Theme.Spacing.l }
+        return min(1, max(0.1, free / sceneHeight))
+    }
+    /// The scene's width before scaling: scaled, it fills the width on screen.
+    private var width: CGFloat { available / sceneScale }
     private var pileCenter: CGPoint { CGPoint(x: width / 2, y: 78) }
     private var albumCenter: CGPoint { CGPoint(x: width / 2, y: 252) }
     private var spacing: CGFloat { min(176, width * 0.44) }
@@ -57,30 +83,35 @@ struct SortingShow: View {
     ]
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.l) {
-            header
-            ZStack {
-                pile
-                carousel
-                ForEach(flights) { FlyingPhoto(flight: $0) }
+        Group {
+            if sideBySide {
+                // Turned sideways the screen is too low for counts, scene and button one below
+                // the other: the counts stand beside the scene and its button.
+                HStack(alignment: .top, spacing: Theme.Spacing.l) {
+                    header
+                    VStack(spacing: Theme.Spacing.l) {
+                        scene
+                        skip
+                    }
+                }
+            } else {
+                VStack(spacing: Theme.Spacing.l) {
+                    header
+                    scene
+                    skip
+                }
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: sceneHeight)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-            // Decorative and hidden from VoiceOver: the labels must not grow out of the scene.
-            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-            .accessibilityHidden(true)
-
-            // Ends only the animation; the albums keep being created in the background.
-            // A plain secondary button: glass belongs to the bars above the content
-            // (Theme.swift, design review N3).
-            Button("Animation überspringen", action: onFinish)
-                .buttonStyle(SecondaryButtonStyle())
         }
         // iPad: a focused column instead of a small cluster in a wide band.
-        .frame(maxWidth: 520)
+        .frame(maxWidth: sideBySide ? .infinity : 520)
         .frame(maxWidth: .infinity)
         .padding(.top, Theme.Spacing.m)
+        // How high the screen is: the scroll view's visible height, without its bars.
+        .background {
+            Color.clear
+                .containerRelativeFrame(.vertical)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room = $0 }
+        }
         .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.6), trigger: landings)
         .task {
             if voiceOver {
@@ -91,6 +122,41 @@ struct SortingShow: View {
     }
 
     // MARK: Parts
+
+    /// Pile, albums and flying photos, drawn in a 360 pt high frame and scaled to what the
+    /// screen has left (`sceneScale`); in the layout it takes only its scaled height.
+    private var scene: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: sceneHeight * sceneScale)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
+            .overlay(alignment: .top) {
+                ZStack {
+                    pile
+                    carousel
+                    ForEach(flights) { FlyingPhoto(flight: $0) }
+                }
+                .frame(width: width, height: sceneHeight)
+                .scaleEffect(sceneScale, anchor: .top)
+            }
+            // Nothing to tap: the scene drawn at full size reaches below its scaled frame.
+            .allowsHitTesting(false)
+            // Decorative and hidden from VoiceOver: the labels must not grow out of the scene.
+            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+            .accessibilityHidden(true)
+    }
+
+    /// Ends only the animation; the albums keep being created in the background. A plain
+    /// secondary button: glass belongs to the bars above the content (Theme.swift, design
+    /// review N3). Its text stops growing at AX2, where "überspringen" still fits one line on
+    /// the small iPhone (at AX5 the word broke in the middle); the scene makes room for it.
+    private var skip: some View {
+        Button("Animation überspringen", action: onFinish)
+            .buttonStyle(SecondaryButtonStyle())
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            .accessibilityIdentifier("show.skip")
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { skipHeight = $0 }
+    }
 
     private var header: some View {
         VStack(spacing: Theme.Spacing.xs) {
@@ -119,6 +185,7 @@ struct SortingShow: View {
         .accessibilityLabel(Text("Fotos werden einsortiert"))
         .accessibilityValue(Text("\(landed.count) von \(albums.count) Alben fertig, \(counted) Fotos einsortiert"))
         .accessibilityAddTraits(.updatesFrequently)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
     }
 
     /// The pile thins out as photos find their albums.

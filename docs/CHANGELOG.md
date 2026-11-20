@@ -107,6 +107,13 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 20.11.: Größte Schrift (P3-18): Das Mosaik eines Vorschlags zeigt „+24“ statt „+…“; die Zahl wächst nur bis
+  zur ersten Bedienungshilfe-Größe, steht in einer Zeile und wird eher etwas
+  kleiner als abgeschnitten (VoiceOver nennt die ganze Zahl weiter am Knopf des Mosaiks). In der Sortier-Show steht
+  „Animation überspringen“ bei jeder Schriftgröße ohne Scrollen über der Tab-Leiste: Die Bilder der Show werden kleiner,
+  wo der Bildschirm nicht reicht, Zahlen und Knopf behalten ihre Größe (auf dem kleinen iPhone lag der Knopf auch bei
+  normaler Schrift unter der Tab-Leiste); quer auf dem iPhone stehen die Zahlen neben Bildern und Knopf. Der Text des
+  Knopfs wächst bis AX2, so bricht „überspringen“ nicht mehr mitten im Wort.
 - 20.11.: Die Karte der laufenden Analyse zeigt auf einen Blick nur noch, was zählt: was gerade läuft (mit „Pause“),
   die Zahl, eine kurze Zeile („Fertig gegen 23:40“, warum es langsamer geht oder wartet, der Countdown für Apple),
   den Balken, „Schon fertig … Ansehen“ und „Details“. „Schritt 4 von 6“, „Gerade angesehen“, ob die Analyse im

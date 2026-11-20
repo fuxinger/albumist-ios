@@ -1774,6 +1774,35 @@ final class SortlyFlowUITests: XCTestCase {
         return reached
     }
 
+    /// The sweep's own album when the albums tab has none: two photos into "Testalbum Rundgang"
+    /// (no sweep-skip word in it), kept for the sweep. Until 20.11. the sweep used the albums
+    /// that DeviceConditionUITests 05, 07 and 08 left on the same simulator; those now run in
+    /// their own group (device-flows), so the sweep makes its own.
+    private func ensureAlbumForSweep() {
+        guard tap(tabButton("Alben"), "albums tab before the sweep") else { return }
+        let empty = app.staticTexts["Noch keine Alben"]
+        let album = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label MATCHES %@", "(.*, )?[0-9]+ Fotos?")).firstMatch
+        // The tab shows its rows or says it has none.
+        _ = UITestWait.holds(timeout: 10) { empty.exists || album.exists }
+        let made = empty.exists
+        print("UI_FACT albums tab empty before the sweep \(made)")
+        if made, openManualPlan("Testalbum Rundgang"),
+           tap(app.buttons["plan.apply"], "apply the sweep's album", timeout: 30) {
+            let done = button("Rückgängig machen").waitForExistence(timeout: 900)
+            print(done ? "UI_STEP_OK album for the sweep" : "UI_STEP_MISSING album for the sweep")
+            XCTAssertTrue(done, "The sweep's album was not created")
+            back()
+        }
+        tap(tabButton("Übersicht"), "overview before the sweep")
+        _ = app.navigationBars["Übersicht"].waitForExistence(timeout: 10)
+        guard made else { return }
+        // After a plan the analysis starts again on its own time: up to 2 s for its "Pause",
+        // then the overview idle over three checks (as in ensureHistory, without a fixed pause).
+        _ = UITestWait.holds(timeout: 2) { app.buttons["Pause"].exists }
+        _ = waitStable("analysis before the sweep", timeout: 180) { analysisIdle }
+    }
+
     /// Third run: every tab, every row, one level deep.
     func test3_TapThroughSweep() {
         continueAfterFailure = true
@@ -1781,11 +1810,11 @@ final class SortlyFlowUITests: XCTestCase {
         let prepared = Date()
         prepare()
         UITestWait.appears(app.tabBars.firstMatch, "tab bar before the sweep", timeout: 60)
+        ensureAlbumForSweep()
         // The old 5 s at least (second review of C2): the overview settles before the sweep.
         UITestWait.atLeast(5, since: prepared)
         // A sweep that reaches nothing proves nothing: every tab and the suggestions list must
-        // lead somewhere. The albums tab is the exception only while the library really has no
-        // album (a fresh simulator before any plan): then it must say so.
+        // lead somewhere, the albums tab too (the test made an album above when it had none).
         func check(_ tab: String, _ reached: Int) {
             print("UI_SWEEP_TAB \(tab) \(reached)")
             if reached == 0 { XCTFail("The sweep reached no screen from \(tab)") }
@@ -1805,11 +1834,8 @@ final class SortlyFlowUITests: XCTestCase {
             if tab == "Suchen" {
                 check(tab, sweepSearch())
             } else if tab == "Alben" && app.staticTexts["Noch keine Alben"].exists {
-                // An album row shows its photo count ("12 Fotos"), alone or in the row's label.
-                let album = app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "label MATCHES %@", "(.*, )?[0-9]+ Fotos?")).firstMatch
-                print("UI_SWEEP_TAB Alben not checked (empty)")
-                XCTAssertFalse(album.exists, "\"Noch keine Alben\" while an album is listed")
+                print("UI_SWEEP_TAB Alben 0 (empty)")
+                XCTFail("\"Noch keine Alben\": the sweep has no album to open (ensureAlbumForSweep)")
             } else {
                 check(tab, sweep(tab, depth: 0))
             }

@@ -1188,9 +1188,10 @@ final class DeviceConditionUITests: XCTestCase {
         prepare()
         let card = anything("wurde unterbrochen")
         // Album titles stay clear of the words the tap-through sweep never taps ("Fortsetzen",
-        // "Entfernen", …, SortlyFlowUITests.sweepSkip): the albums stay in Photos, and test3
-        // runs on the same simulator after these tests (UI run 43930271358: "The sweep reached
-        // no screen from Alben", both album rows were skipped by their titles).
+        // "Entfernen", …, SortlyFlowUITests.sweepSkip; UI run 43930271358: "The sweep reached
+        // no screen from Alben", both album rows were skipped by their titles). Since 20.11.
+        // this test runs in the group device-flows, not on the sweep's simulator; the sweep
+        // makes its own album (SortlyFlowUITests.ensureAlbumForSweep).
         if let continued = interruptManualPlan("Testalbum Vollendet"), tap(app.buttons["Rest anlegen"], "continue interrupted plan") {
             let done = waitGone(card, timeout: 120)
             print(done ? "UI_STEP_OK interrupted plan continued" : "UI_STEP_MISSING interrupted plan continued")

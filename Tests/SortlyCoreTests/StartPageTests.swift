@@ -4,9 +4,10 @@ import Testing
 
 /// What the start page "Vorschläge" shows in every state (design wave 1, drafts E1, E6, E7):
 /// the first analysis with its mosaic and "Schon gefunden" (9A), "Dein Startpaket" after it,
-/// "Neue Reisen" later, the rows with trips first and "Deine Welt" right under them, nothing
-/// open, an empty library, 0, 1 and over 300 suggestions, free albums used up, and nothing
-/// moving under the user's finger after "Anlegen" on a card (7B).
+/// "Neue Reisen" later, the rows with trips first and "Deine Welt" right under them, "Alle
+/// Vorschläge" at the end, nothing open (and why), an empty library, 0, 1 and over 300
+/// suggestions, free albums used up, an interrupted plan, a cut-off analysis, which suggestions
+/// count as open, and nothing moving under the user's finger after "Anlegen" on a card (7B).
 @Suite("Start page")
 struct StartPageTests {
     static let day: TimeInterval = 86_400
@@ -41,12 +42,19 @@ struct StartPageTests {
     static let lindau = proposal("Häufiger Ort in Lindau", .frequentPlace)
     static let contracts = proposal("Verträge", .documentCategory("contracts"))
 
+    /// `starterSet`: how many albums "Dein Startpaket" would hold now; the model offers the
+    /// first open ones here.
     static func page(_ proposals: [AlbumProposal], open: [AlbumProposal]? = nil, analysedOnce: Bool = true,
                      mosaic: Bool = false, starterSet: Int = 0, nothingMade: Bool = true, libraryHint: Bool = false,
-                     areas: [OrganizationArea] = areas, visit: StartVisit = StartVisit()) -> StartPage {
-        StartPage.make(.init(proposals: proposals, open: Set((open ?? proposals).map(\.id)), areas: areas,
-                             analysedOnce: analysedOnce, showsMosaic: mosaic, starterSetSize: starterSet,
-                             nothingMadeYet: nothingMade, libraryHint: libraryHint, visit: visit))
+                     rebuilding: Bool = false, analysing: Bool = false, interrupted: Bool = false,
+                     inYourAlbums: Int = 0, areas: [OrganizationArea] = areas,
+                     visit: StartVisit = StartVisit()) -> StartPage {
+        let open = open ?? proposals
+        return StartPage.make(.init(proposals: proposals, open: Set(open.map(\.id)), areas: areas,
+                                    analysedOnce: analysedOnce, showsMosaic: mosaic,
+                                    starterSet: open.prefix(starterSet).map(\.id), nothingMadeYet: nothingMade,
+                                    libraryHint: libraryHint, rebuilding: rebuilding, analysing: analysing,
+                                    interruptedPlan: interrupted, inYourAlbums: inYourAlbums, visit: visit))
     }
 
     /// The sections by name, so an expectation reads like the page: "row.trips", "atlas" …
@@ -64,7 +72,7 @@ struct StartPageTests {
     @Test func theFirstAnalysisShowsTheMosaicAndTheTripsFoundSoFar() {
         let all = [Self.rome, Self.kyoto, Self.split, Self.lisbon, Self.italy]
         let page = Self.page(all, analysedOnce: false, mosaic: true, starterSet: 4)
-        #expect(Self.names(page) == ["mosaic", "earlyTrips", "row.trips", "atlas", "row.places"])
+        #expect(Self.names(page) == ["mosaic", "earlyTrips", "row.trips", "atlas", "row.places", "allSuggestions"])
         #expect(page.bigCards == [Self.kyoto.id, Self.split.id], "newest first, two at most")
         #expect(Self.row(.trips, in: page)?.cards == [Self.rome.id, Self.lisbon.id], "the big cards are not repeated")
         #expect(Self.row(.trips, in: page)?.openCount == 4, "\"Alle 4\" counts every open trip")
@@ -76,7 +84,7 @@ struct StartPageTests {
     /// mosaic when it is not shown.
     @Test func aPausedFirstAnalysisKeepsTheTripsFound() {
         let page = Self.page([Self.kyoto, Self.italy], analysedOnce: false, mosaic: false)
-        #expect(Self.names(page) == ["earlyTrips", "atlas", "row.places"])
+        #expect(Self.names(page) == ["earlyTrips", "atlas", "row.places", "allSuggestions"])
         #expect(page.bigCards == [Self.kyoto.id])
     }
 
@@ -94,7 +102,9 @@ struct StartPageTests {
     @Test func afterTheAnalysisTheStarterSetAndTheRows() {
         let all = [Self.rome, Self.kyoto, Self.split, Self.lisbon, Self.italy, Self.japan, Self.lindau, Self.contracts]
         let page = Self.page(all, starterSet: 6)
-        #expect(Self.names(page) == ["starterSet", "row.trips", "atlas", "row.places", "row.frequentPlaces", "row.documents"])
+        #expect(Self.names(page) == ["starterSet", "row.trips", "atlas", "row.places", "row.frequentPlaces", "row.documents",
+                                     "allSuggestions"])
+        #expect(page.starterSet?.count == 6)
         #expect(Self.row(.trips, in: page)?.cards == [Self.kyoto.id, Self.split.id, Self.rome.id, Self.lisbon.id])
         #expect(Self.row(.places, in: page)?.cards == [Self.japan.id, Self.italy.id], "biggest first")
         #expect(page.bigCards.isEmpty)
@@ -104,7 +114,7 @@ struct StartPageTests {
     @Test func aStarterSetNeedsThreeAlbums() {
         let page = Self.page([Self.kyoto, Self.rome, Self.italy], starterSet: 2)
         #expect(!page.showsStarterSet)
-        #expect(Self.names(page) == ["newTrips", "atlas", "row.places"])
+        #expect(Self.names(page) == ["newTrips", "atlas", "row.places", "allSuggestions"])
         #expect(page.bigCards == [Self.kyoto.id, Self.rome.id])
     }
 
@@ -121,7 +131,7 @@ struct StartPageTests {
         let page = Self.page([Self.kyoto, Self.rome, Self.split], starterSet: 0, nothingMade: false,
                              visit: StartVisit(lastMade: made))
         #expect(!page.showsStarterSet)
-        #expect(Self.names(page) == ["newTrips", "row.trips", "atlas"])
+        #expect(Self.names(page) == ["newTrips", "row.trips", "atlas", "allSuggestions"])
         #expect(page.bigCards == [Self.kyoto.id], "only the trip after the last album is new")
     }
 
@@ -130,12 +140,12 @@ struct StartPageTests {
         let lastMade = Self.now.addingTimeInterval(-350 * Self.day)
         let page = Self.page([Self.kyoto, Self.rome, Self.split, Self.lisbon], starterSet: 5, nothingMade: false,
                              visit: StartVisit(lastMade: lastMade))
-        #expect(Self.names(page) == ["newTrips", "row.trips", "atlas"])
+        #expect(Self.names(page) == ["newTrips", "row.trips", "atlas", "allSuggestions"])
         #expect(page.bigCards == [Self.kyoto.id, Self.split.id])
         #expect(Self.row(.trips, in: page)?.cards == [Self.rome.id, Self.lisbon.id])
         // Nothing new since: no big part, the trips in their row.
         let later = Self.page([Self.rome, Self.lisbon], nothingMade: false, visit: StartVisit(lastMade: lastMade))
-        #expect(Self.names(later) == ["row.trips", "atlas"])
+        #expect(Self.names(later) == ["row.trips", "atlas", "allSuggestions"])
         // A trip without dates is never "new".
         var undated = Self.trip("Ohne Datum", daysAgo: 1)
         undated.dateRange = nil
@@ -189,7 +199,7 @@ struct StartPageTests {
         visit.saw(first)
         visit.create(Self.kyoto.id)
         let after = Self.page(all, open: [Self.rome, Self.split], starterSet: 3, nothingMade: false, visit: visit)
-        #expect(after.showsStarterSet)
+        #expect(after.starterSet == [Self.rome.id, Self.split.id], "with what is left of it")
         #expect(Self.row(.trips, in: after)?.cards == [Self.kyoto.id, Self.split.id, Self.rome.id])
         let next = Self.page(all, open: [Self.rome, Self.split], starterSet: 3, nothingMade: false, visit: StartVisit(lastMade: Self.now))
         #expect(!next.showsStarterSet)
@@ -211,20 +221,29 @@ struct StartPageTests {
 
     // MARK: Few and many
 
-    /// No suggestion after the analysis: one calm card, no empty rows; with the card for an
-    /// empty library that card explains it.
-    @Test func noSuggestionSaysAllDone() {
-        #expect(Self.names(Self.page([])) == ["caughtUp", "atlas"])
+    /// Nothing open after the analysis: one calm card that says why, no empty rows. Everything
+    /// decided: "Alles erledigt". No suggestion at all: "Noch keine Vorschläge" (a run that goes
+    /// on may still find some). Made anew ("Nur 2026" → "Alle Jahre", a recount, "Analyse neu
+    /// aufbauen"): "Wird neu berechnet". A long run goes on: never "Alles erledigt", more may
+    /// come. With the card for an empty library, that card explains it.
+    @Test func nothingOpenSaysWhy() {
+        let decided = [Self.kyoto, Self.italy]
+        #expect(Self.names(Self.page(decided, open: [])) == ["caughtUp", "atlas", "allSuggestions"])
+        #expect(Self.page([]).sections == [.noSuggestionsYet(analysing: false), .atlas])
+        #expect(Self.page([], analysing: true).sections == [.noSuggestionsYet(analysing: true), .atlas])
+        #expect(Self.names(Self.page(decided, open: [], rebuilding: true)) == ["rebuilding", "atlas", "allSuggestions"])
+        #expect(Self.names(Self.page([], rebuilding: true)) == ["rebuilding", "atlas"])
+        #expect(Self.names(Self.page([], rebuilding: true, analysing: true)) == ["rebuilding", "atlas"])
+        #expect(Self.names(Self.page(decided, open: [], analysing: true)) == ["atlas", "allSuggestions"])
         #expect(Self.names(Self.page([], libraryHint: true)) == ["atlas"])
-        // Everything decided: the same.
-        #expect(Self.names(Self.page([Self.kyoto, Self.italy], open: [])) == ["caughtUp", "atlas"])
+        #expect(Self.names(Self.page([], libraryHint: true, rebuilding: true)) == ["atlas"])
     }
 
     /// One suggestion: a trip is the big part, a place its own row of one card.
     @Test func oneSuggestion() {
-        #expect(Self.names(Self.page([Self.kyoto])) == ["newTrips", "atlas"])
+        #expect(Self.names(Self.page([Self.kyoto])) == ["newTrips", "atlas", "allSuggestions"])
         let place = Self.page([Self.italy])
-        #expect(Self.names(place) == ["atlas", "row.places"])
+        #expect(Self.names(place) == ["atlas", "row.places", "allSuggestions"])
         #expect(Self.row(.places, in: place)?.showsAll == false, "no \"Alle 1\"")
     }
 
@@ -233,7 +252,8 @@ struct StartPageTests {
         let trips = (0..<300).map { Self.trip("Reise \($0)", daysAgo: Double($0 + 1)) }
         let places = (0..<40).map { Self.place("Land \($0)", photos: 10 + $0) }
         let page = Self.page(trips + places, starterSet: 10)
-        #expect(Self.names(page) == ["starterSet", "row.trips", "atlas", "row.places"])
+        #expect(Self.names(page) == ["starterSet", "row.trips", "atlas", "row.places", "allSuggestions"])
+        #expect(page.sections.last == .allSuggestions(.init(total: 340, inYourAlbums: 0, rebuilding: false)))
         let row = Self.row(.trips, in: page)
         #expect(row?.cards.count == StartPage.rowLimit)
         #expect(row?.openCount == 300)
@@ -252,10 +272,11 @@ struct StartPageTests {
         let all = [years, screenshots, Self.contracts, Self.lindau, Self.italy, Self.rome]
         let page = Self.page(all, starterSet: 0, nothingMade: false, visit: StartVisit(lastMade: Self.now))
         #expect(Self.names(page) == ["row.trips", "atlas", "row.places", "row.frequentPlaces", "row.screenshots",
-                                     "row.documents", "row.chronology"])
+                                     "row.documents", "row.chronology", "allSuggestions"])
         let withoutTrips = Self.page(all, nothingMade: false, areas: Self.areas.filter { $0 != .trips && $0 != .documents },
                                      visit: StartVisit(lastMade: Self.now))
-        #expect(Self.names(withoutTrips) == ["atlas", "row.places", "row.frequentPlaces", "row.screenshots", "row.chronology"])
+        #expect(Self.names(withoutTrips) == ["atlas", "row.places", "row.frequentPlaces", "row.screenshots", "row.chronology",
+                                             "allSuggestions"])
     }
 
     /// The section ids are unique, so the app can use them as identities.
@@ -264,6 +285,177 @@ struct StartPageTests {
         for page in [Self.page(all, analysedOnce: false, mosaic: true), Self.page(all, starterSet: 4), Self.page([])] {
             #expect(Set(Self.names(page)).count == page.sections.count, "\(Self.names(page))")
         }
+    }
+
+    // MARK: Which suggestions are open
+
+    /// Open on the start page: no decision, or an accepted one that still changes something in
+    /// Photos (a preview's pick, a choice under "Anpassen", a pick of the old basket), and not
+    /// complete in Photos. Not open: "Nicht jetzt", kept as it is, complete.
+    @Test func aSuggestionIsOpenUntilItIsDoneOrSetAside() {
+        let album = CollectionID("album.toskana")
+        #expect(StartPage.isOpen(decision: nil, complete: false))
+        #expect(StartPage.isOpen(decision: .undecided, complete: false))
+        #expect(StartPage.isOpen(decision: .createNew(title: nil, folderPath: nil), complete: false))
+        #expect(StartPage.isOpen(decision: .createNew(title: "Bella Italia", folderPath: ["Länder"]), complete: false))
+        #expect(StartPage.isOpen(decision: .extendExisting(album), complete: false))
+        #expect(StartPage.isOpen(decision: .renameExisting(album, newTitle: "Toskana 2023", extend: true), complete: false))
+        #expect(StartPage.isOpen(decision: .moveExisting(album, folderPath: ["Reisen"], extend: false), complete: false))
+        #expect(StartPage.isOpen(decision: .merge(target: album, sources: [], title: nil, folderPath: nil), complete: false))
+        #expect(!StartPage.isOpen(decision: .reject, complete: false), "\"Nicht jetzt\"")
+        #expect(!StartPage.isOpen(decision: .keepExisting(album), complete: false), "kept as it is: nothing to do")
+        #expect(!StartPage.isOpen(decision: nil, complete: true), "complete in Photos already")
+        #expect(!StartPage.isOpen(decision: .createNew(title: nil, folderPath: nil), complete: true))
+        #expect(!StartPage.isOpen(decision: .extendExisting(album), complete: true))
+    }
+
+    /// Suggestions chosen and waiting (picked for a preview, adjusted under "Anpassen", picked in
+    /// the old basket of Build 40) stay on the page with their cards: never "Alles erledigt"
+    /// while they wait, and none of them vanishes from its row.
+    @Test func chosenSuggestionsStayOnThePage() {
+        let all = [Self.kyoto, Self.italy, Self.lindau, Self.japan]
+        let decisions: [SortlyID: ProposalDecision] = [
+            Self.kyoto.id: .createNew(title: nil, folderPath: nil),
+            Self.italy.id: .createNew(title: "Bella Italia", folderPath: ["Länder"]),
+            Self.japan.id: .extendExisting(CollectionID("album.japan")),
+            Self.lindau.id: .reject,
+        ]
+        let open = all.filter { StartPage.isOpen(decision: decisions[$0.id], complete: false) }
+        let page = Self.page(all, open: open, nothingMade: false)
+        #expect(Self.names(page) == ["newTrips", "atlas", "row.places", "allSuggestions"])
+        #expect(page.bigCards == [Self.kyoto.id])
+        #expect(Self.row(.places, in: page)?.cards == [Self.japan.id, Self.italy.id])
+        #expect(page.made.isEmpty)
+    }
+
+    // MARK: "Angelegt" only once the album is there (7B)
+
+    /// "Anlegen" picks the suggestion for its plan while the album is made: still open, so the
+    /// card shows its work, not "Angelegt". Made, the run clears the pick before the suggestions
+    /// are matched again: the card keeps "Angelegt" meanwhile, never "Anlegen" in between. Once
+    /// the page saw it done, "Widerrufen" brings "Anlegen" back in its place.
+    @Test func aCardSaysMadeOnlyOnceItsAlbumIsInPhotos() {
+        let all = [Self.kyoto, Self.rome, Self.split]
+        let plan = SortlyID("plan.kyoto")
+        var visit = StartVisit()
+        visit.saw(Self.page(all, nothingMade: false, visit: visit))
+        visit.create(Self.kyoto.id)
+        let running = Self.page(all, nothingMade: false, visit: visit)
+        #expect(running.made.isEmpty, "no \"Angelegt\" before the album exists")
+        #expect(running.bigCards == [Self.kyoto.id, Self.split.id])
+        visit.made(Self.kyoto.id, by: plan)
+        let cleared = Self.page(all, nothingMade: false, visit: visit)
+        #expect(cleared.made == [Self.kyoto.id])
+        #expect(cleared.seenDone.isEmpty)
+        #expect(Self.row(.trips, in: cleared)?.openCount == 2, "the made card no longer counts")
+        let matched = Self.page(all, open: [Self.rome, Self.split], nothingMade: false, visit: visit)
+        #expect(matched.made == [Self.kyoto.id])
+        #expect(matched.seenDone == [Self.kyoto.id])
+        #expect(matched.bigCards == [Self.kyoto.id, Self.split.id])
+        visit.saw(matched)
+        #expect(visit.awaitingDone.isEmpty)
+        let undone = Self.page(all, nothingMade: false, visit: visit)
+        #expect(undone.made.isEmpty)
+        #expect(undone.bigCards == [Self.kyoto.id, Self.split.id], "\"Anlegen\" again, in its place")
+    }
+
+    /// A run with gaps leaves the album short of photos, so the suggestion stays open: the card
+    /// says "Angelegt" for the visit, until the plan that made it is taken back.
+    @Test func aCardMadeWithGapsSaysMadeUntilItsPlanIsTakenBack() {
+        let all = [Self.kyoto, Self.rome]
+        let plan = SortlyID("plan.kyoto")
+        var visit = StartVisit()
+        visit.create(Self.kyoto.id)
+        visit.made(Self.kyoto.id, by: plan)
+        #expect(Self.page(all, nothingMade: false, visit: visit).made == [Self.kyoto.id])
+        visit.undone([SortlyID("plan.other")])
+        #expect(Self.page(all, nothingMade: false, visit: visit).made == [Self.kyoto.id], "another plan was taken back")
+        visit.undone([plan])
+        #expect(Self.page(all, nothingMade: false, visit: visit).made.isEmpty)
+        // Made without a known plan: held until the page sees it done.
+        var unknown = StartVisit()
+        unknown.made(Self.rome.id, by: nil)
+        #expect(unknown.created == [Self.rome.id])
+        #expect(Self.page(all, nothingMade: false, visit: unknown).made == [Self.rome.id])
+    }
+
+    // MARK: "Dein Startpaket" for the visit
+
+    /// Once shown, "Dein Startpaket" stays for the visit with what is left of it: an album of it
+    /// made from its card in a row leaves it, the others stay, and no other suggestion joins
+    /// (the model would offer one meanwhile). Made completely, it goes.
+    @Test func theStarterSetStaysWithWhatIsLeft() {
+        let all = [Self.kyoto, Self.rome, Self.split, Self.italy, Self.japan]
+        var visit = StartVisit()
+        let first = Self.page(all, starterSet: 3, visit: visit)
+        #expect(first.starterSet == [Self.kyoto.id, Self.rome.id, Self.split.id])
+        visit.saw(first)
+        visit.create(Self.rome.id)
+        let one = Self.page(all, open: [Self.kyoto, Self.split, Self.italy, Self.japan], starterSet: 3,
+                            nothingMade: false, visit: visit)
+        #expect(one.starterSet == [Self.kyoto.id, Self.split.id])
+        visit.saw(one)
+        let two = Self.page(all, open: [Self.split, Self.italy, Self.japan], starterSet: 3, nothingMade: false, visit: visit)
+        #expect(two.starterSet == [Self.split.id])
+        // A card of it made and not yet seen done does not stay in it either.
+        visit.made(Self.split.id, by: SortlyID("plan.split"))
+        #expect(Self.page(all, open: [Self.split, Self.italy, Self.japan], starterSet: 3, nothingMade: false,
+                          visit: visit).starterSet == nil)
+        #expect(Self.page(all, open: [Self.italy, Self.japan], starterSet: 3, nothingMade: false, visit: visit).starterSet == nil)
+        // Picked for its own preview, its albums are open still: the card stays as it was.
+        var picked = StartVisit()
+        picked.saw(Self.page(all, starterSet: 3, visit: picked))
+        #expect(Self.page(all, starterSet: 3, nothingMade: false, visit: picked).starterSet
+                == [Self.kyoto.id, Self.rome.id, Self.split.id])
+    }
+
+    /// An interrupted plan offers "Rest anlegen" as the page's one filled button: no
+    /// "Dein Startpaket" beside it, also not one shown before in the visit.
+    @Test func noStarterSetBesideAnInterruptedPlan() {
+        let all = [Self.kyoto, Self.rome, Self.split]
+        var visit = StartVisit()
+        let shown = Self.page(all, starterSet: 3, visit: visit)
+        #expect(shown.starterSet != nil)
+        visit.saw(shown)
+        let beside = Self.page(all, starterSet: 3, interrupted: true)
+        #expect(beside.starterSet == nil)
+        #expect(Self.names(beside) == ["newTrips", "row.trips", "atlas", "allSuggestions"])
+        #expect(Self.page(all, starterSet: 3, interrupted: true, visit: visit).starterSet == nil)
+    }
+
+    // MARK: "Alle Vorschläge"
+
+    /// The page ends with "Alle Vorschläge" whenever there are suggestions: every one is reached
+    /// from there (an area without an open one, one with a single suggestion, those set aside
+    /// with "Nicht jetzt"), with the facts the area list said ("12 davon in deinen Alben",
+    /// "Wird neu berechnet").
+    @Test func allSuggestionsCloseThePage() {
+        let all = [Self.kyoto, Self.rome, Self.italy, Self.lindau]
+        let page = Self.page(all, open: [Self.rome], inYourAlbums: 2)
+        #expect(page.sections.last == .allSuggestions(.init(total: 4, inYourAlbums: 2, rebuilding: false)))
+        let rebuilding = Self.page(all, open: [], rebuilding: true)
+        #expect(rebuilding.sections.last == .allSuggestions(.init(total: 4, inYourAlbums: 0, rebuilding: true)))
+        #expect(Self.page([Self.italy]).sections.last?.id == "allSuggestions")
+        #expect(Self.page(all, analysedOnce: false).sections.last?.id == "allSuggestions")
+        #expect(Self.page(all, open: []).sections.last?.id == "allSuggestions")
+        #expect(!Self.page([]).sections.contains { $0.id == "allSuggestions" })
+    }
+
+    // MARK: A cut-off analysis
+
+    /// An analysis that ended part way ("58 von 246 Fotos analysiert", never "Analyse fertig").
+    /// The first one cut off has not gone through: the trips found so far stay big, no "Dein
+    /// Startpaket" yet (its best albums come from the whole library), nothing says "Alles
+    /// erledigt".
+    @Test func aCutOffAnalysisSaysHowFarItGot() {
+        #expect(AnalysisDoneLine.make(photos: 246, analyzed: 58, later: 0) == .partly(analyzed: 58, photos: 246))
+        #expect(AnalysisDoneLine.make(photos: 246, analyzed: 58, later: 12) == .partly(analyzed: 58, photos: 246))
+        #expect(AnalysisDoneLine.make(photos: 246, analyzed: 0, later: 0) == .partly(analyzed: 0, photos: 246))
+        let all = [Self.kyoto, Self.rome, Self.split, Self.italy]
+        let page = Self.page(all, analysedOnce: false, starterSet: 4)
+        #expect(Self.names(page) == ["earlyTrips", "row.trips", "atlas", "row.places", "allSuggestions"])
+        #expect(page.starterSet == nil)
+        #expect(Self.names(Self.page(all, open: [], analysedOnce: false)) == ["atlas", "allSuggestions"])
     }
 
     // MARK: "Bescheid sagen, wenn fertig" (3B)
@@ -294,8 +486,13 @@ struct StartPageTests {
     @Test func theDoneLineSaysWhetherSomethingFollows() {
         #expect(AnalysisDoneLine.make(photos: 0, analyzed: 0, later: 0) == .upToDate)
         #expect(AnalysisDoneLine.make(photos: 14_381, analyzed: 14_381, later: 0) == .all(photos: 14_381))
-        #expect(AnalysisDoneLine.make(photos: 14_381, analyzed: 14_380, later: 0) == .restLater)
+        #expect(AnalysisDoneLine.make(photos: 14_381, analyzed: 14_380, later: 0) == .partly(analyzed: 14_380, photos: 14_381))
         #expect(AnalysisDoneLine.make(photos: 14_381, analyzed: 14_381, later: 998) == .restLater)
         #expect(AnalysisDoneLine.make(photos: 1, analyzed: 1, later: 0) == .all(photos: 1))
+        // "Den Rest holt Albumist später nach" under the line, or when Albumist last looked.
+        #expect(AnalysisDoneLine.partly(analyzed: 58, photos: 246).restFollows)
+        #expect(AnalysisDoneLine.restLater.restFollows)
+        #expect(!AnalysisDoneLine.all(photos: 246).restFollows)
+        #expect(!AnalysisDoneLine.upToDate.restFollows)
     }
 }

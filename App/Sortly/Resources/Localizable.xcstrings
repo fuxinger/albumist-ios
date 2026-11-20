@@ -7781,46 +7781,6 @@
         }
       }
     },
-    "Die %lld besten Alben aus deiner Mediathek, fertig zum Anlegen. Du siehst vorher genau, was passiert." : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "The best album from your library, ready to create. You see exactly what happens first."
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "The %lld best albums from your library, ready to create. You see exactly what happens first."
-                }
-              }
-            }
-          }
-        },
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Das beste Album aus deiner Mediathek, fertig zum Anlegen. Du siehst vorher genau, was passiert."
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Die %lld besten Alben aus deiner Mediathek, fertig zum Anlegen. Du siehst vorher genau, was passiert."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "%lld Alben anlegen" : {
       "localizations" : {
         "en" : {
@@ -8991,32 +8951,32 @@
         }
       }
     },
-    "Das unterbrochene Anlegen zählt, sobald du oben entschieden hast." : {
+    "Das unterbrochene Anlegen zählt, sobald du auf der Karte „Anlegen wurde unterbrochen“ entschieden hast." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The interrupted album creation counts once you have decided above."
+            "value" : "The interrupted album creation counts once you have decided on the card “Creating Albums Was Interrupted”."
           }
         }
       }
     },
-    "Das unterbrochene Entfernen zählt, sobald du oben entschieden hast." : {
+    "Das unterbrochene Entfernen zählt, sobald du auf der Karte „Entfernen wurde unterbrochen“ entschieden hast." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The interrupted removal counts once you have decided above."
+            "value" : "The interrupted removal counts once you have decided on the card “Removing Albums Was Interrupted”."
           }
         }
       }
     },
-    "Das unterbrochene Rückgängigmachen zählt, sobald du oben entschieden hast." : {
+    "Das unterbrochene Rückgängigmachen zählt, sobald du auf der Karte „Rückgängig wurde unterbrochen“ entschieden hast." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The interrupted undo counts once you have decided above."
+            "value" : "The interrupted undo counts once you have decided on the card “Undo Was Interrupted”."
           }
         }
       }
@@ -15424,9 +15384,39 @@
     "Die %lld besten Alben aus deiner Mediathek. Du siehst vorher genau, was passiert." : {
       "localizations" : {
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The %lld best albums from your library. You see exactly what happens first."
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "The best album from your library. You see exactly what happens first."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "The %lld best albums from your library. You see exactly what happens first."
+                }
+              }
+            }
+          }
+        },
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Das beste Album aus deiner Mediathek. Du siehst vorher genau, was passiert."
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Die %lld besten Alben aus deiner Mediathek. Du siehst vorher genau, was passiert."
+                }
+              }
+            }
           }
         }
       }
@@ -15451,12 +15441,62 @@
         }
       }
     },
+    "Vorschläge erscheinen hier, sobald Albumist sie findet." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggestions appear here as soon as Albumist finds them."
+          }
+        }
+      }
+    },
     "Alle Vorschläge" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "All Suggestions"
+          }
+        }
+      }
+    },
+    "„%@“ anlegen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create “%@”"
+          }
+        }
+      }
+    },
+    "„%@“ ergänzen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to “%@”"
+          }
+        }
+      }
+    },
+    "„%@“ benennen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name “%@”"
+          }
+        }
+      }
+    },
+    "„%@“ ansehen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View “%@”"
           }
         }
       }

@@ -57,6 +57,8 @@ struct StringCatalogTests {
         "Vorschlag mit %lld %@ Fotos",
         "%lld %@ gemeinsame Fotos",
         "Für diese Auswahl brauchst du %lld Alben. Kostenlos sind noch %lld. Mit einem einmaligen Kauf sortierst du unbegrenzt, ohne Abo.",
+        // "Dein Startpaket" keeps what is left of it for the visit, down to one album.
+        "Die %lld besten Alben aus deiner Mediathek. Du siehst vorher genau, was passiert.",
         // "Dein Zuhause".
         "%lld Vorschläge passen nicht mehr und sind weggefallen.",
         "%lld neue Vorschläge.",

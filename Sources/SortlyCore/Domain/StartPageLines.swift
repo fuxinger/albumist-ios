@@ -49,14 +49,27 @@ public enum AnalysisDoneLine: Equatable, Sendable {
     case upToDate
     /// "Alle 14.381 Fotos analysiert".
     case all(photos: Int)
-    /// "Analyse fertig" / "Den Rest holt Albumist später nach": a photo that could not be read
-    /// yet, places without a city name, documents only in iCloud, photos still without the
-    /// labels of a new area, or photos not analysed yet. Each with its count in the sheet.
+    /// The analysis ended part way (cut off, or photos it could not read yet): "58 von 246 Fotos
+    /// analysiert", never "Analyse fertig" (second review of the start page).
+    case partly(analyzed: Int, photos: Int)
+    /// "Analyse fertig" / "Den Rest holt Albumist später nach": every photo analysed, and a
+    /// photo that could not be read yet, places without a city name, documents only in iCloud
+    /// or photos still without the labels of a new area follow later. Each with its count in
+    /// the sheet.
     case restLater
 
     public static func make(photos: Int, analyzed: Int, later: Int) -> AnalysisDoneLine {
         if photos == 0 { return .upToDate }
-        if analyzed >= photos && later == 0 { return .all(photos: photos) }
-        return .restLater
+        if analyzed < photos { return .partly(analyzed: analyzed, photos: photos) }
+        return later == 0 ? .all(photos: photos) : .restLater
+    }
+
+    /// Something follows: the line below says "Den Rest holt Albumist später nach" instead of
+    /// when Albumist last looked.
+    public var restFollows: Bool {
+        switch self {
+        case .partly, .restLater: true
+        case .upToDate, .all: false
+        }
     }
 }

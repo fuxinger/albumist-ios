@@ -87,9 +87,10 @@ final class SortlyLockedUITests: XCTestCase {
             print("UI_FACT locked: no recommended ones, a row for a new album \(row.exists)")
             if row.exists {
                 row.tap(); sleep(2)
-                // By identifier, or by name where the menu does not pass the identifier on.
+                // By identifier, or by the start of the name where the menu does not pass the
+                // identifier on (an item with a second line is named with both).
                 func named(_ identifier: String, _ label: String) -> XCUIElement {
-                    app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@", identifier, label)).firstMatch
+                    app.buttons.matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", identifier, label)).firstMatch
                 }
                 let more = named("proposal.more", "Weitere Aktionen")
                 if more.waitForExistence(timeout: 5) {

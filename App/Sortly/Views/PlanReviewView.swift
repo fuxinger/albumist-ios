@@ -245,7 +245,7 @@ struct PlanReviewView: View {
             .disabled(blocking || facts.hasNoSteps || model.homeChangeRunning)
             .accessibilityIdentifier("plan.apply")
             if blocking {
-                Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")
+                Text("Erst die markierten Punkte klären. Das geht im Vorschlag oben rechts unter „…“ › „Anpassen“.")
                     .font(.footnote).foregroundStyle(.noteText)
             }
             // A removal from "Alben von Albumist", or the retry of one, deletes albums: iOS asks

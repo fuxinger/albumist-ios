@@ -179,17 +179,8 @@ struct DerivedRefreshTests {
         #expect(derived.atlas == TravelAtlas.compute(facts: facts, year: nil))
         #expect(derived.atlas.countryCodes.contains("IT"))
         #expect(derived.atlasYears == TravelAtlas.years(facts: facts))
-        // P4-09, the rest: the atlas of every year (each made with `compute(facts:year:)` on the
-        // main thread when it was chosen) and the facts by id (a dictionary made on the main
-        // thread at the first lookup).
-        let years = Set(facts.compactMap { f in f.asset.creationDate.map { Calendar.current.component(.year, from: $0) } })
-        #expect(years.count >= 2)
-        #expect(Set(derived.yearAtlases.keys) == years)
-        for year in years.sorted() {
-            #expect(derived.yearAtlases[year] == TravelAtlas.compute(facts: facts, year: year), "the atlas of \(year)")
-        }
-        #expect(derived.yearAtlases.values.contains { $0.newCountryCodes.contains("IT") })
-        #expect(DerivedLibrary.emptyYearAtlas(1999) == TravelAtlas.compute(facts: facts, year: 1999))
+        // P4-09, the rest: the facts by id (a dictionary made on the main thread at the first
+        // lookup).
         let byID = Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         #expect(derived.factsByID.count == byID.count)
         #expect(byID.allSatisfy { derived.factsByID[$0.key] == $0.value })
@@ -240,10 +231,56 @@ struct DerivedRefreshTests {
         #expect(refreshed.undone == undoneTargets)
         let home = try #require(detected, "the library has no detected home")
         #expect(refreshed.detectedHome == home)
-        let named = HomePlace(center: home.center, components: HomeName.components(near: home.center, facts: refreshed.library.facts))
-        #expect(named.components != nil)
-        #expect(refreshed.detectedHomePlace == named)
         #expect(refreshed.library.facts == facts)
+    }
+
+    /// Second review of P4-09, SHOULD-1: the atlas of each year (240 ms at 50,000 photos, 671 ms
+    /// at 100,000) and the name of the detected home (299 / 590 ms) went over all photos at every
+    /// refresh, although only the atlas's year picker and "Dein Zuhause" or the settings need
+    /// them: battery for nothing at every early look of an analysis. A refresh makes neither: no
+    /// pass of its own for the name, the first draw makes only what the first screens show, and
+    /// the package carries nothing of either.
+    @Test func aRefreshMakesNeitherTheAtlasOfEachYearNorTheHomeName() async throws {
+        let library = try await analysed()
+        let started = Mutex<Set<String>>([])
+        let probe: DerivedLibrary.Probe = { piece, ended in
+            if !ended { _ = started.withLock { $0.insert(piece.rawValue) } }
+        }
+        let refreshed = try await library.launch().derivedRefresh(settings: library.settings, managed: [], scope: .all, historyLimit: 50,
+                                                                  once: .nothing, probe: probe)
+        #expect(refreshed.detectedHome != nil, "the library has no detected home to name")
+        let passes = started.withLock { $0 }
+        #expect(passes == ["status", "previewRanks", "firstDraw", "factsByID", "merges"], "a refresh runs the passes \(passes.sorted())")
+        // What the package holds, by name: a field for either means the refresh made it.
+        let fields = Set(Mirror(reflecting: refreshed).children.compactMap(\.label))
+            .union(Mirror(reflecting: refreshed.library).children.compactMap(\.label))
+        let made = fields.intersection(["yearAtlases", "homeName", "detectedHomePlace"])
+        #expect(made.isEmpty, "a refresh makes \(made.sorted())")
+    }
+
+    /// ...and what the screens get when they ask (`AppModel.travelAtlas(year:)` and
+    /// `AppModel.detectedHomePlace`), made from what the refresh handed over (its facts, its atlas
+    /// of all years, its detected home): each year's atlas as `TravelAtlas.compute(facts:year:)`
+    /// makes it, a year without photos empty, and the home with its town.
+    @Test func whatTheScreensAskForIsRightWhenTheyAsk() async throws {
+        let library = try await analysed()
+        let refreshed = try await library.launch().derivedRefresh(settings: library.settings, managed: [], scope: .all, historyLimit: 50,
+                                                                  once: .nothing)
+        let facts = refreshed.library.facts
+        #expect(facts == (try await library.launch().currentFacts()))
+        let atlases = DerivedLibrary.yearAtlases(of: facts, allYears: refreshed.library.atlas)
+        let years = Set(facts.compactMap { f in f.asset.creationDate.map { Calendar.current.component(.year, from: $0) } })
+        #expect(years.count >= 2)
+        #expect(Set(atlases.keys) == years)
+        for year in years.sorted() {
+            #expect(atlases[year] == TravelAtlas.compute(facts: facts, year: year), "the atlas of \(year)")
+        }
+        #expect(atlases.values.contains { $0.newCountryCodes.contains("IT") })
+        #expect(DerivedLibrary.emptyYearAtlas(1999) == TravelAtlas.compute(facts: facts, year: 1999))
+        let home = try #require(refreshed.detectedHome, "the library has no detected home")
+        let named = DerivedLibrary.namedHome(at: home.center, facts: facts)
+        #expect(named == HomePlace(center: home.center, components: HomeName.components(near: home.center, facts: facts)))
+        #expect(named.components?.locality != nil, "the detected home has no town: \(String(describing: named.components))")
     }
 }
 
@@ -283,27 +320,55 @@ struct DerivedRefreshAppTests {
     @Test func refreshDerivedHandsOverWhatTheFirstDrawMadeOnTheMainThread() throws {
         let body = try Self.refreshBody()
         let facts = try #require(body.range(of: "(?<![A-Za-z0-9_.])facts = ", options: .regularExpression), "refreshDerived assigns no facts")
-        for cache in ["previewRanksCache = ", "datesCache = ", "atlasCache = derived.yearAtlases", "atlasCache[0] = ", "atlasYearsCache = ",
-                      "factsIndex = ", "detectedHomePlaceCache = "] {
+        for cache in ["previewRanksCache = ", "datesCache = ", "atlasCache = ", "atlasYearsCache = ", "factsIndex = "] {
             let handed = body.range(of: cache).map { $0.lowerBound > facts.lowerBound } ?? false
             #expect(handed, "refreshDerived does not hand over \(cache)…: the first draw makes it on the main thread")
         }
     }
 
-    /// P4-09, second review: the places "Dein Zuhause" offers (322 ms at 50,000 photos) are made
-    /// only when that screen asks, off the main thread, and never at a refresh (battery).
-    @Test func homePlacesAreMadeOffTheMainThreadOnlyWhenTheScreenAsks() throws {
+    /// What only one screen needs from all photos, and how the app makes it: the getter the
+    /// screen reads, the function that starts making it, the pass, the cache and the task.
+    struct OnDemand: Sendable, CustomTestStringConvertible {
+        var getter, make, pass, cache, task: String
+        var testDescription: String { pass }
+    }
+
+    /// P4-09, second review: the places "Dein Zuhause" offers (322 ms at 50,000 photos); its
+    /// SHOULD-1: the atlas of each year (only the atlas's year picker) and the name of the
+    /// detected home (only "Dein Zuhause" and the settings).
+    static let onDemand = [
+        OnDemand(getter: "var homeCandidates: [HomeCandidate]?", make: "private func makeHomeCandidates(", pass: "HomeCandidates.make(",
+                 cache: "homeCandidatesCache", task: "homeCandidatesTask"),
+        OnDemand(getter: "func travelAtlas(year: Int) -> TravelAtlas?", make: "private func makeYearAtlases(", pass: "DerivedLibrary.yearAtlases(",
+                 cache: "yearAtlasesCache", task: "yearAtlasesTask"),
+        OnDemand(getter: "var detectedHomePlace: HomePlace?", make: "private func nameDetectedHome(", pass: "DerivedLibrary.namedHome(",
+                 cache: "detectedHomePlaceCache", task: "detectedHomeNameTask"),
+    ]
+
+    /// Each is made only when its screen asks, off the main thread, once for each value of the
+    /// facts, and never at a refresh (battery): the getter starts it and makes nothing itself,
+    /// the work runs in `Task.detached`, a result for facts that changed meanwhile is dropped
+    /// (`factsVersion`), and new facts empty the cache. The engine's side: `DerivedRefreshTests.
+    /// aRefreshMakesNeitherTheAtlasOfEachYearNorTheHomeName`.
+    @Test(arguments: Self.onDemand)
+    func whatOnlyOneScreenNeedsIsMadeOffTheMainThreadWhenItAsks(_ item: OnDemand) throws {
         let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
-        let engine = AppSource.code(try AppSource.read("Sources/SortlyEngine/DerivedLibrary.swift"))
-        #expect(AppSource.calls(of: "HomeCandidates.make(", in: engine).isEmpty, "every refresh makes the home places")
-        let handed = try Self.refreshBody().contains("homeCandidatesCache =")
-        #expect(!handed, "every refresh hands over the home places")
-        let getter = AppSource.code(AppSource.body(of: "var homeCandidates: [HomeCandidate]?", in: model) ?? "")
-        #expect(!getter.isEmpty && AppSource.calls(of: "HomeCandidates.make(", in: getter).isEmpty,
-                "the screen makes the home places on the main thread")
-        let make = AppSource.code(AppSource.body(of: "private func makeHomeCandidates(", in: model) ?? "")
-        let offMain = !AppSource.calls(of: "Task.detached(", in: make).isEmpty && !AppSource.calls(of: "HomeCandidates.make(", in: make).isEmpty
-        #expect(offMain, "the home places are not made off the main thread")
+        let refresh = try Self.refreshBody()
+        #expect(AppSource.calls(of: item.pass, in: refresh).isEmpty, "every refresh makes \(item.pass)…)")
+        #expect(!refresh.contains("\(item.cache) ="), "every refresh hands over \(item.cache)")
+        let getter = AppSource.code(AppSource.body(of: item.getter, in: model) ?? "")
+        #expect(!getter.isEmpty, "no \(item.getter)")
+        #expect(AppSource.calls(of: item.pass, in: getter).isEmpty, "the screen makes \(item.pass)…) on the main thread")
+        let name = String(item.make.dropFirst("private func ".count))
+        #expect(!AppSource.calls(of: name, in: getter).isEmpty, "\(item.getter) does not start \(name)…)")
+        let make = AppSource.code(AppSource.body(of: item.make, in: model) ?? "")
+        let offMain = !AppSource.calls(of: "Task.detached(", in: make).isEmpty && !AppSource.calls(of: item.pass, in: make).isEmpty
+        #expect(offMain, "\(item.pass)…) is not made off the main thread")
+        #expect(make.contains("guard \(item.task) == nil"), "\(name)…) starts again while it runs")
+        #expect(make.contains("version == self.factsVersion"), "\(name)…) keeps a result for facts that changed meanwhile")
+        let factsLine = try #require(AppSource.code(model).components(separatedBy: "\n").first { $0.contains("var facts: [AssetFacts] = []") })
+        #expect(factsLine.contains("\(item.cache) = nil") && factsLine.contains("\(item.task) = nil"),
+                "new facts keep \(item.cache)")
     }
 
     /// The passes over all photos that ran on the main actor when a screen asked (review P4-09:
@@ -312,7 +377,7 @@ struct DerivedRefreshAppTests {
     /// detected home): wherever the app or "Dein Zuhause" still makes one, it is inside a
     /// `Task.detached` closure; the rest comes made with the facts (`DerivedLibrary`).
     static let passesOverAllPhotos = ["HomeCandidates.make(", "HomeCandidates.stayStart(", "HomeName.components(", "TravelAtlas.compute(",
-                                      "TravelAtlas.years(", "DerivedLibrary.yearAtlases(", "LibraryStatus.searchStatuses(",
+                                      "TravelAtlas.years(", "DerivedLibrary.yearAtlases(", "DerivedLibrary.namedHome(", "LibraryStatus.searchStatuses(",
                                       "LibraryBuckets.make(", "FactsByID(", "Dictionary(", ".mapValues("]
 
     @Test func passesOverAllPhotosRunOffTheMainActor() throws {
@@ -338,9 +403,9 @@ struct DerivedRefreshAppTests {
                 }
             }
         }
-        // The ones still made in the app: the home places, the start of a stay, the library tab's
-        // areas and the statuses of a search.
-        #expect(found >= 4, "the scan found only \(found) passes")
+        // The ones still made in the app: the home places, the atlas of each year, the name of the
+        // detected home, the start of a stay, the library tab's areas and the statuses of a search.
+        #expect(found >= 6, "the scan found only \(found) passes")
     }
 
     /// The line of `source` at a position in Unicode scalars, trimmed.
@@ -352,9 +417,11 @@ struct DerivedRefreshAppTests {
         return String(String.UnicodeScalarView(scalars[start..<end])).trimmingCharacters(in: .whitespaces)
     }
 
-    /// What the refresh hands over (the facts by id, the atlas of each year, the name of the
-    /// detected home) is there whenever facts are: the facts and the detected home are assigned
-    /// in `refreshDerived` only, together with them. The getters make nothing themselves.
+    /// What the refresh hands over (the facts by id, the atlas of all years and its years) is
+    /// there whenever facts are: the facts and the detected home are assigned in
+    /// `refreshDerived` only, together with them. The getters make nothing themselves; those of
+    /// what only one screen needs start making it off the main thread
+    /// (`whatOnlyOneScreenNeedsIsMadeOffTheMainThreadWhenItAsks`).
     @Test func factsAndTheDetectedHomeAreAssignedOnlyWithWhatIsMadeFromThem() throws {
         let model = AppSource.code(try AppSource.read("App/Sortly/Model/AppModel.swift"))
         let refresh = try Self.refreshBody()
@@ -364,8 +431,8 @@ struct DerivedRefreshAppTests {
             let inRefresh = refresh.matches(of: pattern).count
             #expect(everywhere == 1 && inRefresh == 1, "\(name) is assigned \(everywhere) times, \(inRefresh) of them in refreshDerived")
         }
-        for getter in ["func travelAtlas(year: Int? = nil) -> TravelAtlas", "var atlasYears: [Int]", "var factsByID: FactsByID",
-                       "var detectedHomePlace: HomePlace?"] {
+        for getter in ["func travelAtlas() -> TravelAtlas", "func travelAtlas(year: Int) -> TravelAtlas?", "var atlasYears: [Int]",
+                       "var factsByID: FactsByID", "var detectedHomePlace: HomePlace?"] {
             let body = AppSource.code(AppSource.body(of: getter, in: model) ?? "")
             #expect(!body.isEmpty, "no \(getter)")
             let makes = Self.passesOverAllPhotos.contains { !AppSource.calls(of: $0, in: body).filter { !$0.isEmpty }.isEmpty }

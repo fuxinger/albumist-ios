@@ -267,7 +267,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; homeCandidatesTask = nil; factsVersion &+= 1; detectedHomePlaceCache = nil; resetSearchIndex() } }
+    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = nil; atlasYearsCache = nil; yearAtlasesCache = nil; yearAtlasesTask = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; homeCandidatesTask = nil; factsVersion &+= 1; detectedHomePlaceCache = nil; detectedHomeNameTask = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { libraryInputsChanged() } }
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
@@ -301,21 +301,51 @@ final class AppModel {
     @ObservationIgnored private var libraryBucketsMadeFor = -1
     @ObservationIgnored private var libraryBucketsTask: Task<Void, Never>?
     /// The atlas is shown on the overview, which redraws often during an analysis.
-    @ObservationIgnored private var atlasCache: [Int: TravelAtlas] = [:]
+    @ObservationIgnored private var atlasCache: TravelAtlas?
     @ObservationIgnored private var atlasYearsCache: [Int]?
+    /// The atlas of each year, made when the atlas's year picker first asks (`travelAtlas(year:)`).
+    /// Observed: the atlas draws again when they are made.
+    private var yearAtlasesCache: [Int: TravelAtlas]?
+    @ObservationIgnored private var yearAtlasesTask: Task<Void, Never>?
 
-    /// Travel atlas for all years (`nil`) or one calendar year. Made off the main thread with the
-    /// facts, every year at once (`DerivedLibrary.yearAtlases`), and handed over with them by
-    /// `refreshDerived`, the only place the facts are assigned (review P4-09: each year chosen in
-    /// the atlas went over all photos on the main thread, 75 ms at 50,000 photos, 151 ms at
-    /// 100,000). A year that is not there has no photos, so its atlas is empty, as
-    /// `TravelAtlas.compute` would make it; before the first refresh there are no facts at all.
-    /// Kept through memory warnings (a few KB).
-    func travelAtlas(year: Int? = nil) -> TravelAtlas {
+    /// Travel atlas of all years (the overview's teaser, the atlas). Made off the main thread with
+    /// the facts and handed over with them by `refreshDerived`, the only place the facts are
+    /// assigned (review P4-09); before the first refresh there are no facts at all. Kept through
+    /// memory warnings (a few KB).
+    func travelAtlas() -> TravelAtlas {
         // Cache hits must still register the dependency, or views would never see new facts.
         access(keyPath: \.facts)
-        if let cached = atlasCache[year ?? 0] { return cached }
-        return year.map { DerivedLibrary.emptyYearAtlas($0) } ?? TravelAtlas()
+        return atlasCache ?? TravelAtlas()
+    }
+
+    /// Travel atlas of one calendar year (the atlas's year picker). `nil` while the atlas of
+    /// every year is made off the main thread, in one pass (`DerivedLibrary.yearAtlases`): once
+    /// for each value of the facts, only when the year picker asks, never at a refresh (second
+    /// review of P4-09, SHOULD-1: 240 ms at 50,000 photos, 671 ms at 100,000, at every refresh
+    /// for a picker seldom used; before that review P4-09, each year chosen went over all photos
+    /// on the main thread). A year that is not there has no photos, so its atlas is empty, as
+    /// `TravelAtlas.compute` would make it. Kept through memory warnings (a few KB).
+    func travelAtlas(year: Int) -> TravelAtlas? {
+        access(keyPath: \.facts)
+        if let yearAtlasesCache { return yearAtlasesCache[year] ?? DerivedLibrary.emptyYearAtlas(year) }
+        makeYearAtlases()
+        return nil
+    }
+
+    /// Starts making the atlas of each year for the facts as they are, unless that is under way
+    /// (`makeHomeCandidates`): observed `yearAtlasesCache` draws the atlas again when they are
+    /// there; facts that change meanwhile drop the result (`factsVersion`).
+    private func makeYearAtlases() {
+        guard yearAtlasesTask == nil else { return }
+        let facts = facts, version = factsVersion, allYears = atlasCache
+        yearAtlasesTask = Task { [weak self] in
+            let made = await Task.detached(priority: .userInitiated) {
+                DerivedLibrary.yearAtlases(of: facts, allYears: allYears ?? TravelAtlas.compute(facts: facts, year: nil))
+            }.value
+            guard let self, version == self.factsVersion else { return }
+            self.yearAtlasesTask = nil
+            self.yearAtlasesCache = made
+        }
     }
 
     /// The years the atlas offers, handed over with the facts like the atlas.
@@ -377,7 +407,8 @@ final class AppModel {
     /// photos. Never the facts, states, suggestions or decisions. A search index still being
     /// made is left to finish: a search waits for it. Kept (second review of P4-06): the library
     /// tab's areas (a few MB; the grid under the photo view would lose its place), the atlas (a
-    /// few KB, made off the main thread only when the facts are refreshed), the preview ranks
+    /// few KB, made off the main thread only when the facts are refreshed; each year's only
+    /// when the year picker asks), the preview ranks
     /// (small, the same) and the facts by id (an index per photo, a few MB at 100,000 photos, no
     /// copy of the facts any more; made off the main thread only when the facts are refreshed,
     /// review P4-09).
@@ -563,7 +594,10 @@ final class AppModel {
     @ObservationIgnored private var homeCandidatesTask: Task<Void, Never>?
     /// Counts the values of the facts (`makeHomeCandidates`).
     @ObservationIgnored private var factsVersion = 0
-    @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
+    /// The detected home with its name, made when a screen asks (`detectedHomePlace`). Observed:
+    /// the screen that asked draws again when it is named.
+    private var detectedHomePlaceCache: HomePlace?
+    @ObservationIgnored private var detectedHomeNameTask: Task<Void, Never>?
     var execution = ExecutionState()
     /// A constant: views observe its properties, not the model (see `ExecutionProgress`).
     let executionProgress = ExecutionProgress()
@@ -1960,16 +1994,15 @@ final class AppModel {
             MainThreadWatch.shared.section("refresh: facts") {
                 facts = derived.facts
                 // Made with the facts off the main thread (a new value of the facts empties
-                // them): the first draw of the overview, the atlas (each year too), the photo
-                // view and the search hits do not go over all photos on the main thread
-                // (review P4-09).
+                // them): the first draw of the overview, the atlas, the photo view and the search
+                // hits do not go over all photos on the main thread (review P4-09). Not what only
+                // one screen needs (the atlas of each year, the name of the detected home): made
+                // when it asks (second review of P4-09, SHOULD-1).
                 previewRanksCache = derived.previewRanks
                 datesCache = derived.creationDates
-                atlasCache = derived.yearAtlases
-                atlasCache[0] = derived.atlas
+                atlasCache = derived.atlas
                 atlasYearsCache = derived.atlasYears
                 factsIndex = derived.factsByID
-                detectedHomePlaceCache = refreshed.detectedHomePlace
             }
             self.inventory = derived.inventory
             mergeSuggestions = derived.merges
@@ -2390,15 +2423,39 @@ final class AppModel {
         pipeline != nil && !analysis.isRunning && !execution.isRunning && !executionClaimed && !homeChangeRunning && !analysisResetting
     }
 
-    /// The detected home with its name from the user's own photos (town, or offline the region).
-    /// Named once per analysis result, off the main thread with the facts (it goes over all
-    /// photos, review P4-09), and handed over with them by `refreshDerived`, the only place the
-    /// home and the facts are assigned; without that the home has no name yet.
+    /// The detected home with its name from the user's own photos (town, or offline the region;
+    /// `components` `nil` when no photo near it has a place yet). `nil` without a detected home,
+    /// and while it is named (`detectedHomeNaming`): off the main thread (it goes over all photos,
+    /// review P4-09), once for each value of the facts, only when a screen asks ("Dein Zuhause",
+    /// the settings), never at a refresh (second review of P4-09, SHOULD-1: 299 ms at 50,000
+    /// photos, 590 ms at 100,000).
     var detectedHomePlace: HomePlace? {
         access(keyPath: \.facts)
         guard let detectedHome else { return nil }
         if let cached = detectedHomePlaceCache, cached.center == detectedHome.center { return cached }
-        return HomePlace(center: detectedHome.center, components: nil)
+        nameDetectedHome()
+        return nil
+    }
+
+    /// The detected home is being named (`detectedHomePlace`): the screens show that it loads,
+    /// not "Noch kein Zuhause erkannt" or "Ort ohne Namen".
+    var detectedHomeNaming: Bool {
+        detectedHome != nil && detectedHomePlace == nil
+    }
+
+    /// Starts naming the detected home for the facts as they are, unless that is under way
+    /// (`makeHomeCandidates`): observed `detectedHomePlaceCache` draws the screen again when it is
+    /// named; facts that change meanwhile (and with them the detected home) drop the result
+    /// (`factsVersion`).
+    private func nameDetectedHome() {
+        guard detectedHomeNameTask == nil, let center = detectedHome?.center else { return }
+        let facts = facts, version = factsVersion
+        detectedHomeNameTask = Task { [weak self] in
+            let named = await Task.detached(priority: .userInitiated) { DerivedLibrary.namedHome(at: center, facts: facts) }.value
+            guard let self, version == self.factsVersion else { return }
+            self.detectedHomeNameTask = nil
+            self.detectedHomePlaceCache = named
+        }
     }
 
     /// The places of the library the user can choose from, most photo days first. `nil` while
@@ -2430,7 +2487,8 @@ final class AppModel {
     var personalPlaces: [PlaceAnswer] { recurringPlaces.oftenHere }
 
     /// "Stimmt" on the detected home: from now on; the past stays as the detection sees it
-    /// (`HomeSettings.confirmedFrom`). Not offered while the home has no name yet.
+    /// (`HomeSettings.confirmedFrom`). Not offered while the home has no name yet (or is still
+    /// being named).
     func confirmDetectedHome() async {
         guard let place = detectedHomePlace, place.components != nil else { return }
         _ = await changeHome(home: { $0.confirming(place, date: .now) })

@@ -15,7 +15,15 @@ struct HomeSettingsRow: View {
             HomeSettingsView()
         } label: {
             LabeledContent {
-                Text(HomeText.summary(model.homeSettings, detected: model.detectedHomePlace))
+                // The detected home is named off the main thread when the settings ask, and only
+                // when the row shows it (a fraction of a second): not "Noch nicht erkannt" meanwhile.
+                let automatic = model.homeSettings.currentMode == .automatic
+                if automatic && model.detectedHomeNaming {
+                    ProgressView()
+                        .accessibilityLabel(Text("Zuhause wird geladen"))
+                } else {
+                    Text(HomeText.summary(model.homeSettings, detected: automatic ? model.detectedHomePlace : nil))
+                }
             } label: {
                 Label("Dein Zuhause", systemImage: "house")
             }
@@ -152,6 +160,17 @@ struct HomeSettingsView: View {
                             .font(.subheadline)
                             .foregroundStyle(.noteText)
                     }
+                    changeLink(Text("Ändern"))
+                } else if model.detectedHomeNaming {
+                    // Named off the main thread when the screen opens (a fraction of a second):
+                    // not "Noch kein Zuhause erkannt" or "Ort ohne Namen" meanwhile.
+                    HStack(spacing: Theme.Spacing.m) {
+                        ProgressView()
+                            .accessibilityHidden(true) // the text beside it says what runs
+                        Text("Zuhause wird geladen …").foregroundStyle(.secondary)
+                    }
+                    .frame(minHeight: 44, alignment: .leading)
+                    .accessibilityElement(children: .combine)
                     changeLink(Text("Ändern"))
                 } else {
                     // Empty state: nothing detected yet, and why.

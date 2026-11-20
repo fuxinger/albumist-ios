@@ -11,7 +11,9 @@ import SortlyTestSupport
 /// the atlas of one year 75 / 151 ms, the statuses of a search like "nicht sortiert" 27 / 62 ms.
 /// They run off the main actor now: the app makes them in a `Task.detached` closure or gets them
 /// made with the facts (`DerivedLibrary`, `DerivedRefresh`); `DerivedRefreshAppTests` checks the
-/// app's code for it. This test keeps the cost of each pass in sight with a limit per pass (the
+/// app's code for it. What only one screen needs (the places of "Dein Zuhause", the atlas of each
+/// year, the name of the detected home) is made only when that screen asks, never at a refresh
+/// (second review of P4-09, SHOULD-1). This test keeps the cost of each pass in sight with a limit per pass (the
 /// work moved, it did not go away: it still costs battery and delays what waits for it), and
 /// checks that the main actor stays free while the app's way of calling each pass runs.
 /// Part of the load test (`LoadTests`: SORTLY_LOAD_TEST=1, one test after the other, so the
@@ -123,10 +125,11 @@ extension LoadTests {
         let (stayTook, stay) = MainThreadWork.fastest { HomeCandidates.stayStart(near: munich, assets: facts.lazy.map { $0.asset }) }
         #expect(stay != nil)
         note("HomeCandidates.stayStart", stayTook)
-        // The name of the detected home (`DerivedRefresh.detectedHomePlace`).
-        let (nameTook, name) = MainThreadWork.fastest { HomeName.components(near: munich, facts: facts) }
-        #expect(name?.locality == "München")
-        note("HomeName.components", nameTook)
+        // The name of the detected home (`AppModel.detectedHomePlace`, when "Dein Zuhause" or the
+        // settings ask: `DerivedLibrary.namedHome`).
+        let (nameTook, name) = MainThreadWork.fastest { DerivedLibrary.namedHome(at: munich, facts: facts) }
+        #expect(name.components?.locality == "München")
+        note("DerivedLibrary.namedHome", nameTook)
         // The facts by id (`DerivedLibrary.factsByID`); before: a dictionary of all facts.
         let (dictionaryTook, dictionary) = MainThreadWork.fastest { Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         let (byIDTook, byID) = MainThreadWork.fastest { FactsByID(facts) }
@@ -137,8 +140,9 @@ extension LoadTests {
         let (lookupTook, found) = MainThreadWork.fastest { ids.reduce(0) { $0 + (byID[$1] == nil ? 0 : 1) } }
         #expect(found == ids.count)
         note("FactsByID 1,000 lookups", lookupTook, where: "on the main actor")
-        // The atlas of every year (`DerivedLibrary.yearAtlases`); before: one year on the main
-        // actor when it was chosen, the atlas of all years made again inside.
+        // The atlas of every year (`DerivedLibrary.yearAtlases`, when the atlas's year picker asks:
+        // `AppModel.travelAtlas(year:)`); before: one year on the main actor when it was chosen,
+        // the atlas of all years made again inside.
         let allYears = TravelAtlas.compute(facts: facts, year: nil)
         let year = try #require(TravelAtlas.years(facts: facts).first)
         let (oneYearTook, oneYear) = MainThreadWork.fastest { TravelAtlas.compute(facts: facts, year: year) }
@@ -158,6 +162,7 @@ extension LoadTests {
             ("HomeCandidates.make", { HomeCandidates.make(facts: facts).count }),
             ("FactsByID", { FactsByID(facts).count }),
             ("DerivedLibrary.yearAtlases", { DerivedLibrary.yearAtlases(of: facts, allYears: allYears).count }),
+            ("DerivedLibrary.namedHome", { DerivedLibrary.namedHome(at: munich, facts: facts).components == nil ? 0 : 1 }),
             ("LibraryStatus.searchStatuses", { LibraryStatus.searchStatuses(facts: facts, states: states, resolver: resolver, scope: .all).count }),
             ("HomeCandidates.stayStart", { HomeCandidates.stayStart(near: munich, assets: facts.lazy.map { $0.asset }) == nil ? 0 : 1 }),
         ]
@@ -175,7 +180,7 @@ extension LoadTests {
         let scale = photos / 50_000
         #expect(candidatesTook < .milliseconds(3_500) * scale, "HomeCandidates.make took \(candidatesTook)") // measured 844-1,165 / 2,175-2,721 ms
         #expect(stayTook < .milliseconds(600) * scale, "HomeCandidates.stayStart took \(stayTook)") // measured 126-193 / 388-396 ms
-        #expect(nameTook < .milliseconds(800) * scale, "HomeName.components took \(nameTook)") // measured 243-274 / 475-554 ms
+        #expect(nameTook < .milliseconds(800) * scale, "DerivedLibrary.namedHome took \(nameTook)") // measured 243-274 / 475-554 ms
         #expect(byIDTook < .milliseconds(200) * scale, "FactsByID took \(byIDTook)") // measured 40-54 / 89-96 ms
         #expect(lookupTook < .milliseconds(5), "1,000 lookups took \(lookupTook)") // measured 0.5-0.8 ms
         #expect(yearsTook < .milliseconds(1_000) * scale, "DerivedLibrary.yearAtlases took \(yearsTook)") // measured 277-349 / 482-716 ms

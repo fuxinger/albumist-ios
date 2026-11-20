@@ -18,8 +18,7 @@ struct OverlappingRefreshTests {
     /// Everything the overview shows from a refresh.
     static let shown = ["snapshot", "recheckedSuggestions", "recurringPlaceReport", "detectedHome", "homeChangeNotice",
                         "facts", "previewRanksCache", "inventory", "mergeSuggestions", "historyHasMore", "history",
-                        "undonePlans", "removedFromProposals", "datesCache", "atlasCache", "atlasYearsCache", "factsIndex",
-                        "detectedHomePlaceCache"]
+                        "undonePlans", "removedFromProposals", "datesCache", "atlasCache", "atlasYearsCache", "factsIndex"]
 
     /// The rule itself: a call assigns only when it is newer than the result on screen. Of two
     /// overlapping calls the older one never puts its result over the newer one's, whichever

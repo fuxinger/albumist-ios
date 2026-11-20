@@ -206,17 +206,29 @@ struct AtlasView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    private var atlas: TravelAtlas { model.travelAtlas(year: year) }
+    /// `nil` while the atlas of each year is made, the first time a year is chosen after the
+    /// facts changed (`AppModel.travelAtlas(year:)`, a fraction of a second).
+    private var atlas: TravelAtlas? {
+        guard let year else { return model.travelAtlas() }
+        return model.travelAtlas(year: year)
+    }
 
     var body: some View {
         let atlas = atlas
-        let order = atlas.countriesByFirstVisit
+        let order = atlas?.countriesByFirstVisit ?? []
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                 if model.atlasYears.count > 1 { yearPicker }
-                AtlasContent(atlas: atlas, outlines: outlines, revealed: min(revealed, order.count))
-                if SmartAssistant.isAvailable && !model.facts.isEmpty {
-                    storySection(atlas)
+                if let atlas {
+                    AtlasContent(atlas: atlas, outlines: outlines, revealed: min(revealed, order.count))
+                    if SmartAssistant.isAvailable && !model.facts.isEmpty {
+                        storySection(atlas)
+                    }
+                } else {
+                    // Not "0 Länder" for a year still being made.
+                    ProgressView()
+                        .accessibilityLabel(Text("Jahr wird geladen"))
+                        .frame(maxWidth: .infinity, minHeight: 240)
                 }
             }
             .padding(.horizontal, Theme.Spacing.l)
@@ -232,11 +244,12 @@ struct AtlasView: View {
             }
         }
         .onChange(of: year) {
-            // Switching the year shows the result at once (no fill animation).
-            revealed = atlas.countriesByFirstVisit.count
+            // Switching the year shows the result at once (no fill animation), also a year whose
+            // atlas is still being made.
+            revealed = .max
         }
         .sheet(isPresented: $sharing) {
-            ShareCardSheet(atlas: atlas, sortedPhotos: model.progress.fully, map: model.worldMap)
+            ShareCardSheet(atlas: atlas ?? model.travelAtlas(), sortedPhotos: model.progress.fully, map: model.worldMap)
         }
         .task {
             outlines = await AtlasOutlines.shared.load(from: model.worldMap)

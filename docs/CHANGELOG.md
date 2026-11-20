@@ -62,6 +62,9 @@
   Prüfung steht „Gerade eben geprüft“ statt „Zuletzt geprüft jetzt“. Die Foto-Info sagt bei
   einem unsortierten Foto, warum („Noch in keinem Album für „Länder und Orte“ oder „Reisen““).
   Englisch entsprechend („Undo Everything“, „Created on“, „Unsorted“, „Checked just now“).
+- 20.11. (P3-09): Große Zahlen mit Tausenderpunkt auch in Sätzen mit Pluralform: „1.354 Fotos
+  von zu Hause“ statt „1354“ neben „82 von 1.176“ (Übersicht, Prüfbericht, Vorschläge und ihre
+  Begründungen, Mediathek, Belege, Suche, Länder, Reise-Werkstatt, Siri). „1 Foto“ bleibt Einzahl.
 - 18.11. (Entscheidungen Fuchs 1 und 2, Fable P1-05/P1-06): Eine Bedeutung für „sortiert“.
   Ignorierte Fotos zählen im Ring nicht mehr mit (weder sortiert noch offen); der Ring erreicht
   100 %, sobald alles nicht Ignorierte sortiert ist, und „Ignorieren“ vergrößert nie die Zahl

@@ -15,7 +15,7 @@ enum Counted {
         var parts: [String] = []
         if summary.newAlbums > 0 { parts.append(String(localized: "\(summary.newAlbums) neue Alben")) }
         if summary.extendedAlbums > 0 { parts.append(String(localized: "\(summary.extendedAlbums) ergänzt")) }
-        parts.append(String(localized: "\(summary.distinctAssets) Fotos einsortiert"))
+        parts.append(String(localized: "\(summary.distinctAssets) \(summary.distinctAssets.formatted()) Fotos einsortiert"))
         return join(parts, separator: ", ") + "."
     }
 
@@ -24,7 +24,7 @@ enum Counted {
         var parts: [String] = []
         if summary.newAlbums > 0 { parts.append(String(localized: "\(summary.newAlbums) neu")) }
         if summary.extendedAlbums > 0 { parts.append(String(localized: "\(summary.extendedAlbums) ergänzt")) }
-        parts.append(String(localized: "\(summary.distinctAssets) Fotos"))
+        parts.append(String(localized: "\(summary.distinctAssets) \(summary.distinctAssets.formatted()) Fotos"))
         return join(parts, separator: ", ")
     }
 }

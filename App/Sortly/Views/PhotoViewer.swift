@@ -54,7 +54,7 @@ struct PhotoViewer: View {
             }
             .background(Color.black.opacity(1 - min(pull / 500, 0.7)).ignoresSafeArea())
             .ignoresSafeArea(edges: .bottom)
-            .navigationTitle(Text("\(index + 1) von \(ids.count)"))
+            .navigationTitle(Text("\((index + 1).formatted()) von \(ids.count.formatted())"))
             .navigationBarTitleDisplayMode(.inline)
             // Light controls and title on the black photo background.
             .toolbarColorScheme(.dark, for: .navigationBar)

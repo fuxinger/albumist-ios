@@ -208,7 +208,7 @@ struct PlanReceiptView: View {
             }
             // Not a failure, but not sorted in either: the plan is not complete (audit 2, 7.1).
             if receipt.unavailablePhotos > 0 {
-                Text("\(receipt.unavailablePhotos) Fotos waren beim Anlegen nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
+                Text("\(receipt.unavailablePhotos) \(receipt.unavailablePhotos.formatted()) Fotos waren beim Anlegen nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
             }
             ForEach(StepProblemText.texts(receipt.problems), id: \.self) { text in
                 Label(text, systemImage: "exclamationmark.triangle")
@@ -443,10 +443,10 @@ private struct ReceiptAlbumRow: View {
             VStack(alignment: .trailing, spacing: 2) {
                 badge
                 if album.added > 0 {
-                    Text("+\(album.added) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+                    Text("+\(album.added) \(album.added.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
                 }
                 if album.removed > 0 {
-                    Text("−\(album.removed) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+                    Text("−\(album.removed) \(album.removed.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
                 }
             }
         }
@@ -520,8 +520,8 @@ enum ReceiptText {
             for album in receipt.albums {
                 let path = (album.folderPath + [album.title.isEmpty ? String(localized: "Album") : album.title]).joined(separator: " › ")
                 var detail: [String] = []
-                if album.added > 0 { detail.append("+\(album.added)") }
-                if album.removed > 0 { detail.append("−\(album.removed)") }
+                if album.added > 0 { detail.append("+" + album.added.formatted()) }
+                if album.removed > 0 { detail.append("−" + album.removed.formatted()) }
                 lines.append("• \(path)" + (detail.isEmpty ? "" : " (\(detail.joined(separator: ", ")))"))
             }
         }

@@ -26,7 +26,7 @@ CATALOG = "App/Sortly/Resources/Localizable.xcstrings"
 # Button titles the code hands over in a variable (ProposalViews.swift `primaryTitle`) or
 # shows behind a condition ("Namen vorschlagen" gives way to a spinner while it works).
 EXTRA_BUTTONS = {
-    "Album so lassen", "%lld Fotos ergänzen", "Album ergänzen", "Album anlegen",
+    "Album so lassen", "%lld %@ Fotos ergänzen", "Album ergänzen", "Album anlegen",
     "Namen eingeben", "Album auswählen", "Auswählen", "Namen vorschlagen",
 }
 

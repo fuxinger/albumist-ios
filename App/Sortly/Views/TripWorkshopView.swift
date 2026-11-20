@@ -138,7 +138,7 @@ struct TripWorkshopView: View {
         Section {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 let dayCount = Text("\(days.count) Tage")
-                let photoCount = Text("\(proposal.assetIDs.count) Fotos mit Ort")
+                let photoCount = Text("\(proposal.assetIDs.count) \(proposal.assetIDs.count.formatted()) Fotos mit Ort")
                 Text(title(proposal)).font(.headline)
                 Text("\(dayCount) · \(photoCount)")
                     .font(.subheadline).foregroundStyle(.noteText)
@@ -279,7 +279,7 @@ struct TripWorkshopView: View {
     }
 
     private func mergeButton(_ other: AlbumProposal, side: Side) -> some View {
-        let photos = Text("\(other.assetIDs.count) Fotos")
+        let photos = Text("\(other.assetIDs.count) \(other.assetIDs.count.formatted()) Fotos")
         return Button {
             merging = side
         } label: {
@@ -302,9 +302,9 @@ struct TripWorkshopView: View {
             let (first, second) = side == .before ? (other, proposal) : (proposal, other)
             let total = other.assetIDs.count + proposal.assetIDs.count
             if model.analysis.isPausedByUser {
-                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) Fotos. Die pausierte Analyse läuft dann weiter.")
+                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) \(total.formatted()) Fotos. Die pausierte Analyse läuft dann weiter.")
             } else {
-                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) Fotos.")
+                Text("„\(title(first))“ und „\(title(second))“ werden eine Reise mit \(total) \(total.formatted()) Fotos.")
             }
         }
     }
@@ -473,7 +473,7 @@ private struct DayRow: View {
             // The note sits under the date: on the right it pushed "Dienstag, 1. August" onto two lines.
             VStack(alignment: .leading, spacing: 2) {
                 Text(day.start.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                let count = Text("\(day.count) Fotos")
+                let count = Text("\(day.count) \(day.count.formatted()) Fotos")
                 Group {
                     if let note {
                         Text("\(count) · \(note)")
@@ -513,7 +513,7 @@ private struct PartRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(Self.span(part.start, part.end)).font(.subheadline)
-                Text("\(part.count) Fotos").font(.footnote).foregroundStyle(.noteText)
+                Text("\(part.count) \(part.count.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

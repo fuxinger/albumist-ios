@@ -342,7 +342,7 @@ struct TripWorkshopTests {
         // The confirmations, the split and "Rückgängig machen" say that the paused analysis goes on.
         let merge = try body("func mergeButton(", in: workshop)
         let mergeSaysIt = after("if model.analysis.isPausedByUser {", in: merge)?
-            .hasPrefix("Text(\"„\\(title(first))“ und „\\(title(second))“ werden eine Reise mit \\(total) Fotos. Die pausierte Analyse läuft dann weiter.\")") == true
+            .hasPrefix("Text(\"„\\(title(first))“ und „\\(title(second))“ werden eine Reise mit \\(total) \\(total.formatted()) Fotos. Die pausierte Analyse läuft dann weiter.\")") == true
         #expect(mergeSaysIt, "the merge confirmation does not say that the paused analysis goes on")
         let resetSaysIt = after("if model.analysis.isPausedByUser {", in: settings)?
             .hasPrefix("Text(\"Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter.\")") == true
@@ -355,7 +355,7 @@ struct TripWorkshopTests {
         let catalog = try StringCatalogTests.catalog()
         for key in ["Gespeichert. Albumist wendet die Änderung an, sobald die Analyse fertig ist.",
                     "Die pausierte Analyse läuft dann weiter.",
-                    "„%@“ und „%@“ werden eine Reise mit %lld Fotos. Die pausierte Analyse läuft dann weiter.",
+                    "„%@“ und „%@“ werden eine Reise mit %lld %@ Fotos. Die pausierte Analyse läuft dann weiter.",
                     "Albumist vergisst, welche Reisen du geteilt oder zusammengelegt hast. Schon angelegte Alben bleiben, wie sie sind. Die pausierte Analyse läuft dann weiter."] {
             #expect(Self.english(key, in: catalog) != nil, "Not in the catalog with English: \(key)")
         }

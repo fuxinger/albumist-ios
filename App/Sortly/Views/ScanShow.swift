@@ -81,7 +81,7 @@ struct ScanShow: View {
                         Text(model.userTitles[trip.id] ?? trip.title)
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
-                        Text("\(trip.assetIDs.count) Aufnahmen")
+                        Text("\(trip.assetIDs.count) \(trip.assetIDs.count.formatted()) Aufnahmen")
                             .font(.caption).foregroundStyle(.noteText)
                     }
                     Spacer(minLength: 0)

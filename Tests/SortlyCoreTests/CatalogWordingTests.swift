@@ -19,6 +19,11 @@ import SortlyTestSupport
 /// - „Zählt als sortiert“ → "Counts as Sorted" is the setting; its items are „Bereiche“, "areas";
 /// - „Albumist arbeitet mit“ → "Albumist works with" is the choice of one year or the whole
 ///   library, in the start and in the settings.
+///
+/// Counts that can pass 999 show the locale's thousands separator: „1.354 Fotos von zu Hause“,
+/// not „1354“ beside „82 von 1.176“. `%lld` shows no separator, so such a sentence takes its
+/// number twice: the integer picks the plural form, `n.formatted()` is what is shown (key
+/// `"%lld %@ Fotos von zu Hause"`, called as `"\(n) \(n.formatted()) Fotos von zu Hause"`).
 @Suite("Catalog wording")
 struct CatalogWordingTests {
     /// The German texts of an entry: its own German values (plural forms, substitutions) if it
@@ -165,5 +170,102 @@ struct CatalogWordingTests {
     ])
     func oneWordInBothLanguages(_ pair: (german: String, english: String)) throws {
         #expect(try Self.value(pair.german, "en") == pair.english)
+    }
+
+    // MARK: - Thousands separators
+
+    /// A count directly before one of these words can pass 999 (photos of a library, of a
+    /// country, of a check; places, documents, days with photos).
+    static let largeNouns = "(Fotos?|Orte|Orten|Dokumente|Tage|Aufnahmen|Screenshots)"
+
+    /// Integer counts before such a word that stay, each with its reason.
+    static let smallOrElsewhere: [String: String] = [
+        "Albumist sieht erst %lld Fotos. Für ein Album braucht es mehr Fotos von einem Ort oder einer Reise.":
+            "said only while there are too few photos for an album",
+        "%lld Beispielfotos anlegen": "the sample photos, about 100",
+        "Albumist legt %lld Beispielfotos von vier Reisen in deiner Fotos-Mediathek an. Das ist nötig, damit Albumist daraus Alben anlegen kann. Du kannst sie jederzeit wieder entfernen: nur diese Beispielfotos und die Alben, die Albumist daraus gemacht hat.":
+            "the sample photos, about 100",
+        "Legt etwa %lld Beispielfotos mit Reisen, Screenshots und Dokumenten an. Nur im Simulator.": "simulator only, about 100",
+        "%lld Fotos bleiben in Fotos: Name oder Aufnahmedatum passen nicht zu den Beispielfotos von Albumist. Albumist löscht nur, was sicher ein Beispielfoto ist.":
+            "some of the sample photos",
+        "%lld Fotos bleiben im Album „%@“.": "sample photos; AppModel.swift (other work)",
+        "Ein Teil hat weniger als %lld Fotos mit Ort. Er wird kein eigener Reise-Vorschlag; seine Fotos bleiben in den Länder- und Orte-Alben.":
+            "the minimum of a trip, a small fixed number",
+        "%lld Tage": "the days of one trip",
+        "%lld Tage mit Fotos": "HomeSettingsView.swift (other work): switch to „%lld %@ Tage mit Fotos“",
+        "%lld Fotos": "SortingShow.swift (other work): the sorting show still uses it; everything else says „%lld %@ Fotos“",
+        "%lld Fotos einsortiert": "SortingShow.swift (other work)",
+        "%lld von %lld Alben fertig, %lld Fotos einsortiert": "SortingShow.swift (other work)",
+        "%lld Fotos ignoriert": "AppModel.swift (other work): the announcement; the note in the library is grouped",
+    ]
+
+    @Test func largeCountsAreGrouped() throws {
+        let integerBeforeNoun = "%(\\d\\$)?lld (\\p{L}+ )?\(Self.largeNouns)\\b"
+        let catalog = try StringCatalogTests.catalog()
+        let ungrouped = catalog.keys.filter { key in
+            Self.smallOrElsewhere[key] == nil && key.range(of: integerBeforeNoun, options: .regularExpression) != nil
+        }
+        #expect(ungrouped.isEmpty, "count without thousands separator: \(ungrouped.sorted().joined(separator: "\n"))")
+        // Counts said without a noun after them.
+        for key in ["Dazu %lld teilweise sortiert", "%lld von %lld", "%lld ausgewählt", "%lld aus Vorschlag entfernen"] {
+            #expect(catalog[key] == nil, "\(key): count without thousands separator")
+        }
+        let stale = Self.smallOrElsewhere.keys.filter { catalog[$0] == nil }
+        #expect(stale.isEmpty, "gone, remove from the list: \(stale)")
+    }
+
+    /// A grouped count (`%lld %@`): German and English pick their plural form with the integer
+    /// and show the text. A form that showed `%arg` would show „1354“ again.
+    @Test func groupedCountsPickTheirFormByTheNumberAndShowTheText() throws {
+        var problems: [String] = []
+        let specifier = try Regex("%(?:\\d+\\$)?(?:lld|ld|d|@|f|\\.\\d+f)")
+        var pairs = 0
+        for (key, entry) in try StringCatalogTests.catalog() where key.contains("%lld %@") {
+            // The argument number of each integer that a text follows (1-based).
+            let kinds = key.matches(of: specifier).map { String(key[$0.range]) }
+            let counts = kinds.indices.filter { kinds[$0] == "%lld" && $0 + 1 < kinds.count && kinds[$0 + 1] == "%@"
+                && key.contains("\(kinds[$0]) \(kinds[$0 + 1])") }
+            pairs += counts.count
+            for language in ["de", "en"] {
+                guard let loc = StringCatalogTests.localization(entry, language) else {
+                    problems.append("\(language) \(key): no \(language) text (the key would show both numbers)")
+                    continue
+                }
+                let subs = loc["substitutions"] as? [String: [String: Any]] ?? [:]
+                for count in counts {
+                    let argNum = count + 1
+                    let chosen = subs.filter { ($0.value["argNum"] as? Int) == argNum }
+                    if chosen.isEmpty || chosen.values.contains(where: { $0["formatSpecifier"] as? String != "lld" }) {
+                        problems.append("\(language) \(key): no plural form picked by argument \(argNum)")
+                    }
+                    for (name, sub) in chosen {
+                        let plural = (sub["variations"] as? [String: Any])?["plural"] as? [String: Any] ?? [:]
+                        let other = Self.texts(plural["other"])
+                        if other.isEmpty || other.contains(where: { $0.contains("%arg") || !$0.contains("%\(argNum + 1)$@") }) {
+                            problems.append("\(language) \(key): \(name) „other“ must show %\(argNum + 1)$@, not %arg: \(other)")
+                        }
+                    }
+                }
+            }
+        }
+        #expect(pairs > 0)
+        #expect(problems.isEmpty, "\(problems.sorted().joined(separator: "\n"))")
+    }
+
+    /// In the App the shown text is the same number as the integer before it:
+    /// `"\(n) \(n.formatted()) Fotos"`, never `"\(n) \(m.formatted()) Fotos"`.
+    @Test func theShownNumberIsTheCountedOne() throws {
+        let pair = try Regex(#"\\\(([^()]*(?:\([^()]*\))?[^()]*)\) \\\(([^()]*(?:\([^()]*\))?[^()]*)\.formatted\(\)\)"#)
+        var found = 0, wrong: [String] = []
+        for path in AppSource.swiftFiles(under: "App/Sortly") {
+            let code = AppSource.code(try AppSource.read(path), keepStrings: true)
+            for match in code.matches(of: pair) {
+                let counted = String(match.output[1].substring ?? ""), shown = String(match.output[2].substring ?? "")
+                found += 1
+                if shown != counted && shown != "(\(counted))" { wrong.append("\(path): \\(\(counted)) \\(\(shown).formatted())") }
+            }
+        }
+        #expect(found > 0)
+        #expect(wrong.isEmpty, "\(wrong.joined(separator: "\n"))")
     }
 }

@@ -254,6 +254,26 @@ struct LocalizationTests {
         }
     }
 
+    /// Counts that can pass 999 show the thousands separator (review P3-09): the integer picks
+    /// the plural form, its formatted text is what shows (`"\(n) \(n.formatted()) Fotos …"`, key
+    /// `"%lld %@ Fotos …"`). An argument after the pair keeps its place.
+    @Test func groupedCountsShowTheSeparatorAndPickTheForm() throws {
+        let path = try #require(Bundle.main.path(forResource: "de", ofType: "lproj"), "de.lproj missing")
+        let de = try #require(Bundle(path: path)), en = try #require(english)
+        let german = Locale(identifier: "de_DE"), american = Locale(identifier: "en_US")
+        let home = "%lld %@ Fotos von zu Hause", place = "%lld %@ Fotos in %@."
+        let deHome = de.localizedString(forKey: home, value: nil, table: nil)
+        let enHome = en.localizedString(forKey: home, value: nil, table: nil)
+        #expect(String(format: deHome, locale: german, 1354, 1354.formatted(.number.locale(german))) == "1.354 Fotos von zu Hause")
+        #expect(String(format: deHome, locale: german, 1, "1") == "1 Foto von zu Hause")
+        #expect(String(format: enHome, locale: american, 1354, 1354.formatted(.number.locale(american))) == "1,354 photos from home")
+        #expect(String(format: enHome, locale: american, 1, "1") == "1 photo from home")
+        let dePlace = de.localizedString(forKey: place, value: nil, table: nil)
+        let enPlace = en.localizedString(forKey: place, value: nil, table: nil)
+        #expect(String(format: dePlace, locale: german, 2500, "2.500", "Italien") == "2.500 Fotos in Italien.")
+        #expect(String(format: enPlace, locale: american, 1, "1", "Italy") == "1 photo in Italy.")
+    }
+
     @Test func germanStaysSource() {
         #expect(Bundle.main.developmentLocalization == "de")
     }

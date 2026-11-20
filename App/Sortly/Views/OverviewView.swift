@@ -250,7 +250,7 @@ struct OverviewView: View {
                             // Photos already in a matching album for one main area but not yet for the
                             // other count as partly sorted; without this line the ring looked too low
                             // (device test 15.11.: 157 sorted, 1,199 partly).
-                            Text("Dazu \(ring.partially) teilweise sortiert")
+                            Text("Dazu \(ring.partially.formatted()) teilweise sortiert")
                                 .font(.subheadline)
                                 .monospacedDigit()
                         }
@@ -326,13 +326,13 @@ struct OverviewView: View {
         for group in notCounted.groups {
             switch group {
             case .home(let n):
-                parts.append(String(localized: "\(n) Fotos von zu Hause"))
+                parts.append(String(localized: "\(n) \(n.formatted()) Fotos von zu Hause"))
             case .noMainArea(let n, let isNoPlace):
                 // No place, a screenshot; with "Reisen" as the only main area also photos from home.
                 if isNoPlace {
-                    parts.append(String(localized: "\(n) Fotos ohne Ort"))
+                    parts.append(String(localized: "\(n) \(n.formatted()) Fotos ohne Ort"))
                 } else {
-                    parts.append(String(localized: "\(n) Fotos außerhalb dieser Bereiche"))
+                    parts.append(String(localized: "\(n) \(n.formatted()) Fotos außerhalb dieser Bereiche"))
                 }
             case .ignored(let n):
                 // Ignored photos are neither sorted nor open, so they leave the ring (Fuchs 18.11.):
@@ -340,15 +340,15 @@ struct OverviewView: View {
                 // With "Nur 2026" the ring counts the ignored photos of that year only ("Ignoriert"
                 // in the library holds all of them).
                 if case .year(let year) = model.analysisScope {
-                    parts.append(String(localized: "\(n) ignorierte Fotos aus \(String(year))"))
+                    parts.append(String(localized: "\(n) \(n.formatted()) ignorierte Fotos aus \(String(year))"))
                 } else {
-                    parts.append(String(localized: "\(n) ignorierte Fotos"))
+                    parts.append(String(localized: "\(n) \(n.formatted()) ignorierte Fotos"))
                 }
             case .excluded(let n):
                 // Excluded from the analysis (no switch in the app today): only when there are some.
-                parts.append(String(localized: "\(n) ausgeschlossene Fotos"))
+                parts.append(String(localized: "\(n) \(n.formatted()) ausgeschlossene Fotos"))
             case .noAlbum(let n):
-                parts.append(String(localized: "\(n) Fotos, für die sich kein eigenes Album lohnt"))
+                parts.append(String(localized: "\(n) \(n.formatted()) Fotos, für die sich kein eigenes Album lohnt"))
             }
         }
         guard !parts.isEmpty else { return nil }
@@ -429,11 +429,11 @@ struct OverviewView: View {
             // photos (review of the labels fix, M2); both in one line (second review, nit).
             Group {
                 if report.newPhotosAnalyzed > 0 && report.labelsAdded > 0 {
-                    Text("Beim Prüfen \(report.newPhotosAnalyzed) neue Fotos analysiert und \(report.labelsAdded) weitere für die neuen Bereiche angesehen.")
+                    Text("Beim Prüfen \(report.newPhotosAnalyzed) \(report.newPhotosAnalyzed.formatted()) neue Fotos analysiert und \(report.labelsAdded) \(report.labelsAdded.formatted()) weitere für die neuen Bereiche angesehen.")
                 } else if report.newPhotosAnalyzed > 0 {
-                    Text("Beim Prüfen \(report.newPhotosAnalyzed) neue Fotos analysiert.")
+                    Text("Beim Prüfen \(report.newPhotosAnalyzed) \(report.newPhotosAnalyzed.formatted()) neue Fotos analysiert.")
                 } else if report.labelsAdded > 0 {
-                    Text("Beim Prüfen \(report.labelsAdded) Fotos für die neuen Bereiche angesehen.")
+                    Text("Beim Prüfen \(report.labelsAdded) \(report.labelsAdded.formatted()) Fotos für die neuen Bereiche angesehen.")
                 } else if report.newOrChanged == 0 && report.removed == 0 {
                     Text("Beim Prüfen keine neuen Fotos gefunden.")
                 }
@@ -444,21 +444,21 @@ struct OverviewView: View {
             // Analysed before "Themen" or "Dokumente" was turned on and still without their image
             // labels (no run yet, or a read that failed waits for its retry): said apart, the
             // count above stays (second review of the labels fix, finding 6).
-            Label("Für die neuen Bereiche fehlen noch \(counts.labelsMissing) Fotos.", systemImage: "hourglass")
+            Label("Für die neuen Bereiche fehlen noch \(counts.labelsMissing) \(counts.labelsMissing.formatted()) Fotos.", systemImage: "hourglass")
                 .font(.footnote).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
         }
         if counts.unreadable > 0 {
-            Label("\(counts.unreadable) Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal.", systemImage: "exclamationmark.icloud")
+            Label("\(counts.unreadable) \(counts.unreadable.formatted()) Fotos konnten noch nicht gelesen werden. Albumist versucht es später noch einmal.", systemImage: "exclamationmark.icloud")
                 .font(.footnote).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
         }
         if let pending = model.analysis.lastReport?.placesPendingOnline, pending > 0 {
-            Label("\(pending) Orte werden später genauer bestimmt.", systemImage: "moon.zzz")
+            Label("\(pending) \(pending.formatted()) Orte werden später genauer bestimmt.", systemImage: "moon.zzz")
                 .font(.footnote).foregroundStyle(.noteText)
         }
         if let waiting = model.analysis.lastReport?.textWaitingForOriginal, waiting > 0 {
-            Label("\(waiting) Dokumente liegen nur in iCloud und werden später gelesen.", systemImage: "icloud")
+            Label("\(waiting) \(waiting.formatted()) Dokumente liegen nur in iCloud und werden später gelesen.", systemImage: "icloud")
                 .font(.footnote).foregroundStyle(.noteText)
         }
     }
@@ -799,7 +799,7 @@ struct LimitedAccessCard: View {
             Label("Nur ausgewählte Fotos", systemImage: "photo.badge.checkmark").font(.headline).accessibilityAddTraits(.isHeader)
             // Every photo Albumist reads, not the ring's: with "Nur 2026" those are only the
             // photos of 2026, and the card said "sieht nur die 12 Fotos" of 40 shared (P3-03).
-            Text("Albumist sieht nur die \(model.facts.count) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
+            Text("Albumist sieht nur die \(model.facts.count) \(model.facts.count.formatted()) Fotos, die du freigegeben hast. Für Alben aus deiner ganzen Mediathek braucht Albumist vollen Zugriff.")
                 .font(.subheadline).foregroundStyle(.noteText)
                 .fixedSize(horizontal: false, vertical: true)
             #if targetEnvironment(simulator)

@@ -539,7 +539,7 @@ struct ResultCard: View {
                     .multilineTextAlignment(.center)
                 }
                 if summary.unavailableAssets > 0 && !isUndo {
-                    Text("\(summary.unavailableAssets) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
+                    Text("\(summary.unavailableAssets) \(summary.unavailableAssets.formatted()) Fotos waren nicht mehr in deiner Mediathek und wurden nicht einsortiert.")
                         .font(.footnote).foregroundStyle(.noteText)
                         .multilineTextAlignment(.center)
                 }
@@ -662,7 +662,7 @@ enum ConflictText {
         case .albumChangedSincePreview(let id):
             return String(localized: "„\(title(id))“ wurde inzwischen geändert. Bitte prüfe den Vorschlag erneut.")
         case .assetsUnavailable(let count):
-            return String(localized: "\(count) Fotos sind nicht mehr in der Mediathek.")
+            return String(localized: "\(count) \(count.formatted()) Fotos sind nicht mehr in der Mediathek.")
         case .writeAccessMissing:
             return String(localized: "Albumist hat keinen vollen Zugriff auf deine Fotos.")
         }
@@ -800,7 +800,7 @@ private struct PlanAlbumRow: View {
             Spacer(minLength: Theme.Spacing.s)
             VStack(alignment: .trailing, spacing: 2) {
                 badge
-                Text("\(album.addedCount) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
+                Text("\(album.addedCount) \(album.addedCount.formatted()) Fotos").font(.footnote).foregroundStyle(.noteText).monospacedDigit()
             }
         }
         .accessibilityElement(children: .combine)

@@ -132,7 +132,7 @@ struct SearchView: View {
                         }
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
-                        .accessibilityValue(Text("\(suggestion.count) Fotos"))
+                        .accessibilityValue(Text("\(suggestion.count) \(suggestion.count.formatted()) Fotos"))
                         .accessibilityIdentifier("search.example")
                     }
                 }
@@ -164,7 +164,7 @@ struct SearchView: View {
                 .buttonStyle(.plain)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(verbatim: suggestion.label))
-                .accessibilityValue(Text("\(suggestion.count) Fotos"))
+                .accessibilityValue(Text("\(suggestion.count) \(suggestion.count.formatted()) Fotos"))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("search.suggestion")
             }
@@ -342,7 +342,7 @@ struct SearchTokenChip: View {
         .background(tint.opacity(0.12), in: Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: spoken))
-        .accessibilityValue(token.count.map { Text("\($0) Fotos") } ?? Text(verbatim: ""))
+        .accessibilityValue(token.count.map { Text("\($0) \($0.formatted()) Fotos") } ?? Text(verbatim: ""))
         .accessibilityIdentifier(ignored ? "search.ignored" : "search.token")
     }
 }

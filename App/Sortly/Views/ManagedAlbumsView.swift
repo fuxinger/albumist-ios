@@ -52,7 +52,7 @@ struct ManagedAlbumsView: View {
                 DeleteQuestionNote.message(Text("Albumist hat dieses Album angelegt. Es wird gelöscht. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen."),
                                            deletes: model.removalDeletesAlbum(state))
             } else {
-                Text("Die \(state.addedBySortly.count) Fotos, die Albumist hinzugefügt hat, werden aus dem Album genommen. Alles andere bleibt, wie es ist.")
+                Text("Die \(state.addedBySortly.count) \(state.addedBySortly.count.formatted()) Fotos, die Albumist hinzugefügt hat, werden aus dem Album genommen. Alles andere bleibt, wie es ist.")
             }
         }
         .alert("Nichts zu tun", isPresented: $nothingToDo) {
@@ -75,9 +75,9 @@ struct ManagedAlbumsView: View {
                 Text(state.lastKnownTitle).font(.body.weight(.medium))
                 Group {
                     if state.createdBySortly {
-                        Text("Neu angelegt · \(state.addedBySortly.count) Fotos von Albumist")
+                        Text("Neu angelegt · \(state.addedBySortly.count) \(state.addedBySortly.count.formatted()) Fotos von Albumist")
                     } else {
-                        Text("Ergänzt · \(state.addedBySortly.count) Fotos von Albumist")
+                        Text("Ergänzt · \(state.addedBySortly.count) \(state.addedBySortly.count.formatted()) Fotos von Albumist")
                     }
                 }
                 .font(.footnote).foregroundStyle(.noteText)

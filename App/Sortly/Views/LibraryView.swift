@@ -94,10 +94,10 @@ struct LibraryView: View {
     private func content(_ members: [LibraryBuckets.Item]) -> some View {
         if bucket == .suggestions {
             // Numbers as plural strings (design review W5: "1 Fotos und Videos").
-            Text("\(model.openProposals.count) Vorschläge für \(members.count) Fotos und Videos")
+            Text("\(model.openProposals.count) Vorschläge für \(members.count) \(members.count.formatted()) Fotos und Videos")
                 .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
         } else {
-            Text("\(members.count) Fotos und Videos")
+            Text("\(members.count) \(members.count.formatted()) Fotos und Videos")
                 .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
         }
 
@@ -237,7 +237,7 @@ struct LibraryView: View {
         ToolbarItem(placement: .bottomBar) {
             // The bar keeps its height, so the count stays on one line and stops growing at the
             // first accessibility size; the large content viewer shows it in full.
-            Text("\(selection.count) ausgewählt")
+            Text("\(selection.count.formatted()) ausgewählt")
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .lineLimit(1)
@@ -302,7 +302,7 @@ struct IgnoreUndoBar: View {
         if let undo = model.lastIgnored {
             HStack(spacing: Theme.Spacing.m) {
                 Label {
-                    Text("\(undo.assets.count) Fotos ignoriert")
+                    Text("\(undo.assets.count) \(undo.assets.count.formatted()) Fotos ignoriert")
                 } icon: {
                     Image(systemName: "eye.slash")
                 }
@@ -534,7 +534,7 @@ struct AddToAlbumSheet: View {
                 }
             }
             .searchable(text: $query, prompt: Text("Album suchen"))
-            .navigationTitle(Text("\(assets.count) Fotos hinzufügen"))
+            .navigationTitle(Text("\(assets.count) \(assets.count.formatted()) Fotos hinzufügen"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // A round close button: the wider "Abbrechen" pushed the title off centre.

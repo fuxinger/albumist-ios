@@ -188,6 +188,12 @@ public actor SortlyStore: PlanJournal {
         try db.query("SELECT COUNT(*) AS n FROM assets WHERE out_of_view = 1").first?["n"]?.int ?? 0
     }
 
+    /// The stored photos set aside (`setAside(notIn:)`): not deleted, only not shared right now.
+    /// What is bound to photos for good (trip and place identities, chosen suggestions) keeps them.
+    public func outOfViewAssetIDs() throws -> Set<AssetID> {
+        Set(try db.query("SELECT id FROM assets WHERE out_of_view = 1").compactMap { $0["id"]?.string.map { AssetID($0) } })
+    }
+
     /// SQL for a table with an `asset_id` column: the rows of photos in view (not set aside).
     /// Through `idx_assets_out_of_view`: with none set aside it costs nothing.
     private static let inView = "asset_id NOT IN (SELECT id FROM assets WHERE out_of_view = 1)"
@@ -241,8 +247,10 @@ public actor SortlyStore: PlanJournal {
 
     /// The photos in view (none set aside), as every read below that serves the analysis,
     /// the counts, the suggestions and the search.
-    public func assetCount() throws -> Int {
-        try db.query("SELECT COUNT(*) AS n FROM assets WHERE out_of_view = 0").first?["n"]?.int ?? 0
+    /// `includingOutOfView`: also the photos set aside, for whether the database holds any
+    /// photo at all (a selection of none still has the library's analysis).
+    public func assetCount(includingOutOfView: Bool = false) throws -> Int {
+        try db.query("SELECT COUNT(*) AS n FROM assets" + (includingOutOfView ? "" : " WHERE out_of_view = 0")).first?["n"]?.int ?? 0
     }
 
     public func allAssets() throws -> [AssetSnapshot] {

@@ -134,6 +134,9 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
     /// does not change (no entry in its history). `nil`: every photo.
     public private(set) var selection: Set<AssetID>?
     public func set(selection new: Set<AssetID>?) { selection = new }
+    /// The access the user switches to while the next whole read reads (it reads with it).
+    private var accessDuringWholeRead: LibraryAccess?
+    public func set(accessDuringNextWholeRead access: LibraryAccess?) { accessDuringWholeRead = access }
     /// Called for each photo a read of changed photos reads (a test pauses there).
     private var onChangedRead: (@Sendable (AssetID) -> Void)?
     public func set(onChangedRead hook: (@Sendable (AssetID) -> Void)?) { onChangedRead = hook }
@@ -182,6 +185,10 @@ public actor InMemoryLibraryReader: PhotoLibraryReading {
     public func fetchAssets(includeHidden: Bool, knownDetails: [AssetID: Date],
                             progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> [AssetSnapshot] {
         wholeReads += 1
+        if let switched = accessDuringWholeRead {
+            accessLevel = switched
+            accessDuringWholeRead = nil
+        }
         let visible = assets.filter { readable($0, includeHidden: includeHidden) }
         if !arrivingDuringWholeRead.isEmpty {
             set(assets: assets + arrivingDuringWholeRead)

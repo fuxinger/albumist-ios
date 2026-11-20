@@ -12,7 +12,10 @@
   anderen Auswahl kommen sie mit Analyse, Ort und Text zurück und werden nicht neu analysiert.
   Ob ein beiseitegelegtes Foto in Fotos gelöscht wurde, kann Albumist bei eingeschränktem
   Zugriff nicht wissen; es verschwindet aus der Datenbank erst, wenn Albumist wieder alle
-  Fotos sieht. Der erste Lauf danach liest die Mediathek einmal ganz.
+  Fotos sieht. Der erste Lauf danach liest die Mediathek einmal ganz. Bis dahin bleiben auch
+  die gespeicherten Orte und der (maskierte) erkannte Text der nicht freigegebenen Fotos in der
+  Datenbank (`docs/PRIVACY.md`); „Analyse neu aufbauen“ löscht sie. Reisen, häufige Orte und
+  gewählte Vorschläge behalten ihre Kennung und ihre beiseitegelegten Fotos.
 - Ortsnamen über `CLGeocoder` sind von Apple begrenzt (Drosselung, gelegentliche Fehler);
   Länder und Regionen kommen immer aus der Offline-Karte. Ein Lauf in der App fragt höchstens
   40 Ortsnamen pro Minute und wartet nie darauf; was fehlt, kommt mit einem späteren Lauf

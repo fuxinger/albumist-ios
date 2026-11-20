@@ -26,26 +26,39 @@ public enum HeldSuggestions {
     /// chosen, or that the suggestions now make exactly as it was chosen, is let go.
     /// Photos no longer in `library` (deleted in Photos, or a backup restored on another
     /// iPhone) leave a held suggestion; one with none of its photos left is let go.
+    /// `inView`: the photos that may be shown, when fewer than `library` (under "Ausgewählte
+    /// Fotos" the others are set aside, review P1-07): the suggestion keeps them and is shown
+    /// with the shared ones only, or not at all with none shared.
     public static func apply(_ held: [AlbumProposal], decisions: [SortlyID: ProposalDecision], library: Set<AssetID>,
-                             to suggestions: inout Suggestions) -> [AlbumProposal] {
+                             inView: Set<AssetID>? = nil, to suggestions: inout Suggestions) -> [AlbumProposal] {
         var still: [AlbumProposal] = []
         for var p in held where decisions[p.id]?.isAccepted == true {
             p.assetIDs.formIntersection(library)
             p.optionalAssetIDs.formIntersection(library)
             guard !p.assetIDs.isEmpty else { continue }
-            if let cover = p.coverAssetID, !p.assetIDs.contains(cover), !p.optionalAssetIDs.contains(cover) {
-                p.coverAssetID = p.assetIDs.min()
+            p.coverAssetID = cover(of: p)
+            var shown = p
+            if let inView {
+                shown.assetIDs.formIntersection(inView)
+                shown.optionalAssetIDs.formIntersection(inView)
+                shown.coverAssetID = cover(of: shown)
             }
             if let i = suggestions.open.firstIndex(where: { $0.id == p.id }) {
                 if suggestions.open[i] == p { continue }
-                suggestions.open[i] = p
+                if shown.assetIDs.isEmpty { suggestions.open.remove(at: i) } else { suggestions.open[i] = shown }
             } else {
                 suggestions.dismissed.removeAll { $0.id == p.id }
-                suggestions.open.append(p)
+                if !shown.assetIDs.isEmpty { suggestions.open.append(shown) }
             }
             still.append(p)
         }
         return still
+    }
+
+    /// The cover of `p`, or its first photo when the cover left it.
+    private static func cover(of p: AlbumProposal) -> AssetID? {
+        guard let cover = p.coverAssetID, !p.assetIDs.contains(cover), !p.optionalAssetIDs.contains(cover) else { return p.coverAssetID }
+        return p.assetIDs.min()
     }
 }
 

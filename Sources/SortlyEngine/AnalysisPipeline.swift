@@ -304,6 +304,10 @@ public actor AnalysisPipeline {
         /// leave it out, so a database put back or rebuilt reads the whole library first.
         static let libraryMark = "analysis.libraryMark"
         static let frequentPlaces = "analysis.frequentPlaces"
+        /// Places of the analysis before whose photos are set aside under "Ausgewählte Fotos"
+        /// and that the selection does not make (review P1-07): kept for their ids, so they come
+        /// back with them (name, "Nicht jetzt", album). Never shown or counted.
+        static let frequentPlacesOutOfView = "analysis.frequentPlacesOutOfView"
         static let groups = "analysis.groups"
         static let tripCorrections = "user.tripCorrections"
         /// The user's answers to "Bist du hier öfter?" (part of the decisions copy in the backup).
@@ -911,7 +915,10 @@ public actor AnalysisPipeline {
     private func readChanges(includeHidden: Bool, control: AnalysisRunControl,
                              report: inout Report) async throws -> (CollectionInventory, Int)? {
         // Photos set aside under "Ausgewählte Fotos" are put right by a whole read only (it
-        // takes them back or deletes them); the history knows nothing of the selection.
+        // takes them back or deletes them); the history knows nothing of the selection. A run
+        // cannot leave them with a mark (a read with limited access removes it first), and the
+        // count check below would send it to a whole read too; kept as the plain rule
+        // (`photosSetAsideAreTakenBackByAWholeRead` seeds that case).
         guard runAccess == .full, try await store.outOfViewCount() == 0,
               let stored = await storedLibraryMark(),
               stored.readerVersion == Self.currentReaderVersion,
@@ -1039,7 +1046,9 @@ public actor AnalysisPipeline {
                 // set aside with its analysis, place and text, not deleted. Only full access
                 // shows that a photo is gone (review P1-07: back on "Alle Fotos" every photo
                 // outside the selection was analysed again, hours on a large library).
-                if runAccess == .full {
+                // Asked again after the read: switched to "Ausgewählte Fotos" while it read, it may
+                // have read only the selection (second review of P1-07).
+                if runAccess == .full, await reader.access() == .full {
                     report.removed += try await store.removeAssets(notIn: Set(assets.map(\.id)))
                 } else {
                     report.setAside += try await store.setAside(notIn: Set(assets.map(\.id)))
@@ -1507,24 +1516,41 @@ public actor AnalysisPipeline {
             known = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map(TripIdentity.init)
         }
         let trips = TripIdentity.carryOver(detected, from: known)
+        // Photos set aside under "Ausgewählte Fotos" are not deleted: identities bound to them
+        // stay, so trips and places come back with their ids (second review of P1-07).
+        let setAside = try await store.outOfViewAssetIDs()
         // Places keep their IDs by their photos, from the places the last analysis stored (names,
-        // "Nicht jetzt", decisions and albums are bound to them). An unreadable list counts as none.
-        let previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
+        // "Nicht jetzt", decisions and albums are bound to them), and those kept while their
+        // photos are set aside, after them. An unreadable list counts as none.
+        var previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
+        if let away = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlacesOutOfView)) ?? nil, !away.isEmpty {
+            let stored = Set((previousPlaces ?? []).map(\.id))
+            previousPlaces = (previousPlaces ?? []) + away.filter { !stored.contains($0.id) }
+        }
         // A place's days: those of the clocks its photos were taken on, where their places are
         // known so far (review P1-15).
         var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: home)
             .detect(in: all, previous: previousPlaces ?? [], zones: try await placeTimeZones(library: all))
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
+        let made = Set(frequent.map(\.id))
+        let placesOutOfView = setAside.isEmpty ? [] : (previousPlaces ?? []).filter {
+            !made.contains($0.id) && !setAside.isDisjoint(with: $0.assetIDs)
+        }
         // The last moment to stop: from here on everything is stored, all of it or none.
         try checkPause(.tripsBeforeStoring)
         // Only a run or `resuggest()` stores the home time zone, never a read of the facts: it
         // goes into the safety copy, and a fresh database gets the decisions of a copy only
         // while it holds nothing of its own.
         if clock.store { try await store.setValue(clock.zone.identifier, forKey: Key.homeTimeZone) }
-        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
+        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id)).union(setAside)), forKey: Key.tripIdentities)
         try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
+        if placesOutOfView.isEmpty {
+            try await store.removeValue(forKey: Key.frequentPlacesOutOfView)
+        } else {
+            try await store.setValue(placesOutOfView, forKey: Key.frequentPlacesOutOfView)
+        }
         try await store.setValue(tripAnalysis.atHome, forKey: Key.home)
         if let home = tripAnalysis.detectedHome {
             try await store.setValue(home, forKey: Key.detectedHome)
@@ -2325,7 +2351,11 @@ public actor AnalysisPipeline {
         let decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
         var held = try await heldSuggestions()
         if let pending { held = HeldSuggestions.adding(pending.before.proposals, to: held, decisions: decisions, new: suggestions) }
-        held = HeldSuggestions.apply(held, decisions: decisions, library: Set(all.map(\.id)), to: &suggestions)
+        // A chosen suggestion keeps its photos set aside under "Ausgewählte Fotos" and shows only
+        // the shared ones (second review of P1-07).
+        let inView = Set(all.map(\.id))
+        held = HeldSuggestions.apply(held, decisions: decisions, library: inView.union(try await store.outOfViewAssetIDs()),
+                                     inView: inView, to: &suggestions)
         // The full set after an early one: a suggestion of the early set the user already
         // decided on stays, even when the full analysis would not make it any more (review
         // minor: a decision must not lose its suggestion).

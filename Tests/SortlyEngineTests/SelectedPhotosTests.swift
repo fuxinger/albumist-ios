@@ -319,4 +319,136 @@ struct SelectedPhotosTests {
         #expect(try await store.searchText("danke") == [shots[1]])
         #expect(w.analyzer.counts.withLock { $0.text } == 1, "only the shared screenshot without a text is read")
     }
+
+    // MARK: Second review of the fix: what is bound to ids and to photos set aside
+
+    /// A trip whose id was carried over (its first photo deleted) keeps that id across limited
+    /// access and back: decisions, "do not create again" and its album hang on it. Before: the
+    /// identity was dropped while all its photos were set aside, and the trip came back with
+    /// another id. (Second reviewer's test.)
+    @Test func carriedTripIdSurvivesLimitedAndBack() async throws {
+        let lib = Self.library()
+        let w = try Self.world(lib.assets)
+        #expect(try await w.pipeline.run().isComplete)
+        func romeTrip() async throws -> SortlyID? {
+            let trips = try await w.store.value([Trip].self, forKey: AnalysisPipeline.Key.trips) ?? []
+            return trips.first { Set($0.geotaggedAssetIDs).isSuperset(of: Set(lib.rome.dropFirst(2))) }?.id
+        }
+        let t0 = try #require(try await romeTrip())
+        // First photo of the trip deleted: the trip keeps its id by carry-over.
+        await w.reader.set(assets: lib.assets.filter { $0.id != lib.rome[0] })
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await romeTrip() == t0, "carry-over precondition")
+        // Limited: only the home photos.
+        await w.reader.set(selection: Set(lib.home))
+        await w.reader.set(access: .limited)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await romeTrip() == nil, "no trip of photos set aside while limited")
+        await w.reader.set(access: .full)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await romeTrip() == t0, "trip id changed after limited and back")
+    }
+
+    /// The same for a place the user is often at: its id (its name, "Nicht jetzt", its album)
+    /// stays while all its photos are set aside, and it is no suggestion meanwhile.
+    @Test func carriedPlaceIdSurvivesLimitedAndBack() async throws {
+        let lib = Self.library()
+        let w = try Self.world(lib.assets)
+        #expect(try await w.pipeline.run().isComplete)
+        let key = AnalysisPipeline.Key.frequentPlaces
+        func munich() async throws -> FrequentPlace? {
+            (try await w.store.value([FrequentPlace].self, forKey: key) ?? []).first { Set($0.assetIDs).isSuperset(of: Set(lib.home.prefix(30))) }
+        }
+        // An id carried from an earlier analysis (not the one its cell would give it), named.
+        var places = try await w.store.value([FrequentPlace].self, forKey: key) ?? []
+        let index = try #require(places.firstIndex { Set($0.assetIDs).isSuperset(of: Set(lib.home.prefix(30))) })
+        let carried = SortlyID("frequent-carried")
+        places[index].id = carried
+        try await w.store.setValue(places, forKey: key)
+        var named = await w.pipeline.settings
+        named.frequentPlaces.names[carried] = "Büro"
+        await w.pipeline.update(settings: named)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await munich()?.id == carried, "carry-over precondition")
+
+        // Limited: no photo of the place is shared.
+        await w.reader.set(selection: Set(lib.rome + lib.basel))
+        await w.reader.set(access: .limited)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await munich() == nil)
+        let shown = try await w.pipeline.latestProposals()?.proposals ?? []
+        #expect(!shown.contains { $0.id == carried })
+        await w.reader.set(access: .full)
+        #expect(try await w.pipeline.run().isComplete)
+        let back = try await munich()
+        #expect(back?.id == carried, "place id changed after limited and back")
+        #expect(back?.userName == "Büro")
+    }
+
+    /// A suggestion the user chose and Albumist holds (`HeldSuggestions`, after a change in
+    /// "Dein Zuhause") keeps its photos set aside: shown while limited with the shared ones
+    /// only, back whole with full access. Before: the photos set aside left it for good.
+    @Test func aHeldSuggestionKeepsItsPhotosSetAside() async throws {
+        let lib = Self.library()
+        let w = try Self.world(lib.assets)
+        #expect(try await w.pipeline.run().isComplete)
+        let trip = try #require(try await w.pipeline.latestProposals()?.proposals.first { $0.assetIDs.isSuperset(of: Set(lib.rome.dropFirst())) })
+        var held = trip
+        held.title = "Rom, wie gewählt"
+        try await w.store.setValue([held], forKey: AnalysisPipeline.Key.heldSuggestions)
+        try await w.store.setValue([held.id: ProposalDecision.createNew(title: nil, folderPath: nil)], forKey: AnalysisPipeline.Key.decisions)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await w.pipeline.heldSuggestions().first?.assetIDs == held.assetIDs, "precondition")
+
+        let selection = Set(lib.home + lib.rome.prefix(10))
+        await w.reader.set(selection: selection)
+        await w.reader.set(access: .limited)
+        #expect(try await w.pipeline.run().isComplete)
+        let shown = try #require(try await w.pipeline.latestProposals()?.proposals.first { $0.id == held.id })
+        #expect(shown.title == held.title)
+        #expect(shown.assetIDs == held.assetIDs.intersection(selection))
+        #expect(try await w.pipeline.heldSuggestions().first?.assetIDs == held.assetIDs, "photos set aside left the held suggestion")
+
+        await w.reader.set(access: .full)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await w.pipeline.heldSuggestions().first?.assetIDs == held.assetIDs)
+        let back = try #require(try await w.pipeline.latestProposals()?.proposals.first { $0.id == held.id })
+        #expect(back.assetIDs == held.assetIDs)
+    }
+
+    /// Access switched to "Ausgewählte Fotos" while a whole read with full access reads: the
+    /// read sees only the selection, and the photos it misses are set aside, not deleted.
+    @Test func accessLimitedDuringAWholeReadDeletesNothing() async throws {
+        let lib = Self.library()
+        let w = try Self.world(lib.assets)
+        #expect(try await w.pipeline.run().isComplete)
+        let selection = Set(lib.home.prefix(20))
+        await w.reader.set(selection: selection)
+        await w.reader.expireHistory()
+        await w.reader.set(accessDuringNextWholeRead: .limited)
+        let run = try await w.pipeline.run()
+        #expect(run.removed == 0, "\(run.removed) photos deleted when access became limited during the read")
+        #expect(try await w.store.outOfViewCount() == lib.assets.count - selection.count)
+        await w.reader.set(access: .full)
+        let back = try await w.pipeline.run()
+        #expect(back.isComplete)
+        #expect(back.contentAnalyzed == 0 && back.placesResolved == 0)
+    }
+
+    /// Photos set aside while the library's change history has a mark (cannot happen through a
+    /// run: a read with limited access removes the mark): the next run with full access reads
+    /// the whole library and takes them back, instead of reading only the changes.
+    @Test func photosSetAsideAreTakenBackByAWholeRead() async throws {
+        let lib = Self.library()
+        let w = try Self.world(lib.assets)
+        #expect(try await w.pipeline.run().isComplete)
+        #expect(try await w.store.value(AnalysisPipeline.LibraryReadMark.self, forKey: AnalysisPipeline.Key.libraryMark) != nil)
+        #expect(try await w.store.setAside(notIn: Set(lib.home)) == lib.assets.count - lib.home.count)
+        let wholeReads = await w.reader.wholeReads
+        let run = try await w.pipeline.run()
+        #expect(run.isComplete)
+        #expect(await w.reader.wholeReads == wholeReads + 1)
+        #expect(try await w.store.outOfViewCount() == 0)
+        #expect(run.contentAnalyzed == 0)
+    }
 }

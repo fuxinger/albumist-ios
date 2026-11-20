@@ -183,6 +183,27 @@ struct StoreTests {
         #expect(try await s.overrides().count == 1, "the user's decisions stay")
     }
 
+    /// A photo that comes back unchanged from being set aside moves the places revision on:
+    /// the time zones worked out from the places of the photos in view must count it again
+    /// (its local date and day). One read again that was in view does not.
+    @Test func aPhotoBackFromBeingSetAsideMovesThePlacesRevisionOn() async throws {
+        let s = try store()
+        let a = AssetSnapshot(id: "a", creationDate: Fixture.date("2026-01-01"), location: GeoCoordinate(latitude: 48.1, longitude: 11.5))
+        let b = AssetSnapshot(id: "b", creationDate: Fixture.date("2026-01-02"), location: GeoCoordinate(latitude: 40.7, longitude: -74.0))
+        try await s.upsertAssets([a, b])
+        _ = try await s.setAside(notIn: ["a"])
+        let aside = await s.placesRevision
+        #expect(try await s.upsertAssets([a]).isEmpty)
+        #expect(await s.placesRevision == aside, "a photo in view read again unchanged")
+        #expect(try await s.upsertAssets([b]).isEmpty)
+        #expect(await s.placesRevision > aside, "the photo back in view")
+        #expect(try await s.assetCount(includingOutOfView: true) == 2)
+        _ = try await s.setAside(notIn: [])
+        #expect(try await s.assetCount() == 0)
+        #expect(try await s.assetCount(includingOutOfView: true) == 2)
+        #expect(try await s.outOfViewAssetIDs() == ["a", "b"])
+    }
+
     @Test func incrementalAnalysisTracking() async throws {
         let s = try store()
         try await s.upsertAssets((0..<10).map { AssetSnapshot(id: AssetID("a\($0)"), creationDate: Fixture.date("2026-01-01")) })

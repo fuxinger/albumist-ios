@@ -21,6 +21,13 @@ ausgeschlossen und mit iOS-Dateischutz verschlüsselt (`completeUntilFirstUserAu
 nach einem Neustart unlesbar, bis das iPhone einmal entsperrt wurde; stärker geht nicht, weil
 die Analyse auch nachts bei gesperrtem Gerät läuft).
 
+Bei „Ausgewählte Fotos“ behält die Datenbank, was sie über die übrigen, gerade nicht
+freigegebenen Fotos schon weiß: Metadaten, Orte, Analyseergebnisse und den erkannten Text in der
+verkleinerten, maskierten Fassung (strengere Masken gelten auch für sie). Albumist zeigt, zählt
+und durchsucht sie nicht, bis sie wieder freigegeben sind. Gelöscht wird das erst, wenn Albumist
+wieder alle Fotos sieht und ein Foto dann fehlt, oder mit „Analyse neu aufbauen“ (Ergebnisse,
+Orte und Text aller Fotos).
+
 Eine kleine Kopie nur der Entscheidungen liegt in *Application Support/Albumist Backup*
 (`decisions.json`, gleicher Dateischutz) und ist Teil des Geräte-Backups: Ausnahmen, Regeln,
 Einstellungen, eigene Namen, Reise-Kennungen, die von Albumist angelegten Alben und der Verlauf

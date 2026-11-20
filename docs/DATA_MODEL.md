@@ -56,4 +56,8 @@ Idempotenzschlüssel (Plan-ID + Index + Inhalts-Hash).
   (`includingOutOfView`). Wird ein Foto wieder gelesen, ist es wieder sichtbar (0); gelöscht
   wird es erst, wenn ein ganzes Lesen mit vollem Zugriff es nicht findet. Ein Lauf liest nur
   Änderungen, solange kein Foto beiseiteliegt. Fotos älterer Versionen sind sichtbar.
+  Was für immer an Fotos hängt, behält die beiseitegelegten: Reise-Kennungen
+  (`user.tripIdentities`), gewählte Vorschläge (`user.heldSuggestions`, gezeigt nur mit den
+  freigegebenen Fotos) und häufige Orte, die die Auswahl nicht ergibt
+  (`analysis.frequentPlacesOutOfView`, nur für ihre Kennung, nie gezeigt).
 Migrationen laufen nur vorwärts, jede in einer Transaktion.

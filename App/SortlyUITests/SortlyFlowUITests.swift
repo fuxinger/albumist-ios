@@ -986,7 +986,10 @@ final class SortlyFlowUITests: XCTestCase {
             ignoreAndUndo()
         }
 
-        // Albums
+        // Albums. Until 20.11. this used the albums DeviceConditionUITests 05, 07 and 08 left on
+        // the simulator of the same group; since they run in "device-flows" (UI run 44777850189:
+        // "Missing: open an album" on an empty tab), the test makes its own, as test3 does.
+        ensureAlbum(for: "the album check")
         if tap(tabButton("Alben"), "albums tab") {
             // Design review W12: an album shows all its photos, and each opens large.
             // An album with photos: an empty one has none to open.
@@ -1778,19 +1781,24 @@ final class SortlyFlowUITests: XCTestCase {
     /// (no sweep-skip word in it), kept for the sweep. Until 20.11. the sweep used the albums
     /// that DeviceConditionUITests 05, 07 and 08 left on the same simulator; those now run in
     /// their own group (device-flows), so the sweep makes its own.
-    private func ensureAlbumForSweep() {
-        guard tap(tabButton("Alben"), "albums tab before the sweep") else { return }
+    private func ensureAlbumForSweep() { ensureAlbum(for: "the sweep") }
+
+    /// An album with photos on the Alben tab: makes "Testalbum Rundgang" through a manual plan
+    /// when the tab says it has none. Every test starts on a fresh library, so a test that needs
+    /// an album makes its own instead of relying on what another test left behind.
+    private func ensureAlbum(for purpose: String) {
+        guard tap(tabButton("Alben"), "albums tab before \(purpose)") else { return }
         let empty = app.staticTexts["Noch keine Alben"]
         let album = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label MATCHES %@", "(.*, )?[0-9]+ Fotos?")).firstMatch
         // The tab shows its rows or says it has none.
         let shown = UITestWait.holds(timeout: 10) { empty.exists || album.exists }
         if !shown {
-            print("UI_STEP_MISSING albums tab before the sweep")
-            XCTFail("The albums tab showed neither an album row nor \"Noch keine Alben\" before the sweep")
+            print("UI_STEP_MISSING albums tab before \(purpose)")
+            XCTFail("The albums tab showed neither an album row nor \"Noch keine Alben\" before \(purpose)")
         }
         let made = empty.exists
-        print("UI_FACT albums tab empty before the sweep \(made)")
+        print("UI_FACT albums tab empty before \(purpose) \(made)")
         if made, openManualPlan("Testalbum Rundgang"),
            tap(app.buttons["plan.apply"], "apply the sweep's album", timeout: 30) {
             let done = button("Rückgängig machen").waitForExistence(timeout: 900)
@@ -1809,13 +1817,13 @@ final class SortlyFlowUITests: XCTestCase {
             print("UI_FACT sweep album plan interrupted by the restart \(cut)")
             XCTAssertFalse(cut, "The sweep's album plan shows as interrupted after the restart")
         }
-        tap(tabButton("Übersicht"), "overview before the sweep")
+        tap(tabButton("Übersicht"), "overview before \(purpose)")
         _ = app.navigationBars["Übersicht"].waitForExistence(timeout: 10)
         guard made else { return }
         // After a plan the analysis starts again on its own time: up to 2 s for its "Pause",
         // then the overview idle over three checks (as in ensureHistory, without a fixed pause).
         _ = UITestWait.holds(timeout: 2) { app.buttons["Pause"].exists }
-        _ = waitStable("analysis before the sweep", timeout: 180) { analysisIdle }
+        _ = waitStable("analysis before \(purpose)", timeout: 180) { analysisIdle }
     }
 
     /// Third run: every tab, every row, one level deep.

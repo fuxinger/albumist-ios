@@ -167,10 +167,11 @@ extension AnalysisPipeline {
 
 /// Everything one `AppModel.refreshDerived` call shows, read and worked out off the main actor in
 /// one call (`AnalysisPipeline.derivedRefresh`), so the app assigns all of it together, and only
-/// when the call is still the newest (`LatestCall`). Reviews G4-03 and P4-10: the suggestions, the
-/// facts, the inventory, the history and the rest were assigned as each was read, and only the
-/// last assignment asked whether the call was the newest; two overlapping calls that ended in
-/// swapped order left an older call's facts next to the newer call's states.
+/// when the call is newer than the result on screen (`LatestCall.mayShow`). Reviews G4-03 and
+/// P4-10: the suggestions, the facts, the inventory, the history and the rest were assigned as
+/// each was read, and only the last assignment asked whether the call was the newest; two
+/// overlapping calls that ended in swapped order left an older call's facts next to the newer
+/// call's states.
 public struct DerivedRefresh: Sendable {
     /// The suggestions with their matches (`refreshMatchesIfOutdated`).
     public var snapshot: ProposalSnapshot?
@@ -193,7 +194,7 @@ public struct DerivedRefresh: Sendable {
 
     public init() {}
 
-    /// What a call applies at once, whether or not it is still the newest when it ends: the
+    /// What a call applies at once, whether or not it shows its result when it ends: the
     /// decisions opened again after a recheck (the store gives them out once) and the plans taken
     /// back (settled with the free albums before the library is read, so a read that fails there
     /// does not skip it).

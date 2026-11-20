@@ -252,7 +252,7 @@ final class AppModel {
     /// background): its time share moves the value from the floor (`ResumedRun.spend`).
     @ObservationIgnored private var resumedActive = 0.0
     /// When the overview last looked for the early suggestions without finding them.
-    /// `refreshDerived` calls that overlap: only the newest assigns its result.
+    /// `refreshDerived` calls that overlap: a call assigns its result only over an older one.
     @ObservationIgnored private var derivedCalls = LatestCall()
     /// The open database's stamp (`SortlyStore.identity`), written into the analysis marker.
     @ObservationIgnored private var databaseID: String?
@@ -1927,9 +1927,11 @@ final class AppModel {
         await reconcileManagedAlbums(quiet: true)
         do {
             // Everything is read and worked out off the main actor in one call and comes back as
-            // one package (`DerivedRefresh`), assigned together and only by the newest call: an
-            // older call that finished later put back older suggestions or facts next to newer
-            // states until the next refresh (reviews G4-03, P4-10). Everything that grows with the
+            // one package (`DerivedRefresh`), assigned together and only when the call is newer
+            // than the result on screen: an older call that finished later put back older
+            // suggestions or facts next to newer states until the next refresh (reviews G4-03,
+            // P4-10); a newer call that failed does not throw away an older call's result that is
+            // still newer than what is shown (second review, NIT-1). Everything that grows with the
             // library is read once there, its passes side by side (review P4-02), and what the
             // first screens make from all photos comes with it (review P4-09). The reopenings
             // after a recheck are decisions, applied once whichever call gets them; the plans
@@ -1942,9 +1944,11 @@ final class AppModel {
                 undone: { undone in await Purchases.shared.settleUndone(undone) })
             let refreshed = try await pipeline.derivedRefresh(settings: settings, managed: managed, scope: scope,
                                                               historyLimit: historyLimit, once: once)
-            // A newer call started meanwhile, or the part of the library changed: this result
-            // is older than what is or will be shown (review of 9f0bc40).
-            guard derivedCalls.isNewest(call), scope == analysisScope else { return }
+            // A newer call showed its result meanwhile, or the part of the library changed: this
+            // result is older than what is shown (review of 9f0bc40). Noted at once, so an older
+            // call that ends later sees it.
+            guard derivedCalls.mayShow(call), scope == analysisScope else { return }
+            derivedCalls.shown(call)
             // From here to the end of the assignments there is no await: nothing of another call
             // comes in between.
             let snapshot = refreshed.snapshot, derived = refreshed.library

@@ -11,8 +11,9 @@ import SortlyTestSupport
 /// rest were assigned as each was read, so two overlapping calls that finished in swapped order
 /// left an older call's suggestions or facts next to the newer call's states until the next
 /// refresh. With a trip change in flight that was the old trip back in the list for a moment.
-/// Now everything is read first and assigned together, only by the newest call.
-@Suite("Overlapping refreshes: only the newest call assigns")
+/// Now everything is read first and assigned together, and only over an older result: never
+/// over a newer call's, but also when the newer calls failed (second review, NIT-1).
+@Suite("Overlapping refreshes: a call assigns only over an older result")
 struct OverlappingRefreshTests {
     /// Everything the overview shows from a refresh.
     static let shown = ["snapshot", "recheckedSuggestions", "recurringPlaceReport", "detectedHome", "homeChangeNotice",
@@ -20,25 +21,43 @@ struct OverlappingRefreshTests {
                         "undonePlans", "removedFromProposals", "datesCache", "atlasCache", "atlasYearsCache", "factsIndex",
                         "detectedHomePlaceCache"]
 
-    /// The rule itself: of two overlapping calls only the newest one may assign, whichever ends last.
-    @Test func onlyTheNewestCallAssigns() {
+    /// The rule itself: a call assigns only when it is newer than the result on screen. Of two
+    /// overlapping calls the older one never puts its result over the newer one's, whichever
+    /// ends last; when the newer one failed, the older one's result is still newer than what is
+    /// shown (second review of P4-10, NIT-1).
+    @Test func aCallAssignsOnlyOverAnOlderResult() {
         var calls = LatestCall()
         let older = calls.begin()
         let newer = calls.begin()
-        #expect(calls.isNewest(newer))
-        #expect(!calls.isNewest(older), "an older call that ends last would put back its result")
+        #expect(calls.isNewest(newer) && !calls.isNewest(older))
+        #expect(calls.mayShow(newer) && calls.mayShow(older), "nothing is shown yet")
+        calls.shown(newer)
+        #expect(!calls.mayShow(older), "an older call that ends last would put back its result")
+
+        var failing = LatestCall()
+        let first = failing.begin()
+        _ = failing.begin() // fails: shows nothing
+        #expect(failing.mayShow(first), "a newer call that failed throws away the older call's result")
+        failing.shown(first)
+        #expect(!failing.mayShow(first) && failing.lastShown == first)
+        let third = failing.begin()
+        #expect(failing.mayShow(third))
     }
 
-    /// The App assigns nothing it shows before the newest-call guard, and each of it after the
-    /// guard (it does not build on Linux, so its code is read without comments and strings,
-    /// `AppSource.code`). The reopenings after a recheck are decisions and stay before it.
-    @Test func refreshDerivedAssignsOnlyAfterTheNewestCallGuard() throws {
+    /// The App assigns nothing it shows before its guard (a call shows its result only over an
+    /// older one, `LatestCall.mayShow`), and each of it after the guard (it does not build on
+    /// Linux, so its code is read without comments and strings, `AppSource.code`). The
+    /// reopenings after a recheck are decisions and stay before it.
+    @Test func refreshDerivedAssignsOnlyAfterItsGuard() throws {
         let model = try AppSource.read("App/Sortly/Model/AppModel.swift")
         let body = AppSource.code(try #require(AppSource.body(of: "func refreshDerived(", in: model)))
-        let guardLine = "guard derivedCalls.isNewest(call), scope == analysisScope else { return }"
+        let guardLine = "guard derivedCalls.mayShow(call), scope == analysisScope else { return }"
         let parts = body.components(separatedBy: guardLine)
-        #expect(parts.count == 2, "refreshDerived has no single newest-call guard")
+        #expect(parts.count == 2, "refreshDerived has no single guard that lets a call show only over an older result")
         guard parts.count == 2 else { return }
+        // Noted at once, before anything else of the call: an older call that ends later sees it.
+        let notes = parts[1].trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("derivedCalls.shown(call)")
+        #expect(notes, "refreshDerived does not note right after its guard that the call shows its result")
         func assigns(_ name: String, in text: String) throws -> Bool {
             let pattern = try Regex("(?m)^\\s*(self\\.)?\(name)\\s*=[^=]")
             return text.contains(pattern) || text.contains("{ self.\(name) = ") || text.contains("{ \(name) = ")
@@ -53,11 +72,17 @@ struct OverlappingRefreshTests {
         let reopensFirst = parts[0].contains("reopenAfterRecheck(reopened)") && parts[0].contains("DerivedRefresh.Once(")
         #expect(reopensFirst, "the reopenings after a recheck depend on the call being the newest")
         // One call into the engine, one package: nothing else is awaited before the guard
-        // (`reconcileManagedAlbums` comes before the reads, as before).
-        let awaits = parts[0].components(separatedBy: "await ").count - 1
-        #expect(awaits == 4, "refreshDerived awaits \(awaits) things before its guard: the album check, the package and the two it applies once")
+        // (`reconcileManagedAlbums` comes before the reads, as before). What is awaited, by name
+        // (second review, NIT-6: a count of the text "await " broke with a line break after it).
+        let awaitedCall = try Regex("\\bawait\\s+([A-Za-z_][A-Za-z0-9_.?]*)")
+        func awaited(in text: String) -> [String] {
+            text.matches(of: awaitedCall).compactMap { $0.output[1].substring.map(String.init) }.sorted()
+        }
+        let beforeGuard = awaited(in: parts[0])
+        #expect(beforeGuard == ["Purchases.shared.settleUndone", "pipeline.derivedRefresh", "reconcileManagedAlbums", "self?.reopenAfterRecheck"],
+                "refreshDerived awaits \(beforeGuard) before its guard: only the album check, the package and the two it applies once")
         let assigning = parts[1].components(separatedBy: "} catch {")[0]
-        #expect(!assigning.contains("await "), "refreshDerived awaits between its guard and its assignments")
+        #expect(awaited(in: assigning).isEmpty, "refreshDerived awaits \(awaited(in: assigning)) between its guard and its assignments")
         // An older call that fails does not show its error over a newer call's result.
         let catchPart = body.components(separatedBy: "} catch {").dropFirst().joined()
         #expect(catchPart.contains("if derivedCalls.isNewest(call) { message = .failure("), "an older call shows its error")
@@ -72,18 +97,23 @@ struct OverlappingRefreshTests {
         var history: Int?
     }
 
+    struct Failed: Error {}
+
     /// The overview as `AppModel.refreshDerived` fills it, on one actor like the main actor.
     actor Overview {
         var calls = LatestCall()
         var shown = Shown()
 
         /// As the app does it now: one package from the engine (`derivedRefresh`), assigned
-        /// together, only by the newest call.
-        func refresh(_ pipeline: AnalysisPipeline, settings: OrganizationSettings, probe: DerivedLibrary.Probe?) async throws {
+        /// together, only over an older result. `fails`: the call throws once it has its package
+        /// (as a read of the store can).
+        func refresh(_ pipeline: AnalysisPipeline, settings: OrganizationSettings, probe: DerivedLibrary.Probe?, fails: Bool = false) async throws {
             let call = calls.begin()
             let refreshed = try await pipeline.derivedRefresh(settings: settings, managed: [], scope: .all, historyLimit: 50,
                                                               once: .nothing, probe: probe)
-            guard calls.isNewest(call) else { return }
+            if fails { throw Failed() }
+            guard calls.mayShow(call) else { return }
+            calls.shown(call)
             shown = Shown(facts: Set(refreshed.library.facts.map(\.id)), states: Set(refreshed.library.status.states.keys),
                           history: refreshed.history.count)
         }
@@ -107,8 +137,8 @@ struct OverlappingRefreshTests {
 
     /// Two overlapping refreshes: the first one is held after it read the facts, the library
     /// changes (one more photo), the second one ends, then the first. `asBefore`: with the
-    /// order the app had before the fix.
-    static func overlapping(asBefore: Bool) async throws -> (shown: Shown, photos: Int) {
+    /// order the app had before the fix. `secondFails`: the second call throws.
+    static func overlapping(asBefore: Bool, secondFails: Bool = false) async throws -> (shown: Shown, photos: Int) {
         let library = try await DerivedRefreshTests().analysed()
         let pipeline = library.launch()
         let overview = Overview()
@@ -133,7 +163,11 @@ struct OverlappingRefreshTests {
         if asBefore {
             try await overview.refreshAsBefore(pipeline, settings: settings, probe: nil)
         } else {
-            try await overview.refresh(pipeline, settings: settings, probe: nil)
+            do {
+                try await overview.refresh(pipeline, settings: settings, probe: nil, fails: secondFails)
+            } catch is Failed {
+                #expect(secondFails)
+            }
         }
         release.withLock { $0 = true }
         try await first.value
@@ -149,6 +183,17 @@ struct OverlappingRefreshTests {
         #expect(shown.facts.contains(Self.late.id))
         #expect(shown.states.contains(Self.late.id))
         #expect(shown.facts == shown.states, "facts of one call next to states of another: \(shown.facts.count) photos with facts, \(shown.states.count) with a state")
+        #expect(shown.history != nil)
+    }
+
+    /// Second review of P4-10, NIT-1: the newer call fails, the older one ends after it. Its
+    /// result is newer than what is on screen (nothing yet here), so it is shown; "only the
+    /// newest call assigns" threw it away and left the screen as it was until the next refresh.
+    @Test func aNewerCallThatFailsLeavesTheOlderResultToShow() async throws {
+        let (shown, photos) = try await Self.overlapping(asBefore: false, secondFails: true)
+        #expect(!shown.facts.isEmpty, "the older call's result was thrown away")
+        #expect(shown.facts.count == photos - 1 && !shown.facts.contains(Self.late.id), "not the older call's facts")
+        #expect(shown.facts == shown.states, "facts of one call next to states of another")
         #expect(shown.history != nil)
     }
 

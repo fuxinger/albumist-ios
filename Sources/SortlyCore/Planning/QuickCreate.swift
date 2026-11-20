@@ -11,9 +11,15 @@ public enum QuickCreate {
     /// through the preview, decision Punkt 5), renaming, moving or merging one, a suggestion still
     /// undecided (a name is missing, several albums fit) and personal content ("Ansehen …") open
     /// the suggestion first.
-    public static func mayCreateAtOnce(_ proposal: AlbumProposal, decision: ProposalDecision) -> Bool {
+    ///
+    /// Personal as its card treats it (`ProposalCardText`): a sensitive suggestion, or one whose
+    /// preview is hidden because every photo is a sensitive document (`hidesPreview`, the app's
+    /// `previewHidden(for:)`). Its card shows no photo, so the user has never seen what would go
+    /// into Photos (second review of the cards). The app's `createNow`, where every "Anlegen"
+    /// ends, passes it.
+    public static func mayCreateAtOnce(_ proposal: AlbumProposal, decision: ProposalDecision, hidesPreview: Bool = false) -> Bool {
         guard case .createNew = decision else { return false }
-        return !proposal.isSensitive
+        return !proposal.isSensitive && !hidesPreview
     }
 
     /// Whether `plan` may run without the preview: it makes exactly one album with photos in it,

@@ -79,7 +79,9 @@ extension AppModel {
         // recommendation (with the name the user gave it).
         let chosen = decision(for: proposal)
         let pick = chosen.isAccepted ? chosen : recommendedDecision(for: proposal)
-        guard QuickCreate.mayCreateAtOnce(proposal, decision: pick) else {
+        // A suggestion whose photos its card hides (every one a sensitive document) is looked
+        // at first, as a sensitive one is: the user has not seen what would go into Photos.
+        guard QuickCreate.mayCreateAtOnce(proposal, decision: pick, hidesPreview: previewHidden(for: proposal)) else {
             route = .suggestion(proposal.id)
             return .needsLook
         }

@@ -52,6 +52,21 @@ struct QuickCreateTests {
         #expect(!QuickCreate.mayCreateAtOnce(personal, decision: .createNew(title: nil, folderPath: nil)))
     }
 
+    /// Personal content is looked at first, as its card treats it (`ProposalCardText`): a
+    /// sensitive suggestion, and one whose preview is hidden because every photo is a sensitive
+    /// document. Its card shows no photo, so the user has never seen what would go into Photos
+    /// (second review of the cards). Both open the suggestion, then the preview.
+    @Test func whatTheUserHasNotSeenIsLookedAtFirst() {
+        let new = ProposalDecision.createNew(title: nil, folderPath: nil)
+        #expect(QuickCreate.mayCreateAtOnce(Self.kyoto, decision: new, hidesPreview: false))
+        #expect(!QuickCreate.mayCreateAtOnce(Self.kyoto, decision: new, hidesPreview: true))
+        #expect(!QuickCreate.mayCreateAtOnce(Self.kyoto, decision: .createNew(title: "Kyoto", folderPath: ["Japan"]), hidesPreview: true))
+        var sensitive = Self.kyoto
+        sensitive.isSensitive = true
+        #expect(!QuickCreate.mayCreateAtOnce(sensitive, decision: new, hidesPreview: false))
+        #expect(!QuickCreate.mayCreateAtOnce(sensitive, decision: new, hidesPreview: true))
+    }
+
     /// What „Anlegen“ chooses is what the suggestion recommends: a certain match of the user's
     /// album is extended, so its card goes through the preview („Ergänzen …“); a place without
     /// a name stays undecided („Benennen …“).
@@ -250,6 +265,17 @@ struct QuickCreateTests {
         #expect(found == found.sorted(), "asked in another order than \(order)")
         #expect(create.contains("endPreview("), "the selection of the suggestion is never given back")
         #expect(create.contains("purchase ="), "used-up free albums do not open the purchase sheet")
+    }
+
+    /// Every card's „Anlegen“ and the suggestion's own „Album anlegen“ end in `createNow`: it asks
+    /// whether the suggestion's photos are hidden, exactly as its card decides it
+    /// (`previewHidden(for:)`, `ProposalCardText.hidesPreview`), so such a suggestion opens first.
+    @Test func theAppAsksWhetherThePhotosWereShown() throws {
+        let code = AppSource.code(try AppSource.read(Self.model))
+        let create = try #require(AppSource.body(of: "func createNow(", in: code))
+        let asks = AppSource.calls(of: "QuickCreate.mayCreateAtOnce(", in: create)
+        #expect(asks.count == 1)
+        #expect(asks.allSatisfy { $0.contains("hidesPreview: previewHidden(for: proposal)") }, "\(asks)")
     }
 
     /// „Widerrufen“ finds out first whether the undo deletes the album (iOS asks then), as every

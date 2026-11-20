@@ -1,0 +1,38 @@
+import SwiftUI
+
+/// Before Albumist deletes albums or folders in Photos, iOS asks once more ("delete 15 albums
+/// and 9 folders"). Albumist's own confirmation before it says so, so the word "delete" in the
+/// iOS question does not scare (review 18.11., P3-07). Only when the change really deletes one
+/// (`AppModel.undoDeletesCollections`, `ChangePlan.deletesCollections`): an undo that only
+/// takes photos out of albums says nothing about deleting. `DeleteQuestionNoteTests` finds
+/// every confirmation by what its button calls.
+enum DeleteQuestionNote {
+    /// The sentence itself, the one place it is written.
+    static var text: Text {
+        Text("iOS fragt gleich noch einmal, ob Albumist die Alben löschen darf. Deine Fotos bleiben.")
+    }
+
+    /// A confirmation's message: `lead`, then the iOS question when `deletes`, otherwise that
+    /// the photos stay (the note says that too, so it is never said twice).
+    static func message(_ lead: Text, deletes: Bool) -> Text {
+        let tail = deletes ? text : Text("Deine Fotos bleiben unverändert.")
+        return Text("\(lead) \(tail)")
+    }
+}
+
+extension View {
+    /// A button title with a small spinner beside it while Albumist checks whether the change
+    /// deletes albums (a moment, at most `DeleteQuestion.limit`), as Apple's own buttons do
+    /// while they work (third review of P3-07, SHOULD-2).
+    func checkingBeside(_ checking: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.s) {
+            if checking {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true) // the value below says it
+            }
+            self
+        }
+        .accessibilityValue(checking ? Text("Wird vorbereitet") : Text(verbatim: ""))
+    }
+}

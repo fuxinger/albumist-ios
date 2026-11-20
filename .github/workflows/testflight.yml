@@ -11,8 +11,11 @@ run-name: >-
 # which replaced the click of decision 5 of 18.11.). No job waits for or looks at other runs.
 #
 # Two gates (input "gate"; the owner's decision 10 of 18.11.2026, docs/TESTFLIGHT.md "Zwei Tore"):
-#   - big (the default; every build for testers and the App Store): CI, the UI flow with every
-#     group, the small stress pass, the UI gate over every group.
+#   - big (the default; every build for testers and the App Store): CI, the UI flow, the small
+#     stress pass, the UI gate over every group. Every group needs a full green for exactly this
+#     content; since the owner's decision of 20.11.2026, 17:12 the full UI pass runs once before
+#     the merge (ui.yml by hand on the pull request's branch, quick off), and the UI flow here
+#     runs only the groups without such a green (usually none), the gate takes the others.
 #   - small (the daily build for the owner's own iPhone; daily-build.yml starts it each morning
 #     when the app changed, and it can be started by hand): CI, the two short UI groups
 #     flow-full and contrast (about 18 min each), the small stress pass, the UI gate over those
@@ -20,6 +23,10 @@ run-name: >-
 #     gate"; such a build is not given to testers.
 #   The stress pass belongs to both gates: the owner's rule 17.11. and his decision 4 want it
 #   before every upload, and the daily build uploads too (an internal build for the owner).
+#   Since the owner's decision of 20.11.2026, 17:20 it runs once before the merge (by hand on the
+#   pull request's branch, beside the full UI pass); ui-stress.yml skips it here when a green
+#   pass of 10,000 photos exists for exactly this content, and the UI gate checks it either way
+#   (--stress 10000-15). Without such a green it runs here as before.
 # Either way the upload follows the gates, without a click (the owner's decision of 19.11.2026):
 # the upload job runs only from main and only when every gate below is green, in the GitHub
 # environment "testflight-upload", which only the branch main may use, and the four App Store
@@ -238,6 +245,12 @@ jobs:
     # included, as it uploads too).
     needs: tests
     uses: ./.github/workflows/ui-stress.yml
+    # actions: read for its "Stress plan" (earlier passes, reuse by content); checks: read for its
+    # "UI stress verdict", which is skipped here (release) but must not ask for more than it gets.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     with:
       release: true
       # The small pass (the owner's rule 17.11.), named here rather than left to defaults.
@@ -260,13 +273,14 @@ jobs:
     # longest (device conditions, 62 min) first; the short groups that wait end before it, so
     # the run takes no longer (TestFlight run 44461253154). Not after the stress pass or the UI
     # flow: that would add the whole ~30 min of this job to the run.
-    # A red here is not remembered across runs, the rule of the stress pass (second review of
-    # C7, decided so): within a run "Re-run failed jobs" cannot turn it green (earlier_attempts.py:
-    # its build and test steps block), but a NEW run on the same app runs it again, unlike a UI
-    # group, whose red the UI gate keeps for that app and test code (ui_evidence.py). The daily
-    # build never starts a new run on a commit that already was in a TestFlight run, or that adds
-    # only docs to one (daily_build.py); by hand, fix the cause first. Keeping it like a UI group would need this
-    # job's own fingerprints in its name and a check in the UI gate; not done.
+    # A red here is not remembered across runs (second review of C7, decided so): within a run
+    # "Re-run failed jobs" cannot turn it green (earlier_attempts.py: its build and test steps
+    # block), but a NEW run on the same app runs it again, unlike a UI group or, since 20.11.2026,
+    # the stress pass, whose red the UI gate keeps for that app and test code by the key in the
+    # job's name (ui_evidence.py, gate --stress). The daily build never starts a new run on a
+    # commit that already was in a TestFlight run, or that adds only docs to one
+    # (daily_build.py); by hand, fix the cause first. Keeping it like the stress pass would need
+    # this job's own key in its name and a check in the UI gate; not done.
     # Unverified until a Mac run.
     name: Release build smoke test (UI)
     needs: tests
@@ -476,10 +490,12 @@ jobs:
           # Empty for the big gate (every group); the small gate's two groups.
           GATE_GROUPS: ${{ needs.check.outputs.gate_groups }}
         run: |
+          # The stress pass of this run or, since the owner's decision of 20.11.2026, 17:20, the
+          # one before the merge for exactly this content (ui-stress.yml skips it then).
           if [ -n "$GATE_GROUPS" ]; then
-            python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS"
+            python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS" --stress 10000-15
           else
-            python3 .github/scripts/ui_evidence.py gate
+            python3 .github/scripts/ui_evidence.py gate --stress 10000-15
           fi
 
   release:

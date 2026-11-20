@@ -17,6 +17,13 @@ final class ThumbnailCache {
         cache.totalCostLimit = 80 * 1024 * 1024
         cache.countLimit = 2000
         assets.countLimit = 6000
+        // On a memory warning the thumbnails go at once (P4-06), and what the image manager
+        // keeps; each comes again from Photos when it is shown.
+        MemoryPressure.shared.register("thumbnails", owner: self) {
+            $0.cache.removeAllObjects()
+            $0.assets.removeAllObjects()
+            $0.manager.value.stopCachingImagesForAllAssets()
+        }
     }
 
     func image(for id: AssetID, side: CGFloat) async -> UIImage? {
@@ -330,7 +337,7 @@ struct CoverThumbnail: View {
                     if hidden {
                         Image(systemName: "eye.slash")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondary) // secondary-text: system (a symbol on a placeholder tile, not text: 3:1 is enough)
                     }
                 }
                 .accessibilityHidden(true)
@@ -382,7 +389,7 @@ struct ThumbnailGrid: View {
             Text("Vorschau ausgeblendet").font(.subheadline)
                 .multilineTextAlignment(.center)
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.noteText)
         .frame(maxWidth: .infinity, minHeight: 120)
         .padding(Theme.Spacing.m)
         .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))

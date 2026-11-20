@@ -53,6 +53,7 @@ class FailureTests(unittest.TestCase):
                      "Install XcodeGen", "Upload to TestFlight", "Upload results", "Post Run actions/checkout@abc",
                      "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "Earlier attempts of this run",
                      "Plan the UI groups", "UI groups green for this app and test code",
+                     "Key of this pass and whether it runs", "Stress pass green for this app and test code",
                      "Keep the retry record for the run summary", "Wait before the second try of the retry record",
                      "Keep the retry record for the run summary (second try)"):
             with self.subTest(step=step):

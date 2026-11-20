@@ -198,7 +198,11 @@ struct AnalysisCoverageTests {
         await reader.set(assets: selection)
         let next = try await p.run()
         #expect(next.isComplete)
-        #expect(next.removed == assets.count - selection.count)
+        // The photos outside the selection are set aside, not deleted (review P1-07): what was
+        // found about them stays for when they are shared again.
+        #expect(next.removed == 0)
+        #expect(next.setAside == assets.count - selection.count)
+        #expect(try await store.outOfViewCount() == assets.count - selection.count)
         #expect(try await store.countNeedingAnalysis(version: AnalysisPipeline.contentVersion) == 0)
     }
 
@@ -287,8 +291,20 @@ struct AnalysisCoverageTests {
         let first = Self.pipeline(store: firstStore, reader: InMemoryLibraryReader(assets: assets), analyzer: killed, batchSize: batch)
         let progress = Mutex<[AnalysisPipeline.Progress]>([])
         let abandoned = Task { try await first.run(onProgress: { p in progress.withLock { $0.append(p) } }) }
-        // Wait until it hangs in the 25th photo.
-        while killed.contentCalls.withLock({ $0.count }) < 25 { try await Task.sleep(for: .milliseconds(5)) }
+        // Wait until it hangs in the 25th photo, and until the early suggestions it makes beside
+        // the image step are saved: a process iOS has ended writes nothing more, but this one
+        // goes on in the test, and a write of it during the second run locked the database
+        // ("SQLite error 5", 1 of 6 runs on main 31ec24c, 5 of 6 once the overview refresh
+        // made the early set later).
+        // Only a guard against a hang, not a measure of speed: alone this takes under a second,
+        // but in the whole parallel suite the load tests hold the shared threads, and the test's
+        // own loop was not resumed for 71.7 s (Linux, 4 cores, 20.11.; IMPROVEMENTS.md).
+        let clock = ContinuousClock()
+        let waitedFrom = clock.now
+        while killed.contentCalls.withLock({ $0.count }) < 25 || !progress.withLock({ $0.contains(where: \.earlyProposals) }) {
+            try #require(clock.now - waitedFrom < .seconds(300), "the first process never got to the 25th photo with its early suggestions saved")
+            try await Task.sleep(for: .milliseconds(5))
+        }
         let markedBefore = try await firstStore.assetCount() - (try await firstStore.countNeedingAnalysis(version: AnalysisPipeline.contentVersion))
         #expect(markedBefore >= 20 && markedBefore < 25)
 

@@ -35,13 +35,91 @@ enum UITestWait {
     static func until(_ what: String, timeout: TimeInterval,
                       file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) -> Bool {
         let start = Date()
-        var met = condition()
-        while !met, Date().timeIntervalSince(start) < timeout {
-            usleep(500_000)
-            met = condition()
-        }
+        let met = holds(timeout: timeout, condition)
         report(met, what, since: start, timeout: timeout, file: file, line: line)
         return met
+    }
+
+    /// `condition` holds within `timeout` seconds, checked every `interval` seconds; goes on as
+    /// soon as it does. Unlike `until` it neither prints nor fails: for a try the caller repeats
+    /// or checks itself right after (a tab bar that expands after a swipe), and for something
+    /// that may or may not come (a system alert). Every condition wait of this file polls here.
+    static func holds(timeout: TimeInterval, interval: TimeInterval = 0.5, _ condition: () -> Bool) -> Bool {
+        let start = Date()
+        var met = condition()
+        while !met, Date().timeIntervalSince(start) < timeout {
+            // pacing: the poll's interval
+            usleep(UInt32(interval * 1_000_000))
+            met = condition()
+        }
+        return met
+    }
+
+    /// What `screenAtRest` found.
+    enum ScreenRest {
+        /// Two snapshots in a row put every element in the same place; the last of them.
+        case still(any XCUIElementSnapshot)
+        /// The last two snapshots still differed when the time ran out (the test has failed).
+        case moving
+        /// No two snapshots in a row could be read (failed or too slow): not checked, not failed.
+        case unread
+    }
+
+    /// The screen of `app` has stopped moving: two snapshots of its whole tree, half a second
+    /// apart, put every element in the same place (to the point). Replaces the fixed second
+    /// "to let a scroll come to rest" before a screenshot, a tree check or an audit: it goes on
+    /// once a decelerating list has stopped, and a screen that is still moving after `timeout`
+    /// fails with `UI_STEP_MISSING`. Only movement fails: a snapshot that cannot be read (a
+    /// busy simulator) is said as `UI_FACT … no snapshot` and the caller carries on, as after
+    /// the old sleep.
+    ///
+    /// Not seen: transitions that move no frame. UIKit sets the final frames of a push or a
+    /// sheet at once and animates only what is drawn, and a fade changes no frame at all; the
+    /// waits for the screen's own elements cover the first, the second contrast audit
+    /// (`confirmContrast` in AccessibilityUITests) the fades.
+    @discardableResult
+    static func screenAtRest(_ app: XCUIApplication, _ what: String, timeout: TimeInterval = 8,
+                             file: StaticString = #filePath, line: UInt = #line) -> ScreenRest {
+        let start = Date()
+        var last: [CGRect]?
+        var lastRoot: (any XCUIElementSnapshot)?
+        // The last two readings were both read and differed: real movement.
+        var moved = false
+        let still = holds(timeout: timeout) {
+            var now: [CGRect]?
+            lastRoot = try? app.snapshot()
+            if let root = lastRoot { now = frames(of: root) }
+            moved = now != nil && last != nil && now != last
+            let same = now != nil && now == last
+            last = now
+            return same
+        }
+        print("UI_TIMING wait \(what) \(String(format: "%.1f", Date().timeIntervalSince(start))) s")
+        if still, let root = lastRoot {
+            print("UI_STEP_OK \(what)")
+            return .still(root)
+        }
+        if moved {
+            print("UI_STEP_MISSING \(what) (still moving after \(Int(timeout)) s)")
+            XCTFail("Not at rest within \(Int(timeout)) s: \(what)", file: file, line: line)
+            return .moving
+        }
+        print("UI_FACT \(what): not checked at rest, no snapshot")
+        return .unread
+    }
+
+    /// Every element's frame in one snapshot, rounded to the point, in a fixed order. A loop,
+    /// not a nested function: the snapshot's attributes belong to the main actor.
+    static func frames(of root: any XCUIElementSnapshot) -> [CGRect] {
+        var frames: [CGRect] = []
+        var stack: [any XCUIElementSnapshot] = [root]
+        while let node = stack.popLast() {
+            let frame = node.frame
+            frames.append(CGRect(x: frame.minX.rounded(), y: frame.minY.rounded(),
+                                 width: frame.width.rounded(), height: frame.height.rounded()))
+            stack.append(contentsOf: node.children)
+        }
+        return frames
     }
 
     /// Presses Home and waits until iOS has the app in the background (or ended it), then keeps
@@ -169,11 +247,7 @@ enum UITestWait {
     static func never(_ what: String, for seconds: TimeInterval,
                       file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) -> Bool {
         let start = Date()
-        var seen = condition()
-        while !seen, Date().timeIntervalSince(start) < seconds {
-            usleep(500_000)
-            seen = condition()
-        }
+        let seen = holds(timeout: seconds, condition)
         let took = String(format: "%.1f", Date().timeIntervalSince(start))
         if seen {
             print("UI_STEP_MISSING \(what) (it happened after \(took) s)")

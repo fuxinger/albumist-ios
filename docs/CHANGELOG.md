@@ -89,7 +89,51 @@
 - Diagnosebericht: Akkuverbrauch der Analyse „etwa höchstens N % pro 1.000 Fotos“ und Zahlen aus
   MetricKit (Hänger, Akku), ohne Fotos, Namen oder Orte.
 ### Korrigiert
+- 20.11.: Die Karte der laufenden Analyse zeigt auf einen Blick nur noch, was zählt: was gerade läuft (mit „Pause“),
+  die Zahl, eine kurze Zeile („Fertig gegen 23:40“, warum es langsamer geht oder wartet, der Countdown für Apple),
+  den Balken, „Schon fertig … Ansehen“ und „Details“. „Schritt 4 von 6“, „Gerade angesehen“, ob die Analyse im
+  Hintergrund weiterläuft (jetzt ehrlich „Läuft im Hintergrund weiter, dort aber langsamer“) und der Hinweis zu den
+  Städtenamen stehen unter „Details“; VoiceOver nennt den Schritt weiter. Nur wenn iOS die Zeit im Hintergrund
+  verweigert hat, sagt die kurze Zeile „Läuft, solange Albumist offen ist“ statt der Fertig-Uhrzeit (die steht dann
+  in „Details“). Der Sperrbildschirm sagt nun ebenfalls „Läuft im Hintergrund weiter, dort aber langsamer“ statt
+  „Läuft weiter, auch wenn du die App verlässt“ (P3-08, P4-13).
+- 20.11.: Vorschau: „Alben jetzt anlegen“ steht unten über der Tab-Leiste und ist ohne Scrollen erreichbar, darüber in
+  einer Zeile „Kein Original wird gelöscht oder kopiert.“ (vorher beides erst am Ende der Albenliste). Was den Plan
+  aufhält (voller Zugriff nötig, unterbrochenes Anlegen, Albumist freischalten), steht jetzt oben in der Vorschau, und
+  dann gibt es keinen Knopf; während der Sortier-Show und über dem Ergebnis steht die Leiste nicht. Bei den größten
+  Schriftgrößen und quer auf dem iPhone bleiben unten der Knopf und was zu ihm gehört (warum er wartet, die Rückfrage
+  von iOS vor dem Löschen von Alben); die Zusage und die Zahl der Gratis-Alben stehen dann am Ende (P3-05 = G3-05).
+- 20.11.: Kein Hinweis zeigt mehr auf ein „Anpassen“, das man nicht sieht (P3-06, zweite Prüfung): Bei einem ähnlichen Album bietet die Karte des Vorschlags selbst „Stattdessen „X“ ergänzen …“ an (öffnet „Anpassen“), ihr Hinweis lautet nur noch „Albumist legt ein neues Album an und ändert „X“ nicht.“; die Vorschau sagt „Das geht im Vorschlag oben rechts unter „…“ › „Anpassen“.“; „„X“ nicht mehr anbieten“ erklärt, dass Albumist es „für diesen Vorschlag nicht mehr“ anbietet. `suggestion_actions_rule.py` lehnt Texte ab, die eine Aktion des Menüs ohne „…“ nennen.
+- 20.11.: Ein Vorschlag zeigt nur noch zwei Knöpfe: „Album anlegen“ (oder was er zuerst braucht, etwa „Namen eingeben“) und „Nicht jetzt“. „Anpassen“, „Auswählen und später anlegen“, „Reise teilen oder zusammenlegen“ und „Keine Reise, hier bin ich öfter“ stehen im Menü „…“ oben rechts, wie in Apples Apps; vorher standen bis zu sechs Aktionen untereinander, die letzte halb hinter der Tab-Leiste (P3-06). `suggestion_actions_rule.py` hält das fest.
+- 20.11.: Übersicht: Die Zahlen rund um „sortiert“ passen zusammen. Der Ring und „Außerdem nicht mitgezählt“
+  ergeben zusammen die Fotos von „Alle 246 Fotos analysiert“, jedes Foto genau einmal; neu genannt werden Fotos ohne
+  Ort (ohne „Länder und Orte“ als Hauptbereich: Fotos außerhalb deiner Hauptbereiche), „Fotos, für die sich kein
+  eigenes Album lohnt“ stehen zuletzt. Statt „0 von 0 sortiert“ steht „Wird gezählt“, solange es noch keine
+  Vorschläge gibt und die Analyse läuft (erster Start, nach dem Zurückholen aus der Sicherung), „Noch nicht gezählt“
+  ohne Drehen, solange sie dabei pausiert, wartet oder vorzeitig endete, „Nichts zu sortieren“, wenn nichts
+  mitzuzählen bleibt (etwa alles ignoriert), und „Kein Bereich zählt als sortiert“, wenn kein Hauptbereich
+  eingeschaltet ist. Auch „Wird neu gezählt“ dreht nur, solange die Analyse arbeitet; sonst steht die letzte Zahl
+  still: „Zuletzt 82 von 176 sortiert“, darunter „Wird weitergezählt, sobald die Analyse weiterläuft.“ „Gezählt
+  werden nur …“ nennt nur eingeschaltete Hauptbereiche; „Nur ausgewählte Fotos“ nennt auch mit „Nur 2026“ alle
+  freigegebenen Fotos (P3-03).
+- 20.11.: Kleine graue Texte (Fußnoten, Zahlen, Erklärungen auf Karten und in Listen) sind gut lesbar und bleiben doch heller als der Haupttext: das neue Grau `.noteText` (`Theme.noteText`, hell 5,9:1 auf weißen Karten statt 3,4:1, überall mindestens 4,6:1; dunkel 7,5:1 auf Karten, mindestens 4,7:1; mit erhöhtem Kontrast deutlich stärker) an 145 Stellen in 21 Dateien statt des System-Graus. Das dunklere `Theme.secondaryText` bleibt für Text auf dem Farbschein der Fotos. `secondary_text_rule.py` lehnt neues kleines System-Grau ab (P3-14).
+- 20.11.: Auswählen wie in Fotos: Solange Fotos ausgewählt werden, ist die Tab-Leiste ausgeblendet. „N aus Vorschlag
+  entfernen“ lag hinter der Tab-Leiste und lässt sich jetzt antippen; in der Mediathek stehen „Zu Album hinzufügen“,
+  die Zahl der ausgewählten Fotos und „Ignorieren“ in der Leiste unten statt in einer eigenen Leiste über den Tabs (P3-01 = G3-04).
+- 20.11.: Rückgängig machen und das Fertigstellen oder Zurücknehmen eines unterbrochenen Vorgangs brauchen jetzt
+  Zugriff auf alle Fotos. Bei „Ausgewählte Fotos“ sah ein Album, in das du selbst nicht freigegebene Fotos gelegt
+  hattest, aus wie eines von Albumist und konnte beim Rückgängigmachen gelöscht werden (zweite Prüfung von P1-07).
+- 20.11.: „Ausgewählte Fotos“ und zurück auf „Alle Fotos“: Albumist analysiert nicht mehr alles von vorn (P1-07).
+  Fotos außerhalb der Auswahl werden beiseitegelegt statt gelöscht und zählen, suchen und planen nicht mit;
+  zurück kommen sie mit Analyse, Ort und Text. Endgültig gelöscht wird ein Foto erst, wenn es bei vollem Zugriff fehlt
+  (Datenbank Version 6). Reisen, häufige Orte und gewählte Vorschläge behalten dabei ihre Kennung und ihre Fotos,
+  auch über mehrere Auswahlen hintereinander (nicht bei einer Änderung von „Dein Zuhause“ während der Auswahl, siehe KNOWN_LIMITATIONS).
+- 20.11.: Rückgängig und „Alben von Albumist“: Löscht Albumist dabei Alben oder Ordner, sagt die Rückfrage von Albumist jetzt vorher „iOS fragt gleich noch einmal, ob Albumist die Alben löschen darf. Deine Fotos bleiben.“ Nur dann: nimmt Albumist nur Fotos aus Alben, steht dort nichts vom Löschen. Ob gelöscht wird, liest Albumist beim Tippen frisch aus Fotos (höchstens 3 s, solange dreht ein kleiner Kreisel am Knopf; danach steht der Satz sicherheitshalber), mit noch nicht gespeicherten Ergebnissen. Auch beim Weitermachen einer unterbrochenen Entfernung steht der Satz, die Karte heißt dann „Entfernen wurde unterbrochen“ mit „Rest entfernen“ (P3-07 = G3-09, `DeleteQuestionNote`, `DeleteQuestion`).
+- 19.11.: Vorschau vor dem Anlegen: Der Hinweis bei einem schon vorhandenen Albumnamen sagt jetzt, dass danach zwei
+  Alben mit diesem Namen da sind (Albumist hängt keinen Zusatz an, P2-02). Der Titel folgt dem Schritt: „Vorschau“,
+  „Alben werden angelegt“, „Alben werden geändert“ (Rückgängig), „Ergebnis“ (P3-15, `PlanReviewPhase`).
 - 19.11.: Suche: Neben einem Vorschlag („Ital“ → Italien) steht nicht mehr „nicht erkannt“ (P3-13 = G3-06).
+- 19.11.: Speicherwarnung von iOS: Albumist leert Suchindex, Vorschaubilder, die für die Analyse vorgeladenen Bilder und die aus den Fotodaten gebauten Zwischenspeicher (abseits des Hauptthreads) und baut sie bei Bedarf neu; Fotodaten, Vorschläge, Entscheidungen, Mediathek-Raster und Atlas bleiben, der Diagnosebericht nennt die Warnungen dieses Starts und die letzte (P4-06).
 - 19.11.: Featuring-Check nennt kein iPad mehr; die App gibt es nur fürs iPhone (G7-02).
 - 19.11.: Größte Schrift: Die Länderliste im Reise-Atlas wird nicht mehr zerhackt (P3-11).
   Flagge und Pfeil stehen oben, der Name darunter in voller Breite, das Jahr in einer eigenen
@@ -108,6 +152,18 @@
   die schon unter „Von Albumist angelegt oder ergänzt“ stehen (P3-16 = G3-02).
 - 19.11.: Die Foto-Großansicht baut nur noch die Seiten um das gezeigte Foto (50 davor und
   danach) statt aller geladenen Fotos und schiebt sie beim Blättern nach (P4-11).
+- 19.11.: Tage, Monate und Jahre folgen der Ortszeit des Fotos wie in Apple Fotos (P1-15): ein Foto
+  von 23 Uhr in New York am 31. Januar bleibt im Januar, auch auf einem iPhone mit deutscher Zeit.
+  Die Zeitzone des iPhones während der Analyse ändert kein Album mehr. Offline kommt die Zeitzone
+  aus dem Land (IANA-Liste). Fotos ohne Ort zählen in der Zeitzone des Zuhauses, des gewählten
+  oder gefundenen (auch bei einem Update auf Reisen, nach einem Umzug in der des neuen), auf einer
+  Reise in der ihres Ziels; die des iPhones gilt nur, solange kein Zuhause bekannt ist.
+- 19.11., zweite Prüfung von P1-15: „Nur 2026“ sieht sich genau die Fotos des Jahres nach ihrer
+  Uhr an und zählt sie (mit einer Reise nach Sydney zählte Silvester zu Hause zu 2026); eine
+  gespeicherte Zeitzone, die das System nicht kennt, wird nicht mehr ersetzt; offline hat der
+  Süden der Gold Coast die Zeit von Queensland, West Wendover die von Utah, Norilsk die von
+  Krasnojarsk und Flin Flon die von Manitoba. Die Zonen der Orte werden einmal je Stand der Orte
+  bestimmt, die Reisen einmal je Analyse erkannt.
 - 19.11.: Fotos mit einem Datum in der Zukunft bleiben nicht mehr für immer unsortiert (P1-03);
   ein als unlesbar aufgegebenes Foto wird eine Woche später noch einmal versucht (P1-08); Fotos,
   deren Land sich nicht finden lässt, gelten nicht mehr für immer als offen (P1-09); die

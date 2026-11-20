@@ -53,6 +53,8 @@ MACHINERY_STEPS = {
     # the groups alone, every time anew (ui_evidence.py): a red group stays red for them in
     # every attempt, so a re-run of them can hide nothing.
     "Plan the UI groups", "UI groups green for this app and test code",
+    # ui-stress.yml, the same for the stress pass (decision 20.11.2026, 17:20).
+    "Key of this pass and whether it runs", "Stress pass green for this app and test code",
     # ui.yml: the build products without tests (a build or artifact problem, not a test), and
     # a group whose every pass failed on the simulator or XCTest alone (ui_tests.py exit 75):
     # there is no test result, so a re-run hides none.

@@ -17,18 +17,29 @@ Buildnummer und der Commit werden automatisch angehängt.
   (Beschluss 17.11.).
 
 <!-- testflight:start -->
-Danke fürs Testen! Dieser Build bringt Korrekturen aus der großen Prüfung. Bitte achte besonders auf:
+Danke fürs Testen! Dieser Build bringt weitere Korrekturen aus der großen Prüfung. Bitte achte besonders auf:
 
-- Tab „Alben“: Jedes Album steht nur noch einmal. Alben von Albumist stehen nicht zusätzlich unter „Deine Alben“.
-- Fotos groß ansehen: Öffnest du ein Foto in einer sehr großen Mediathek, geht es schneller auf. Wische bitte einmal weit vor und zurück: Springt das Bild, oder hakt es?
-- Größte Schrift (Einstellungen > Bedienungshilfen): Reise-Atlas, Suche und „Ordner für neue Alben“ sind jetzt ganz lesbar, nichts liegt mehr übereinander.
-- Englisch: Viele Texte und Knöpfe sind korrigiert (zum Beispiel „Certain“ statt „Safe“). Wer das iPhone auf Englisch hat: Klingt etwas falsch?
+- Monatsalben nach Ortszeit: Fotos zählen jetzt zu dem Tag und Monat, den die Uhr am Aufnahmeort zeigte, wie in Apple Fotos. Ein Silvesterfoto aus New York landet also im Dezember, nicht im Januar.
+- Pause: Tippst du während der Analyse auf „Pause“, hält jetzt auch die Arbeit im Hintergrund an, nicht nur die Anzeige. Wird das iPhone dabei weniger warm?
+- Übersicht: Nach einer Analyse und beim Start sollte die Übersicht schneller stehen und nicht mehr kurz hängen.
+- Vorschau vor dem Anlegen: Der Titel sagt jetzt, was gerade passiert („Alben werden angelegt“, „Ergebnis“). Gibt es schon ein Album mit demselben Namen, sagt der Hinweis ehrlich, dass du danach zwei Alben mit diesem Namen hast.
+- Suche: Während die Suche neu aufgebaut wird, findet sie gleich die neuen Treffer.
+- Viele Apps offen: Wenn der Speicher knapp wird, gibt Albumist Platz frei und lädt das Nötige später neu. Bitte melde, wenn etwas leer bleibt.
+- Analyse-Karte: Sie zeigt jetzt nur noch das Wichtigste. Schritt, Hintergrund und „Gerade angesehen“ findest du unter „Details“. Fehlt dir dort etwas?
+- Vorschau: „Alben jetzt anlegen“ steht unten in einer Leiste und ist ohne Scrollen erreichbar.
+- Vorschläge: Unten stehen zwei Knöpfe, alles Weitere oben rechts unter „…“.
+- Übersicht: Die Zahlen zu „sortiert“ passen jetzt zur Analyse-Karte, und „0 von 0 sortiert“ kommt nicht mehr vor.
+- Auswählen in Listen: Die Tab-Leiste blendet sich aus, die Aktionen stehen unten wie in Apple Fotos.
+- Nur ausgewählte Fotos freigegeben: Die Analyse bleibt erhalten, wenn du die Auswahl änderst. Rückgängig und Anlegen fragen nach vollem Zugriff.
+- Rückgängig und Entfernen sagen vorher, dass iOS gleich nach dem Löschen der Alben fragt.
+- Weniger warten: Ein neuer Analyse-Lauf liest nur die Fotos neu, die sich geändert haben.
 
 Wenn etwas nicht stimmt: Einstellungen > „Diagnose teilen“ und den Bericht mit einer kurzen Beschreibung schicken. Der Bericht enthält keine Fotos, Namen oder Orte.
 <!-- testflight:end -->
 
 ## Frühere Builds
 
+- Build nach PR #11 (19.11.2026): Alben-Tab ohne doppelte Alben, Fotoansicht schneller, größte Schrift ganz lesbar, Suche ohne „nicht erkannt“ neben einem Vorschlag, Englisch korrigiert.
 - Build 38 (19.11.2026, erster Upload ohne Klick): Orte nach der Stadt, Ortsnamen ohne Warten, Ring „Sortiert“ bis 100 %, keine Dokumente als Vorschau, Namensfeld wie in iOS, Pause und Reisen, umstrittene Gebiete, Gleicher Name, Fotos mit Zukunftsdatum, Umkreis-Suche, Akku im Diagnosebericht.
 - Build nach PR #7 (19.11.2026): Ausblenden sofort sichtbar, Mediathek-Tab schneller, Fotos hängt nie fest, Rückgängig nach Abbruch, Suche mit Zeiträumen, Themen später einschalten, Sprache der Albumnamen, Tag zu Hause trennt eine Reise.
 - Bis 18.11.2026: Rückgängig fragt nach dem Löschen; Analyse läuft bei Wärme weiter; Probejahr bleibt; Fotos groß ansehen.

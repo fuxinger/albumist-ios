@@ -59,6 +59,10 @@ jobs:
       - name: Spinner rule
         # A bare spinner is an element with no description (accessibility audit, VoiceOver).
         run: python3 .github/scripts/spinner_rule.py .
+      - name: Secondary text rule
+        # Small grey text (footnote, caption, subheadline) uses .noteText (Theme.noteText, 4.6:1
+        # and more), not the system grey .secondary (3.4:1 on a white card; review P3-14).
+        run: python3 .github/scripts/secondary_text_rule.py .
       - name: Every UI string has English
         run: python3 .github/scripts/check_strings.py .
       - name: Code map lists every Swift file
@@ -94,6 +98,14 @@ jobs:
     name: Core tests (Linux)
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
+    # Hang limits (20.11.2026: the core tests hung 30 min, until this job's limit of 30), from the
+    # green jobs since 16.11. (fourth review: at least the longest seen + 50 % and twice the 95th
+    # percentile): this job (97 in CI) p95 9.7, longest 18.9 min (11.6 of it apt during the mirror
+    # outage), so 30 for the container, apt's retries and both test steps; "Build and test" (158
+    # jobs) p95 4.7, longest 5.8: watchdog 10, step 12; load test p95 3.2, longest 3.3: watchdog
+    # 7, step 9. swift_test_watch.py stops a step's tests before its timeout-minutes and names the
+    # tests still running (TEST_HANG), so the log says which test hung; a hang is red like any
+    # failing test, never re-run.
     timeout-minutes: 30
     defaults:
       run:
@@ -103,13 +115,14 @@ jobs:
       - name: Install SQLite headers
         run: bash .github/scripts/apt_install.sh libsqlite3-dev python3
       - name: Build and test
-        run: |
-          set -o pipefail
-          swift test --parallel 2>&1 | tee core-linux.log
+        timeout-minutes: 12
+        run: python3 .github/scripts/swift_test_watch.py --minutes 10 --log core-linux.log -- swift test --parallel
       - name: Load test (20,000 and 100,000 photos, time and memory limits)
+        timeout-minutes: 9
         run: |
           set +e
-          SORTLY_LOAD_TEST=1 swift test --skip-build --filter LoadTests > load.log 2>&1
+          SORTLY_LOAD_TEST=1 python3 .github/scripts/swift_test_watch.py --minutes 7 --quiet --log load.log -- \
+            swift test --skip-build --filter LoadTests
           status=$?
           grep -E "LOAD_|passed|failed|error" load.log
           exit $status
@@ -133,7 +146,9 @@ jobs:
     # before the merge builds and tests the app (ui.yml, "concurrency").
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: xcode-27
-    timeout-minutes: 45
+    # 64 green jobs since 16.11.: p95 28.6, longest 32.4 min; the longest + 50 % is 49 (fourth
+    # review of the tempo plan; was 45, entry "Zeitgrenze gelockert" in docs/IMPROVEMENTS.md).
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select pinned Xcode
@@ -157,11 +172,61 @@ jobs:
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 .github/scripts/pick_simulator.py --role default)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-      - name: Core tests (macOS)
+      - name: Build app and its tests
+        # Compile first (tempo plan 20.11.): the app and its unit tests are built before the
+        # macOS core tests (5-6 min) and the fresh simulator (2-10 min), so a compile error that
+        # only the Mac finds is red about 12 min after the push instead of 27 (61e9b8c,
+        # PHPersistentChangeFetchResult.enumerateChanges: CI red after 27.1 min). The simulator
+        # is not booted yet (nothing competes with the build, see "Pick simulator"). "Build and
+        # test app" below builds again with the same settings and finds nothing to compile.
+        # Only this build's failure stops the core tests and the app tests below (a failed
+        # "Build UI tests" does not: those steps ask for this one's outcome).
+        id: appbuild
+        if: steps.sim.outputs.udid != ''
         run: |
-          set -o pipefail
+          cd App
+          xcodebuild build-for-testing \
+            -project Sortly.xcodeproj \
+            -scheme Sortly \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO > ../build-log.txt 2>&1 \
+            || { grep -E "error:" -A3 ../build-log.txt | grep -v "/SourcePackages/" | head -80; echo "--- last 30 lines of the build log"; tail -30 ../build-log.txt; exit 1; }
+          tail -2 ../build-log.txt
+      - name: Build UI tests
+        # The UI tests run in their own workflow (ui.yml); building them here finds a compile
+        # error in them within minutes of this job instead of after the long simulator setup
+        # there. Right after the app's build (tempo plan 20.11.), before the core tests and the
+        # simulator, with the same build settings, so the app is not compiled a second time.
+        # Not in a TestFlight run (release): there ui.yml's "UI build" builds exactly this
+        # (scheme SortlyUI, build-for-testing) right after this job, in the same run, and a
+        # compile error stops the upload there (about 1 min of this Mac, TestFlight run
+        # 44461253154). test_workflows.py ReleaseSkipTests: a step left out in release mode is
+        # one whose build ui.yml really does itself.
+        if: steps.sim.outputs.udid != '' && !inputs.release
+        run: |
+          cd App
+          xcodebuild build-for-testing \
+            -project Sortly.xcodeproj \
+            -scheme SortlyUI \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGNING_ALLOWED=NO > ../build-ui-log.txt 2>&1 \
+            || { grep -E "error:" -A3 ../build-ui-log.txt | grep -v "/SourcePackages/" | head -80; echo "--- last 30 lines of the build log"; tail -30 ../build-ui-log.txt; exit 1; }
+          grep -E "warning: .*SortlyUITests" ../build-ui-log.txt | head -40 || true
+          tail -2 ../build-ui-log.txt
+      - name: Core tests (macOS)
+        # Also after a failed "Build UI tests" (its error is in the log above; the app's own
+        # tests still say what they find). Not after a failed app build or an earlier step.
+        # Hang limit from 64 green jobs: p95 6.3, longest 8.3 min, so watchdog 13 (twice the p95,
+        # above the longest + 50 %), step 15; the watchdog names the tests still running
+        # (swift_test_watch.py, as in the Linux job).
+        id: core
+        if: ${{ !cancelled() && (steps.appbuild.outcome == 'success' || (success() && steps.sim.outputs.udid == '')) }}
+        timeout-minutes: 15
+        run: |
           mkdir -p build
-          swift test --parallel 2>&1 | tee build/core-macos.log
+          python3 .github/scripts/swift_test_watch.py --minutes 13 --log build/core-macos.log -- swift test --parallel
       - name: Fresh simulator (erased and booted)
         # 18.11.: StoreKit listed no product for 300 s in four runs from ~16:00 UTC on, with no
         # error, also on claude/next at 3dfda45 (CI 44369338871), whose code was green in every
@@ -189,7 +254,8 @@ jobs:
         # empty product response" (44390350152, network up: empty list, no error), or it failed
         # with URLError -1009 (44383157858). The test session now comes before the test process's
         # first StoreKit call (PurchaseStoreKitTests, StoreKitEnvironment).
-        if: steps.sim.outputs.udid != ''
+        id: fresh
+        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' }}
         timeout-minutes: 20
         run: |
           UDID="${{ steps.sim.outputs.udid }}"
@@ -200,6 +266,8 @@ jobs:
             xcrun simctl bootstatus "$UDID" -b > /dev/null && break
             [ "$attempt" = 3 ] && { echo "simulator did not boot (3 attempts)"; exit 1; }
             echo "FLAKY_BOOT bootstatus failed (attempt $attempt of 3), retrying"
+            echo "::warning title=Environment retry (simulator boot)::bootstatus failed (attempt $attempt of 3), erased simulator booted again; counted, a finding to fix, not a test result"
+            echo "- Environment retry (simulator boot): attempt $attempt of 3 failed" >> "$GITHUB_STEP_SUMMARY"
             xcrun simctl shutdown "$UDID" > /dev/null 2>&1 || true
             sleep 15
           done
@@ -209,7 +277,7 @@ jobs:
             > storekit-live.log 2>&1 &
           echo "simulator $UDID erased and booted; StoreKit log recorded live (pid $!)"
       - name: Build and test app
-        if: steps.sim.outputs.udid != ''
+        if: ${{ !cancelled() && steps.appbuild.outcome == 'success' && steps.core.outcome == 'success' && steps.fresh.outcome == 'success' }}
         run: |
           echo "LOAD at start: $(sysctl -n vm.loadavg)"
           ps -Ao pcpu=,state=,comm= -r | head -8 | cut -c1-160 | sed 's/^/SIM_TOP at start /'
@@ -261,25 +329,6 @@ jobs:
               curl -sS -o /dev/null -m 15 -w "$url: HTTP %{http_code}, connect %{time_connect} s, total %{time_total} s\n" "$url" 2>&1 || true
             done
           fi
-      - name: Build UI tests
-        # The UI tests run in their own workflow (ui.yml); building them here finds a compile
-        # error in them within this run instead of after the long simulator setup there. Not in
-        # a TestFlight run (release): there ui.yml's "UI build" builds exactly this (scheme
-        # SortlyUI, build-for-testing) right after this job, in the same run, and a compile error
-        # stops the upload there (about 1 min of this Mac, TestFlight run 44461253154).
-        # test_workflows.py ReleaseSkipTests: a step left out in release mode is one whose
-        # build ui.yml really does itself.
-        if: steps.sim.outputs.udid != '' && !inputs.release
-        run: |
-          cd App
-          xcodebuild build-for-testing \
-            -project Sortly.xcodeproj \
-            -scheme SortlyUI \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            CODE_SIGNING_ALLOWED=NO > ../build-ui-log.txt 2>&1 \
-            || { grep -E "error:" -A3 ../build-ui-log.txt | grep -v "/SourcePackages/" | head -80; exit 1; }
-          grep -E "warning: .*SortlyUITests" ../build-ui-log.txt | head -40 || true
-          tail -2 ../build-ui-log.txt
       - name: Export strings for translation
         if: success() && steps.sim.outputs.udid != ''
         run: |

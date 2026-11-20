@@ -127,6 +127,16 @@ enum Migrations {
         );
         CREATE INDEX idx_assets_labels ON assets(labels_version);
         """),
+        // v6: photos Albumist cannot see right now (review P1-07). With "Ausgewählte Fotos"
+        // the photos outside the selection are set aside (`out_of_view = 1`) instead of deleted:
+        // their analysis, place and text stay, and every read of the analysis, the counts and
+        // the search leaves them out. Read again (the selection changed, or full access is
+        // back), they come back with all of it; only a whole read with full access deletes a
+        // photo for good. Every photo stored before is in view.
+        (6, """
+        ALTER TABLE assets ADD COLUMN out_of_view INTEGER NOT NULL DEFAULT 0;
+        CREATE INDEX idx_assets_out_of_view ON assets(id) WHERE out_of_view = 1;
+        """),
     ]
 
     /// Optional full-text index over `text_plain` (external content), kept in sync by

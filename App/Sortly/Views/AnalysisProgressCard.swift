@@ -6,6 +6,14 @@ import SortlyEngine
 /// in six segments for the whole analysis, the step's count, the finish time, what is already
 /// done, and every waiting state in words. The state comes from `AppModel.analysisCard`
 /// (pure rules in `AnalysisCardState`, tested in SortlyEngine); this view only renders it.
+///
+/// At a glance only that (review of 18.11., P3-08: nine things at once were too many for a
+/// newcomer and for a hurried user): the heading with its one button, the count, one short
+/// line, the bar, "Schon fertig" and "Details". The step it stands on, the photos just looked
+/// at, whether it runs in the background and the note on town names are in "Details"
+/// (`AnalysisDetailsSheet`); VoiceOver still says the step (`AnalysisCardGlanceTests`). Only
+/// when iOS refused the background time does the short line say "Läuft, solange Albumist offen
+/// ist", in place of the finish time (`runsOnlyWhileOpen`).
 struct AnalysisProgressCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -95,20 +103,15 @@ struct AnalysisProgressCard: View {
         }
     }
 
+    /// What the card shows at a glance (P3-08): the heading with its one button, the progress
+    /// (count, one short line, bar), "Schon fertig" and "Details". Nothing more: what moved to
+    /// "Details" stays there, and adding a part here means another one goes.
     private var full: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             header
             progress
-            // Not during the overnight refinement: it is the "later" this note speaks of, and
-            // says itself what it waits for.
-            if case .running(let p, _, _, _) = state, p?.step == .places, !model.analysis.refining {
-                Text("Städtenamen kommen von Apple, das braucht etwas Zeit. Was jetzt nicht fertig wird, holt Albumist nach, wenn dein iPhone das nächste Mal lädt.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             alreadyDone
             if !isPaused { Divider() }
-            bottomRow
             Button { showDetails = true } label: {
                 HStack {
                     Text("Details").foregroundStyle(Color.primary)
@@ -178,7 +181,9 @@ struct AnalysisProgressCard: View {
         }
     }
 
-    /// Count, status line, bar and step: ONE accessibility element shown as a progress view (B1).
+    /// Count, the short line and the bar: ONE accessibility element shown as a progress view
+    /// (B1). The step ("Schritt 4 von 6") is in its value and in "Details", no longer under the
+    /// bar (P3-08): the heading names the step, the bar shows how far the whole analysis is.
     private var progress: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             if let position, position.hasCount, !isWaitingOrPaused {
@@ -187,8 +192,6 @@ struct AnalysisProgressCard: View {
             statusLines
             AnalysisBar(widths: model.analysis.widths, grey: state.isGrey, working: state.isWorking,
                         runningStep: position?.step)
-            Text(stepLine)
-                .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
         }
         .accessibilityRepresentation {
             ProgressView(value: spokenOverall) { Text(title) }
@@ -254,6 +257,16 @@ struct AnalysisProgressCard: View {
 
     private var isRunning: Bool { if case .running = state { true } else { false } }
 
+    /// iOS refused the background time (S8): the analysis goes on only while Albumist is open,
+    /// which matters before the user leaves it. Said in the finish time's place while it runs
+    /// (the finish time stays in Details), not during Apple's countdown, which says why it
+    /// waits. Every other word on the background stays in Details (decision of 20.11.: the
+    /// card keeps five parts).
+    private var runsOnlyWhileOpen: Bool {
+        guard case .running(_, _, let appleWait, _) = state, !appleWait else { return false }
+        return model.analysisBackground == .refused
+    }
+
     private var isWaitingOrPaused: Bool {
         switch state {
         case .waiting, .paused, .pausing: true
@@ -272,13 +285,14 @@ struct AnalysisProgressCard: View {
                 .font(.title.weight(.semibold))
                 .contentTransition(.numericText(value: Double(position.completed)))
             Text(AnalysisText.ofTotal(position.total, position.step.unit))
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline).foregroundStyle(.noteText)
         }
         .monospacedDigit()
         .animation(reduceMotion ? nil : .snappy, value: position.step)
     }
 
-    /// Under the count: the finish time, the wait for Apple's limit, why it is slower, what waiting means.
+    /// Under the count: the finish time (or that it runs only while Albumist is open), the wait
+    /// for Apple's limit, why it is slower, what waiting means.
     @ViewBuilder
     private var statusLines: some View {
         Group {
@@ -297,6 +311,9 @@ struct AnalysisProgressCard: View {
                             .contentTransition(.numericText(countsDown: true))
                             .accessibilityIdentifier("analysis.appleWait")
                     }
+                } else if runsOnlyWhileOpen {
+                    Text("Läuft, solange Albumist offen ist")
+                        .accessibilityIdentifier("analysis.onlyWhileOpen")
                 } else if let finish = model.analysisFinish {
                     Text(AnalysisText.finish(finish))
                         .accessibilityIdentifier("analysis.finishTime")
@@ -332,20 +349,19 @@ struct AnalysisProgressCard: View {
                 EmptyView()
             }
         }
-        .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+        .font(.subheadline).foregroundStyle(.noteText).monospacedDigit()
         .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// The step in the VoiceOver value ("Schritt 4 von 6", the UI tests read it there), with the
+    /// count while it waits or stops, when the large number is not shown.
     private var stepLine: String {
-        let steps = AnalysisStep.count
-        if case .running(_, _, _, let catchingUp?) = state {
-            return String(localized: "Gleich wieder bei Schritt \(catchingUp) von \(steps)")
+        let step = state.stepText ?? String(localized: "Schritt \(1) von \(AnalysisStep.count)")
+        if case .running(_, _, _, _?) = state { return step }
+        if isWaitingOrPaused, let position, position.hasCount, !isPaused {
+            return step + " · " + AnalysisText.count(position)
         }
-        guard let position else { return String(localized: "Schritt \(1) von \(steps)") }
-        if isWaitingOrPaused, position.hasCount, !isPaused {
-            return String(localized: "Schritt \(position.step.number) von \(steps)") + " · " + AnalysisText.count(position)
-        }
-        return String(localized: "Schritt \(position.step.number) von \(steps)")
+        return step
     }
 
     private var isPaused: Bool { if case .paused = state { true } else { false } }
@@ -357,7 +373,11 @@ struct AnalysisProgressCard: View {
         if case .running = state, let pass = model.analysis.mapPass, pass.checked < pass.of {
             parts.append(AnalysisText.mapChecked(pass))
         }
-        if case .running = state, let finish = model.analysisFinish { parts.append(AnalysisText.finish(finish)) }
+        if runsOnlyWhileOpen {
+            parts.append(String(localized: "Läuft, solange Albumist offen ist"))
+        } else if case .running = state, let finish = model.analysisFinish {
+            parts.append(AnalysisText.finish(finish))
+        }
         parts.append(stepLine)
         parts.append(String(localized: "Analyse zu \(AnalysisPercent.percent(model.analysis.shownOverall, isComplete: model.analysis.isComplete)) % fertig"))
         return parts.joined(separator: ", ")
@@ -370,7 +390,7 @@ struct AnalysisProgressCard: View {
         if !done.isEmpty, !isPaused {
             let row = HStack(spacing: Theme.Spacing.s) {
                 Text("Schon fertig: \(Text(AnalysisText.alreadyDone(done)).foregroundStyle(Color.primary))")
-                    .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                    .font(.subheadline).foregroundStyle(.noteText).monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 // Opened from the overview's root (`MainTabs`, route `.proposals`): this row goes
@@ -387,62 +407,6 @@ struct AnalysisProgressCard: View {
                 .padding(.vertical, 2)
                 .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-    }
-
-    /// "Gerade angesehen" (image step only, B4) and the background chip (S8).
-    @ViewBuilder
-    private var bottomRow: some View {
-        let showThumbnails = position?.step == .content && !model.analysisRecent.isEmpty && !isPaused
-        let chip = chipText
-        if showThumbnails || chip != nil {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: Theme.Spacing.m) {
-                    if showThumbnails { thumbnails }
-                    Spacer(minLength: 0)
-                    if let chip { chipView(chip) }
-                }
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    if showThumbnails { thumbnails }
-                    if let chip { chipView(chip) }
-                }
-            }
-        }
-    }
-
-    private var thumbnails: some View {
-        HStack(spacing: Theme.Spacing.s) {
-            HStack(spacing: -10) {
-                ForEach(model.analysisRecent, id: \.self) { id in
-                    AssetThumbnail(id: id, side: 30)
-                        .frame(width: 30, height: 30)
-                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Theme.card, lineWidth: 2))
-                }
-            }
-            .accessibilityHidden(true)
-            .transition(.opacity)
-            Text("Gerade angesehen").font(.subheadline).foregroundStyle(.secondary)
-        }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: model.analysisRecent)
-    }
-
-    private var chipText: (text: LocalizedStringKey, symbol: String)? {
-        guard !isPaused else { return nil }
-        switch model.analysisBackground {
-        case .running: return ("Läuft auch im Hintergrund", "arrow.triangle.2.circlepath")
-        case .refused: return ("Läuft, solange Albumist offen ist", "iphone")
-        case .idle: return nil
-        }
-    }
-
-    private func chipView(_ chip: (text: LocalizedStringKey, symbol: String)) -> some View {
-        Label(chip.text, systemImage: chip.symbol)
-            .font(.footnote)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
-            .accessibilityIdentifier("analysis.background")
     }
 
     /// The short check for new photos: one line with a spinner; Pause only after 5 s (rule 9).
@@ -609,7 +573,7 @@ struct AnalysisFinishedView: View {
             }
             // How many photos are analysed says the plain card under it ("Alle 246 Fotos analysiert").
             Text(String(localized: "\(proposals) Vorschläge warten auf dich."))
-                .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                .font(.subheadline).foregroundStyle(.noteText).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             if proposals > 0 {
                 // Opened from the overview's root, as "Ansehen" above: the finish moment goes
@@ -637,10 +601,14 @@ struct AnalysisFinishedView: View {
 
 // MARK: - Details
 
-/// "Details": all six steps with one sentence each and where they stand (rule 8).
+/// "Details": all six steps with one sentence each and where they stand (rule 8). Also what the
+/// card leaves out so it can be read at a glance (P3-08): the step on top ("Schritt 4 von 6"),
+/// whether the analysis goes on in the background, the photos just looked at (in the image
+/// step's row, B4) and the note on town names (in the places step's row).
 struct AnalysisDetailsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         NavigationRoot {
@@ -648,10 +616,18 @@ struct AnalysisDetailsSheet: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     TimelineView(.periodic(from: .now, by: 15)) { context in
                         Text(summary(now: context.date))
-                            .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                            .font(.subheadline).foregroundStyle(.noteText).monospacedDigit()
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityIdentifier("analysis.details.summary")
+                    // Whether it goes on when Albumist is left (S8), and honestly: iOS gives work
+                    // in the background less computing power (P4-13).
+                    if let background {
+                        Label(background.text, systemImage: background.symbol)
+                            .font(.subheadline).foregroundStyle(.noteText)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("analysis.background")
+                    }
                     VStack(spacing: 0) {
                         ForEach(AnalysisStep.allCases, id: \.self) { step in
                             row(step)
@@ -660,7 +636,7 @@ struct AnalysisDetailsSheet: View {
                     }
                     Label("Alles passiert auf deinem iPhone. Nur für Städtenamen fragt Albumist bei Apple nach.", systemImage: "lock")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.noteText)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(Theme.Spacing.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -681,9 +657,11 @@ struct AnalysisDetailsSheet: View {
         .presentationDetents([.medium, .large])
     }
 
-    /// "Fertig gegen 23:40 · 46 % · bisher 18 Min."
+    /// "Schritt 4 von 6 · Fertig gegen 23:40 · 46 % · bisher 18 Min."
     private func summary(now: Date) -> String {
         var parts: [String] = []
+        // The step the card no longer shows under its bar (P3-08).
+        if let step = model.analysisCard?.stepText { parts.append(step) }
         if let finish = model.analysisFinish, model.analysis.isRunning { parts.append(AnalysisText.finish(finish)) }
         // Never 100 % before the end (`AnalysisPercent`).
         parts.append(AnalysisPercent.value(model.analysisBar, isComplete: model.analysis.isComplete)
@@ -693,6 +671,27 @@ struct AnalysisDetailsSheet: View {
             parts.append(String(localized: "bisher \(elapsed.formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))"))
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// "Läuft im Hintergrund weiter, dort aber langsamer" while iOS lets the analysis go on when
+    /// Albumist is left, "Läuft, solange Albumist offen ist" after iOS refused (S8); nothing while
+    /// it is paused or nothing runs.
+    private var background: (text: LocalizedStringKey, symbol: String)? {
+        guard !isPaused else { return nil }
+        switch model.analysisBackground {
+        case .running: return ("Läuft im Hintergrund weiter, dort aber langsamer", "arrow.triangle.2.circlepath")
+        case .refused: return ("Läuft, solange Albumist offen ist", "iphone")
+        case .idle: return nil
+        }
+    }
+
+    private var isPaused: Bool { if case .paused? = model.analysisCard { true } else { false } }
+
+    /// The places step runs in the app (not during the overnight refinement: that is the
+    /// "later" the note on town names speaks of, and it says itself what it waits for).
+    private var placesRunInTheApp: Bool {
+        guard case .running(let p, _, _, _)? = model.analysisCard else { return false }
+        return p?.step == .places && !model.analysis.refining
     }
 
     private enum Standing { case done, running, later }
@@ -744,17 +743,44 @@ struct AnalysisDetailsSheet: View {
                     }
                 }
                 Text(step.explanation)
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
                 if standing == .running, model.analysis.isRunning, let left = model.analysisStepRemaining {
                     Text("noch etwa \(AnalysisText.left(left))")
-                        .font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                        .font(.footnote).foregroundStyle(.noteText).monospacedDigit()
                         .accessibilityLabel(Text("noch etwa \(AnalysisText.left(left, width: .wide))"))
                 }
+                if step == .places, standing == .running, placesRunInTheApp {
+                    Text("Städtenamen kommen von Apple, das braucht etwas Zeit. Was jetzt nicht fertig wird, holt Albumist nach, wenn dein iPhone das nächste Mal lädt.")
+                        .font(.footnote).foregroundStyle(.noteText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                recentPhotos(step)
             }
         }
         .padding(.vertical, Theme.Spacing.m)
         .accessibilityElement(children: .combine)
+    }
+
+    /// "Gerade angesehen": the last photos the image step looked at, beside that step only, so
+    /// never a screenshot (B4); none while paused. Only seen, not read out: the row says what runs.
+    @ViewBuilder
+    private func recentPhotos(_ step: AnalysisStep) -> some View {
+        if step == .content, standing(step) == .running, !model.analysisRecent.isEmpty, !isPaused {
+            HStack(spacing: Theme.Spacing.s) {
+                HStack(spacing: 4) {
+                    ForEach(model.analysisRecent, id: \.self) { id in
+                        AssetThumbnail(id: id, side: 30)
+                            .frame(width: 30, height: 30)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
+                }
+                Text("Gerade angesehen").font(.footnote).foregroundStyle(.noteText)
+            }
+            .padding(.top, Theme.Spacing.xs)
+            .accessibilityHidden(true)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: model.analysisRecent)
+        }
     }
 
     private func name(_ step: AnalysisStep, _ standing: Standing) -> some View {
@@ -767,7 +793,7 @@ struct AnalysisDetailsSheet: View {
     private func status(_ step: AnalysisStep, _ standing: Standing) -> some View {
         switch standing {
         case .done:
-            Text("fertig").font(.subheadline).foregroundStyle(.secondary)
+            Text("fertig").font(.subheadline).foregroundStyle(.noteText)
         case .running:
             if let p = model.analysis.position ?? model.analysis.stoppedAt, p.hasCount {
                 Text("\(p.completed.formatted()) von \(p.total.formatted())")
@@ -792,6 +818,20 @@ extension AnalysisCardState {
         case .pausing: "pausing"
         case .paused: "paused"
         case .finished: "finished"
+        }
+    }
+
+    /// "Schritt 4 von 6", or "Gleich wieder bei Schritt 4 von 6" while a run catches up after a
+    /// stop; nil when no step runs. In "Details" and in the card's VoiceOver value (P3-08).
+    var stepText: String? {
+        let steps = AnalysisStep.count
+        switch self {
+        case .running(_, _, _, let catchingUp?):
+            return String(localized: "Gleich wieder bei Schritt \(catchingUp) von \(steps)")
+        case .running(let p, _, _, _), .waiting(_, let p), .pausing(let p, _), .paused(let p):
+            return String(localized: "Schritt \(p?.step.number ?? 1) von \(steps)")
+        case .quickCheck, .finished:
+            return nil
         }
     }
 }

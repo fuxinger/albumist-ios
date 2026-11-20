@@ -21,11 +21,21 @@ ausgeschlossen und mit iOS-Dateischutz verschlüsselt (`completeUntilFirstUserAu
 nach einem Neustart unlesbar, bis das iPhone einmal entsperrt wurde; stärker geht nicht, weil
 die Analyse auch nachts bei gesperrtem Gerät läuft).
 
+Bei „Ausgewählte Fotos“ behält die Datenbank, was sie über die übrigen, gerade nicht
+freigegebenen Fotos schon weiß: Metadaten, Orte, Analyseergebnisse und den erkannten Text in der
+verkleinerten, maskierten Fassung (strengere Masken gelten auch für sie). Albumist zeigt, zählt
+und durchsucht sie nicht, bis sie wieder freigegeben sind. Gelöscht wird das erst, wenn Albumist
+wieder alle Fotos sieht und ein Foto dann fehlt, oder mit „Analyse neu aufbauen“ (Ergebnisse,
+Orte und Text aller Fotos).
+
 Eine kleine Kopie nur der Entscheidungen liegt in *Application Support/Albumist Backup*
 (`decisions.json`, gleicher Dateischutz) und ist Teil des Geräte-Backups: Ausnahmen, Regeln,
 Einstellungen, eigene Namen, Reise-Kennungen, die von Albumist angelegten Alben und der Verlauf
 (Album- und Foto-Kennungen, Albumtitel). Kein erkannter Text, keine Analyseergebnisse (Orte,
 Koordinaten, Bildinhalte), keine Bilder. Sie verlässt das Gerät nur mit dem Backup des Nutzers.
+Die Foto-Kennungen darin (Reise-Kennungen `user.tripIdentities`, gewählte Vorschläge
+`user.heldSuggestions`) schließen bei „Ausgewählte Fotos“ auch die gerade nicht freigegebenen
+Fotos ein, bis Albumist wieder alle Fotos sieht.
 Es werden **keine Bildkopien** gespeichert. Wenige Werte liegen in `UserDefaults`
 (Onboarding erledigt, Zahl der verbrauchten Gratis-Alben mit den Kennungen der bekannten
 Kauf-Transaktionen, Stand einer unterbrochenen Analyse, Stand der Bewertungsfrage,
@@ -58,8 +68,8 @@ Vorschaufotos eine DKB-Karte mit lesbarer Nummer). Was die Analyse nicht erkenne
 Bild ausgeblendet. Das gilt für die Vorschaufotos und den Farbschein eines Vorschlags, die
 Titelbilder in den Listen (Vorschläge, Startpaket, Alben, „Schon gefunden“, Tage der
 Reise-Werkstatt), die Vorschau und den Beleg eines Plans, die Sortier-Show, das Mosaik der
-ersten Analyse, „Gerade angesehen“ auf der Analyse-Karte, den Farbschein eines Atlas-Lands und
-das Foto im teilbaren Reise-Atlas-Bild.
+ersten Analyse, „Gerade angesehen“ in den Details der Analyse-Karte, den Farbschein eines
+Atlas-Lands und das Foto im teilbaren Reise-Atlas-Bild.
 - **Sensibel** ist ein Foto, dessen Dokument-Einordnung finanziell, Ausweis oder medizinisch
   sagt; in dessen gespeichertem Text eine Kartennummer oder IBAN maskiert wurde oder ein Wort
   einer Bankkarte oder eines Kontoauszugs steht („Visa Debit“, „girocard“, „Kontostand“); und

@@ -72,7 +72,13 @@ Absturzprotokoll), fragt GitHub jeden Morgen um 06:00 UTC von selbst ab
 (`.github/workflows/asc-feedback.yml`, Skript `.github/scripts/asc_feedback.py`). Von Hand:
 Actions > **TestFlight feedback** > Run workflow.
 
-- **counts** (täglich und Standard): die Zusammenfassung des Laufs zeigt nur, wie viele
+- **encrypted** (täglich und Standard, seit 20.11.2026): Kommentare, Screenshots und
+  Absturzprotokolle der letzten 14 Tage, mit openssl verschlüsselt an das Zertifikat
+  `.github/feedback-recipient.pem` (Fingerabdruck fest im Skript); hochgeladen wird nur die
+  verschlüsselte Datei (Artefakt **testflight-feedback-encrypted**, 7 Tage), die Zusammenfassung
+  zeigt nur Anzahlen. Lesen mit dem privaten Schlüssel: `tools/feedback_inbox.py`
+  (`docs/launch/FREIGABE_EINRICHTEN.md`, „Freiwillig“). Erlaubt auch bei öffentlichem Repository.
+- **counts** (von Hand): die Zusammenfassung des Laufs zeigt nur, wie viele
   Feedbacks und Abstürze jeder Build hat, und das Datum des neuesten. Kommentare, Gerätedaten,
   Screenshots und Absturzprotokolle werden dabei gar nicht erst abgefragt, nichts wird
   gespeichert oder hochgeladen. Die Inhalte selbst stehen in App Store Connect > Albumist >
@@ -91,9 +97,12 @@ Actions > **TestFlight feedback** > Run workflow.
   erscheinen nur als Text (kein HTML, keine Links, keine Erwähnungen) und nie im Protokoll des Laufs.
 - Eigener Schlüssel, nicht der des Uploads (seit 18.11.2026): den Upload-Schlüssel bekommt nur
   der Upload-Job. Der Feedback-Schlüssel hat die Rolle **Developer** und
-  liegt als Repository-Secrets `ASC_FEEDBACK_KEY_ID`, `ASC_FEEDBACK_ISSUER_ID` und
-  `ASC_FEEDBACK_KEY_P8` (`docs/launch/FREIGABE_EINRICHTEN.md`, „Freiwillig“). Ohne sie
-  meldet der Lauf nur „Skipped“. Mit einer Rolle ohne Lesezugriff meldet er „HTTP 403“ und nennt
+  liegt als Secrets `ASC_FEEDBACK_KEY_ID`, `ASC_FEEDBACK_ISSUER_ID` und `ASC_FEEDBACK_KEY_P8` in
+  der Umgebung `asc-feedback`, die nur `main` benutzen darf; der erste Job prüft das
+  (`docs/launch/FREIGABE_EINRICHTEN.md`, „Freiwillig“). Bis es die Umgebung gibt, holt ein
+  zweiter Job mit den gleichnamigen Repository-Secrets ab und warnt, dass sie noch nicht auf
+  `main` beschränkt sind; eine Umgebung mit anderer Regel macht den Lauf rot. Abgeholt wird nur
+  auf `main`. Ohne die Secrets meldet der Lauf nur „Skipped“. Mit einer Rolle ohne Lesezugriff meldet er „HTTP 403“ und nennt
   die fehlende Rolle (Admin, App Manager oder Developer geht). Die Rolle eines Schlüssels lässt
   sich nicht ändern: neuen Schlüssel mit passender Rolle erzeugen, alten widerrufen, die drei
   Secrets ersetzen. Geprüft 16.11. (damals noch mit dem Upload-Schlüssel): Feedback und Abstürze
@@ -213,8 +222,10 @@ Actions > **TestFlight feedback** > Run workflow.
 
 ## UI-Tests: nur betroffene Gruppen (Regel Fuchs, 17.11.2026)
 
-Die UI-Tests laufen in fünf Gruppen (`.github/ui-groups.json`): Gerätezustände, voller Ablauf
-mit Video, übrige Abläufe mit Kauf und Suche, Barrierefreiheit, Kontrast. Seit 18.11. läuft
+Die UI-Tests laufen in sechs Gruppen (`.github/ui-groups.json`): Rückgängig, unterbrochener
+Plan und große Mediathek (`device-flows`, seit 20.11.), Gerätezustände, übrige Abläufe mit Kauf
+und Suche, Barrierefreiheit, voller Ablauf mit Video, Kontrast; bis zu fünf zugleich (im
+TestFlight-Lauf drei). Seit 18.11. läuft
 eine Gruppe nur noch, wenn es für sie kein grünes Ergebnis für genau diese App und genau ihren
 Testcode gibt.
 
@@ -338,6 +349,10 @@ Testcode gibt.
   nur durch eine gemeinsame Datei (Hilfsdatei, Skript, Workflow) zu einem neuen Schlüssel,
   ohne dass sich eine eigene Testdatei der Gruppe änderte, warnen Plan und Gate („UI red
   cleared by a shared change“): prüfen, ob das wirklich die Korrektur war.
+- **Bekanntes Rot sofort** (Tempo-Plan 20.11.): ist eine Gruppe schon rot für dieselbe App und
+  ihren Testcode, scheitert der Linux-Job „UI known red (verdict will be red)“ in der ersten
+  Minute und nennt die Läufe. Die Gruppen laufen trotzdem, das Urteil bleibt der Job „UI
+  verdict“.
 - **Längere Wartezeiten in Tests brauchen einen gemessenen Grund** (Regel 17.11.): wer ein
   `timeout` oder eine Wartezeit verlängert, nennt im Commit die Messung (Lauf und gemessene
   Sekunden), so wie 4bb7fdd („say how long it took“). Eine reine Verlängerung ohne Messung ist
@@ -375,7 +390,7 @@ Testcode gibt.
   in beiden Modi. Für die Freigabe eines Commits, der nur schnelle Läufe hat: „UI flow“ von
   Hand ohne `quick` starten; dann laufen alle Gruppen ohne volles Grün für diesen Stand.
 - Von Hand: Actions > **UI flow** > Run workflow, Feld **groups**: `auto` (Vorgabe), `all`
-  (alle Gruppen) oder Gruppennamen (`device flow-full flow-other accessibility contrast`), und
+  (alle Gruppen) oder Gruppennamen (`device-flows device flow-other accessibility flow-full contrast`), und
   **quick** (aus = voller Lauf). In **TestFlight** gibt es dafür **ui_groups** (`auto` oder
   `all`); TestFlight läuft immer voll.
 
@@ -410,7 +425,8 @@ Gemessen aus den Job-Protokollen der Läufe zu Commit 4bb7fdd (Pull Request 1): 
   Sekunden, weil der Simulator gleichzeitig startet und die Platte belegt. Nicht geändert.
 - Barrierefreiheit startete 14 Minuten später als die anderen Gruppen: alle fünf Macs waren
   belegt (CIs iOS-Job, drei Gruppen und 26 Minuten lang die CodeQL-Swift-Analyse, die am Ende
-  scheiterte). Kontrast wartet ohnehin, bis eine Gruppe fertig ist (höchstens vier zugleich).
+  scheiterte). Kontrast wartet ohnehin, bis eine Gruppe fertig ist (damals höchstens vier
+  zugleich; seit 20.11. fünf, GitHub hält die sechste, solange CIs Mac-Job läuft).
 
 Umgesetzt (18.11.):
 
@@ -423,13 +439,136 @@ Umgesetzt (18.11.):
 
 Vorschläge, noch nicht umgesetzt (Entscheidung nötig, nach dem Kürzen der UI-Tests neu messen):
 
-1. Gruppen neu verteilen: Gerätezustände (58 Minuten Testzeit, test11 allein 26) und übrige
-   Abläufe (54) bestimmen die Dauer, voller Ablauf (10) und Kontrast (12) sind kurz. Zum
-   Beispiel test11 in die Gruppe „voller Ablauf“ und test05/07/08 zu den Gerätezuständen: die
-   längste Gruppe hätte dann etwa 45 statt 58 Minuten Testzeit.
+1. ~~Gruppen neu verteilen~~ umgesetzt 20.11. (Tempo-Plan): Gerätezustände test05, test07,
+   test08 und test11 bilden die Gruppe `device-flows`, bis zu fünf Gruppen zugleich. Gemessen
+   vorher (Pull Requests seit 18.11., Schnellmodus, Job-Median): übrige Abläufe 55,8, Gerätezustände
+   43,3 Minuten. Erwartet: längste Gruppe rund 43 statt 56 Minuten (schlechtester Fall rund 50
+   statt 65). TestFlight (drei zugleich, voller Modus, Barrierefreiheit als vierte gestartet):
+   rund 70–76 Minuten für die Gruppen, vorher rund 68–74 (sechs Jobs auf drei Macs gehen nicht
+   unter etwa 70); mit dem vollen Lauf vor dem Merge laufen dort meist keine Gruppen mehr.
 2. Im TestFlight-Lauf die UI-Tests schon nach den Linux-Teilen von CI starten statt nach dem
    iOS-Job (rund 16 Minuten früher). Kostet Mac-Minuten, wenn der iOS-Job dann rot wird, und
    weicht von „erst schnell, dann teuer“ ab.
+
+## Tempo-Plan (Analyse 20.11.2026, Zweig `ci/tempo`)
+
+Gemessen an den Pull-Request-Läufen seit 18.11. 17:00 UTC (die heutige Strecke): Push bis
+UI-Urteil im Median 73, höchstens 131 Minuten; Push bis CI-Urteil 32 (höchstens 48). Davon
+Mac-Warteschlange im Median 0,4, aber bis 63 Minuten; die längste UI-Gruppe (übrige Abläufe)
+56 Minuten im Median, davon 2–4 Minuten „Wait for the simulator“ und 4–5 Minuten erstes
+Onboarding. Rot seit 16.11.: 87 Läufe, davon 25 App-Fehler, 22 Testfehler, 24 Umgebung, 2
+Bau-Strecke, 14 veraltet; seit der heutigen Strecke 25 (4 App, 6 Test, 14 Umgebung, 1 Strecke).
+
+Auf dem Zweig umgesetzt (kein Schritt fällt weg, kein Tor wird weicher, kein Test wird
+übersprungen oder wiederholt):
+
+| Stufe | vorher (Median / schlechtester) | nachher (erwartet) |
+|---|---|---|
+| Übersetzungsfehler nur auf dem Mac bis rot | 27 Minuten (61e9b8c) | rund 12 Minuten |
+| CI-Urteil je Push | 32 / 48 | gleich (rund 31) |
+| UI-Gruppen, längste Gruppe | 56 / 65 | rund 43 / 50 |
+| Push bis UI-Urteil | 73 / 131 | rund 60 / 105 |
+| Rot, das für diese App und diesen Testcode schon feststand | 69 Minuten (8b71209) | rund 1 Minute (Job „UI known red“) |
+| TestFlight, großes Tor, Gruppen laufen dort | 129 (ohne Konkurrenz) / 156 | etwa gleich (Gruppenphase rund 70–76 statt 68–74) |
+| TestFlight, kleines Tor | 89 | gleich |
+
+Geänderte Regeln: „höchstens fünf Macs je Push“ (16.11.) wird „fünf laufen, die sechste wartet
+in GitHubs Schlange“ (UI-Gruppen außerhalb von TestFlight fünf zugleich). Alle anderen bleiben:
+kein Cache, Rot bleibt rot, „Re-run failed jobs“ nur für die Technik, Merge nur grün ohne
+Wiederholung, voller UI-Lauf und Härtetest vor jedem Upload, Freigabe vor dem Hochladen.
+
+### Voller UI-Lauf einmal vor dem Merge (Entscheidung Fuchs 20.11. 17:12 Uhr)
+
+Regeländerung: Der volle UI-Lauf läuft einmal vor dem Merge, nicht noch einmal im
+TestFlight-Lauf. Der volle Lauf vor jedem Upload bleibt Pflicht; das UI-Tor von TestFlight
+weist ihn über die Fingerabdrücke nach, statt ihn zu wiederholen.
+
+- **Vor dem Merge (Stufe 1)**: nach dem letzten Push des Pull Requests Actions > UI flow > Run
+  workflow auf seinem Zweig, „quick“ aus (`gh workflow run ui.yml --ref <zweig> -f quick=false`).
+  Der Lauf führt nur die Gruppen aus, die für diesen Inhalt noch kein volles Grün haben. Die
+  Pull-Request-Läufe selbst bleiben schnell (quick) und sagen das im Urteil-Job als Hinweis.
+- **Merge-Tor**: „UI verdict (full)“ dieses Laufs grün auf dem letzten Commit des Zweigs. Es
+  verlangt für jede Gruppe ein volles Grün (nie ein schnelles) für genau den App- und
+  Test-Fingerabdruck, kein Rot für diesen Schlüssel, und im Schritt „Merge content same as this
+  commit“, dass der Merge in `main` dieselben Fingerabdrücke hat (`ui_evidence.py
+  merge-content`, `git merge-tree`). Hat `main` seitdem App oder Testcode geändert oder gibt es
+  Konflikte, ist er rot: `main` in den Zweig holen und den vollen Lauf neu starten (Gruppen mit
+  gleichem Schlüssel werden übernommen, kosten also keinen Mac).
+- **Damit GitHub es erzwingt** (nur Fuchs, Einstellung, P5-09): Schutzregel für `main` mit
+  Pflicht-Prüfungen „UI verdict (full)“ und „UI stress verdict“ (seit 17:20, unten) und „Require
+  branches to be up to date before merging“.
+  Bis dahin gilt es als Regel für Agenten und Fuchs.
+- **TestFlight (großes Tor)**: unverändert `ui_groups: auto`; es laufen nur Gruppen ohne volles
+  Grün für genau diesen Inhalt (nach Stufe 1 meist keine), das UI-Tor prüft alle Gruppen wie
+  bisher. Härtetest, Release-Kurztest, frühere Versuche, Upload-Bedingungen und Freigabe bleiben
+  unverändert. Großes Tor dann rund 85–90 statt 129–156 Minuten (CI rund 30, Härtetest rund 45
+  neben dem Release-Kurztest, Hochladen rund 10); letzter Push bis Upload rund 2,5 statt 3,5–4
+  Stunden. Unterscheidet sich der Inhalt doch (etwas kam nach dem vollen Lauf auf `main`),
+  laufen die betroffenen Gruppen im TestFlight-Lauf wie bisher: langsamer, nie ungeprüft.
+- Achtung Mac-Warteschlange: der Lauf von Hand wartet in `mac-queue`; ein neuer Push auf
+  irgendeinen Pull Request kann ihn dort ersetzen (GitHub hält je Gruppe einen wartenden Lauf).
+  Darum erst starten, wenn der schnelle Lauf des letzten Pushs fertig ist.
+
+### Härtetest einmal vor dem Merge (Entscheidung Fuchs 20.11. 17:20 Uhr)
+
+Regeländerung: Der kleine Härtetest (10.000 Fotos, 15 Minuten) läuft einmal vor dem Merge,
+neben dem vollen UI-Lauf, und TestFlight übernimmt sein Grün, wenn der Inhalt nachweislich gleich
+ist. Ohne passendes Grün läuft er im TestFlight-Lauf wie bisher, nie ungeprüft.
+
+- **Starten**: auf dem Zweig zuerst Actions > UI stress > Run workflow (Vorgaben 10000/15;
+  `gh workflow run ui-stress.yml --ref <zweig>`), dann den vollen UI-Lauf. Der Härtetest hat
+  eine eigene Gruppe `stress-branch` (eine für alle Zweige), wartet also nicht hinter dem
+  UI-Lauf in `mac-queue`; höchstens ein Zweig-Härtetest belegt einen Mac zugleich.
+- **Schlüssel**: wie bei den UI-Gruppen. Der Job heißt `UI stress 10000 photos [stress-10000-15
+  app … tests …]`: App-Fingerabdruck und Test-Fingerabdruck des Härtetests (der volle
+  Fingerabdruck der Gruppe, die `test12` nennt, also Testdatei, Hilfsdateien und Harness samt
+  `ui-stress.yml`, dazu Fotos und Minuten; `ui_evidence.py stress_fingerprint`). Rot bleibt rot
+  für diesen Schlüssel wie bei den Gruppen.
+- **Wiederverwenden**: der erste Job „Stress plan (key, reuse)“ lässt den Lauf aus, wenn es für
+  genau diesen Inhalt ein grünes Ergebnis dieser Größe und kein rotes gibt (Lauf von Hand und
+  TestFlight; der wöchentliche Lauf läuft immer).
+- **Merge-Tor**: zusätzlich „UI stress verdict“ grün auf dem letzten Commit des Zweigs. Der
+  Merge-Inhalt-Schritt des vollen UI-Laufs deckt den Härtetest mit ab (sein Schlüssel folgt aus
+  dem der Gruppe).
+- **TestFlight**: ruft den Härtetest in jedem Lauf auf (beide Tore); er läuft nur ohne passendes
+  Grün. Das UI-Tor prüft ihn immer (`ui_evidence.py gate --stress 10000-15`), der Upload braucht
+  ihn grün wie bisher. Release-Kurztest, Archiv-Prüfung, frühere Versuche, Upload-Bedingungen
+  und alle Tore laufen in jedem TestFlight-Lauf.
+- **Macs und Dauer vor dem Merge**: voller UI-Lauf (fünf Gruppen zugleich) und Härtetest wollen
+  sechs Macs, das Konto hat fünf. Der Härtetest startet zuerst (sein Plan braucht eine halbe
+  Minute, die UI-Gruppen kommen erst nach Plan, Linux-Kern und Bau, rund 8 Minuten). Er belegt
+  einen Mac rund 40–50 Minuten; die Gruppen laufen so lange auf vier. Erwartet: Härtetest fertig
+  nach rund 50, voller UI-Lauf nach rund 70 Minuten (ohne Härtetest rund 57).
+- **TestFlight danach**: mit übernommenen Gruppen und Härtetest bestimmt der Release-Kurztest
+  (rund 25 Minuten) die Dauer: großes Tor rund 65–70 statt 129–156 Minuten.
+
+Noch nicht umgesetzt, Entscheidung nötig:
+
+1. **Label statt Lauf von Hand** (später, wenn gewünscht): ein Label `full-ui` startet den vollen
+   Lauf des Pull Requests.
+2. **TestFlight vor Pull Requests**: UI-Läufe von Pull Requests warten, solange ein
+   TestFlight-Lauf seine Gruppen braucht (Lauf 44629523806: Gruppen warteten 17–82 Minuten).
+3. **Bekannt rote Gruppen nicht mehr laufen lassen**: ihr Grün zählt nicht; spart je Fall
+   20–55 Mac-Minuten, zeigt aber nicht mehr, ob das Rot wiederkommt.
+4. **Pushes bündeln** (Agenten-Regel): 30 von 42 Pushes kamen weniger als 70 Minuten nach dem
+   vorigen; 12 % der Mac-Minuten gingen an abgebrochene UI-Läufe.
+5. **P5-05 Stufe 1** (eine vorbereitete Demo-Mediathek je Gruppe statt Onboarding in jedem Test):
+   rund 4–5 Minuten je Gruppe; braucht Testcode-Änderungen.
+
+### Umgebungsfehler: was einmal automatisch wiederholt wird (Stand 20.11.)
+
+Regel: Wackelndes wird gezählt und an der Ursache behoben, nie still wiederholt. Wiederholt wird
+nur bei genau erkannten Umgebungsfehlern; im Zweifel ist es ein echter Fehler.
+
+| Fehler | Wiederholung | sichtbar | gezählt |
+|---|---|---|---|
+| Simulator startet nicht (UI-Gruppen, Härtetest) | bis 3 Boot-Versuche, `FLAKY_BOOT` | Zusammenfassung, Anmerkung | ja, `flaky_history.py` („Failed boot attempts“) |
+| Simulator/XCTest bricht in einem UI-Durchgang ab (genaue Muster `ui_tests.py INFRA`, `STRONG_REAL` geht vor) | einmal, nur die nicht bestandenen Tests, `FLAKY_RETRY` | Zusammenfassung, Anmerkung | ja („passed on repeat“) |
+| Simulator startet nicht (CI-Mac-Job) | bis 3 Boot-Versuche | seit 20.11. Anmerkung und Zusammenfassung | nein (nur im Log und in der Anmerkung) |
+| Ubuntu-Paketquelle (apt) | 2 Versuche, dann Azure-Kopie, 2 weitere, `CI_INFRA_RETRY` | seit 20.11. Anmerkung und Zusammenfassung | nein |
+| Artefakt-Upload ETIMEDOUT | nur der Retry-Record (`ui.yml`, `testflight.yml`): ein zweiter Versuch nach 60 s, `FLAKY_UPLOAD` | Log | nein; andere Uploads: „Re-run failed jobs“ als Technik, vom Upload-Job gelistet |
+| StoreKit „no product“ | keine | – | – (bleibt ein roter Testlauf, bis eine genaue Signatur vereinbart ist) |
+| Hängender Test (`swift_test_watch.py`, `UI_HANG`) | keine, immer rot | Anmerkung, Zusammenfassung | als Testfehler |
 
 ## Code-Scanning (CodeQL)
 

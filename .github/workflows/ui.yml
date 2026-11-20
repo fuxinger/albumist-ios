@@ -14,16 +14,20 @@ run-name: >-
 #      starts for a commit whose core tests fail (fast first, then expensive).
 #   2. UI build: builds the app and the UI tests once (build-for-testing) and hands them on.
 #   3. The test groups (.github/ui-groups.json), each on its own runner and freshly booted
-#      simulator (test-without-building), at most four at a time (max-parallel; three when
+#      simulator (test-without-building), at most five at a time (max-parallel; three when
 #      TestFlight calls it, beside its stress pass and Release smoke test), so the slowest
 #      group sets the wall time, not the sum. Measured times per group: docs/TESTFLIGHT.md
 #      ("Messung"). "other flows" is defined as "everything the other groups do not run", so a
 #      new test class always runs somewhere and no test runs twice (test_ui_tests.py GroupTests
 #      checks every UI test against the groups).
-#      With CI's one macOS job this is at most five macOS jobs per push at the peak (the build
-#      job runs before the groups; max-parallel 4 holds the fifth group back), about all the
-#      repository has; accepted on 16.11. Contrast is listed last, so it is the group that
-#      waits.
+#      max-parallel 5 holds back the sixth group (the last listed, contrast) until one of the
+#      five ends. With CI's one macOS job that is still six macOS jobs asked for at the peak,
+#      for the first 15-25 min of the groups while CI's job still runs; the account runs five
+#      at once, so one of the five started groups waits in GitHub's account queue until a Mac
+#      is free, and which one GitHub picks is not fixed (a queued job waits, it never fails;
+#      its timeout counts from its start). Tempo plan 20.11.: six groups of at most about 45
+#      min instead of five with one of 56-65 min (before: max-parallel 4, five macOS jobs at
+#      the peak, accepted on 16.11.).
 #      The stress pass is not part of this run: .github/workflows/ui-stress.yml (10,000 photos
 #      before each TestFlight build, 50,000 weekly at night and before the App Store launch).
 #
@@ -33,7 +37,8 @@ run-name: >-
 #     fingerprint of the group: its test files, the shared helpers they use, its definition and
 #     the harness; .github/scripts/ui_groups.py). A test-only change runs the groups of the
 #     changed files, a change to a shared helper every group that uses it, any app change all.
-#   - all: every group; or group names (device flow-full flow-other accessibility contrast).
+#   - all: every group; or group names (device flow-other accessibility device-flows flow-full
+#     contrast).
 #   Each group job carries both fingerprints in its name ("[device app ... tests ...]"); that is
 #   where later runs and the TestFlight gate find the result again. A group whose result for
 #   this app and test code was red runs again when asked, but its green never counts (a red test
@@ -161,6 +166,8 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
+      known_red: ${{ steps.plan.outputs.known_red }}
+      known_red_text: ${{ steps.plan.outputs.known_red_text }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,6 +180,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           UI_GROUPS: ${{ inputs.groups || 'auto' }}
         run: python3 .github/scripts/ui_evidence.py plan --groups "$UI_GROUPS" ${UI_QUICK:+--quick}
+
+  known-red:
+    # Tempo plan 20.11.: a group that is red for exactly this app and its test code makes the
+    # verdict red whatever this run shows (a red test is never re-run to green). The plan knows
+    # that at minute one; this job turns it into a red check at once instead of after the groups
+    # (8b71209: the verdict was red after 69 min from a red of a cancelled run). The groups still
+    # run (their results show whether the red came back); nothing is skipped or re-run, and the
+    # verdict below decides as before. Not in a TestFlight run: its UI gate decides there.
+    name: UI known red (verdict will be red)
+    needs: plan
+    if: ${{ needs.plan.outputs.known_red != '' && !inputs.release }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Red before for this app and test code
+        env:
+          KNOWN_RED: ${{ needs.plan.outputs.known_red }}
+          KNOWN_RED_TEXT: ${{ needs.plan.outputs.known_red_text }}
+        run: |
+          echo "::error title=UI known red::$KNOWN_RED_TEXT. The verdict of this run will be red: fix the test or the app and push; a red test is never re-run to green."
+          {
+            echo "### UI groups already red for this app and test code: $KNOWN_RED"
+            echo "$KNOWN_RED_TEXT"
+            echo
+            echo "The groups still run; their green does not count for this app and test code."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
   dependabot-note:
     name: 'Dependabot: UI by hand'
@@ -200,7 +235,10 @@ jobs:
     if: ${{ needs.plan.outputs.count != '0' && !inputs.release }}
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
-    timeout-minutes: 30
+    # Hang limits as in CI's "Core tests (Linux)" (the watchdog names the tests still running,
+    # swift_test_watch.py). This job, 61 green since 16.11.: p95 5.6, longest 7.0 min; 25 leaves
+    # room for apt's retries (up to 11.6 min seen in CI during the mirror outage) and the step's 12.
+    timeout-minutes: 25
     defaults:
       run:
         shell: bash
@@ -209,9 +247,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Install SQLite headers
-        run: bash .github/scripts/apt_install.sh libsqlite3-dev
+        run: bash .github/scripts/apt_install.sh libsqlite3-dev python3
       - name: Build and test
-        run: swift test --parallel
+        timeout-minutes: 12
+        run: python3 .github/scripts/swift_test_watch.py --minutes 10 --log core-linux.log -- swift test --parallel
 
   build:
     name: UI build
@@ -276,14 +315,17 @@ jobs:
     timeout-minutes: 150
     strategy:
       fail-fast: false
-      # Four groups + CI's macOS job = five macOS jobs at the peak (see the top of this file).
+      # Five groups + CI's macOS job = six asked for at the peak; the account queue holds one of
+      # them, whichever GitHub picks, until a Mac is free (top of this file, tempo plan 20.11.).
       # Called by TestFlight (release): three, as the stress pass and the Release smoke test run
       # beside the groups there (CI's Mac job has ended), so five Macs at most, the account's
-      # limit. The group order (.github/ui-groups.json) starts the longest, device conditions,
-      # first; the two short ones wait for a free Mac and still end before it (TestFlight run
-      # 44461253154: device 62 min, flow-full 12, contrast 15 at the end), so the run takes no
-      # longer (second review of C7; test_workflows.py ReleaseSmokeTests).
-      max-parallel: ${{ inputs.release && 3 || 4 }}
+      # limit. The group order (.github/ui-groups.json) starts the longest in a full run
+      # (device-flows, device, other flows) first, accessibility (the longest of the short ones)
+      # on the first free Mac, then flow-full and contrast. Estimate for a full run (job minutes
+      # from TestFlight run 44461253154 and the pull-request medians since 18.11.): about 70-76
+      # min for the groups, before about 68-74; six jobs on three Macs cannot do better than
+      # about 70 (second review of C7; test_workflows.py ReleaseSmokeTests).
+      max-parallel: ${{ inputs.release && 3 || 5 }}
       # The groups of .github/ui-groups.json that run (UI plan): group, title, device, only,
       # skip, video, reduce_motion, increase_contrast, budget_min, app, tests.
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -437,7 +479,11 @@ jobs:
     # its own test code, from this run or an earlier one, and none red for that pair; the same
     # check as the TestFlight gate (ui_evidence.py gate). Also when no group had to run. The
     # release gate (ci_gate.py) needs this job green in its full form; a quick verdict (pull
-    # requests) never counts for an upload or a release. Not in a TestFlight run: there the
+    # requests) never counts for an upload or a release.
+    # Merge gate (the owner's decision of 20.11.2026, 17:12): "UI verdict (full)" of a full run
+    # started on the pull request's branch, green on its last commit, with the merge content
+    # unchanged (step "Merge content same as this commit"); the TestFlight run after the merge
+    # then reuses those greens by content and runs only groups without one. Not in a TestFlight run: there the
     # "UI gate" of testflight.yml does this.
     name: UI verdict (${{ (!inputs.release && (github.event_name == 'pull_request' || inputs.quick)) && 'quick' || 'full' }})
     needs: [plan, ui]
@@ -455,10 +501,28 @@ jobs:
           # The commits of earlier results, to recompute their fingerprints from git.
           fetch-depth: 0
           persist-credentials: false
+      - name: Full UI pass before the merge
+        # The owner's decision of 20.11.2026, 17:12: the full UI pass runs once before the merge
+        # (not again in the TestFlight run, whose UI gate takes its greens by content). A pull
+        # request's own runs are quick; this says how to start the full one on its branch.
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          echo "::notice title=Full UI pass before the merge::Once the last commit is pushed: Actions > UI stress > Run workflow on branch $HEAD_REF (first, the longest Mac job), then Actions > UI flow > Run workflow on it with quick off. 'UI stress verdict' and 'UI verdict (full)' must be green on the branch's last commit before the merge (docs/TESTFLIGHT.md)."
       - name: UI groups green for this app and test code
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}
+      - name: Merge content same as this commit
+        # The full pass before the merge (decision 20.11.2026): its greens stand for the merge
+        # only when merging this commit into main gives the same app fingerprint and the same
+        # full test fingerprint of every group (ui_evidence.py merge-content, git merge-tree).
+        # When main changed the app or test code since, or the merge conflicts, this is red:
+        # merge main into the branch and run the full pass again (unchanged groups are reused).
+        # Also after a red gate, so both reasons show at once.
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && !inputs.quick && github.ref != 'refs/heads/main' }}
+        run: python3 .github/scripts/ui_evidence.py merge-content --base origin/main
 
   summary:
     name: UI summary (retries and flaky tests)

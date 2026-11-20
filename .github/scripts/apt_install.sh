@@ -52,7 +52,15 @@ for mirror in primary fallback; do
   for _ in 1 2; do
     attempt=$((attempt + 1))
     if try_install "$@"; then
-      [ "$attempt" -gt 1 ] && echo "apt_install.sh: installed on attempt $attempt ($mirror mirror)"
+      if [ "$attempt" -gt 1 ]; then
+        echo "apt_install.sh: installed on attempt $attempt ($mirror mirror)"
+        # Visible in the check's annotations and the job summary, not only in the log: an
+        # environment retry is counted and fixed at its cause, never hidden (rule of 17.11.).
+        echo "::warning title=Environment retry (apt)::Ubuntu packages installed on attempt $attempt ($mirror mirror) after $((attempt - 1)) failed attempt(s); the mirror is a finding to fix, not a test result"
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          echo "- Environment retry (apt): installed on attempt $attempt ($mirror mirror)" >> "$GITHUB_STEP_SUMMARY"
+        fi
+      fi
       exit 0
     fi
     echo "CI_INFRA_RETRY apt: attempt $attempt failed ($mirror mirror)"

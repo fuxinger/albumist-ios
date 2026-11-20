@@ -10,7 +10,7 @@ struct StoreTests {
 
     @Test func migrationsRun() async throws {
         let s = try store()
-        #expect(await s.schemaVersion == 5)
+        #expect(await s.schemaVersion == 6)
     }
 
     @Test func fileBackedStoreSurvivesReopen() async throws {
@@ -22,7 +22,7 @@ struct StoreTests {
         }
         let reopened = try SortlyStore(url: url)
         #expect(try await reopened.assetCount() == 1)
-        #expect(await reopened.schemaVersion == 5)
+        #expect(await reopened.schemaVersion == 6)
     }
 
     @Test func upsertReportsOnlyChangedAssetsAndRoundTrips() async throws {
@@ -38,6 +38,170 @@ struct StoreTests {
         #expect(try await s.upsertAssets([modified]) == ["a"])
         #expect(try await s.asset("a") == modified)
         #expect(try await s.asset("b")?.creationDate == nil) // unknown dates stay unknown
+    }
+
+    /// Second review of P1-15: the time zones worked out from the places of all photos are kept
+    /// while `placesRevision` stays the same. Every write that can change a photo's place or its
+    /// location moves it on; reading, or storing photos unchanged, does not.
+    @Test func everyWriteThatCanChangeAPlaceMovesThePlacesRevisionOn() async throws {
+        let s = try store()
+        let a = AssetSnapshot(id: "a", creationDate: Fixture.date("2026-01-01"), location: GeoCoordinate(latitude: 48.1, longitude: 11.5))
+        let b = AssetSnapshot(id: "b", creationDate: Fixture.date("2026-01-02"))
+        let place = ResolvedPlace(components: PlaceComponents(isoCountryCode: "DE"), source: .gpsReverseGeocoded)
+        var seen = [await s.placesRevision]
+        try await s.upsertAssets([a, b])
+        seen.append(await s.placesRevision)
+        try await s.setPlaces(["a": place])
+        seen.append(await s.placesRevision)
+        var moved = a
+        moved.location = GeoCoordinate(latitude: 40.7, longitude: -74.0)
+        try await s.upsertAssets([moved, b])
+        seen.append(await s.placesRevision)
+        _ = try await s.removeAssets(notIn: ["a"])
+        seen.append(await s.placesRevision)
+        try await s.setPlace(nil, for: "a")
+        seen.append(await s.placesRevision)
+        try await s.resetAnalysis()
+        seen.append(await s.placesRevision)
+        #expect(zip(seen, seen.dropFirst()).allSatisfy { $0 < $1 }, "\(seen)")
+        let last = await s.placesRevision
+        _ = try await s.places()
+        _ = try await s.allAssets()
+        try await s.upsertAssets([moved])
+        _ = try await s.removeAssets(notIn: ["a"])
+        #expect(await s.placesRevision == last)
+    }
+
+    /// Second review of P1-15: the image step of a trial year leaves out the photos in its time
+    /// that are of another year on their own clock, in every query it counts and pages with; any
+    /// number of them (they go in as one parameter).
+    @Test func theImageStepsQueriesLeaveOutPhotosOfAnotherYear() async throws {
+        let s = try store()
+        let start = Fixture.date("2026-01-01")
+        try await s.upsertAssets((0..<12).map { AssetSnapshot(id: AssetID("p\($0)"), creationDate: start.addingTimeInterval(Double($0) * 3_600)) })
+        let range = start..<start.addingTimeInterval(10 * 3_600)
+        let otherYear: Set<AssetID> = ["p1", "p4", "p8", "p11"]
+        try await s.saveResult("labels saved, not marked", kind: "content", asset: "p2", version: 3)
+        try await s.saveResult("labels saved, not marked", kind: "content", asset: "p8", version: 3)
+        #expect(try await s.countNeedingAnalysis(version: 3, within: range, excluding: otherYear) == 7)
+        var paged: [AssetID] = []
+        var cursor: AssetSnapshot?
+        while case let page = try await s.assetsNeedingAnalysis(version: 3, limit: 3, olderThan: cursor, within: range, excluding: otherYear),
+              !page.isEmpty {
+            paged += page.map(\.id)
+            cursor = page.last
+        }
+        #expect(paged == ["p9", "p7", "p6", "p5", "p3", "p2", "p0"])
+        #expect(try await s.pendingResults(String.self, kind: "content", version: 3, within: range, excluding: otherYear).keys.sorted() == ["p2"])
+        try await s.markAnalyzed(["p3", "p4"], version: 3)
+        #expect(try await s.countNeedingLabelsOnly(version: 3, labelsVersion: 1, within: range, excluding: otherYear) == 1)
+        let many = Set((0..<40_000).map { AssetID("x\($0)") }).union(["p0"])
+        #expect(try await s.countNeedingAnalysis(version: 3, within: range, excluding: many) == 7)
+        #expect(try await s.countNeedingAnalysis(version: 3, within: range) == 8)
+    }
+
+    /// Review P1-07: a photo set aside under "Ausgewählte Fotos" keeps its analysis, place and
+    /// text, and is left out of every read of the analysis, the counts and the search, until it
+    /// is read again. Only `removeAssets` deletes it.
+    @Test func photosSetAsideAreLeftOutOfEveryReadAndComeBackWhole() async throws {
+        let s = try store()
+        let a = AssetSnapshot(id: "a", creationDate: Fixture.date("2026-01-01"), location: GeoCoordinate(latitude: 48.1, longitude: 11.5),
+                              uniformTypeIdentifier: "public.heic")
+        let b = AssetSnapshot(id: "b", creationDate: Fixture.date("2026-01-02"), location: GeoCoordinate(latitude: 41.9, longitude: 12.5),
+                              originalFilename: "IMG_0002.HEIC", uniformTypeIdentifier: "public.heic")
+        let c = AssetSnapshot(id: "c", creationDate: Fixture.date("2026-01-03"))
+        try await s.upsertAssets([a, b, c])
+        let place = ResolvedPlace(components: PlaceComponents(isoCountryCode: "IT", country: "Italien"), source: .gpsReverseGeocoded,
+                                  resolvedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try await s.setPlaces(["a": place, "b": place])
+        try await s.saveResults([(AssetID("a"), "a labels"), (AssetID("b"), "b labels")], kind: "content", version: 3,
+                                markingAnalyzed: ["a", "b"], labelsVersion: 1)
+        try await s.saveResult("c pending", kind: "content", asset: "c", version: 3)
+        try await s.saveResult("b text", kind: "text", asset: "b", version: 1)
+        try await s.indexText("Rechnung Hotel Rom", for: "b")
+        try await s.indexText("Rechnung Bäcker", for: "a")
+        try await s.addOverride(UserOverride(scope: .asset("b"), decision: .ignoreAsset))
+        let revision = await s.placesRevision
+
+        #expect(try await s.setAside(notIn: ["a"]) == 2)
+        #expect(await s.placesRevision > revision)
+        #expect(try await s.setAside(notIn: ["a"]) == 0, "set aside once")
+        #expect(try await s.outOfViewCount() == 2)
+        #expect(try await s.assetCount() == 1)
+        #expect(try await s.allAssets().map(\.id) == ["a"])
+        #expect(try await s.asset("b") == nil)
+        #expect(try await s.assetsNeedingAnalysis(version: 3, limit: 10).isEmpty)
+        #expect(try await s.countNeedingAnalysis(version: 3) == 0)
+        #expect(try await s.countNeedingAnalysis(version: 3, labelsVersion: 2) == 1)
+        #expect(try await s.countNeedingLabelsOnly(version: 3, labelsVersion: 2) == 1)
+        #expect(try await s.unlabelledAssets(version: 3, labelsVersion: 2) == ["a"])
+        #expect(try await s.unlabelledAssets(version: 3, labelsVersion: 2, withResult: "content") == ["a"])
+        #expect(try await s.labelsVersions() == ["a": 1])
+        #expect(try await s.analyzedResults(String.self, kind: "content", version: 3, of: ["a", "b"]) == ["a": "a labels"])
+        #expect(try await s.results(String.self, kind: "content") == ["a": "a labels"])
+        #expect(try await s.results(String.self, kind: "text").isEmpty)
+        #expect(try await s.pendingResults(String.self, kind: "content", version: 3).isEmpty)
+        #expect(try await s.places() == ["a": place])
+        #expect(try await s.searchText("Rechnung") == ["a"])
+        #expect(try await s.searchText("Hotel").isEmpty)
+        // Kept, for the changes that go over every stored result and for reading the library.
+        #expect(try await s.results(String.self, kind: "text", includingOutOfView: true) == ["b": "b text"])
+        #expect(try await s.places(includingOutOfView: true) == ["a": place, "b": place])
+        #expect(try await s.storedAssets(among: ["a", "b", "x"]) == ["a", "b"])
+        #expect(try await s.assetsWithFileDetails().keys.contains("b"))
+        #expect(try await s.overrides().count == 1)
+
+        // Read again, unchanged and without its file details (known): back with everything,
+        // not counted as changed (nothing is analysed again).
+        var bare = b
+        bare.uniformTypeIdentifier = nil
+        bare.originalFilename = nil
+        #expect(try await s.upsertAssets([bare]).isEmpty)
+        #expect(try await s.outOfViewCount() == 1)
+        #expect(try await s.asset("b") == b)
+        #expect(try await s.results(String.self, kind: "content") == ["a": "a labels", "b": "b labels"])
+        #expect(try await s.places()["b"] == place)
+        #expect(Set(try await s.searchText("Rechnung")) == ["a", "b"])
+        #expect(try await s.labelsVersions() == ["a": 1, "b": 1])
+        // Read again changed: back, and analysed again as any changed photo.
+        var edited = c
+        edited.pixelWidth = 100
+        #expect(try await s.upsertAssets([edited]) == ["c"])
+        #expect(try await s.outOfViewCount() == 0)
+        #expect(try await s.countNeedingAnalysis(version: 3) == 1)
+
+        // Only `removeAssets` deletes a photo set aside, with its results.
+        #expect(try await s.setAside(notIn: ["a", "c"]) == 1)
+        #expect(try await s.removeAssets(notIn: ["a", "c"]) == 1)
+        #expect(try await s.outOfViewCount() == 0)
+        #expect(try await s.rawResult(kind: "content", asset: "b") == nil)
+        #expect(try await s.recognizedText(for: "b") == nil)
+        #expect(try await s.places(includingOutOfView: true).keys.sorted() == ["a"])
+        #expect(try await s.setAside(notIn: ["a"]) == 1)
+        #expect(try await s.removeAssets(["c"]) == 1)
+        #expect(try await s.assetCount() == 1)
+        #expect(try await s.overrides().count == 1, "the user's decisions stay")
+    }
+
+    /// A photo that comes back unchanged from being set aside moves the places revision on:
+    /// the time zones worked out from the places of the photos in view must count it again
+    /// (its local date and day). One read again that was in view does not.
+    @Test func aPhotoBackFromBeingSetAsideMovesThePlacesRevisionOn() async throws {
+        let s = try store()
+        let a = AssetSnapshot(id: "a", creationDate: Fixture.date("2026-01-01"), location: GeoCoordinate(latitude: 48.1, longitude: 11.5))
+        let b = AssetSnapshot(id: "b", creationDate: Fixture.date("2026-01-02"), location: GeoCoordinate(latitude: 40.7, longitude: -74.0))
+        try await s.upsertAssets([a, b])
+        _ = try await s.setAside(notIn: ["a"])
+        let aside = await s.placesRevision
+        #expect(try await s.upsertAssets([a]).isEmpty)
+        #expect(await s.placesRevision == aside, "a photo in view read again unchanged")
+        #expect(try await s.upsertAssets([b]).isEmpty)
+        #expect(await s.placesRevision > aside, "the photo back in view")
+        #expect(try await s.assetCount(includingOutOfView: true) == 2)
+        _ = try await s.setAside(notIn: [])
+        #expect(try await s.assetCount() == 0)
+        #expect(try await s.assetCount(includingOutOfView: true) == 2)
+        #expect(try await s.outOfViewAssetIDs() == ["a", "b"])
     }
 
     @Test func incrementalAnalysisTracking() async throws {
@@ -126,7 +290,7 @@ struct StoreTests {
             try old.execute("INSERT INTO text_fts (asset_id, content) VALUES ('gone', 'Kontoauszug alt')")
         }
         let s = try SortlyStore(url: URL(fileURLWithPath: path))
-        #expect(await s.schemaVersion == 5)
+        #expect(await s.schemaVersion == 6)
         #expect(await s.hasFullTextSearch)
         #expect(try await s.searchText("Hotel") == ["a"])
         #expect(try await s.searchText("Kontoauszug").isEmpty) // orphan from the old index is gone

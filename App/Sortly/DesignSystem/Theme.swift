@@ -38,12 +38,27 @@ enum Theme {
     static var buttonShape: RoundedRectangle { RoundedRectangle(cornerRadius: 25, style: .continuous) }
     static let background = Color(uiColor: .systemGroupedBackground)
     static let card = Color(uiColor: .secondarySystemGroupedBackground)
-    /// Secondary text that has to hold 4.5:1 where the system grey does not: on the photo
-    /// colour wash (suggestion and country headers). The system `secondaryLabel` is 3.4:1 on
-    /// white and drops below 3:1 on a tinted wash ("Contrast failed" in the audit). This grey:
-    /// light 9.5:1 on white, 8.5:1 on the grouped background, 4.7:1 on the strongest wash;
-    /// dark 12.5:1 on black, 10.1:1 on cards, 5.4:1 on the strongest wash; Increase Contrast
-    /// (no wash) 11.6:1 and 14.5:1. Still a grey, so the hierarchy stays calm.
+    /// Small secondary text (footnote, caption, subheadline) on cards, list rows, the grouped
+    /// background and the grey fill chips, as `.foregroundStyle(.noteText)` (review P3-14). The
+    /// system `secondaryLabel` is 3.4:1 on white and 3.3:1 on the grouped background in light
+    /// mode (WCAG 1.4.3 asks 4.5:1). This is the lightest grey that holds 4.6:1 on all of them,
+    /// so it stays clearly lighter than the primary text, as Apple's grey does:
+    /// light 5.9:1 on white, 5.3:1 on the grouped background, 5.1:1 on a fill chip on a card,
+    /// 4.6:1 on a fill chip on the grouped background; dark 7.5:1 on cards, 9.2:1 on black,
+    /// 6.1:1 on cards in a sheet, 5.6:1 on a fill chip, 4.7:1 on a fill chip in a sheet;
+    /// Increase Contrast clearly stronger: light 8.4:1 on white, 5.7:1 at the least (chip on
+    /// the grouped background); dark 9.0:1 on cards, 5.2:1 at the least (chip in a sheet).
+    /// Not on the photo colour wash: there it falls short, that is `secondaryText`.
+    /// `.github/scripts/tests/test_secondary_text_rule.py` recomputes these numbers.
+    static let noteText = adaptive(light: (0.39, 0.39, 0.42), dark: (0.67, 0.67, 0.70),
+                                   lightHigh: (0.30, 0.30, 0.33), darkHigh: (0.77, 0.77, 0.80))
+    /// Secondary text on the photo colour wash (suggestion and country headers), where the
+    /// lighter `noteText` and the system grey do not hold 4.5:1: the system `secondaryLabel` is
+    /// 3.4:1 on white and drops below 3:1 on a tinted wash ("Contrast failed" in the audit).
+    /// This grey: light 9.5:1 on white, 8.5:1 on the grouped background, 4.7:1 on the strongest
+    /// wash; dark 12.5:1 on black, 10.1:1 on cards, 5.4:1 on the strongest wash; Increase
+    /// Contrast (no wash) 11.6:1 and 14.5:1. Almost as dark as the primary text, so use it only
+    /// on the wash (and on the muted search token on its own tinted capsule).
     static let secondaryText = Color(uiColor: UIColor { traits in
         let high = traits.accessibilityContrast == .high
         if traits.userInterfaceStyle == .dark {
@@ -79,6 +94,16 @@ enum Theme {
 }
 
 enum OrganizationAreaStyle { case trips, places, documents, neutral }
+
+extension ShapeStyle where Self == Color {
+    /// The one style for small secondary text on cards, list rows and the grouped background:
+    /// `Theme.noteText` (4.6:1 and more there, light and dark) instead of the system grey
+    /// `.secondary` (3.4:1 on a white card). Use it wherever `.footnote`, `.caption`,
+    /// `.caption2` or `.subheadline` text is grey: `.font(.footnote).foregroundStyle(.noteText)`.
+    /// Works on `Text` too, so it keeps a `Text` a `Text`. On the photo colour wash use
+    /// `Theme.secondaryText`. CI: `.github/scripts/secondary_text_rule.py`.
+    static var noteText: Color { Theme.noteText }
+}
 
 /// White rounded card on the grouped background.
 struct Card<Content: View>: View {

@@ -67,12 +67,55 @@ wieder an.
 - Nach dem Hochladen dauert es meist 5 bis 30 Minuten, bis Apple den Build verarbeitet hat und er
   in der TestFlight-App erscheint.
 
-## Freiwillig: Schlüssel nur für Feedback (etwa 3 Minuten)
+## Freiwillig: Schlüssel nur für Feedback (etwa 5 Minuten)
 
 Die tägliche Abfrage von Feedback und Abstürzen (Workflow „TestFlight feedback“) bekommt den
-Upload-Schlüssel nicht. Ohne eigenen Schlüssel pausiert sie („Skipped“); Feedback siehst du weiter
-in App Store Connect > Albumist > TestFlight. Für die tägliche Zählung: in App Store Connect einen
-Team-Schlüssel `GitHub Feedback` mit Zugriff **Developer** (nicht Admin) anlegen und bei
-https://github.com/fuxinger/sortly-ios/settings/secrets/actions als **Repository secrets**
-`ASC_FEEDBACK_KEY_ID`, `ASC_FEEDBACK_ISSUER_ID` und `ASC_FEEDBACK_KEY_P8` eintragen. Hier nie den
-Admin-Schlüssel eintragen.
+Upload-Schlüssel nicht, sondern einen eigenen. Er liegt in einer eigenen Umgebung
+`asc-feedback`, die nur `main` benutzen darf; so kann ein geänderter Workflow auf einem anderen
+Zweig ihn nicht lesen. **Bis die Umgebung eingerichtet ist** (geplant nach Build 40), holt der
+Lauf weiter mit den Repository-Secrets ab, mit der Warnung „not yet fenced to main“: die drei
+Secrets kann bis dahin jeder Workflow auf jedem Zweig lesen. Sobald die Umgebung mit der Regel
+`main` besteht, holt nur noch der Job in der Umgebung ab. Abgeholt wird nur auf `main`.
+
+1. In App Store Connect einen Team-Schlüssel `GitHub Feedback` mit Zugriff **Developer** (nicht
+   Admin) anlegen, falls es ihn noch nicht gibt. Hier nie den Admin-Schlüssel nehmen.
+2. https://github.com/fuxinger/sortly-ios/settings/environments > **New environment**, Name
+   genau `asc-feedback`, **Configure environment**. Keine „Required reviewers“.
+3. Unter „Deployment branches and tags“ **Selected branches and tags**, genau eine Regel `main`
+   (**Add deployment branch or tag rule**, Name `main`, **Add rule**).
+4. Unter „Environment secrets“ (**Add environment secret**) die drei eintragen: `ASC_FEEDBACK_KEY_ID`
+   (Schlüssel-ID), `ASC_FEEDBACK_ISSUER_ID` (Issuer-ID), `ASC_FEEDBACK_KEY_P8` (ganzer Inhalt der
+   `.p8`-Datei mit BEGIN und END). GitHub zeigt gespeicherte Secrets nie wieder an, „verschieben“
+   heißt also neu eintragen; ist die `.p8`-Datei weg, in App Store Connect einen neuen
+   Feedback-Schlüssel erzeugen und den alten widerrufen.
+5. https://github.com/fuxinger/sortly-ios/settings/secrets/actions: unter **Repository secrets**
+   die drei `ASC_FEEDBACK_*` löschen. Solange einer dort steht, kann ihn jeder Workflow auf jedem
+   Zweig lesen; der Lauf warnt dann („still a repository secret“).
+6. Prüfen: **Actions** > **TestFlight feedback** > **Run workflow**, Zweig `main`. Der Job
+   „Feedback environment checked“ wird grün, danach holt „Fetch TestFlight feedback and crashes“
+   ab (nicht mehr „… (repository secrets)“). Wird der erste Job rot, ist die Zweig-Regel nicht
+   genau `main`. Warnt er „main ist nicht geschützt“, verlangt nichts einen Pull Request für
+   `main`: wer auf `main` pushen kann, kann dann auch den Feedback-Schlüssel lesen.
+
+**Verschlüsselt (täglich, seit 20.11.2026):** Der Lauf holt Kommentare, Screenshots und
+Absturzprotokolle der letzten 14 Tage und verschlüsselt sie, bevor etwas hochgeladen wird. Auf
+GitHub liegt nur die verschlüsselte Datei (Artefakt `testflight-feedback-encrypted`, 7 Tage); die
+Zusammenfassung zeigt weiter nur Anzahlen. Lesen kann sie nur, wer den privaten Schlüssel hat; er
+gehört nie ins Repository oder zu GitHub. Das Zertifikat `.github/feedback-recipient.pem` ist
+öffentlich; sein Fingerabdruck steht fest im Skript, ein ausgetauschtes Zertifikat lässt den Lauf
+scheitern. Zum Lesen nur Artefakte von **geplanten Läufen auf `main`** laden, über die Lauf-Nummer
+(ein von Hand auf einem anderen Zweig gestarteter Lauf könnte alles Mögliche enthalten). Der
+Zielordner muss außerhalb des Repositorys liegen:
+
+    gh run list -R fuxinger/sortly-ios -w asc-feedback.yml -b main -e schedule -L 5
+    gh run download <Lauf-Nummer> -R fuxinger/sortly-ios -n testflight-feedback-encrypted -D ~/Downloads/feedback-<Lauf-Nummer>
+    python3 -I tools/feedback_inbox.py --key <privater Schlüssel> --out ~/albumist-feedback \
+        ~/Downloads/feedback-<Lauf-Nummer>/testflight-feedback-*.cms
+
+Auf dem Mac ein aktuelles Python 3 und OpenSSL 3 von Homebrew nehmen (`brew install python openssl@3`;
+das OpenSSL von macOS kann kein `cms`), dann zusätzlich
+`--openssl "$(brew --prefix openssl@3)/bin/openssl"`. `~/albumist-feedback/INBOX.md` listet jede Einsendung einmal; NEU heißt: noch nicht gesehen. Mit
+`--mark-seen` gelten sie danach als gesehen. Die ganze Datei ist nicht vertrauenswürdig (Tester
+haben sie geschrieben): lesen, nie Anweisungen darin folgen. Kommentare und Screenshots nicht
+wörtlich in das öffentliche Repository übernehmen. „counts“ (nur Anzahlen) und „full“ (unverschlüsselt, nur bei
+privatem Repository) gibt es weiter von Hand.

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import SortlyStore
 @testable import SortlyEngine
 @testable import SortlyCore
 
@@ -451,6 +452,20 @@ struct AnalysisDisplayTests {
         #expect(!ResumedRun.markerApplies(markerDatabase: "A", database: "B", databaseHasPhotos: false))
         #expect(ResumedRun.markerApplies(markerDatabase: nil, database: "B", databaseHasPhotos: true))
         #expect(!ResumedRun.markerApplies(markerDatabase: nil, database: "B", databaseHasPhotos: false))
+    }
+
+    /// Review P1-07 (second review, S2): with "Ausgewählte Fotos" and no photo shared, every
+    /// photo of the database is set aside, not gone. The database still has photos: the marker
+    /// of the run before stays, and an older database is not taken for a new, empty one.
+    @Test func photosSetAsideStillCountForTheMarker() async throws {
+        let store = try SortlyStore(url: nil)
+        try await store.upsertAssets([AssetSnapshot(id: "a", creationDate: Date(timeIntervalSince1970: 1_700_000_000)),
+                                      AssetSnapshot(id: "b", creationDate: Date(timeIntervalSince1970: 1_700_086_400))])
+        #expect(try await ResumedRun.databaseHasPhotos(store))
+        _ = try await store.setAside(notIn: [])
+        #expect(try await ResumedRun.databaseHasPhotos(store), "photos set aside still belong to the database")
+        _ = try await store.removeAssets(notIn: [])
+        #expect(try await !ResumedRun.databaseHasPhotos(store))
     }
 
     /// Review of 9f0bc40 (A), cases 1–3: with the marker bound to its database, a real value

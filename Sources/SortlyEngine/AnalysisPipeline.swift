@@ -7,10 +7,81 @@ import SortlyStore
 /// while the run is still starting is not lost (the run used to clear the flag when it began),
 /// and a Pause that arrives after its run ended cannot stop the next one.
 public final class AnalysisRunControl: Sendable {
-    private let paused = Mutex(false)
+    /// Someone waiting for the Pause (`untilPaused`), or one that was cancelled before it waited.
+    private enum Waiter {
+        case waiting(CheckedContinuation<Void, Never>)
+        case cancelled
+    }
+
+    private struct State {
+        var paused = false
+        var waiters: [Int: Waiter] = [:]
+        var nextID = 0
+    }
+
+    private let state = Mutex(State())
     public init() {}
-    public func pause() { paused.withLock { $0 = true } }
-    public var isPaused: Bool { paused.withLock { $0 } }
+
+    public func pause() {
+        let waiting = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.paused = true
+            defer { state.waiters = [:] }
+            return state.waiters.values.compactMap { waiter in
+                if case .waiting(let continuation) = waiter { return continuation }
+                return nil
+            }
+        }
+        for continuation in waiting { continuation.resume() }
+    }
+
+    public var isPaused: Bool { state.withLock { $0.paused } }
+
+    /// Returns once the run is paused, or as soon as the calling task is cancelled.
+    func untilPaused() async {
+        let id = state.withLock { state -> Int in
+            state.nextID += 1
+            return state.nextID
+        }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let now = state.withLock { state -> Bool in
+                    // Paused already, or cancelled before it got here.
+                    if state.paused || state.waiters.removeValue(forKey: id) != nil { return true }
+                    state.waiters[id] = .waiting(continuation)
+                    return false
+                }
+                if now { continuation.resume() }
+            }
+        } onCancel: {
+            let waiting = state.withLock { state -> CheckedContinuation<Void, Never>? in
+                if case .waiting(let continuation) = state.waiters.removeValue(forKey: id) { return continuation }
+                if !state.paused { state.waiters[id] = .cancelled }
+                return nil
+            }
+            waiting?.resume()
+        }
+    }
+
+    /// `work`, cancelled as soon as the run is paused (review P4-07: the photos in work were
+    /// finished first, an iCloud original for up to 180 s, while the card said "Wird
+    /// angehalten"). When the Pause comes before `work` ends, this throws `CancellationError`,
+    /// whatever `work` ends with after its cancellation (an analyzer may answer the cancel with
+    /// an error of its own): a photo given up for the Pause is never counted against it. A
+    /// result that came before the Pause is returned as usual; a Pause before the call throws
+    /// at once.
+    func cancellingOnPause<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        if isPaused { throw CancellationError() }
+        return try await withThrowingTaskGroup(of: T?.self) { group in
+            group.addTask { try await work() }
+            group.addTask {
+                await self.untilPaused()
+                return nil
+            }
+            defer { group.cancelAll() }
+            guard let value = try await group.next() ?? nil else { throw CancellationError() }
+            return value
+        }
+    }
 }
 
 /// Snapshot of the latest proposals, stored so the app opens instantly (prompt §14).
@@ -159,7 +230,11 @@ public actor AnalysisPipeline {
         public var earlyProposalsFailure: String?
         public var pausedBecause: PauseReason?
         public var newOrChanged = 0
+        /// Photos deleted from the store: gone from the library, read with full access.
         public var removed = 0
+        /// Photos set aside because "Ausgewählte Fotos" hides them (review P1-07): kept with
+        /// their analysis, left out of everything until they are read again.
+        public var setAside = 0
         public var placesResolved = 0
         public var placesPendingOnline = 0
         public var onlineRequests = 0
@@ -224,7 +299,15 @@ public actor AnalysisPipeline {
 
     enum Key {
         static let trips = "analysis.trips"
+        /// Where in the library's change history the stored photos and albums are
+        /// (`LibraryReadMark`). An analysis key: "Analyse neu aufbauen" and the safety copy
+        /// leave it out, so a database put back or rebuilt reads the whole library first.
+        static let libraryMark = "analysis.libraryMark"
         static let frequentPlaces = "analysis.frequentPlaces"
+        /// Places of the analysis before whose photos are set aside under "Ausgewählte Fotos"
+        /// and that the selection does not make (review P1-07): kept for their ids, so they come
+        /// back with them (name, "Nicht jetzt", album). Never shown or counted.
+        static let frequentPlacesOutOfView = "analysis.frequentPlacesOutOfView"
         static let groups = "analysis.groups"
         static let tripCorrections = "user.tripCorrections"
         /// The user's answers to "Bist du hier öfter?" (part of the decisions copy in the backup).
@@ -274,9 +357,15 @@ public actor AnalysisPipeline {
         static let heldSuggestions = "user.heldSuggestions"
         /// A change in "Dein Zuhause" no suggestions were made for yet (`PendingHomeChange`).
         static let pendingHomeChange = "analysis.pendingHomeChange"
+        /// The clock of photos whose place tells no time zone (review P1-15, `LocalTime`): the
+        /// iPhone's time zone at the first analysis, as an IANA identifier. Stored once and kept
+        /// when the iPhone travels, so its time zone during an analysis changes no album. Kept
+        /// like the user's settings: "Analyse neu aufbauen" leaves it, the safety copy carries it.
+        /// A database from before gets the time zone of its first run after the update.
+        static let homeTimeZone = "user.homeTimeZone"
     }
 
-    private let store: SortlyStore
+    let store: SortlyStore
     private let reader: any PhotoLibraryReading
     private let analyzer: any ContentAnalyzing
     private let geocoder: (any ReverseGeocoding)?
@@ -516,12 +605,179 @@ public actor AnalysisPipeline {
     }
 
     /// A trial run over one year analyses only the photos of that year (and the trips that
-    /// touch it); the rest is looked at once the user takes in the whole library.
-    static func dateRange(of scope: OrganizationScope, calendar: Calendar) -> Range<Date>? {
-        guard case .year(let year) = scope,
-              let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
-              let end = calendar.date(byAdding: .year, value: 1, to: start) else { return nil }
-        return start..<end
+    /// touch it); the rest is looked at once the user takes in the whole library. A photo's year
+    /// is that of its own clock (review P1-15): the range holds every instant that is in the year
+    /// on a clock in `calendar`'s zone (the home time zone) or in one of `zones` (those of the
+    /// places in the library). Which photos are in the year is told by their facts
+    /// (`OrganizationScope.includes`); this range only limits the work.
+    static func dateRange(of scope: OrganizationScope, calendar: Calendar, zones: Set<TimeZone> = []) -> Range<Date>? {
+        guard case .year(let year) = scope else { return nil }
+        var range: Range<Date>?
+        for zone in [calendar.timeZone] + zones.sorted(by: { $0.identifier < $1.identifier }) {
+            var local = calendar
+            local.timeZone = zone
+            guard let start = local.date(from: DateComponents(year: year, month: 1, day: 1)),
+                  let end = local.date(byAdding: .year, value: 1, to: start) else { continue }
+            range = range.map { min($0.lowerBound, start)..<max($0.upperBound, end) } ?? start..<end
+        }
+        return range
+    }
+
+    /// The clocks a year begins first and ends last on (the date line): with them `dateRange`
+    /// holds every instant that is in the year somewhere.
+    static let everyClock: Set<TimeZone> = [TimeZone(secondsFromGMT: 14 * 3600)!, TimeZone(secondsFromGMT: -12 * 3600)!]
+
+    /// The clock of photos whose place tells no time zone (review P1-15): the zone of the home
+    /// (second review), as stored by the last run; the zone of the home the user chose in "Dein
+    /// Zuhause", or of the one the last analysis found while none is stored; while no home is
+    /// known, the iPhone's at the first analysis (stored then), or the iPhone's.
+    public func homeTimeZone() async throws -> TimeZone {
+        try await homeTimeZoneInEffect(all: nil).zone
+    }
+
+    /// The home time zone and whether a run stores it (`patternsClock`), in this order:
+    /// - the zone of the home the user chose, whatever is stored;
+    /// - the stored one (a home the analysis finds later changes it before the trips are
+    ///   detected, `patternsClock`);
+    /// - none stored (or none this system can read): the zone of the home the last analysis
+    ///   found, when the home is left to the analysis (an update on a trip abroad: the home
+    ///   in Munich gives Berlin time, not the iPhone's Los Angeles time);
+    /// - no home known: the iPhone's, stored only when nothing is stored.
+    /// `all`: the library, where a run or `resuggest()` has it read (`placeTimeZones`).
+    private func homeTimeZoneInEffect(all: [AssetSnapshot]?) async throws -> (zone: TimeZone, store: Bool) {
+        let stored = try await storedHomeTimeZone()
+        let home = try await homeSettings()
+        if home.currentMode == .confirmed, let place = home.confirmed,
+           let zone = try await zone(ofHomeAt: place.center, components: place.components, all: all) {
+            if case .zone(let current) = stored, current.identifier == zone.identifier { return (zone, false) }
+            return (zone, true)
+        }
+        if case .zone(let zone) = stored { return (zone, false) }
+        if home.currentMode == .automatic,
+           let found = try await readable({ try await store.value(DetectedHome.self, forKey: Key.detectedHome) }),
+           let zone = try await zone(ofHomeAt: found.center, components: nil, all: all) {
+            return (zone, true)
+        }
+        if case .none = stored { return (calendar.timeZone, true) }
+        return (calendar.timeZone, false)
+    }
+
+    /// The time zone of a home (second review of P1-15): the one its place names (a home the user
+    /// chose: online its own zone, else its country's there); else that of the country the
+    /// offline map finds at its centre; else the most common one of the photos within the home
+    /// radius (no map, or a centre at sea).
+    private func zone(ofHomeAt center: GeoCoordinate, components: PlaceComponents?, all: [AssetSnapshot]?) async throws -> TimeZone? {
+        if let zone = LocalTime.zone(of: components, at: center) { return zone }
+        if let map, let zone = LocalTime.zone(of: map.lookup(center).components(language: .english), at: center) { return zone }
+        let zones = try await placeTimeZones(library: all)
+        guard !zones.isEmpty else { return nil }
+        let radius = settings.trips.advanced.homeRadiusMeters
+        var library = all
+        if library == nil { library = try await store.allAssets() }
+        let near = (library ?? []).filter { $0.usableLocation.map { GeoMath.distance($0, center) <= radius } ?? false }
+        var counts: [String: Int] = [:]
+        for asset in near { if let zone = zones[asset.id] { counts[zone.identifier, default: 0] += 1 } }
+        return counts.max(by: { ($0.value, $1.key) < ($1.value, $0.key) }).flatMap { TimeZone(identifier: $0.key) }
+    }
+
+    /// What the store holds as the home time zone.
+    private enum StoredHomeTimeZone {
+        case none
+        case zone(TimeZone)
+        /// A zone this system's database does not know (newer, from the safety copy of a newer
+        /// iPhone) or a value in a shape a later version stored: kept as it is, never replaced
+        /// for that (second review of P1-15). Meanwhile the iPhone's zone stands in, in memory.
+        case unreadable
+    }
+
+    private func storedHomeTimeZone() async throws -> StoredHomeTimeZone {
+        do {
+            guard let identifier = try await store.value(String.self, forKey: Key.homeTimeZone) else { return .none }
+            return TimeZone(identifier: identifier).map(StoredHomeTimeZone.zone) ?? .unreadable
+        } catch is DecodingError {
+            return .unreadable
+        }
+    }
+
+    /// The calendar the analysis counts days in where no photo's own clock is asked (home days,
+    /// trips at home, the places the user is often at): the iPhone's calendar in the home time
+    /// zone, so the iPhone's time zone during an analysis changes nothing (review P1-15).
+    private func homeCalendar() async throws -> Calendar {
+        var home = calendar
+        home.timeZone = try await homeTimeZone()
+        return home
+    }
+
+    /// The zone each photo's place tells (online its own, offline its country's there), for the
+    /// photos that have one (review P1-15). Worked out once for each state of the places and the
+    /// photos' locations (`SortlyStore.placesRevision`): a run asked for them up to four times
+    /// and every read of the facts once more, about three seconds each over 100,000 photos in as
+    /// many places (second review). Off the actor, like the facts (`offActor`).
+    /// `library`: the photos as the store holds them, where a run or `resuggest()` has them read
+    /// (only a run writes the photos, and the two take turns); otherwise they are read here.
+    /// While no place is known (a first run before its places step) no photo is read: a read of
+    /// 50,000 photos made the trips step stand silent for longer than it may.
+    /// `read`: the places and the photos a caller read itself, after it took the state of the
+    /// places (`revision`): used instead of reading them again (the overview's facts, P4-02); a
+    /// write after `revision` keeps them from being kept for others, as below.
+    private func placeTimeZones(library: [AssetSnapshot]? = nil,
+                                read: (revision: Int, places: [AssetID: ResolvedPlace])? = nil) async throws -> [AssetID: TimeZone] {
+        let revision: Int
+        if let read { revision = read.revision } else { revision = await store.placesRevision }
+        if let cached = placeZones, cached.revision == revision { return cached.zones }
+        let places: [AssetID: ResolvedPlace]
+        if let read { places = read.places } else { places = try await store.places() }
+        var zones: [AssetID: TimeZone] = [:]
+        if !places.isEmpty {
+            zoneProbe?()
+            var assets = library
+            if assets == nil { assets = try await store.allAssets() }
+            let photos = assets ?? []
+            zones = await Task.detached(priority: Task.currentPriority) { LocalTime.placeZones(of: photos, places: places) }.value
+        }
+        // A write meanwhile made them older than the store: they serve this caller only.
+        if await store.placesRevision == revision { placeZones = (revision, zones) }
+        return zones
+    }
+
+    /// `placeTimeZones()` and the state of the places they were worked out for.
+    private var placeZones: (revision: Int, zones: [AssetID: TimeZone])?
+
+    /// The photos the image step of a trial run over one year looks at (second review of P1-15):
+    /// those of the year on their own clock, as their facts read it (`PhotoClocks`, with the
+    /// places known so far). The count of the step and the photos it looks at are the same.
+    struct PhotosOfTheYear: Sendable {
+        /// The time they were taken in: the year on the clocks of the home and of the places
+        /// (`dateRange`), to find them in the store.
+        let range: Range<Date>
+        /// The photos taken in `range` that are of another year on their own clock: New Year's
+        /// Eve at home lies in the new year of Sydney's clock once a photo of Sydney is known.
+        let otherYears: Set<AssetID>
+        /// How many there are.
+        let count: Int
+
+        func contains(_ asset: AssetSnapshot) -> Bool {
+            (asset.creationDate.map(range.contains) ?? false) && !otherYears.contains(asset.id)
+        }
+    }
+
+    /// `PhotosOfTheYear` of a run over `scope`; nil for the whole library.
+    private func photosOfTheYear(_ scope: OrganizationScope, all: [AssetSnapshot], trips: [Trip]) async throws -> PhotosOfTheYear? {
+        guard case .year = scope else { return nil }
+        let home = try await homeCalendar()
+        let zones = try await placeTimeZones(library: all)
+        guard let range = Self.dateRange(of: scope, calendar: home, zones: Set(zones.values)) else { return nil }
+        let clocks = PhotoClocks(places: zones, trips: trips, home: home.timeZone)
+        var otherYears = Set<AssetID>()
+        var count = 0
+        for asset in all where asset.creationDate.map(range.contains) ?? false {
+            if scope.includes(AssetFacts(asset: asset, timeZone: clocks.zone(of: asset.id)), calendar: home) {
+                count += 1
+            } else {
+                otherYears.insert(asset.id)
+            }
+        }
+        return PhotosOfTheYear(range: range, otherYears: otherYears, count: count)
     }
 
     /// Pauses the run in progress at its next check; `run` then returns with `.userPaused`.
@@ -537,6 +793,8 @@ public actor AnalysisPipeline {
         // Early suggestions a stopped run left behind finish first (cancelled, they save
         // nothing): nothing of them overlaps the next run's own writes.
         await waitForEarlyLeftBehind()
+        // Work of a step given up at a Pause ends first: "Fortsetzen" does not run beside it.
+        await waitForAbandonedWork()
     }
 
     private func endRun() {
@@ -599,6 +857,131 @@ public actor AnalysisPipeline {
         await reader.access() != runAccess
     }
 
+    /// Where in the library's change history the stored photos and albums are: they are
+    /// the library as it was at `mark`, read with `includeHidden`. Written after a whole read
+    /// with full access and after each read of the changes; removed before a whole read.
+    struct LibraryReadMark: Codable, Sendable {
+        var mark: LibraryChangeMark
+        var includeHidden: Bool
+        /// Reads of changes since the last whole read (`wholeReadEvery`).
+        var changeReads = 0
+        /// `currentReaderVersion` when it was written.
+        var readerVersion = AnalysisPipeline.currentReaderVersion
+        /// When the library was last read whole (`wholeReadAfter`).
+        var wholeReadAt: Date
+    }
+
+    /// What a read takes of each photo (`AssetSnapshot`, the PhotoKit reader's `snapshot`).
+    /// Raised by an update that reads more or other of a photo: the stored photos are then
+    /// read whole once, or the photos that do not change would never get it.
+    static let currentReaderVersion = 1
+    /// After this many runs that read changes, one reads the whole library anyway: whatever
+    /// the change history may have missed is put right within days (a run starts at every
+    /// launch of the app). Runs without any change do not count.
+    static let wholeReadEvery = 30
+    /// And a whole read at the latest this long after the last one, also when the history
+    /// names no change at all: albums or details of a photo it may miss are put right.
+    static let wholeReadAfter: TimeInterval = 7 * 24 * 60 * 60
+    /// More changed photos than this: the whole read, which says how far it is on the card
+    /// (a read of the changes says nothing until it is done).
+    static let largestChangeRead = 1_000
+
+    /// The mark at which this run read the albums and those albums, for `albumsUnchanged`.
+    private var inventoryMark: (mark: LibraryChangeMark, inventory: CollectionInventory)?
+
+    /// The stored mark. One that cannot be read (an older form, a broken value) counts as none
+    /// and is removed: the run reads the whole library instead of ending with the error.
+    private func storedLibraryMark() async -> LibraryReadMark? {
+        do {
+            return try await store.value(LibraryReadMark.self, forKey: Key.libraryMark)
+        } catch {
+            try? await store.removeValue(forKey: Key.libraryMark)
+            return nil
+        }
+    }
+
+    /// Step 1 by the library's change history (review P4-03): the photos added, changed or
+    /// deleted since the stored mark are read and stored, nothing else. The albums are walked
+    /// again only when anything changed at all. Returns the albums and the number of photos,
+    /// or `nil` when the whole library has to be read: no mark (or one that cannot be read, or
+    /// of another reader version), another setting for hidden photos, limited access (the
+    /// selection can change without a change in the library), photos still set aside from
+    /// limited access (review P1-07), a history that cannot tell or
+    /// does not answer (too old, another library, an error), many changes, every
+    /// `wholeReadEvery`-th time, a week after the last whole read, or a number of photos after
+    /// the changes that does not fit the library. Nothing is written before that is known.
+    /// Throws `LibraryReadPaused` on a Pause, with the mark left where it was (the changes are
+    /// read again next time).
+    private func readChanges(includeHidden: Bool, control: AnalysisRunControl,
+                             report: inout Report) async throws -> (CollectionInventory, Int)? {
+        // Photos set aside under "Ausgewählte Fotos" are put right by a whole read only (it
+        // takes them back or deletes them); the history knows nothing of the selection. A run
+        // does not leave them with a mark (a whole read removes it first and writes it only when
+        // it read with full access, also when access changed while it read), and the count check
+        // below would send it to a whole read too; kept as the plain rule
+        // (`photosSetAsideAreTakenBackByAWholeRead` seeds that case).
+        guard runAccess == .full, try await store.outOfViewCount() == 0,
+              let stored = await storedLibraryMark(),
+              stored.readerVersion == Self.currentReaderVersion,
+              stored.includeHidden == includeHidden, stored.changeReads < Self.wholeReadEvery,
+              abs(now().timeIntervalSince(stored.wholeReadAt)) < Self.wholeReadAfter else { return nil }
+        let answer: LibraryChanges?
+        do {
+            answer = try await reader.changes(since: stored.mark, limit: Self.largestChangeRead)
+        } catch let error as CancellationError {
+            // The run is ended, or Photos does not answer: the run ends as with any read that
+            // gets no answer, and the mark stays for the next run.
+            throw error
+        } catch let error as PhotosNotResponding {
+            throw error
+        } catch {
+            // Any other error of the history is no reason to end the run: the whole read follows.
+            answer = nil
+        }
+        guard let changes = answer,
+              !changes.tooMany,
+              changes.assets.count + changes.deleted.count <= Self.largestChangeRead else { return nil }
+        // The deleted ones too: what is readable now stays, whatever order the history named
+        // its changes in (a photo put back from "Zuletzt gelöscht").
+        let asked = changes.assets.union(changes.deleted)
+        let read = try await reader.fetchAssets(asked, includeHidden: includeHidden,
+                                                knownDetails: try await store.fileDetails(for: asked)) { _, _ in !control.isPaused }
+        let readIDs = Set(read.assets.map(\.id))
+        // Named and not read: deleted, hidden, or no longer of the user's library.
+        let gone = asked.subtracting(readIDs)
+        // The number of photos the store will hold, against the library's, before anything is
+        // written: a removal deletes the photo's results too, and one the reader got wrong
+        // would cost its analysis. Only the numbers are compared, not which photos they are
+        // (two errors that cancel out go unseen until the next whole read).
+        let storedAsked = try await store.storedAssets(among: asked)
+        let expected = try await store.assetCount() - storedAsked.intersection(gone).count + readIDs.subtracting(storedAsked).count
+        guard expected == read.libraryCount else { return nil }
+        report.newOrChanged = try await store.upsertAssets(read.assets).count
+        report.removed = try await store.removeAssets(gone)
+        if changes.isEmpty {
+            // Nothing changed: the stored albums are the library's; the mark stays (no write).
+            return (try await store.loadInventory(), read.libraryCount)
+        }
+        // Any change walks the albums: a photo added, deleted or changed may have joined or
+        // left one. Only the albums that differ are written.
+        let inventory = try await reader.currentInventory()
+        try await store.saveInventory(inventory)
+        var next = stored
+        next.mark = changes.mark
+        next.changeReads += 1
+        try await store.setValue(next, forKey: Key.libraryMark)
+        return (inventory, read.libraryCount)
+    }
+
+    /// Whether the albums are still as this run read them (`inventory`), by the change history:
+    /// then the suggestions need no second walk over all albums (review P4-03). `false` when
+    /// that cannot be told.
+    private func albumsUnchanged(_ inventory: CollectionInventory) async -> Bool {
+        guard let (mark, read) = inventoryMark, read == inventory,
+              let changes = try? await reader.changes(since: mark, limit: Self.largestChangeRead) else { return false }
+        return changes.isEmpty
+    }
+
     /// `onWaiting`: the run waits for the device (hot, battery nearly empty) and goes on by
     /// itself; called with `nil` when it goes on.
     /// `control`: the app's handle to pause exactly this run. A run that is called while
@@ -639,14 +1022,48 @@ public actor AnalysisPipeline {
         // keep their file details (the next read skips those), but the partial list is never
         // taken as the library: nothing is removed (review of 9f0bc40: a user who paused again
         // and again started from nothing each time).
-        let assets: [AssetSnapshot]
         let includeHidden = settings.privacy.includeHiddenAssets
         report.settingsUsed.hidden = includeHidden
+        // Only what changed since the last run, when the library's change history can say
+        // (review P4-03); otherwise, or when anything is in doubt, the whole library.
+        let inventory: CollectionInventory
+        let libraryCount: Int
         do {
-            assets = try await reader.fetchAssets(includeHidden: includeHidden,
-                                                  knownDetails: try await store.assetsWithFileDetails()) { read, total in
-                onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
-                return !control.isPaused
+            if let changed = try await readChanges(includeHidden: includeHidden, control: control, report: &report) {
+                (inventory, libraryCount) = changed
+            } else {
+                // A whole read starts without a mark: one paused or failed half way never
+                // leaves a mark that the partial read would be taken for.
+                try await store.removeValue(forKey: Key.libraryMark)
+                // Taken before the read: a change made while it reads is read next time.
+                let mark = runAccess == .full ? await reader.changeMark() : nil
+                let assets = try await reader.fetchAssets(includeHidden: includeHidden,
+                                                          knownDetails: try await store.assetsWithFileDetails()) { read, total in
+                    onProgress(Progress(stage: .inventory, completed: min(read, total), total: total))
+                    return !control.isPaused
+                }
+                report.newOrChanged += try await store.upsertAssets(assets).count
+                // A photo missing from a read of "Ausgewählte Fotos" is only out of view: it is
+                // set aside with its analysis, place and text, not deleted. Only full access
+                // shows that a photo is gone (review P1-07: back on "Alle Fotos" every photo
+                // outside the selection was analysed again, hours on a large library).
+                // Asked again after the read: switched to "Ausgewählte Fotos" while it read, it may
+                // have read only the selection (second review of P1-07).
+                let readWithFullAccess = runAccess == .full ? await reader.access() == .full : false
+                if readWithFullAccess {
+                    report.removed += try await store.removeAssets(notIn: Set(assets.map(\.id)))
+                } else {
+                    report.setAside += try await store.setAside(notIn: Set(assets.map(\.id)))
+                }
+                inventory = try await reader.currentInventory()
+                try await store.saveInventory(inventory)
+                libraryCount = assets.count
+                // Only after a read with full access: one that set photos aside (access switched
+                // while it read) leaves no mark, so the next run reads the whole library again.
+                if let mark, readWithFullAccess {
+                    try await store.setValue(LibraryReadMark(mark: mark, includeHidden: includeHidden, wholeReadAt: now()),
+                                             forKey: Key.libraryMark)
+                }
             }
         } catch let paused as LibraryReadPaused {
             if !paused.read.isEmpty { _ = try await store.upsertAssets(paused.read) }
@@ -656,11 +1073,9 @@ public actor AnalysisPipeline {
             report.pausedBecause = .userPaused
             return report
         }
-        report.newOrChanged = try await store.upsertAssets(assets).count
-        report.removed = try await store.removeAssets(notIn: Set(assets.map(\.id)))
-        let inventory = try await reader.currentInventory()
-        try await store.saveInventory(inventory)
-        onProgress(Progress(stage: .inventory, completed: assets.count, total: assets.count))
+        // Where the albums are known to be as stored (`albumsUnchanged`).
+        inventoryMark = await storedLibraryMark().map { ($0.mark, inventory) }
+        onProgress(Progress(stage: .inventory, completed: libraryCount, total: libraryCount))
         report.completedStages.append(.inventory)
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
 
@@ -670,33 +1085,47 @@ public actor AnalysisPipeline {
         // Total 0: no count yet; the photos with a location follow as they are grouped.
         onProgress(Progress(stage: .patterns, completed: 0, total: 0))
         let all = try await store.allAssets()
+        // Reading every photo takes a moment on a large library (review P4-07).
+        if control.isPaused { report.pausedBecause = .userPaused; return report }
         var patternsGeneration = homeGeneration
         // The step's count: photos with a location grouped so far ("12.000 von 30.000 Fotos"),
         // so it does not stand still on a large library (review of 11ef3e1, minor 3).
         var grouped = (done: 0, of: 1)
-        var (trips, frequent) = try await detectPatterns(all: all, progress: { done, of in
-            grouped = (done, max(1, of))
-            onProgress(Progress(stage: .patterns, completed: done, total: max(1, of)))
-        })
+        var trips: [Trip], frequent: [FrequentPlace]
+        do {
+            (trips, frequent) = try await detectPatterns(all: all, stopsAt: control, progress: { done, of in
+                grouped = (done, max(1, of))
+                onProgress(Progress(stage: .patterns, completed: done, total: max(1, of)))
+            })
+        } catch is CancellationError where control.isPaused {
+            report.pausedBecause = .userPaused
+            return report
+        }
         report.completedStages.append(.patterns)
 
-        // The photos this run analyses: all of them, or one year and the trips that touch it.
-        let range = Self.dateRange(of: scope, calendar: calendar)
+        // The photos this run analyses: all of them, or one year and the trips that touch it. A
+        // photo's year is that of its own clock (review P1-15): places are looked for wherever a
+        // photo may be in the year on any clock (`reach`), the image step looks at the photos of
+        // the year on the clocks known (`year`, again after the places step).
+        var year = try await photosOfTheYear(scope, all: all, trips: trips)
+        let reach = Self.dateRange(of: scope, calendar: calendar, zones: Self.everyClock)
         // Read once: the workload said below and the image step count the same photos.
         let labels = Self.wantsLabels(settings) ? Self.labelsVersion : nil
         report.settingsUsed.labels = labels != nil
         let scoped: [AssetSnapshot]
-        if let range {
-            let inYear = Set(all.filter { $0.creationDate.map(range.contains) ?? false }.map(\.id))
+        if let reach {
+            let inYear = Set(all.filter { $0.creationDate.map(reach.contains) ?? false }.map(\.id))
             let tripMembers = Set(trips.filter { !inYear.isDisjoint(with: $0.geotaggedAssetIDs) }.flatMap(\.geotaggedAssetIDs))
             scoped = all.filter { inYear.contains($0.id) || tripMembers.contains($0.id) }
         } else {
             scoped = all
         }
         onProgress(Progress(stage: .patterns, completed: grouped.of, total: grouped.of,
-                            workload: try await workload(all: all, scoped: scoped, range: range, labels: labels)))
+                            workload: try await workload(all: all, scoped: scoped, year: year, labels: labels)))
 
         // 3. Places
+        // A Pause during the trips step: the places step does not begin (review P4-07).
+        if control.isPaused { report.pausedBecause = .userPaused; return report }
         // What `resolvePlaces` reads first thing (same moment, no wait in between).
         report.settingsUsed.places = PlaceResolutionPolicy(settings: settings)
         let placeOutcome = try await resolvePlaces(scoped, trips: trips, frequent: frequent, refining: mode == .refinement, onProgress: onProgress)
@@ -707,6 +1136,8 @@ public actor AnalysisPipeline {
         trips = try await inDestinationTime(trips, all: all)
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
         report.completedStages.append(.places)
+        // A trial year also goes by the clocks of the places found in this run (review P1-15).
+        if year != nil { year = try await photosOfTheYear(scope, all: all, trips: trips) }
 
         // 4. Content
         let peopleRequest = ContentAnalysisRequest(
@@ -716,14 +1147,14 @@ public actor AnalysisPipeline {
             featurePrint: true
         )
         // Photos given up as unreadable a week ago or longer get one more read (review P1-08).
-        try await reopenGivenUpPhotos(all, within: range, labels: labels)
+        try await reopenGivenUpPhotos(all, within: year, labels: labels)
         // With labels wanted, also the photos analysed while they were not: only their labels
         // are asked for (`labelsOnly` below). Each counts as one photo, like a full look.
-        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range)
+        let contentTotal = try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
+                                                                within: year?.range, excluding: year?.otherYears ?? [])
         // Shown over the whole library: after a pause the count goes on from what is done
         // (first device test 15.11.: "1.450 von 14.332", then "2.700 von 12.708").
-        let inRange = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
-        let contentBefore = max(0, inRange - contentTotal)
+        let contentBefore = max(0, (year?.count ?? all.count) - contentTotal)
         // Every report of this step goes through here: the early suggestions are said with the
         // newest one (`earlySuggestions`). Nothing of an earlier run's step.
         contentShown = nil
@@ -782,7 +1213,8 @@ public actor AnalysisPipeline {
             // were saved by a run that ended before it marked them (or only their place or date
             // changed since), so they are not looked at twice; or they could not be read before.
             let stored = contentTotal > 0
-                ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion, within: range)
+                ? try await store.pendingResults(ContentAnalysis.self, kind: "content", version: Self.contentVersion,
+                                                 within: year?.range, excluding: year?.otherYears ?? [])
                 : [:]
             // Photos given up before and read once more (`reopenGivenUpPhotos`): whatever goes
             // wrong with that read, the photo is given up again for another week. An analyzer
@@ -816,12 +1248,13 @@ public actor AnalysisPipeline {
                 // Deferred photos can come back only without a cursor (behind it they are past).
                 let limit = batchSize + (cursor == nil ? deferred.count : 0)
                 var raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, limit: limit,
-                                                                olderThan: cursor, within: range)
+                                                                olderThan: cursor, within: year?.range, excluding: year?.otherYears ?? [])
                 if raw.isEmpty, cursor != nil {
                     // Past the oldest dated photo: one plain pass picks up photos without a date.
                     cursor = nil
                     raw = try await store.assetsNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
-                                                                limit: batchSize + deferred.count, within: range)
+                                                                limit: batchSize + deferred.count, within: year?.range,
+                                                                excluding: year?.otherYears ?? [])
                 }
                 var batch = raw.filter { !deferred.contains($0.id) }
                 if batch.isEmpty { break }
@@ -901,12 +1334,17 @@ public actor AnalysisPipeline {
                             next += 1
                             inFlight += 1
                             let earlier = labelsOnly[asset.id]
+                            // Cancelled at a Pause instead of finished first (review P4-07).
                             group.addTask {
                                 do {
                                     guard let earlier else {
-                                        return (asset, .success(try await analyzer.analyzeContent(asset, request: peopleRequest)))
+                                        return (asset, .success(try await control.cancellingOnPause {
+                                            try await analyzer.analyzeContent(asset, request: peopleRequest)
+                                        }))
                                     }
-                                    let fresh = try await analyzer.analyzeContent(asset, request: .labelsOnly)
+                                    let fresh = try await control.cancellingOnPause {
+                                        try await analyzer.analyzeContent(asset, request: .labelsOnly)
+                                    }
                                     return (asset, .success(earlier.addingLabels(of: fresh)))
                                 } catch {
                                     return (asset, .failure(error))
@@ -939,7 +1377,11 @@ public actor AnalysisPipeline {
                             suspects = []
                         case .failure(let error):
                             deferred.insert(asset.id)
-                            if error is CancellationError || Task.isCancelled {
+                            if error is CancellationError, control.isPaused, !Task.isCancelled {
+                                // Given up for the Pause, not unreadable: nothing is counted for it,
+                                // and the run ends like at a Pause between two photos.
+                                if stopped == nil { stopped = .userPaused; stopSeen = .now }
+                            } else if error is CancellationError || Task.isCancelled {
                                 // Stopped, not unreadable: what is done stays done, the rest waits.
                                 cancelled = true
                             } else if let quiet = error as? PhotosNotResponding {
@@ -1018,8 +1460,14 @@ public actor AnalysisPipeline {
         if let reason = await shouldStop() { report.pausedBecause = reason; return report }
         onProgress(Progress(stage: .proposals, completed: 0, total: 0))
         if let fresh = try await patternsAfterAHomeChange(since: &patternsGeneration, all: all) { (trips, frequent) = fresh }
-        let snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope,
-                                               homeChange: patternsGeneration)
+        let snapshot: ProposalSnapshot
+        do {
+            snapshot = try await makeProposals(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups, scope: scope,
+                                               homeChange: patternsGeneration, stopsAt: control)
+        } catch is CancellationError where control.isPaused {
+            report.pausedBecause = .userPaused
+            return report
+        }
         report.proposals = snapshot.proposals.count
         report.completedStages.append(.proposals)
         onProgress(Progress(stage: .proposals, completed: snapshot.proposals.count, total: snapshot.proposals.count))
@@ -1041,12 +1489,28 @@ public actor AnalysisPipeline {
     }
 
     /// `progress(grouped, of)`: photos with a location grouped so far (see `TripDetector.analyse`).
-    private func detectPatterns(all: [AssetSnapshot],
+    /// Detected once, on the clock of the home (`patternsClock`), and stored at the end, the home
+    /// time zone with the trips and places.
+    /// `control`: a Pause of the run throws `CancellationError`, also inside the detection
+    /// (review P4-07: over 100,000 photos the step took up to 6.3 s without asking), before
+    /// anything is stored: all of it or none.
+    private func detectPatterns(all: [AssetSnapshot], stopsAt control: AnalysisRunControl? = nil,
                                 progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) async throws -> (trips: [Trip], frequent: [FrequentPlace]) {
+        let paused = { control?.isPaused == true }
+        func checkPause(_ point: StopPoint) throws {
+            stopPointProbe?(point)
+            if paused() { throw CancellationError() }
+        }
         let corrections = try await store.value(TripCorrections.self, forKey: Key.tripCorrections, defaults: TripCorrections()) ?? TripCorrections()
         let answers = try await recurringPlaceAnswers()
-        let tripAnalysis = TripDetector(configuration: settings.trips.advanced, calendar: calendar)
-            .analyse(in: all, corrections: corrections, places: answers, home: try await homeSettings(), progress: progress)
+        var home = calendar
+        let clock = try await patternsClock(all: all, corrections: corrections, answers: answers, progress: progress, stoppingWhen: paused)
+        home.timeZone = clock.zone
+        try checkPause(.tripsClockChosen)
+        let tripAnalysis = try TripDetector(configuration: settings.trips.advanced, calendar: home)
+            .analyse(in: all, corrections: corrections, places: answers, home: try await homeSettings(), progress: progress,
+                     stoppingWhen: paused)
+        try checkPause(.tripsDetected)
         let detected = tripAnalysis.trips
         // Trips keep their identity when their photos change a little (an older photo
         // imported, the first one deleted): decisions and deleted albums stay attached.
@@ -1056,16 +1520,48 @@ public actor AnalysisPipeline {
             known = (try await store.value([Trip].self, forKey: Key.trips) ?? []).map(TripIdentity.init)
         }
         let trips = TripIdentity.carryOver(detected, from: known)
-        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id))), forKey: Key.tripIdentities)
-        try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
+        // Photos set aside under "Ausgewählte Fotos" are not deleted: identities bound to them
+        // stay, so trips and places come back with their ids (second review of P1-07).
+        let setAside = try await store.outOfViewAssetIDs()
         // Places keep their IDs by their photos, from the places the last analysis stored (names,
-        // "Nicht jetzt", decisions and albums are bound to them). An unreadable list counts as none.
-        let previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
-        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: calendar)
-            .detect(in: all, previous: previousPlaces ?? [])
+        // "Nicht jetzt", decisions and albums are bound to them), and those kept while their
+        // photos are set aside, after them. An unreadable list counts as none.
+        var previousPlaces = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlaces)) ?? nil
+        if let away = (try? await store.value([FrequentPlace].self, forKey: Key.frequentPlacesOutOfView)) ?? nil, !away.isEmpty {
+            previousPlaces = Self.withPhotosSetAside(previousPlaces ?? [], away)
+        }
+        // A place's days: those of the clocks its photos were taken on, where their places are
+        // known so far (review P1-15).
+        var frequent = FrequentPlaceDetector(configuration: settings.frequentPlaces.advanced, calendar: home)
+            .detect(in: all, previous: previousPlaces ?? [], zones: try await placeTimeZones(library: all))
         for i in frequent.indices { frequent[i].userName = settings.frequentPlaces.names[frequent[i].id] }
+        // Each place before keeps its photos set aside for the next run: a place the shared
+        // photos do not make whole, one they make only a part of with its part set aside (a
+        // second selection with the other part keeps the id, third review of P1-07).
+        let made = Set(frequent.map(\.id))
+        let placesOutOfView: [FrequentPlace] = setAside.isEmpty ? [] : (previousPlaces ?? []).compactMap { place in
+            guard !setAside.isDisjoint(with: place.assetIDs) else { return nil }
+            guard made.contains(place.id) else { return place }
+            var part = place
+            part.assetIDs = place.assetIDs.filter(setAside.contains)
+            return part
+        }
+        // The last moment to stop: from here on everything is stored, all of it or none.
+        try checkPause(.tripsBeforeStoring)
+        // Only a run or `resuggest()` stores the home time zone, never a read of the facts: it
+        // goes into the safety copy, and a fresh database gets the decisions of a copy only
+        // while it holds nothing of its own.
+        if clock.store { try await store.setValue(clock.zone.identifier, forKey: Key.homeTimeZone) }
+        try await store.setValue(Self.mergedIdentities(known, trips, library: Set(all.map(\.id)).union(setAside), setAside: setAside),
+                                 forKey: Key.tripIdentities)
+        try await store.setValue(RecurringPlaceReport(tripAnalysis, trips: trips, answers: answers), forKey: Key.recurringPlaceReport)
         try await store.setValue(trips, forKey: Key.trips)
         try await store.setValue(frequent, forKey: Key.frequentPlaces)
+        if placesOutOfView.isEmpty {
+            try await store.removeValue(forKey: Key.frequentPlacesOutOfView)
+        } else {
+            try await store.setValue(placesOutOfView, forKey: Key.frequentPlacesOutOfView)
+        }
         try await store.setValue(tripAnalysis.atHome, forKey: Key.home)
         if let home = tripAnalysis.detectedHome {
             try await store.setValue(home, forKey: Key.detectedHome)
@@ -1075,21 +1571,70 @@ public actor AnalysisPipeline {
         return (trips, frequent)
     }
 
+    /// The clock the trips are detected on, which follows the home (second review of P1-15):
+    /// the home time zone in effect (`homeTimeZoneInEffect`), `store` where it changed: the zone
+    /// of the home the user chose, of the home found before the update, or the iPhone's at the
+    /// first analysis while no home is known. Stored by `detectPatterns` with the trips. Where the
+    /// user left the home to the analysis and the home found on that clock has another zone
+    /// (found for the first time, or a move), that zone, if the home found on its clock has it
+    /// too. Two homes with about as many photo days can each have the more days on the other's
+    /// clock (Munich and Auckland, half a day apart): following the detection would swap the zone
+    /// with every run, so it stays as it was. Only the home is detected for this
+    /// (`TripDetector.detectedHome`, a small part of the work), so the trips are detected once,
+    /// with their count going on: a second detection on another clock stood silent for longer
+    /// than the step may. The count is named first (`progress`, at 0).
+    /// `stop`: gives up with `CancellationError` (`TripDetector.detectedHome`).
+    private func patternsClock(all: [AssetSnapshot], corrections: TripCorrections, answers: RecurringPlaceAnswers,
+                               progress: (_ grouped: Int, _ of: Int) -> Void,
+                               stoppingWhen stop: () -> Bool) async throws -> (zone: TimeZone, store: Bool) {
+        let (zone, changed) = try await homeTimeZoneInEffect(all: all)
+        guard try await homeSettings().currentMode == .automatic else { return (zone, changed) }
+        func homeFound(on zone: TimeZone, progress: (_ grouped: Int, _ of: Int) -> Void = { _, _ in }) throws -> DetectedHome? {
+            var clock = calendar
+            clock.timeZone = zone
+            return try TripDetector(configuration: settings.trips.advanced, calendar: clock)
+                .detectedHome(in: all, corrections: corrections, places: answers, progress: progress, stoppingWhen: stop)
+        }
+        guard let found = try homeFound(on: zone, progress: progress),
+              let other = try await self.zone(ofHomeAt: found.center, components: nil, all: all),
+              other.identifier != zone.identifier,
+              let again = try homeFound(on: other),
+              try await self.zone(ofHomeAt: again.center, components: nil, all: all)?.identifier == other.identifier else { return (zone, changed) }
+        return (other, true)
+    }
+
+    /// Where a run checks for a Pause in the middle of the trips and suggestions steps (tests:
+    /// `setStopPointProbe`, called right before each check).
+    enum StopPoint: Sendable {
+        case tripsClockChosen, tripsDetected, tripsBeforeStoring, suggestionsBeforeSaving
+    }
+
+    /// Tests only: see `StopPoint`.
+    private var stopPointProbe: (@Sendable (StopPoint) -> Void)?
+    func setStopPointProbe(_ probe: (@Sendable (StopPoint) -> Void)?) { stopPointProbe = probe }
+
     /// Day trip or weekend is decided in the destination's days, once places know its time
-    /// zone (an evening in New York is already the next day in Munich). Stored when it changed.
+    /// zone (an evening in New York is already the next day in Munich): the zone the online
+    /// lookup names, else the country's there (review P1-15). Stored when it changed.
     private func inDestinationTime(_ trips: [Trip], all: [AssetSnapshot]) async throws -> [Trip] {
-        let zones = try await store.places().compactMapValues(\.components.timeZoneIdentifier)
+        // Only the trips' photos count: with the zones of countries known offline nearly every
+        // photo with a location has one.
+        let members = Set(trips.lazy.flatMap(\.geotaggedAssetIDs))
+        let travelled = all.filter { members.contains($0.id) }
+        let placeZones = try await placeTimeZones(library: all)
+        var zones: [AssetID: String] = [:]
+        for id in members { if let zone = placeZones[id] { zones[id] = zone.identifier } }
         guard !zones.isEmpty else { return trips }
-        let localTrips = TripDetector.inDestinationTime(trips, assets: Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) }),
-                                                        timeZones: zones, calendar: calendar)
+        let localTrips = TripDetector.inDestinationTime(trips, assets: Dictionary(uniqueKeysWithValues: travelled.map { ($0.id, $0) }),
+                                                        timeZones: zones, calendar: try await homeCalendar())
         if localTrips != trips { try await store.setValue(localTrips, forKey: Key.trips) }
         return localTrips
     }
 
     /// How much work this run has (see `AnalysisWorkload`): the amounts over the part of the
     /// library the run works on, and what is still to do in the image and text steps.
-    private func workload(all: [AssetSnapshot], scoped: [AssetSnapshot], range: Range<Date>?, labels: Int?) async throws -> AnalysisWorkload {
-        let photos = range.map { r in all.filter { $0.creationDate.map(r.contains) ?? false }.count } ?? all.count
+    private func workload(all: [AssetSnapshot], scoped: [AssetSnapshot], year: PhotosOfTheYear?, labels: Int?) async throws -> AnalysisWorkload {
+        let photos = year?.count ?? all.count
         let screenshots = scoped.filter(\.isScreenshotLike)
         let read = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
         let located = scoped.filter { $0.usableLocation != nil }
@@ -1104,13 +1649,15 @@ public actor AnalysisPipeline {
         // Of the photos still to look at: those analysed already that get only their labels.
         var labelsLeft = 0
         if let labels {
-            labelsLeft = try await store.countNeedingLabelsOnly(version: Self.contentVersion, labelsVersion: labels, within: range)
+            labelsLeft = try await store.countNeedingLabelsOnly(version: Self.contentVersion, labelsVersion: labels,
+                                                                within: year?.range, excluding: year?.otherYears ?? [])
         }
         return AnalysisWorkload(
             photos: photos,
             located: located.count,
             screenshots: screenshots.count,
-            contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels, within: range),
+            contentLeft: try await store.countNeedingAnalysis(version: Self.contentVersion, labelsVersion: labels,
+                                                              within: year?.range, excluding: year?.otherYears ?? []),
             textLeft: screenshots.filter { read[$0.id] == nil }.count,
             placesLeft: placesLeft,
             labelsLeft: labelsLeft
@@ -1125,7 +1672,7 @@ public actor AnalysisPipeline {
     /// week. Looked for at most once a day (it reads every photo's result) and only in the
     /// part of the library the run works on. Not a photo this run reads anyway for its labels
     /// ("Themen" turned on later: one more full look for a photo given up, `labels`).
-    private func reopenGivenUpPhotos(_ all: [AssetSnapshot], within range: Range<Date>?, labels: Int?) async throws {
+    private func reopenGivenUpPhotos(_ all: [AssetSnapshot], within year: PhotosOfTheYear?, labels: Int?) async throws {
         let now = now()
         if let checked = try await store.value(Date.self, forKey: Key.givenUpChecked),
            (0..<86_400).contains(now.timeIntervalSince(checked)) { return }
@@ -1134,9 +1681,7 @@ public actor AnalysisPipeline {
         if let labels, !due.isEmpty {
             due.subtract(try await store.unlabelledAssets(version: Self.contentVersion, labelsVersion: labels))
         }
-        let reopen = all.filter { asset in
-            due.contains(asset.id) && (range.map { r in asset.creationDate.map(r.contains) ?? false } ?? true)
-        }.map(\.id)
+        let reopen = all.filter { asset in due.contains(asset.id) && (year?.contains(asset) ?? true) }.map(\.id)
         if !reopen.isEmpty { try await store.markAnalyzed(reopen, version: 0) }
         try await store.setValue(now, forKey: Key.givenUpChecked)
     }
@@ -1287,7 +1832,8 @@ public actor AnalysisPipeline {
         guard let map, try await store.value(TitleLanguage.self, forKey: Key.placesLanguage) != language else { return }
         let renamer = map.renamer(to: language)
         var renamed: [AssetID: ResolvedPlace] = [:]
-        for (id, var place) in try await store.places() {
+        // Also the places of photos set aside under "Ausgewählte Fotos": they come back renamed.
+        for (id, var place) in try await store.places(includingOutOfView: true) {
             let components = renamer.renamed(place.components)
             guard components != place.components else { continue }
             place.components = components
@@ -1340,6 +1886,7 @@ public actor AnalysisPipeline {
         let documents = DocumentAnalyzer()
         let screenshots = ScreenshotClassifier()
         let analyzer = self.analyzer
+        let control = activeControl ?? AnalysisRunControl()
         // Analyzer errors in a row, not counted against the photos yet (see the content stage).
         var suspects: [AssetID] = []
         var processed = 0
@@ -1385,9 +1932,12 @@ public actor AnalysisPipeline {
                     next += 1
                     downloading = allowNetwork
                     inFlight += 1
+                    // Cancelled at a Pause instead of finished first (review P4-07).
                     group.addTask {
                         do {
-                            return (asset, allowNetwork, .success(try await analyzer.recognizeText(asset, allowNetwork: allowNetwork)))
+                            return (asset, allowNetwork, .success(try await control.cancellingOnPause {
+                                try await analyzer.recognizeText(asset, allowNetwork: allowNetwork)
+                            }))
                         } catch {
                             return (asset, allowNetwork, .failure(error))
                         }
@@ -1440,6 +1990,11 @@ public actor AnalysisPipeline {
                         outcome.waiting += 1
                     }
                 case .failure(let error):
+                    if error is CancellationError, control.isPaused, !Task.isCancelled {
+                        // Given up for the Pause: stays as it was, read again by the next run.
+                        if outcome.paused == nil { outcome.paused = .userPaused }
+                        continue
+                    }
                     if error is CancellationError || Task.isCancelled {
                         cancelled = true
                         continue
@@ -1505,8 +2060,9 @@ public actor AnalysisPipeline {
     private func remaskStoredTexts() async throws {
         let done = try await store.value(Int.self, forKey: Key.textMaskVersion) ?? 1
         guard done < TextMinimizer.maskVersion else { return }
-        let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion)
-        for (asset, var result) in try await store.results(TextResult.self, kind: "text") {
+        // Also the texts of photos set aside under "Ausgewählte Fotos": they come back masked.
+        let current = try await store.results(TextResult.self, kind: "text", minimumVersion: Self.textVersion, includingOutOfView: true)
+        for (asset, var result) in try await store.results(TextResult.self, kind: "text", includingOutOfView: true) {
             // A big library takes minutes the first time; a cut-off run keeps what it did (masked
             // rows are skipped next time) and the purge below runs when the last row is done.
             try Task.checkCancellation()
@@ -1648,10 +2204,100 @@ public actor AnalysisPipeline {
         }.value
     }
 
+    /// When work in the middle of a step gives up (review P4-07): at a Pause of the run
+    /// (`control`), and for early suggestions also when they are dropped (`whenCancelled`: the
+    /// calling task is cancelled).
+    struct WorkStop: Sendable {
+        let control: AnalysisRunControl?
+        let whenCancelled: Bool
+        /// Asked in the calling task.
+        var now: Bool { control?.isPaused == true || (whenCancelled && Task.isCancelled) }
+    }
+
+    /// Settled once: by the end of the work (`false`) or by a stop (`true`), whichever is first.
+    private final class FirstOf: Sendable {
+        private let state = Mutex<(stopped: Bool?, waiting: CheckedContinuation<Bool, Never>?)>((nil, nil))
+
+        func settle(stopped: Bool) {
+            let waiting = state.withLock { state -> CheckedContinuation<Bool, Never>? in
+                guard state.stopped == nil else { return nil }
+                state.stopped = stopped
+                defer { state.waiting = nil }
+                return state.waiting
+            }
+            waiting?.resume(returning: stopped)
+        }
+
+        var stopped: Bool {
+            get async {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                    let settled = state.withLock { state -> Bool? in
+                        if let stopped = state.stopped { return stopped }
+                        state.waiting = continuation
+                        return nil
+                    }
+                    if let settled { continuation.resume(returning: settled) }
+                }
+            }
+        }
+    }
+
+    /// `offActor`, given up the moment `stop` says so (a Pause wakes it, no polling): throws
+    /// `CancellationError` then (review P4-07: a Pause waited for seconds of it). The work's own
+    /// task is cancelled: the facts, the suggestions and the matching ask for that and end
+    /// early with a result nobody reads, and the next run waits for it (`beginRun`), so a
+    /// "Fortsetzen" never runs beside a copy of it. Without `stop`, plain `offActor`.
+    private func offActor<T: Sendable>(unless stop: WorkStop?, _ work: @escaping @Sendable () -> T) async throws -> T {
+        guard let stop, stop.control != nil || stop.whenCancelled else { return await offActor(work) }
+        if stop.now { throw CancellationError() }
+        let probe = offActorProbe
+        let first = FirstOf()
+        let task = Task.detached(priority: Task.currentPriority) { () -> T in
+            defer { first.settle(stopped: false) }
+            await probe?()
+            return work()
+        }
+        let watcher = stop.control.map { control in
+            Task.detached {
+                await control.untilPaused()
+                // Also when the watcher is cancelled after the work ended: settled already.
+                if control.isPaused { first.settle(stopped: true) }
+            }
+        }
+        let stopped = await withTaskCancellationHandler {
+            await first.stopped
+        } onCancel: {
+            if stop.whenCancelled { first.settle(stopped: true) }
+        }
+        watcher?.cancel()
+        guard !stopped else {
+            task.cancel()
+            // A task of its own that waits for the work and drops its value, so a partial
+            // result (up to a whole set of facts) is freed when the work ends, not only at
+            // the next run, which may be hours later while paused (re-review N2).
+            let ending = Task.detached(priority: .utility) { _ = await task.value }
+            abandonedWork.append { await ending.value }
+            throw CancellationError()
+        }
+        return await task.value
+    }
+
+    /// Work given up by `offActor(unless:)` that may still be ending (see there).
+    private var abandonedWork: [@Sendable () async -> Void] = []
+
+    /// Also for tests: the work given up at a Pause has ended.
+    func waitForAbandonedWork() async {
+        while let work = abandonedWork.popLast() { await work() }
+    }
+
     /// Tests only: runs where `offActor` work runs, before it (a test holds it there and sees
     /// the image step go on).
     private var offActorProbe: (@Sendable () async -> Void)?
     func setOffActorProbe(_ probe: (@Sendable () async -> Void)?) { offActorProbe = probe }
+
+    /// Tests only: called whenever the zones of the photos' places are worked out.
+    private var zoneProbe: (@Sendable () -> Void)?
+    func setZoneProbe(_ probe: (@Sendable () -> Void)?) { zoneProbe = probe }
 
     /// After a change in "Dein Zuhause" that no suggestions were made for yet
     /// (`PendingHomeChange`), whichever step makes them (`resuggest()`, a run, the early set):
@@ -1661,26 +2307,36 @@ public actor AnalysisPipeline {
     /// after that (the trips or the settings read here may be older than it) stays pending.
     private func makeProposals(
         all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
-        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false, homeChange: Int, abandonable: Bool = false
+        groups: [ObservationGroup], scope: OrganizationScope, early: Bool = false, homeChange: Int, abandonable: Bool = false,
+        stopsAt control: AnalysisRunControl? = nil
     ) async throws -> ProposalSnapshot {
+        // Dropped meanwhile (an early set, `abandonable`) or the run paused (`control`, review
+        // P4-07: the step took 3.5 to 7.8 s over 50,000 to 100,000 photos without asking): no
+        // more of the suggestions is made, and nothing is saved (`CancellationError`).
+        let stop = WorkStop(control: control, whenCancelled: abandonable)
+        func checkStop() throws { if stop.now { throw CancellationError() } }
         let pending = try await pendingHomeChange()
         // The albums are read again: a plan applied while this run was busy (minutes or hours
         // on a large library) created albums the matching must see, or it would suggest them
         // a second time.
         let generation = albumGeneration
         var inventory = inventory
-        if let fresh = try? await reader.currentInventory(), fresh != inventory {
+        if await albumsUnchanged(inventory) {
+            // Nothing changed in the library since this run read the albums.
+        } else if let fresh = try? await reader.currentInventory(), fresh != inventory {
             inventory = fresh
             try await store.saveInventory(fresh)
         }
         // An early set has no image or text themes (`ProposalSnapshot.isEarly`), also when photos
         // were analysed already (a first run paused in the image step): only the full set, made
         // once every photo is looked at, offers those.
+        let home = try await homeCalendar()
+        try checkStop()
         let facts = try await currentFacts(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups,
-                                           analysed: !early)
-            .filter { scope.includes($0, calendar: calendar) }
+                                           analysed: !early, unless: stop)
+            .filter { scope.includes($0, calendar: home) }
         // Dropped meanwhile: the suggestions (seconds over a large library) are not made at all.
-        if abandonable { try Task.checkCancellation() }
+        try checkStop()
         let overrides = OverrideSet(try await store.overrides())
         let scopedIDs = Set(facts.map(\.id))
         let oftenHere = try await recurringPlaceReport()?.places ?? []
@@ -1695,16 +2351,22 @@ public actor AnalysisPipeline {
         )
         analysis.applied = Set(Self.assignments(try await store.managedAlbums()).keys)
         analysis.chosen = try await chosenSuggestions()
-        let engine = ProposalEngine(settings: settings, calendar: calendar)
+        let engine = ProposalEngine(settings: settings, calendar: home)
         let input = analysis
-        var suggestions = await offActor { engine.suggestions(for: input, overrides: overrides) }
-        if abandonable { try Task.checkCancellation() }
+        var suggestions = try await offActor(unless: stop) {
+            engine.suggestions(for: input, overrides: overrides, stoppingWhen: { Task.isCancelled })
+        }
+        try checkStop()
         // Chosen before a change in "Dein Zuhause": stays as the user chose it, in this and
         // every later run, until it is created or deselected.
         let decisions = try await store.value([SortlyID: ProposalDecision].self, forKey: Key.decisions) ?? [:]
         var held = try await heldSuggestions()
         if let pending { held = HeldSuggestions.adding(pending.before.proposals, to: held, decisions: decisions, new: suggestions) }
-        held = HeldSuggestions.apply(held, decisions: decisions, library: Set(all.map(\.id)), to: &suggestions)
+        // A chosen suggestion keeps its photos set aside under "Ausgewählte Fotos" and shows only
+        // the shared ones (second review of P1-07).
+        let inView = Set(all.map(\.id))
+        held = HeldSuggestions.apply(held, decisions: decisions, library: inView.union(try await store.outOfViewAssetIDs()),
+                                     inView: inView, to: &suggestions)
         // The full set after an early one: a suggestion of the early set the user already
         // decided on stays, even when the full analysis would not make it any more (review
         // minor: a decision must not lose its suggestion).
@@ -1721,18 +2383,18 @@ public actor AnalysisPipeline {
         let unlocated = Set(all.filter { $0.usableLocation == nil }.map(\.id))
         let found = suggestions, albums = inventory
         let assignments = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albums)
-        var matches = await offActor {
+        var matches = try await offActor(unless: stop) {
             Self.match(found.open, dismissed: found.dismissed, against: albums, overrides: overrides, assignments: assignments, trips: tripSets,
-                       unlocated: unlocated)
+                       unlocated: unlocated, stoppingWhen: { Task.isCancelled })
         }
         if generation != albumGeneration {
             // A plan was applied while this ran: match against the albums as they are now, or
             // the suggestions would offer albums that were just created.
             let albumsNow = try await store.loadInventory(), overridesNow = OverrideSet(try await store.overrides())
             let assignmentsNow = Self.assignments(try await store.managedAlbums(), proposals: found.open + found.dismissed, inventory: albumsNow)
-            matches = await offActor {
+            matches = try await offActor(unless: stop) {
                 Self.match(found.open, dismissed: found.dismissed, against: albumsNow, overrides: overridesNow, assignments: assignmentsNow,
-                           trips: tripSets, unlocated: unlocated)
+                           trips: tripSets, unlocated: unlocated, stoppingWhen: { Task.isCancelled })
             }
         }
         for (id, match) in keptMatches where matches[id] == nil { matches[id] = match }
@@ -1751,8 +2413,10 @@ public actor AnalysisPipeline {
                 removing.insert(Key.pendingHomeChange)
             }
         }
-        // The early set of a run that stopped or failed meanwhile is not saved (`run`).
-        if abandonable { try Task.checkCancellation() }
+        // The early set of a run that stopped or failed meanwhile is not saved (`run`), nor the
+        // set of a run paused meanwhile.
+        stopPointProbe?(.suggestionsBeforeSaving)
+        try checkStop()
         proposalsGeneration += 1
         try await store.setValues(values, removing: removing)
         return snapshot
@@ -1773,15 +2437,20 @@ public actor AnalysisPipeline {
     /// collection for a dismissed trip too; only their results are taken from that pass.
     /// An album that already is the complete album of a dismissed suggestion stays its album:
     /// no shown suggestion extends it (review 16.11., A10).
+    /// `stop`: asked between the matchings; when it says so, what is matched so far is
+    /// returned (only for work whose result is dropped then, review P4-07).
     static func match(_ open: [AlbumProposal], dismissed: [AlbumProposal], against inventory: CollectionInventory,
                       overrides: OverrideSet, assignments: [SortlyID: CollectionID],
-                      trips: [Set<AssetID>] = [], unlocated: Set<AssetID> = []) -> [SortlyID: MatchResult] {
+                      trips: [Set<AssetID>] = [], unlocated: Set<AssetID> = [],
+                      stoppingWhen stop: () -> Bool = { false }) -> [SortlyID: MatchResult] {
+        if stop() { return [:] }
         guard !dismissed.isEmpty else {
             return AlbumMatcher().match(open, against: inventory, overrides: overrides, assignments: assignments, trips: trips,
                                         unlocated: unlocated)
         }
         let all = AlbumMatcher().match(open + dismissed, against: inventory, overrides: overrides, assignments: assignments, trips: trips,
                                        unlocated: unlocated)
+        if stop() { return [:] }
         let reserved = Set(dismissed.compactMap { p in
             all[p.id].flatMap { $0.status == .alreadyComplete && $0.best?.isEditable == true ? $0.best?.albumID : nil }
         })
@@ -1949,32 +2618,102 @@ public actor AnalysisPipeline {
         )
     }
 
+    /// The facts, with the album list and the image results read for them: the overview needs
+    /// both too, and read them a second time next to the facts (review P4-02: the image results
+    /// of 50,000 photos are about a second to read). Each input is read once; the photos and the
+    /// places also serve the zones of the places when they are not known for this state of the
+    /// places yet (the first refresh after a launch read both twice).
+    func factsForOverview() async throws -> (facts: [AssetFacts], inventory: CollectionInventory, contents: [AssetID: ContentAnalysis]) {
+        // Before the photos and the places are read: a write meanwhile keeps the zones made
+        // from them from being kept (`placeTimeZones`).
+        let revision = await store.placesRevision
+        let all = try await store.allAssets()
+        let inventory = try await store.loadInventory()
+        let read = try await assembledFacts(
+            all: all, inventory: inventory,
+            trips: try await store.value([Trip].self, forKey: Key.trips) ?? [],
+            frequent: try await store.value([FrequentPlace].self, forKey: Key.frequentPlaces) ?? [],
+            groups: try await store.value([ObservationGroup].self, forKey: Key.groups) ?? [],
+            analysed: true, placesRevision: revision)
+        return (read.facts, inventory, read.contents)
+    }
+
     /// Assembled off this actor (`offActor`): the overview asks for the facts while a run goes
     /// on (`refreshDerived` after the early suggestions), and over 50,000 photos assembling
     /// them held the run's image step for about a second on Linux.
     /// `analysed` false: without the labels and texts read so far (an early set, `makeProposals`).
+    /// `stop`: given up when it says so (`offActor(unless:)`).
     private func currentFacts(all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace], groups: [ObservationGroup],
-                              analysed: Bool = true) async throws -> [AssetFacts] {
+                              analysed: Bool = true, unless stop: WorkStop? = nil) async throws -> [AssetFacts] {
+        try await assembledFacts(all: all, inventory: inventory, trips: trips, frequent: frequent, groups: groups,
+                                 analysed: analysed, placesRevision: nil, unless: stop).facts
+    }
+
+    /// `currentFacts`, with the image results it read. `placesRevision`: the state of the places
+    /// taken before `all` was read; the zones of the places are then made from `all` and the
+    /// places read here (`factsForOverview`), not read again.
+    private func assembledFacts(all: [AssetSnapshot], inventory: CollectionInventory, trips: [Trip], frequent: [FrequentPlace],
+                                groups: [ObservationGroup], analysed: Bool, placesRevision: Int?,
+                                unless stop: WorkStop? = nil) async throws -> (facts: [AssetFacts], contents: [AssetID: ContentAnalysis]) {
         let places = try await store.places()
         let contents = analysed ? try await store.results(ContentAnalysis.self, kind: "content") : [:]
         let texts = analysed ? try await store.results(TextResult.self, kind: "text") : [:]
         let home = try await store.value(Set<AssetID>.self, forKey: Key.home) ?? []
         let withoutCountry = try await store.value(Set<AssetID>.self, forKey: Key.placesWithoutCountry) ?? []
-        return await offActor {
+        let homeZone = try await homeTimeZone()
+        let placeZones: [AssetID: TimeZone]
+        if let placesRevision {
+            placeZones = try await placeTimeZones(library: all, read: (placesRevision, places))
+        } else {
+            placeZones = try await placeTimeZones()
+        }
+        let facts = try await offActor(unless: stop) {
             FactsAssembler.assemble(assets: all, places: places, contents: contents, texts: texts, trips: trips,
                                     frequentPlaces: frequent, groups: groups, inventory: inventory, home: home,
-                                    withoutCountry: withoutCountry)
+                                    withoutCountry: withoutCountry, homeTimeZone: homeZone, placeZones: placeZones,
+                                    stoppingWhen: { Task.isCancelled })
         }
+        return (facts, contents)
     }
 
     /// The remembered identities, updated with this run's trips. Identities of trips that are
     /// not detected right now stay while any of their photos is still in the library (a trip
     /// can come back when its photos sync again or a correction is undone).
-    static func mergedIdentities(_ known: [TripIdentity], _ trips: [Trip], library: Set<AssetID>) -> [TripIdentity] {
+    /// `setAside`: photos set aside under "Ausgewählte Fotos". A trip that keeps its id keeps the
+    /// photos of its identity that are set aside too: detected from the shared photos it is only
+    /// a part of itself, and a second selection with the other part must find the id again
+    /// (third review of P1-07). With full access nothing is set aside: the trip's photos.
+    static func mergedIdentities(_ known: [TripIdentity], _ trips: [Trip], library: Set<AssetID>,
+                                 setAside: Set<AssetID> = []) -> [TripIdentity] {
         let current = Set(trips.map(\.id))
-        return trips.map(TripIdentity.init) + known.filter { identity in
+        let before = Dictionary(known.map { ($0.id, $0.members) }, uniquingKeysWith: { first, _ in first })
+        return trips.map { trip in
+            var identity = TripIdentity(trip)
+            if !setAside.isEmpty, let members = before[trip.id] {
+                let mine = Set(identity.members)
+                identity.members += members.filter { setAside.contains($0) && !mine.contains($0) }
+            }
+            return identity
+        } + known.filter { identity in
             !current.contains(identity.id) && identity.members.contains(where: library.contains)
         }
+    }
+
+    /// The places of the analysis before (`stored`) with the photos set aside of each (`away`,
+    /// `Key.frequentPlacesOutOfView`): a place of both keeps its photos and gets the others, a
+    /// place only set aside comes after the stored ones (their order decides ties).
+    static func withPhotosSetAside(_ stored: [FrequentPlace], _ away: [FrequentPlace]) -> [FrequentPlace] {
+        var result = stored
+        let index = Dictionary(stored.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for place in away {
+            if let i = index[place.id] {
+                let have = Set(result[i].assetIDs)
+                result[i].assetIDs += place.assetIDs.filter { !have.contains($0) }
+            } else if !result.contains(where: { $0.id == place.id }) {
+                result.append(place)
+            }
+        }
+        return result
     }
 
     /// Suggestion → the album it was applied to, from the managed-album records. Two albums
@@ -2167,5 +2906,14 @@ public actor AnalysisPipeline {
         if outdated { proposalsGeneration += 1 }
         try await store.setValues(values, afterEach: afterEachWrite)
         return MatchRefresh(snapshot: snapshot, reopened: reopened)
+    }
+}
+
+extension ResumedRun {
+    /// Whether the database has photos, for `markerApplies` at the app's start. Photos set
+    /// aside under "Ausgewählte Fotos" count (review P1-07): with no photo shared, a database
+    /// full of analysis is not an empty one.
+    public static func databaseHasPhotos(_ store: SortlyStore) async throws -> Bool {
+        try await store.assetCount(includingOutOfView: true) > 0
     }
 }

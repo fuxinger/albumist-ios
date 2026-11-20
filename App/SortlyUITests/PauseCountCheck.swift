@@ -21,6 +21,37 @@ enum PauseCountCheck {
         return Int(m.1)
     }
 
+    /// When the app took the Pause touch, from its record: the first line after the tap's start
+    /// that says "Wird angehalten" or "Analyse pausiert" (Pause changes the card in the touch's
+    /// own call). Nil when no line says either.
+    static func reactedInRecord(_ lines: [(at: Date, line: String?)]) -> Date? {
+        lines.first { row in
+            guard let line = row.line else { return false }
+            return line.hasPrefix("Wird angehalten") || line.hasPrefix("Analyse pausiert")
+        }?.at
+    }
+
+    /// Where a main-thread stall counts as holding the Pause (test12: under 1 s). It ends, as
+    /// before, a second after the tap returned (or after the card reacted, if that was later):
+    /// a hold the Pause causes after its reaction keeps XCTest's tap waiting and still counts.
+    /// With the app's record it starts a second before the card reacted: a touch that waited
+    /// for a stall is taken right after it ends, so a stall that ended earlier did not hold it.
+    /// XCTest's tap first waits for the app to go idle (19.47 s in stress run 44777843545 on a
+    /// Mac at load 360–500, where a 3.2 s stall ended about 1.5 s before the card reacted and
+    /// was counted although the Pause itself reacted at once); a stall in that wait comes before
+    /// the touch. Without the record it starts at the tap's start, as before.
+    static func stallWindow(tapStarted: Date, tapped: Date, reacted: Date?) -> (from: Date, to: Date) {
+        let to = max(tapped, reacted ?? tapped).addingTimeInterval(1)
+        guard let reacted else { return (tapStarted, to) }
+        return (max(tapStarted, reacted.addingTimeInterval(-1)), to)
+    }
+
+    /// Whether a stall (its end and length) overlaps a window.
+    static func overlaps(stallEnd: Date, ms: Int, from: Date, to: Date) -> Bool {
+        let start = stallEnd.addingTimeInterval(-Double(ms) / 1000)
+        return start <= to && stallEnd >= from
+    }
+
     /// From the app's record (time, line; nil at a relaunch) between the Pause tap and the
     /// Fortsetzen tap: when the card first said "Analyse pausiert" (Fortsetzen shows from then
     /// on, `AnalysisProgressCard.control`), the count then, and the last time the count moved

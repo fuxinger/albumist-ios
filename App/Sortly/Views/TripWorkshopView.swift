@@ -141,9 +141,9 @@ struct TripWorkshopView: View {
                 let photoCount = Text("\(proposal.assetIDs.count) Fotos mit Ort")
                 Text(title(proposal)).font(.headline)
                 Text("\(dayCount) · \(photoCount)")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.noteText)
                 Text("Hat Albumist hier zwei Reisen zusammengefasst oder eine Reise zerschnitten? Das korrigierst du hier. Albumist merkt es sich auch für jede spätere Analyse.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, Theme.Spacing.xs)
@@ -233,7 +233,7 @@ struct TripWorkshopView: View {
             }
             if preview.first.count < minimum || preview.second.count < minimum {
                 Text("Ein Teil hat weniger als \(minimum) Fotos mit Ort. Er wird kein eigener Reise-Vorschlag; seine Fotos bleiben in den Länder- und Orte-Alben.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Button {
@@ -250,7 +250,7 @@ struct TripWorkshopView: View {
             // During a Pause the split starts the analysis again (decision 18.11.2026).
             if model.analysis.isPausedByUser {
                 Text("Die pausierte Analyse läuft dann weiter.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.noteText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -341,7 +341,7 @@ struct TripWorkshopView: View {
                             Text("Die Vorschläge sind schon angepasst. Albumist hält sich daran, auch bei jeder neuen Analyse. Aufheben kannst du es hier an der Reise oder in den Einstellungen.")
                         }
                     }
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.noteText)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                 }
@@ -396,7 +396,7 @@ struct TripChangeWaitNote: View {
                     .accessibilityHidden(true) // the text beside it says what runs
             }
             .font(.footnote)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.noteText)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier(identifier)
@@ -449,7 +449,7 @@ private struct MergeRowLabel: View {
                     .foregroundStyle(isEnabled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
                 detail
                     .font(.subheadline)
-                    .foregroundStyle(isEnabled ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(.noteText) : AnyShapeStyle(.tertiary))
             }
         }
         .frame(minHeight: 44)
@@ -482,7 +482,7 @@ private struct DayRow: View {
                     }
                 }
                 .font(selected ? .subheadline.weight(.semibold) : .subheadline)
-                .foregroundStyle(selected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
+                .foregroundStyle(selected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.noteText))
             }
             Spacer(minLength: Theme.Spacing.s)
             if selected {
@@ -513,7 +513,7 @@ private struct PartRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(Self.span(part.start, part.end)).font(.subheadline)
-                Text("\(part.count) Fotos").font(.footnote).foregroundStyle(.secondary)
+                Text("\(part.count) Fotos").font(.footnote).foregroundStyle(.noteText)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

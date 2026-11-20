@@ -71,6 +71,7 @@ class AptInstallTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertIn("install -y -qq libsqlite3-dev python3", calls[1])
         self.assertNotIn("CI_INFRA_RETRY", result.stdout)
+        self.assertNotIn("Environment retry", result.stdout)
         self.assertEqual(final, UBUNTU_SOURCES)
 
     def test_a_failed_index_is_an_error_and_apt_gives_up_quickly(self):
@@ -85,6 +86,9 @@ class AptInstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("CI_INFRA_RETRY apt: switched to azure.archive.ubuntu.com", result.stdout)
         self.assertEqual(result.stdout.count("CI_INFRA_RETRY apt: attempt"), 2)
+        # Visible in the check (annotation), not only in the log.
+        self.assertIn("::warning title=Environment retry (apt)::Ubuntu packages installed on attempt 3 (fallback mirror)",
+                      result.stdout)
         self.assertNotIn("archive.ubuntu.com/ubuntu", final.replace("azure.archive.ubuntu.com", ""))
         self.assertNotIn("security.ubuntu.com", final)
         self.assertIn("URIs: http://azure.archive.ubuntu.com/ubuntu/", final)

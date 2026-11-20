@@ -64,6 +64,22 @@ final class SortlyLockedUITests: XCTestCase {
         }
     }
 
+    /// `element` is in sight as the plan opens, without scrolling and clear of the tab bar
+    /// (review P3-05 = G3-05: the button and the unlock card stood at the end of the plan, below
+    /// the fold). Content under the tab bar counts as hittable for XCUITest, so the frame is read.
+    @discardableResult
+    private func expectInReach(_ element: XCUIElement, _ what: String) -> Bool {
+        let tabs = app.tabBars.firstMatch
+        let reached = UITestWait.until("\(what) in reach without scrolling", timeout: 10) {
+            element.exists && element.isHittable && app.frame.contains(element.frame)
+                && (!tabs.exists || element.frame.maxY <= tabs.frame.minY + 1)
+        }
+        if !reached {
+            print("UI_FACT \(what): \(element.exists ? "\(element.frame)" : "missing"), tab bar \(tabs.exists ? "\(tabs.frame)" : "missing")")
+        }
+        return reached
+    }
+
     /// The number on "N Vorschläge prüfen", 0 without the button.
     private func openSuggestionCount() -> Int {
         let review = reviewSuggestionsButton()
@@ -72,28 +88,61 @@ final class SortlyLockedUITests: XCTestCase {
     }
 
     /// Opens the suggestions and selects the recommended ones, or else one suggestion for a
-    /// new album with its own "Auswählen und später anlegen"; true when something is then
-    /// ready to be created.
+    /// new album with its own "Auswählen und später anlegen" (in the "…" menu at the top right
+    /// since review P3-06); true when something is then ready to be created.
     private func selectRecommended(_ step: String) -> Bool {
         let review = reviewSuggestionsButton()
         guard review.waitForExistence(timeout: 20) else { return false }
         tap(review, step)
-        sleep(1)
+        let list = app.navigationBars["Vorschläge"]
+        let detail = app.navigationBars["Vorschlag"]
+        UITestWait.appears(list, "suggestions list (locked)", timeout: 10)
         shot("71-locked-suggestions")
         if button("empfohlene auswählen").waitForExistence(timeout: 5) {
-            button("empfohlene auswählen").tap(); sleep(1)
+            button("empfohlene auswählen").tap()
+            // The list offers "N ausgewählte Alben anlegen" once something is selected; whether
+            // it is, the return below says.
+            _ = button("ausgewählte Alben anlegen").waitForExistence(timeout: 5)
         } else {
             let row = app.collectionViews.cells.containing(NSPredicate(format: "label CONTAINS %@", "Neues Album")).firstMatch
             print("UI_FACT locked: no recommended ones, a row for a new album \(row.exists)")
             if row.exists {
-                row.tap(); sleep(2)
-                let later = button("Auswählen und später anlegen")
-                if later.waitForExistence(timeout: 5) { tap(later, "select one suggestion (locked)"); sleep(1) }
-                // The detail goes back to the list by itself after the choice; if not, back.
-                if app.navigationBars["Vorschlag"].exists { back(); sleep(1) }
+                row.tap()
+                UITestWait.appears(detail, "one suggestion opened (locked)", timeout: 10)
+                // By identifier, or by the start of the name where the menu does not pass the
+                // identifier on (an item with a second line is named with both).
+                func named(_ identifier: String, _ label: String) -> XCUIElement {
+                    app.buttons.matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", identifier, label)).firstMatch
+                }
+                let more = named("proposal.more", "Weitere Aktionen")
+                if more.waitForExistence(timeout: 5) {
+                    more.tap()
+                    // A menu item is tapped where it is: a swipe would close the menu.
+                    let later = named("proposal.selectLater", "Auswählen und später anlegen")
+                    if later.waitForExistence(timeout: 5) {
+                        later.tap()
+                        print("UI_STEP_OK select one suggestion (locked)")
+                        // The detail goes back to the list by itself after the choice.
+                        _ = UITestWait.holds(timeout: 5) { !detail.exists }
+                    } else {
+                        // Not offered for this suggestion: a tap at the left edge closes the menu
+                        // (if it reached the page, it hits no button there).
+                        print("UI_FACT locked: no \"Auswählen und später anlegen\" in the menu")
+                        app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5)).tap()
+                        // "Anpassen" is in every suggestion's menu and nowhere on its page.
+                        UITestWait.until("menu closed (locked)", timeout: 5) { !named("proposal.adjust", "Anpassen").exists }
+                    }
+                }
+                // If not, back.
+                if detail.exists {
+                    back()
+                    UITestWait.disappears(detail, "suggestion closed (locked)", timeout: 10)
+                }
             }
         }
-        back(); sleep(1)
+        back()
+        // Gone first: the list has its own "ausgewählte Alben anlegen" at the bottom.
+        UITestWait.disappears(list, "suggestions list closed (locked)", timeout: 10)
         return button("ausgewählte Alben anlegen").waitForExistence(timeout: 10)
     }
 
@@ -102,14 +151,18 @@ final class SortlyLockedUITests: XCTestCase {
     private func takeBackNewestPlans(limit: Int) -> Int {
         guard tap(app.buttons["Einstellungen"], "settings (locked)"),
               tap(app.buttons["settings.history"], "history (locked)", timeout: 5) else { return 0 }
-        sleep(1)
+        let history = app.navigationBars["Verlauf und Rückgängig"]
+        UITestWait.appears(history, "history screen (locked)", timeout: 10)
+        // Its rows (not asserted: an empty history has none, and then nothing is taken back).
+        _ = app.buttons.matching(identifier: "history.row").firstMatch.waitForExistence(timeout: 5)
         var undone = 0
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for index in 0..<(limit + 4) where undone < limit {
             let rows = app.buttons.matching(identifier: "history.row")
             guard index < rows.count else { break }
             rows.element(boundBy: index).tap()
-            sleep(2)
+            // A history row opens its change receipt (PlanReceiptView).
+            UITestWait.appears(app.navigationBars["Änderungen"], "receipt of history row \(index + 1) (locked)", timeout: 10)
             let undo = app.buttons["receipt.undo"]
             var more = 0
             while !undo.exists && more < 6 { app.swipeUp(); more += 1 }
@@ -123,16 +176,22 @@ final class SortlyLockedUITests: XCTestCase {
                         let alert = springboard.alerts.firstMatch
                         if alert.waitForExistence(timeout: 3) {
                             let delete = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Delete", "Löschen"])).firstMatch
-                            if delete.exists { delete.tap(); sleep(2) } else { break }
+                            if delete.exists {
+                                delete.tap()
+                                // The alert has gone (it may ask again: the loop looks once more).
+                                _ = UITestWait.holds(timeout: 5) { !alert.exists }
+                            } else { break }
                         }
                     }
                     if app.staticTexts["Rückgängig gemacht"].waitForExistence(timeout: 30) { undone += 1 }
                 }
             }
-            back(); sleep(1)
+            back()
+            UITestWait.appears(history, "back on the history (locked)", timeout: 10)
         }
         print("UI_FACT locked: plans taken back to have suggestions again: \(undone)")
-        back(); sleep(1)
+        back()
+        UITestWait.appears(app.navigationBars["Einstellungen"], "back on the settings (locked)", timeout: 10)
         tap(button("Fertig"), "close settings (locked)")
         UITestWait.disappears(app.navigationBars["Einstellungen"], "settings closed (locked)", timeout: 20)
         return undone
@@ -180,7 +239,7 @@ final class SortlyLockedUITests: XCTestCase {
     /// the overview and closed again. nil when it cannot be read.
     private func freeAlbumsLeftInSettings() -> Int? {
         guard tap(app.buttons["Einstellungen"], "settings for the free albums (locked)") else { return nil }
-        sleep(1)
+        UITestWait.appears(app.navigationBars["Einstellungen"], "settings open for the free albums (locked)", timeout: 10)
         let row = anything("Noch kostenlos")
         var swipes = 0
         while !(row.exists && row.isHittable) && swipes < 10 {
@@ -191,7 +250,7 @@ final class SortlyLockedUITests: XCTestCase {
         print("UI_FACT locked: Settings says \(left.map { "\($0)" } ?? "?") free albums left")
         shot("72-locked-free-albums")
         tap(button("Fertig"), "close settings after the free albums (locked)")
-        sleep(2)
+        UITestWait.disappears(app.navigationBars["Einstellungen"], "settings closed after the free albums (locked)", timeout: 20)
         return left
     }
 
@@ -214,6 +273,8 @@ final class SortlyLockedUITests: XCTestCase {
             let ready = anything("Fotos analysiert").exists && !app.buttons["Pause"].exists
                 && !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists
             streak = ready ? streak + 1 : 0
+            // pacing: the poll's interval, kept: "three checks in a row" means the library stayed
+            // ready for about four seconds (not only between two batches of the analysis).
             sleep(2)
         }
         print(streak >= 3 ? "UI_STEP_OK prepared (locked)" : "UI_STEP_MISSING prepared (locked)")
@@ -248,9 +309,12 @@ final class SortlyLockedUITests: XCTestCase {
                 // The suggestions of the plans taken back return once the undo is stored and
                 // matched again; the count on the overview says when (run 43804947107 went on
                 // at once and found the one suggestion that was there before).
-                var after = openSuggestionCount()
-                let end = Date().addingTimeInterval(120)
-                while after <= before && Date() < end { sleep(2); after = openSuggestionCount() }
+                var after = 0
+                // Not asserted here: the relaunch below and the selection after it decide.
+                _ = UITestWait.holds(timeout: 120) {
+                    after = openSuggestionCount()
+                    return after > before
+                }
                 print("UI_FACT locked: open suggestions \(before) before taking back, \(after) after")
                 shot("70-locked-overview-after-takeback")
                 // Every undo gave its albums back to the free count (AppModel.finalize:
@@ -296,6 +360,9 @@ final class SortlyLockedUITests: XCTestCase {
         }
         if cardShown {
             print("UI_STEP_OK unlock card")
+            // At the top of the plan, where "Alben jetzt anlegen" would be in reach otherwise.
+            expectInReach(unlock, "unlock card (locked)")
+            shot("74-locked-plan-unlock")
             XCTAssertFalse(app.buttons["plan.apply"].exists, "A plan over the free albums offered \"Alben jetzt anlegen\"")
             // With or without a price from StoreKit (W7: "Preis wird geladen …" until it is there).
             XCTAssertTrue(app.buttons["unlock.buy"].exists, "No unlock button")
@@ -307,6 +374,8 @@ final class SortlyLockedUITests: XCTestCase {
         let start = app.buttons["plan.apply"]
         // Waited for (also after "jetzt kostenlos anlegen", which had a fixed 3 s before).
         UITestWait.appears(start, "the plan within the free albums can be applied (locked)", timeout: 23)
+        expectInReach(start, "\"Alben jetzt anlegen\" (locked)")
+        shot("75-locked-plan-free")
         // What is free afterwards: the free albums less what this plan uses ("Die ersten N"
         // made the plan anew, so its summary is read again).
         let used = cardShown ? (rowCount("Neue Alben", timeout: 10) ?? 0) + (rowCount("Ergänzte Alben", timeout: 0) ?? 0) : planned

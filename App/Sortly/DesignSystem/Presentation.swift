@@ -200,7 +200,7 @@ enum ReasonText {
         case .noExistingAlbum:
             return String(localized: "Es gibt noch kein passendes Album.")
         case .keptUnchangedUntilChosen(let album):
-            return String(localized: "Albumist legt ein neues Album an und ändert „\(album)“ nicht. Unter „Anpassen“ kannst du stattdessen „\(album)“ ergänzen.")
+            return String(localized: "Albumist legt ein neues Album an und ändert „\(album)“ nicht.")
         }
     }
 }

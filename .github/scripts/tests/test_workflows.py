@@ -404,7 +404,9 @@ class TestFlightWiringTests(unittest.TestCase):
         self.assertIn("plan --groups \"$UI_GROUPS\" ${UI_QUICK:+--quick}", text)
         self.assertIn("TEST_RUNNER_SORTLY_UI_QUICK: ${{ matrix.quick && '1' || '' }}", text)
         testflight = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
-        self.assertIn("python3 .github/scripts/ui_evidence.py gate\n", testflight)  # full, never --quick
+        # Full, never --quick; the stress pass of 10,000 photos too (decision 20.11.2026, 17:20).
+        self.assertIn("python3 .github/scripts/ui_evidence.py gate --stress 10000-15\n", testflight)
+        self.assertIn('python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS" --stress 10000-15\n', testflight)
         self.assertIn("      release: true\n      quick: false\n", testflight)
 
     def test_pull_request_runs_name_their_merge_commit(self):
@@ -472,6 +474,191 @@ def job_steps(text, job):
             fields[found.group(1)] = value
         steps.append((fields.get("name", ""), " ".join(fields.get("if", "").split()), fields.get("run", "")))
     return steps
+
+
+class CompileFirstTests(unittest.TestCase):
+    """Tempo plan 20.11.: CI's Mac job compiles the app, its unit tests and the UI tests before
+    the macOS core tests and the fresh simulator, so a compile error only the Mac finds is red
+    within minutes (61e9b8c was red after 27 min). Every step stays."""
+
+    def test_the_mac_job_builds_before_it_tests(self):
+        ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        steps = job_steps(ci, "ios")
+        names = [name for name, _, _ in steps]
+        for name in ("Build app and its tests", "Build UI tests", "Core tests (macOS)",
+                     "Fresh simulator (erased and booted)", "Build and test app", "Export strings for translation"):
+            self.assertIn(name, names)
+        order = [names.index(n) for n in ("Pick simulator", "Build app and its tests", "Build UI tests",
+                                          "Core tests (macOS)", "Fresh simulator (erased and booted)", "Build and test app")]
+        self.assertEqual(order, sorted(order))
+        runs = {name: run for name, _, run in steps}
+        first = runs["Build app and its tests"]
+        self.assertRegex(first, r"xcodebuild build-for-testing\b")
+        self.assertIn("-scheme Sortly\n", first.replace(" \\", ""))
+        # The same build settings as the test step, so that one compiles nothing again.
+        test = runs["Build and test app"]
+        for setting in ("COMPILER_INDEX_STORE_ENABLE=NO", "CODE_SIGNING_ALLOWED=NO"):
+            self.assertIn(setting, first)
+            self.assertIn(setting, test)
+            self.assertIn(setting, runs["Build UI tests"])
+        # A failed build is red: no "|| true" after the build, and it is no machinery step.
+        self.assertIn("exit 1", first)
+        self.assertIn("tail -30 ../build-log.txt", first)
+        # Second review of ci/tempo (S3): only the app build's failure stops the core tests and
+        # the app tests, a failed "Build UI tests" does not.
+        rules = {name: rule for name, rule, _ in steps}
+        for name in ("Core tests (macOS)", "Fresh simulator (erased and booted)", "Build and test app"):
+            with self.subTest(step=name):
+                self.assertIn("!cancelled()", rules[name])
+                self.assertIn("steps.appbuild.outcome == 'success'", rules[name])
+        self.assertIn("id: appbuild", ci)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "earlier_attempts", os.path.join(ROOT, ".github", "scripts", "earlier_attempts.py"))
+        earlier_attempts = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(earlier_attempts)
+        self.assertFalse(earlier_attempts.is_machinery("Build app and its tests"))
+        self.assertFalse(earlier_attempts.is_machinery("Build UI tests"))
+
+
+class KnownRedTests(unittest.TestCase):
+    """Tempo plan 20.11.: a group already red for this app and test code shows as a red check at
+    minute one (ui.yml "UI known red"), the groups still run and the verdict decides as before."""
+
+    def test_the_known_red_job(self):
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        jobs = job_blocks(ui)
+        self.assertIn("known-red", jobs)
+        self.assertEqual(job_field(ui, "known-red", "needs").strip(), "plan")
+        rule = job_field(ui, "known-red", "if")
+        self.assertIn("needs.plan.outputs.known_red != ''", rule)
+        self.assertIn("!inputs.release", rule)
+        self.assertIn("known_red: ${{ steps.plan.outputs.known_red }}", jobs["plan"])
+        steps = job_steps(ui, "known-red")
+        self.assertEqual(len(steps), 1)
+        self.assertTrue(steps[0][2].rstrip().endswith("exit 1"), "the job fails")
+        # Nothing else waits for it: the groups and the verdict run as before.
+        for job in ("build", "ui", "verdict", "summary"):
+            with self.subTest(job=job):
+                self.assertNotIn("known-red", job_field(ui, job, "needs"))
+        # Its red is a verdict, not machinery: "Re-run failed jobs" does not hide it.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "earlier_attempts", os.path.join(ROOT, ".github", "scripts", "earlier_attempts.py"))
+        earlier_attempts = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(earlier_attempts)
+        self.assertFalse(earlier_attempts.is_machinery(steps[0][0]))
+
+
+class FullPassBeforeMergeTests(unittest.TestCase):
+    """The owner's decision of 20.11.2026, 17:12: the full UI pass runs once before the merge, its
+    verdict checks that the merge brings exactly the tested content, and TestFlight takes its
+    greens by content (ui_evidence.py) instead of running the groups again."""
+
+    def test_the_full_verdict_checks_the_merge_content(self):
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        steps = job_steps(ui, "verdict")
+        rules = {name: rule for name, rule, _ in steps}
+        runs = {name: run for name, _, run in steps}
+        merge = "Merge content same as this commit"
+        self.assertIn(merge, rules)
+        self.assertIn("python3 .github/scripts/ui_evidence.py merge-content --base origin/main", runs[merge])
+        for part in ("github.event_name == 'workflow_dispatch'", "!inputs.quick", "github.ref != 'refs/heads/main'"):
+            self.assertIn(part, rules[merge])
+        # The gate itself is unchanged: full unless quick.
+        self.assertIn("python3 .github/scripts/ui_evidence.py gate ${UI_QUICK:+--quick}",
+                      runs["UI groups green for this app and test code"])
+        # The checkout has main's history (merge-tree needs origin/main).
+        self.assertIn("fetch-depth: 0", job_blocks(ui)["verdict"])
+
+    def test_testflight_still_runs_and_gates_every_group(self):
+        tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        jobs = job_blocks(tf)
+        # Groups "auto": only those without a full green for this content run; the gate checks
+        # every group of the big gate, full (no --quick anywhere in the TestFlight run).
+        self.assertIn("default: auto", tf)
+        self.assertIn('python3 .github/scripts/ui_evidence.py gate --groups "$GATE_GROUPS"', jobs["ui-gate"])
+        self.assertNotIn("--quick", tf)
+        self.assertIn("stress", jobs)
+        self.assertIn("release-smoke", jobs)
+
+
+class HangLimitTests(unittest.TestCase):
+    """20.11.2026: the core tests hung 30 min until the job's limit; every swift test step now runs
+    under swift_test_watch.py, which names the tests still running before the step's limit."""
+
+    def test_every_core_test_step_is_watched(self):
+        ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
+        watched = 0
+        for text, job in ((ci, "core-linux"), (ci, "ios"), (ui, "core-linux")):
+            for name, _, run in job_steps(text, job):
+                if "swift test" not in run:
+                    continue
+                with self.subTest(job=job, step=name):
+                    self.assertIn("python3 .github/scripts/swift_test_watch.py --minutes", run)
+                    minutes = float(re.search(r"--minutes (\d+(?:\.\d+)?)", run).group(1))
+                    block = "\n" + text.split(f"- name: {name}\n", 1)[1].split("\n      - ", 1)[0]
+                    limit = re.search(r"\n        timeout-minutes: (\d+)", block)
+                    self.assertIsNotNone(limit, "the step has its own timeout-minutes")
+                    # The watchdog reports (and gives the backtrace a minute) before GitHub kills.
+                    self.assertLessEqual(minutes + 2, int(limit.group(1)))
+                    watched += 1
+        self.assertEqual(watched, 4)
+        # The Linux container installs python3 for it.
+        for text in (ci, ui):
+            self.assertIn("apt_install.sh libsqlite3-dev python3", text)
+
+
+class StressBeforeMergeTests(unittest.TestCase):
+    """The owner's decision of 20.11.2026, 17:20: the stress pass runs once before the merge, and
+    TestFlight takes its green by content; without one it runs there as before."""
+
+    def test_the_stress_workflow_plans_names_and_judges_its_pass(self):
+        text = read(os.path.join(ROOT, ".github", "workflows", "ui-stress.yml"))
+        jobs = job_blocks(text)
+        self.assertEqual(list(jobs)[:3], ["plan", "stress", "verdict"])
+        plan = {n: r for n, _, r in job_steps(text, "plan")}["Key of this pass and whether it runs"]
+        self.assertIn('ui_evidence.py stress-plan --photos "$STRESS_PHOTOS" --minutes "$STRESS_MINUTES" ${REUSE:+--reuse}', plan)
+        # The weekly pass never reuses.
+        self.assertIn("REUSE: ${{ github.event_name != 'schedule' && 'yes' || '' }}", jobs["plan"])
+        self.assertIn("fetch-depth: 0", jobs["plan"])
+        # The key in the job's name, where the gate and later plans find it.
+        self.assertIn("[${{ needs.plan.outputs.group }} app ${{ needs.plan.outputs.app }} tests ${{ needs.plan.outputs.tests }}]",
+                      jobs["stress"])
+        self.assertEqual(job_field(text, "stress", "if").strip(), "${{ needs.plan.outputs.run == 'true' }}")
+        verdict = {n: r for n, _, r in job_steps(text, "verdict")}["Stress pass green for this app and test code"]
+        self.assertIn('ui_evidence.py gate --stress "${STRESS_PHOTOS}-${STRESS_MINUTES}" --stress-only', verdict)
+        self.assertIn("!inputs.release", job_field(text, "verdict", "if"))
+        self.assertIn("name: UI stress verdict", jobs["verdict"])
+
+    def test_testflight_checks_the_stress_pass_by_content(self):
+        tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
+        jobs = job_blocks(tf)
+        gate = "\n".join(r for _, _, r in job_steps(tf, "ui-gate"))
+        self.assertEqual(gate.count("--stress 10000-15"), 2)
+        # Still called in every run with the small pass; the upload still needs it green
+        # (a pass skipped for a green one by content leaves the called workflow green).
+        self.assertIn("photos: '10000'", jobs["stress"])
+        # The called workflow's plan reads earlier runs: the caller grants it.
+        self.assertIn("actions: read", jobs["stress"])
+        self.assertIn("checks: read", jobs["stress"])
+        self.assertIn("minutes: '15'", jobs["stress"])
+        self.assertIn("needs.stress.result == 'success'", job_field(tf, "release", "if"))
+        self.assertIn("needs.release-smoke.result == 'success'", job_field(tf, "release", "if"))
+
+
+class EnvironmentRetryTests(unittest.TestCase):
+    """Rule 17.11.: an environment retry is counted and fixed at its cause, never hidden. The
+    retries that exist are narrow (exact signatures, ui_tests.py INFRA; a boot that did not come
+    up; an apt mirror) and each one shows in the check's annotations, not only in the log."""
+
+    def test_the_ci_boot_retry_is_an_annotation(self):
+        ci = read(os.path.join(ROOT, ".github", "workflows", "ci.yml"))
+        step = ci.split("- name: Fresh simulator (erased and booted)\n", 1)[1].split("\n      - name: ", 1)[0]
+        self.assertIn("for attempt in 1 2 3; do", step)
+        self.assertIn("::warning title=Environment retry (simulator boot)::", step)
+        self.assertIn('[ "$attempt" = 3 ] && { echo "simulator did not boot (3 attempts)"; exit 1; }', step)
 
 
 class ReleaseSkipTests(unittest.TestCase):
@@ -550,9 +737,10 @@ class ReleaseSmokeTests(unittest.TestCase):
         # before the groups.
         ui = read(os.path.join(ROOT, ".github", "workflows", "ui.yml"))
         found = re.search(r"\n      max-parallel: \$\{\{ inputs\.release && (\d) \|\| (\d) \}\}\n", ui)
-        self.assertIsNotNone(found, "ui.yml: max-parallel ${{ inputs.release && N || 4 }}")
+        self.assertIsNotNone(found, "ui.yml: max-parallel ${{ inputs.release && N || 5 }}")
         in_release, otherwise = int(found.group(1)), int(found.group(2))
-        self.assertEqual(otherwise, 4)
+        # Outside TestFlight five groups (tempo plan 20.11.; beside CI's Mac job GitHub queues one).
+        self.assertEqual(otherwise, 5)
         tf = read(os.path.join(ROOT, ".github", "workflows", "testflight.yml"))
         beside = [job for job in ("stress", "release-smoke")
                   if [n.strip() for n in job_field(tf, job, "needs").split(",")] == ["tests"]]
@@ -674,7 +862,10 @@ class MacQueueTests(unittest.TestCase):
             group = concurrency_group(text)
             with self.subTest(workflow=name):
                 self.assertEqual(gh_expr(group, dispatch_context("refs/heads/main")), "mac-queue-main")
-                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/feature")), "mac-queue")
+                # The stress pass before the merge runs beside the branch's full UI pass (the
+                # owner's decision of 20.11.2026, 17:20): a group per branch, not the Mac queue.
+                self.assertEqual(gh_expr(group, dispatch_context("refs/heads/feature")),
+                                 "stress-branch" if name == "ui-stress" else "mac-queue")
 
     def test_no_pull_request_joins_the_queue_of_main(self):
         group = concurrency_group(self.ui)

@@ -121,6 +121,46 @@
         }
       }
     },
+    "%lld Fotos ohne Ort" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto ohne Ort"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos ohne Ort"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo without a location"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos without a location"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld ignorierte Fotos" : {
       "localizations" : {
         "de" : {
@@ -421,6 +461,46 @@
         }
       }
     },
+    "%lld ausgeschlossene Fotos" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ausgeschlossenes Foto"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld ausgeschlossene Fotos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld excluded photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld excluded photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld ausgewählt" : {
       "localizations" : {
         "en" : {
@@ -627,6 +707,16 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Dafür braucht Albumist Zugriff auf alle Fotos. Gerade sind nur ausgewählte Fotos freigegeben, und Albumist sieht nicht, was sonst in deinen Alben liegt. Ändern kannst du das unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist needs access to all photos for this. Only selected photos are shared right now, so Albumist can't see what else is in your albums. You can change this in Settings › Apps › Albumist › Photos › Full Access."
           }
         }
       }
@@ -1181,22 +1271,22 @@
         }
       }
     },
-    "Alben und Zuordnungen von Albumist werden entfernt. Deine Fotos bleiben unverändert." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albums and assignments made by Albumist will be removed. Your photos stay unchanged."
-          }
-        }
-      }
-    },
     "Alben werden angelegt" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Creating albums"
+          }
+        }
+      }
+    },
+    "Alben werden geändert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updating albums"
           }
         }
       }
@@ -1381,12 +1471,12 @@
         }
       }
     },
-    "Albumist legt ein neues Album an und ändert „%@“ nicht. Unter „Anpassen“ kannst du stattdessen „%@“ ergänzen." : {
+    "Albumist legt ein neues Album an und ändert „%@“ nicht." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist creates a new album and leaves “%1$@” unchanged. Under “Adjust” you can add to “%2$@” instead."
+            "value" : "Albumist creates a new album and leaves “%@” unchanged."
           }
         }
       }
@@ -1401,12 +1491,12 @@
         }
       }
     },
-    "Albumist legt ohnehin ein neues Album an und bietet dieses unter „Anpassen“ nicht mehr an. Am Album selbst ändert sich nichts." : {
+    "Albumist legt ohnehin ein neues Album an und bietet es für diesen Vorschlag nicht mehr an. Am Album selbst ändert sich nichts." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Albumist creates a new album anyway and no longer offers this one under “Adjust”. The album itself stays unchanged."
+            "value" : "Albumist creates a new album anyway and no longer offers it for this suggestion. The album itself stays unchanged."
           }
         }
       }
@@ -2111,6 +2201,26 @@
         }
       }
     },
+    "Die Zahl kommt mit den ersten Vorschlägen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The number arrives with the first suggestions."
+          }
+        }
+      }
+    },
+    "Die Zahl kommt, sobald die Analyse weiterläuft." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The number arrives once the analysis continues."
+          }
+        }
+      }
+    },
     "Die pausierte Analyse läuft dann weiter." : {
       "localizations" : {
         "en" : {
@@ -2371,6 +2481,16 @@
         }
       }
     },
+    "Ergebnis" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Result"
+          }
+        }
+      }
+    },
     "Ergänzte Alben" : {
       "localizations" : {
         "en" : {
@@ -2401,12 +2521,12 @@
         }
       }
     },
-    "Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“." : {
+    "Erst die markierten Punkte klären. Das geht im Vorschlag oben rechts unter „…“ › „Anpassen“." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Resolve the marked items first. Change the suggestion under “Adjust”."
+            "value" : "Resolve the marked items first. You can do that in the suggestion under “…” › “Adjust” at the top right."
           }
         }
       }
@@ -2441,12 +2561,12 @@
         }
       }
     },
-    "Es gibt schon ein anderes Album „%@“. Das neue bekommt einen Zusatz." : {
+    "Es gibt schon ein anderes Album „%@“. Danach hast du zwei Alben mit diesem Namen." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "There is already another album “%@”. The new one gets a suffix."
+            "value" : "There’s already another album named “%@”. You’ll then have two albums with this name."
           }
         }
       }
@@ -2801,6 +2921,16 @@
         }
       }
     },
+    "Kein Bereich zählt als sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No area counts as sorted"
+          }
+        }
+      }
+    },
     "Kein Zugriff auf die Fotos" : {
       "localizations" : {
         "en" : {
@@ -2917,16 +3047,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Countries and places"
-          }
-        }
-      }
-    },
-    "Läuft weiter, auch wenn du die App verlässt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keeps running even when you leave the app"
           }
         }
       }
@@ -3241,6 +3361,16 @@
         }
       }
     },
+    "Nicht mitgezählt: %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not counted: %@."
+          }
+        }
+      }
+    },
     "Nicht nachgeprüft" : {
       "localizations" : {
         "en" : {
@@ -3277,6 +3407,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nothing Left to Do"
+          }
+        }
+      }
+    },
+    "Nichts zu sortieren" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing to sort"
           }
         }
       }
@@ -3377,6 +3517,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Still free"
+          }
+        }
+      }
+    },
+    "Noch nicht gezählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not counted yet"
           }
         }
       }
@@ -3801,16 +3951,6 @@
         }
       }
     },
-    "Albumist entfernt die angelegten Alben und Zuordnungen wieder. Deine Fotos bleiben unverändert." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist removes the albums and assignments it created. Your photos stay unchanged."
-          }
-        }
-      }
-    },
     "Albumist ergänzt das größte Album um die fehlenden Fotos. Die anderen Alben bleiben erhalten." : {
       "localizations" : {
         "en" : {
@@ -3877,6 +4017,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Album name language"
+          }
+        }
+      }
+    },
+    "Stattdessen „%@“ ergänzen …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add to “%@” Instead…"
           }
         }
       }
@@ -4341,12 +4491,32 @@
         }
       }
     },
+    "Wird gezählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Counting"
+          }
+        }
+      }
+    },
     "Wird später fortgesetzt" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Will continue later"
+          }
+        }
+      }
+    },
+    "Wird weitergezählt, sobald die Analyse weiterläuft." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Counting resumes once the analysis continues."
           }
         }
       }
@@ -4747,16 +4917,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "Albumist hat dieses Album angelegt. Es wird gelöscht, die Fotos bleiben in deiner Mediathek. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist created this album. It will be deleted; the photos stay in your library. If you added photos yourself, the album stays with those photos."
           }
         }
       }
@@ -5859,16 +6019,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "They won’t go into this album. They stay in your library and in other suggestions."
-          }
-        }
-      }
-    },
-    "Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt. Deine Fotos bleiben unverändert." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist removes what is certainly its own and tells you if anything stays. Your photos stay unchanged."
           }
         }
       }
@@ -7933,6 +8083,16 @@
         }
       }
     },
+    "Zuletzt %@ von %@ sortiert" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last count: %1$@ of %2$@ sorted"
+          }
+        }
+      }
+    },
     "Zuletzt %@ von %@ sortiert. Die neue Zahl kommt mit den ersten Vorschlägen." : {
       "localizations" : {
         "en" : {
@@ -8233,6 +8393,16 @@
         }
       }
     },
+    "Wähle in den Einstellungen unter „Zählt als sortiert“, welche Bereiche zählen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose which areas count under “Counts as Sorted” in Settings."
+          }
+        }
+      }
+    },
     "Wähle mindestens einen Bereich." : {
       "localizations" : {
         "en" : {
@@ -8373,22 +8543,12 @@
         }
       }
     },
-    "Kein Original wird gelöscht" : {
+    "Kein Original wird gelöscht oder kopiert." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No originals are deleted"
-          }
-        }
-      }
-    },
-    "Es werden keine Kopien angelegt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No copies are made"
+            "value" : "No originals are deleted or copied."
           }
         }
       }
@@ -9396,6 +9556,46 @@
                       "value" : "%arg different days"
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld Fotos außerhalb deiner Hauptbereiche" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto außerhalb deiner Hauptbereiche"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos außerhalb deiner Hauptbereiche"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo outside your main areas"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos outside your main areas"
                 }
               }
             }
@@ -10753,12 +10953,12 @@
         }
       }
     },
-    "Läuft auch im Hintergrund" : {
+    "Läuft im Hintergrund weiter, dort aber langsamer" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Also runs in the background"
+            "value" : "Keeps running in the background, but more slowly"
           }
         }
       }
@@ -12779,6 +12979,96 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "about at most %@%%"
+          }
+        }
+      }
+    },
+    "%@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@"
+          }
+        }
+      }
+    },
+    "Alben und Zuordnungen von Albumist werden entfernt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albums and assignments made by Albumist will be removed."
+          }
+        }
+      }
+    },
+    "Albumist entfernt die angelegten Alben und Zuordnungen wieder." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist removes the albums and assignments it created."
+          }
+        }
+      }
+    },
+    "Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist removes what is certainly its own and tells you if anything stays."
+          }
+        }
+      }
+    },
+    "Deine Fotos bleiben unverändert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your photos stay unchanged."
+          }
+        }
+      }
+    },
+    "iOS fragt gleich noch einmal, ob Albumist die Alben löschen darf. Deine Fotos bleiben." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS will ask once more whether Albumist may delete the albums. Your photos stay."
+          }
+        }
+      }
+    },
+    "Albumist hat dieses Album angelegt. Es wird gelöscht. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist created this album. It will be deleted. If you added photos yourself, the album stays with those photos."
+          }
+        }
+      }
+    },
+    "Entfernen wurde unterbrochen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removing Albums Was Interrupted"
+          }
+        }
+      }
+    },
+    "Rest entfernen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish Removing"
           }
         }
       }

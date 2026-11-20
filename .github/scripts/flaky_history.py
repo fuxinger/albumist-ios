@@ -144,7 +144,8 @@ def group_of(job_name: str) -> str | None:
     name = job_name.split(" / ")[-1]
     found = GROUP_JOB.search(name)
     if found:
-        return found.group(1)
+        # The stress pass carries its evidence key like a group job ("[stress-10000-15 ...]").
+        return "stress" if ui_evidence.is_stress(found.group(1)) else found.group(1)
     if STRESS_JOB.search(name):
         return "stress"
     return "release-smoke" if SMOKE_JOB.search(name) else None

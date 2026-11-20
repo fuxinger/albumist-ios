@@ -155,9 +155,7 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
     /// `Task.isCancelled` is always false).
     private static func readAssets(includeHidden: Bool, knownDetails: [AssetID: Date], stopped isStopped: @escaping () -> Bool,
                                    progress: @escaping (Int, Int) -> Bool) throws -> [AssetSnapshot] {
-        let options = PHFetchOptions()
-        options.includeHiddenAssets = includeHidden
-        options.includeAssetSourceTypes = [.typeUserLibrary, .typeiTunesSynced]
+        let options = libraryOptions(includeHidden: includeHidden)
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
         let result = PHAsset.fetchAssets(with: options)
 
@@ -198,6 +196,144 @@ struct PhotoKitLibrary: PhotoLibraryReading, PhotoLibraryWriting {
         try Task.checkCancellation()
         if isStopped() { throw CancellationError() }
         return snapshots
+    }
+
+    /// The photos a whole read returns: the user's own library (and synced from a computer),
+    /// hidden ones only when the user lets Albumist see them.
+    private static let librarySources: PHAssetSourceType = [.typeUserLibrary, .typeiTunesSynced]
+
+    private static func libraryOptions(includeHidden: Bool) -> PHFetchOptions {
+        let options = PHFetchOptions()
+        options.includeHiddenAssets = includeHidden
+        options.includeAssetSourceTypes = librarySources
+        // A burst as the whole read sees it, also when fetched by identifier (Photos' default,
+        // set here so both reads say so).
+        options.includeAllBurstAssets = false
+        return options
+    }
+
+    // MARK: Changes since the last run (review P4-03)
+
+    // Photos keeps a history of its changes (iOS 16): a run reads only the photos added,
+    // changed or deleted since the token stored with the last read, instead of every photo
+    // and every album at every launch. A token that is too old or of another library, or any
+    // error, gets `nil`: the run reads the whole library, as before. Asked only with full
+    // access (`AnalysisPipeline.readChanges`).
+
+    /// Photos' change token now, archived (`PHPersistentChangeToken` is `NSSecureCoding`).
+    func changeMark() async -> LibraryChangeMark? {
+        try? await Self.read("changeMark") { _ -> LibraryChangeMark? in
+            Self.mark(PHPhotoLibrary.shared().currentChangeToken)
+        }
+    }
+
+    private static func mark(_ token: PHPersistentChangeToken) -> LibraryChangeMark? {
+        (try? NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)).map { LibraryChangeMark($0) }
+    }
+
+    /// Bounded like every read; every change in the history is a sign of progress.
+    func changes(since mark: LibraryChangeMark, limit: Int) async throws -> LibraryChanges? {
+        let data = mark.data
+        return try await Self.read("libraryChanges") { beat -> LibraryChanges? in
+            guard let token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: PHPersistentChangeToken.self, from: data),
+                  // Taken before the history is read: a change made meanwhile is read next time too.
+                  let now = Self.mark(PHPhotoLibrary.shared().currentChangeToken) else { return nil }
+            let history: PHPersistentChangeFetchResult
+            do {
+                history = try PHPhotoLibrary.shared().fetchPersistentChanges(since: token)
+            } catch {
+                // `persistentChangeTokenExpired`, `persistentChangeDetailsUnavailable`, a token of
+                // another library: not known.
+                return nil
+            }
+            var out = LibraryChanges(mark: now)
+            var known = true
+            // `enumerateChanges(_:)` is not in the Swift interface; the fetch result is a Sequence.
+            changes: for change in history {
+                if beat.isCancelled {
+                    known = false
+                    break changes
+                }
+                do {
+                    // Oldest first: a photo deleted after a change counts as deleted, one added
+                    // again after a deletion as changed. The pipeline asks for both kinds again
+                    // either way, so the order only saves work.
+                    let assets = try change.changeDetails(for: .asset)
+                    let changed = Set(assets.insertedLocalIdentifiers.union(assets.updatedLocalIdentifiers).map { AssetID($0) })
+                    let deleted = Set(assets.deletedLocalIdentifiers.map { AssetID($0) })
+                    out.assets.subtract(deleted)
+                    out.deleted.formUnion(deleted)
+                    out.deleted.subtract(changed)
+                    out.assets.formUnion(changed)
+                    if out.assets.count + out.deleted.count > limit {
+                        // More than the caller reads one by one: stop here, without holding the rest.
+                        out = LibraryChanges(mark: out.mark, tooMany: true)
+                        break changes
+                    }
+                    var named = !changed.isEmpty || !deleted.isEmpty
+                    for type in [PHObjectType.assetCollection, .collectionList] {
+                        let details = try change.changeDetails(for: type)
+                        if !details.insertedLocalIdentifiers.isEmpty || !details.updatedLocalIdentifiers.isEmpty
+                            || !details.deletedLocalIdentifiers.isEmpty {
+                            out.other = true
+                            named = true
+                        }
+                    }
+                    // A change that names nothing of these: something changed all the same.
+                    // How often Photos writes such changes (iCloud, its own housekeeping) is
+                    // not measured: if a quiet library always has some, the albums are walked
+                    // every run (as before this change). To measure on a device (TEST_PLAN 📱).
+                    if !named { out.other = true }
+                } catch {
+                    known = false
+                    break changes
+                }
+                beat.beat()
+            }
+            if beat.isCancelled { throw CancellationError() }
+            return known ? out : nil
+        }
+    }
+
+    /// Fetched by identifier with the whole read's options (`libraryOptions`, also for bursts),
+    /// then held to its rules by hand as well: whether a fetch by identifier leaves out hidden
+    /// photos or other sources is not taken on trust. Bounded like `fetchAssets`, every photo a sign of progress.
+    func fetchAssets(_ ids: Set<AssetID>, includeHidden: Bool, knownDetails: [AssetID: Date],
+                     progress: @escaping @Sendable (Int, Int) -> Bool) async throws -> ChangedAssets {
+        let wanted = ids.map(\.rawValue).sorted()
+        return try await Self.read("fetchChangedAssets") { beat -> ChangedAssets in
+            let options = Self.libraryOptions(includeHidden: includeHidden)
+            var snapshots: [AssetSnapshot] = []
+            var paused = false
+            for start in stride(from: 0, to: wanted.count, by: 500) {
+                if beat.isCancelled { throw CancellationError() }
+                let chunk = Array(wanted[start..<min(start + 500, wanted.count)])
+                PHAsset.fetchAssets(withLocalIdentifiers: chunk, options: options).enumerateObjects { asset, _, stop in
+                    if beat.isCancelled {
+                        stop.pointee = true
+                        return
+                    }
+                    guard includeHidden || !asset.isHidden, Self.librarySources.contains(asset.sourceType) else { return }
+                    autoreleasepool {
+                        let needsResources = knownDetails[AssetID(asset.localIdentifier)].map { known in
+                            !AssetSnapshot.sameModification(known, asset.modificationDate)
+                        } ?? true
+                        snapshots.append(Self.snapshot(asset, withResources: needsResources))
+                    }
+                    beat.beat()
+                    // Pause, as in the whole read (fewer photos, so more often).
+                    if snapshots.count % 50 == 0, !progress(snapshots.count, wanted.count) {
+                        paused = true
+                        stop.pointee = true
+                    }
+                }
+                if paused { throw LibraryReadPaused(read: snapshots) }
+            }
+            if beat.isCancelled { throw CancellationError() }
+            // How many photos a whole read would return: the pipeline checks the store against it.
+            let count = PHAsset.fetchAssets(with: options).count
+            return ChangedAssets(assets: snapshots, libraryCount: count)
+        }
     }
 
     static func snapshot(_ asset: PHAsset, withResources: Bool) -> AssetSnapshot {

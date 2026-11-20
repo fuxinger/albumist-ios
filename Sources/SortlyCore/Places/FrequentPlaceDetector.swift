@@ -43,7 +43,10 @@ public struct FrequentPlaceDetector: Sendable {
 
     /// - Parameter previous: the places of the previous analysis (`analysis.frequentPlaces`):
     ///   each place keeps the ID of the one it mostly is (`carryOver`).
-    public func detect(in assets: [AssetSnapshot], previous: [FrequentPlace] = []) -> [FrequentPlace] {
+    /// - Parameter zones: the time zone each photo's place tells, where one is known (review
+    ///   P1-15): a place's days are those of the clocks where its photos were taken; photos
+    ///   without one are read in `calendar`'s zone.
+    public func detect(in assets: [AssetSnapshot], previous: [FrequentPlace] = [], zones: [AssetID: TimeZone] = [:]) -> [FrequentPlace] {
         let usable = assets.compactMap { asset -> (AssetSnapshot, GeoCoordinate, Date)? in
             guard let c = asset.usableLocation, let d = asset.creationDate else { return nil }
             return (asset, c, d)
@@ -59,7 +62,7 @@ public struct FrequentPlaceDetector: Sendable {
 
         let places = groups.compactMap { indices -> FrequentPlace? in
             let members = indices.map { usable[$0] }
-            let days = Set(members.map { calendar.startOfDay(for: $0.2) })
+            let days = Set(members.map { LocalTime.day(LocalTime.wallClock($0.2, in: zones[$0.0.id] ?? calendar.timeZone)) })
             guard days.count >= configuration.minDistinctDays,
                   let first = members.map(\.2).min(), let last = members.map(\.2).max(),
                   last.timeIntervalSince(first) >= configuration.minSpan,

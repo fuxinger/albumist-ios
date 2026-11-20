@@ -173,6 +173,36 @@ public struct ChangePlan: Hashable, Sendable, Codable, Identifiable {
     /// What really happened (planned counts for plans from older versions).
     public var appliedSummary: PlanSummary { PlanSummary(applied: self) }
 
+    /// Whether this plan still has an album or folder to delete in Photos (a step not finished
+    /// yet). iOS asks the user once more before it deletes one, and Albumist says so before
+    /// (review 18.11., P3-07): an undo that only takes photos out of albums deletes nothing.
+    public var deletesCollections: Bool {
+        steps.contains { step in
+            if case .deleteCollection = step.operation { !step.state.isFinished } else { false }
+        }
+    }
+
+    /// Albums and folders this plan made in Photos, or may have made: the ids Photos gave its
+    /// create steps (resolved, written down inside the change, or given back by a step that
+    /// succeeded). Never one found by its name after an interruption (`adoptedKeys`): undo
+    /// keeps those.
+    public var collectionsMade: Set<CollectionID> {
+        var made = Set<CollectionID>(record?.earlierMaybeCreated ?? [])
+        let adopted = record?.adoptedKeys ?? []
+        for step in steps {
+            switch step.operation {
+            case .createAlbum(let key, _, _), .createFolder(let key, _, _):
+                guard !adopted.contains(key) else { continue }
+                if let id = resolvedKeys[key] { made.insert(id) }
+                if let id = record?.maybeCreated[key] { made.insert(id) }
+                if case .succeeded(let created?, _) = step.state { made.insert(created) }
+            default:
+                continue
+            }
+        }
+        return made
+    }
+
     /// Media an add or remove step verifiably changed: the settled journal entry, and nothing
     /// while the outcome is unclear (interrupted, or the read-back failed), so an intent is
     /// never counted as done (audit 2, 6.2). Plans from versions without a journal fall back

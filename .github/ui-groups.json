@@ -5,39 +5,39 @@
     "device: pro (the image's iPhone Pro) or se (the small iPhone), see .github/toolchain.json.",
     "flow-other is 'everything the other groups do not run', so a new test class always runs somewhere and no test runs twice",
     "(test_ui_tests.py GroupTests checks every UI test against the groups). Keep its skip list in step with the others.",
-    "The order is the start order: with max-parallel 4 in ui.yml the last group (contrast, the shortest) is the one that waits.",
+    "The order is the start order: the longest in a full run (device-flows, device, flow-other) start first, accessibility (the longest of the short ones) fourth. max-parallel 5 in ui.yml holds back the last group (contrast) until one ends; while CI's macOS job still runs, GitHub's account queue (five Macs) holds one more of the started groups, whichever it picks. In a TestFlight run (max-parallel 3) the three long ones run first and the three short ones follow.",
     "A change here changes the test fingerprint of the group that changed (ui_groups.py), so that group runs again.",
     "budget_min: minutes for the group's test passes (ui_tests.py budget_check); over it the run shows a warning, never red. Report-only, so not in the fingerprint.",
-    "Measured in TestFlight run 44461253154 (19.11.): device 62, flow-full 12, flow-other 52, accessibility 20, contrast 15 min (the step Run UI tests)."
+    "Measured in TestFlight run 44461253154 (19.11.): device 62, flow-full 12, flow-other 52, accessibility 20, contrast 15 min (the step Run UI tests).",
+    "Rebalanced 20.11. (tempo plan): DeviceConditionUITests 05, 07, 08 left other flows and 11 left device conditions for the new group device-flows; quick runs measured before: other flows 55.8, device 43.3 min (job, median since 18.11.)."
   ],
   "groups": [
     {
-      "group": "device",
-      "budget_min": 70,
-      "title": "device conditions",
-      "_why": "The device-condition switches (App/Sortly/Platform/UITestSwitches.swift) on the Pro simulator. A test that resets the photo access asks the Mac to give it back (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07 and 08 (undo, interrupted plan) run with the other flows; test12 is the stress test and skips itself here (ui-stress.yml).",
+      "group": "device-flows",
+      "budget_min": 50,
+      "title": "undo, interrupted plans and large library",
+      "_why": "DeviceConditionUITests 05, 07, 08 (undo when iOS declines, interrupted plan, removed album; before 20.11. in other flows) and 11 (large library, about 25 min, skips itself in quick mode; before 20.11. in device conditions) on the Pro simulator. Split off so that no group runs much longer than the others (tempo plan 20.11., measured in UI run 44617747359: other flows 55.8 min job, device 43.3, these four tests 17 min quick and about 42 min full).",
       "device": "pro",
-      "only": "DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline",
+      "only": "DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo DeviceConditionUITests/test11_LargeLibrary",
       "skip": ""
     },
     {
-      "group": "flow-full",
-      "budget_min": 20,
-      "title": "full flow and video",
-      "_why": "Onboarding, demo library, plan and the sorting-show video.",
+      "group": "device",
+      "budget_min": 45,
+      "title": "device conditions",
+      "_why": "The device-condition switches (App/Sortly/Platform/UITestSwitches.swift) on the Pro simulator. A test that resets the photo access asks the Mac to give it back (UI_HOST_GRANT_PHOTOS, answered by ui_tests.py). DeviceConditionUITests 05, 07, 08 and 11 run in the group device-flows (tempo plan 20.11.: the longest group sets the run's time); test12 is the stress test and skips itself here (ui-stress.yml).",
       "device": "pro",
-      "only": "SortlyFlowUITests/test1_FullFlow",
-      "skip": "",
-      "video": true
+      "only": "DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline",
+      "skip": ""
     },
     {
       "group": "flow-other",
-      "budget_min": 60,
+      "budget_min": 45,
       "title": "other flows, purchase and search",
-      "_why": "Every other UI test except the accessibility tests (flow tests 1b-6, locked purchase, search, and DeviceConditionUITests 05, 07, 08). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
+      "_why": "Every other UI test except the accessibility tests (flow tests 1b-7, locked purchase, search). Each brings the app to an onboarded demo library by itself (UITestOnboarding).",
       "device": "pro",
       "only": "",
-      "skip": "SortlyFlowUITests/test1_FullFlow AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline"
+      "skip": "SortlyFlowUITests/test1_FullFlow AccessibilityUITests DeviceConditionUITests/test01_WarmAndHotPhoneWaitAndFinish DeviceConditionUITests/test02_LowBatteryAndLowPowerModeWording DeviceConditionUITests/test03_BackgroundExpiryAndRelaunchContinue DeviceConditionUITests/test04_UnreadableICloudOfflineComplete DeviceConditionUITests/test06_DiskFullDuringAnalysisAndPlan DeviceConditionUITests/test09_PhotoAccessDeniedLimitedAndRevoked DeviceConditionUITests/test10_EmptyLibrary DeviceConditionUITests/test11_LargeLibrary DeviceConditionUITests/test12_StressManyPhotosICloudOnlyOffline DeviceConditionUITests/test05_UndoWhenDeletionIsDeclinedOrIgnored DeviceConditionUITests/test07_InterruptedPlanContinueAndUndo DeviceConditionUITests/test08_RemoveManagedAlbumAndUndo"
     },
     {
       "group": "accessibility",
@@ -48,6 +48,16 @@
       "only": "AccessibilityUITests",
       "skip": "AccessibilityUITests/test5_IncreasedContrastAndReducedTransparency",
       "reduce_motion": true
+    },
+    {
+      "group": "flow-full",
+      "budget_min": 20,
+      "title": "full flow and video",
+      "_why": "Onboarding, demo library, plan and the sorting-show video.",
+      "device": "pro",
+      "only": "SortlyFlowUITests/test1_FullFlow",
+      "skip": "",
+      "video": true
     },
     {
       "group": "contrast",

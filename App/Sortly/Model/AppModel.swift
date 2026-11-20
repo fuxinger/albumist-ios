@@ -15,6 +15,13 @@ import UIKit
 final class AppModel {
     static let shared = AppModel()
 
+    init() {
+        // The copies made from the facts go when iOS warns that memory runs low (P4-06), and the
+        // previews loaded ahead for the analysis.
+        MemoryPressure.shared.register("library caches", owner: self) { $0.dropCaches() }
+        PreviewCache.registerForMemoryWarnings()
+    }
+
     enum Phase: Equatable {
         case loading
         case onboarding
@@ -205,7 +212,8 @@ final class AppModel {
     var analysisStartedAt: Date?
     /// "Gerade angesehen": the last photos of the image step, at most one change a second.
     var analysisRecent: [AssetID] = []
-    /// The Lock Screen task really runs (chip "Läuft auch im Hintergrund"), or iOS refused it.
+    /// The Lock Screen task really runs (the card's Details: "Läuft im Hintergrund weiter, dort
+    /// aber langsamer"), or iOS refused it (the card: "Läuft, solange Albumist offen ist").
     var analysisBackground: ContinuedAnalysis.Status = .idle
     /// Albumist is on screen (scene active): no gliding, no thumbnails, no announcements otherwise.
     var isOnScreen = true
@@ -259,7 +267,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; detectedHomePlaceCache = nil; resetSearchIndex() } }
+    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; homeCandidatesTask = nil; factsVersion &+= 1; detectedHomePlaceCache = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { libraryInputsChanged() } }
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
@@ -334,9 +342,7 @@ final class AppModel {
     var creationDates: [AssetID: Date] {
         access(keyPath: \.facts)
         if let datesCache { return datesCache }
-        let dates = MainThreadWatch.shared.section("creation dates") {
-            Dictionary(facts.compactMap { f in f.asset.creationDate.map { (f.id, $0) } }, uniquingKeysWith: { first, _ in first })
-        }
+        let dates = MainThreadWatch.shared.section("creation dates") { DerivedLibrary.creationDates(of: facts) }
         datesCache = dates
         return dates
     }
@@ -353,6 +359,32 @@ final class AppModel {
         let ranks = MainThreadWatch.shared.section("preview ranks") { PreviewRank.ranks(of: facts) }
         previewRanksCache = ranks
         return ranks
+    }
+
+    /// iOS warned that memory runs low (review 18.11., P4-06): every registered cache is emptied
+    /// (`MemoryPressure`), and the warning is written for the diagnostic report at once, so the
+    /// report has it even when iOS ends the app right after.
+    func memoryWarning() {
+        let emptied = MemoryPressure.shared.warning()
+        BackgroundRunLog.memoryWarning(MemoryPressure.line(at: Date(), analysisRunning: analysis.isRunning, onScreen: isOnScreen,
+                                                           availableMB: BackgroundRunLog.availableMemoryMB, emptied: emptied))
+    }
+
+    /// The copies made from the facts that are made again at their next use: the search index
+    /// (off the main thread, at the next search), the facts by id (at the next lookup, as after
+    /// every change of the facts), the capture dates and the atlas's country photos. Never the
+    /// facts, states, suggestions or decisions. A search index still being made is left to
+    /// finish: a search waits for it. Kept (second review of P4-06): the library tab's areas (a
+    /// few MB; the grid under the photo view would lose its place), the atlas (a few KB, 100 to
+    /// 250 ms to make again on the main thread) and the preview ranks (small, made off the main
+    /// thread only when the facts are refreshed).
+    private func dropCaches() {
+        let dropped = (searchIndexStore.dropCache(), factsIndex, datesCache, countryCache)
+        factsIndex = nil
+        datesCache = nil
+        countryCache = [:]
+        // Freed off the main thread: letting go of 100,000 entries takes a moment.
+        Task.detached(priority: .background) { withExtendedLifetime(dropped) {} }
     }
 
     /// Photos the user took out of a suggestion ("Aus Vorschlag entfernen").
@@ -524,7 +556,11 @@ final class AppModel {
         var mode: AnalysisPipeline.Mode
         var cause: AnalysisStartCause
     }
-    @ObservationIgnored private var homeCandidatesCache: [HomeCandidate]?
+    /// Observed: the screen that asked draws again when they are made (`homeCandidates`).
+    private var homeCandidatesCache: [HomeCandidate]?
+    @ObservationIgnored private var homeCandidatesTask: Task<Void, Never>?
+    /// Counts the values of the facts (`makeHomeCandidates`).
+    @ObservationIgnored private var factsVersion = 0
     @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
     var execution = ExecutionState()
     /// A constant: views observe its properties, not the model (see `ExecutionProgress`).
@@ -630,7 +666,8 @@ final class AppModel {
             // Where the analysis got to (UserDefaults, restored by a device backup) belongs to
             // this database only; the database folder is not backed up (review of 9f0bc40).
             let identity = try await store.identity()
-            let hasPhotos = try await store.assetCount() > 0
+            // Photos set aside under "Ausgewählte Fotos" count (review P1-07).
+            let hasPhotos = try await ResumedRun.databaseHasPhotos(store)
             databaseID = identity.id
             if let marker = AnalysisMarker.unfinished,
                !ResumedRun.markerApplies(markerDatabase: marker.database, database: identity.id, databaseHasPhotos: hasPhotos) {
@@ -1899,41 +1936,23 @@ final class AppModel {
             let recurringReport = try await pipeline.recurringPlaceReport()
             let home = try await pipeline.detectedHome()
             let homeNotice = try await pipeline.homeChangeNotice()
-            let newFacts = try await pipeline.currentFacts()
-            // The preview ranks of the whole library, worked out off the main thread with the
-            // facts (second review of the build 36 fix; `previewRanks` only falls back to it).
-            let newRanks = await Task.detached(priority: .userInitiated) { PreviewRank.ranks(of: newFacts) }.value
-            let inventory = try await store.loadInventory()
-            // Albumist's own albums overlap on purpose (a country holds its trips).
-            let own = Set(managedAlbums.map(\.albumID))
-            let merges = await Task.detached(priority: .utility) { AlbumOverlapAnalyzer().suggestions(in: inventory, excluding: own) }.value
+            // Everything that grows with the library is read once and worked out off the main
+            // actor, its passes side by side (`AnalysisPipeline.derivedLibrary`); here it is only
+            // assigned. Review P4-02: the image results and the album list were read twice, and
+            // the start waited for each pass after the other; review of d612bc0: with 50,000
+            // photos this was seconds of main-thread work at every call. The analysed photos
+            // still without their image labels are read there too, so the sets never pass
+            // through the main actor.
+            let settings = settings
+            let managed = managedAlbums, scope = analysisScope
+            // Before the library is read, as before: a read that fails there does not skip
+            // settling the purchases with the plans taken back.
             let plans = try await store.planHistory(limit: historyLimit + 1)
             let undone = try await store.undoneTargets()
             Purchases.shared.settleUndone(undone)
-            let contents = try await store.results(ContentAnalysis.self, kind: "content")
-            let stored = try await store.overrides()
-            let overrides = OverrideSet(stored)
-            var removed: [SortlyID: Set<AssetID>] = [:]
-            for o in stored where o.decision == .neverAdd {
-                if case .assetInSource(let asset, let source) = o.scope { removed[source, default: []].insert(asset) }
-            }
-            // Everything that grows with the library is worked out off the main actor; here
-            // it is only assigned (review of d612bc0: with 50,000 photos this was seconds of
-            // main-thread work at every call, a lead for the 7 s Pause tap of the stress run).
-            let settings = settings
-            let managed = managedAlbums, scope = analysisScope
-            let derived = try await Task.detached(priority: .userInitiated) {
-                // The analysed photos still without their image labels ("Themen" or "Dokumente"
-                // turned on since): counted apart on the overview, and the ring holds its count
-                // until each was looked at once (`RecountState`). Read here, so the sets never
-                // pass through the main actor; only while one of the two is on, and only those
-                // photos, none once they are caught up (second review of the labels fix, 11).
-                let labels = try await AnalysisPipeline.photosWaitingForLabels(in: store, settings: settings)
-                return DerivedLibraryStatus.derive(facts: newFacts, snapshot: snapshot, settings: settings, overrides: overrides,
-                                                   contents: contents, labelsMissing: labels.missing,
-                                                   labelsRetrying: labels.retrying, managed: managed,
-                                                   inventory: inventory, scope: scope)
-            }.value
+            // Albumist's own albums overlap on purpose (a country holds its trips).
+            let derived = try await pipeline.derivedLibrary(snapshot: snapshot, settings: settings, managed: managed, scope: scope,
+                                                            ownAlbums: Set(managed.map(\.albumID)))
             // A newer call started meanwhile, or the part of the library changed: this result
             // is older than what is or will be shown (review of 9f0bc40).
             guard derivedCalls.isNewest(call), scope == analysisScope else { return }
@@ -1943,16 +1962,22 @@ final class AppModel {
             detectedHome = home
             homeChangeNotice = homeNotice
             MainThreadWatch.shared.section("refresh: facts") {
-                facts = newFacts
-                previewRanksCache = newRanks
+                facts = derived.facts
+                // Made with the facts off the main thread (a new value of the facts empties
+                // them): the first draw of the overview and the atlas does not go over all
+                // photos on the main thread (review P4-09).
+                previewRanksCache = derived.previewRanks
+                datesCache = derived.creationDates
+                atlasCache[0] = derived.atlas
+                atlasYearsCache = derived.atlasYears
             }
-            self.inventory = inventory
-            mergeSuggestions = merges
+            self.inventory = derived.inventory
+            mergeSuggestions = derived.merges
             historyHasMore = plans.count > historyLimit
             history = plans.prefix(historyLimit).filter { $0.reverts == nil }
             undonePlans = undone
-            removedFromProposals = removed
-            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived, snapshot: snapshot, call: call) }
+            removedFromProposals = derived.removed
+            MainThreadWatch.shared.section("refresh: status") { assignDerived(derived.status, snapshot: snapshot, call: call) }
             tripChangeLedger.refreshShown(call)
         } catch {
             message = .failure(error.localizedDescription)
@@ -2375,13 +2400,29 @@ final class AppModel {
         return place
     }
 
-    /// The places of the library the user can choose from, most photo days first.
-    var homeCandidates: [HomeCandidate] {
+    /// The places of the library the user can choose from, most photo days first. `nil` while
+    /// they are made off the main thread: once for each value of the facts, only when a screen
+    /// asks for them ("Dein Zuhause"), never at a refresh (review P4-09: 322 ms on the main
+    /// thread at 50,000 photos when the screen opened; at every refresh it would cost battery).
+    var homeCandidates: [HomeCandidate]? {
         access(keyPath: \.facts)
         if let homeCandidatesCache { return homeCandidatesCache }
-        let candidates = HomeCandidates.make(facts: facts)
-        homeCandidatesCache = candidates
-        return candidates
+        makeHomeCandidates()
+        return nil
+    }
+
+    /// Starts making `homeCandidates` for the facts as they are, unless that is under way.
+    /// Observed `homeCandidatesCache` draws the screen again when they are there; facts that
+    /// change meanwhile drop the result (`factsVersion`) and the next ask starts anew.
+    private func makeHomeCandidates() {
+        guard homeCandidatesTask == nil else { return }
+        let facts = facts, version = factsVersion
+        homeCandidatesTask = Task { [weak self] in
+            let made = await Task.detached(priority: .userInitiated) { HomeCandidates.make(facts: facts) }.value
+            guard let self, version == self.factsVersion else { return }
+            self.homeCandidatesTask = nil
+            self.homeCandidatesCache = made
+        }
     }
 
     /// The places the user is often at ("Eltern", "Zweitwohnung", answers to "Bist du hier öfter?").
@@ -2610,9 +2651,29 @@ final class AppModel {
 
     /// Applies a reviewed plan. Only one plan runs at a time.
     func execute(_ plan: ChangePlan) async {
+        guard await changesHaveFullAccess() else { return }
         guard claimExecution() else { return }
         defer { releaseExecution() }
         await run(plan)
+    }
+
+    /// Undo, "Rest rückgängig machen" and finishing or taking back an interrupted plan change
+    /// Photos without a review, so they ask here for what the review asks with `FullAccessCard`
+    /// (second review of P1-07, S2): with "Ausgewählte Fotos" the album list shows only the
+    /// shared photos of each album, and an album the user also filled with photos that are not
+    /// shared would look like Albumist's alone and be deleted. Asked of Photos now, not from
+    /// `access` as last seen. UI tests keep their way, as in the review.
+    /// Also asked by the undo buttons before their dialog opens, so a confirmed dialog is never
+    /// answered with "not possible" (second look at S2), and by `execute`: the review goes by
+    /// `access` as last seen.
+    func changesHaveFullAccess() async -> Bool {
+        let now = await library.access()
+        // Written only when it changed: every write redraws the screens that read it.
+        if access != now { access = now }
+        guard now == .limited, !UITestSupport.isRunning else { return true }
+        message = AppMessage(title: String(localized: "Voller Zugriff nötig"),
+                             text: String(localized: "Dafür braucht Albumist Zugriff auf alle Fotos. Gerade sind nur ausgewählte Fotos freigegeben, und Albumist sieht nicht, was sonst in deinen Alben liegt. Ändern kannst du das unter Einstellungen › Apps › Albumist › Fotos › Voller Zugriff."))
+        return false
     }
 
     private func claimExecution() -> Bool {
@@ -2968,6 +3029,7 @@ final class AppModel {
     /// request never got to Photos); the user's own albums get nothing without a preview
     /// (`ChangeExecutor`, docs/DECISIONS.md).
     func resumeInterruptedPlan() async {
+        guard await changesHaveFullAccess() else { return }
         guard let store, let interrupted = interruptedPlan, claimExecution() else { return }
         defer { releaseExecution() }
         guard await reconcileManagedAlbums() != nil else { return }
@@ -3026,6 +3088,8 @@ final class AppModel {
             await keepInterruptedPlanAsIs()
             return
         }
+        // Keeping as it is changes nothing in Photos (above); taking back does.
+        guard await changesHaveFullAccess() else { return }
         guard let store, let interrupted = interruptedPlan, claimExecution() else { return }
         defer { releaseExecution() }
         // Without write access nothing could be taken back: nothing changes, the card stays.
@@ -3194,6 +3258,7 @@ final class AppModel {
     }
 
     func undo(_ executed: ChangePlan) async {
+        guard await changesHaveFullAccess() else { return }
         // Asked to take it back: never an App Store rating question for this plan (`ReviewPrompt`).
         ReviewPrompt.shared.undoStarted(executed.id)
         // Taking back the same plan twice would find nothing to do (or remove what the user
@@ -3209,15 +3274,14 @@ final class AppModel {
         // What the user changed by hand since counts first: a photo they took out and put back
         // is theirs now and stays.
         guard let current = await reconcileManagedAlbums() else { return }
-        var owned: [CollectionID: Set<AssetID>] = [:]
-        for state in managedAlbums { owned[state.albumID, default: []].formUnion(state.addedBySortly) }
+        // The album records of this reconciliation, one snapshot for the whole plan.
+        let albums = managedAlbums
         // Undos of this plan that did not get everything back (plugin review W1): an album one
         // of them brought back gets the photos still missing, never a second album.
         let earlier: [ChangePlan]
         do { earlier = try await store.reverts(of: executed.id) } catch { message = .failure(error.localizedDescription); return }
-        // An album another plan made, left with only this plan's photos, goes too (plugin review N5).
-        let created: Set<CollectionID> = Set(managedAlbums.filter { $0.createdBySortly }.map { $0.albumID })
-        let undoPlan = UndoPlanner().undoPlan(for: executed, current: current, owned: owned, createdByAlbumist: created, earlierUndos: earlier)
+        // The same planning as the question before it (`DeleteQuestion.undo`).
+        let undoPlan = UndoPlanner().undoPlan(for: executed, albums: albums, current: current, earlierUndos: earlier)
         // A plan that was cut off is settled first (plugin review K2).
         if PlanGate.refusal(for: undoPlan, interrupted: interruptedPlan) != nil {
             message = AppMessage(title: interruptedPlan?.reverts != nil
@@ -3235,6 +3299,36 @@ final class AppModel {
            let said = Self.remainderMessage(UndoRemainder(plan: executed, current: inventory), inHistory: false) {
             message = said
         }
+    }
+
+    // MARK: Announcing the iOS question (review 18.11., P3-07)
+    //
+    // iOS asks once more before Albumist deletes albums or folders ("delete 15 albums and 9
+    // folders"). The confirmation before says so (`DeleteQuestionNote`), but only when the
+    // change deletes one. `DeleteQuestion` works it out at the tap, the way the change itself
+    // plans: from the album list read from Photos (the app's list lacks albums an interrupted
+    // plan made), an album of the plan the list lacks looked up on its own, and the results of
+    // plans still waiting to be stored folded in. Within a few seconds; when Photos does not
+    // answer by then, it says that iOS may ask.
+
+    /// Whether taking back `executed` ("Rückgängig machen", "Rest rückgängig machen") deletes
+    /// an album or folder.
+    func undoDeletesCollections(_ executed: ChangePlan) async -> Bool {
+        let albums = managedAlbums
+        let waiting = (try? await store?.plansAwaitingFinalization()) ?? []
+        let earlier = (try? await store?.reverts(of: executed.id)) ?? []
+        return await DeleteQuestion(library: library).undo(executed, albums: albums, waiting: waiting, earlierUndos: earlier, cached: inventory)
+    }
+
+    /// Whether "Alles zurücknehmen" for the interrupted plan deletes an album or folder.
+    func interruptedUndoDeletesCollections() async -> Bool {
+        guard let interrupted = interruptedPlan, interrupted.reverts == nil else { return false }
+        return await DeleteQuestion(library: library).interruptedUndo(interrupted, cached: inventory)
+    }
+
+    /// Whether taking Albumist's changes back out of one album deletes the album.
+    func removalDeletesAlbum(_ state: ManagedAlbumState) -> Bool {
+        ManagedAlbumTracker().removalPlan(for: state, current: inventory).deletesCollections
     }
 
     /// What an undo left in Photos because Albumist cannot prove it was its own doing
@@ -3479,17 +3573,14 @@ final class AppModel {
 
     /// Search index over the current facts, album names and the names the user gave places,
     /// built once per change and off the main thread (a large library takes a moment); every
-    /// search then only combines prepared sets.
-    @ObservationIgnored private var searchIndexCache: SearchIndex?
-    @ObservationIgnored private var searchIndexTask: Task<SearchIndex, Never>?
-    @ObservationIgnored private var searchIndexGeneration = 0
+    /// search then only combines prepared sets. A change while an index is being built gives
+    /// every search the index of the new state, also one already waiting (review G4-05).
+    private let searchIndexStore = SearchIndexStore()
     /// The names of places the index was made with.
     @ObservationIgnored private var searchIndexPlaceNames: [NamedPlace] = []
 
     private func resetSearchIndex() {
-        searchIndexCache = nil
-        searchIndexTask = nil
-        searchIndexGeneration += 1
+        searchIndexStore.invalidate()
     }
 
     func searchIndex() async -> SearchIndex {
@@ -3502,21 +3593,11 @@ final class AppModel {
             resetSearchIndex()
             searchIndexPlaceNames = placeNames
         }
-        if let searchIndexCache { return searchIndexCache }
-        if let searchIndexTask { return await searchIndexTask.value }
-        let facts = facts, inventory = inventory, generation = searchIndexGeneration
-        let home = homeSettings
-        let task = Task.detached(priority: .userInitiated) {
-            SearchIndex(facts: facts, inventory: inventory, namedPlaces: placeNames, home: home)
+        // The inputs as they are when a build starts (again, after a change while waiting).
+        return await searchIndexStore.index {
+            let facts = facts, inventory = inventory, home = homeSettings, placeNames = searchIndexPlaceNames
+            return { SearchIndex(facts: facts, inventory: inventory, namedPlaces: placeNames, home: home) }
         }
-        searchIndexTask = task
-        let index = await task.value
-        // Facts or names that changed meanwhile start a new index on the next search.
-        if generation == searchIndexGeneration {
-            searchIndexCache = index
-            searchIndexTask = nil
-        }
-        return index
     }
 
     /// Keywords Apple Intelligence derived from the last sentence-style query (shown in the UI).

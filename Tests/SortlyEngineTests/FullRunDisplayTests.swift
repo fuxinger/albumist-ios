@@ -247,7 +247,8 @@ struct FullRunDisplayTests {
     }
 
     /// The workload is said exactly once per run, with the library's amounts; the bar's widths
-    /// come from it. "Gerade angesehen" never shows a screenshot (B4).
+    /// come from it. "Gerade angesehen" (in the analysis card's Details) never shows a
+    /// screenshot (B4).
     @Test func workloadIsSaidOnceWithTheLibrarysAmounts() async throws {
         let sim = try Sim(scale: 0.2)
         let run = await sim.run("workload")

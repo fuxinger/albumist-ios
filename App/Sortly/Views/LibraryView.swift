@@ -507,6 +507,7 @@ struct AddToAlbumSheet: View {
                         // "…": the preview opens first (design W1, Punkt 2).
                         Button("Anlegen …") { Task { await prepare(target: nil) } }
                             .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .accessibilityIdentifier("addToAlbum.create")
                     }
                 } header: {
                     Text("Neues Album")

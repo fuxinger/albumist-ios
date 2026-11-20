@@ -739,7 +739,7 @@ final class DeviceConditionUITests: XCTestCase {
         if !field.waitForExistence(timeout: 5) { field = app.textFields.firstMatch }
         guard tap(field, "name for \(title)") else { return false }
         field.typeText(title)
-        guard tap(app.buttons["Anlegen"], "create \(title)") else { return false }
+        guard tap(UITestScreens.Unsorted.createAlbum(app), "create \(title)") else { return false }
         let plan = app.navigationBars["Vorschau"].waitForExistence(timeout: 20)
         print(plan ? "UI_STEP_OK plan for \(title)" : "UI_STEP_MISSING plan for \(title)")
         XCTAssertTrue(plan, "Adding photos to a new album did not open its plan")

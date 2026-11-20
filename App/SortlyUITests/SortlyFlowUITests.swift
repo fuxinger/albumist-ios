@@ -1794,12 +1794,20 @@ final class SortlyFlowUITests: XCTestCase {
         if made, openManualPlan("Testalbum Rundgang"),
            tap(app.buttons["plan.apply"], "apply the sweep's album", timeout: 30) {
             let done = button("Rückgängig machen").waitForExistence(timeout: 900)
+            let doneAt = Date()
             print(done ? "UI_STEP_OK album for the sweep" : "UI_STEP_MISSING album for the sweep")
             XCTAssertTrue(done, "The sweep's album was not created")
             // The plan ran from the "Zu Album hinzufügen" sheet: start the app again, as
-            // applyRecommended does, so no sheet is left over the tab bar.
+            // applyRecommended does, so no sheet is left over the tab bar; with its pacing (the
+            // app stores the finished plan after the result shows, no element says when), so the
+            // restart does not cut the plan off.
+            UITestWait.atLeast(2, since: doneAt)
             launch()
             UITestWait.appears(app.tabBars.firstMatch, "tab bar after the sweep's album", timeout: 60)
+            // Evidence that it was stored: no "wurde unterbrochen" card for it after the restart.
+            let cut = anything("wurde unterbrochen").waitForExistence(timeout: 5)
+            print("UI_FACT sweep album plan interrupted by the restart \(cut)")
+            XCTAssertFalse(cut, "The sweep's album plan shows as interrupted after the restart")
         }
         tap(tabButton("Übersicht"), "overview before the sweep")
         _ = app.navigationBars["Übersicht"].waitForExistence(timeout: 10)

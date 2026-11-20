@@ -865,7 +865,7 @@ class MacQueueTests(unittest.TestCase):
                 # The stress pass before the merge runs beside the branch's full UI pass (the
                 # owner's decision of 20.11.2026, 17:20): a group per branch, not the Mac queue.
                 self.assertEqual(gh_expr(group, dispatch_context("refs/heads/feature")),
-                                 "stress-branch-refs/heads/feature" if name == "ui-stress" else "mac-queue")
+                                 "stress-branch" if name == "ui-stress" else "mac-queue")
 
     def test_no_pull_request_joins_the_queue_of_main(self):
         group = concurrency_group(self.ui)

@@ -508,8 +508,8 @@ ist. Ohne passendes Grün läuft er im TestFlight-Lauf wie bisher, nie ungeprüf
 
 - **Starten**: auf dem Zweig zuerst Actions > UI stress > Run workflow (Vorgaben 10000/15;
   `gh workflow run ui-stress.yml --ref <zweig>`), dann den vollen UI-Lauf. Der Härtetest hat
-  dort eine eigene Gruppe `stress-branch-<zweig>`, wartet also nicht hinter dem UI-Lauf in
-  `mac-queue`.
+  eine eigene Gruppe `stress-branch` (eine für alle Zweige), wartet also nicht hinter dem
+  UI-Lauf in `mac-queue`; höchstens ein Zweig-Härtetest belegt einen Mac zugleich.
 - **Schlüssel**: wie bei den UI-Gruppen. Der Job heißt `UI stress 10000 photos [stress-10000-15
   app … tests …]`: App-Fingerabdruck und Test-Fingerabdruck des Härtetests (der volle
   Fingerabdruck der Gruppe, die `test12` nennt, also Testdatei, Hilfsdateien und Harness samt

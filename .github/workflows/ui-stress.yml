@@ -108,9 +108,11 @@ env:
 #     so that no pull request run replaces it while it waits (19.11.2026: a rebased Dependabot
 #     pull request did). A newer run on main still replaces a waiting one.
 #   - the pass before the merge, by hand on a pull request's branch (the owner's decision of
-#     20.11.2026, 17:20): "stress-branch-<branch>", so it runs beside the full UI pass of that
-#     branch (in "mac-queue") instead of waiting behind it; a newer pass on the same branch
-#     replaces a waiting one. Start it first, it is the longest Mac job (docs/TESTFLIGHT.md).
+#     20.11.2026, 17:20): one group "stress-branch" for every branch, so it runs beside the full
+#     UI pass of that branch (in "mac-queue") instead of waiting behind it, and at most one
+#     branch pass holds a Mac at a time (the rule of 17.11., one Mac-heavy strand); a newer
+#     branch pass replaces a waiting one. Start it first, it is the longest Mac job
+#     (docs/TESTFLIGHT.md).
 #
 # Reuse (the owner's decision of 20.11.2026, 17:20): the first job, "Stress plan", names the
 # pass's evidence key (app fingerprint, stress test fingerprint, size; ui_evidence.py
@@ -125,7 +127,7 @@ concurrency:
     ${{ (inputs.release || github.workflow == 'TestFlight') && format('testflight-stress-{0}', github.run_id)
     || (github.event_name == 'schedule' && 'stress-weekly')
     || (github.ref == 'refs/heads/main' && 'mac-queue-main')
-    || (github.event_name == 'workflow_dispatch' && format('stress-branch-{0}', github.ref))
+    || (github.event_name == 'workflow_dispatch' && 'stress-branch')
     || 'mac-queue' }}
   cancel-in-progress: false
 

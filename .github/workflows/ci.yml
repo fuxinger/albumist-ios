@@ -98,12 +98,15 @@ jobs:
     name: Core tests (Linux)
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
-    # Hang limits (20.11.2026: the core tests hung 30 min, until this job's old limit of 30): about
-    # twice the 95th percentile of 158 green jobs since 16.11. (job 9.0 min, "Build and test" 4.7,
-    # load test 3.2). swift_test_watch.py stops a step's tests before its timeout-minutes and
-    # names the tests still running (TEST_HANG), so the log says which test hung; a hang is red
-    # like any failing test, never re-run.
-    timeout-minutes: 25
+    # Hang limits (20.11.2026: the core tests hung 30 min, until this job's limit of 30), from the
+    # green jobs since 16.11. (fourth review: at least the longest seen + 50 % and twice the 95th
+    # percentile): this job (97 in CI) p95 9.7, longest 18.9 min (11.6 of it apt during the mirror
+    # outage), so 30 for the container, apt's retries and both test steps; "Build and test" (158
+    # jobs) p95 4.7, longest 5.8: watchdog 10, step 12; load test p95 3.2, longest 3.3: watchdog
+    # 7, step 9. swift_test_watch.py stops a step's tests before its timeout-minutes and names the
+    # tests still running (TEST_HANG), so the log says which test hung; a hang is red like any
+    # failing test, never re-run.
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
@@ -143,7 +146,9 @@ jobs:
     # before the merge builds and tests the app (ui.yml, "concurrency").
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && needs.lint.result == 'success' && needs.core-linux.result == 'success' && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: xcode-27
-    timeout-minutes: 45
+    # 64 green jobs since 16.11.: p95 28.6, longest 32.4 min; the longest + 50 % is 49 (fourth
+    # review of the tempo plan; was 45, entry "Zeitgrenze gelockert" in docs/IMPROVEMENTS.md).
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Select pinned Xcode
@@ -213,8 +218,9 @@ jobs:
       - name: Core tests (macOS)
         # Also after a failed "Build UI tests" (its error is in the log above; the app's own
         # tests still say what they find). Not after a failed app build or an earlier step.
-        # Hang limit: about twice the 95th percentile of 64 green jobs (6.3 min); the watchdog
-        # names the tests still running (swift_test_watch.py, as in the Linux job).
+        # Hang limit from 64 green jobs: p95 6.3, longest 8.3 min, so watchdog 13 (twice the p95,
+        # above the longest + 50 %), step 15; the watchdog names the tests still running
+        # (swift_test_watch.py, as in the Linux job).
         id: core
         if: ${{ !cancelled() && (steps.appbuild.outcome == 'success' || (success() && steps.sim.outputs.udid == '')) }}
         timeout-minutes: 15

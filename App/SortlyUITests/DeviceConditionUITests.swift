@@ -635,10 +635,13 @@ final class DeviceConditionUITests: XCTestCase {
             print("UI_FACT notice: \(text)")
             texts.append(text)
             let ok = alert.buttons["OK"]
+            let tapped = Date()
             if ok.exists { ok.tap() } else if alert.buttons.firstMatch.exists { alert.buttons.firstMatch.tap() }
             // That notice has gone (a next one shows after it; the loop looks for it). Not
-            // asserted: a notice still there is read and closed once more.
+            // asserted: a notice still there is read and closed once more. At least the old
+            // second, so a notice that follows later still falls in the loop's look (review).
             _ = UITestWait.holds(timeout: 3) { !alert.exists }
+            UITestWait.atLeast(1, since: tapped)
         }
         return texts
     }

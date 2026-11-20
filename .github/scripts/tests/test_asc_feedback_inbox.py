@@ -12,6 +12,7 @@ import tarfile
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -187,7 +188,8 @@ class InboxTests(unittest.TestCase):
             found += [os.path.relpath(os.path.join(base, f), self.out) for f in files]
         self.assertFalse([f for f in found if "escape" in f or "abs.txt" in f or "up.png" in f])
         run = os.listdir(os.path.join(self.out, "runs"))[0]
-        self.assertEqual(sorted(os.listdir(os.path.join(self.out, "runs", run))), ["report.md", "submissions.json"])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.out, "runs", run))),
+                         ["imported-at", "report.md", "submissions.json"])
         self.assertEqual(sorted(os.listdir(self.out)), ["INBOX.md", "runs"])     # no decrypted tar left
 
     def test_wrong_key_bad_zip_and_a_target_inside_the_repository_fail(self):
@@ -196,7 +198,10 @@ class InboxTests(unittest.TestCase):
         subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", other],
                        check=True, capture_output=True)
         self.assertEqual(self.run_tool("--key", other, "--out", self.out, artifact), 1)
-        self.assertIn("openssl cms -decrypt failed", self.stderr)
+        # Usually openssl fails; about once in 256 its padding-attack protection decrypts to random
+        # bytes instead, which are no tar. Either way: exit 1 and "wrong key".
+        self.assertIn("wrong key", self.stderr.lower())
+        self.assertEqual(os.listdir(os.path.join(self.out, "runs")), [])
         self.assertEqual([n for n in os.listdir(self.out) if n.startswith(".decrypt-")], [])
         empty = os.path.join(self.base, "empty.zip")
         with zipfile.ZipFile(empty, "w") as handle:
@@ -209,11 +214,65 @@ class InboxTests(unittest.TestCase):
         self.assertIn("outside the repository", self.stderr)
         self.assertFalse(os.path.exists(os.path.join(ROOT, "feedback-inbox")))
 
+    def test_random_bytes_from_a_wrong_key_are_a_clear_error(self):
+        artifact = self.sealed([row("s1")], "2026-11-18 06:00 UTC")
+
+        def garbage(blob, key, work, openssl):
+            path = os.path.join(work, "plain.tar")
+            with open(path, "wb") as handle:
+                handle.write(os.urandom(4096))
+            return path
+        with mock.patch.object(feedback_inbox, "decrypt", garbage):
+            self.assertEqual(self.run_tool("--key", self.key, "--out", self.out, artifact), 1)
+        self.assertIn("no tar: wrong key", self.stderr)
+        self.assertEqual(os.listdir(os.path.join(self.out, "runs")), [])
+        self.assertEqual([n for n in os.listdir(self.out) if n.startswith(".decrypt-")], [])
+
     def test_odd_rows_are_skipped_not_rendered(self):
         artifact = self.sealed([row("ok"), row("bad\nid"), "not a dict", row(""), row("x" * 200)],
                                "2026-11-18 06:00 UTC")
         self.assertEqual(self.run_tool("--key", self.key, "--out", self.out, artifact), 0, self.stderr)
         self.assertIn("invalid=4 submissions=1", self.stdout)
+
+
+    def test_the_run_imported_last_wins_not_the_files_own_date(self):
+        # Review S2: "generated" comes from the file; a forged far-future date must not win.
+        forged = self.sealed([row("a", "aus der Zukunft")], "9999-12-31 23:59 UTC")
+        later = self.sealed([row("a", "zuletzt importiert")], "2000-01-01 00:00 UTC")
+        with mock.patch("feedback_inbox.time.time", return_value=1_700_000_000):
+            self.assertEqual(self.run_tool("--key", self.key, "--out", self.out, forged), 0, self.stderr)
+        with mock.patch("feedback_inbox.time.time", return_value=1_700_000_100):
+            self.assertEqual(self.run_tool("--key", self.key, "--out", self.out, later), 0, self.stderr)
+        text = self.inbox()
+        self.assertIn("zuletzt importiert", text)
+        self.assertNotIn("aus der Zukunft", text)
+        # An import time in the future (a planted or edited file) counts as the oldest.
+        runs = os.path.join(self.out, "runs")
+        newest = max(os.listdir(runs), key=lambda n: feedback_inbox.imported_at(os.path.join(runs, n), 2 * 10 ** 15))
+        with open(os.path.join(runs, newest, "imported-at"), "w", encoding="ascii") as handle:
+            handle.write("99999999999999999\n")
+        self.assertEqual(feedback_inbox.imported_at(os.path.join(runs, newest), 1_700_000_200 * 10 ** 6), 0)
+        self.assertEqual(self.run_tool("--out", self.out), 0)
+        self.assertIn("aus der Zukunft", self.inbox())
+
+    def test_a_run_that_cannot_be_read_is_counted_invalid_and_the_rest_still_shows(self):
+        good = self.sealed([row("ok", "lesbar")], "2026-11-18 06:00 UTC")
+        self.assertEqual(self.run_tool("--key", self.key, "--out", self.out, good), 0, self.stderr)
+        bad = {"0000000000000001": b"[" * 200_000,                                  # RecursionError
+               "0000000000000002": b'{"format": 1, "submissions": [\xff\xfe]}',    # not UTF-8
+               "0000000000000003": b'{"format": 1, "submissions": {"a": 1}}',
+               "0000000000000004": b'{"format": 1, "submissions": [{"id": "x", "comment": "\\ud800 \\udfff"}]}'}
+        for name, data in bad.items():
+            os.makedirs(os.path.join(self.out, "runs", name))
+            with open(os.path.join(self.out, "runs", name, "submissions.json"), "wb") as handle:
+                handle.write(data)
+        self.assertEqual(self.run_tool("--out", self.out), 0, self.stderr)
+        self.assertIn("invalid=3 submissions=2", self.stdout)
+        text = self.inbox()
+        self.assertIn("lesbar", text)
+        self.assertIn("### NEU · Feedback x", text)                     # lone surrogates replaced, no crash
+        self.assertIn("Diese ganze Datei ist nicht vertrauenswürdig", text)
+        text.encode("utf-8")
 
 
 if __name__ == "__main__":

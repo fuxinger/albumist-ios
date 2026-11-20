@@ -81,8 +81,7 @@ final class DeviceConditionUITests: XCTestCase {
         let bar = app.navigationBars.firstMatch
         var swipes = 0
         while swipes < 8 {
-            let underBar = bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY
-            if underBar { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
+            if UITestWait.underNavigationBar(element, bar) { app.swipeDown() } else if !element.isHittable { app.swipeUp() } else { break }
             swipes += 1
         }
         UITestOnboarding.clock("tap \(step)")

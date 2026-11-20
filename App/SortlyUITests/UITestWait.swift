@@ -55,6 +55,19 @@ enum UITestWait {
         return met
     }
 
+    /// `element` lies above the bottom of the navigation bar `bar` and not inside it: content
+    /// that counts as hittable for XCUITest, but a tap there lands on the bar. As
+    /// `bar.exists && !bar.frame.contains(element.frame) && element.frame.midY < bar.frame.maxY`,
+    /// read from one snapshot of each instead of five queries (every property of an
+    /// `XCUIElement` asks the app again; the taps of the flow and device tests ask this before
+    /// each of their taps). The element's frame is read as before when its snapshot fails, so an
+    /// element that is gone still fails the test there.
+    static func underNavigationBar(_ element: XCUIElement, _ bar: XCUIElement) -> Bool {
+        guard let barFrame = (try? bar.snapshot())?.frame else { return false }
+        let frame = (try? element.snapshot())?.frame ?? element.frame
+        return !barFrame.contains(frame) && frame.midY < barFrame.maxY
+    }
+
     /// What `screenAtRest` found.
     enum ScreenRest {
         /// Two snapshots in a row put every element in the same place; the last of them.

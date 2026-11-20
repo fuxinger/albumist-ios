@@ -232,7 +232,8 @@ struct ProposalListView: View {
 private struct ProposalListCard: View {
     @Environment(AppModel.self) private var model
     var proposal: AlbumProposal
-    /// Made from this card a moment ago: "Angelegt" while its banner shows.
+    /// Made from this card a moment ago: "✓ Angelegt" in place of its action while its banner
+    /// shows (draft E6 b; no badge on the photo besides).
     var made: Bool
     var selecting: Bool
     var selectable: Bool
@@ -243,9 +244,11 @@ private struct ProposalListCard: View {
 
     var body: some View {
         let card = model.proposalCard(for: proposal)
+        // The card's body opens the suggestion, or ticks it while the list selects (`onOpen`:
+        // its own button behind cover and texts); its one action stays a real button.
         PhotoCard(coverIDs: model.proposalCoverIDs(for: proposal), title: Text(verbatim: card.title),
-                  subtitle: card.styledSubtitle, badge: made ? .created : nil, hidesPreview: card.hidesPreview,
-                  placeholderSymbol: proposal.placeholderSymbol) {
+                  subtitle: card.styledSubtitle, hidesPreview: card.hidesPreview,
+                  placeholderSymbol: proposal.placeholderSymbol, onOpen: { tap() }) {
             actionButton(card)
                 // While the list selects, a tap ticks the card: the button keeps its place, so
                 // nothing moves, but cannot be seen or tapped.
@@ -253,25 +256,31 @@ private struct ProposalListCard: View {
                 .allowsHitTesting(!selecting)
                 .accessibilityHidden(selecting)
         }
+        // Names the card's container (UI tests: the card, its body and its one button).
+        .accessibilityIdentifier("suggestion.row")
         .overlay(alignment: .topTrailing) {
             if selectable {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.3))
-                    .padding(Theme.Spacing.s)
-                    .accessibilityHidden(true)
+                tick
             }
         }
         // What cannot be ticked steps back while the list selects.
         .opacity(selecting && !selectable ? 0.45 : 1)
-        // A tap on the card opens the suggestion, or ticks it while the list selects. Until
-        // `PhotoCard` opens from its own body (H2), the same as VoiceOver's default action.
-        .onTapGesture { tap() }
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAddTraits(selecting && isSelected ? .isSelected : [])
-        .accessibilityAction { tap() }
-        .accessibilityIdentifier("suggestion.row")
+    }
+
+    /// The tick of a card the list can select, as in Photos. A touch goes through to the card's
+    /// body, which ticks; for VoiceOver it is a button of its own that says whether the card is
+    /// ticked (the body only says what the card is).
+    private var tick: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.title2)
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.white, isSelected ? Theme.accent : Color.black.opacity(0.3))
+            .padding(Theme.Spacing.s)
+            .allowsHitTesting(false)
+            .accessibilityLabel(Text("Auswählen"))
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { toggle() }
+            .accessibilityIdentifier("suggestion.tick")
     }
 
     private func tap() {

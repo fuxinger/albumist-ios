@@ -68,8 +68,21 @@ enum UITestOnboarding {
     static func completeIfNeeded(_ app: XCUIApplication, in test: String) -> Bool {
         let welcome = app.buttons["onboarding.letsGo"]
         let demo = app.buttons["Beispiel-Mediathek anlegen"]
-        guard welcome.waitForExistence(timeout: 10) else {
-            guard demo.waitForExistence(timeout: 5) else {
+        // The first screen: the welcome screen, the start page's tab bar or "Kein Zugriff". The
+        // app picks it once when it has loaded (`AppModel.phase`), so a tab bar is never followed
+        // by the welcome screen. Waiting 10 s for the welcome screen alone ran out in every test
+        // that found the app onboarded: in CI test 1 runs in its own group, so flow tests 3-7
+        // and the locked test came here each time (UI run 44630953220).
+        _ = UITestWait.holds(timeout: 10) {
+            welcome.exists || app.tabBars.firstMatch.exists || app.buttons["access.continue"].exists
+        }
+        guard welcome.exists else {
+            // The demo card is drawn in the same body as the start page's title (OverviewView, a
+            // plain VStack; DemoLibrary.isDone is read at start), so once "Vorschläge" is there,
+            // the card is there too or does not come. Up to the old 5 s when it is not.
+            let startPage = app.navigationBars["Vorschläge"]
+            _ = UITestWait.holds(timeout: 5) { demo.exists || startPage.exists }
+            guard demo.exists else {
                 finishInterruptedAnalysis(app, in: test)
                 return false
             }

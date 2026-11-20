@@ -252,7 +252,7 @@ final class AppModel {
     /// background): its time share moves the value from the floor (`ResumedRun.spend`).
     @ObservationIgnored private var resumedActive = 0.0
     /// When the overview last looked for the early suggestions without finding them.
-    /// `refreshDerived` calls that overlap: only the newest assigns its result.
+    /// `refreshDerived` calls that overlap: a call assigns its result only over an older one.
     @ObservationIgnored private var derivedCalls = LatestCall()
     /// The open database's stamp (`SortlyStore.identity`), written into the analysis marker.
     @ObservationIgnored private var databaseID: String?
@@ -267,7 +267,7 @@ final class AppModel {
     var snapshot: ProposalSnapshot?
     var decisions: [SortlyID: ProposalDecision] = [:]
     var userTitles: [SortlyID: String] = [:]
-    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = [:]; atlasYearsCache = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; homeCandidatesTask = nil; factsVersion &+= 1; detectedHomePlaceCache = nil; resetSearchIndex() } }
+    var facts: [AssetFacts] = [] { didSet { libraryInputsChanged(); atlasCache = nil; atlasYearsCache = nil; yearAtlasesCache = nil; yearAtlasesTask?.cancel(); yearAtlasesTask = nil; countryCache = [:]; datesCache = nil; previewRanksCache = nil; factsIndex = nil; homeCandidatesCache = nil; homeCandidatesTask = nil; factsVersion &+= 1; detectedHomePlaceCache = nil; detectedHomeNameTask?.cancel(); detectedHomeNameTask = nil; resetSearchIndex() } }
     var states: [AssetID: AssetOrganizationState] = [:] { didSet { libraryInputsChanged() } }
     /// The photos the user ignored, and the state of each once it is no longer ignored, from
     /// the last count with the taps since laid over it (`IgnoreChange`): "Ignorieren" and
@@ -301,41 +301,86 @@ final class AppModel {
     @ObservationIgnored private var libraryBucketsMadeFor = -1
     @ObservationIgnored private var libraryBucketsTask: Task<Void, Never>?
     /// The atlas is shown on the overview, which redraws often during an analysis.
-    @ObservationIgnored private var atlasCache: [Int: TravelAtlas] = [:]
+    @ObservationIgnored private var atlasCache: TravelAtlas?
     @ObservationIgnored private var atlasYearsCache: [Int]?
+    /// The atlas of each year, made when the atlas's year picker first asks (`travelAtlas(year:)`).
+    /// Observed: the atlas draws again when they are made.
+    private var yearAtlasesCache: [Int: TravelAtlas]?
+    @ObservationIgnored private var yearAtlasesTask: Task<Void, Never>?
 
-    /// Travel atlas for all years (`nil`) or one calendar year; computed once per facts change.
-    func travelAtlas(year: Int? = nil) -> TravelAtlas {
+    /// Travel atlas of all years (the overview's teaser, the atlas). Made off the main thread with
+    /// the facts and handed over with them by `refreshDerived`, the only place the facts are
+    /// assigned (review P4-09); before the first refresh there are no facts at all. Kept through
+    /// memory warnings (a few KB).
+    func travelAtlas() -> TravelAtlas {
         // Cache hits must still register the dependency, or views would never see new facts.
         access(keyPath: \.facts)
-        if let cached = atlasCache[year ?? 0] { return cached }
-        let atlas = MainThreadWatch.shared.section("travel atlas") { TravelAtlas.compute(facts: facts, year: year) }
-        atlasCache[year ?? 0] = atlas
-        return atlas
+        return atlasCache ?? TravelAtlas()
     }
 
+    /// Travel atlas of one calendar year (the atlas's year picker). `nil` while the atlas of
+    /// every year is made off the main thread, in one pass (`DerivedLibrary.yearAtlases`): once
+    /// for each value of the facts, only when the year picker asks, never at a refresh (second
+    /// review of P4-09, SHOULD-1: 240 ms at 50,000 photos, 671 ms at 100,000, at every refresh
+    /// for a picker seldom used; before that review P4-09, each year chosen went over all photos
+    /// on the main thread). A year that is not there has no photos, so its atlas is empty, as
+    /// `TravelAtlas.compute` would make it. Kept through memory warnings (a few KB).
+    func travelAtlas(year: Int) -> TravelAtlas? {
+        access(keyPath: \.facts)
+        if let yearAtlasesCache { return yearAtlasesCache[year] ?? DerivedLibrary.emptyYearAtlas(year) }
+        makeYearAtlases()
+        return nil
+    }
+
+    /// A screen asked for something made only on demand from the facts (the places of "Dein
+    /// Zuhause", the atlas of each year, the name of the detected home), and it is made or being
+    /// made: a refresh whose facts are unchanged keeps it, with no spinner and no lost VoiceOver
+    /// focus (delta review, N2, `refreshDerived`).
+    private var keepsOnDemand: Bool {
+        homeCandidatesCache != nil || homeCandidatesTask != nil || yearAtlasesCache != nil || yearAtlasesTask != nil
+            || detectedHomePlaceCache != nil || detectedHomeNameTask != nil
+    }
+
+    /// Starts making the atlas of each year for the facts as they are, unless that is under way
+    /// (`makeHomeCandidates`): observed `yearAtlasesCache` draws the atlas again when they are
+    /// there; facts that change meanwhile cancel the making (it stops early and gives nothing,
+    /// delta review N3) and drop any result (`factsVersion`).
+    private func makeYearAtlases() {
+        guard yearAtlasesTask == nil else { return }
+        let facts = facts, version = factsVersion, allYears = atlasCache
+        yearAtlasesTask = Task { [weak self] in
+            let making = Task.detached(priority: .userInitiated) {
+                DerivedLibrary.yearAtlases(of: facts, allYears: allYears ?? TravelAtlas.compute(facts: facts, year: nil))
+            }
+            let made = await withTaskCancellationHandler { await making.value } onCancel: { making.cancel() }
+            guard let made, !Task.isCancelled, let self, version == self.factsVersion else { return }
+            self.yearAtlasesTask = nil
+            self.yearAtlasesCache = made
+        }
+    }
+
+    /// The years the atlas offers, handed over with the facts like the atlas.
     var atlasYears: [Int] {
         access(keyPath: \.facts)
-        if let cached = atlasYearsCache { return cached }
-        let years = MainThreadWatch.shared.section("atlas years") { TravelAtlas.years(facts: facts) }
-        atlasYearsCache = years
-        return years
+        return atlasYearsCache ?? []
     }
 
     @ObservationIgnored private var countryCache: [String: CountryPhotos] = [:]
     @ObservationIgnored private var datesCache: [AssetID: Date]?
     @ObservationIgnored private var previewRanksCache: [AssetID: PreviewRank]?
-    @ObservationIgnored private var factsIndex: [AssetID: AssetFacts]?
+    @ObservationIgnored private var factsIndex: FactsByID?
 
-    /// Facts by photo id (search hits, photo view).
-    var factsByID: [AssetID: AssetFacts] {
+    /// Facts by photo id (search hits, photo view): each id's place in the facts, made off the
+    /// main thread with them and handed over by `refreshDerived`, the only place the facts are
+    /// assigned (review P4-09: a dictionary of all facts was made here, on the main thread, at
+    /// the first lookup after every refresh: 97 ms at 50,000 photos, 267 ms at 100,000). No second
+    /// copy of the facts (review P4-06), so it is kept through memory warnings. Before the first
+    /// refresh there are no facts.
+    var factsByID: FactsByID {
         access(keyPath: \.facts)
-        if let factsIndex { return factsIndex }
-        let index = MainThreadWatch.shared.section("facts by id") {
-            Dictionary(facts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        }
-        factsIndex = index
-        return index
+        // Handed over with these facts, never with others (second review of P4-09, NIT-5).
+        assert(factsIndex.map { DerivedLibrary.sameFacts($0.facts, facts) } ?? facts.isEmpty, "factsIndex is not made from the facts")
+        return factsIndex ?? FactsByID()
     }
 
     /// Capture date of every photo, for time-ordered previews.
@@ -371,16 +416,17 @@ final class AppModel {
     }
 
     /// The copies made from the facts that are made again at their next use: the search index
-    /// (off the main thread, at the next search), the facts by id (at the next lookup, as after
-    /// every change of the facts), the capture dates and the atlas's country photos. Never the
-    /// facts, states, suggestions or decisions. A search index still being made is left to
-    /// finish: a search waits for it. Kept (second review of P4-06): the library tab's areas (a
-    /// few MB; the grid under the photo view would lose its place), the atlas (a few KB, 100 to
-    /// 250 ms to make again on the main thread) and the preview ranks (small, made off the main
-    /// thread only when the facts are refreshed).
+    /// (off the main thread, at the next search), the capture dates and the atlas's country
+    /// photos. Never the facts, states, suggestions or decisions. A search index still being
+    /// made is left to finish: a search waits for it. Kept (second review of P4-06): the library
+    /// tab's areas (a few MB; the grid under the photo view would lose its place), the atlas (a
+    /// few KB, made off the main thread only when the facts are refreshed; each year's only
+    /// when the year picker asks), the preview ranks
+    /// (small, the same) and the facts by id (an index per photo, a few MB at 100,000 photos, no
+    /// copy of the facts any more; made off the main thread only when the facts are refreshed,
+    /// review P4-09).
     private func dropCaches() {
-        let dropped = (searchIndexStore.dropCache(), factsIndex, datesCache, countryCache)
-        factsIndex = nil
+        let dropped = (searchIndexStore.dropCache(), datesCache, countryCache)
         datesCache = nil
         countryCache = [:]
         // Freed off the main thread: letting go of 100,000 entries takes a moment.
@@ -561,7 +607,10 @@ final class AppModel {
     @ObservationIgnored private var homeCandidatesTask: Task<Void, Never>?
     /// Counts the values of the facts (`makeHomeCandidates`).
     @ObservationIgnored private var factsVersion = 0
-    @ObservationIgnored private var detectedHomePlaceCache: HomePlace?
+    /// The detected home with its name, made when a screen asks (`detectedHomePlace`). Observed:
+    /// the screen that asked draws again when it is named.
+    private var detectedHomePlaceCache: HomePlace?
+    @ObservationIgnored private var detectedHomeNameTask: Task<Void, Never>?
     var execution = ExecutionState()
     /// A constant: views observe its properties, not the model (see `ExecutionProgress`).
     let executionProgress = ExecutionProgress()
@@ -1912,7 +1961,7 @@ final class AppModel {
 
     /// `afterFailure`: the one more refresh after a failed one (`TripChangeLedger.refreshFailed`).
     func refreshDerived(afterFailure: Bool = false) async {
-        guard let store, let pipeline else {
+        guard store != nil, let pipeline else {
             // A refresh asked for after a failure must not leave the trip controls waiting.
             tripChangeLedger.refreshCouldNotStart()
             return
@@ -1924,63 +1973,77 @@ final class AppModel {
         defer { tripChangeLedger.refreshEnded(call) }
         await reconcileManagedAlbums(quiet: true)
         do {
-            // Everything is read first and assigned together, only by the newest call: an older
-            // call that finished later put back older suggestions or facts next to newer states
-            // until the next refresh (reviews G4-03, P4-10). The reopenings after a recheck are
-            // decisions, applied once whichever call gets them.
-            // Results of an older matching version are matched again once (review 16.11.).
-            let refresh = try await pipeline.refreshMatchesIfOutdated()
-            reopenAfterRecheck(refresh.reopened)
-            let snapshot = refresh.snapshot
-            let rechecked = try await store.value(Int.self, forKey: AnalysisPipeline.recheckedSuggestionsKey) ?? 0
-            let recurringReport = try await pipeline.recurringPlaceReport()
-            let home = try await pipeline.detectedHome()
-            let homeNotice = try await pipeline.homeChangeNotice()
-            // Everything that grows with the library is read once and worked out off the main
-            // actor, its passes side by side (`AnalysisPipeline.derivedLibrary`); here it is only
-            // assigned. Review P4-02: the image results and the album list were read twice, and
-            // the start waited for each pass after the other; review of d612bc0: with 50,000
-            // photos this was seconds of main-thread work at every call. The analysed photos
-            // still without their image labels are read there too, so the sets never pass
-            // through the main actor.
+            // Everything is read and worked out off the main actor in one call and comes back as
+            // one package (`DerivedRefresh`), assigned together and only when the call is newer
+            // than the result on screen: an older call that finished later put back older
+            // suggestions or facts next to newer states until the next refresh (reviews G4-03,
+            // P4-10); a newer call that failed does not throw away an older call's result that is
+            // still newer than what is shown (second review, NIT-1). Everything that grows with the
+            // library is read once there, its passes side by side (review P4-02), and what the
+            // first screens make from all photos comes with it (review P4-09). The reopenings
+            // after a recheck are decisions, applied once whichever call gets them; the plans
+            // taken back are settled with the free albums before the library is read, so a read
+            // that fails there does not skip it.
             let settings = settings
             let managed = managedAlbums, scope = analysisScope
-            // Before the library is read, as before: a read that fails there does not skip
-            // settling the purchases with the plans taken back.
-            let plans = try await store.planHistory(limit: historyLimit + 1)
-            let undone = try await store.undoneTargets()
-            Purchases.shared.settleUndone(undone)
-            // Albumist's own albums overlap on purpose (a country holds its trips).
-            let derived = try await pipeline.derivedLibrary(snapshot: snapshot, settings: settings, managed: managed, scope: scope,
-                                                            ownAlbums: Set(managed.map(\.albumID)))
-            // A newer call started meanwhile, or the part of the library changed: this result
-            // is older than what is or will be shown (review of 9f0bc40).
-            guard derivedCalls.isNewest(call), scope == analysisScope else { return }
+            // The facts on screen, when a screen has something made only on demand from them:
+            // when the new ones equal them, the engine hands them back (comparing them costs
+            // 150 ms at 50,000 photos off the main thread, so only then).
+            let shownFacts = keepsOnDemand ? facts : []
+            let once = DerivedRefresh.Once(
+                reopened: { [weak self] reopened in await self?.reopenAfterRecheck(reopened) },
+                undone: { undone in await Purchases.shared.settleUndone(undone) })
+            let refreshed = try await pipeline.derivedRefresh(settings: settings, managed: managed, scope: scope,
+                                                              historyLimit: historyLimit, once: once, shown: shownFacts)
+            // A newer call showed its result meanwhile, or the part of the library changed: this
+            // result is older than what is shown (review of 9f0bc40). Noted at once, so an older
+            // call that ends later sees it.
+            guard derivedCalls.mayShow(call), scope == analysisScope else { return }
+            derivedCalls.shown(call)
+            // Equal to facts on screen that an older call replaced meanwhile (it showed in
+            // between): the package lacks what only the facts make (`factsOnScreen`). Nothing of
+            // it is shown; one more refresh reads anew.
+            if refreshed.library.factsOnScreen, !DerivedLibrary.sameFacts(refreshed.library.facts, facts) {
+                refreshAgain()
+                return
+            }
+            // From here to the end of the assignments there is no await: nothing of another call
+            // comes in between.
+            let snapshot = refreshed.snapshot, derived = refreshed.library
             MainThreadWatch.shared.section("refresh: snapshot") { self.snapshot = snapshot }
-            recheckedSuggestions = rechecked
-            recurringPlaceReport = recurringReport
-            detectedHome = home
-            homeChangeNotice = homeNotice
+            recheckedSuggestions = refreshed.rechecked
+            recurringPlaceReport = refreshed.recurringReport
+            detectedHome = refreshed.detectedHome
+            homeChangeNotice = refreshed.homeNotice
             MainThreadWatch.shared.section("refresh: facts") {
+                // The facts on screen themselves (`DerivedLibrary.sameFacts`, one look): nothing
+                // made from them is emptied or made again, not the atlas of a year nor the name
+                // of the home a screen shows (delta review, N2: a spinner and VoiceOver's focus
+                // lost at every refresh).
+                if DerivedLibrary.sameFacts(derived.facts, facts) { return }
                 facts = derived.facts
                 // Made with the facts off the main thread (a new value of the facts empties
-                // them): the first draw of the overview and the atlas does not go over all
-                // photos on the main thread (review P4-09).
+                // them): the first draw of the overview, the atlas, the photo view and the search
+                // hits do not go over all photos on the main thread (review P4-09). Not what only
+                // one screen needs (the atlas of each year, the name of the detected home): made
+                // when it asks (second review of P4-09, SHOULD-1).
                 previewRanksCache = derived.previewRanks
                 datesCache = derived.creationDates
-                atlasCache[0] = derived.atlas
+                atlasCache = derived.atlas
                 atlasYearsCache = derived.atlasYears
+                factsIndex = derived.factsByID
             }
             self.inventory = derived.inventory
             mergeSuggestions = derived.merges
-            historyHasMore = plans.count > historyLimit
-            history = plans.prefix(historyLimit).filter { $0.reverts == nil }
-            undonePlans = undone
+            historyHasMore = refreshed.historyHasMore
+            history = refreshed.history
+            undonePlans = refreshed.undone
             removedFromProposals = derived.removed
             MainThreadWatch.shared.section("refresh: status") { assignDerived(derived.status, snapshot: snapshot, call: call) }
             tripChangeLedger.refreshShown(call)
         } catch {
-            message = .failure(error.localizedDescription)
+            // An older call that fails says nothing: a newer one shows its result or its error.
+            if derivedCalls.isNewest(call) { message = .failure(error.localizedDescription) }
             // The newest refresh failed with a trip change written but not on screen: one more,
             // once per failure chain (the controls wait for it meanwhile).
             if tripChangeLedger.refreshFailed(call, newest: derivedCalls.isNewest(call), retry: afterFailure) {
@@ -1991,6 +2054,11 @@ final class AppModel {
             }
         }
         SpotlightIndex.scheduleUpdate(self)
+    }
+
+    /// One more `refreshDerived`, started from a call that could not show its result.
+    private func refreshAgain() {
+        Task { await refreshDerived() }
     }
 
     /// `snapshot`: the one the status was derived from (read before the await).
@@ -2389,15 +2457,40 @@ final class AppModel {
         pipeline != nil && !analysis.isRunning && !execution.isRunning && !executionClaimed && !homeChangeRunning && !analysisResetting
     }
 
-    /// The detected home with its name from the user's own photos (town, or offline the region).
-    /// Named once per analysis result, not on every redraw of the settings.
+    /// The detected home with its name from the user's own photos (town, or offline the region;
+    /// `components` `nil` when no photo near it has a place yet). `nil` without a detected home,
+    /// and while it is named (`detectedHomeNaming`): off the main thread (it goes over all photos,
+    /// review P4-09), once for each value of the facts, only when a screen asks ("Dein Zuhause",
+    /// the settings), never at a refresh (second review of P4-09, SHOULD-1: 299 ms at 50,000
+    /// photos, 590 ms at 100,000).
     var detectedHomePlace: HomePlace? {
         access(keyPath: \.facts)
         guard let detectedHome else { return nil }
         if let cached = detectedHomePlaceCache, cached.center == detectedHome.center { return cached }
-        let place = HomePlace(center: detectedHome.center, components: HomeName.components(near: detectedHome.center, facts: facts))
-        detectedHomePlaceCache = place
-        return place
+        nameDetectedHome()
+        return nil
+    }
+
+    /// The detected home is being named (`detectedHomePlace`): the screens show that it loads,
+    /// not "Noch kein Zuhause erkannt" or "Ort ohne Namen".
+    var detectedHomeNaming: Bool {
+        detectedHome != nil && detectedHomePlace == nil
+    }
+
+    /// Starts naming the detected home for the facts as they are, unless that is under way
+    /// (`makeHomeCandidates`): observed `detectedHomePlaceCache` draws the screen again when it is
+    /// named; facts that change meanwhile (and with them the detected home) cancel the naming
+    /// (it stops early and gives nothing, delta review N3) and drop any result (`factsVersion`).
+    private func nameDetectedHome() {
+        guard detectedHomeNameTask == nil, let center = detectedHome?.center else { return }
+        let facts = facts, version = factsVersion
+        detectedHomeNameTask = Task { [weak self] in
+            let naming = Task.detached(priority: .userInitiated) { DerivedLibrary.namedHome(at: center, facts: facts) }
+            let named = await withTaskCancellationHandler { await naming.value } onCancel: { naming.cancel() }
+            guard let named, !Task.isCancelled, let self, version == self.factsVersion else { return }
+            self.detectedHomeNameTask = nil
+            self.detectedHomePlaceCache = named
+        }
     }
 
     /// The places of the library the user can choose from, most photo days first. `nil` while
@@ -2429,7 +2522,8 @@ final class AppModel {
     var personalPlaces: [PlaceAnswer] { recurringPlaces.oftenHere }
 
     /// "Stimmt" on the detected home: from now on; the past stays as the detection sees it
-    /// (`HomeSettings.confirmedFrom`). Not offered while the home has no name yet.
+    /// (`HomeSettings.confirmedFrom`). Not offered while the home has no name yet (or is still
+    /// being named).
     func confirmDetectedHome() async {
         guard let place = detectedHomePlace, place.components != nil else { return }
         _ = await changeHome(home: { $0.confirming(place, date: .now) })
@@ -2444,9 +2538,14 @@ final class AppModel {
     }
 
     /// The proposed answer to "Seit wann wohnst du dort?": the first day of the latest stay near
-    /// the place in the user's photos (`HomeCandidates.stayStart`); today without one.
-    func homeStayStart(_ candidate: HomeCandidate) -> Date {
-        HomeCandidates.stayStart(near: candidate.center, assets: facts.lazy.map(\.asset)) ?? Calendar.current.startOfDay(for: .now)
+    /// the place in the user's photos (`HomeCandidates.stayStart`); today without one. It goes
+    /// over every photo: worked out off the main thread (review P4-09).
+    func homeStayStart(_ candidate: HomeCandidate) async -> Date {
+        let facts = facts, center = candidate.center
+        let start = await Task.detached(priority: .userInitiated) {
+            HomeCandidates.stayStart(near: center, assets: facts.lazy.map { $0.asset })
+        }.value
+        return start ?? Calendar.current.startOfDay(for: .now)
     }
 
     /// "Kein Zuhause festlegen".

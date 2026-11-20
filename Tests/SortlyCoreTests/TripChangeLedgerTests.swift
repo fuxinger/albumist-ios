@@ -372,7 +372,7 @@ struct TripChangeLedgerTests {
         let endsAlways = order("tripChangeLedger.refreshBegan(call)", "defer { tripChangeLedger.refreshEnded(call) }", in: refresh)
             && refresh.components(separatedBy: "tripChangeLedger.refreshEnded(call)").count == 2
         #expect(endsAlways, "a refresh that returns early or throws is not ended")
-        let shown = order("guard derivedCalls.isNewest(call)", "tripChangeLedger.refreshShown(call)", in: refresh)
+        let shown = order("guard derivedCalls.mayShow(call)", "tripChangeLedger.refreshShown(call)", in: refresh)
         #expect(shown, "refreshDerived counts trips as shown that an older call read")
         // A failed newest refresh with a change left asks for exactly one more (SHOULD-1).
         let catchPart = refresh.components(separatedBy: "} catch {").dropFirst().joined()

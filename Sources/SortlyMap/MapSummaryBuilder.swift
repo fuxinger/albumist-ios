@@ -130,18 +130,21 @@ extension MapSummary {
         return result
     }
 
-    /// A total order on what the map reads of a fact (trip, date, location, home, place, clock),
-    /// to pick one of two facts with the same id whatever order they came in. Facts equal in all
-    /// of it give the same map, so which of them stays does not matter.
+    /// A total order on what the map reads of a fact, to pick one of two facts with the same id
+    /// whatever order they came in: one taken at home first (if any copy says so, the photo is
+    /// never drawn: privacy first, as `TripGeometry.build` picks), then trip, date, location,
+    /// place and clock. Facts equal in all of it give the same map, so which of them stays does
+    /// not matter.
     static func precedes(_ a: AssetFacts, _ b: AssetFacts) -> Bool {
+        if a.atHome != b.atHome { return a.atHome }
         // In two parts: the standard library compares tuples of up to six elements.
         func when(_ fact: AssetFacts) -> (String, Double, Double, Double) {
             let location = fact.asset.usableLocation
             return (fact.tripID?.rawValue ?? "", fact.asset.creationDate?.timeIntervalSinceReferenceDate ?? .infinity,
                     location?.latitude ?? .infinity, location?.longitude ?? .infinity)
         }
-        func what(_ fact: AssetFacts) -> (Int, String, String, String) {
-            (fact.atHome ? 1 : 0, fact.place?.isoCountryCode ?? "", fact.place?.locality ?? "", fact.timeZone?.identifier ?? "")
+        func what(_ fact: AssetFacts) -> (String, String, String) {
+            (fact.place?.isoCountryCode ?? "", fact.place?.locality ?? "", fact.timeZone?.identifier ?? "")
         }
         let (whenA, whenB) = (when(a), when(b))
         if whenA != whenB { return whenA < whenB }

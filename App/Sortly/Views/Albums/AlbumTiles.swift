@@ -40,8 +40,10 @@ extension CardBadge {
 /// and the number of photos below it, "Neu" or "+12" on a white ground for an album of
 /// Albumist's. A tap opens the album (`AlbumScreen`). A long press shows it large with "Fotos
 /// ansehen" and, for an album of Albumist's, "Rückgängig machen" with the line that says what it
-/// does: the same item as "…" in the album, which is the main way (decision 17.11.). VoiceOver
-/// has both as actions of the tile.
+/// does: the same item as "…" in the album, which is the main way (decision 17.11.). For
+/// assistive technologies the tile is the card's container (`PhotoCard`): one element that
+/// opens the album, nothing repeated as an action; the long press is theirs too (VoiceOver:
+/// double-tap and hold), and both of its items are in the album itself.
 struct AlbumTile: View {
     @Environment(AppModel.self) private var model
     @Environment(Navigator.self) private var navigator: Navigator?
@@ -71,16 +73,11 @@ struct AlbumTile: View {
         let undoable = mark == nil ? nil : managed
         PhotoCard(coverIDs: cover.ids, title: Text(verbatim: album.title), subtitle: Self.photoCount(album),
                   badge: mark.map { CardBadge($0) }, hidesPreview: cover.hidden, aspectRatio: 1, style: .tile,
-                  placeholderSymbol: "rectangle.stack")
-            .opens(.album(album.id), on: navigator)
-            .accessibilityActions {
-                if !album.assetIDs.isEmpty {
-                    Button("Fotos ansehen") { showPhotos(cover) }
-                }
-                if let undoable {
-                    Button("Rückgängig machen") { undo(undoable) }
-                }
-            }
+                  placeholderSymbol: "rectangle.stack",
+                  onOpen: { Navigator.push(.album(album.id), on: navigator) })
+            // Names the card, a container: its body ("Rom, 16 Fotos", "Neu") is the button that
+            // opens the album.
+            .accessibilityIdentifier("album.tile")
             .contextMenu {
                 if !album.assetIDs.isEmpty {
                     Button { showPhotos(cover) } label: {
@@ -96,7 +93,6 @@ struct AlbumTile: View {
             } preview: {
                 AlbumPreview(cover: cover, title: album.title, line: Self.line(album, managed: managed))
             }
-            .accessibilityIdentifier("album.tile")
     }
 
     /// The album's photos in full screen, oldest first as in the album, starting at the photo
@@ -312,19 +308,5 @@ struct AlbumSectionHeader<Trailing: View>: View {
 extension AlbumSectionHeader where Trailing == EmptyView {
     init(_ title: Text, subtitle: Text? = nil) {
         self.init(title, subtitle: subtitle) { EmptyView() }
-    }
-}
-
-extension View {
-    /// Opens `screen` with a tap and as VoiceOver's default action, for a photo card that is
-    /// not a button itself. Until `PhotoCard` opens a card from its own body (second review of
-    /// the components, H2), which then takes over here.
-    @MainActor
-    fileprivate func opens(_ screen: AppScreen, on navigator: Navigator?) -> some View {
-        self
-            .contentShape(Rectangle())
-            .onTapGesture { Navigator.push(screen, on: navigator) }
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { Navigator.push(screen, on: navigator) }
     }
 }

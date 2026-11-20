@@ -4751,16 +4751,6 @@
         }
       }
     },
-    "Albumist hat dieses Album angelegt. Es wird gelöscht, die Fotos bleiben in deiner Mediathek. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albumist created this album. It will be deleted; the photos stay in your library. If you added photos yourself, the album stays with those photos."
-          }
-        }
-      }
-    },
     "Albumists Fotos herausnehmen" : {
       "localizations" : {
         "en" : {
@@ -12829,6 +12819,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iOS will ask once more whether Albumist may delete the albums. Your photos stay."
+          }
+        }
+      }
+    },
+    "Albumist hat dieses Album angelegt. Es wird gelöscht. Hast du selbst Fotos hineingelegt, bleibt das Album mit diesen Fotos bestehen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumist created this album. It will be deleted. If you added photos yourself, the album stays with those photos."
           }
         }
       }

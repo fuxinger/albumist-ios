@@ -248,8 +248,9 @@ struct PlanReviewView: View {
                 Text("Erst die markierten Punkte klären. Ändere dazu den Vorschlag unter „Anpassen“.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            // A removal or the retry of an undo deletes albums: iOS asks right after this
-            // button, and this screen is the confirmation before it (review 18.11., P3-07).
+            // A removal from "Alben von Albumist", or the retry of one, deletes albums: iOS asks
+            // right after this button, and this screen is the confirmation before it (review
+            // 18.11., P3-07).
             if summary.deletedContainers > 0 {
                 DeleteQuestionNote.text
                     .font(.footnote).foregroundStyle(.secondary)
@@ -464,8 +465,10 @@ struct ResultCard: View {
             .accessibilityIdentifier("result.receipt")
             if !isUndo && !model.undonePlans.contains(plan.id) {
                 Button("Rückgängig machen") {
-                    undoDeletes = model.undoDeletesCollections(plan)
-                    confirmUndo = true
+                    Task {
+                        undoDeletes = await model.undoDeletesCollections(plan)
+                        confirmUndo = true
+                    }
                 }
                     .buttonStyle(SecondaryButtonStyle())
                 Text("Auch später möglich unter Einstellungen › Verlauf und Rückgängig. Rückgängig entfernt nur die neuen Alben und Zuordnungen, deine Fotos bleiben.")
@@ -491,7 +494,7 @@ struct ResultCard: View {
                 Task { await model.undo(plan) }
             }
         } message: {
-            DeleteQuestionNote.undoMessage(Text("Albumist entfernt die angelegten Alben und Zuordnungen wieder."), deletes: undoDeletes)
+            DeleteQuestionNote.message(Text("Albumist entfernt die angelegten Alben und Zuordnungen wieder."), deletes: undoDeletes)
         }
     }
 }

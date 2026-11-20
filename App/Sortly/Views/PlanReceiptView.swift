@@ -94,7 +94,7 @@ struct PlanReceiptView: View {
                 }
             }
         } message: {
-            DeleteQuestionNote.undoMessage(Text("Alben und Zuordnungen von Albumist werden entfernt."), deletes: undoDeletes)
+            DeleteQuestionNote.message(Text("Alben und Zuordnungen von Albumist werden entfernt."), deletes: undoDeletes)
         }
         .alert("Nichts mehr zu tun", isPresented: $nothingToRetry) {
             Button("OK", role: .cancel) {}
@@ -356,10 +356,13 @@ struct PlanReceiptView: View {
         }
     }
 
-    /// "Rückgängig machen" and "Rest rückgängig machen" ask first, and say whether iOS asks too.
+    /// "Rückgängig machen" and "Rest rückgängig machen" ask first, and say whether iOS asks too
+    /// (from the albums read fresh from Photos, a moment after the tap).
     private func askUndo() {
-        undoDeletes = model.undoDeletesCollections(plan)
-        confirmUndo = true
+        Task {
+            undoDeletes = await model.undoDeletesCollections(plan)
+            confirmUndo = true
+        }
     }
 
     // MARK: Parts

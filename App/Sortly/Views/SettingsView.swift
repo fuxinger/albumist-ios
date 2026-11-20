@@ -378,8 +378,9 @@ struct InterruptedHistoryRow: View {
             .buttonStyle(.borderless) // several buttons in one list row, each tappable on its own
             .font(.subheadline)
             .disabled(model.execution.isRunning)
-            // "Rest zurücknehmen" deletes albums: iOS asks right after it (P3-07).
-            if plan.reverts != nil && plan.deletesCollections {
+            // Going on deletes albums (an undo, or a removal from "Alben von Albumist"): iOS
+            // asks right after the button (P3-07).
+            if plan.deletesCollections {
                 DeleteQuestionNote.text
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -390,8 +391,8 @@ struct InterruptedHistoryRow: View {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
-            DeleteQuestionNote.undoMessage(Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt."),
-                                           deletes: undoDeletes)
+            DeleteQuestionNote.message(Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt."),
+                                       deletes: undoDeletes)
         }
     }
 
@@ -411,8 +412,10 @@ struct InterruptedHistoryRow: View {
         // An interrupted undo cannot itself be taken back; it goes on or stays as it is.
         if !isUndo {
             Button {
-                undoDeletes = model.interruptedUndoDeletesCollections
-                confirmUndo = true
+                Task {
+                    undoDeletes = await model.interruptedUndoDeletesCollections()
+                    confirmUndo = true
+                }
             } label: { Text("Alles zurücknehmen").minimumHitTarget() }
         }
         Button { Task { await model.keepInterruptedPlanAsIs() } } label: {

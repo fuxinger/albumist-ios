@@ -541,8 +541,10 @@ struct InterruptedPlanCard: View {
                     .accessibilityIdentifier("interrupted.resume")
                 if !isUndo {
                     Button("Alles zurücknehmen") {
-                        undoDeletes = model.interruptedUndoDeletesCollections
-                        confirmUndo = true
+                        Task {
+                            undoDeletes = await model.interruptedUndoDeletesCollections()
+                            confirmUndo = true
+                        }
                     }
                         .buttonStyle(SecondaryButtonStyle())
                         .accessibilityIdentifier("interrupted.undo")
@@ -557,8 +559,9 @@ struct InterruptedPlanCard: View {
                 }
                 .accessibilityIdentifier("interrupted.keep")
                 Group {
-                    // "Rest zurücknehmen" deletes albums: iOS asks right after it (P3-07).
-                    if isUndo && plan.deletesCollections {
+                    // Going on deletes albums (an undo, or a removal from "Alben von
+                    // Albumist"): iOS asks right after the button (P3-07).
+                    if plan.deletesCollections {
                         DeleteQuestionNote.text
                     } else {
                         Text("Deine Fotos bleiben in jedem Fall unverändert.")
@@ -576,8 +579,8 @@ struct InterruptedPlanCard: View {
                 Task { await model.undoInterruptedPlan() }
             }
         } message: {
-            DeleteQuestionNote.undoMessage(Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt."),
-                                           deletes: undoDeletes)
+            DeleteQuestionNote.message(Text("Albumist entfernt, was sicher von Albumist ist, und sagt dir, falls etwas bleibt."),
+                                       deletes: undoDeletes)
         }
     }
 }

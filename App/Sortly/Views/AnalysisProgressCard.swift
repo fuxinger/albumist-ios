@@ -11,7 +11,9 @@ import SortlyEngine
 /// newcomer and for a hurried user): the heading with its one button, the count, one short
 /// line, the bar, "Schon fertig" and "Details". The step it stands on, the photos just looked
 /// at, whether it runs in the background and the note on town names are in "Details"
-/// (`AnalysisDetailsSheet`); VoiceOver still says the step (`AnalysisCardGlanceTests`).
+/// (`AnalysisDetailsSheet`); VoiceOver still says the step (`AnalysisCardGlanceTests`). Only
+/// when iOS refused the background time does the short line say "Läuft, solange Albumist offen
+/// ist", in place of the finish time (`runsOnlyWhileOpen`).
 struct AnalysisProgressCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -255,6 +257,16 @@ struct AnalysisProgressCard: View {
 
     private var isRunning: Bool { if case .running = state { true } else { false } }
 
+    /// iOS refused the background time (S8): the analysis goes on only while Albumist is open,
+    /// which matters before the user leaves it. Said in the finish time's place while it runs
+    /// (the finish time stays in Details), not during Apple's countdown, which says why it
+    /// waits. Every other word on the background stays in Details (decision of 20.11.: the
+    /// card keeps five parts).
+    private var runsOnlyWhileOpen: Bool {
+        guard case .running(_, _, let appleWait, _) = state, !appleWait else { return false }
+        return model.analysisBackground == .refused
+    }
+
     private var isWaitingOrPaused: Bool {
         switch state {
         case .waiting, .paused, .pausing: true
@@ -279,7 +291,8 @@ struct AnalysisProgressCard: View {
         .animation(reduceMotion ? nil : .snappy, value: position.step)
     }
 
-    /// Under the count: the finish time, the wait for Apple's limit, why it is slower, what waiting means.
+    /// Under the count: the finish time (or that it runs only while Albumist is open), the wait
+    /// for Apple's limit, why it is slower, what waiting means.
     @ViewBuilder
     private var statusLines: some View {
         Group {
@@ -298,6 +311,9 @@ struct AnalysisProgressCard: View {
                             .contentTransition(.numericText(countsDown: true))
                             .accessibilityIdentifier("analysis.appleWait")
                     }
+                } else if runsOnlyWhileOpen {
+                    Text("Läuft, solange Albumist offen ist")
+                        .accessibilityIdentifier("analysis.onlyWhileOpen")
                 } else if let finish = model.analysisFinish {
                     Text(AnalysisText.finish(finish))
                         .accessibilityIdentifier("analysis.finishTime")
@@ -357,7 +373,11 @@ struct AnalysisProgressCard: View {
         if case .running = state, let pass = model.analysis.mapPass, pass.checked < pass.of {
             parts.append(AnalysisText.mapChecked(pass))
         }
-        if case .running = state, let finish = model.analysisFinish { parts.append(AnalysisText.finish(finish)) }
+        if runsOnlyWhileOpen {
+            parts.append(String(localized: "Läuft, solange Albumist offen ist"))
+        } else if case .running = state, let finish = model.analysisFinish {
+            parts.append(AnalysisText.finish(finish))
+        }
         parts.append(stepLine)
         parts.append(String(localized: "Analyse zu \(AnalysisPercent.percent(model.analysis.shownOverall, isComplete: model.analysis.isComplete)) % fertig"))
         return parts.joined(separator: ", ")

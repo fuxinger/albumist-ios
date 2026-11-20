@@ -252,9 +252,12 @@ final class SortlyFlowUITests: XCTestCase {
         }
         details.tap()
         let sheet = app.navigationBars["So läuft die Analyse"]
-        guard sheet.waitForExistence(timeout: 10) else {
-            print("UI_FACT analysis details did not open")
-            return
+        if !sheet.waitForExistence(timeout: 10) {
+            // A sheet that opens late would cover the card for the rest of the test (it reads
+            // analysis.progress): it gets 10 s more and is closed like one that opened in time.
+            print("UI_FACT analysis details did not open within 10 s")
+            guard sheet.waitForExistence(timeout: 10) else { return }
+            print("UI_FACT analysis details opened late")
         }
         shot("60a-analysis-details")
         let done = sheet.buttons["Fertig"]

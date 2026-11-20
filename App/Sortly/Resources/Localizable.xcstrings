@@ -2941,16 +2941,6 @@
         }
       }
     },
-    "Läuft weiter, auch wenn du die App verlässt" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keeps running even when you leave the app"
-          }
-        }
-      }
-    },
     "Löscht nur Albumists eigene Analyse. Deine Fotos und Alben bleiben, wie sie sind." : {
       "localizations" : {
         "en" : {

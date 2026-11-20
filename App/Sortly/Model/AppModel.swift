@@ -2000,6 +2000,13 @@ final class AppModel {
             // call that ends later sees it.
             guard derivedCalls.mayShow(call), scope == analysisScope else { return }
             derivedCalls.shown(call)
+            // Equal to facts on screen that an older call replaced meanwhile (it showed in
+            // between): the package lacks what only the facts make (`factsOnScreen`). Nothing of
+            // it is shown; one more refresh reads anew.
+            if refreshed.library.factsOnScreen, !DerivedLibrary.sameFacts(refreshed.library.facts, facts) {
+                refreshAgain()
+                return
+            }
             // From here to the end of the assignments there is no await: nothing of another call
             // comes in between.
             let snapshot = refreshed.snapshot, derived = refreshed.library
@@ -2013,11 +2020,7 @@ final class AppModel {
                 // made from them is emptied or made again, not the atlas of a year nor the name
                 // of the home a screen shows (delta review, N2: a spinner and VoiceOver's focus
                 // lost at every refresh).
-                if DerivedLibrary.sameFacts(derived.facts, facts) {
-                    // Capture dates a memory warning emptied come back made off the main thread.
-                    if datesCache == nil { datesCache = derived.creationDates }
-                    return
-                }
+                if DerivedLibrary.sameFacts(derived.facts, facts) { return }
                 facts = derived.facts
                 // Made with the facts off the main thread (a new value of the facts empties
                 // them): the first draw of the overview, the atlas, the photo view and the search
@@ -2051,6 +2054,11 @@ final class AppModel {
             }
         }
         SpotlightIndex.scheduleUpdate(self)
+    }
+
+    /// One more `refreshDerived`, started from a call that could not show its result.
+    private func refreshAgain() {
+        Task { await refreshDerived() }
     }
 
     /// `snapshot`: the one the status was derived from (read before the await).

@@ -39,6 +39,10 @@ public struct DerivedLibrary: Sendable {
     public var atlasYears: [Int] = []
     /// The facts by photo id (`FactsByID`).
     public var factsByID = FactsByID()
+    /// `facts` are the facts on screen (`derivedLibrary(shown:)`): what only they make (preview
+    /// ranks, capture dates, atlas of all years and its years, facts by id) was not made again;
+    /// the app keeps its own (follow-up review, NIT1).
+    public var factsOnScreen = false
 
     public init() {}
 
@@ -127,8 +131,9 @@ extension AnalysisPipeline {
     }
 
     /// `shown`: the facts on screen. When the facts read equal them (compared off the main
-    /// thread), they are handed back themselves, and everything is made from them
-    /// (`DerivedLibrary.sameFacts`): the app then keeps the facts and all it made from them
+    /// thread), they are handed back themselves (`DerivedLibrary.sameFacts`), and what only the
+    /// facts make is not made again (`factsOnScreen`): the app keeps the facts and all it made
+    /// from them
     /// (delta review of the second review, N2: every refresh assigned the facts anew, so the
     /// atlas of a year and "Dein Zuhause" were made again, with a spinner and VoiceOver's
     /// focus lost, at every early look of an analysis).
@@ -146,6 +151,7 @@ extension AnalysisPipeline {
             if await Self.pass(.sameFacts, .userInitiated, probe, { shown == readFacts }).value { chosen = shown }
         }
         let facts = chosen
+        let onScreen = !shown.isEmpty && DerivedLibrary.sameFacts(facts, shown)
         let stored = try await store.overrides()
         let overrides = OverrideSet(stored)
         // The analysed photos still without their image labels ("Themen" or "Dokumente" turned
@@ -159,20 +165,22 @@ extension AnalysisPipeline {
                                         contents: contents, labelsMissing: labels.missing, labelsRetrying: labels.retrying,
                                         managed: managed, inventory: inventory, scope: scope)
         }
-        let ranks = Self.pass(.previewRanks, .userInitiated, probe) { PreviewRank.ranks(of: facts) }
-        let firstDraw = Self.pass(.firstDraw, .userInitiated, probe) {
+        // Not for the facts on screen: the app has them made already.
+        let ranks = onScreen ? nil : Self.pass(.previewRanks, .userInitiated, probe) { PreviewRank.ranks(of: facts) }
+        let firstDraw = onScreen ? nil : Self.pass(.firstDraw, .userInitiated, probe) {
             (DerivedLibrary.creationDates(of: facts), TravelAtlas.compute(facts: facts, year: nil), TravelAtlas.years(facts: facts))
         }
-        let byID = Self.pass(.factsByID, .userInitiated, probe) { FactsByID(facts) }
+        let byID = onScreen ? nil : Self.pass(.factsByID, .userInitiated, probe) { FactsByID(facts) }
         let merges = Self.pass(.merges, .utility, probe) { AlbumOverlapAnalyzer().suggestions(in: inventory, excluding: ownAlbums) }
         var result = DerivedLibrary()
         result.facts = facts
         result.inventory = inventory
         result.removed = DerivedLibrary.removedFromProposals(stored)
         result.status = await status.value
-        result.previewRanks = await ranks.value
-        (result.creationDates, result.atlas, result.atlasYears) = await firstDraw.value
-        result.factsByID = await byID.value
+        result.factsOnScreen = onScreen
+        if let ranks { result.previewRanks = await ranks.value }
+        if let firstDraw { (result.creationDates, result.atlas, result.atlasYears) = await firstDraw.value }
+        if let byID { result.factsByID = await byID.value }
         result.merges = await merges.value
         return result
     }

@@ -58,9 +58,10 @@
   und die Einstellungen sie brauchen, einmal je Stand der Fotodaten, nie beim Auffrischen (zweite Prüfung: sonst
   kosteten sie bei jedem Auffrischen Akku, bei 50.000 Fotos 240 und 299 ms); bis dahin zeigen Atlas und „Dein
   Zuhause“ kurz, dass sie laden. Neue Fotodaten brechen eine solche Rechnung ab, statt sie zu Ende laufen zu lassen.
-  Ein Auffrischen mit unveränderten Fotodaten behält sie, solange ein Bildschirm sie hat (kein Kreisel, „Stimmt“ und
-  der VoiceOver-Fokus bleiben); dafür vergleicht es die Fotodaten abseits des Haupt-Strangs, nur dann (bei 50.000
-  Fotos 95–149 ms). Ändern sich die Fotodaten, etwa während einer Analyse, wird beides neu gerechnet, wenn ein
+  Ein Auffrischen mit unveränderten Fotodaten behält sie, sobald ein Bildschirm sie einmal gebraucht hat, bis sich
+  die Fotodaten ändern (kein Kreisel, „Stimmt“ und der VoiceOver-Fokus bleiben); nur dann vergleicht es die
+  Fotodaten abseits des Haupt-Strangs (bei 50.000 Fotos 95–149 ms) und rechnet bei Gleichheit nichts neu, was nur
+  aus den Fotodaten entsteht (Vorschau-Ränge, Atlas aller Jahre, Fotodaten nach Kennung). Ändern sich die Fotodaten, etwa während einer Analyse, wird beides neu gerechnet, wenn ein
   Bildschirm es braucht. „Teilen“ im Atlas teilt die Karte, wie sie beim Tippen war, auch wenn die Übersicht
   währenddessen aufgefrischt wird. „Seit wann wohnst du dort?“ rechnet seinen Vorschlag im Hintergrund, der gewählte
   Ort zeigt solange einen Kreisel. Vorher bei 50.000 Fotos auf Linux auf dem Haupt-Strang: Jahr im Atlas 75 ms,

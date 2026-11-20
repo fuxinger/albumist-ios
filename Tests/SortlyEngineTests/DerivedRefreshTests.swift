@@ -259,31 +259,37 @@ struct DerivedRefreshTests {
     }
 
     /// Delta review, N2: a refresh whose facts equal those on screen hands back those very facts
-    /// (the same storage), and everything made from them is made from them, so the app keeps
-    /// the facts and all it made from them (the atlas of a year, the name of the home: no
-    /// spinner, no lost VoiceOver focus at every early look). Facts that changed come anew.
+    /// (the same storage), so the app keeps the facts and all it made from them (the atlas of a
+    /// year, the name of the home: no spinner, no lost VoiceOver focus at every early look).
+    /// Follow-up review, NIT1: what only the facts make (preview ranks, first draw, facts by id)
+    /// is then not made at all; the app keeps its own. Facts that changed come anew, with all.
     @Test func aRefreshWithUnchangedFactsHandsBackTheFactsOnScreen() async throws {
         let library = try await analysed()
         let pipeline = library.launch()
         let settings = library.settings
         let first = try await pipeline.derivedRefresh(settings: settings, managed: [], scope: .all, historyLimit: 50, once: .nothing)
         let shown = first.library.facts
-        let compared = Mutex(false)
-        let probe: DerivedLibrary.Probe = { piece, _ in if piece == .sameFacts { compared.withLock { $0 = true } } }
+        let started = Mutex<Set<String>>([])
+        let probe: DerivedLibrary.Probe = { piece, ended in if !ended { _ = started.withLock { $0.insert(piece.rawValue) } } }
         let again = try await pipeline.derivedRefresh(settings: settings, managed: [], scope: .all, historyLimit: 50, once: .nothing,
                                                       shown: shown, probe: probe)
-        #expect(compared.withLock { $0 }, "the facts were not compared off the main thread")
+        let passes = started.withLock { $0 }
+        #expect(passes.contains("sameFacts"), "the facts were not compared off the main thread")
         #expect(DerivedLibrary.sameFacts(again.library.facts, shown), "unchanged facts come as a new copy")
-        #expect(DerivedLibrary.sameFacts(again.library.factsByID.facts, shown), "the facts by id are made from other facts")
-        // Without the facts on screen (the first refresh), or with others: new ones.
+        #expect(passes == ["sameFacts", "status", "merges"], "unchanged facts still run \(passes.sorted())")
+        #expect(again.library.status.states == first.library.status.states)
+        // Without the facts on screen (the first refresh), or with others: new ones, and all passes.
         let fresh = try await pipeline.derivedRefresh(settings: settings, managed: [], scope: .all, historyLimit: 50, once: .nothing)
         #expect(fresh.library.facts == shown && !DerivedLibrary.sameFacts(fresh.library.facts, shown))
         _ = try await library.store.upsertAssets([OverlappingRefreshTests.late])
+        started.withLock { $0 = [] }
         let changed = try await pipeline.derivedRefresh(settings: settings, managed: [], scope: .all, historyLimit: 50, once: .nothing,
-                                                        shown: shown)
+                                                        shown: shown, probe: probe)
         #expect(!DerivedLibrary.sameFacts(changed.library.facts, shown))
         #expect(changed.library.facts.contains { $0.id == OverlappingRefreshTests.late.id })
         #expect(DerivedLibrary.sameFacts(changed.library.factsByID.facts, changed.library.facts))
+        let all = started.withLock { $0 }
+        #expect(all.isSuperset(of: ["status", "previewRanks", "firstDraw", "factsByID", "merges"]), "changed facts run only \(all.sorted())")
     }
 
     /// Delta review, N3: new facts cancel what is being made for the old ones; the making then
@@ -531,6 +537,11 @@ struct DerivedRefreshAppTests {
         let skip = try #require(body.range(of: "if DerivedLibrary.sameFacts(derived.facts, facts) {"), "refreshDerived assigns unchanged facts")
         let assign = try #require(body.range(of: "(?<![A-Za-z0-9_.])facts = derived.facts", options: .regularExpression))
         #expect(skip.lowerBound < assign.lowerBound, "the facts are assigned before it is asked whether they changed")
+        // Follow-up review, NIT1: a package for facts an older call replaced meanwhile lacks what
+        // only the facts make; it is not shown, one more refresh comes instead.
+        let stale = try #require(body.range(of: "if refreshed.library.factsOnScreen, !DerivedLibrary.sameFacts(refreshed.library.facts, facts) {"),
+                                 "refreshDerived shows a package without what the facts make")
+        #expect(stale.lowerBound < skip.lowerBound && String(body[stale.upperBound...].prefix(60)).contains("refreshAgain()"))
         let branch = String(body[skip.upperBound..<assign.lowerBound])
         #expect(branch.contains("return") && !branch.contains("factsIndex") && !branch.contains("atlasCache") && !branch.contains("previewRanksCache"),
                 "unchanged facts still empty or replace what is made from them: \(branch)")

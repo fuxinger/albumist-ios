@@ -111,29 +111,6 @@ final class SortlySearchUITests: XCTestCase {
         }
     }
 
-    private func allowPhotosIfAsked() {
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let labels = ["Zugriff auf alle Fotos erlauben", "Allow Full Access", "Allow Access to All Photos", "Alle Fotos erlauben", "Vollzugriff erlauben"]
-        // Taps the alert's button when it is there; the trial step means it was not needed.
-        _ = UITestWait.holds(timeout: 25) {
-            for source in [springboard, app] {
-                for label in labels where source.buttons[label].exists {
-                    source.buttons[label].tap()
-                    return true
-                }
-            }
-            return button("Analyse starten").exists
-        }
-    }
-
-    private func allowNotificationsIfAsked() {
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for label in ["Erlauben", "Allow"] {
-            let allow = springboard.buttons[label]
-            if allow.waitForExistence(timeout: 4) { allow.tap(); return }
-        }
-    }
-
     @discardableResult
     private func waitStable(_ what: String, timeout: TimeInterval, stableChecks: Int = 3, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
@@ -149,9 +126,9 @@ final class SortlySearchUITests: XCTestCase {
         return false
     }
 
-    /// The Pause button first: one query while the analysis runs (see SortlyFlowUITests).
+    /// The start page's line about the analysis, and no "Pause" (`UITestScreens.Analysis`).
     private var analysisIdle: Bool {
-        !app.buttons["Pause"].exists && (anything("Fotos analysiert").exists || anything("Analyse aktuell").exists || anything("Analyse fertig").exists)
+        UITestScreens.Analysis.isIdle(app)
     }
 
     // MARK: Search helpers
@@ -206,17 +183,13 @@ final class SortlySearchUITests: XCTestCase {
         continueAfterFailure = true
         launch()
 
-        // Fresh simulator (run alone): onboarding and the demo library first.
-        if button("Los geht").waitForExistence(timeout: 15) {
-            tap(button("Los geht"), "welcome")
-            tap(button("Weiter"), "areas")
-            if app.buttons["access.continue"].waitForExistence(timeout: 5) {
-                app.buttons["access.continue"].tap()
-                allowPhotosIfAsked()
-            }
-            if button("Weiter").waitForExistence(timeout: 3) { button("Weiter").tap() }
-            tap(button("Analyse starten"), "start analysis", timeout: 20)
-            allowNotificationsIfAsked()
+        // Fresh simulator (run alone): onboarding and the demo library first. After "Los geht’s"
+        // only the access page (design wave 1): the analysis starts by itself with access.
+        if app.buttons["onboarding.letsGo"].waitForExistence(timeout: 15) {
+            tap(app.buttons["onboarding.letsGo"], "welcome")
+            let tabs = UITestOnboarding.passAccessPage(app)
+            print(tabs ? "UI_STEP_OK access page" : "UI_STEP_MISSING access page")
+            XCTAssertTrue(tabs, "The onboarding did not reach the tabs after the access page")
         }
         let demo = button("Beispiel-Mediathek anlegen")
         if demo.waitForExistence(timeout: 10) {
@@ -225,7 +198,7 @@ final class SortlySearchUITests: XCTestCase {
                 !anything("Beispielfotos werden angelegt").exists && !button("Beispiel-Mediathek anlegen").exists
             }
         }
-        if app.tabBars.buttons["Übersicht"].exists { tabButton("Übersicht").tap() }
+        if app.tabBars.buttons["Vorschläge"].exists { tabButton("Vorschläge").tap() }
         XCTAssertTrue(waitStable("analysis finished", timeout: 1200) { analysisIdle }, "Analysis did not finish")
 
         guard tap(searchTabButton(), "search tab") else { return }

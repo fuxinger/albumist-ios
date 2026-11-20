@@ -257,15 +257,17 @@ struct FolderTile: View {
 
 // MARK: - Layout
 
-/// Albums and folders side by side, two in a row as in Photos; one below the other at the
-/// accessibility text sizes (design rule 4).
+/// Albums and folders side by side as in Photos: two in a row on the iPhone (172 pt on a 393 pt
+/// screen, draft E4), more on wider screens; one below the other at the accessibility text sizes
+/// (design rule 4).
 struct AlbumGrid<Content: View>: View {
     @ViewBuilder var content: Content
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: Theme.Spacing.l, alignment: .top),
-                            count: typeSize.isAccessibilitySize ? 1 : 2)
+        let columns = typeSize.isAccessibilitySize
+            ? [GridItem(.flexible(), alignment: .top)]
+            : [GridItem(.adaptive(minimum: 150, maximum: 260), spacing: Theme.Spacing.l, alignment: .top)]
         LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
             content
         }

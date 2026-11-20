@@ -16,6 +16,7 @@ struct AlbumsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @Environment(Navigator.self) private var navigator: Navigator?
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var viewing: PhotoViewer.Start?
     @State private var undoing: ManagedAlbumState?
 
@@ -30,7 +31,8 @@ struct AlbumsView: View {
                         if sections.showsAll { allButton(count: sections.albumistAlbums.count) }
                     }
                     .padding(.top, Theme.Spacing.s)
-                    CardShelf {
+                    // Two covers side by side on the iPhone, the third peeking in; four on the iPad.
+                    CardShelf(count: sizeClass == .regular ? 4 : 2) {
                         ForEach(sections.shelf) { album in
                             AlbumTile(album: album.collection, managed: album.state,
                                       viewPhotos: { viewing = $0 }, undo: { undoing = $0 })

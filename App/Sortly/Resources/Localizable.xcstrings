@@ -147,13 +147,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld photo without a place"
+                  "value" : "%lld photo without a location"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld photos without a place"
+                  "value" : "%lld photos without a location"
                 }
               }
             }
@@ -2211,6 +2211,16 @@
         }
       }
     },
+    "Die Zahl kommt, sobald die Analyse weiterläuft." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The number arrives once the analysis continues."
+          }
+        }
+      }
+    },
     "Die pausierte Analyse läuft dann weiter." : {
       "localizations" : {
         "en" : {
@@ -3517,6 +3527,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Still free"
+          }
+        }
+      }
+    },
+    "Noch nicht gezählt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not counted yet"
           }
         }
       }
@@ -9533,6 +9553,46 @@
         }
       }
     },
+    "%lld Fotos außerhalb deiner Hauptbereiche" : {
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto außerhalb deiner Hauptbereiche"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos außerhalb deiner Hauptbereiche"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photo outside your main areas"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld photos outside your main areas"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "%lld Fotos zeigen „%@“." : {
       "localizations" : {
         "de" : {
@@ -10496,46 +10556,6 @@
                 "stringUnit" : {
                   "state" : "translated",
                   "value" : "%lld photos from home"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "%lld Fotos, die zu keinem deiner Hauptbereiche passen" : {
-      "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Foto, das zu keinem deiner Hauptbereiche passt"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Fotos, die zu keinem deiner Hauptbereiche passen"
-                }
-              }
-            }
-          }
-        },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photo that fits none of your main areas"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photos that fit none of your main areas"
                 }
               }
             }

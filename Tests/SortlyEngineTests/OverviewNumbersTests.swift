@@ -51,6 +51,10 @@ struct OverviewNumbersTests {
         func ignore(_ ids: [AssetID]) async throws {
             for id in ids { try await store.addOverride(UserOverride(scope: .asset(id), decision: .ignoreAsset)) }
         }
+
+        func exclude(_ ids: [AssetID]) async throws {
+            for id in ids { try await store.addOverride(UserOverride(scope: .asset(id), decision: .excludeFromAnalysis)) }
+        }
     }
 
     static func germanSettings() -> OrganizationSettings {
@@ -138,6 +142,58 @@ struct OverviewNumbersTests {
         #expect(!ring.notCounted.noMainAreaIsNoPlace, "photos from home have a place")
     }
 
+    /// Photos excluded from the analysis are a group of their own (no switch in the app today,
+    /// but the numbers must add up then too). A photo both ignored and excluded is in it once:
+    /// excluded comes first (`OrganizationStatusResolver.areaStatus`), never in both groups.
+    @Test func excludedPhotosAreOneGroupAlsoWhenIgnoredToo() async throws {
+        let w = try await world()
+        let both = w.rome[0]
+        try await w.ignore([both] + Array(w.basel.prefix(2)))
+        try await w.exclude([both, w.basel[5], w.home[0], w.noPlace[0]])
+        let d = try await w.derived()
+        guard case .ring(let ring) = Self.card(d, w.settings) else {
+            Issue.record("no ring: \(Self.card(d, w.settings)); \(Self.line(d))")
+            return
+        }
+        #expect(ring.total + ring.notCounted.sum == d.photos, "\(ring.total) counted, \(ring.notCounted); \(Self.line(d))")
+        #expect(ring.notCounted.excluded == 4, "\(ring.notCounted)")
+        #expect(ring.notCounted.ignored == 2, "the photo ignored and excluded counts once, as excluded: \(ring.notCounted)")
+        #expect(ring.fully == w.rome.count - 1)
+        #expect(ring.total == w.rome.count - 1 + w.basel.count - 3, "\(Self.line(d))")
+        #expect(ring.notCounted.home == w.home.count + w.homeEarlier.count - 1, "\(ring.notCounted)")
+        #expect(ring.notCounted.noMainArea == w.noPlace.count - 1, "\(ring.notCounted)")
+        #expect(ring.notCounted.groups.contains(.excluded(4)), "\(ring.notCounted.groups)")
+    }
+
+    /// The overview names the groups in this order: "57 Fotos von zu Hause, 13 Fotos ohne Ort, 3
+    /// ignorierte Fotos, 1 ausgeschlossenes Foto und 6 Fotos, für die sich kein eigenes Album
+    /// lohnt." The one group said with a relative clause is last, where the period closes it;
+    /// before "und" the clause stayed open ("…, 6 Fotos, für die sich kein eigenes Album lohnt und
+    /// 13 Fotos ohne Ort.", second review of P3-03). Empty groups are not named.
+    @Test func theGroupSaidWithAClauseComesLast() {
+        for mask in 1..<32 {
+            let n = { (bit: Int, value: Int) in mask & (1 << bit) != 0 ? value : 0 }
+            let notCounted = SortedCountCard.NotCounted(home: n(0, 57), noAlbum: n(1, 6), noMainArea: n(2, 13), ignored: n(3, 3),
+                                                        excluded: n(4, 1))
+            let groups = notCounted.groups
+            #expect(groups.map(\.count).reduce(0, +) == notCounted.sum, "\(groups)")
+            #expect(!groups.contains { $0.count == 0 }, "\(groups)")
+            if notCounted.noAlbum > 0 {
+                #expect(groups.last == .noAlbum(6), "mask \(mask): \(groups)")
+            }
+            let order = groups.map { group -> Int in
+                switch group {
+                case .home: 0
+                case .noMainArea: 1
+                case .ignored: 2
+                case .excluded: 3
+                case .noAlbum: 4
+                }
+            }
+            #expect(order == order.sorted(), "mask \(mask): \(groups)")
+        }
+    }
+
     // MARK: - Never "0 von 0 sortiert"
 
     /// After the decisions came back from the backup (`RestoredFromBackupCard`, UI test 4,
@@ -158,7 +214,8 @@ struct OverviewNumbersTests {
             let card = SortedCountCard.make(.init(progress: read.progress, leftOut: read.leftOut, settings: settings,
                                                   hasSuggestions: false, analysisRunning: running, analysisPaused: paused,
                                                   analysedOnce: false))
-            #expect(card == .counting, "running \(running), paused \(paused): \(card)")
+            // The spinner only while the analysis runs (`notCountedYetWhileTheAnalysisDoesNotRun`).
+            #expect(card == (running ? .counting : .notCountedYet), "running \(running), paused \(paused): \(card)")
         }
         // The first suggestions (the early set of trips and places, minutes into a first run):
         // the count is shown while the run goes on.
@@ -195,38 +252,106 @@ struct OverviewNumbersTests {
         #expect(Self.card(d, w.settings, running: true) == card)
     }
 
-    /// The overview never says "0 von 0 sortiert", in any state of the analysis: either the card
-    /// for an empty library explains it (`EmptyLibraryState`), or the first card has no ring.
+    /// Before the first suggestions, the first card turns a spinner ("Wird gezählt") only while
+    /// the analysis works. Paused by the user (also after a new launch), waiting for the device or
+    /// for Photos, pausing, ended early or on an error: "Noch nicht gezählt", without a spinner.
+    /// Before, "Wird gezählt" turned for as long as a pause lasted, right above the paused
+    /// analysis card (second review of P3-03).
+    @Test func notCountedYetWhileTheAnalysisDoesNotRun() async throws {
+        let w = try await world()
+        let read = try await w.derived(suggestions: false)
+        func card(running: Bool, paused: Bool, _ analysisCard: AnalysisCardState?) -> SortedCountCard {
+            SortedCountCard.make(.init(progress: read.progress, leftOut: read.leftOut, settings: w.settings, hasSuggestions: false,
+                                       analysisRunning: running, analysisPaused: paused, analysedOnce: false,
+                                       analysisCard: analysisCard))
+        }
+        let works: [(String, SortedCountCard)] = [
+            ("running", card(running: true, paused: false, .running(nil, slower: nil, appleWait: false, catchingUp: nil))),
+            ("running slower, after a pause", card(running: true, paused: true, .running(nil, slower: .warm, appleWait: false, catchingUp: nil))),
+            ("running, card not drawn yet", card(running: true, paused: false, nil)),
+        ]
+        for (what, shown) in works { #expect(shown == .counting, "\(what): \(shown)") }
+        let stands: [(String, SortedCountCard)] = [
+            ("paused by the user", card(running: false, paused: true, .paused(nil))),
+            ("paused, after a new launch", card(running: false, paused: false, .paused(nil))),
+            ("pausing", card(running: true, paused: false, .pausing(nil, longer: false))),
+            ("waiting for the device to cool", card(running: true, paused: false, .waiting(.cooling, nil))),
+            ("waiting to charge", card(running: true, paused: false, .waiting(.charging, nil))),
+            ("Photos does not answer, still running", card(running: true, paused: false, .waiting(.photos, nil))),
+            ("Photos did not answer, next try later", card(running: false, paused: true, .waiting(.photos, nil))),
+            ("Albumist was busy, next try later", card(running: false, paused: true, .waiting(.busy, nil))),
+            ("ended early, goes on at the next start", card(running: false, paused: true, nil)),
+            ("ended on an error", card(running: false, paused: false, nil)),
+        ]
+        for (what, shown) in stands { #expect(shown == .notCountedYet, "\(what): \(shown)") }
+    }
+
+    /// The states of the analysis the overview can meet: whether it runs, the "paused" fact of
+    /// `EmptyLibraryState` (the last report paused, or a run that goes on by itself; a run that
+    /// goes on after a Pause still has the paused report), whether it went through once, and
+    /// what its card shows (`AnalysisCardState.resolve`: waiting for the device, pausing and the
+    /// running card only while it runs; paused, busy and finished only after it ended).
+    static let situations: [(running: Bool, paused: Bool, once: Bool, card: AnalysisCardState?)] = {
+        let running = AnalysisCardState.running(nil, slower: nil, appleWait: false, catchingUp: nil)
+        var all: [(running: Bool, paused: Bool, once: Bool, card: AnalysisCardState?)] = []
+        for once in [false, true] {
+            for paused in [false, true] {
+                var whileRunning: [AnalysisCardState?] = [nil, running, .pausing(nil, longer: false), .waiting(.cooling, nil),
+                                                          .waiting(.charging, nil), .waiting(.photos, nil)]
+                if once { whileRunning.append(.quickCheck(showsPause: false)) }
+                for card in whileRunning { all.append((true, paused, once, card)) }
+                for card: AnalysisCardState? in [nil, .paused(nil), .waiting(.photos, nil), .waiting(.busy, nil)] {
+                    all.append((false, paused, once, card))
+                }
+            }
+        }
+        all.append((false, false, true, .finished(photos: 300, proposals: 3)))
+        return all
+    }()
+
+    /// In every state the overview can meet: never "0 von 0 sortiert" (the card for an empty
+    /// library explains it, `EmptyLibraryState`, or the first card has no ring); once the
+    /// analysis went through never "Wird gezählt" or "Noch nicht gezählt" (no spinner that turns
+    /// for good); the spinner only while the analysis works, and "Noch nicht gezählt" only while
+    /// it does not. Suggestions exist exactly when the analysis made some (`AppModel.proposals`).
     @Test func theOverviewNeverSaysZeroOfZero() {
-        var said: [String] = []
+        var problems: [String] = []
+        var seen: Set<String> = []
         for photos in [0, 4, 300] {
             for total in Set([0, photos / 2, photos]).sorted() {
                 for proposals in [0, 3] {
-                    for flags in 0..<16 {
-                        let suggestions = proposals > 0 || flags & 1 != 0, running = flags & 2 != 0
-                        let paused = flags & 4 != 0, analysedOnce = flags & 8 != 0
+                    for s in Self.situations {
                         for held in [nil, RecountState(fully: 3, total: 9)] {
                             var progress = OrganizationStatusResolver.Progress()
                             progress.total = total
                             progress.unorganized = total
                             progress.outsideMainAreas = photos - total
                             let empty = EmptyLibraryState.evaluate(.init(
-                                photos: photos, photosWithPlace: photos, proposals: proposals, analysisRunning: running,
-                                analysisPaused: paused, analysedOnce: analysedOnce, recounting: held != nil))
+                                photos: photos, photosWithPlace: photos, proposals: proposals, analysisRunning: s.running,
+                                analysisPaused: s.paused, analysedOnce: s.once, recounting: held != nil))
                             guard empty == nil else { continue }
-                            let card = SortedCountCard.make(.init(
-                                progress: progress, recount: held, settings: Self.germanSettings(), hasSuggestions: suggestions,
-                                analysisRunning: running, analysisPaused: paused, analysedOnce: analysedOnce))
-                            if case .ring(let ring) = card, ring.total == 0 {
-                                said.append("photos \(photos), proposals \(proposals), suggestions \(suggestions), running \(running), "
-                                            + "paused \(paused), analysed once \(analysedOnce)")
+                            let input = SortedCountCard.Input(
+                                progress: progress, recount: held, settings: Self.germanSettings(), hasSuggestions: proposals > 0,
+                                analysisRunning: s.running, analysisPaused: s.paused, analysedOnce: s.once, analysisCard: s.card)
+                            let card = SortedCountCard.make(input)
+                            let state = "photos \(photos), total \(total), proposals \(proposals), running \(s.running), "
+                                + "paused \(s.paused), analysed once \(s.once), card \(String(describing: s.card)): \(card)"
+                            seen.insert(String(describing: card).prefix { $0 != "(" }.description)
+                            if case .ring(let ring) = card, ring.total == 0 { problems.append("0 von 0 · " + state) }
+                            let wentThrough = !s.running && !s.paused && s.once
+                            if wentThrough && (card == .counting || card == .notCountedYet) {
+                                problems.append("no count after the analysis went through · " + state)
                             }
+                            if card == .counting && !input.analysisWorks { problems.append("spinner while not working · " + state) }
+                            if card == .notCountedYet && input.analysisWorks { problems.append("no spinner while working · " + state) }
                         }
                     }
                 }
             }
         }
-        #expect(said.isEmpty, "\"0 von 0 sortiert\" in \(said.count) states, e.g. \(said.prefix(3))")
+        #expect(problems.isEmpty, "\(problems.count) states, e.g. \(problems.prefix(3))")
+        // The grid reaches every card the overview can show here (no main area is another test).
+        #expect(seen.isSuperset(of: ["counting", "notCountedYet", "recounting", "nothingToSort", "ring"]), "\(seen.sorted())")
     }
 
     // MARK: - The main areas the sentence names are the ones that count
@@ -280,14 +405,60 @@ struct OverviewNumbersTests {
             #expect(card[label] != nil && card[label] == empty[label],
                     "\(label): \(card[label] ?? "missing") here, \(empty[label] ?? "missing") for the empty library")
         }
+        // The spinner follows the analysis card below (`Input.analysisWorks`).
+        #expect(card["analysisCard"] == "model.analysisCard", "\(card["analysisCard"] ?? "missing")")
         let status = AppSource.code(AppSource.body(of: "private var statusCard", in: overview) ?? "")
         #expect(status.contains("switch sortedCount"), "the first card does not show `SortedCountCard`")
         for own in ["model.progress", "model.leftOut"] {
             #expect(!status.contains(own), "the first card reads \(own) itself")
         }
+        // "Noch nicht gezählt" has no spinner: the analysis does not run then.
+        let notYet = Self.caseBody(".notCountedYet", in: status)
+        #expect(!notYet.isEmpty && !notYet.contains("ProgressView"), "\(notYet)")
+        #expect(Self.caseBody(".counting", in: status).contains("ProgressView"))
+        // The groups in the core's order, and only the last one said with a clause (a comma
+        // inside the group): "…, 3 ignorierte Fotos und 6 Fotos, für die sich kein eigenes
+        // Album lohnt." (`theGroupSaidWithAClauseComesLast`).
+        let list = AppSource.body(of: "private func notCountedText", in: overview) ?? ""
+        #expect(AppSource.code(list).contains("notCounted.groups"), "the overview orders the groups itself")
+        let groups = Self.localized(in: list).filter { !$0.hasPrefix("Außerdem nicht mitgezählt") && !$0.hasPrefix("Nicht mitgezählt") }
+        #expect(groups.count >= 6, "\(groups)")
+        let withAClause = groups.filter { $0.contains(",") }
+        #expect(withAClause.count == 1 && withAClause.allSatisfy { $0.contains("kein eigenes Album lohnt") }, "\(groups)")
         let limited = AppSource.code(AppSource.body(of: ["struct LimitedAccessCard", "var body: some View"], in: overview) ?? "")
         #expect(limited.contains("model.facts.count"), "limited access does not name the photos Albumist sees")
         #expect(!limited.contains("progress.allPhotos"), "limited access names the ring's photos")
+    }
+
+    /// The code of one case of a `switch` in `code`: from `case <pattern>` to the next `case .`
+    /// at the same place in the text (the cases of `statusCard` hold no other switch).
+    static func caseBody(_ pattern: String, in code: String) -> String {
+        guard let start = code.range(of: "case " + pattern) else { return "" }
+        let rest = code[start.upperBound...]
+        let end = rest.range(of: "case .")?.lowerBound ?? rest.endIndex
+        return String(rest[..<end])
+    }
+
+    /// The texts of `String(localized: "…")` in `source`, as written (interpolations included).
+    static func localized(in source: String) -> [String] {
+        var found: [String] = []
+        var rest = Substring(source)
+        while let start = rest.range(of: "String(localized: \"") {
+            var text = ""
+            var index = start.upperBound
+            while index < rest.endIndex, rest[index] != "\"" {
+                if rest[index] == "\\", rest.index(after: index) < rest.endIndex, rest[rest.index(after: index)] == "\"" {
+                    text.append("\"")
+                    index = rest.index(index, offsetBy: 2)
+                    continue
+                }
+                text.append(rest[index])
+                index = rest.index(after: index)
+            }
+            found.append(text)
+            rest = rest[index...]
+        }
+        return found
     }
 
     /// The labelled arguments of a call (`label: value`, also inside `.init(…)`), the value with

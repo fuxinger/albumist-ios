@@ -12,13 +12,18 @@ import SortlyCore
 ///
 /// It never says "0 von 0 sortiert" (the review saw it while the analysis ran again after the
 /// decisions came back from the backup), and never a ring that cannot mean anything yet:
-/// - `counting` ("Wird gezählt"): the analysis has not gone through, and no suggestion exists in
-///   this library yet or no photo was read yet. Without suggestions no photo can count as sorted
-///   (an own album counts through the suggestion it fits, an album of Albumist through the
-///   suggestion it was made for), so the ring could only say "0 von 0" or "0 von 246". This is
-///   the first start, the time after the decisions came back from the backup, and "Analyse neu
-///   aufbauen" when no count was on screen to hold. It ends with the first suggestions (the early
-///   set of trips and places, minutes into a first run) or when the analysis went through.
+/// - `counting` ("Wird gezählt", with a spinner): the analysis has not gone through, and no
+///   suggestion exists in this library yet or no photo was read yet, while the analysis runs.
+///   Without suggestions no photo can count as sorted (an own album counts through the suggestion
+///   it fits, an album of Albumist through the suggestion it was made for), so the ring could
+///   only say "0 von 0" or "0 von 246". This is the first start, the time after the decisions
+///   came back from the backup, and "Analyse neu aufbauen" when no count was on screen to hold.
+///   It ends with the first suggestions (the early set of trips and places, minutes into a first
+///   run) or when the analysis went through.
+/// - `notCountedYet` ("Noch nicht gezählt", no spinner): the same, while the analysis does not
+///   run: paused by the user, waiting for the device or for Photos, ended early (also across
+///   launches until it goes on). A spinner then turned for as long as the pause lasted, right
+///   above the paused analysis card (second review of P3-03).
 /// - `recounting`: a count held while it is made anew (`RecountState`), as before.
 /// - `noMainAreaChosen`: no main area counts (none chosen in the settings, or the chosen ones
 ///   turned off, which the start allows): every photo stayed open for good ("0 von 300").
@@ -27,6 +32,7 @@ import SortlyCore
 /// - `ring`: "82 von 176 sortiert".
 public enum SortedCountCard: Equatable, Sendable {
     case counting
+    case notCountedYet
     case recounting(RecountState)
     case noMainAreaChosen
     case nothingToSort(NotCounted)
@@ -50,8 +56,9 @@ public enum SortedCountCard: Equatable, Sendable {
     }
 
     /// The photos the ring leaves out, each in one group: "Außerdem nicht mitgezählt: 57 Fotos von
-    /// zu Hause, 13 Fotos ohne Ort und 3 ignorierte Fotos." With the ring's total they are every
-    /// photo of the analysis card (`DerivedLibraryStatus.photos` = `Progress.allPhotos`).
+    /// zu Hause, 13 Fotos ohne Ort, 3 ignorierte Fotos und 6 Fotos, für die sich kein eigenes Album
+    /// lohnt." With the ring's total they are every photo of the analysis card
+    /// (`DerivedLibraryStatus.photos` = `Progress.allPhotos`).
     public struct NotCounted: Equatable, Sendable {
         /// Taken at home (`LibraryStatus.NotCounted.home`).
         public var home: Int
@@ -69,7 +76,7 @@ public enum SortedCountCard: Equatable, Sendable {
         /// Ort"): a photo with a place counts for it unless it was taken at home or has no album
         /// on purpose (the groups above). Left are photos without a usable location, screenshots
         /// (iOS saves none with them) and the rare place without a country (open sea). Else
-        /// "13 Fotos, die zu keinem deiner Hauptbereiche passen".
+        /// "13 Fotos außerhalb deiner Hauptbereiche".
         public var noMainAreaIsNoPlace: Bool
 
         public init(home: Int = 0, noAlbum: Int = 0, noMainArea: Int = 0, ignored: Int = 0, excluded: Int = 0,
@@ -97,6 +104,37 @@ public enum SortedCountCard: Equatable, Sendable {
         /// Every photo the ring leaves out.
         public var sum: Int { home + noAlbum + noMainArea + ignored + excluded }
         public var isEmpty: Bool { sum == 0 }
+
+        /// One group as the overview names it.
+        public enum Group: Equatable, Sendable {
+            /// "57 Fotos von zu Hause"
+            case home(Int)
+            /// "13 Fotos ohne Ort" (`isNoPlace`), else "13 Fotos außerhalb deiner Hauptbereiche".
+            case noMainArea(Int, isNoPlace: Bool)
+            /// "3 ignorierte Fotos" ("aus 2026" with a trial year)
+            case ignored(Int)
+            /// "1 ausgeschlossenes Foto"
+            case excluded(Int)
+            /// "6 Fotos, für die sich kein eigenes Album lohnt": the one group said with a
+            /// relative clause, so it comes last, where the period closes the clause. Before
+            /// "und" it stayed open ("…, 6 Fotos, für die sich kein eigenes Album lohnt und 13
+            /// Fotos ohne Ort.", second review of P3-03).
+            case noAlbum(Int)
+
+            /// The group's photos.
+            public var count: Int {
+                switch self {
+                case .home(let n), .noMainArea(let n, _), .ignored(let n), .excluded(let n), .noAlbum(let n): n
+                }
+            }
+        }
+
+        /// The groups with photos, in the order the overview names them ("Außerdem nicht
+        /// mitgezählt: …"): the group with a relative clause last.
+        public var groups: [Group] {
+            [.home(home), .noMainArea(noMainArea, isNoPlace: noMainAreaIsNoPlace), .ignored(ignored), .excluded(excluded),
+             .noAlbum(noAlbum)].filter { $0.count > 0 }
+        }
     }
 
     public struct Input: Sendable {
@@ -115,10 +153,14 @@ public enum SortedCountCard: Equatable, Sendable {
         public var analysisRunning: Bool
         public var analysisPaused: Bool
         public var analysedOnce: Bool
+        /// What the analysis card below shows (`AppModel.analysisCard`): "Wird gezählt" turns only
+        /// while it shows the analysis working (`analysisWorks`). `nil` while it runs: not drawn yet.
+        public var analysisCard: AnalysisCardState?
 
         public init(progress: OrganizationStatusResolver.Progress, leftOut: LibraryStatus.LeftOut = LibraryStatus.LeftOut(),
                     recount: RecountState? = nil, settings: OrganizationSettings, hasSuggestions: Bool,
-                    analysisRunning: Bool, analysisPaused: Bool = false, analysedOnce: Bool) {
+                    analysisRunning: Bool, analysisPaused: Bool = false, analysedOnce: Bool,
+                    analysisCard: AnalysisCardState? = nil) {
             self.progress = progress
             self.leftOut = leftOut
             self.recount = recount
@@ -127,6 +169,17 @@ public enum SortedCountCard: Equatable, Sendable {
             self.analysisRunning = analysisRunning
             self.analysisPaused = analysisPaused
             self.analysedOnce = analysedOnce
+            self.analysisCard = analysisCard
+        }
+
+        /// The analysis works right now: it runs, and its card neither waits (for the device to
+        /// cool or charge, for Photos) nor pauses. Only then does the first card show a spinner.
+        public var analysisWorks: Bool {
+            guard analysisRunning else { return false }
+            switch analysisCard {
+            case .waiting?, .pausing?, .paused?: return false
+            case .running?, .quickCheck?, .finished?, nil: return true
+            }
         }
     }
 
@@ -139,7 +192,9 @@ public enum SortedCountCard: Equatable, Sendable {
         let wentThrough = !input.analysisRunning && !input.analysisPaused && input.analysedOnce
         // Once the analysis went through, a library without photos or suggestions has the card
         // of `EmptyLibraryState` instead; what is left here is a real count (or none to make).
-        if !wentThrough && (!input.hasSuggestions || p.allPhotos == 0) { return .counting }
+        if !wentThrough && (!input.hasSuggestions || p.allPhotos == 0) {
+            return input.analysisWorks ? .counting : .notCountedYet
+        }
         let notCounted = NotCounted(progress: p, leftOut: input.leftOut, countedAreas: counted)
         if p.total == 0 { return .nothingToSort(notCounted) }
         return .ring(Ring(fully: p.fully, total: p.total, partially: p.partially, notCounted: notCounted))

@@ -107,14 +107,16 @@ struct OverviewView: View {
     /// What the first card says about the sorted count, decided in `SortedCountCard` (tested on
     /// Linux, review P3-03): with the same facts about the analysis as the card for an
     /// empty library (`EmptyLibraryCard.state(for:)`), so the two never both stay away and
-    /// "0 von 0 sortiert" never shows.
+    /// "0 von 0 sortiert" never shows; and with the analysis card below, so "Wird gezählt"
+    /// turns only while that card shows the analysis working.
     private var sortedCount: SortedCountCard {
         let analysis = model.analysis
         return SortedCountCard.make(.init(
             progress: model.progress, leftOut: model.leftOut, recount: model.recount, settings: model.settings,
             hasSuggestions: !model.proposals.isEmpty, analysisRunning: analysis.isRunning,
             analysisPaused: analysis.lastReport?.pausedBecause != nil || analysis.needsResume,
-            analysedOnce: AnalysisMarker.completedOnce || analysis.lastReport?.isComplete == true))
+            analysedOnce: AnalysisMarker.completedOnce || analysis.lastReport?.isComplete == true,
+            analysisCard: model.analysisCard))
     }
 
     private var statusCard: some View {
@@ -139,6 +141,25 @@ struct OverviewView: View {
                         Text("Wird gezählt")
                             .font(.headline)
                         Text("Die Zahl kommt mit den ersten Vorschlägen.")
+                            .font(.subheadline)
+                            .foregroundStyle(.noteText)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            case .notCountedYet:
+                // The same before the first suggestions, while the analysis does not run (paused,
+                // waiting for the device or for Photos, ended early): nothing turns, the card
+                // below says why (second review of P3-03).
+                layout {
+                    Image(systemName: "hourglass")
+                        .font(.largeTitle)
+                        .foregroundStyle(.noteText)
+                        .frame(width: side, height: side)
+                        .accessibilityHidden(true) // "Noch nicht gezählt" beside it says it
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("Noch nicht gezählt")
+                            .font(.headline)
+                        Text("Die Zahl kommt, sobald die Analyse weiterläuft.")
                             .font(.subheadline)
                             .foregroundStyle(.noteText)
                     }
@@ -268,37 +289,37 @@ struct OverviewView: View {
     /// and "kein eigenes Album" were said, and the photos without a place nowhere, so "82 von 176
     /// sortiert" and "57 Fotos von zu Hause" did not add up to 246 (P3-03). Since home no longer
     /// counts for "Länder und Orte", the total shrank without a word (review of the sorted count,
-    /// 16.11.).
+    /// 16.11.). In the core's order (`NotCounted.groups`): the one group said with a relative
+    /// clause comes last, where the period closes it.
     private func notCountedText(_ notCounted: SortedCountCard.NotCounted, besidesRing: Bool) -> String? {
         var parts: [String] = []
-        if notCounted.home > 0 {
-            parts.append(String(localized: "\(notCounted.home) Fotos von zu Hause"))
-        }
-        if notCounted.noAlbum > 0 {
-            parts.append(String(localized: "\(notCounted.noAlbum) Fotos, für die sich kein eigenes Album lohnt"))
-        }
-        if notCounted.noMainArea > 0 {
-            // No place, a screenshot; with "Reisen" as the only main area also photos from home.
-            if notCounted.noMainAreaIsNoPlace {
-                parts.append(String(localized: "\(notCounted.noMainArea) Fotos ohne Ort"))
-            } else {
-                parts.append(String(localized: "\(notCounted.noMainArea) Fotos, die zu keinem deiner Hauptbereiche passen"))
+        for group in notCounted.groups {
+            switch group {
+            case .home(let n):
+                parts.append(String(localized: "\(n) Fotos von zu Hause"))
+            case .noMainArea(let n, let isNoPlace):
+                // No place, a screenshot; with "Reisen" as the only main area also photos from home.
+                if isNoPlace {
+                    parts.append(String(localized: "\(n) Fotos ohne Ort"))
+                } else {
+                    parts.append(String(localized: "\(n) Fotos außerhalb deiner Hauptbereiche"))
+                }
+            case .ignored(let n):
+                // Ignored photos are neither sorted nor open, so they leave the ring (Fuchs 18.11.):
+                // said here, so a total that shrinks after "Ignorieren" has its reason on screen.
+                // With "Nur 2026" the ring counts the ignored photos of that year only ("Ignoriert"
+                // in the library holds all of them).
+                if case .year(let year) = model.analysisScope {
+                    parts.append(String(localized: "\(n) ignorierte Fotos aus \(String(year))"))
+                } else {
+                    parts.append(String(localized: "\(n) ignorierte Fotos"))
+                }
+            case .excluded(let n):
+                // Excluded from the analysis (no switch in the app today): only when there are some.
+                parts.append(String(localized: "\(n) ausgeschlossene Fotos"))
+            case .noAlbum(let n):
+                parts.append(String(localized: "\(n) Fotos, für die sich kein eigenes Album lohnt"))
             }
-        }
-        // Ignored photos are neither sorted nor open, so they leave the ring (Fuchs 18.11.):
-        // said here, so a total that shrinks after "Ignorieren" has its reason on screen.
-        // With "Nur 2026" the ring counts the ignored photos of that year only ("Ignoriert" in
-        // the library holds all of them).
-        if notCounted.ignored > 0 {
-            if case .year(let year) = model.analysisScope {
-                parts.append(String(localized: "\(notCounted.ignored) ignorierte Fotos aus \(String(year))"))
-            } else {
-                parts.append(String(localized: "\(notCounted.ignored) ignorierte Fotos"))
-            }
-        }
-        // Excluded from the analysis (no switch in the app today): only when there are some.
-        if notCounted.excluded > 0 {
-            parts.append(String(localized: "\(notCounted.excluded) ausgeschlossene Fotos"))
         }
         guard !parts.isEmpty else { return nil }
         let list = parts.formatted(.list(type: .and))

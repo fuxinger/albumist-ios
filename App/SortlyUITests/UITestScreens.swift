@@ -26,6 +26,9 @@ import XCTest
 /// - The tab "Unsortiert" (`Unsorted`): its filters `library.filter.<area>`.
 /// - The tab "Alben" (`Albums`): "Verlauf und Rückgängig" (`albums.history`), the only way to
 ///   the history since 5C, and the album tiles (`album.tile`) with "…" and "Rückgängig machen".
+///
+/// Each part is `@MainActor` of its own: a type nested in a main-actor type is not on the main
+/// actor by itself, and XCUIApplication and XCUIElement belong to it.
 @MainActor
 enum UITestScreens {
     /// The tab names as Localizable.xcstrings says them (the search tab carries the system's own).
@@ -49,6 +52,7 @@ enum UITestScreens {
 
     // MARK: Cards
 
+    @MainActor
     enum Cards {
         /// The four actions a suggestion card can have (`ProposalCardAction`).
         static let actions = ["create", "add", "name", "look"]
@@ -166,6 +170,7 @@ enum UITestScreens {
 
     // MARK: Analysis
 
+    @MainActor
     enum Analysis {
         /// The start page's line once nothing runs (`analysis.summary`: "Alle N Fotos analysiert",
         /// "Analyse aktuell", "58 von 246 Fotos analysiert" or "Analyse fertig"), or right after
@@ -332,6 +337,7 @@ enum UITestScreens {
 
     // MARK: Start page
 
+    @MainActor
     enum StartPage {
         /// The start page's title (and its tab's name).
         static let title = "Vorschläge"
@@ -398,6 +404,7 @@ enum UITestScreens {
 
     // MARK: List of suggestions
 
+    @MainActor
     enum SuggestionList {
         /// The cards of the list (`suggestion.row`): body `photoCard.body`, one action button.
         static func cards(_ app: XCUIApplication) -> XCUIElementQuery {
@@ -461,6 +468,7 @@ enum UITestScreens {
     // MARK: One suggestion
 
     /// The page of one suggestion (draft E2): cover, facts, photos by day, its own bar.
+    @MainActor
     enum SuggestionPage {
         /// What only the page has, while photos are picked too: its bar ("Nicht jetzt" and the
         /// filled button) or its "Auswählen"/"Fertig" for the photos. The bar's title stays
@@ -532,6 +540,7 @@ enum UITestScreens {
 
     // MARK: After "Anlegen"
 
+    @MainActor
     enum QuickCreate {
         /// "„Name“ angelegt" with "Widerrufen" (`quickCreate.banner`).
         static func banner(_ app: XCUIApplication) -> XCUIElement {
@@ -566,6 +575,7 @@ enum UITestScreens {
 
     // MARK: Purchase sheet
 
+    @MainActor
     enum Purchase {
         /// "Albumist freischalten" as a sheet (`unlock.sheet`).
         static func sheet(_ app: XCUIApplication) -> XCUIElement {
@@ -599,6 +609,7 @@ enum UITestScreens {
 
     // MARK: Unsorted
 
+    @MainActor
     enum Unsorted {
         /// The tab's three filters (`LibraryBuckets.unsortedTabFilters`), "Unsortiert" first.
         static let filters = ["unorganized", "uncertain", "ignored"]
@@ -640,6 +651,7 @@ enum UITestScreens {
 
     // MARK: Albums
 
+    @MainActor
     enum Albums {
         /// "Verlauf und Rückgängig" in the tab "Alben" (`albums.history`): the only way to the
         /// history since 5C (it left the settings).

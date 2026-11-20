@@ -428,6 +428,34 @@ struct DataSafetyTests {
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("new.sqlite-wal").path))
     }
 
+    /// Stray logs set aside by the database move (`Quarantine/<time>-stray`) never push out a
+    /// quarantined database: each kind keeps its two newest folders (re-check of prep/rename).
+    @Test func strayFoldersDoNotCountAgainstTheQuarantinedDatabases() throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("old.sqlite")
+        func quarantine(_ time: Double) throws -> String {
+            try Data("db \(time)".utf8).write(to: url)
+            return try #require(SortlyStore.quarantineDatabase(at: url, now: Date(timeIntervalSince1970: time))).lastPathComponent
+        }
+        func stray(_ time: Double) throws -> String {
+            let aside = DatabaseFile.strayFolder(in: dir, now: Date(timeIntervalSince1970: time))
+            try FileManager.default.createDirectory(at: aside, withIntermediateDirectories: true)
+            try Data("stale log".utf8).write(to: aside.appendingPathComponent("new.sqlite-wal"))
+            return aside.lastPathComponent
+        }
+        func kept() throws -> Set<String> {
+            Set(try FileManager.default.contentsOfDirectory(atPath: dir.appendingPathComponent("Quarantine").path))
+        }
+        let first = try quarantine(1_700_000_000)
+        let strays = [try stray(1_700_000_100), try stray(1_700_000_200)]
+        let second = try quarantine(1_700_000_300)
+        #expect(try kept() == Set([first, second] + strays))
+        let third = [try stray(1_700_000_400)]
+        let last = try quarantine(1_700_000_500)
+        #expect(try kept() == Set([second, last, strays[1]] + third))
+    }
+
     /// "Neu aufbauen" after a start that failed with the store already open (AppModel.load):
     /// the old connection is still open while its files go to the quarantine and a new database
     /// starts under the same name. When the old connection closes, it must not touch the new

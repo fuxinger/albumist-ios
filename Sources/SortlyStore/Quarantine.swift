@@ -4,7 +4,10 @@ extension SortlyStore {
     /// "Neu aufbauen" after a start error: moves the database together with its write-ahead
     /// log and shared memory file into a dated folder `Quarantine/<time>` next to it. The log
     /// can hold the last saved changes, so it is never just deleted; the two newest
-    /// quarantines are kept for support, older ones go. Photos and albums are not involved.
+    /// quarantined databases are kept for support, older ones go. Stray logs the database move
+    /// set aside (`Quarantine/<time>-stray`, `DatabaseFile`) are counted on their own: they
+    /// never push out a quarantined database; their two newest folders stay as well. Photos
+    /// and albums are not involved.
     ///
     /// Returns the folder the files went to, or nil when nothing was moved: no database
     /// there, or a file could not be moved. Then the caller starts with what is there (and
@@ -54,7 +57,9 @@ extension SortlyStore {
         }
         let old = ((try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
-        for stale in old.dropFirst(max(1, keep)) { try? fm.removeItem(at: stale) }
+        let isStray = { (folder: URL) in folder.lastPathComponent.contains(DatabaseFile.straySuffix) }
+        for stale in old.filter({ !isStray($0) }).dropFirst(max(1, keep)) { try? fm.removeItem(at: stale) }
+        for stale in old.filter(isStray).dropFirst(max(1, keep)) { try? fm.removeItem(at: stale) }
         return target
     }
 }

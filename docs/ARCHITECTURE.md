@@ -91,7 +91,9 @@ Gespeicherte Namen dürfen sich nicht still ändern, sonst verliert ein Update D
   mit ihrem Log unter ihrem Namen (nie eine leere neue Datenbank daneben, nie eine ohne ihr Log);
   scheitert auch der Rückweg, scheitert der Start (Startfehler-Seite), gelöscht wird nichts. Ein
   Log unter beiden Namen: das unter dem neuen Namen ist veraltet und kommt nach
-  `Quarantine/<Zeit>-stray/` (nie gelöscht, SQLite spielte es sonst über neuere Zeilen), dann
+  `Quarantine/<Zeit>-stray/` (verschoben, nicht gelöscht; SQLite spielte es sonst über neuere
+  Zeilen; „Neu aufbauen“ behält davon die zwei neuesten, getrennt von den zwei neuesten
+  beiseitegelegten Datenbanken), dann
   zieht die Datenbank um; „Neu aufbauen“ nimmt solche Logs beider Namen mit in die Quarantäne. Bis zur Umbenennung sind beide
   Namen gleich und nichts zieht um.
 - JSON-Schlüssel `addedBySortly` und `createdBySortly` der verwalteten Alben (Datenbank,

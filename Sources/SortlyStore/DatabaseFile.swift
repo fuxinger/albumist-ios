@@ -34,8 +34,9 @@ public enum DatabaseFile {
         /// database closes cleanly (its log checkpointed and deleted), the next move would put the
         /// database next to the stale log and SQLite would replay it over newer rows (second
         /// review of prep/rename, 250 updates and an insert lost). So the stale log and shared
-        /// memory of the current name go into `Quarantine/<time>-stray/` (never deleted), then the
-        /// earlier database moves as usual.
+        /// memory of the current name go into `Quarantine/<time>-stray/` (moved, not deleted;
+        /// only "Neu aufbauen" later thins those folders out to the two newest, apart from the
+        /// quarantined databases), then the earlier database moves as usual.
         case setAsideStrayLog
     }
 
@@ -123,7 +124,7 @@ public enum DatabaseFile {
         case .openCurrent:
             return (url(current), .unchanged)
         case .setAsideStrayLog:
-            // Moved, never deleted; if that fails the start fails (nothing opens next to it).
+            // Moved, not deleted; if that fails the start fails (nothing opens next to it).
             let stray = [current + "-wal", current + "-shm"].filter { FileManager.default.fileExists(atPath: url($0).path) }
             do {
                 let aside = strayFolder(in: folder, now: now)
@@ -155,18 +156,22 @@ public enum DatabaseFile {
         }
     }
 
-    /// A new folder `Quarantine/<time>-stray` next to the database (the folder "Neu aufbauen"
-    /// uses; a running number when one of that time exists).
+    /// Marks the quarantine folders of stray logs (`Quarantine/<time>-stray`): the quarantine
+    /// of "Neu aufbauen" counts them apart from the quarantined databases.
+    static let straySuffix = "-stray"
+
+    /// A new folder `Quarantine/<time>-stray` next to the database (in the folder "Neu
+    /// aufbauen" uses; a running number when one of that time exists).
     static func strayFolder(in folder: URL, now: Date) -> URL {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let stamp = formatter.string(from: now).replacingOccurrences(of: ":", with: "-")
         let base = folder.appendingPathComponent("Quarantine", isDirectory: true)
-        var target = base.appendingPathComponent("\(stamp)-stray", isDirectory: true)
+        var target = base.appendingPathComponent(stamp + straySuffix, isDirectory: true)
         var attempt = 1
         while FileManager.default.fileExists(atPath: target.path) {
             attempt += 1
-            target = base.appendingPathComponent("\(stamp)-stray-\(attempt)", isDirectory: true)
+            target = base.appendingPathComponent("\(stamp)\(straySuffix)-\(attempt)", isDirectory: true)
         }
         return target
     }
